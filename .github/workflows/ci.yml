@@ -1,0 +1,109 @@
+---
+jobs:
+  etc:
+    name: 'FreeBSD/v${{matrix.perl}}'
+    needs:
+      - setup
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - architecture: x86-64
+            host: ubuntu-latest
+            name: freebsd
+            pkg: pkg install -y
+            version: 14.1
+          - architecture: arm64
+            host: ubuntu-latest
+            name: freebsd
+            pkg: pkg install -y
+            version: 14.1
+        perl:
+          - "5.42.0"
+      max-parallel: 5
+    uses: ./.github/workflows/cross.yml
+    with:
+      arch: '${{ matrix.os.architecture }}'
+      host: '${{ matrix.os.host }}'
+      os: '${{ matrix.os.name }}'
+      perl: '${{ matrix.perl }}'
+      pkg: '${{ matrix.os.pkg }}'
+      setup: '${{ matrix.os.setup }}'
+      version: '${{ matrix.os.version }}'
+  linux:
+    name: 'Linux/v${{matrix.perl}}'
+    needs:
+      - setup
+    strategy:
+      fail-fast: false
+      matrix:
+        flags: '${{ fromJSON(needs.setup.outputs.matrix).flags }}'
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+        perl: '${{ fromJSON(needs.setup.outputs.matrix).perl }}'
+      max-parallel: 25
+    uses: ./.github/workflows/unix.yml
+    with:
+      flags: '${{ matrix.flags }}'
+      os: '${{ matrix.os }}'
+      perl: '${{ matrix.perl }}'
+  macos:
+    name: "[${{ matrix.os == 'macos-13' && 'Intel' || 'Apple' }}] macOS/v${{matrix.perl}}"
+    needs:
+      - setup
+    strategy:
+      fail-fast: false
+      matrix:
+        flags: '${{ fromJSON(needs.setup.outputs.matrix).flags }}'
+        os:
+          - macos-13
+          - macos-latest
+        perl: '${{ fromJSON(needs.setup.outputs.matrix).perl }}'
+      max-parallel: 25
+    uses: ./.github/workflows/unix.yml
+    with:
+      flags: '${{ matrix.flags }}'
+      os: '${{ matrix.os }}'
+      perl: '${{ matrix.perl }}'
+  setup:
+    name: Generate Testing Matrix
+    outputs:
+      matrix: '${{ steps.matrix.outputs.matrix }}'
+    runs-on: ubuntu-22.04
+    steps:
+      - env:
+          DATA: |
+            {
+              "perl":  ["5.42.0"],
+              "flags": [""]
+            }
+        id: matrix
+        run: "jq -rn 'env.DATA | fromjson | @json \"matrix=\\(.)\"' > $GITHUB_OUTPUT\n"
+  win32:
+    name: 'Windows/v${{matrix.perl}}'
+    needs:
+      - setup
+    strategy:
+      fail-fast: false
+      matrix:
+        flags:
+          - ''
+        os:
+          - windows-2022
+          - windows-11-arm
+        perl: '${{ fromJSON(needs.setup.outputs.matrix).perl }}'
+      max-parallel: 25
+    uses: ./.github/workflows/win32.yml
+    with:
+      flags: '${{ matrix.flags }}'
+      os: '${{ matrix.os }}'
+      perl: '${{ matrix.perl }}'
+name: CI Matrix
+on:
+  pull_request: ~
+  push: ~
+  workflow_dispatch: ~
+permissions:
+  actions: read
+  contents: read
