@@ -9,13 +9,12 @@ on:
 
 permissions:
   contents: read
-  # actions: read is required to list artifacts via the API
   actions: read
 
 jobs:
 
   vm:
-    name:  ${{ matrix.platform.os }}
+    name:  ${{ matrix.platform.os }}-${{ matrix.arch }}
     uses: ./.github/workflows/unified-tester.yml
     secrets: inherit
     with:
@@ -24,68 +23,39 @@ jobs:
       os: ${{ matrix.platform.os }}
       os_version: ${{ matrix.platform.version }}
       arch: ${{ matrix.arch }}
-      prepare:  ${{ matrix.toolchain == 'clang' && matrix.platform.prepare_clang || matrix.platform.prepare_gcc }}
+      prepare:  ${{ matrix.platform.prepare }}
       host_os: 'ubuntu-latest'
-      toolchain: ${{ matrix.compiler_cmd || matrix.toolchain }}
+      toolchain: 'none'
     strategy:
       fail-fast: false
       matrix:
         platform:
           - os: 'freebsd'
             version: '15.0'
-            prepare_gcc:   'pkg install -y perl5 lang/gcc'
-            prepare_clang: 'pkg install -y perl5 llvm'
+            prepare: 'pkg install -y perl5.40'
           - os: 'openbsd'
             version: '7.8'
-            #~ https://openbsd.app/
-            prepare_gcc:   'pkg_add gcc-11.2.0p19 g++-11.2.0p19'
-            prepare_clang: ''
+            prepare: ''
           - os: 'netbsd'
             version: '10.1'
-            prepare_gcc:   '/usr/sbin/pkg_add perl'
+            prepare: 'pkgin -y install perl'
           - os: 'dragonflybsd'
             version: '6.4.0'
-            prepare_gcc:   'pkg install -y perl5 gcc'
+            prepare: 'pkg install -y perl5.40'
           - os: 'solaris'
             version: '11.4'
-            prepare_gcc:   'pkg install -v --accept perl-540 gcc'
+            prepare: 'pkg install -v --accept gcc make binutils; curl -L https://install.perlbrew.pl | bash; export PATH=$HOME/perl5/perlbrew/bin:$PATH; perlbrew install perl-5.40.0 --notest -j 4; perlbrew use perl-5.40.0'
           - os: 'omnios'
             version: 'r151056'
-            prepare_gcc:   'pkg install -v --accept perl build-essential'
-        arch: ['x86_64', 'aarch64', 'riscv64']
-        toolchain: ['gcc', 'clang']
+            prepare: 'pkg update; pkg install -v --accept runtime/perl-540 build-essential'
+        arch: ['x86_64', 'aarch64']
         exclude:
-          # Architecture exclusions
           - platform: { os: 'dragonflybsd' }
             arch: 'aarch64'
           - platform: { os: 'solaris' }
             arch: 'aarch64'
           - platform: { os: 'omnios' }
             arch: 'aarch64'
-          - platform: { os: 'dragonflybsd' }
-            arch: 'riscv64'
-          - platform: { os: 'netbsd' }
-            arch: 'riscv64'
-          - platform: { os: 'solaris' }
-            arch: 'riscv64'
-          - platform: { os: 'omnios' }
-            arch: 'riscv64'
-          # Toolchain exclusions for simplicity
-          - platform: { os: 'netbsd' }
-            toolchain: 'clang'
-          - platform: { os: 'dragonflybsd' }
-            toolchain: 'clang'
-          - platform: { os: 'solaris' }
-            toolchain: 'clang'
-          - platform: { os: 'omnios' }
-            toolchain: 'clang'
-          # Skip RISC-V because, well, I haven't worked on adding support for it.
-          - arch: 'riscv64'
-        include:
-          # Use specific 'egcc' command for packaged GCC on OpenBSD
-          - platform: { os: 'openbsd' }
-            toolchain: 'gcc'
-            compiler_cmd: 'egcc'
 
   direct:
     name: ${{ matrix.platform.name }}-${{ matrix.platform.arch }}
@@ -96,8 +66,8 @@ jobs:
       runner_type: 'direct'
       os: ${{ matrix.platform.os }}
       arch: ${{ matrix.platform.arch }}
-      prepare: ${{ (matrix.toolchain == 'clang' && matrix.platform.prepare_clang) || (matrix.toolchain == 'msvc' && matrix.platform.prepare_msvc) || matrix.platform.prepare_gcc }}
-      toolchain: ${{ matrix.toolchain }}
+      prepare: ${{ matrix.platform.prepare }}
+      toolchain: 'none'
     strategy:
       fail-fast: false
       matrix:
@@ -105,44 +75,27 @@ jobs:
           - name: 'ubuntu'
             os: 'ubuntu-latest'
             arch: 'x86_64'
-            prepare_gcc: 'sudo apt-get update && sudo apt-get install -y gcc'
-            prepare_clang: 'sudo apt-get update && sudo apt-get install -y clang'
+            prepare: 'sudo apt-get update'
           - name: 'macos'
             os: 'macos-15'
             arch: 'aarch64'
-            prepare_gcc: ''
-            prepare_clang: ''
+            prepare: ''
           - name: 'macos'
             os: 'macos-15-intel'
             arch: 'x86_64'
-            prepare_gcc: ''
-            prepare_clang: ''
+            prepare: ''
           - name: 'windows'
             os: 'windows-latest'
             arch: 'x86_64'
-            # Setup Strawberry Perl which includes cpanm
-            prepare_gcc: 'choco install mingw'
-            prepare_clang: 'choco install llvm'
-            prepare_msvc: 'choco install opencppcoverage bash'
+            prepare: ''
           - name: 'ubuntu'
             os: 'ubuntu-24.04-arm'
             arch: 'aarch64'
-            prepare_gcc: 'sudo apt-get update && sudo apt-get install -y gcc'
-            prepare_clang: 'sudo apt-get update && sudo apt-get install -y clang'
+            prepare: 'sudo apt-get update'
           - name: 'windows'
             os: 'windows-11-arm'
             arch: 'aarch64'
-            prepare_gcc: ''
-            prepare_clang: 'choco install llvm'
-            prepare_msvc: 'choco install opencppcoverage bash'
-        toolchain: ['gcc', 'clang', 'msvc']
-        exclude:
-          #~ - platform: { name: 'macos' }
-            #~ toolchain: 'gcc'
-          - platform: { name: 'ubuntu' }
-            toolchain: 'msvc'
-          - platform: { name: 'macos' }
-            toolchain: 'msvc'
+            prepare: ''
 
   results:
     name: Summary
@@ -160,12 +113,11 @@ jobs:
       - name: Generate Job Summary from Artifacts
         run: |
           mkdir -p status
-          # --- Setup for Markdown and JSON output ---
           SUMMARY_MD="status/status.md"
           STATUS_JSON="status/status.json"
           echo "## Build and Test Summary" > $SUMMARY_MD
-          echo "| OS | Arch | Compiler | Result |" >> $SUMMARY_MD
-          echo "|:---|:---|:---|:---|" >> $SUMMARY_MD
+          echo "| OS | Arch | Result |" >> $SUMMARY_MD
+          echo "|:---|:---|:---|" >> $SUMMARY_MD
           echo "{" > $STATUS_JSON
           is_first_json_entry=true
           if [ -d "results" ] && [ -n "$(ls -A results)" ]; then
@@ -176,19 +128,16 @@ jobs:
               IFS='-' read -ra parts <<< "$filename"
               platform="${parts[0]}"
               arch="${parts[1]}"
-              compiler="${parts[2]}"
-              echo "| **$platform** | \`$arch\` | \`$compiler\` | $ICON $result |" >> $SUMMARY_MD
+              echo "| **$platform** | \`$arch\` | $ICON $result |" >> $SUMMARY_MD
               if [ "$is_first_json_entry" = false ]; then
                 echo "," >> $STATUS_JSON
               fi
-              # The key is the unique job identifier, e.g., "freebsd-x86_64-gcc"
-              # The value is "passing" or "failing" for Shields.io color coding
               SHIELD_STATUS=$([[ $result == 'success' ]] && echo '👍🏽 passing' || echo '👎🏽 failing')
               echo "\"$filename\": \"$SHIELD_STATUS\"" >> $STATUS_JSON
               is_first_json_entry=false
             done
           else
-            echo "| All build jobs | | | No result data found. ❌ |" >> $SUMMARY_MD
+            echo "| All build jobs | | No result data found. ❌ |" >> $SUMMARY_MD
           fi
           echo "}" >> $STATUS_JSON
           cat $SUMMARY_MD >> $GITHUB_STEP_SUMMARY
@@ -199,21 +148,19 @@ jobs:
           path: status/
   publish-status:
     name: Publish Status Page
-    if: ( success() || failure() ) && github.ref == 'refs/heads/main' # Only run on pushes to the main branch
+    if: ( success() || failure() ) && github.ref == 'refs/heads/main'
     needs: [results]
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Important: Permission to write to the repo (for gh-pages branch)
+      contents: write
     steps:
       - name: Download status files
-        #~ if: success() || failure()
         uses: actions/download-artifact@v4
         with:
           name: status-files
           path: ./status
 
       - name: Deploy to GitHub Pages
-        #~ if: success() || failure()
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

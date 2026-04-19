@@ -50,11 +50,23 @@ jobs:
         with:
           arch: ${{ inputs.arch == 'aarch64' && 'arm64' || 'x64' }}
 
-      - name: Setup Perl
-        if: inputs.runner_type == 'direct'
+      - name: Setup Perl (Linux/macOS)
+        if: inputs.runner_type == 'direct' && runner.os != 'Windows'
         uses: shogo82148/actions-setup-perl@v1
         with:
           perl-version: '5.40'
+
+      - name: Setup Perl (Windows)
+        if: inputs.runner_type == 'direct' && runner.os == 'Windows'
+        run: |
+          if perl -e 'exit ($^V ge v5.40.0 ? 0 : 1)' 2>/dev/null; then
+            echo "Perl version is sufficient: $(perl -e 'print $^V')"
+          else
+            echo "Perl is too old or not found. Installing/Upgrading..."
+            choco install strawberryperl -y || choco upgrade strawberryperl -y
+            echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
+          fi
+        shell: bash
 
       - name: Check Perl
         if: inputs.runner_type == 'direct'
