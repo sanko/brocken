@@ -92,7 +92,7 @@ class Pulse::Emit::ARM64 {
     }
 
     method lea_rva ( $reg, $target_rva, $text_rva ) {
-        my $r = $REG{ lc $reg };
+        my $r     = $REG{ lc $reg };
         my $off   = $target_rva - ( $text_rva + length($code) );
         my $immlo = $off & 0x3;
         my $immhi = ( $off >> 2 ) & 0x7FFFF;
@@ -105,8 +105,16 @@ class Pulse::Emit::ARM64 {
         $code .= pack( 'L<', 0xD63F0200 );
     }
 
-    method syscall($macos = 0) {
-        $code .= pack( 'L<', 0xD4000001 );    # SVC #0
+    method syscall( $macos = 0 ) {
+
+        # For macOS ARM64, syscall number is in x16, instruction is SVC #0x80
+        # For Linux ARM64, syscall number is in x8, instruction is SVC #0
+        if ($macos) {
+            $code .= pack( 'L<', 0xD4001001 );    # SVC #0x80
+        }
+        else {
+            $code .= pack( 'L<', 0xD4000001 );    # SVC #0
+        }
     }
 
     method jcc ( $cc, $label ) {
@@ -168,6 +176,12 @@ class Pulse::Emit::X64 {
     method add_imm ( $reg, $imm ) {
         my $r = $REG{ lc $reg };
         $code .= $self->_rex( 1, 0, 0, $r ) . pack( 'CCl<', 0x81, 0xC0 | ( $r & 7 ), $imm );
+    }
+
+    method add_reg( $dest, $src ) {
+        my $d = $REG{ lc $dest };
+        my $s = $REG{ lc $src };
+        $code .= $self->_rex( 1, $s, 0, $d ) . pack( 'CC', 0x01, 0xC0 | ( ( $s & 7 ) << 3 ) | ( $d & 7 ) );
     }
 
     method sub_imm ( $reg, $imm ) {
@@ -252,45 +266,52 @@ class Pulse::Format {
 class Pulse::Format::MachO : isa(Pulse::Format) {
 
     method write_bin ( $filename, $text, $data, $arch, $os = 'macos' ) {
-        my $page_size   = ($arch eq 'arm64') ? 0x4000 : 0x1000;
+        my $page_size   = ( $arch eq 'arm64' ) ? 0x4000 : 0x1000;
         my $is_arm      = ( $arch eq 'arm64' );
         my $cpu_type    = $is_arm ? 0x0100000C : 0x01000007;
         my $cpu_subtype = $is_arm ? 0x00000000 : 0x00000003;
-
-        my $align = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+        my $align       = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
         my $text_padded = $text . ( "\0" x ( $align->( length($text), $page_size ) - length($text) ) );
         my $data_padded = $data . ( "\0" x ( $align->( length($data), $page_size ) - length($data) ) );
-
-        my $ncmds      = 4; # PAGEZERO, TEXT, DATA, MAIN
-        my $sizeofcmds = 72 + 152 + 152 + 24; 
-
-        # Mach-O Header
-        my $header = pack( 'L L L L L L L L', 0xFEEDFACF, $cpu_type, $cpu_subtype, 2, $ncmds, $sizeofcmds, 0x00200001, 0 );
+        my $ncmds       = 4;                     # PAGEZERO, TEXT, DATA, MAIN
+        my $sizeofcmds  = 72 + 152 + 152 + 24;
+        my $header      = pack( 'L L L L L L L L', 0xFEEDFACF, $cpu_type, $cpu_subtype, 2, $ncmds, $sizeofcmds, 0x00200085, 0 );
 
         # LC_SEGMENT_64 (__PAGEZERO)
         my $lc_pagezero = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 72, "__PAGEZERO", 0, 0x100000000, 0, 0, 0, 0, 0, 0 );
 
-        # LC_SEGMENT_64 (__TEXT) - covers headers + text section
+        # LC_SEGMENT_64 (__TEXT)
         my $lc_text = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__TEXT", 0x100000000, 2 * $page_size, 0, 2 * $page_size, 7, 5, 1, 0 );
-        # Section __text (at 0x100000000 + $page_size)
-        $lc_text .= pack( 'a16 a16 Q Q L L L L L L L L', "__text", "__TEXT", 0x100000000 + $page_size, length($text_padded), $page_size, 0, 0, 0, 0x80000400, 0, 0, 0 );
 
-        # LC_SEGMENT_64 (__DATA) - separate segment
-        my $lc_data = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__DATA", 0x100000000 + 2 * $page_size, $page_size, 2 * $page_size, $page_size, 7, 3, 1, 0 );
-        # Section __data (at 0x100000000 + 2 * $page_size)
-        $lc_data .= pack( 'a16 a16 Q Q L L L L L L L L', "__data", "__DATA", 0x100000000 + 2 * $page_size, length($data_padded), 2 * $page_size, 0, 0, 0, 0, 0, 0, 0 );
+        # Section __text (at 0x100004000 for ARM64, 0x100001000 for x64)
+        my $text_section_vmaddr = 0x100000000 + $page_size;
+        my $text_section_offset = $page_size;
+        $lc_text .= pack( 'a16 a16 Q Q L L L L L L L L',
+            "__text", "__TEXT", $text_section_vmaddr, length($text_padded), $page_size, $text_section_offset, 0, 0, 0x80000400, 0, 0, 0 );
+
+        # LC_SEGMENT_64 (__DATA)
+        my $lc_data
+            = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__DATA", 0x100000000 + 2 * $page_size, $page_size, 2 * $page_size, $page_size, 7, 3, 1,
+            0 );
+
+        # Section __data (at 0x100008000 for ARM64, 0x100002000 for x64)
+        my $data_section_vmaddr = 0x100000000 + 2 * $page_size;
+        my $data_section_offset = 2 * $page_size;
+        $lc_data .= pack( 'a16 a16 Q Q L L L L L L L L',
+            "__data", "__DATA", $data_section_vmaddr, length($data_padded), $page_size, $data_section_offset, 0, 0, 0, 0, 0, 0 );
 
         # LC_MAIN
-        my $lc_main = pack( 'L L Q Q', 0x80000028, 24, $page_size, 0 );
-
+        my $lc_main = pack( 'L L Q Q', 0x80000028, 24, $page_size, 0 );    # Entry point offset is page_size
         open my $fh, '>', $filename or die $!;
         binmode $fh;
         print $fh $header, $lc_pagezero, $lc_text, $lc_data, $lc_main;
-        print $fh ( "\0" x ( $page_size - (length($header) + $sizeofcmds) ) );
+        print $fh ( "\0" x ( $page_size - ( length($header) + $sizeofcmds ) ) );    # Pad to page size after commands
         print $fh $text_padded, $data_padded;
         close $fh;
         chmod 0755, $filename;
+
         if ( $^O eq 'darwin' ) {
+
             # Verbose codesigning to help debug
             system("codesign --force --sign - $filename");
         }
@@ -312,8 +333,8 @@ class Pulse::Format::ELF : isa(Pulse::Format) {
         my $data_padded = $data . ( "\0" x ( $align->( length($data), 0x1000 ) - length($data) ) );
         my $elf_hdr     = pack(
             'A4 C C C C C x7 S S L Q Q Q L S S S S S S',
-            "\x7fELF", 2, 1, 1, $osabi, 0, 2, $machine, 1, $base + $text_off,
-            0x40,      0, 0, 64, 56, 2, 0, 0,        0
+            "\x7fELF", 2, 1, 1,  $osabi, 0, 2, $machine, 1, $base + $text_off,
+            0x40,      0, 0, 64, 56,     2, 0, 0,        0
         );
         my $ph_text = pack( 'LL Q Q Q Q Q Q', 1, 5, 0, $base, $base, $text_off + length($text_padded), $text_off + length($text_padded), 0x1000 );
         my $ph_data
@@ -350,6 +371,7 @@ class Pulse::Format::PE : isa(Pulse::Format) {
         my $rva_hn      = $rva_dll + 16;
         my $iat_data    = '';
         my $hn_data     = '';
+
         for my $fn (@funcs) {
             $iat_data .= pack( 'Q<', $rva_hn + length($hn_data) );
             my $hn_entry = pack( 'S<', 0 ) . $fn . "\0";
@@ -360,9 +382,13 @@ class Pulse::Format::PE : isa(Pulse::Format) {
         my $import_dir   = pack( 'L< L< L< L< L<', $rva_ilt, 0, 0, $rva_dll, $rva_iat ) . ( "\0" x 20 );
         my $idata_raw    = $iat_data . $iat_data . $import_dir . pack( 'a16', 'kernel32.dll' ) . $hn_data;
         my $idata_padded = $idata_raw . ( "\0" x ( $align->( length($idata_raw), $fa ) - length($idata_raw) ) );
-        my $headers_bin  = pack( 'S< x58 L<', 0x5A4D, 0x80 ) . pack( 'a64', "This program cannot be run in DOS mode.\r\r\n\$" );
-        my $file_hdr     = pack( 'S< S< L< L< L< S< S<', $machine, 3, time(), 0, 0, 240, 0x0022 );
-        my $opt_hdr      = pack(
+        my $headers_bin  = pack( 'S< x58 L<', 0x5A4D, 0x80 ) . pack(
+            'a64', "This program cannot be run in DOS mode.
+
+\$"
+        );
+        my $file_hdr = pack( 'S< S< L< L< L< S< S<', $machine, 3, time(), 0, 0, 240, 0x0022 );
+        my $opt_hdr  = pack(
             'S< C C L< L< L< L< L< Q< L< L< S< S< S< S< S< S< L< L< L< L< S< S< Q< Q< Q< Q< L< L<',
             0x20B, 14,        0,         length($text_padded), length($data_padded) + length($idata_padded),
             0,     $text_rva, $text_rva, $image_base,          $sa, $fa, 6, 0, 0, 0, 6, 0, 0, $align->( $idata_rva + length($idata_padded), $sa ),
@@ -405,15 +431,15 @@ class Pulse::Compiler {
     #
     ADJUST {
         my $d_os = 'linux';
-        $d_os = 'win64'    if $^O eq 'MSWin32';
-        $d_os = 'macos'    if $^O eq 'darwin';
-        $d_os = 'freebsd'  if $^O eq 'freebsd';
-        $d_os = 'openbsd'  if $^O eq 'openbsd';
-        $d_os = 'netbsd'   if $^O eq 'netbsd';
-        $d_os = 'solaris'  if $^O eq 'solaris';
+        $d_os = 'win64'     if $^O eq 'MSWin32';
+        $d_os = 'macos'     if $^O eq 'darwin';
+        $d_os = 'freebsd'   if $^O eq 'freebsd';
+        $d_os = 'openbsd'   if $^O eq 'openbsd';
+        $d_os = 'netbsd'    if $^O eq 'netbsd';
+        $d_os = 'solaris'   if $^O eq 'solaris';
         $d_os = 'dragonfly' if $^O eq 'dragonfly';
-
         my $d_arch = 'x64';
+
         if ( $^O eq 'MSWin32' ) {
             $d_arch = ( ( $ENV{PROCESSOR_ARCHITECTURE} // '' ) =~ /ARM64/i ) ? 'arm64' : 'x64';
         }
@@ -430,7 +456,7 @@ class Pulse::Compiler {
         }
         $os   //= $d_os;
         $arch //= $d_arch;
-        $as     = $arch eq 'arm64' ? Pulse::Emit::ARM64->new() : Pulse::Emit::X64->new();
+        $as = $arch eq 'arm64' ? Pulse::Emit::ARM64->new() : Pulse::Emit::X64->new();
         if    ( $os eq 'win64' ) { $format = Pulse::Format::PE->new() }
         elsif ( $os eq 'macos' ) { $format = Pulse::Format::MachO->new() }
         else                     { $format = Pulse::Format::ELF->new() }
@@ -452,19 +478,19 @@ class Pulse::Compiler {
             if ( $arch eq 'arm64' ) {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 64 );    # write
                 $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
-                $as->mov_imm( 'x0', 1 );                  # stdout
-                my $page_size = ($os eq 'macos') ? 0x4000 : 0x1000;
+                $as->mov_imm( 'x0', 1 );                                                 # stdout
+                my $page_size = ( $os eq 'macos' ) ? 0x4000 : 0x1000;
                 my $text_rva  = $page_size;
                 my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'x1', $data_rva + $off, $text_rva );
                 $as->mov_imm( 'x2', length($str) );
-                $as->syscall($os eq 'macos');
+                $as->syscall( $os eq 'macos' );
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 1 );
                 $as->mov_imm( 'rax', $num );
                 $as->mov_imm( 'rdi', 1 );
-                my $page_size = ($os eq 'macos') ? 0x1000 : 0x1000;
+                my $page_size = ( $os eq 'macos' ) ? 0x1000 : 0x1000;
                 my $text_rva  = $page_size;
                 my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'rsi', $data_rva + $off, $text_rva );
@@ -475,7 +501,7 @@ class Pulse::Compiler {
         else {
             if ( $arch eq 'arm64' ) {
                 $as->mov_imm( 'x0', -11 );
-                $as->call_rva( 0x3008, 0x1000 );
+                $as->call_rva( 0x3008, 0x1000 );    # IAT 1: GetStdHandle
                 $as->mov_reg( 'x0', 'x0' );
                 $as->lea_rva( 'x1', 0x2000 + $off, 0x1000 );
                 $as->mov_imm( 'x2', length($str) );
@@ -483,14 +509,14 @@ class Pulse::Compiler {
             }
             else {
                 $as->mov_imm( 'rcx', -11 );
-                $as->call_rva( 0x3008, 0x1000 );
+                $as->call_rva( 0x3008, 0x1000 );                # IAT 1: GetStdHandle
                 $as->mov_reg( 'rcx', 'rax' );
                 $as->lea_rva( 'rdx', 0x2000 + $off, 0x1000 );
                 $as->mov_imm( 'r8', length($str) );
                 $as->lea_reg_disp( 'r9', 'rsp', 48 );
                 $as->mov_imm( 'r10', 0 );
-                $as->store_mem_disp_reg( 'rsp', 32, 'r10' );
-                $as->call_rva( 0x3010, 0x1000 );
+                $as->store_mem_disp_reg( 'rsp', 32, 'r10' );    # lpOverlapped = null
+                $as->call_rva( 0x3010, 0x1000 );                # IAT 2: WriteFile
             }
         }
     }
@@ -499,10 +525,10 @@ class Pulse::Compiler {
         my $is_bsd_like = $os =~ /macos|freebsd|openbsd|netbsd|dragonfly|solaris/;
         if ( $os eq 'linux' || $is_bsd_like ) {
             if ( $arch eq 'arm64' ) {
-                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );
+                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );    # exit
                 $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
                 $as->mov_imm( 'x0', $code );
-                $as->syscall($os eq 'macos');
+                $as->syscall( $os eq 'macos' );
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 60 );
@@ -518,7 +544,7 @@ class Pulse::Compiler {
             }
             else {
                 $as->mov_imm( 'rcx', $code );
-                $as->call_rva( 0x3000, 0x1000 );
+                $as->call_rva( 0x3000, 0x1000 );    # IAT 0: ExitProcess
             }
         }
     }
@@ -541,7 +567,7 @@ class Pulse::Compiler {
         my $l_end   = $self->_label();
         $as->mark_label($l_start);
         $cond_cb->($as);
-        $as->jcc( $self->cc('z'), $l_end );
+        $as->jcc( $self->cc('z'), $l_end );    # JZ -> end
         $body_cb->($as);
         $as->jmp($l_start);
         $as->mark_label($l_end);
@@ -555,27 +581,38 @@ my $as = $p->as;
 if ( $p->os eq 'win64' && $p->arch eq 'x64' ) {
     $as->sub_imm( 'rsp', 56 );
 }
-$p->print_str("Pulse AOT Engine Starting...\n");
-
+$p->print_str(
+    "Pulse AOT Engine Starting...
+"
+);
 my $loop_reg = ( $p->arch eq 'arm64' ) ? 'x19' : 'rbx';
 $as->mov_imm( $loop_reg, 1 );
-
 $as->mark_label('loop');
-$p->print_str(" -> Inside Loop Iteration\n");
+$p->print_str(
+    " -> Inside Loop Iteration
+"
+);
 $as->add_imm( $loop_reg, 1 );
 $as->cmp_reg_imm( $loop_reg, 4 );
 $as->jcc( $p->cc('lt'), 'loop' );
-$p->print_str("Done! Exiting with status 42.\n");
+$p->print_str(
+    "Done! Exiting with status 42.
+"
+);
 $p->exit_proc(42);
 $as->resolve();
 #
 my $exe = $p->write_bin('pulse_output');
 $exe = "./$exe" if $^O ne 'MSWin32';
 my $status = system($exe);
-if ($status == -1) {
+if ( $status == -1 ) {
     say "Failed to execute: $!";
-} elsif ($status & 127) {
-    printf "Child died with signal %d, %s coredump\n", ($status & 127), ($status & 128) ? 'with' : 'without';
-} else {
-    printf "Exit code: %d\n", $status >> 8;
+}
+elsif ( $status & 127 ) {
+    printf "Child died with signal %d, %s coredump
+", ( $status & 127 ), ( $status & 128 ) ? 'with' : 'without';
+}
+else {
+    printf "Exit code: %d
+", $status >> 8;
 }
