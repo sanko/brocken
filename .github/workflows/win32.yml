@@ -7,12 +7,12 @@ jobs:
       - uses: actions/checkout@v5.0.0
         with:
           submodules: true
-      #~ - name: Setup Perl environment
-        #~ uses: shogo82148/actions-setup-perl@v1.40.0
-        #~ with:
-          #~ distribution: "${{ inputs.flags == '-Dusethreads' && 'strawberry' || 'default' }}"
-          #~ multi-thread: "${{ inputs.flags == '-Dusethreads' && true || false }}"
-          #~ perl-version: '${{ inputs.perl }}'
+      - name: Setup Perl environment
+        uses: shogo82148/actions-setup-perl@v1.40.0
+        with:
+          distribution: "${{ inputs.flags == '-Dusethreads' && 'strawberry' || 'default' }}"
+          multi-thread: "${{ inputs.flags == '-Dusethreads' && true || false }}"
+          perl-version: '${{ inputs.perl }}'
       #~ - name: Install prereqs
         #~ run: cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
       - name: Run tests
