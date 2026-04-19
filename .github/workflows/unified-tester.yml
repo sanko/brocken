@@ -63,7 +63,7 @@ jobs:
             echo "Perl version is sufficient: $(perl -e 'print $^V')"
           else
             echo "Perl is too old or not found. Installing/Upgrading..."
-            choco install strawberryperl -y || choco upgrade strawberryperl -y
+            choco install strawberryperl --version=5.40.0 -y || choco upgrade strawberryperl --version=5.40.0 -y
             echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
           fi
         shell: bash
@@ -88,7 +88,8 @@ jobs:
           arch: ${{ inputs.arch }}
           prepare: ${{ inputs.prepare }}
           run: |
-            perl demo.pl
+            export PATH=/usr/local/bin:$PATH
+            perl5.40 demo.pl
 
       - name: Build and Test in OpenBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'openbsd'
@@ -99,7 +100,7 @@ jobs:
           arch: ${{ inputs.arch }}
           prepare: ${{ inputs.prepare }}
           run: |
-            perl demo.pl
+            /usr/local/bin/perl5.40.0 demo.pl
 
       - name: Build and Test in NetBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'netbsd'
@@ -110,7 +111,8 @@ jobs:
           arch: ${{ inputs.arch }}
           prepare: ${{ inputs.prepare }}
           run: |
-            perl demo.pl
+            export PATH=/usr/pkg/bin:/usr/local/bin:$PATH
+            perl5.40 demo.pl
 
       - name: Build and Test in DragonflyBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'dragonflybsd'
@@ -120,7 +122,8 @@ jobs:
           usesh: true
           prepare: ${{ inputs.prepare }}
           run: |
-            perl demo.pl
+            export PATH=/usr/local/bin:$PATH
+            perl5.40 demo.pl
 
       - name: Build and Test in Solaris
         if: inputs.runner_type == 'vm' && inputs.os == 'solaris'
@@ -141,7 +144,7 @@ jobs:
           usesh: true
           prepare: ${{ inputs.prepare }}
           run: |
-            perl demo.pl
+            /opt/perl5/bin/perl5.40.0 demo.pl
 
       #~ - name: Upload coverage reports to Codecov
         #~ uses: codecov/codecov-action@v5
