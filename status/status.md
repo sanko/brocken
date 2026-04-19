@@ -18,10 +18,10 @@
 | **openbsd** | `x86_64` | `clang` | ✅ success |
 | **openbsd** | `x86_64` | `egcc` | ✅ success |
 | **solaris** | `x86_64` | `gcc` | ❌ failure |
-| **ubuntu** | `aarch64` | `clang` | ❌ failure |
-| **ubuntu** | `aarch64` | `gcc` | ❌ failure |
-| **ubuntu** | `x86_64` | `clang` | ❌ failure |
-| **ubuntu** | `x86_64` | `gcc` | ❌ failure |
+| **ubuntu** | `aarch64` | `clang` | ✅ success |
+| **ubuntu** | `aarch64` | `gcc` | ✅ success |
+| **ubuntu** | `x86_64` | `clang` | ✅ success |
+| **ubuntu** | `x86_64` | `gcc` | ✅ success |
 | **windows** | `aarch64` | `clang` | ❌ failure |
 | **windows** | `aarch64` | `gcc` | ❌ failure |
 | **windows** | `aarch64` | `msvc` | ❌ failure |
