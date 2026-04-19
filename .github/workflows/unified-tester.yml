@@ -62,18 +62,10 @@ jobs:
           if perl -e 'exit ($^V ge v5.40.0 ? 0 : 1)' 2>/dev/null; then
             echo "Perl version is sufficient: $(perl -e 'print $^V')"
           else
-            echo "Perl is too old or not found. Installing/Upgrading..."
-            choco install strawberryperl -y || choco upgrade strawberryperl -y
-            echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
-          fi
-          export PERL=/c/Strawberry/perl/bin/perl.exe
-          if $PERL -e 'exit ($^V ge v5.40.0 ? 0 : 1)'; then
-            echo "Perl version is sufficient: $($PERL -e 'print $^V')"
-          else
-            echo " Downloading Perl 5.40..."
-            curl -L -o /tmp/perl.msi https://github.com/StrawberryPerl/Perl/releases/download/perl-5.40.0.0/strawberry-perl-5.40.0.0-64bit.msi
-            msiexec /i /tmp/perl.msi /quiet /qn
-            echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
+            echo "Perl is old: $(perl -e 'print $^V')"
+            echo "Trying different perl install method..."
+            choco install strawberryperl -y || true
+            echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH 2>/dev/null || true
           fi
         shell: bash
 
@@ -83,20 +75,9 @@ jobs:
 
       - name: Build and Test on Direct Runner
         if: inputs.runner_type == 'direct'
-        shell: bash
         run: |
           ${{ inputs.prepare }}
           perl demo.pl
-
-      - name: Cache Perl for FreeBSD
-        if: inputs.runner_type == 'vm' && inputs.os == 'freebsd'
-        uses: actions/cache@v4
-        with:
-          path: ~/perl5
-          key: freebsd-perl540-${{ inputs.os_version }}-${{ inputs.arch }}
-          restore-keys: |
-            freebsd-perl540-${{ inputs.os_version }}-
-            freebsd-perl540-
 
       - name: Build and Test in FreeBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'freebsd'
@@ -105,11 +86,10 @@ jobs:
           release: ${{ inputs.os_version }}
           usesh: true
           arch: ${{ inputs.arch }}
-          prepare: |
-            pkg install -y perl5.40 || pkg install -y perl5.38 || true
+          prepare: ${{ inputs.prepare }}
           run: |
             export PATH=/usr/local/bin:$PATH
-            perl5.40 demo.pl || perl5.38 demo.pl || perl demo.pl
+            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in OpenBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'openbsd'
@@ -118,10 +98,10 @@ jobs:
           release: ${{ inputs.os_version }}
           usesh: true
           arch: ${{ inputs.arch }}
-          prepare: |
-            pkg_add -v perl5.40 || pkg_add -v perl5.38 || true
+          prepare: ${{ inputs.prepare }}
           run: |
-            /usr/local/bin/perl5.40.0 demo.pl || /usr/local/bin/perl5.38.0 demo.pl || perl demo.pl
+            export PATH=/usr/local/bin:$PATH
+            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in NetBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'netbsd'
@@ -130,11 +110,10 @@ jobs:
           release: ${{ inputs.os_version }}
           usesh: true
           arch: ${{ inputs.arch }}
-          prepare: |
-            pkgin -y install perl5.40 || pkgin -y install perl5.38 || true
+          prepare: ${{ inputs.prepare }}
           run: |
-            export PATH=/usr/pkg/bin:/usr/local/bin:$PATH
-            perl5.40 demo.pl || perl5.38 demo.pl || perl demo.pl
+            export PATH=/usr/local/bin:$PATH
+            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in DragonflyBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'dragonflybsd'
@@ -142,11 +121,10 @@ jobs:
         with:
           release: ${{ inputs.os_version }}
           usesh: true
-          prepare: |
-            pkg install -y perl5.40 || pkg install -y perl5.38 || true
+          prepare: ${{ inputs.prepare }}
           run: |
             export PATH=/usr/local/bin:$PATH
-            perl5.40 demo.pl || perl5.38 demo.pl || perl demo.pl
+            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in Solaris
         if: inputs.runner_type == 'vm' && inputs.os == 'solaris'
@@ -156,8 +134,8 @@ jobs:
           usesh: true
           prepare: ${{ inputs.prepare }}
           run: |
-            export PATH=$HOME/perl5/perlbrew/bin:$PATH
-            perl5.40.0 demo.pl || perl5.38.0 demo.pl || perl demo.pl
+            export PATH=/usr/local/bin:$PATH
+            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in OmniOS
         if: inputs.runner_type == 'vm' && inputs.os == 'omnios'
@@ -167,7 +145,8 @@ jobs:
           usesh: true
           prepare: ${{ inputs.prepare }}
           run: |
-            /opt/perl5/bin/perl5.40.0 demo.pl || /opt/perl5/bin/perl5.38.0 demo.pl || perl demo.pl
+            export PATH=/usr/local/bin:$PATH
+            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       #~ - name: Upload coverage reports to Codecov
         #~ uses: codecov/codecov-action@v5

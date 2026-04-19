@@ -32,22 +32,22 @@ jobs:
         platform:
           - os: 'freebsd'
             version: '15.0'
-            prepare: 'pkg install -y perl5.40'
+            prepare: 'cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install'
           - os: 'openbsd'
             version: '7.8'
-            prepare: 'pkg_add -v perl5.40'
+            prepare: 'cd /tmp && ftp https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install'
           - os: 'netbsd'
             version: '10.1'
-            prepare: 'pkgin -y install perl5.40'
+            prepare: 'cd /tmp && ftp https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install'
           - os: 'dragonflybsd'
             version: '6.4.0'
-            prepare: 'pkg install -y perl5.40'
+            prepare: 'cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install'
           - os: 'solaris'
             version: '11.4'
-            prepare: 'pkg install -v --accept gcc make binutils; curl -L https://install.perlbrew.pl | bash; export PATH=$HOME/perl5/perlbrew/bin:$PATH; perlbrew install perl-5.40.0 --notest -j 4; perlbrew use perl-5.40.0'
+            prepare: 'pkg install -v --accept gcc library/libc && cd /tmp && wget -q https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install || true'
           - os: 'omnios'
             version: 'r151056'
-            prepare: 'pkg update; pkg install -v --accept runtime/perl-540 build-essential'
+            prepare: 'pkg update && pkg install -v runtime/perl-540'
         arch: ['x86_64', 'aarch64']
         exclude:
           - platform: { os: 'dragonflybsd' }
