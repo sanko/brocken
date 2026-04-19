@@ -1,0 +1,55 @@
+{
+"dragonflybsd-x86_64-gcc": "👎🏽 failing"
+,
+"freebsd-aarch64-clang": "👍🏽 passing"
+,
+"freebsd-aarch64-gcc": "👍🏽 passing"
+,
+"freebsd-x86_64-clang": "👍🏽 passing"
+,
+"freebsd-x86_64-gcc": "👍🏽 passing"
+,
+"macos-aarch64-clang": "👍🏽 passing"
+,
+"macos-aarch64-gcc": "👍🏽 passing"
+,
+"macos-x86_64-clang": "👍🏽 passing"
+,
+"macos-x86_64-gcc": "👍🏽 passing"
+,
+"netbsd-aarch64-gcc": "👍🏽 passing"
+,
+"netbsd-x86_64-gcc": "👍🏽 passing"
+,
+"omnios-x86_64-gcc": "👍🏽 passing"
+,
+"openbsd-aarch64-clang": "👍🏽 passing"
+,
+"openbsd-aarch64-egcc": "👍🏽 passing"
+,
+"openbsd-x86_64-clang": "👍🏽 passing"
+,
+"openbsd-x86_64-egcc": "👍🏽 passing"
+,
+"solaris-x86_64-gcc": "👎🏽 failing"
+,
+"ubuntu-aarch64-clang": "👎🏽 failing"
+,
+"ubuntu-aarch64-gcc": "👎🏽 failing"
+,
+"ubuntu-x86_64-clang": "👎🏽 failing"
+,
+"ubuntu-x86_64-gcc": "👎🏽 failing"
+,
+"windows-aarch64-clang": "👎🏽 failing"
+,
+"windows-aarch64-gcc": "👎🏽 failing"
+,
+"windows-aarch64-msvc": "👎🏽 failing"
+,
+"windows-x86_64-clang": "👎🏽 failing"
+,
+"windows-x86_64-gcc": "👎🏽 failing"
+,
+"windows-x86_64-msvc": "👎🏽 failing"
+}
