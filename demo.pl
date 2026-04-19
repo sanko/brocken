@@ -280,25 +280,66 @@ class Pulse::Emit::X64 {
 }
 
 class Pulse::Format {
-    method write_bin( $filename, $text, $data, $arch ) {...}
+    method write_bin( $filename, $text, $data, $arch, $os ) { }
 }
 
-class Pulse::Format::MachO : isa(Pulse::Format) { }
+class Pulse::Format::MachO : isa(Pulse::Format) {
+
+    method write_bin ( $filename, $text, $data, $arch, $os = 'macos' ) {
+        my $page_size   = 0x1000;
+        my $is_arm      = ( $arch eq 'arm64' );
+        my $cpu_type    = $is_arm ? 0x0100000C : 0x01000007;
+        my $cpu_subtype = $is_arm ? 0x00000000 : 0x00000003;
+        my $align       = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+        my $text_padded = $text . ( "\0" x ( $align->( length($text), $page_size ) - length($text) ) );
+        my $data_padded = $data . ( "\0" x ( $align->( length($data), $page_size ) - length($data) ) );
+        my $ncmds       = 3;
+        my $sizeofcmds  = 72 + 152 + 24;    # PAGEZERO + TEXT(2 sects) + LC_MAIN
+        my $header      = pack( 'L L L L L L L L', 0xFEEDFACF, $cpu_type, $cpu_subtype, 2, $ncmds, $sizeofcmds, 0x00200085, 0 );
+
+        # LC_SEGMENT_64 (__PAGEZERO)
+        my $lc_pagezero = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 72, '__PAGEZERO', 0, 0x100000000, 0, 0, 0, 0, 0, 0 );
+
+        # LC_SEGMENT_64 (__TEXT)
+        my $vmsize  = 0x3000;
+        my $lc_text = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, '__TEXT', 0x100000000, $vmsize, 0, $vmsize, 7, 5, 2, 0 );
+
+        # Section __text
+        $lc_text
+            .= pack( 'a16 a16 Q Q L L L L L L L L', '__text', '__TEXT', 0x100001000, length($text_padded), 0x1000, 0, 0, 0, 0x80000400, 0, 0, 0 );
+
+        # Section __data
+        $lc_text .= pack( 'a16 a16 Q Q L L L L L L L L', '__data', '__TEXT', 0x100002000, length($data_padded), 0x2000, 0, 0, 0, 0, 0, 0, 0 );
+
+        # LC_MAIN
+        my $lc_main = pack( 'L L Q Q', 0x80000028, 24, 0x1000, 0 );
+        open my $fh, '>', $filename or die $!;
+        binmode $fh;
+        print $fh $header, $lc_pagezero, $lc_text, $lc_main;
+        print $fh ( "\0" x ( $page_size - length($header) - $sizeofcmds ) );
+        print $fh $text_padded, $data_padded;
+        close $fh;
+        chmod 0755, $filename;
+        system("codesign -s - $filename >/dev/null 2>&1") if $^O eq 'darwin';
+        return $filename;
+    }
+}
 
 class Pulse::Format::ELF : isa(Pulse::Format) {
 
-    method write_bin ( $filename, $text, $data, $arch ) {
+    method write_bin ( $filename, $text, $data, $arch, $os = 'linux' ) {
         my $base        = 0x400000;
         my $text_off    = 0x1000;
         my $data_off    = 0x2000;
         my $machine     = ( $arch eq 'arm64' ) ? 183 : 62;
+        my $osabi       = ( $os eq 'freebsd' ) ? 9   : 0;
         my $align       = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
         my $text_padded = $text . ( "\0" x ( $align->( length($text), 0x1000 ) - length($text) ) );
         my $data_padded = $data . ( "\0" x ( $align->( length($data), 0x1000 ) - length($data) ) );
         my $elf_hdr     = pack(
             'A4 C C C C C x7 S S L Q Q Q L S S S S S S',
-            "\x7fELF", 2, 1, 1,  0,  0, 2, $machine, 1, $base + $text_off,
-            0x40,      0, 0, 64, 56, 2, 0, 0,        0
+            "\x7fELF", 2, 1, 1,  $osabi, 0, 2, $machine, 1, $base + $text_off,
+            0x40,      0, 0, 64, 56,     2, 0, 0,        0
         );
         my $ph_text = pack( 'LL Q Q Q Q Q Q', 1, 5, 0, $base, $base, $text_off + length($text_padded), $text_off + length($text_padded), 0x1000 );
         my $ph_data
@@ -315,7 +356,7 @@ class Pulse::Format::ELF : isa(Pulse::Format) {
 
 class Pulse::Format::PE : isa(Pulse::Format) {
 
-    method write_bin ( $filename, $text, $data, $arch ) {
+    method write_bin ( $filename, $text, $data, $arch, $os = 'win64' ) {
         my $fa          = 0x200;
         my $sa          = 0x1000;
         my $image_base  = hex '140000000';
@@ -401,7 +442,10 @@ class Pulse::Compiler {
     field $label_count = 0;
     #
     ADJUST {
-        my $d_os   = ( $^O eq 'MSWin32' ? 'win64' : 'linux' );
+        my $d_os = 'linux';
+        $d_os = 'win64'   if $^O eq 'MSWin32';
+        $d_os = 'macos'   if $^O eq 'darwin';
+        $d_os = 'freebsd' if $^O eq 'freebsd';
         my $d_arch = 'x64';
         if ( $^O eq 'MSWin32' ) {
             $d_arch = ( ( $ENV{PROCESSOR_ARCHITECTURE} // '' ) =~ /ARM64/i ) ? 'arm64' : 'x64';
@@ -410,19 +454,21 @@ class Pulse::Compiler {
             my $m = `uname -m` // 'x86_64';
             $d_arch = 'arm64' if $m =~ /aarch64|arm64|armv8/i;
             use Config;
-            $d_arch = 'arm64' if ( $Config{archname} // '' ) =~ /aarch64|arm64/i;
+            $d_arch = 'arm64' if ( $Config{archname} // '' ) =~ /aarch64|arm64|apple-arm64/i;
         }
-        if ( @ARGV && $ARGV[0] =~ /^(?:linux|win64)-(?:x64|arm64)$/ ) {
+        if ( @ARGV && $ARGV[0] =~ /^(?:linux|win64|macos|freebsd)-(?:x64|arm64)$/ ) {
             my $target = shift @ARGV;
             ( $os, $arch ) = split /-/, $target;
         }
         $os   //= $d_os;
         $arch //= $d_arch;
-        $as     = $arch eq 'arm64' ? Pulse::Emit::ARM64->new() : Pulse::Emit::X64->new();
-        $format = $os eq 'win64'   ? Pulse::Format::PE->new()  : Pulse::Format::ELF->new();
+        $as = $arch eq 'arm64' ? Pulse::Emit::ARM64->new() : Pulse::Emit::X64->new();
+        if    ( $os eq 'win64' ) { $format = Pulse::Format::PE->new() }
+        elsif ( $os eq 'macos' ) { $format = Pulse::Format::MachO->new() }
+        else                     { $format = Pulse::Format::ELF->new() }
     }
     #
-    method write_bin($path) { $format->write_bin( $path, $as->code, $data, $arch ) }
+    method write_bin($path) { $format->write_bin( $path, $as->code, $data, $arch, $os ) }
     #
     method cc ($name) {
         return { eq => 0, ne => 1, lt => 0xB, le => 0xD, gt => 0xC, ge => 0xA, z => 0, nz => 1 }->{$name} if $arch eq 'arm64';
@@ -433,16 +479,18 @@ class Pulse::Compiler {
         my $as  = $as;
         my $off = length $data;
         $data .= $str;
-        if ( $os eq 'linux' ) {
+        if ( $os eq 'linux' || $os eq 'macos' || $os eq 'freebsd' ) {
             if ( $arch eq 'arm64' ) {
-                $as->mov_imm( 'x8', 64 );    # write
-                $as->mov_imm( 'x0', 1 );     # stdout
+                my $num = ( $os eq 'macos' ) ? 4 : ( $os eq 'freebsd' ? 4 : 64 );    # write
+                $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
+                $as->mov_imm( 'x0', 1 );                                             # stdout
                 $as->lea_rva( 'x1', 0x2000 + $off, 0x1000 );
                 $as->mov_imm( 'x2', length($str) );
                 $as->syscall();
             }
             else {
-                $as->mov_imm( 'rax', 1 );
+                my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $os eq 'freebsd' ? 4 : 1 );
+                $as->mov_imm( 'rax', $num );
                 $as->mov_imm( 'rdi', 1 );
                 $as->lea_rva( 'rsi', 0x2000 + $off, 0x1000 );
                 $as->mov_imm( 'rdx', length($str) );
@@ -478,14 +526,16 @@ class Pulse::Compiler {
     }
 
     method exit_proc ($code) {
-        if ( $os eq 'linux' ) {
+        if ( $os eq 'linux' || $os eq 'macos' || $os eq 'freebsd' ) {
             if ( $arch eq 'arm64' ) {
-                $as->mov_imm( 'x8', 93 );                       # exit
+                my $num = ( $os eq 'macos' ) ? 1 : ( $os eq 'freebsd' ? 1 : 93 );    # exit
+                $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
                 $as->mov_imm( 'x0', $code );
                 $as->syscall();
             }
             else {
-                $as->mov_imm( 'rax', 60 );
+                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $os eq 'freebsd' ? 1 : 60 );
+                $as->mov_imm( 'rax', $num );
                 $as->mov_imm( 'rdi', $code );
                 $as->syscall();
             }
