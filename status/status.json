@@ -15,9 +15,9 @@
 ,
 "omnios-x86_64-none": "👎🏽 failing"
 ,
-"openbsd-aarch64-none": "👍🏽 passing"
+"openbsd-aarch64-none": "👎🏽 failing"
 ,
-"openbsd-x86_64-none": "👍🏽 passing"
+"openbsd-x86_64-none": "👎🏽 failing"
 ,
 "solaris-x86_64-none": "👎🏽 failing"
 ,
