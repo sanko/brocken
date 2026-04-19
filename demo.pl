@@ -259,10 +259,10 @@ class Pulse::Format {
 class Pulse::Format::MachO : isa(Pulse::Format) {
 
     method write_bin ( $filename, $text, $data, $arch, $os = 'macos' ) {
-        my $page_size   = ($arch eq 'arm64') ? 0x4000 : 0x1000;
+        my $page_size   = ($arch eq 'arm64') ? 0x4000 : 0x1000; # 16KB for ARM64, 4KB for x64
         my $is_arm      = ( $arch eq 'arm64' );
-        my $cpu_type    = $is_arm ? 0x0100000C : 0x01000007;
-        my $cpu_subtype = $is_arm ? 0x00000000 : 0x00000003;
+        my $cpu_type    = $is_arm ? 0x0100000C : 0x01000007; # CPU_TYPE_ARM64 : CPU_TYPE_X86_64
+        my $cpu_subtype = $is_arm ? 0x00000000 : 0x00000003; # CPU_SUBTYPE_ARM64_ALL : CPU_SUBTYPE_X86_64_ALL
 
         my $align = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
         my $text_padded = $text . ( "\0" x ( $align->( length($text), $page_size ) - length($text) ) );
@@ -272,21 +272,25 @@ class Pulse::Format::MachO : isa(Pulse::Format) {
         my $sizeofcmds = 72 + 152 + 152 + 24; 
 
         # Mach-O Header
-        my $header = pack( 'L L L L L L L L', 0xFEEDFACF, $cpu_type, $cpu_subtype, 2, $ncmds, $sizeofcmds, 0x00200085, 0 ); # MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE
+        # Flags: MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE (common flags)
+        my $header = pack( 'L L L L L L L L', 0xFEEDFACF, $cpu_type, $cpu_subtype, 2, $ncmds, $sizeofcmds, 0x00200085, 0 );
 
         # LC_SEGMENT_64 (__PAGEZERO)
         my $lc_pagezero = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 72, "__PAGEZERO", 0, 0x100000000, 0, 0, 0, 0, 0, 0 );
 
-        # LC_SEGMENT_64 (__TEXT) - Covers headers + text section
-        my $lc_text = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__TEXT", 0x100000000, 2 * $page_size, 0, 2 * $page_size, 7, 5, 1, 0 ); # maxprot=rwx, initprot=rx, nsects=1
-        # Section __text (at 0x100000000 + $page_size)
+        # LC_SEGMENT_64 (__TEXT) - covers headers + text section
+        my $text_segment_vm_size = 2 * $page_size; 
+        my $lc_text = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__TEXT", 0x100000000, $text_segment_vm_size, 0, $text_segment_vm_size, 7, 5, 1, 0 ); # maxprot=rwx, initprot=rx, nsects=1
+        # Section __text (aligned to page_size)
         my $text_section_vmaddr = 0x100000000 + $page_size;
         my $text_section_offset = $page_size;
         $lc_text .= pack( 'a16 a16 Q Q L L L L L L L L', "__text", "__TEXT", $text_section_vmaddr, length($text_padded), $page_size, $text_section_offset, 0, 0, 0, 0x80000400, 0, 0, 0 ); # S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS
 
-        # LC_SEGMENT_64 (__DATA) - separate segment
-        my $lc_data = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__DATA", 0x100000000 + 2 * $page_size, $page_size, 2 * $page_size, $page_size, 7, 3, 1, 0 ); # maxprot=rwx, initprot=rw, nsects=1
-        # Section __data (at 0x100000000 + 2 * $page_size)
+        # LC_SEGMENT_64 (__DATA)
+        my $data_segment_vmaddr = 0x100000000 + 2 * $page_size;
+        my $data_segment_fileoff = 2 * $page_size;
+        my $lc_data = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__DATA", $data_segment_vmaddr, $page_size, $data_segment_fileoff, $page_size, 7, 3, 1, 0 ); # maxprot=rwx, initprot=rw, nsects=1
+        # Section __data (aligned to page_size)
         my $data_section_vmaddr = 0x100000000 + 2 * $page_size;
         my $data_section_offset = 2 * $page_size;
         $lc_data .= pack( 'a16 a16 Q Q L L L L L L L L', "__data", "__DATA", $data_section_vmaddr, length($data_padded), $page_size, $data_section_offset, 0, 0, 0, 0, 0, 0 );
@@ -404,9 +408,9 @@ class Pulse::Format::PE : isa(Pulse::Format) {
     }
 }
 
-package Pulse::Lexer { }
+class Pulse::Lexer { }
 
-package Pulse::Parser { }
+class Pulse::Parser { }
 
 class Pulse::Compiler {
     field $arch   : reader : param = undef;
