@@ -12,8 +12,7 @@ package Pulse::Util {
             my $hex   = join( ' ', map { sprintf( '%02X', ord($_) ) } split( //, $chunk ) );
             my $pad   = ' ' x ( 48 - length($hex) );
             my $asc   = join( '', map { $_ =~ /[ -~]/ ? $_ : '.' } split( //, $chunk ) );
-            $out .= sprintf( "%08X  %s%s |%s|
-", $i, $hex, $pad, $asc );
+            $out .= sprintf( "%08X  %s%s |%s|\n", $i, $hex, $pad, $asc );
         }
         return $out;
     }
@@ -93,7 +92,7 @@ class Pulse::Emit::ARM64 {
     }
 
     method lea_rva ( $reg, $target_rva, $text_rva ) {
-        my $r = $REG{ lc $reg };
+        my $r     = $REG{ lc $reg };
         my $off   = $target_rva - ( $text_rva + length($code) );
         my $immlo = $off & 0x3;
         my $immhi = ( $off >> 2 ) & 0x7FFFF;
@@ -106,12 +105,14 @@ class Pulse::Emit::ARM64 {
         $code .= pack( 'L<', 0xD63F0200 );
     }
 
-    method syscall($macos = 0) {
+    method syscall( $macos = 0 ) {
+
         # For macOS ARM64, syscall number is in x16. Use SVC #0x80.
         # For Linux ARM64, syscall number is in x8. Use SVC #0.
         if ($macos) {
             $code .= pack( 'L<', 0xD4001001 );    # SVC #0x80
-        } else {
+        }
+        else {
             $code .= pack( 'L<', 0xD4000001 );    # SVC #0
         }
     }
@@ -259,55 +260,91 @@ class Pulse::Format {
 class Pulse::Format::MachO : isa(Pulse::Format) {
 
     method write_bin ( $filename, $text, $data, $arch, $os = 'macos' ) {
-        my $page_size   = ($arch eq 'arm64') ? 0x4000 : 0x1000; # 16KB for ARM64, 4KB for x64
         my $is_arm      = ( $arch eq 'arm64' );
-        my $cpu_type    = $is_arm ? 0x0100000C : 0x01000007; # CPU_TYPE_ARM64 : CPU_TYPE_X86_64
-        my $cpu_subtype = $is_arm ? 0x00000000 : 0x00000003; # CPU_SUBTYPE_ARM64_ALL : CPU_SUBTYPE_X86_64_ALL
+        my $page_size   = $is_arm ? 0x4000     : 0x1000;
+        my $cpu_type    = $is_arm ? 0x0100000C : 0x01000007;
+        my $cpu_subtype = $is_arm ? 0x00000000 : 0x00000003;
+        my $align_f     = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+        my $text_padded = $text . ( "\0" x ( $align_f->( length($text), $page_size ) - length($text) ) );
+        my $data_padded = $data . ( "\0" x ( $align_f->( length($data), $page_size ) - length($data) ) );
 
-        my $align = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
-        my $text_padded = $text . ( "\0" x ( $align->( length($text), $page_size ) - length($text) ) );
-        my $data_padded = $data . ( "\0" x ( $align->( length($data), $page_size ) - length($data) ) );
+        # 12 Load Commands for strict dyld/codesign compliance
+        my $ncmds      = 12;
+        my $sizeofcmds = 72 + 152 + 152 + 72 + 24 + 24 + 24 + 32 + 56 + 24 + 80 + 48;    # 760 bytes
 
-        my $ncmds      = 4; # PAGEZERO, TEXT, DATA, MAIN
-        my $sizeofcmds = 72 + 152 + 152 + 24; 
-
-        # Mach-O Header
-        # Flags: MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE (common flags)
+        # Header (MH_PIE | MH_TWOLEVEL | MH_DYLDLINK | MH_NOUNDEFS)
         my $header = pack( 'L L L L L L L L', 0xFEEDFACF, $cpu_type, $cpu_subtype, 2, $ncmds, $sizeofcmds, 0x00200085, 0 );
 
         # LC_SEGMENT_64 (__PAGEZERO)
         my $lc_pagezero = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 72, "__PAGEZERO", 0, 0x100000000, 0, 0, 0, 0, 0, 0 );
 
-        # LC_SEGMENT_64 (__TEXT) - covers headers + text section
-        my $text_segment_vm_size = 2 * $page_size; 
-        my $lc_text = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__TEXT", 0x100000000, $text_segment_vm_size, 0, $text_segment_vm_size, 7, 5, 1, 0 ); # maxprot=rwx, initprot=rx, nsects=1
-        # Section __text (aligned to page_size)
-        my $text_section_vmaddr = 0x100000000 + $page_size;
-        my $text_section_offset = $page_size;
-        $lc_text .= pack( 'a16 a16 Q Q L L L L L L L L', "__text", "__TEXT", $text_section_vmaddr, length($text_padded), $page_size, $text_section_offset, 0, 0, 0, 0x80000400, 0, 0, 0 ); # S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS
+        # LC_SEGMENT_64 (__TEXT) - Permissions RX (5)
+        my $text_vmsize = 2 * $page_size;
+        my $lc_text     = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__TEXT", 0x100000000, $text_vmsize, 0, $text_vmsize, 5, 5, 1, 0 );
+        $lc_text .= pack(
+            'a16 a16 Q Q L L L L L L L L',
+            "__text", "__TEXT", 0x100000000 + $page_size,
+            length($text_padded), $is_arm ? 14 : 12,
+            $page_size, 0, 0, 0, $is_arm ? 0x80000400 : 0x00000400,
+            0, 0, 0
+        );
 
-        # LC_SEGMENT_64 (__DATA)
-        my $data_segment_vmaddr = 0x100000000 + 2 * $page_size;
-        my $data_segment_fileoff = 2 * $page_size;
-        my $lc_data = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__DATA", $data_segment_vmaddr, $page_size, $data_segment_fileoff, $page_size, 7, 3, 1, 0 ); # maxprot=rwx, initprot=rw, nsects=1
-        # Section __data (aligned to page_size)
-        my $data_section_vmaddr = 0x100000000 + 2 * $page_size;
-        my $data_section_offset = 2 * $page_size;
-        $lc_data .= pack( 'a16 a16 Q Q L L L L L L L L', "__data", "__DATA", $data_section_vmaddr, length($data_padded), $page_size, $data_section_offset, 0, 0, 0, 0, 0, 0 );
+        # LC_SEGMENT_64 (__DATA) - Permissions RW (3)
+        my $data_vmaddr = 0x100000000 + 2 * $page_size;
+        my $lc_data     = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__DATA", $data_vmaddr, $page_size, 2 * $page_size, $page_size, 3, 3, 1, 0 );
+        $lc_data .= pack(
+            'a16 a16 Q Q L L L L L L L L',
+            "__data", "__DATA", $data_vmaddr, length($data_padded),
+            $is_arm ? 14 : 12,
+            2 * $page_size,
+            0, 0, 0, 0, 0, 0, 0
+        );
 
-        # LC_MAIN
-        my $lc_main = pack( 'L L Q Q', 0x80000028, 24, $page_size, 0 ); # Entry point offset is page_size
+        # LC_SEGMENT_64 (__LINKEDIT) - Permissions R (1)
+        my $link_vmaddr  = 0x100000000 + 3 * $page_size;
+        my $link_fileoff = 3 * $page_size;
+        my $lc_linkedit  = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 72, "__LINKEDIT", $link_vmaddr, $page_size, $link_fileoff, $page_size, 1, 1, 0, 0 );
 
+        # LC_MAIN (Entry point offset)
+        my $lc_main = pack( 'L L Q Q', 0x80000028, 24, $page_size, 0 );
+
+        # LC_BUILD_VERSION (macOS 11.0)
+        my $lc_build = pack( 'L L L L L L', 0x32, 24, 1, 0x000B0000, 0x000B0000, 0 );
+
+        # LC_UUID
+        my $lc_uuid = pack( 'L L a16', 0x1B, 24, pack( "H*", "C0FFEE" . "0" x 26 ) );
+
+        # LC_LOAD_DYLINKER
+        my $lc_dyld = pack( 'L L L a20', 0x0E, 32, 12, "/usr/lib/dyld" );
+
+        # LC_LOAD_DYLIB
+        my $lc_dylib = pack( 'L L L L L L a32', 0x0C, 56, 24, 2, 0x01000000, 0x01000000, "/usr/lib/libSystem.B.dylib" );
+
+        # LC_SYMTAB (Points to start of __LINKEDIT so codesign safely bounds it)
+        my $lc_symtab = pack( 'L L L L L L', 0x02, 24, $link_fileoff, 0, $link_fileoff, 0 );
+
+        # LC_DYSYMTAB (Required safely zeroed metadata for dyld parsing)
+        my $lc_dysymtab = pack( 'L L' . 'L' x 18, 0x0B, 80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+
+        # LC_DYLD_INFO_ONLY (Also bound safely to the __LINKEDIT to prevent bounds underflow)
+        my $lc_dyld_info = pack( 'L L L L L L L L L L L L',
+            0x80000022, 48, $link_fileoff, 0, $link_fileoff, 0, $link_fileoff, 0, $link_fileoff, 0, $link_fileoff, 0 );
         open my $fh, '>', $filename or die $!;
         binmode $fh;
-        print $fh $header, $lc_pagezero, $lc_text, $lc_data, $lc_main;
-        print $fh ( "\0" x ( $page_size - (length($header) + $sizeofcmds) ) ); # Pad after commands to start of text segment
-        print $fh $text_padded, $data_padded;
+
+        # Write exactly 760 bytes of load commands + 32 bytes of Mach-O Header
+        print $fh $header, $lc_pagezero, $lc_text, $lc_data, $lc_linkedit, $lc_main, $lc_build, $lc_uuid, $lc_dyld, $lc_dylib, $lc_symtab,
+            $lc_dysymtab, $lc_dyld_info;
+
+        # Pad up to $page_size boundary. This strictly isolates the header from the code.
+        print $fh ( "\0" x ( $page_size - ( length($header) + $sizeofcmds ) ) );
+        print $fh $text_padded;             # Page 1
+        print $fh $data_padded;             # Page 2
+        print $fh ( "\0" x $page_size );    # Page 3 (Empty space for `codesign` to overwrite)
         close $fh;
         chmod 0755, $filename;
         if ( $^O eq 'darwin' ) {
-            # Verbose codesigning to help debug
-            system("codesign --force --sign - $filename");
+            system("codesign --force --sign - \"$filename\" >/dev/null 2>&1");
         }
         return $filename;
     }
@@ -322,14 +359,13 @@ class Pulse::Format::ELF : isa(Pulse::Format) {
         my $machine     = ( $arch eq 'arm64' ) ? 183 : 62;
         my %osabis      = ( freebsd => 9, netbsd => 2, solaris => 6 );
         my $osabi       = $osabis{$os} // 0;
-
         my $align       = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
         my $text_padded = $text . ( "\0" x ( $align->( length($text), 0x1000 ) - length($text) ) );
         my $data_padded = $data . ( "\0" x ( $align->( length($data), 0x1000 ) - length($data) ) );
         my $elf_hdr     = pack(
             'A4 C C C C C x7 S S L Q Q Q L S S S S S S',
-            "\x7fELF", 2, 1, 1, $osabi, 0, 2, $machine, 1, $base + $text_off,
-            0x40,      0, 0, 64, 56, 2, 0, 0,        0
+            "\x7fELF", 2, 1, 1,  $osabi, 0, 2, $machine, 1, $base + $text_off,
+            0x40,      0, 0, 64, 56,     2, 0, 0,        0
         );
         my $ph_text = pack( 'LL Q Q Q Q Q Q', 1, 5, 0, $base, $base, $text_off + length($text_padded), $text_off + length($text_padded), 0x1000 );
         my $ph_data
@@ -366,6 +402,7 @@ class Pulse::Format::PE : isa(Pulse::Format) {
         my $rva_hn      = $rva_dll + 16;
         my $iat_data    = '';
         my $hn_data     = '';
+
         for my $fn (@funcs) {
             $iat_data .= pack( 'Q<', $rva_hn + length($hn_data) );
             my $hn_entry = pack( 'S<', 0 ) . $fn . "\0";
@@ -376,8 +413,7 @@ class Pulse::Format::PE : isa(Pulse::Format) {
         my $import_dir   = pack( 'L< L< L< L< L<', $rva_ilt, 0, 0, $rva_dll, $rva_iat ) . ( "\0" x 20 );
         my $idata_raw    = $iat_data . $iat_data . $import_dir . pack( 'a16', 'kernel32.dll' ) . $hn_data;
         my $idata_padded = $idata_raw . ( "\0" x ( $align->( length($idata_raw), $fa ) - length($idata_raw) ) );
-        my $headers_bin  = pack( 'S< x58 L<', 0x5A4D, 0x80 ) . pack( 'a64', "This program cannot be run in DOS mode.
-\$" );
+        my $headers_bin  = pack( 'S< x58 L<', 0x5A4D, 0x80 ) . pack( 'a64', "This program cannot be run in DOS mode.\n\$" );
         my $file_hdr     = pack( 'S< S< L< L< L< S< S<', $machine, 3, time(), 0, 0, 240, 0x0022 );
         my $opt_hdr      = pack(
             'S< C C L< L< L< L< L< Q< L< L< S< S< S< S< S< S< L< L< L< L< S< S< Q< Q< Q< Q< L< L<',
@@ -422,15 +458,15 @@ class Pulse::Compiler {
     #
     ADJUST {
         my $d_os = 'linux';
-        $d_os = 'win64'    if $^O eq 'MSWin32';
-        $d_os = 'macos'    if $^O eq 'darwin';
-        $d_os = 'freebsd'  if $^O eq 'freebsd';
-        $d_os = 'openbsd'  if $^O eq 'openbsd';
-        $d_os = 'netbsd'   if $^O eq 'netbsd';
-        $d_os = 'solaris'  if $^O eq 'solaris';
+        $d_os = 'win64'     if $^O eq 'MSWin32';
+        $d_os = 'macos'     if $^O eq 'darwin';
+        $d_os = 'freebsd'   if $^O eq 'freebsd';
+        $d_os = 'openbsd'   if $^O eq 'openbsd';
+        $d_os = 'netbsd'    if $^O eq 'netbsd';
+        $d_os = 'solaris'   if $^O eq 'solaris';
         $d_os = 'dragonfly' if $^O eq 'dragonfly';
-
         my $d_arch = 'x64';
+
         if ( $^O eq 'MSWin32' ) {
             $d_arch = ( ( $ENV{PROCESSOR_ARCHITECTURE} // '' ) =~ /ARM64/i ) ? 'arm64' : 'x64';
         }
@@ -447,7 +483,7 @@ class Pulse::Compiler {
         }
         $os   //= $d_os;
         $arch //= $d_arch;
-        $as     = $arch eq 'arm64' ? Pulse::Emit::ARM64->new() : Pulse::Emit::X64->new();
+        $as = $arch eq 'arm64' ? Pulse::Emit::ARM64->new() : Pulse::Emit::X64->new();
         if    ( $os eq 'win64' ) { $format = Pulse::Format::PE->new() }
         elsif ( $os eq 'macos' ) { $format = Pulse::Format::MachO->new() }
         else                     { $format = Pulse::Format::ELF->new() }
@@ -469,19 +505,19 @@ class Pulse::Compiler {
             if ( $arch eq 'arm64' ) {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 64 );    # write
                 $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
-                $as->mov_imm( 'x0', 1 );                  # stdout
-                my $page_size = ($os eq 'macos') ? 0x4000 : 0x1000;
+                $as->mov_imm( 'x0', 1 );                                                 # stdout
+                my $page_size = ( $os eq 'macos' ) ? 0x4000 : 0x1000;
                 my $text_rva  = $page_size;
                 my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'x1', $data_rva + $off, $text_rva );
                 $as->mov_imm( 'x2', length($str) );
-                $as->syscall($os eq 'macos');
+                $as->syscall( $os eq 'macos' );
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 1 );
                 $as->mov_imm( 'rax', $num );
                 $as->mov_imm( 'rdi', 1 );
-                my $page_size = ($os eq 'macos') ? 0x1000 : 0x1000;
+                my $page_size = ( $os eq 'macos' ) ? 0x1000 : 0x1000;
                 my $text_rva  = $page_size;
                 my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'rsi', $data_rva + $off, $text_rva );
@@ -500,7 +536,7 @@ class Pulse::Compiler {
             }
             else {
                 $as->mov_imm( 'rcx', -11 );
-                $as->call_rva( 0x3008, 0x1000 );    # IAT 1: GetStdHandle
+                $as->call_rva( 0x3008, 0x1000 );                # IAT 1: GetStdHandle
                 $as->mov_reg( 'rcx', 'rax' );
                 $as->lea_rva( 'rdx', 0x2000 + $off, 0x1000 );
                 $as->mov_imm( 'r8', length($str) );
@@ -516,10 +552,10 @@ class Pulse::Compiler {
         my $is_bsd_like = $os =~ /macos|freebsd|openbsd|netbsd|dragonfly|solaris/;
         if ( $os eq 'linux' || $is_bsd_like ) {
             if ( $arch eq 'arm64' ) {
-                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );          # exit
+                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );    # exit
                 $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
                 $as->mov_imm( 'x0', $code );
-                $as->syscall($os eq 'macos');
+                $as->syscall( $os eq 'macos' );
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 60 );
@@ -572,32 +608,29 @@ my $as = $p->as;
 if ( $p->os eq 'win64' && $p->arch eq 'x64' ) {
     $as->sub_imm( 'rsp', 56 );
 }
-$p->print_str("Pulse AOT Engine Starting...
-");
-
+$p->print_str("Pulse AOT Engine Starting...\n");
 my $loop_reg = ( $p->arch eq 'arm64' ) ? 'x19' : 'rbx';
 $as->mov_imm( $loop_reg, 1 );
-
 $as->mark_label('loop');
-$p->print_str(" -> Inside Loop Iteration
-");
+$p->print_str(" -> Inside Loop Iteration\n");
 $as->add_imm( $loop_reg, 1 );
 $as->cmp_reg_imm( $loop_reg, 4 );
 $as->jcc( $p->cc('lt'), 'loop' );
-$p->print_str("Done! Exiting with status 42.
-");
+$p->print_str("Done! Exiting with status 42.\n");
 $p->exit_proc(42);
 $as->resolve();
 #
 my $exe = $p->write_bin('pulse_output');
 $exe = "./$exe" if $^O ne 'MSWin32';
 my $status = system($exe);
-if ($status == -1) {
+if ( $status == -1 ) {
     say "Failed to execute: $!";
-} elsif ($status & 127) {
+}
+elsif ( $status & 127 ) {
     printf "Child died with signal %d, %s coredump
-", ($status & 127), ($status & 128) ? 'with' : 'without';
-} else {
+", ( $status & 127 ), ( $status & 128 ) ? 'with' : 'without';
+}
+else {
     printf "Exit code: %d
 ", $status >> 8;
 }
