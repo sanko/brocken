@@ -61,19 +61,11 @@ class Pulse::Emit::ARM64 {
 
     method mov_imm ( $reg, $imm ) {
         my $r = $REG{ lc $reg };
-
-        # Handle 64-bit unsigned imm for bitwise ops,
-        # but we use it for syscall numbers which are small or 0x200000x.
-        # MOVZ xd, imm16
         $code .= pack( 'L<', 0xD2800000 | ( ( $imm & 0xFFFF ) << 5 ) | $r );
         if ( ( $imm >> 16 ) & 0xFFFF ) {
-
-            # MOVK xd, imm16, lsl 16
             $code .= pack( 'L<', 0xF2A00000 | ( 1 << 21 ) | ( ( ( $imm >> 16 ) & 0xFFFF ) << 5 ) | $r );
         }
         if ( ( $imm >> 32 ) & 0xFFFF ) {
-
-            # MOVK xd, imm16, lsl 32
             $code .= pack( 'L<', 0xF2C00000 | ( 2 << 21 ) | ( ( ( $imm >> 32 ) & 0xFFFF ) << 5 ) | $r );
         }
     }
@@ -81,37 +73,26 @@ class Pulse::Emit::ARM64 {
     method mov_reg ( $dest, $src ) {
         my $d = $REG{ lc $dest };
         my $s = $REG{ lc $src };
-
-        # ORR xd, xzr, xm (MOV xd, xm)
         $code .= pack( 'L<', 0xAA0003E0 | ( $s << 16 ) | $d );
     }
 
     method add_imm ( $reg, $imm ) {
         my $r = $REG{ lc $reg };
-
-        # ADD xd, xn, imm12
         $code .= pack( 'L<', 0x91000000 | ( ( $imm & 0xFFF ) << 10 ) | ( $r << 5 ) | $r );
     }
 
     method sub_imm ( $reg, $imm ) {
         my $r = $REG{ lc $reg };
-
-        # SUB xd, xn, imm12
         $code .= pack( 'L<', 0xD1000000 | ( ( $imm & 0xFFF ) << 10 ) | ( $r << 5 ) | $r );
     }
 
     method cmp_reg_imm ( $reg, $imm ) {
         my $r = $REG{ lc $reg };
-
-        # SUBS xzr, xn, imm12 (CMP xn, imm12)
         $code .= pack( 'L<', 0xF1000000 | ( ( $imm & 0xFFF ) << 10 ) | ( $r << 5 ) | 31 );
     }
 
-    # PC-Relative Addressing
     method lea_rva ( $reg, $target_rva, $text_rva ) {
         my $r = $REG{ lc $reg };
-
-        # ADR xd, label (21-bit offset)
         my $off   = $target_rva - ( $text_rva + length($code) );
         my $immlo = $off & 0x3;
         my $immhi = ( $off >> 2 ) & 0x7FFFF;
@@ -120,36 +101,20 @@ class Pulse::Emit::ARM64 {
 
     method call_rva ( $target_rva, $text_rva ) {
         $self->lea_rva( 'x16', $target_rva, $text_rva );
-
-        # LDR x16, [x16, #0] (Load from IAT)
         $code .= pack( 'L<', 0xF9400000 | ( 16 << 5 ) | 16 );
-
-        # BLR x16 (Branch with Link to Register)
         $code .= pack( 'L<', 0xD63F0200 );
     }
 
-    # System Calls
-    method syscall( $macos = 0 ) {
-        if ($macos) {
-            $code .= pack( 'L<', 0xD4001001 );    # SVC #0x80
-        }
-        else {
-            $code .= pack( 'L<', 0xD4000001 );    # SVC #0
-        }
+    method syscall($macos = 0) {
+        $code .= pack( 'L<', 0xD4000001 );    # SVC #0
     }
 
-    # Control Flow
     method jcc ( $cc, $label ) {
-
-        # B.cond (19-bit offset)
-        # cc: 4 = EQ/Z, 0x0C = LT, 0x0D = LE, 0x0A = GE, 0x0B = GT
         push @fixups, { offset => length($code), target => $label, type => 'cond', cc => $cc };
         $code .= pack( 'L<', 0x54000000 | $cc );
     }
 
     method jmp ($label) {
-
-        # B (26-bit PC-relative branch, 26-bit offset)
         push @fixups, { offset => length($code), target => $label, type => 'uncond' };
         $code .= pack( 'L<', 0x14000000 );
     }
@@ -160,14 +125,11 @@ class Pulse::Emit::ARM64 {
             my $target = $labels{ $_->{target} };
             my $off    = ( $target - $_->{offset} ) / 4;
             if ( $_->{type} eq 'cond' ) {
-
-                # B.cond imm19
                 my $instr = unpack( 'L<', substr( $code, $_->{offset}, 4 ) );
                 $instr |= ( $off & 0x7FFFF ) << 5;
                 substr( $code, $_->{offset}, 4, pack( 'L<', $instr ) );
             }
             else {
-                # B imm26
                 my $instr = unpack( 'L<', substr( $code, $_->{offset}, 4 ) );
                 $instr |= ( $off & 0x3FFFFFF );
                 substr( $code, $_->{offset}, 4, pack( 'L<', $instr ) );
@@ -218,7 +180,6 @@ class Pulse::Emit::X64 {
         $code .= $self->_rex( 1, 0, 0, $r ) . pack( 'CCl<', 0x81, 0xF8 | ( $r & 7 ), $imm );
     }
 
-    # Position Independent Addressing
     method lea_rva ( $reg, $target_rva, $text_rva ) {
         my $r        = $REG{ lc $reg };
         my $next_rip = $text_rva + length($code) + 7;
@@ -230,14 +191,13 @@ class Pulse::Emit::X64 {
         $code .= pack( 'CC l<', 0xFF, 0x15, $target_rva - $next_rip );
     }
 
-    # Stack / Memory SIB Addressing for Win64
     method lea_reg_disp ( $dest, $base, $disp ) {
         my $d = $REG{ lc $dest };
         my $b = $REG{ lc $base };
         $code .= $self->_rex( 1, $d, 0, $b );
         if ( $disp >= -128 && $disp <= 127 ) {
             $code .= pack( 'CC', 0x8D, 0x40 | ( ( $d & 7 ) << 3 ) | ( $b & 7 ) );
-            $code .= pack( 'C',  0x24 ) if ( $b & 7 ) == 4;    # SIB byte for RSP
+            $code .= pack( 'C',  0x24 ) if ( $b & 7 ) == 4;
             $code .= pack( 'c',  $disp );
         }
         else {
@@ -264,7 +224,6 @@ class Pulse::Emit::X64 {
     }
     method syscall { $code .= pack 'CC', 0x0F, 0x05 }
 
-    # Control Flow
     method jcc ( $cc, $label ) {
         $code .= pack( 'CC', 0x0F, 0x80 + $cc );
         push @fixups, { offset => length($code), target => $label };
@@ -293,55 +252,47 @@ class Pulse::Format {
 class Pulse::Format::MachO : isa(Pulse::Format) {
 
     method write_bin ( $filename, $text, $data, $arch, $os = 'macos' ) {
-        my $page_size   = 0x4000;
+        my $page_size   = ($arch eq 'arm64') ? 0x4000 : 0x1000;
         my $is_arm      = ( $arch eq 'arm64' );
         my $cpu_type    = $is_arm ? 0x0100000C : 0x01000007;
         my $cpu_subtype = $is_arm ? 0x00000000 : 0x00000003;
-        my $align       = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+
+        my $align = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
         my $text_padded = $text . ( "\0" x ( $align->( length($text), $page_size ) - length($text) ) );
         my $data_padded = $data . ( "\0" x ( $align->( length($data), $page_size ) - length($data) ) );
-        my $ncmds       = 4;                     # PAGEZERO, TEXT, DATA, MAIN
-        my $sizeofcmds  = 72 + 152 + 152 + 24;
-        my $header      = pack( 'L L L L L L L L', 0xFEEDFACF, $cpu_type, $cpu_subtype, 2, $ncmds, $sizeofcmds, 0x00200085, 0 );
+
+        my $ncmds      = 4; # PAGEZERO, TEXT, DATA, MAIN
+        my $sizeofcmds = 72 + 152 + 152 + 24; 
+
+        # Mach-O Header
+        my $header = pack( 'L L L L L L L L', 0xFEEDFACF, $cpu_type, $cpu_subtype, 2, $ncmds, $sizeofcmds, 0x00200001, 0 );
 
         # LC_SEGMENT_64 (__PAGEZERO)
         my $lc_pagezero = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 72, "__PAGEZERO", 0, 0x100000000, 0, 0, 0, 0, 0, 0 );
 
-        # LC_SEGMENT_64 (__TEXT)
+        # LC_SEGMENT_64 (__TEXT) - covers headers + text section
         my $lc_text = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__TEXT", 0x100000000, 2 * $page_size, 0, 2 * $page_size, 7, 5, 1, 0 );
+        # Section __text (at 0x100000000 + $page_size)
+        $lc_text .= pack( 'a16 a16 Q Q L L L L L L L L', "__text", "__TEXT", 0x100000000 + $page_size, length($text_padded), $page_size, 0, 0, 0, 0x80000400, 0, 0, 0 );
 
-        # Section __text (at 0x100004000)
-        $lc_text .= pack(
-            'a16 a16 Q Q L L L L L L L L',
-            "__text", "__TEXT", 0x100000000 + $page_size,
-            length($text_padded), $page_size, 0, 0, 0, 0x80000400, 0, 0, 0
-        );
-
-        # LC_SEGMENT_64 (__DATA)
-        my $lc_data
-            = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__DATA", 0x100000000 + 2 * $page_size, $page_size, 2 * $page_size, $page_size, 7, 3, 1,
-            0 );
-
-        # Section __data (at 0x100008000)
-        $lc_data .= pack(
-            'a16 a16 Q Q L L L L L L L L',
-            "__data",             "__DATA", 0x100000000 + 2 * $page_size,
-            length($data_padded), 2 * $page_size,
-            0,                    0, 0, 0, 0, 0, 0
-        );
+        # LC_SEGMENT_64 (__DATA) - separate segment
+        my $lc_data = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 152, "__DATA", 0x100000000 + 2 * $page_size, $page_size, 2 * $page_size, $page_size, 7, 3, 1, 0 );
+        # Section __data (at 0x100000000 + 2 * $page_size)
+        $lc_data .= pack( 'a16 a16 Q Q L L L L L L L L', "__data", "__DATA", 0x100000000 + 2 * $page_size, length($data_padded), 2 * $page_size, 0, 0, 0, 0, 0, 0, 0 );
 
         # LC_MAIN
         my $lc_main = pack( 'L L Q Q', 0x80000028, 24, $page_size, 0 );
+
         open my $fh, '>', $filename or die $!;
         binmode $fh;
         print $fh $header, $lc_pagezero, $lc_text, $lc_data, $lc_main;
-        print $fh ( "\0" x ( $page_size - ( length($header) + $sizeofcmds ) ) );
+        print $fh ( "\0" x ( $page_size - (length($header) + $sizeofcmds) ) );
         print $fh $text_padded, $data_padded;
         close $fh;
         chmod 0755, $filename;
-
         if ( $^O eq 'darwin' ) {
-            system("codesign -s - $filename >/dev/null 2>&1");
+            # Verbose codesigning to help debug
+            system("codesign --force --sign - $filename");
         }
         return $filename;
     }
@@ -361,8 +312,8 @@ class Pulse::Format::ELF : isa(Pulse::Format) {
         my $data_padded = $data . ( "\0" x ( $align->( length($data), 0x1000 ) - length($data) ) );
         my $elf_hdr     = pack(
             'A4 C C C C C x7 S S L Q Q Q L S S S S S S',
-            "\x7fELF", 2, 1, 1,  $osabi, 0, 2, $machine, 1, $base + $text_off,
-            0x40,      0, 0, 64, 56,     2, 0, 0,        0
+            "\x7fELF", 2, 1, 1, $osabi, 0, 2, $machine, 1, $base + $text_off,
+            0x40,      0, 0, 64, 56, 2, 0, 0,        0
         );
         my $ph_text = pack( 'LL Q Q Q Q Q Q', 1, 5, 0, $base, $base, $text_off + length($text_padded), $text_off + length($text_padded), 0x1000 );
         my $ph_data
@@ -399,7 +350,6 @@ class Pulse::Format::PE : isa(Pulse::Format) {
         my $rva_hn      = $rva_dll + 16;
         my $iat_data    = '';
         my $hn_data     = '';
-
         for my $fn (@funcs) {
             $iat_data .= pack( 'Q<', $rva_hn + length($hn_data) );
             my $hn_entry = pack( 'S<', 0 ) . $fn . "\0";
@@ -441,16 +391,6 @@ class Pulse::Format::PE : isa(Pulse::Format) {
     }
 }
 
-package Pulse::Syscall::SysV { }
-
-package Pulse::Syscall::Windows { }
-
-package Pulse::Syscall::ARM64 { }
-
-package Pulse::Runtime::Memory { }
-
-package Pulse::Runtime::Types { }
-
 package Pulse::Lexer { }
 
 package Pulse::Parser { }
@@ -461,20 +401,19 @@ class Pulse::Compiler {
     field $as     : reader;
     field $data   : reader = '';
     field $format : reader;
-    #
     field $label_count = 0;
     #
     ADJUST {
         my $d_os = 'linux';
-        $d_os = 'win64'     if $^O eq 'MSWin32';
-        $d_os = 'macos'     if $^O eq 'darwin';
-        $d_os = 'freebsd'   if $^O eq 'freebsd';
-        $d_os = 'openbsd'   if $^O eq 'openbsd';
-        $d_os = 'netbsd'    if $^O eq 'netbsd';
-        $d_os = 'solaris'   if $^O eq 'solaris';
+        $d_os = 'win64'    if $^O eq 'MSWin32';
+        $d_os = 'macos'    if $^O eq 'darwin';
+        $d_os = 'freebsd'  if $^O eq 'freebsd';
+        $d_os = 'openbsd'  if $^O eq 'openbsd';
+        $d_os = 'netbsd'   if $^O eq 'netbsd';
+        $d_os = 'solaris'  if $^O eq 'solaris';
         $d_os = 'dragonfly' if $^O eq 'dragonfly';
-        my $d_arch = 'x64';
 
+        my $d_arch = 'x64';
         if ( $^O eq 'MSWin32' ) {
             $d_arch = ( ( $ENV{PROCESSOR_ARCHITECTURE} // '' ) =~ /ARM64/i ) ? 'arm64' : 'x64';
         }
@@ -491,7 +430,7 @@ class Pulse::Compiler {
         }
         $os   //= $d_os;
         $arch //= $d_arch;
-        $as = $arch eq 'arm64' ? Pulse::Emit::ARM64->new() : Pulse::Emit::X64->new();
+        $as     = $arch eq 'arm64' ? Pulse::Emit::ARM64->new() : Pulse::Emit::X64->new();
         if    ( $os eq 'win64' ) { $format = Pulse::Format::PE->new() }
         elsif ( $os eq 'macos' ) { $format = Pulse::Format::MachO->new() }
         else                     { $format = Pulse::Format::ELF->new() }
@@ -513,19 +452,21 @@ class Pulse::Compiler {
             if ( $arch eq 'arm64' ) {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 64 );    # write
                 $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
-                $as->mov_imm( 'x0', 1 );                                                 # stdout
-                my $text_rva = ( $os eq 'macos' ) ? 0x4000 : 0x1000;
-                my $data_rva = ( $os eq 'macos' ) ? 0x8000 : 0x2000;
+                $as->mov_imm( 'x0', 1 );                  # stdout
+                my $page_size = ($os eq 'macos') ? 0x4000 : 0x1000;
+                my $text_rva  = $page_size;
+                my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'x1', $data_rva + $off, $text_rva );
                 $as->mov_imm( 'x2', length($str) );
-                $as->syscall( $os eq 'macos' );
+                $as->syscall($os eq 'macos');
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 1 );
                 $as->mov_imm( 'rax', $num );
                 $as->mov_imm( 'rdi', 1 );
-                my $text_rva = ( $os eq 'macos' ) ? 0x4000 : 0x1000;
-                my $data_rva = ( $os eq 'macos' ) ? 0x8000 : 0x2000;
+                my $page_size = ($os eq 'macos') ? 0x1000 : 0x1000;
+                my $text_rva  = $page_size;
+                my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'rsi', $data_rva + $off, $text_rva );
                 $as->mov_imm( 'rdx', length($str) );
                 $as->syscall();
@@ -534,7 +475,7 @@ class Pulse::Compiler {
         else {
             if ( $arch eq 'arm64' ) {
                 $as->mov_imm( 'x0', -11 );
-                $as->call_rva( 0x3008, 0x1000 );    # IAT 1: GetStdHandle
+                $as->call_rva( 0x3008, 0x1000 );
                 $as->mov_reg( 'x0', 'x0' );
                 $as->lea_rva( 'x1', 0x2000 + $off, 0x1000 );
                 $as->mov_imm( 'x2', length($str) );
@@ -542,16 +483,14 @@ class Pulse::Compiler {
             }
             else {
                 $as->mov_imm( 'rcx', -11 );
-                $as->call_rva( 0x3008, 0x1000 );                # IAT 1: GetStdHandle
+                $as->call_rva( 0x3008, 0x1000 );
                 $as->mov_reg( 'rcx', 'rax' );
                 $as->lea_rva( 'rdx', 0x2000 + $off, 0x1000 );
                 $as->mov_imm( 'r8', length($str) );
-                # Win64 ABI specifies arg5 and arg6 go to stack offsets [rsp+32] and [rsp+40]
-                # 4th arg (r9) is pointer to bytes_written. We point to [rsp+48]
                 $as->lea_reg_disp( 'r9', 'rsp', 48 );
                 $as->mov_imm( 'r10', 0 );
-                $as->store_mem_disp_reg( 'rsp', 32, 'r10' );    # lpOverlapped = null
-                $as->call_rva( 0x3010, 0x1000 );                # IAT 2: WriteFile
+                $as->store_mem_disp_reg( 'rsp', 32, 'r10' );
+                $as->call_rva( 0x3010, 0x1000 );
             }
         }
     }
@@ -560,10 +499,10 @@ class Pulse::Compiler {
         my $is_bsd_like = $os =~ /macos|freebsd|openbsd|netbsd|dragonfly|solaris/;
         if ( $os eq 'linux' || $is_bsd_like ) {
             if ( $arch eq 'arm64' ) {
-                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );    # exit
+                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );
                 $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
                 $as->mov_imm( 'x0', $code );
-                $as->syscall( $os eq 'macos' );
+                $as->syscall($os eq 'macos');
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 60 );
@@ -579,7 +518,7 @@ class Pulse::Compiler {
             }
             else {
                 $as->mov_imm( 'rcx', $code );
-                $as->call_rva( 0x3000, 0x1000 );    # IAT 0: ExitProcess
+                $as->call_rva( 0x3000, 0x1000 );
             }
         }
     }
@@ -589,8 +528,6 @@ class Pulse::Compiler {
         my $l_else = $self->_label();
         my $l_end  = $self->_label();
         $cond_cb->($as);
-
-        # Assume $cond_cb sets Zero Flag if false. JZ -> else
         $as->jcc( $self->cc('z'), $l_else );
         $then_cb->($as);
         $as->jmp($l_end) if $else_cb;
@@ -604,147 +541,25 @@ class Pulse::Compiler {
         my $l_end   = $self->_label();
         $as->mark_label($l_start);
         $cond_cb->($as);
-        $as->jcc( $self->cc('z'), $l_end );    # JZ -> end
+        $as->jcc( $self->cc('z'), $l_end );
         $body_cb->($as);
         $as->jmp($l_start);
         $as->mark_label($l_end);
     }
-
-    method emit_alloc ( $size_bytes, $dest_reg ) {
-        $size_bytes = Pulse::Util::align( $size_bytes, 8 );    # $size_bytes must be aligned to 8
-        my $l_fast_path = $self->_label();
-        my $l_end       = $self->_label();
-
-        # Load Heap Pointers
-        $as->lea_rva( 'r8', 0x2000 + 8,  0x1000 );             # R8 = address of alloc_ptr
-        $as->lea_rva( 'r9', 0x2000 + 16, 0x1000 );             # R9 = address of limit_ptr
-        if ( $arch eq 'x64' ) {
-            $as->load_reg_mem( 'rax', 'r8' );                  # RAX = current alloc_ptr
-            $as->load_reg_mem( 'rcx', 'r9' );                  # RCX = current limit_ptr
-
-            # Check if we have enough space (alloc_ptr + size <= limit_ptr)
-            $as->mov_reg( 'rdx', 'rax' );
-            $as->add_imm( 'rdx', $size_bytes );
-            $as->cmp_reg_reg( 'rdx', 'rcx' );
-            $as->jcc( 0x0E, $l_fast_path );                    # JLE (Jump Less Equal) -> Fast Path
-
-            # SLOW PATH: Trigger GC
-            # Warning: This will call out to a compiled runtime function
-            $as->mov_imm( 'rcx', $size_bytes );          # Pass size to GC
-            $as->call_rva( 0x1000 + 0xDEAD, 0x1000 );    # Call GC_Collect (Address TBA)
-            $as->mov_reg( 'rdx', 'rax' );
-
-            # FAST PATH: Bump the pointer
-            $as->mark_label($l_fast_path);
-            $as->store_mem_reg( 'r8', 'rdx' );           # alloc_ptr = alloc_ptr + size
-            $as->mark_label($l_end);
-            $as->mov_reg( $dest_reg, 'rax' ) if $dest_reg ne 'rax';
-        }
-    }
-
-    # try/catch using a shadow stack stored in .data
-    method emit_try_catch ( $try_cb, $catch_cb ) {
-        my $l_catch = $self->_label();
-        my $l_end   = $self->_label();
-        if ( $arch eq 'x64' ) {
-            $as->mov_reg( 'r10', 'rsp' );
-            $as->lea_rva( 'r8', 0x2000, 0x1000 );        # r8 = aslr safe address of shadow stack
-            $as->load_reg_mem( 'r9', 'r8' );             # r9 = [head]
-            $as->push_reg('r9');                         # Save prev head
-            $as->lea_rip( 'r9', $l_catch );
-            $as->push_reg('r9');                         # Save Catch Address
-            $as->push_reg('rbp');                        # Save Frame Pointer
-            $as->push_reg('rsp');                        # Save Stack Pointer (will be restored by throw)
-            $as->store_mem_reg( 'r8', 'rsp' );           # [head] = new frame (rsp)
-            $try_cb->($as);
-
-            # If no exception, pop the frame and skip catch
-            $as->lea_rva( 'r8', 0x2000, 0x1000 );
-            $as->load_reg_mem_disp( 'r9', 'rsp', 24 );    # r9 = prev head
-            $as->store_mem_reg( 'r8', 'r9' );             # [head] = prev head
-            $as->add_imm( 'rsp', 32 );                    # cleanup 4 pushes
-            $as->jmp($l_end);
-
-            # Catch Block
-            $as->mark_label($l_catch);
-            $catch_cb->($as);
-            $as->mark_label($l_end);
-        }
-    }
-
-    method emit_throw ($err_code) {
-        if ( $arch eq 'x64' ) {
-            $as->mov_imm( 'rax', $err_code );             # RAX = Error Code
-            $as->lea_rva( 'r8', 0x2000, 0x1000 );         # ASLR safe
-            $as->load_reg_mem( 'r9', 'r8' );              # R9 = current frame (saved RSP)
-
-            # Restore context from frame
-            $as->load_reg_mem_disp( 'rsp', 'r9', 0 );     # RSP = saved_rsp
-            $as->load_reg_mem_disp( 'rbp', 'r9', 8 );     # RBP = saved_rbp
-            $as->load_reg_mem_disp( 'r10', 'r9', 16 );    # R10 = Catch Address
-            $as->load_reg_mem_disp( 'r11', 'r9', 24 );    # R11 = prev head
-            $as->store_mem_reg( 'r8', 'r11' );            # Pop frame from shadow stack
-            $as->jmp_reg('r10');                          # Jump to catch
-        }
-    }
-
-    method emit_tail_call ( $target_label, $frame_size = 0 ) {
-        $as->add_imm( 'rsp', $frame_size ) if $frame_size > 0;
-        $as->jmp($target_label);
-    }
-}
-#
-class Brocken::AST {
-
-    class Brocken::AST::Class {
-        field $name;
-        field @fields;
-        field @methods;
-
-        class Brocken::AST::Method {
-            field $name;
-            field @params;
-            field $body;
-            field $returns;
-        }
-    }
-}
-#
-class Brocken::Parser {
-    field $lexer;
-    field $current_token;
-
-    method parse_class() {
-        $self->expect('class');
-        my $name = $self->expect('IDENTIFIER');
-        my $node = Brocken::AST::Class->new( name => $name );
-        $self->expect('{');
-        while ( $current_token ne '}' ) {
-            if ( $current_token eq 'field' )  { push @{ $node->fields },  $self->parse_field(); }
-            if ( $current_token eq 'method' ) { push @{ $node->methods }, $self->parse_method(); }
-        }
-        $self->expect('}');
-        return $node;
-    }
-
-    # ... and so on
 }
 #
 my $p = Pulse::Compiler->new();
 say 'Detected OS: ' . $p->os . ' Arch: ' . $p->arch;
 my $as = $p->as;
 #
-# Windows ABI: Setup 32 bytes shadow space
 if ( $p->os eq 'win64' && $p->arch eq 'x64' ) {
     $as->sub_imm( 'rsp', 56 );
 }
 $p->print_str("Pulse AOT Engine Starting...\n");
 
-# Set Loop Counter
 my $loop_reg = ( $p->arch eq 'arm64' ) ? 'x19' : 'rbx';
 $as->mov_imm( $loop_reg, 1 );
 
-# Loop Top Label
 $as->mark_label('loop');
 $p->print_str(" -> Inside Loop Iteration\n");
 $as->add_imm( $loop_reg, 1 );
@@ -757,12 +572,10 @@ $as->resolve();
 my $exe = $p->write_bin('pulse_output');
 $exe = "./$exe" if $^O ne 'MSWin32';
 my $status = system($exe);
-if ( $status == -1 ) {
+if ($status == -1) {
     say "Failed to execute: $!";
-}
-elsif ( $status & 127 ) {
-    printf "Child died with signal %d, %s coredump\n", ( $status & 127 ), ( $status & 128 ) ? 'with' : 'without';
-}
-else {
+} elsif ($status & 127) {
+    printf "Child died with signal %d, %s coredump\n", ($status & 127), ($status & 128) ? 'with' : 'without';
+} else {
     printf "Exit code: %d\n", $status >> 8;
 }
