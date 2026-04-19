@@ -1,55 +1,31 @@
 {
-"dragonflybsd-x86_64-gcc": "👎🏽 failing"
+"dragonflybsd-x86_64-none": "👎🏽 failing"
 ,
-"freebsd-aarch64-clang": "👍🏽 passing"
+"freebsd-aarch64-none": "👎🏽 failing"
 ,
-"freebsd-aarch64-gcc": "👍🏽 passing"
+"freebsd-x86_64-none": "👎🏽 failing"
 ,
-"freebsd-x86_64-clang": "👍🏽 passing"
+"macos-aarch64-none": "👍🏽 passing"
 ,
-"freebsd-x86_64-gcc": "👍🏽 passing"
+"macos-x86_64-none": "👍🏽 passing"
 ,
-"macos-aarch64-clang": "👍🏽 passing"
+"netbsd-aarch64-none": "👎🏽 failing"
 ,
-"macos-aarch64-gcc": "👍🏽 passing"
+"netbsd-x86_64-none": "👎🏽 failing"
 ,
-"macos-x86_64-clang": "👍🏽 passing"
+"omnios-x86_64-none": "👎🏽 failing"
 ,
-"macos-x86_64-gcc": "👍🏽 passing"
+"openbsd-aarch64-none": "👍🏽 passing"
 ,
-"netbsd-aarch64-gcc": "👍🏽 passing"
+"openbsd-x86_64-none": "👍🏽 passing"
 ,
-"netbsd-x86_64-gcc": "👍🏽 passing"
+"solaris-x86_64-none": "👎🏽 failing"
 ,
-"omnios-x86_64-gcc": "👍🏽 passing"
+"ubuntu-aarch64-none": "👍🏽 passing"
 ,
-"openbsd-aarch64-clang": "👍🏽 passing"
+"ubuntu-x86_64-none": "👍🏽 passing"
 ,
-"openbsd-aarch64-egcc": "👍🏽 passing"
+"windows-aarch64-none": "👎🏽 failing"
 ,
-"openbsd-x86_64-clang": "👍🏽 passing"
-,
-"openbsd-x86_64-egcc": "👍🏽 passing"
-,
-"solaris-x86_64-gcc": "👎🏽 failing"
-,
-"ubuntu-aarch64-clang": "👍🏽 passing"
-,
-"ubuntu-aarch64-gcc": "👍🏽 passing"
-,
-"ubuntu-x86_64-clang": "👍🏽 passing"
-,
-"ubuntu-x86_64-gcc": "👍🏽 passing"
-,
-"windows-aarch64-clang": "👎🏽 failing"
-,
-"windows-aarch64-gcc": "👎🏽 failing"
-,
-"windows-aarch64-msvc": "👎🏽 failing"
-,
-"windows-x86_64-clang": "👎🏽 failing"
-,
-"windows-x86_64-gcc": "👎🏽 failing"
-,
-"windows-x86_64-msvc": "👎🏽 failing"
+"windows-x86_64-none": "👎🏽 failing"
 }
