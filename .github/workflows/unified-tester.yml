@@ -130,6 +130,7 @@ jobs:
           usesh: true
           prepare: ${{ inputs.prepare }}
           run: |
+            export PATH=$HOME/perl5/perlbrew/bin:$PATH
             perl demo.pl
 
       - name: Build and Test in OmniOS
