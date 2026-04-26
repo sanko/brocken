@@ -1,7 +1,7 @@
 ## Build and Test Summary
 | OS | Arch | Result |
 |:---|:---|:---|
-| **dragonflybsd** | `x86_64` | ❌ failure |
+| **dragonflybsd** | `x86_64` | ✅ success |
 | **freebsd** | `aarch64` | ✅ success |
 | **freebsd** | `x86_64` | ✅ success |
 | **macos** | `aarch64` | ✅ success |
