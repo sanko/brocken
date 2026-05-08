@@ -538,7 +538,8 @@ class Pulse::Compiler {
                 $as->mov_reg( 'x0', 'x0' );
                 $as->lea_rva( 'x1', 0x2000 + $off, 0x1000 );
                 $as->mov_imm( 'x2', length($str) );
-                $as->call_rva( 0x3010, 0x1000 );
+                $as->mov_imm( 'x4', 0 );            # lpOverlapped = null
+                $as->call_rva( 0x3010, 0x1000 );    # IAT 2: WriteFile
             }
             else {
                 $as->mov_imm( 'rcx', -11 );
