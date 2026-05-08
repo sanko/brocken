@@ -68,6 +68,9 @@ class Pulse::Emit::ARM64 {
         if ( ( $imm >> 32 ) & 0xFFFF ) {
             $code .= pack( 'L<', 0xF2C00000 | ( 2 << 21 ) | ( ( ( $imm >> 32 ) & 0xFFFF ) << 5 ) | $r );
         }
+        if ( ( $imm >> 48 ) & 0xFFFF ) {
+            $code .= pack( 'L<', 0xF2E00000 | ( 3 << 21 ) | ( ( ( $imm >> 48 ) & 0xFFFF ) << 5 ) | $r );
+        }
     }
 
     method mov_reg ( $dest, $src ) {
