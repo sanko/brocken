@@ -611,8 +611,13 @@ my $p = Pulse::Compiler->new();
 say 'Detected OS: ' . $p->os . ' Arch: ' . $p->arch;
 my $as = $p->as;
 #
-if ( $p->os eq 'win64' && $p->arch eq 'x64' ) {
-    $as->sub_imm( 'rsp', 56 );
+if ( $p->os eq 'win64' ) {
+    if ( $p->arch eq 'x64' ) {
+        $as->sub_imm( 'rsp', 56 );
+    }
+    elsif ( $p->arch eq 'arm64' ) { # Idk what else it *could* be but might as well be safe...
+        $as->sub_imm( 'sp', 48 );
+    }
 }
 $p->print_str("Pulse AOT Engine Starting...\n");
 my $loop_reg = ( $p->arch eq 'arm64' ) ? 'x19' : 'rbx';
