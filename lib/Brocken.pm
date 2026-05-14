@@ -22,7 +22,7 @@ class Brocken {
         $d_os = 'dragonfly' if $^O eq 'dragonfly';
         my $d_arch = 'x64';
 
-        if ($d_os eq 'win64' ) {
+        if ( $d_os eq 'win64' ) {
             $d_arch = ( ( $ENV{PROCESSOR_ARCHITECTURE} // '' ) =~ /ARM64/i ) ? 'arm64' : 'x64';
         }
         else {
