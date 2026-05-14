@@ -77,7 +77,7 @@ jobs:
         if: inputs.runner_type == 'direct'
         run: |
           ${{ inputs.prepare }}
-          perl demo.pl
+          perl eg/brocken.pl
 
       - name: Build and Test in FreeBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'freebsd'
@@ -89,7 +89,7 @@ jobs:
           prepare: ${{ inputs.prepare }}
           run: |
             export PATH=/usr/local/bin:$PATH
-            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
+            /usr/local/bin/perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in OpenBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'openbsd'
@@ -101,7 +101,7 @@ jobs:
           prepare: ${{ inputs.prepare }}
           run: |
             export PATH=/usr/local/bin:$PATH
-            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
+            /usr/local/bin/perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in NetBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'netbsd'
@@ -113,7 +113,7 @@ jobs:
           prepare: ${{ inputs.prepare }}
           run: |
             export PATH=/usr/local/bin:$PATH
-            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
+            /usr/local/bin/perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in DragonflyBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'dragonflybsd'
@@ -124,7 +124,7 @@ jobs:
           prepare: ${{ inputs.prepare }}
           run: |
             export PATH=/usr/local/bin:$PATH
-            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
+            /usr/local/bin/perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in Solaris
         if: inputs.runner_type == 'vm' && inputs.os == 'solaris'
@@ -135,7 +135,7 @@ jobs:
           prepare: ${{ inputs.prepare }}
           run: |
             export PATH=/usr/local/bin:$PATH
-            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
+            /usr/local/bin/perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in OmniOS
         if: inputs.runner_type == 'vm' && inputs.os == 'omnios'
@@ -146,7 +146,7 @@ jobs:
           prepare: ${{ inputs.prepare }}
           run: |
             export PATH=/usr/local/bin:$PATH
-            /usr/local/bin/perl demo.pl ${{ inputs.os }}-${{ inputs.arch }}
+            /usr/local/bin/perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       #~ - name: Upload coverage reports to Codecov
         #~ uses: codecov/codecov-action@v5
