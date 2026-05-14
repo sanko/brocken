@@ -14,7 +14,7 @@ permissions:
 jobs:
 
   vm:
-    name:  ${{ matrix.platform.os }}-${{ matrix.arch }}
+    name:  ${{ matrix.platform.os }}
     uses: ./.github/workflows/unified-tester.yml
     secrets: inherit
     with:
@@ -44,10 +44,10 @@ jobs:
             prepare: 'cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install'
           - os: 'solaris'
             version: '11.4'
-            prepare: 'pkg install -v --accept gcc library/libc && cd /tmp && wget -q https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install || true'
+            prepare: 'pkg install -v --accept gcc library/libc && cd /tmp && wget -q https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make && make install || true'
           - os: 'omnios'
             version: 'r151056'
-            prepare: 'pkg update && pkg install -v runtime/perl-540'
+            prepare: 'pkg update && pkg install -v runtime/perl'
         arch: ['x86_64', 'aarch64']
         exclude:
           - platform: { os: 'dragonflybsd' }
@@ -58,7 +58,7 @@ jobs:
             arch: 'aarch64'
 
   direct:
-    name: ${{ matrix.platform.name }}-${{ matrix.platform.arch }}
+    name: ${{ matrix.platform.name }}
     uses: ./.github/workflows/unified-tester.yml
     secrets: inherit
     with:
@@ -155,7 +155,7 @@ jobs:
       contents: write
     steps:
       - name: Download status files
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7.0.1
         with:
           name: status-files
           path: ./status

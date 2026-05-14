@@ -25,8 +25,7 @@ $p->print_str("Done! Exiting with status 42.\n");
 $p->exit_proc(42);
 $as->resolve();
 #
-my $exe = $p->write_bin('pulse_output');
-$exe = "./$exe" if $^O ne 'MSWin32';
+my $exe    = $p->write_bin('pulse_output');
 my $status = system($exe);
 if ( $status == -1 ) {
     say "Failed to execute: $!";
