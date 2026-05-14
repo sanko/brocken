@@ -11,8 +11,9 @@ class Brocken {
     field $label_count = 0;
     #
     ADJUST {
+        warn $^O;
         my $d_os = 'linux';
-        $d_os = 'win64'     if $^O eq 'MSWin32';
+        $d_os = 'win64'     if $^O eq 'MSWin32' || $^O eq 'cygwin';
         $d_os = 'macos'     if $^O eq 'darwin';
         $d_os = 'freebsd'   if $^O eq 'freebsd';
         $d_os = 'openbsd'   if $^O eq 'openbsd';
@@ -21,7 +22,7 @@ class Brocken {
         $d_os = 'dragonfly' if $^O eq 'dragonfly';
         my $d_arch = 'x64';
 
-        if ( $^O eq 'MSWin32' ) {
+        if ($d_os eq 'win64' ) {
             $d_arch = ( ( $ENV{PROCESSOR_ARCHITECTURE} // '' ) =~ /ARM64/i ) ? 'arm64' : 'x64';
         }
         else {
@@ -59,7 +60,10 @@ class Brocken {
     }
     sub align ( $val, $align ) { ( $val + $align - 1 ) & ~( $align - 1 ) }
     #
-    method write_bin($path) { $format->write_bin( $path, $as->code, $data, $arch, $os ) }
+    method write_bin($path) {
+        $path = $os eq 'win64' ? "./$path.exe" : "./$path";
+        $format->write_bin( $path, $as->code, $data, $arch, $os );
+    }
     #
     method cc ($name) {
         return { eq => 0, ne => 1, lt => 0xB, le => 0xD, gt => 0xC, ge => 0xA, z => 0, nz => 1 }->{$name} if $arch eq 'arm64';
