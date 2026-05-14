@@ -1,0 +1,9 @@
+*.old
+*.exe
+brocken_out
+SciTE.session
+.tidyall.d/
+
+eg/pulse_output
+pulse_output
+pulse_output.exe

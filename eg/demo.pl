@@ -534,12 +534,12 @@ class Pulse::Compiler {
         else {
             if ( $arch eq 'arm64' ) {
                 $as->mov_imm( 'x0', -11 );
-                $as->call_rva( 0x3008, 0x1000 );    # IAT 1: GetStdHandle
+                $as->call_rva( 0x3008, 0x1000 );      # IAT 1: GetStdHandle
                 $as->mov_reg( 'x0', 'x0' );
                 $as->lea_rva( 'x1', 0x2000 + $off, 0x1000 );
                 $as->mov_imm( 'x2', length($str) );
-                $as->mov_imm( 'x4', 0 );            # lpOverlapped = null
-                $as->call_rva( 0x3010, 0x1000 );    # IAT 2: WriteFile
+                $as->mov_imm( 'x4', 0 );              # lpOverlapped = null
+                $as->call_rva( 0x3010, 0x1000 );      # IAT 2: WriteFile
             }
             else {
                 $as->mov_imm( 'rcx', -11 );
@@ -616,7 +616,7 @@ if ( $p->os eq 'win64' ) {
     if ( $p->arch eq 'x64' ) {
         $as->sub_imm( 'rsp', 56 );
     }
-    elsif ( $p->arch eq 'arm64' ) { # Idk what else it *could* be but might as well be safe...
+    elsif ( $p->arch eq 'arm64' ) {    # Idk what else it *could* be but might as well be safe...
         $as->sub_imm( 'sp', 48 );
     }
 }
