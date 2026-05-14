@@ -2,7 +2,7 @@ use v5.40;
 use feature 'class';
 no warnings 'portable', 'experimental::class';
 #
-class Brocken::Format::MachO : isa(Brocken::Format) {
+class Brocken::Target::Format::MachO : isa(Brocken::Target::Format) {
 
     method write_bin ( $filename, $text, $data, $arch, $os = 'macos' ) {
         my $is_arm      = ( $arch eq 'arm64' );
