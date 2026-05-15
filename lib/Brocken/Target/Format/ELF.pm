@@ -25,7 +25,8 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         my $data_padded = $data . ( "\0" x ( $align_f->( length($data), 0x1000 ) - length($data) ) );
 
         # Generate Identification Notes for BSDs
-        my $note_data = '';
+        my $note_data     = '';
+        my $pintable_data = '';
 
         # Note: Some OSes like OpenBSD may have issues with custom note sections
         if ( $os eq 'netbsd' ) {
@@ -45,8 +46,13 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
 
             # Namesz=8, Descsz=4, Type=1 (ELF_NOTE_OPENBSD_IDENT)
             $note_data = pack( 'LLL', 8, 4, 1 ) . "OpenBSD\0" . pack( 'L', 0 );
+
+            # Using duplicate entries triggers the kernel to mark the syscall as a wildcard
+            # allowing it to be securely called from any instruction offset.
+            # We whitelist sys_exit (1) and sys_write (4)
+            $pintable_data = pack( 'LL', 0, 1 ) . pack( 'LL', 0, 1 ) . pack( 'LL', 0, 4 ) . pack( 'LL', 0, 4 );
         }
-        my $num_ph = $note_data ? 3 : 2;
+        my $num_ph = 2 + ( $note_data ? 1 : 0 ) + ( $pintable_data ? 1 : 0 );
 
         # ELF Header
         my $elf_hdr = pack(
@@ -63,15 +69,24 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         my $ph_data
             = pack( 'LL Q Q Q Q Q Q', 1, 6, $data_off, $base + $data_off, $base + $data_off, length($data_padded), length($data_padded), 0x1000 );
 
-        # PT_NOTE - vaddr must match p_offset for proper loading
-        my $ph_note = '';
+        # PT_NOTE and PT_OPENBSD_SYSCALLS
+        my $ph_note     = '';
+        my $ph_syscalls = '';
+        my $extra_off   = 64 + ( $num_ph * 56 );
         if ($note_data) {
-            my $note_file_off = 64 + ( $num_ph * 56 );
-            $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $note_file_off, $note_file_off, $note_file_off, length($note_data), length($note_data), 4 );
+            $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $extra_off, $extra_off, $extra_off, length($note_data), length($note_data), 4 );
+            $extra_off += length($note_data);
+        }
+        if ($pintable_data) {
+
+            # PT_OPENBSD_SYSCALLS = 0x65a3dbe9
+            $ph_syscalls
+                = pack( 'LL Q Q Q Q Q Q', 0x65a3dbe9, 4, $extra_off, $extra_off, $extra_off, length($pintable_data), length($pintable_data), 4 );
+            $extra_off += length($pintable_data);
         }
         open my $fh, '>', $filename or die $!;
         binmode $fh;
-        my $header_block = $elf_hdr . $ph_text . $ph_data . $ph_note . $note_data;
+        my $header_block = $elf_hdr . $ph_text . $ph_data . $ph_note . $ph_syscalls . $note_data . $pintable_data;
         print $fh $header_block;
         print $fh ( "\0" x ( $text_off - length($header_block) ) );
         print $fh $text_padded, $data_padded;
