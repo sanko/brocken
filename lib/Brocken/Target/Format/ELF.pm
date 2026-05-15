@@ -47,12 +47,29 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
             # Namesz=8, Descsz=4, Type=1 (ELF_NOTE_OPENBSD_IDENT)
             $note_data = pack( 'LLL', 8, 4, 1 ) . "OpenBSD\0" . pack( 'L', 0 );
 
-            # Using duplicate entries triggers the kernel to mark the syscall as a wildcard
-            # allowing it to be securely called from any instruction offset.
-            # We whitelist sys_exit (1) and sys_write (4)
-            $pintable_data = pack( 'LL', 0, 1 ) . pack( 'LL', 0, 1 ) . pack( 'LL', 0, 4 ) . pack( 'LL', 0, 4 );
+            # Secure pinsyscalls generation: dynamically find the exact addresses of syscall ops
+            my $pos = 0;
+            if ( $arch eq 'x64' ) {
+                while ( ( my $idx = index( $text, "\x0F\x05", $pos ) ) != -1 ) {
+                    my $vaddr = $base + $text_off + $idx;
+                    $pintable_data .= pack( 'LL', $vaddr, 1 );    # OpenBSD SYS_exit
+                    $pintable_data .= pack( 'LL', $vaddr, 4 );    # OpenBSD SYS_write
+                    $pos = $idx + 2;
+                }
+            }
+            else {
+                # OpenBSD ARM64 uses SVC #0 `01 00 00 d4`
+                while ( ( my $idx = index( $text, "\x01\x00\x00\xd4", $pos ) ) != -1 ) {
+                    my $vaddr = $base + $text_off + $idx;
+                    $pintable_data .= pack( 'LL', $vaddr, 1 );
+                    $pintable_data .= pack( 'LL', $vaddr, 4 );
+                    $pos = $idx + 4;
+                }
+            }
         }
-        my $num_ph = 2 + ( $note_data ? 1 : 0 ) + ( $pintable_data ? 1 : 0 );
+
+        # 3 Base LOAD Segments (Headers, Text, Data) + optional Notes/Syscalls
+        my $num_ph = 3 + ( $note_data ? 1 : 0 ) + ( $pintable_data ? 1 : 0 );
 
         # ELF Header
         my $elf_hdr = pack(
@@ -61,32 +78,36 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
             64,        0, 0, 64, 56,     $num_ph, 0, 0,        0, 0
         );
 
-        # PT_LOAD (RX) - file offset points to text start, vaddr aligned to entry point
+        # PT_LOAD (R) - mapped from offset 0x0 to 0x1000 to include headers in memory
+        my $ph_hdrs = pack( 'LL Q Q Q Q Q Q', 1, 4, 0, $base, $base, $text_off, $text_off, 0x1000 );
+
+        # PT_LOAD (RX) - mapped exactly from entry point
         my $ph_text
             = pack( 'LL Q Q Q Q Q Q', 1, 5, $text_off, $base + $text_off, $base + $text_off, length($text_padded), length($text_padded), 0x1000 );
 
         # PT_LOAD (RW)
         my $ph_data
             = pack( 'LL Q Q Q Q Q Q', 1, 6, $data_off, $base + $data_off, $base + $data_off, length($data_padded), length($data_padded), 0x1000 );
-
-        # PT_NOTE and PT_OPENBSD_SYSCALLS
         my $ph_note     = '';
         my $ph_syscalls = '';
         my $extra_off   = 64 + ( $num_ph * 56 );
         if ($note_data) {
-            $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $extra_off, $extra_off, $extra_off, length($note_data), length($note_data), 4 );
+            $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $extra_off, $base + $extra_off, $base + $extra_off, length($note_data), length($note_data), 4 );
             $extra_off += length($note_data);
         }
         if ($pintable_data) {
 
             # PT_OPENBSD_SYSCALLS = 0x65a3dbe9
-            $ph_syscalls
-                = pack( 'LL Q Q Q Q Q Q', 0x65a3dbe9, 4, $extra_off, $extra_off, $extra_off, length($pintable_data), length($pintable_data), 4 );
+            $ph_syscalls = pack( 'LL Q Q Q Q Q Q',
+                0x65a3dbe9, 4, $extra_off,
+                $base + $extra_off,
+                $base + $extra_off,
+                length($pintable_data), length($pintable_data), 4 );
             $extra_off += length($pintable_data);
         }
         open my $fh, '>', $filename or die $!;
         binmode $fh;
-        my $header_block = $elf_hdr . $ph_text . $ph_data . $ph_note . $ph_syscalls . $note_data . $pintable_data;
+        my $header_block = $elf_hdr . $ph_hdrs . $ph_text . $ph_data . $ph_note . $ph_syscalls . $note_data . $pintable_data;
         print $fh $header_block;
         print $fh ( "\0" x ( $text_off - length($header_block) ) );
         print $fh $text_padded, $data_padded;
