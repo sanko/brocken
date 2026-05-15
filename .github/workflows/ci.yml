@@ -44,7 +44,7 @@ jobs:
             prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkg install perl 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
           - os: 'solaris'
             version: '11.4'
-            prepare: 'pkg install -v --accept gcc library/libc && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" || (cd /tmp && wget -q https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make && make install || true)'
+            prepare: 'pkg install -v --accept gcc library/libc; perl -e "exit($^V ge v5.40.0 ? 0 : 1)" || (cd /tmp && wget -q https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make && make install || true)'
           - os: 'omnios'
             version: 'r151056'
             prepare: 'pkg update && pkg install -v runtime/perl'

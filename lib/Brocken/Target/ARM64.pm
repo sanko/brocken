@@ -109,6 +109,7 @@ class Brocken::Target::ARM64 {
         else {
             $code .= pack( 'L<', 0xD4000001 );    # SVC #0
             if ( $os eq 'openbsd' ) {
+
                 # OpenBSD ARM64 kernel purposefully skips exactly 2 instructions after a syscall to mitigate speculative execution
                 $code .= pack( 'L<', 0x14000002 );    # B .+8
                 $code .= pack( 'L<', 0xD4200000 );    # BRK #0
