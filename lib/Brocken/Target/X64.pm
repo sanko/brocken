@@ -86,7 +86,7 @@ class Brocken::Target::X64 {
             $code .= pack( 'l<', $disp );
         }
     }
-    method syscall { $code .= pack 'CC', 0x0F, 0x05 }
+    method syscall( $os = '' ) { $code .= pack 'CC', 0x0F, 0x05 }
 
     method jcc ( $cc, $label ) {
         $code .= pack( 'CC', 0x0F, 0x80 + $cc );
@@ -108,4 +108,4 @@ class Brocken::Target::X64 {
         }
     }
 }
-1
+1;

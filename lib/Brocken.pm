@@ -108,7 +108,7 @@ class Brocken {
                 my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'x1', $data_rva + $off, $text_rva );
                 $as->mov_imm( 'x2', length($str) );
-                $as->syscall( $os eq 'macos' );
+                $as->syscall($os);
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 1 );
@@ -119,7 +119,7 @@ class Brocken {
                 my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'rsi', $data_rva + $off, $text_rva );
                 $as->mov_imm( 'rdx', length($str) );
-                $as->syscall();
+                $as->syscall($os);
             }
         }
         else {
@@ -153,13 +153,13 @@ class Brocken {
                 my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );    # exit
                 $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
                 $as->mov_imm( 'x0', $code );
-                $as->syscall( $os eq 'macos' );
+                $as->syscall($os);
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 60 );
                 $as->mov_imm( 'rax', $num );
                 $as->mov_imm( 'rdi', $code );
-                $as->syscall();
+                $as->syscall($os);
             }
         }
         else {
