@@ -11,7 +11,7 @@
 | **omnios** | `x86_64` | ✅ success |
 | **openbsd** | `aarch64` | ✅ success |
 | **openbsd** | `x86_64` | ✅ success |
-| **solaris** | `x86_64` | ❌ failure |
+| **solaris** | `x86_64` | ✅ success |
 | **ubuntu** | `aarch64` | ✅ success |
 | **ubuntu** | `x86_64` | ✅ success |
 | **windows** | `aarch64` | ✅ success |
