@@ -35,7 +35,7 @@ jobs:
             prepare: 'perl -e "exit($^V ge v5.40.0 ? 0 : 1)" || (cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install)'
           - os: 'openbsd'
             version: '7.8'
-            prepare: 'perl -e "exit($^V ge v5.40.0 ? 0 : 1)" || (cd /tmp && ftp https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install)'
+            prepare: 'export PATH=/usr/local/bin:$PATH; if [ -x /usr/local/bin/perl ]; then perl -v | head -2; else echo "Installing Perl 5.40..."; cd /tmp && ftp -o perl-5.40.0.tar.gz https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install && echo "Perl installed"; fi'
           - os: 'netbsd'
             version: '10.1'
             prepare: 'perl -e "exit($^V ge v5.40.0 ? 0 : 1)" || (cd /tmp && ftp https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install)'
