@@ -38,7 +38,7 @@ jobs:
             prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkg_add perl 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && ftp -o perl-5.40.0.tar.gz https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
           - os: 'netbsd'
             version: '10.1'
-            prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkgin install perl5 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && ftp https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
+            prepare: 'pkg_add perl; if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkgin install perl5 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && ftp https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
           - os: 'dragonflybsd'
             version: '6.4.0'
             prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkg install perl5 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
