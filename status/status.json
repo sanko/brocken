@@ -9,7 +9,7 @@
 ,
 "macos-x86_64-none": "👍🏽 passing"
 ,
-"netbsd-aarch64-none": "👍🏽 passing"
+"netbsd-aarch64-none": "👎🏽 failing"
 ,
 "netbsd-x86_64-none": "👍🏽 passing"
 ,
