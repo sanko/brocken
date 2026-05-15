@@ -27,48 +27,49 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         # Generate Identification Notes for BSDs
         my $note_data = '';
         if ( $os eq 'openbsd' ) {
-            $note_data = pack( 'L L L', 8, 4, 1 ) . "OpenBSD\0" . pack( 'L', 0 );
+            $note_data = pack( 'LLL', 8, 4, 1 ) . "OpenBSD\0" . pack( 'L', 0 );
         }
         elsif ( $os eq 'netbsd' ) {
-            $note_data = pack( 'L L L', 7, 4, 1 ) . "NetBSD\0\0" . pack( 'L', 900000000 );
+            $note_data = pack( 'LLL', 7, 4, 1 ) . "NetBSD\0\0" . pack( 'L', 900000000 );
         }
         elsif ( $os eq 'freebsd' ) {
-            $note_data = pack( 'L L L', 8, 4, 1 ) . "FreeBSD\0" . pack( 'L', 1400000 );
+
+            # Namesz=8, Descsz=4, Type=1 (ABI_TAG)
+            $note_data = pack( 'LLL', 8, 4, 1 ) . "FreeBSD\0" . pack( 'L', 1400000 );    # Ver 14.0
         }
         elsif ( $os eq 'dragonfly' ) {
-            $note_data = pack( 'L L L', 10, 4, 1 ) . "DragonFly\0\0" . pack( 'L', 0 );
+
+            # Namesz=10, Descsz=4, Type=1
+            $note_data = pack( 'LLL', 10, 4, 1 ) . "DragonFly\0\0" . pack( 'L', 0 );
         }
+        my $num_ph = $note_data ? 3 : 2;
 
-        # PT_LOAD (RX) - offset 0 covers header + text, vaddr 0x400000, entry point at 0x401000
-        my $ph_text = pack( 'LL Q Q Q Q Q Q', 1, 5, 0, $base, $base, $text_off + length($text_padded), $text_off + length($text_padded), 0x1000 );
-
-        # PT_LOAD (RW) - data segment
-        my $ph_data = pack( 'LL Q Q Q Q Q Q', 1, 6, $data_off, $base + $data_off, $base + $data_off, length($data_padded), length($data_padded), 0x1000 );
-
-        # Build segments - start with text and data only
-        my @segments = ( $ph_text, $ph_data );
-        my $num_ph = 2;
-
-        # PT_NOTE - only include if we have note data (required by some BSDs)
-        if ($note_data) {
-            my $note_offset = 64 + ( 2 * 56 );    # After 2 segments * 56 bytes
-            push @segments, pack( 'LL Q Q Q Q Q Q', 4, 4, $note_offset, $note_offset, $note_offset, length($note_data), length($note_data), 4 );
-            $num_ph++;
-        }
-
-        # ELF Header - calculate num_ph after building segments
+        # ELF Header
         my $elf_hdr = pack(
             'A4 C C C C C x7 S S L Q Q Q L S S S S S S',
             "\x7fELF", 2, 1, 1,  $osabi, 0,       2, $machine, 1, $base + $text_off,
             64,        0, 0, 64, 56,     $num_ph, 0, 0,        0, 0
         );
 
-        my $header_block = $elf_hdr . join( '', @segments ) . $note_data;
+        # PT_LOAD (RX) - file offset points to text start, vaddr aligned to entry point
+        my $ph_text
+            = pack( 'LL Q Q Q Q Q Q', 1, 5, $text_off, $base + $text_off, $base + $text_off, length($text_padded), length($text_padded), 0x1000 );
+
+        # PT_LOAD (RW)
+        my $ph_data
+            = pack( 'LL Q Q Q Q Q Q', 1, 6, $data_off, $base + $data_off, $base + $data_off, length($data_padded), length($data_padded), 0x1000 );
+
+        # PT_NOTE
+        my $ph_note = '';
+        if ($note_data) {
+            my $note_file_off = 64 + ( $num_ph * 56 );
+            $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $note_file_off, 0, 0, length($note_data), length($note_data), 0 );
+        }
         open my $fh, '>', $filename or die $!;
         binmode $fh;
+        my $header_block = $elf_hdr . $ph_text . $ph_data . $ph_note . $note_data;
         print $fh $header_block;
-        my $remaining = $text_off - length($header_block);
-        print $fh ( "\0" x $remaining ) if $remaining > 0;
+        print $fh ( "\0" x ( $text_off - length($header_block) ) );
         print $fh $text_padded, $data_padded;
         close $fh;
         chmod 0755, $filename;
@@ -116,20 +117,19 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
             length($data_padded), length($data_padded), 0x1000 );
         my $ph_dyn = pack( 'LL Q Q Q Q Q Q', 6, 1, $dynsec_off, $base + $dynsec_off, $base + $dynsec_off, $dynsec_size, $dynsec_size, 0x1000 );
         my $sh_off = 64 + 3 * 56;
-        my $header_block = $elf_hdr . $ph_text . $ph_data . $ph_dyn;
         open my $fh, '>', $filename or die $!;
         binmode $fh;
-        print $fh $header_block;
+        print $fh $elf_hdr, $ph_text, $ph_data, $ph_dyn;
         print $fh ( "\0" x ( $text_off - 64 - 3 * 56 ) );
         print $fh $text_padded, $data_padded;
         print $fh $dynsym;
         print $fh $dynstr;
         my $shdr_off = tell($fh);
         print $fh ( "\0" x 64 );
-        print $fh pack( 'LLQQQQLLQQ', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
-        print $fh pack( 'LLQQQQLLQQ', 11, 1, 6, $base + 0x1000, 0x1000, length($text), 0, 0, 16, 0 );
+        print $fh pack( 'LLQQQQLLQQ', 0,  0, 0, 0,                         0,                 0,                    0, 0, 0,  0 );
+        print $fh pack( 'LLQQQQLLQQ', 11, 1, 6, $base + 0x1000,            0x1000,            length($text),        0, 0, 16, 0 );
         print $fh pack( 'LLQQQQLLQQ', 14, 1, 6, $base + $dyn_off - 0x1000, $dyn_off - 0x1000, length($data_padded), 0, 0, 32, 0 );
-        print $fh pack( 'LLQQQQLLQQ', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+        print $fh pack( 'LLQQQQLLQQ', 0,  0, 0, 0,                         0,                 0,                    0, 0, 0,  0 );
         seek( $fh, 40, 0 );
         print $fh pack( 'Q', $sh_off );
         seek( $fh, 60, 0 );
