@@ -6,9 +6,9 @@ class Brocken::Target::X64 {
     our %REG = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7, r8 => 8, r9 => 9, r10 => 10, r11 => 11 );
     field $code : reader = '';
     field @fixups;
-field %labels;
-    method labels () { return \%labels } # Returns the HASH reference
-    method ret ()      { $code .= pack( 'C', 0xC3 ) }
+    field %labels;
+    method labels () { return \%labels }              # Returns the HASH reference
+    method ret ()    { $code .= pack( 'C', 0xC3 ) }
 
     method _rex ( $w, $r, $x, $b ) {
         my $rex = 0x40;
