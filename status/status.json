@@ -11,7 +11,7 @@
 ,
 "netbsd-aarch64-none": "👎🏽 failing"
 ,
-"netbsd-x86_64-none": "👍🏽 passing"
+"netbsd-x86_64-none": "👎🏽 failing"
 ,
 "omnios-x86_64-none": "👍🏽 passing"
 ,

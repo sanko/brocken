@@ -7,7 +7,7 @@
 | **macos** | `aarch64` | ✅ success |
 | **macos** | `x86_64` | ✅ success |
 | **netbsd** | `aarch64` | ❌ failure |
-| **netbsd** | `x86_64` | ✅ success |
+| **netbsd** | `x86_64` | ❌ failure |
 | **omnios** | `x86_64` | ✅ success |
 | **openbsd** | `aarch64` | ✅ success |
 | **openbsd** | `x86_64` | ✅ success |
