@@ -12,98 +12,9 @@ permissions:
   actions: read
 
 jobs:
-  setup:
-    name: Determine Strategy
-    runs-on: ubuntu-latest
-    outputs:
-      vm_matrix: ${{ steps.filter.outputs.vm_matrix }}
-      direct_matrix: ${{ steps.filter.outputs.direct_matrix }}
-      run_vm: ${{ steps.filter.outputs.run_vm }}
-      run_direct: ${{ steps.filter.outputs.run_direct }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Filter Matrix
-        id: filter
-        run: |
-          # 1. Get the commit message
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            MSG=$(cat <<EOF
-          ${{ github.event.pull_request.title }}
-          ${{ github.event.pull_request.body }}
-          EOF
-          )
-          else
-            MSG=$(git log -1 --pretty=%B)
-          fi
-
-          # 2. Write data to temporary files using literal Here-Docs
-          # The single quotes around 'EOF' prevent the shell from interpreting $ and \
-          cat << 'EOF' > vm_platforms.json
-          [
-            {"os": "freebsd", "version": "15.0", "prepare": "if perl -e \"exit($^V ge v5.40.0 ? 0 : 1)\" 2>/dev/null; then :; elif pkg install -y perl5 2>/dev/null && perl -e \"exit($^V ge v5.40.0 ? 0 : 1)\" 2>/dev/null; then :; else cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi"},
-            {"os": "openbsd", "version": "7.8", "prepare": "if perl -e \"exit($^V ge v5.40.0 ? 0 : 1)\" 2>/dev/null; then :; elif pkg_add perl 2>/dev/null && perl -e \"exit($^V ge v5.40.0 ? 0 : 1)\" 2>/dev/null; then :; else cd /tmp && ftp -o perl-5.40.0.tar.gz https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi"},
-            {"os": "netbsd", "version": "10.1", "prepare": "pkg_add perl; if perl -e \"exit($^V ge v5.40.0 ? 0 : 1)\" 2>/dev/null; then :; elif pkgin install perl5 2>/dev/null && perl -e \"exit($^V ge v5.40.0 ? 0 : 1)\" 2>/dev/null; then :; else cd /tmp && ftp https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi"},
-            {"os": "dragonflybsd", "version": "6.4.0", "prepare": "if perl -e \"exit($^V ge v5.40.0 ? 0 : 1)\" 2>/dev/null; then :; elif pkg install perl5 2>/dev/null && perl -e \"exit($^V ge v5.40.0 ? 0 : 1)\" 2>/dev/null; then :; else cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi"},
-            {"os": "solaris", "version": "11.4", "prepare": "pkg install -v --accept gcc library/libc && perl -e \"exit($^V ge v5.40.0 ? 0 : 1)\" || (cd /tmp && wget -q https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make && make install || true)"},
-            {"os": "omnios", "version": "r151056", "prepare": "pkg update && pkg install -v runtime/perl"}
-          ]
-          EOF
-
-          echo '["x86_64", "aarch64"]' > vm_arches.json
-
-          cat << 'EOF' > vm_excludes.json
-          [
-            {"platform": {"os": "dragonflybsd"}, "arch": "aarch64"},
-            {"platform": {"os": "solaris"}, "arch": "aarch64"},
-            {"platform": {"os": "omnios"}, "arch": "aarch64"}
-          ]
-          EOF
-
-          cat << 'EOF' > direct_platforms.json
-          [
-            {"name": "ubuntu", "os": "ubuntu-latest", "arch": "x86_64", "prepare": "sudo apt-get update"},
-            {"name": "macos", "os": "macos-15", "arch": "aarch64", "prepare": ""},
-            {"name": "macos", "os": "macos-15-intel", "arch": "x86_64", "prepare": ""},
-            {"name": "windows", "os": "windows-latest", "arch": "x86_64", "prepare": ""},
-            {"name": "ubuntu", "os": "ubuntu-24.04-arm", "arch": "aarch64", "prepare": "sudo apt-get update"},
-            {"name": "windows", "os": "windows-11-arm", "arch": "aarch64", "prepare": ""}
-          ]
-          EOF
-
-          # 3. Parse filters
-          OS_FILTER=$(echo "$MSG" | grep -oEi 'ci:(freebsd|openbsd|netbsd|dragonflybsd|solaris|omnios|ubuntu|macos|windows)' | cut -d: -f2 | tr '[:upper:]' '[:lower:]' || true)
-          ARCH_FILTER=$(echo "$MSG" | grep -oEi 'ci:(x86_64|aarch64|arm64)' | cut -d: -f2 | tr '[:upper:]' '[:lower:]' | sed 's/arm64/aarch64/' || true)
-
-          # 4. Apply filters to the files
-          if [ -n "$OS_FILTER" ]; then
-            jq -c "[.[] | select(.os == \"$OS_FILTER\")]" vm_platforms.json > tmp.json && mv tmp.json vm_platforms.json
-            jq -c "[.[] | select(.name == \"$OS_FILTER\")]" direct_platforms.json > tmp.json && mv tmp.json direct_platforms.json
-          fi
-          if [ -n "$ARCH_FILTER" ]; then
-            jq -c "[.[] | select(. == \"$ARCH_FILTER\")]" vm_arches.json > tmp.json && mv tmp.json vm_arches.json
-            jq -c "[.[] | select(.arch == \"$ARCH_FILTER\")]" direct_platforms.json > tmp.json && mv tmp.json direct_platforms.json
-          fi
-
-          # 5. Output booleans
-          VM_COUNT=$(jq 'length' vm_platforms.json)
-          DIRECT_COUNT=$(jq 'length' direct_platforms.json)
-
-          [ "$VM_COUNT" -gt 0 ] && echo "run_vm=true" >> $GITHUB_OUTPUT || echo "run_vm=false" >> $GITHUB_OUTPUT
-          [ "$DIRECT_COUNT" -gt 0 ] && echo "run_direct=true" >> $GITHUB_OUTPUT || echo "run_direct=false" >> $GITHUB_OUTPUT
-
-          # 6. Build Matrix JSONs and output
-          VM_MATRIX=$(jq -n -c --argjson p "$(cat vm_platforms.json)" --argjson a "$(cat vm_arches.json)" --argjson e "$(cat vm_excludes.json)" '{platform: $p, arch: $a, exclude: $e}')
-          DIRECT_MATRIX=$(jq -n -c --argjson p "$(cat direct_platforms.json)" '{platform: $p}')
-
-          echo "vm_matrix=$VM_MATRIX" >> $GITHUB_OUTPUT
-          echo "direct_matrix=$DIRECT_MATRIX" >> $GITHUB_OUTPUT
 
   vm:
-    name: ${{ matrix.platform.os }} (${{ matrix.arch }})
-    needs: setup
-    if: needs.setup.outputs.run_vm == 'true'
+    name:  ${{ matrix.platform.os }}
     uses: ./.github/workflows/unified-tester.yml
     secrets: inherit
     with:
@@ -112,17 +23,42 @@ jobs:
       os: ${{ matrix.platform.os }}
       os_version: ${{ matrix.platform.version }}
       arch: ${{ matrix.arch }}
-      prepare: ${{ matrix.platform.prepare }}
+      prepare:  ${{ matrix.platform.prepare }}
       host_os: 'ubuntu-latest'
       toolchain: 'none'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup.outputs.vm_matrix) }}
+      matrix:
+        platform:
+          - os: 'freebsd'
+            version: '15.0'
+            prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkg install -y perl5 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
+          - os: 'openbsd'
+            version: '7.8'
+            prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkg_add perl 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && ftp -o perl-5.40.0.tar.gz https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
+          - os: 'netbsd'
+            version: '10.1'
+            prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkgin install perl5 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && ftp https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
+          - os: 'dragonflybsd'
+            version: '6.4.0'
+            prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkg install perl5 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
+          - os: 'solaris'
+            version: '11.4'
+            prepare: 'pkg install -v --accept gcc library/libc && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" || (cd /tmp && wget -q https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make && make install || true)'
+          - os: 'omnios'
+            version: 'r151056'
+            prepare: 'pkg update && pkg install -v runtime/perl'
+        arch: ['x86_64', 'aarch64']
+        exclude:
+          - platform: { os: 'dragonflybsd' }
+            arch: 'aarch64'
+          - platform: { os: 'solaris' }
+            arch: 'aarch64'
+          - platform: { os: 'omnios' }
+            arch: 'aarch64'
 
   direct:
-    name: ${{ matrix.platform.name }} (${{ matrix.platform.arch }})
-    needs: setup
-    if: needs.setup.outputs.run_direct == 'true'
+    name: ${{ matrix.platform.name }}
     uses: ./.github/workflows/unified-tester.yml
     secrets: inherit
     with:
@@ -134,7 +70,32 @@ jobs:
       toolchain: 'none'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.setup.outputs.direct_matrix) }}
+      matrix:
+        platform:
+          - name: 'ubuntu'
+            os: 'ubuntu-latest'
+            arch: 'x86_64'
+            prepare: 'sudo apt-get update'
+          - name: 'macos'
+            os: 'macos-15'
+            arch: 'aarch64'
+            prepare: ''
+          - name: 'macos'
+            os: 'macos-15-intel'
+            arch: 'x86_64'
+            prepare: ''
+          - name: 'windows'
+            os: 'windows-latest'
+            arch: 'x86_64'
+            prepare: ''
+          - name: 'ubuntu'
+            os: 'ubuntu-24.04-arm'
+            arch: 'aarch64'
+            prepare: 'sudo apt-get update'
+          - name: 'windows'
+            os: 'windows-11-arm'
+            arch: 'aarch64'
+            prepare: ''
 
   results:
     name: Summary
