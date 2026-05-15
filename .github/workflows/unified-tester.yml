@@ -104,6 +104,14 @@ jobs:
           run: |
             export PATH=/usr/local/bin:$PATH
             perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
+            ktrace ./pulse_output || true
+            kdump
+            dmesg | tail -n 20
+            readelf -Wl ./pulse_output
+            if [ -f pulse_output.core ]; then
+              echo "=== CORE DUMP BACKTRACE ==="
+              gdb -batch -ex "bt" -ex "x/10i \$pc-10" ./pulse_output pulse_output.core || true
+            fi
 
       - name: Build and Test in NetBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'netbsd'
