@@ -32,10 +32,10 @@ jobs:
         platform:
           - os: 'freebsd'
             version: '15.0'
-            prepare: 'perl -e "exit($^V ge v5.40.0 ? 0 : 1)" || (cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install)'
+            prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkg install -y perl5 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && fetch https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
           - os: 'openbsd'
             version: '7.8'
-            prepare: 'export PATH=/usr/local/bin:$PATH; if [ -x /usr/local/bin/perl ]; then perl -v | head -2; else echo "Installing Perl 5.40..."; cd /tmp && ftp -o perl-5.40.0.tar.gz https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install && echo "Perl installed"; fi'
+            prepare: 'if perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; elif pkg_add perl 2>/dev/null && perl -e "exit($^V ge v5.40.0 ? 0 : 1)" 2>/dev/null; then :; else cd /tmp && ftp -o perl-5.40.0.tar.gz https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install; fi'
           - os: 'netbsd'
             version: '10.1'
             prepare: 'perl -e "exit($^V ge v5.40.0 ? 0 : 1)" || (cd /tmp && ftp https://www.cpan.org/src/5.0/perl-5.40.0.tar.gz && tar xzf perl-5.40.0.tar.gz && cd perl-5.40.0 && ./Configure -des -Dprefix=/usr/local && make -j4 && make install)'
