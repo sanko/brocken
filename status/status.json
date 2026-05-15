@@ -1,31 +1,5 @@
 {
-"dragonflybsd-x86_64-none": "👍🏽 passing"
-,
-"freebsd-aarch64-none": "👍🏽 passing"
-,
-"freebsd-x86_64-none": "👍🏽 passing"
-,
-"macos-aarch64-none": "👍🏽 passing"
-,
-"macos-x86_64-none": "👍🏽 passing"
-,
 "netbsd-aarch64-none": "👎🏽 failing"
 ,
 "netbsd-x86_64-none": "👎🏽 failing"
-,
-"omnios-x86_64-none": "👍🏽 passing"
-,
-"openbsd-aarch64-none": "👍🏽 passing"
-,
-"openbsd-x86_64-none": "👍🏽 passing"
-,
-"solaris-x86_64-none": "👍🏽 passing"
-,
-"ubuntu-aarch64-none": "👍🏽 passing"
-,
-"ubuntu-x86_64-none": "👍🏽 passing"
-,
-"windows-aarch64-none": "👍🏽 passing"
-,
-"windows-x86_64-none": "👍🏽 passing"
 }
