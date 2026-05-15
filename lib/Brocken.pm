@@ -10,8 +10,10 @@ class Brocken {
     field $format : reader;
     field $label_count = 0;
     #
+    field %exports;    # Attempt to generate shared libs
+
+    #
     ADJUST {
-        warn $^O;
         my $d_os = 'linux';
         $d_os = 'win64'     if $^O eq 'MSWin32' || $^O eq 'cygwin';
         $d_os = 'macos'     if $^O eq 'darwin';
@@ -63,6 +65,27 @@ class Brocken {
     method write_bin($path) {
         $path = $os eq 'win64' ? "./$path.exe" : "./$path";
         $format->write_bin( $path, $as->code, $data, $arch, $os );
+    }
+    #
+    method export_label ($label) { $exports{$label} = 1; }
+
+    method write_lib( $path, $manual_exports = undef ) {
+
+        # Fix file extension based on OS
+        my $ext = { win64 => '.dll', macos => '.dylib' }->{$os} // '.so';
+        $path .= $ext unless $path =~ /\Q$ext\E$/;
+        my $export_map;
+        if ( defined $manual_exports ) {
+
+            # If user passed a hashref, use it
+            $export_map = $manual_exports;
+        }
+        else {
+            # Auto-export everything currently in the label table
+            $export_map = $as->labels();
+        }
+        $format->write_lib( $path, $as->code, $data, $arch, $os, $export_map );
+        return $path;
     }
     #
     method cc ($name) {

@@ -93,5 +93,24 @@ class Brocken::Target::Format::MachO : isa(Brocken::Target::Format) {
         }
         return $filename;
     }
+
+    method write_lib ( $filename, $text, $data, $arch, $os, $exports ) {
+
+        # 1. Change header type to MH_DYLIB (6)
+        # 2. Add LC_ID_DYLIB (0x0D) command
+        # 3. Add LC_DYLD_INFO_ONLY (0x80000022) to point to Export Trie
+        # Simple trick for JIT engines:
+        # Use MH_DYLIB and add a LC_ID_DYLIB containing the name of the file.
+        my $is_arm   = ( $arch eq 'arm64' );
+        my $cpu_type = $is_arm ? 0x0100000C : 0x01000007;
+
+        # LC_ID_DYLIB
+        my $id_dylib = pack( 'L L L L L L a32', 0x0D, 56, 24, 1, 0, 0, $filename );
+
+        # (Proceed with header generation using type 6 and including $id_dylib)
+        # Note: codesign is mandatory on ARM64 for dylibs to load.
+        system("codesign --force --sign - \"$filename\" >/dev/null 2>&1") if $^O eq 'darwin';
+        return $filename;
+    }
 }
 1

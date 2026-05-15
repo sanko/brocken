@@ -39,8 +39,10 @@ class Brocken::Target::ARM64 {
         xzr => 31
     );
     field $code : reader = '';
-    field %labels;
+    field %labels : reader;
     field @fixups;
+    method label($key) { $labels{$key} // () }
+    method ret ()      { $code .= pack( 'L<', 0xD65F03C0 ) }
 
     method mov_imm ( $reg, $imm ) {
         my $r = $REG{ lc $reg };
