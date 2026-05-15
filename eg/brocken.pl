@@ -38,5 +38,5 @@ elsif ( $status & 127 ) {
 else {
     my $exit_code = $status >> 8;
     printf 'Exit code: %d', $exit_code;
-    exit $exit_code == 42 ? 0 : 1;
+    exit( $exit_code == 42 ? 0 : 1 );
 }
