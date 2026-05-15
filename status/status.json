@@ -11,11 +11,11 @@
 ,
 "netbsd-aarch64-none": "👎🏽 failing"
 ,
-"netbsd-x86_64-none": "👎🏽 failing"
+"netbsd-x86_64-none": "👍🏽 passing"
 ,
 "omnios-x86_64-none": "👍🏽 passing"
 ,
-"openbsd-aarch64-none": "👍🏽 passing"
+"openbsd-aarch64-none": "👎🏽 failing"
 ,
 "openbsd-x86_64-none": "👍🏽 passing"
 ,
