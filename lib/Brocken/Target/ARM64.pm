@@ -93,17 +93,22 @@ class Brocken::Target::ARM64 {
         $code .= pack( 'L<', 0xD63F0200 );
     }
 
-    method syscall( $os = '' ) {
+    method syscall( $os = '', $num = 0 ) {
 
         # For macOS ARM64, syscall number is in x16. Use SVC #0x80.
-        # For Linux ARM64, syscall number is in x8. Use SVC #0.
         if ( $os eq 'macos' ) {
             $code .= pack( 'L<', 0xD4001001 );    # SVC #0x80
         }
+
+        # For NetBSD ARM64, the syscall number is encoded into the SVC immediate
+        elsif ( $os eq 'netbsd' && $num > 0 ) {
+            $code .= pack( 'L<', 0xD4000001 | ( ( $num & 0xFFFF ) << 5 ) );
+        }
+
+        # For Linux/FreeBSD/OpenBSD ARM64, syscall number is in x8. Use SVC #0.
         else {
             $code .= pack( 'L<', 0xD4000001 );    # SVC #0
             if ( $os eq 'openbsd' ) {
-
                 # OpenBSD ARM64 kernel purposefully skips exactly 2 instructions after a syscall to mitigate speculative execution
                 $code .= pack( 'L<', 0x14000002 );    # B .+8
                 $code .= pack( 'L<', 0xD4200000 );    # BRK #0

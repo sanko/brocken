@@ -101,14 +101,14 @@ class Brocken {
         if ( $os eq 'linux' || $is_bsd_like ) {
             if ( $arch eq 'arm64' ) {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 64 );    # write
-                $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
+                $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num ) unless $os eq 'netbsd';
                 $as->mov_imm( 'x0', 1 );                                                 # stdout
                 my $page_size = ( $os eq 'macos' ) ? 0x4000 : 0x1000;
                 my $text_rva  = $page_size;
                 my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'x1', $data_rva + $off, $text_rva );
                 $as->mov_imm( 'x2', length($str) );
-                $as->syscall($os);
+                $as->syscall( $os, $num );
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 1 );
@@ -119,7 +119,7 @@ class Brocken {
                 my $data_rva  = 2 * $page_size;
                 $as->lea_rva( 'rsi', $data_rva + $off, $text_rva );
                 $as->mov_imm( 'rdx', length($str) );
-                $as->syscall($os);
+                $as->syscall( $os, $num );
             }
         }
         else {
@@ -151,15 +151,15 @@ class Brocken {
         if ( $os eq 'linux' || $is_bsd_like ) {
             if ( $arch eq 'arm64' ) {
                 my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );    # exit
-                $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
+                $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num ) unless $os eq 'netbsd';
                 $as->mov_imm( 'x0', $code );
-                $as->syscall($os);
+                $as->syscall( $os, $num );
             }
             else {
                 my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 60 );
                 $as->mov_imm( 'rax', $num );
                 $as->mov_imm( 'rdi', $code );
-                $as->syscall($os);
+                $as->syscall( $os, $num );
             }
         }
         else {
