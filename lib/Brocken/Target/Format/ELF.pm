@@ -42,7 +42,7 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
             # Namesz=10, Descsz=4, Type=1
             $note_data = pack( 'LLL', 10, 4, 1 ) . "DragonFly\0\0" . pack( 'L', 0 );
         }
-        my $num_ph = $note_data ? 3 : 2;
+        my $num_ph = 3 + ( $note_data ? 1 : 0 );
 
         # ELF Header
         my $elf_hdr = pack(
@@ -51,23 +51,27 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
             64,        0, 0, 64, 56,     $num_ph, 0, 0,        0, 0
         );
 
-        # PT_LOAD (RX) - file offset points to text start, vaddr aligned to entry point
+        # PT_LOAD (RX) - text at offset 0x1000 maps to vaddr 0x401000 (entry point)
+        my $header_size = $text_off;
         my $ph_text
             = pack( 'LL Q Q Q Q Q Q', 1, 5, $text_off, $base + $text_off, $base + $text_off, length($text_padded), length($text_padded), 0x1000 );
 
-        # PT_LOAD (RW)
+        # PT_LOAD (RW) - data segment at offset 0x2000
         my $ph_data
             = pack( 'LL Q Q Q Q Q Q', 1, 6, $data_off, $base + $data_off, $base + $data_off, length($data_padded), length($data_padded), 0x1000 );
 
-        # PT_NOTE
+        # PT_GNU_STACK - required by some systems for executable stack handling
+        my $ph_gnu_stack = pack( 'LL Q Q Q Q Q Q', 0x6474E551, 6, 0, $base, $base, 0, 0, 0x1000 );
+
+        # PT_NOTE - always after text, data, gnu_stack (3 segments)
         my $ph_note = '';
         if ($note_data) {
-            my $note_file_off = 64 + ( $num_ph * 56 );
-            $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $note_file_off, 0, 0, length($note_data), length($note_data), 0 );
+            my $note_offset = 64 + ( 3 * 56 );    # 3 segments * 56 bytes = 168 bytes after ELF header
+            $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $note_offset, $note_offset, $note_offset, length($note_data), length($note_data), 4 );
         }
         open my $fh, '>', $filename or die $!;
         binmode $fh;
-        my $header_block = $elf_hdr . $ph_text . $ph_data . $ph_note . $note_data;
+        my $header_block = $elf_hdr . $ph_text . $ph_data . $ph_gnu_stack . $ph_note . $note_data;
         print $fh $header_block;
         print $fh ( "\0" x ( $text_off - length($header_block) ) );
         print $fh $text_padded, $data_padded;
