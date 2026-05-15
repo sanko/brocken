@@ -103,7 +103,7 @@ jobs:
           prepare: ${{ inputs.prepare }}
           run: |
             export PATH=/usr/local/bin:$PATH
-            /usr/local/bin/perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
+            perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in NetBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'netbsd'
