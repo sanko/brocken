@@ -29,10 +29,14 @@ my $exe    = $p->write_bin('pulse_output');
 my $status = system($exe);
 if ( $status == -1 ) {
     say "Failed to execute: $!";
+    exit 1;
 }
 elsif ( $status & 127 ) {
     printf 'Child died with signal %d, %s coredump', ( $status & 127 ), ( $status & 128 ) ? 'with' : 'without';
+    exit 1;
 }
 else {
-    printf 'Exit code: %d', $status >> 8;
+    my $exit_code = $status >> 8;
+    printf 'Exit code: %d', $exit_code;
+    exit $exit_code == 42 ? 0 : 1;
 }

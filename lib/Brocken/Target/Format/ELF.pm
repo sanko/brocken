@@ -52,7 +52,7 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         );
 
         # PT_LOAD (RX)
-        my $ph_text = pack( 'LL Q Q Q Q Q Q', 1, 5, 0, $base, $base, $text_off + length($text_padded), $text_off + length($text_padded), 0x1000 );
+        my $ph_text = pack( 'LL Q Q Q Q Q Q', 1, 5, $text_off, $base, $base, length($text_padded), length($text_padded), 0x1000 );
 
         # PT_LOAD (RW)
         my $ph_data

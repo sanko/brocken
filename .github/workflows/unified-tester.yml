@@ -162,7 +162,12 @@ jobs:
       - name: Record Build Status
         if: always()
         shell: bash
-        run: echo ${{ job.status }} > ${{ inputs.platform_name }}-${{ inputs.arch }}-${{ inputs.toolchain }}.result
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "success" > ${{ inputs.platform_name }}-${{ inputs.arch }}-${{ inputs.toolchain }}.result
+          else
+            echo "failure" > ${{ inputs.platform_name }}-${{ inputs.arch }}-${{ inputs.toolchain }}.result
+          fi
 
       - name: Upload Build Status Artifact
         if: always()
