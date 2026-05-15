@@ -6,7 +6,7 @@
 | **freebsd** | `x86_64` | ✅ success |
 | **macos** | `aarch64` | ✅ success |
 | **macos** | `x86_64` | ✅ success |
-| **netbsd** | `aarch64` | ❌ failure |
+| **netbsd** | `aarch64` | ✅ success |
 | **netbsd** | `x86_64` | ✅ success |
 | **omnios** | `x86_64` | ✅ success |
 | **openbsd** | `aarch64` | ✅ success |
