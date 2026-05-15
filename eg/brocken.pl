@@ -28,19 +28,12 @@ $as->resolve();
 my $exe    = $p->write_bin('pulse_output');
 my $runexe = $exe;
 $runexe =~ s{^\./}{} if $^O eq 'MSWin32';
-
-
-if ($p->os eq 'openbsd') {
+if ( $p->os eq 'openbsd' ) {
     system 'readelf -Wl ' . $runexe;
     system 'ktrace', $runexe;
     system 'kdump';
     system 'dmesg | tail -n 20';
-
 }
-
-
-
-
 my $status = system($runexe);
 if ( $status == -1 ) {
     say "Failed to execute: $!";
