@@ -59,11 +59,11 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         my $ph_data
             = pack( 'LL Q Q Q Q Q Q', 1, 6, $data_off, $base + $data_off, $base + $data_off, length($data_padded), length($data_padded), 0x1000 );
 
-        # PT_NOTE
+        # PT_NOTE - vaddr must match p_offset for proper loading
         my $ph_note = '';
         if ($note_data) {
             my $note_file_off = 64 + ( $num_ph * 56 );
-            $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $note_file_off, 0, 0, length($note_data), length($note_data), 0 );
+            $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $note_file_off, $note_file_off, $note_file_off, length($note_data), length($note_data), 4 );
         }
         open my $fh, '>', $filename or die $!;
         binmode $fh;
