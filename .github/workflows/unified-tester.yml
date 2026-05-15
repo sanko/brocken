@@ -122,8 +122,8 @@ jobs:
           arch: ${{ inputs.arch }}
           prepare: ${{ inputs.prepare }}
           run: |
-            export PATH=/usr/local/bin:$PATH
-            /usr/local/bin/perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
+            export PATH=/usr/local/bin:lib/perl5/bin:$PATH
+            perl eg/brocken.pl ${{ inputs.os }}-${{ inputs.arch }}
 
       - name: Build and Test in DragonflyBSD
         if: inputs.runner_type == 'vm' && inputs.os == 'dragonflybsd'
