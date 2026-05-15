@@ -28,7 +28,7 @@ $as->resolve();
 my $exe    = $p->write_bin('pulse_output');
 my $runexe = $exe;
 $runexe =~ s{^\./}{} if $^O eq 'MSWin32';
-if ( $p->os eq 'openbsd' ) {
+if ( $p->os =~ /bsd/ ) {
     system 'readelf -Wl ' . $runexe;
     system 'ktrace', $runexe;
     system 'kdump';
