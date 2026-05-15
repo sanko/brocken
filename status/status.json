@@ -9,7 +9,7 @@
 ,
 "macos-x86_64-none": "👍🏽 passing"
 ,
-"netbsd-aarch64-none": "👎🏽 failing"
+"netbsd-aarch64-none": "👍🏽 passing"
 ,
 "netbsd-x86_64-none": "👍🏽 passing"
 ,
@@ -19,7 +19,7 @@
 ,
 "openbsd-x86_64-none": "👍🏽 passing"
 ,
-"solaris-x86_64-none": "👍🏽 passing"
+"solaris-x86_64-none": "👎🏽 failing"
 ,
 "ubuntu-aarch64-none": "👍🏽 passing"
 ,
