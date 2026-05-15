@@ -26,6 +26,7 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
 
         # Generate Identification Notes for BSDs
         my $note_data = '';
+
         # Note: Some OSes like OpenBSD may have issues with custom note sections
         if ( $os eq 'netbsd' ) {
             $note_data = pack( 'LLL', 7, 4, 1 ) . "NetBSD\0\0" . pack( 'L', 900000000 );
@@ -39,6 +40,11 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
 
             # Namesz=10, Descsz=4, Type=1
             $note_data = pack( 'LLL', 10, 4, 1 ) . "DragonFly\0\0" . pack( 'L', 0 );
+        }
+        elsif ( $os eq 'openbsd' ) {
+
+            # Namesz=8, Descsz=4, Type=1 (ELF_NOTE_OPENBSD_IDENT)
+            $note_data = pack( 'LLL', 8, 4, 1 ) . "OpenBSD\0" . pack( 'L', 0 );
         }
         my $num_ph = $note_data ? 3 : 2;
 
@@ -139,4 +145,4 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         return $filename;
     }
 }
-1
+1;
