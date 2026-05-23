@@ -1,0 +1,49 @@
+---
+abstract: Compiler?
+author:
+  - 'Sanko Robinson <sanko@cpan.org>'
+build_requires: {}
+configure_requires:
+  Module::Build::Tiny: '0.034'
+  Path::Tiny: '0'
+  perl: v5.40.0
+dynamic_config: 1
+generated_by: 'App::mii v1.0.0, CPAN::Meta::Converter version 2.150013'
+keywords: []
+license: artistic_2
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: '1.4'
+name: Brocken
+no_index:
+  directory: []
+  file: []
+  namespace: []
+  package: []
+provides:
+  Brocken:
+    file: lib/Brocken.pm
+    version: v0.0.1
+  Brocken::Target::Architecture::ARM64:
+    file: lib/Brocken/Target/Architecture/ARM64.pm
+  Brocken::Target::Architecture::X64:
+    file: lib/Brocken/Target/Architecture/X64.pm
+  Brocken::Target::Format:
+    file: lib/Brocken/Target/Format.pm
+  Brocken::Target::Format::ELF:
+    file: lib/Brocken/Target/Format/ELF.pm
+  Brocken::Target::Format::MachO:
+    file: lib/Brocken/Target/Format/MachO.pm
+  Brocken::Target::Format::PE:
+    file: lib/Brocken/Target/Format/PE.pm
+resources:
+  license: http://www.perlfoundation.org/artistic_license_2_0
+version: v0.0.1
+x_custom_builder: 1
+x_ignore:
+  - .tidyallrc
+  - .gitignore
+  - .clang-format
+  - .github/**
+x_no_upload: 1
+x_serialization_backend: 'CPAN::Meta::YAML version 0.020'

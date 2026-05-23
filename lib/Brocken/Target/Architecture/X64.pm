@@ -2,7 +2,7 @@ use v5.40;
 use feature 'class';
 no warnings 'portable', 'experimental::class';
 #
-class Brocken::Target::X64 {
+class Brocken::Target::Architecture::X64 {
     our %REG = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7, r8 => 8, r9 => 9, r10 => 10, r11 => 11 );
     field $code : reader = '';
     field @fixups;
