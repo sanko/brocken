@@ -4,61 +4,88 @@ no warnings 'portable', 'experimental::class';
 #
 class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
 
+    method _detect_elf_info ( $ref = undef ) {
+        my @candidates = $ref ? ($ref) : ( '/bin/sh', '/sbin/init', '/usr/bin/env', '/boot/system/bin/sh', '/boot/system/bin/env' );
+        for my $candidate (@candidates) {
+            next if !-e $candidate || !-r _;
+            open my $fh, '<:raw', $candidate or next;
+            my $bytes = read( $fh, my $ehdr, 64 );
+            close $fh;
+            next if $bytes != 64;
+            next if substr( $ehdr, 0, 4 ) ne "\x7fELF";
+            my $osabi    = ord( substr( $ehdr, 7, 1 ) );
+            my $ei_class = ord( substr( $ehdr, 4, 1 ) );
+            next if $ei_class != 1 && $ei_class != 2;
+            my ( $e_phoff, $e_phentsize, $e_phnum );
+
+            if ( $ei_class == 2 ) {
+                $e_phoff     = unpack( 'Q', substr( $ehdr, 32, 8 ) );
+                $e_phentsize = unpack( 'S', substr( $ehdr, 54, 2 ) );
+                $e_phnum     = unpack( 'S', substr( $ehdr, 56, 2 ) );
+            }
+            else {
+                $e_phoff     = unpack( 'L', substr( $ehdr, 28, 4 ) );
+                $e_phentsize = unpack( 'S', substr( $ehdr, 42, 2 ) );
+                $e_phnum     = unpack( 'S', substr( $ehdr, 44, 2 ) );
+            }
+            next if !$e_phnum || !$e_phentsize;
+            open my $fh2, '<:raw', $candidate or next;
+            seek( $fh2, $e_phoff, 0 );
+            my $ph_bytes = $e_phentsize * $e_phnum;
+            my $read_ok  = read( $fh2, my $phdrs, $ph_bytes );
+            close $fh2;
+            next if !$read_ok;
+            my ( $note_data, $has_pintable ) = ( '', 0 );
+
+            for my $i ( 0 .. $e_phnum - 1 ) {
+                my $phdr   = substr( $phdrs, $i * $e_phentsize, $e_phentsize );
+                my $p_type = unpack( 'L', substr( $phdr, 0, 4 ) );
+                if ( $p_type == 4 && !$note_data ) {
+                    my ( $p_offset, $p_filesz );
+                    if ( $ei_class == 2 ) {
+                        $p_offset = unpack( 'Q', substr( $phdr, 8,  8 ) );
+                        $p_filesz = unpack( 'Q', substr( $phdr, 32, 8 ) );
+                    }
+                    else {
+                        $p_offset = unpack( 'L', substr( $phdr, 4,  4 ) );
+                        $p_filesz = unpack( 'L', substr( $phdr, 16, 4 ) );
+                    }
+                    open my $fh3, '<:raw', $candidate or next;
+                    seek( $fh3, $p_offset, 0 );
+                    read( $fh3, $note_data, $p_filesz );
+                    close $fh3;
+                }
+                elsif ( $p_type == 0x65a3dbe9 && !$has_pintable ) {
+                    $has_pintable = 1;
+                }
+            }
+            return ( $osabi, $note_data, $has_pintable );
+        }
+        return ( 0, '', 0 );
+    }
+
     method write_bin ( $filename, $text, $data, $arch, $os = 'linux' ) {
         my $base     = 0x400000;
         my $text_off = 0x1000;
         my $data_off = 0x2000;
         my $machine  = ( $arch eq 'arm64' ) ? 183 : 62;
-
-        # Comprehensive OSABI Map
-        my %osabis = (
-            linux     => 0,
-            freebsd   => 9,
-            netbsd    => 2,
-            solaris   => 6,
-            openbsd   => 0,    # OpenBSD prefers 0 + Note
-            dragonfly => 0     # DragonFly prefers 0 + Note
-        );
-        my $osabi       = $osabis{$os} // 0;
-        my $align_f     = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
-        my $text_padded = $text . ( "\0" x ( $align_f->( length($text), 0x1000 ) - length($text) ) );
-        my $data_padded = $data . ( "\0" x ( $align_f->( length($data), 0x1000 ) - length($data) ) );
-
-        # Generate Identification Notes for BSDs
-        my $note_data     = '';
+        my ( $osabi, $note_data, $has_pintable ) = $self->_detect_elf_info();
+        my $align_f       = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+        my $text_padded   = $text . ( "\0" x ( $align_f->( length($text), 0x1000 ) - length($text) ) );
+        my $data_padded   = $data . ( "\0" x ( $align_f->( length($data), 0x1000 ) - length($data) ) );
         my $pintable_data = '';
 
-        # Note: Some OSes like OpenBSD may have issues with custom note sections
-        if ( $os eq 'netbsd' ) {
-            $note_data = pack( 'LLL', 7, 4, 1 ) . "NetBSD\0\0" . pack( 'L', 900000000 );
-        }
-        elsif ( $os eq 'freebsd' ) {
-
-            # Namesz=8, Descsz=4, Type=1 (ABI_TAG)
-            $note_data = pack( 'LLL', 8, 4, 1 ) . "FreeBSD\0" . pack( 'L', 1400000 );    # Ver 14.0
-        }
-        elsif ( $os eq 'dragonfly' ) {
-
-            # Namesz=10, Descsz=4, Type=1
-            $note_data = pack( 'LLL', 10, 4, 1 ) . "DragonFly\0\0" . pack( 'L', 0 );
-        }
-        elsif ( $os eq 'openbsd' ) {
-
-            # Namesz=8, Descsz=4, Type=1 (ELF_NOTE_OPENBSD_IDENT)
-            $note_data = pack( 'LLL', 8, 4, 1 ) . "OpenBSD\0" . pack( 'L', 0 );
-
-            # Secure pinsyscalls generation: dynamically find the exact addresses of syscall ops
+        if ($has_pintable) {
             my $pos = 0;
             if ( $arch eq 'x64' ) {
                 while ( ( my $idx = index( $text, "\x0F\x05", $pos ) ) != -1 ) {
                     my $vaddr = $base + $text_off + $idx;
-                    $pintable_data .= pack( 'LL', $vaddr, 1 );    # OpenBSD SYS_exit
-                    $pintable_data .= pack( 'LL', $vaddr, 4 );    # OpenBSD SYS_write
+                    $pintable_data .= pack( 'LL', $vaddr, 1 );
+                    $pintable_data .= pack( 'LL', $vaddr, 4 );
                     $pos = $idx + 2;
                 }
             }
             else {
-                # OpenBSD ARM64 uses SVC #0 `01 00 00 d4`
                 while ( ( my $idx = index( $text, "\x01\x00\x00\xd4", $pos ) ) != -1 ) {
                     my $vaddr = $base + $text_off + $idx;
                     $pintable_data .= pack( 'LL', $vaddr, 1 );
@@ -67,37 +94,26 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
                 }
             }
         }
-
-        # 3 Base LOAD Segments (Headers, Text, Data) + optional Notes/Syscalls
-        my $num_ph = 3 + ( $note_data ? 1 : 0 ) + ( $pintable_data ? 1 : 0 );
-
-        # ELF Header
+        my $num_ph  = 3 + ( $note_data ? 1 : 0 ) + ( $pintable_data ? 1 : 0 );
         my $elf_hdr = pack(
             'A4 C C C C C x7 S S L Q Q Q L S S S S S S',
             "\x7fELF", 2, 1, 1,  $osabi, 0,       2, $machine, 1, $base + $text_off,
             64,        0, 0, 64, 56,     $num_ph, 0, 0,        0, 0
         );
-
-        # PT_LOAD (R) - mapped from offset 0x0 to 0x1000 to include headers in memory
         my $ph_hdrs = pack( 'LL Q Q Q Q Q Q', 1, 4, 0, $base, $base, $text_off, $text_off, 0x1000 );
-
-        # PT_LOAD (RX) - mapped exactly from entry point
         my $ph_text
             = pack( 'LL Q Q Q Q Q Q', 1, 5, $text_off, $base + $text_off, $base + $text_off, length($text_padded), length($text_padded), 0x1000 );
-
-        # PT_LOAD (RW)
         my $ph_data
             = pack( 'LL Q Q Q Q Q Q', 1, 6, $data_off, $base + $data_off, $base + $data_off, length($data_padded), length($data_padded), 0x1000 );
         my $ph_note     = '';
         my $ph_syscalls = '';
         my $extra_off   = 64 + ( $num_ph * 56 );
+
         if ($note_data) {
             $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $extra_off, $base + $extra_off, $base + $extra_off, length($note_data), length($note_data), 4 );
             $extra_off += length($note_data);
         }
         if ($pintable_data) {
-
-            # PT_OPENBSD_SYSCALLS = 0x65a3dbe9
             $ph_syscalls = pack( 'LL Q Q Q Q Q Q',
                 0x65a3dbe9, 4, $extra_off,
                 $base + $extra_off,
@@ -124,8 +140,7 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         my $text_padded = $text . ( "\0" x ( $align_f->( length($text), 0x1000 ) - length($text) ) );
         my $data_padded = $data . ( "\0" x ( $align_f->( length($data), 0x1000 ) - length($data) ) );
         my $machine     = ( $arch eq 'arm64' ) ? 183 : 62;
-        my %osabis      = ( linux => 0, freebsd => 9, netbsd => 2, solaris => 6, openbsd => 0, dragonfly => 0 );
-        my $osabi       = $osabis{$os} // 0;
+        my ($osabi)     = $self->_detect_elf_info();
         my $num_exports = scalar keys %$exports;
         my $dynsym_size = 24 * ( $num_exports + 1 );
         my $dynstr      = "\0";

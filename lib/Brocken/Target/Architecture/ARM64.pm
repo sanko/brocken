@@ -2,7 +2,7 @@ use v5.40;
 use feature 'class';
 no warnings 'portable', 'experimental::class';
 #
-class Brocken::Target::ARM64 {
+class Brocken::Target::Architecture::ARM64 {
     our %REG = (
         x0  => 0,
         x1  => 1,
