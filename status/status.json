@@ -5,9 +5,9 @@
 ,
 "freebsd-x86_64-none": "👎🏽 failing"
 ,
-"macos-aarch64-none": "👎🏽 failing"
+"macos-aarch64-none": "👍🏽 passing"
 ,
-"macos-x86_64-none": "👎🏽 failing"
+"macos-x86_64-none": "👍🏽 passing"
 ,
 "netbsd-aarch64-none": "👎🏽 failing"
 ,
@@ -19,11 +19,11 @@
 ,
 "openbsd-x86_64-none": "👎🏽 failing"
 ,
-"solaris-x86_64-none": "👎🏽 failing"
+"solaris-x86_64-none": "👍🏽 passing"
 ,
-"ubuntu-aarch64-none": "👎🏽 failing"
+"ubuntu-aarch64-none": "👍🏽 passing"
 ,
-"ubuntu-x86_64-none": "👎🏽 failing"
+"ubuntu-x86_64-none": "👍🏽 passing"
 ,
 "windows-aarch64-none": "👎🏽 failing"
 ,
