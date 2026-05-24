@@ -110,18 +110,6 @@ jobs:
       perl: "5.40"
       pkg: sudo pkg install -y perl5
       version: '14.1'
-  haiku:
-    name: Haiku
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: x86-64
-      host: ubuntu-latest
-      os: haiku
-      perl: "5.40"
-      pkg: sudo pkgman install perl
-      version: r1beta5
   midnightbsd:
     name: MidnightBSD
     needs:
@@ -207,7 +195,6 @@ jobs:
       - dragonflybsd
       - freebsd-x64
       - freebsd-arm64
-      - haiku
       - midnightbsd
       - netbsd-x64
       - netbsd-arm64
@@ -242,7 +229,6 @@ jobs:
             "DragonFly BSD:Intel"
             "FreeBSD:Intel"
             "FreeBSD:ARM"
-            "Haiku:Intel"
             "MidnightBSD:Intel"
             "NetBSD:Intel"
             "NetBSD:ARM"
@@ -263,7 +249,6 @@ jobs:
               *"dragonflybsd"*)      echo "DragonFly BSD:Intel" ;;
               *"freebsd"*"arm64"*)   echo "FreeBSD:ARM" ;;
               *"freebsd"*)           echo "FreeBSD:Intel" ;;
-              *"haiku"*)             echo "Haiku:Intel" ;;
               *"midnightbsd"*)       echo "MidnightBSD:Intel" ;;
               *"netbsd"*"arm64"*)    echo "NetBSD:ARM" ;;
               *"netbsd"*)            echo "NetBSD:Intel" ;;
