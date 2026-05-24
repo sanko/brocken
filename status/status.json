@@ -3,6 +3,8 @@
 ,
 "Linux:ARM": "success"
 ,
+"Linux:RISC-V": "failure"
+,
 "macOS:Intel": "success"
 ,
 "macOS:Apple Silicon": "success"
