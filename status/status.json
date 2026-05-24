@@ -17,8 +17,6 @@
 ,
 "FreeBSD:ARM": "success"
 ,
-"Haiku:Intel": "failure"
-,
 "MidnightBSD:Intel": "success"
 ,
 "NetBSD:Intel": "success"
