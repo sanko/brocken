@@ -25,12 +25,13 @@ class Brocken v0.0.1 {
         }
         else {
             my $m = `uname -m` // 'x86_64';
-            $d_arch = 'arm64' if $m =~ /aarch64|arm64|armv8/i;
+            $d_arch = 'arm64'   if $m =~ /aarch64|arm64|armv8/i;
+            $d_arch = 'riscv64' if $m =~ /riscv64/i;
             use Config;
             $d_arch = 'arm64' if ( $Config{archname} // '' ) =~ /aarch64|arm64|apple-arm64/i;
         }
         my $os_list = 'linux|win64|macos|freebsd|openbsd|netbsd|solaris|dragonfly|midnightbsd|haiku';
-        if ( @ARGV && $ARGV[0] =~ /^(?:$os_list)-(?:x64|arm64)$/ ) {
+        if ( @ARGV && $ARGV[0] =~ /^(?:$os_list)-(?:x64|arm64|riscv64)$/ ) {
             my $target = shift @ARGV;
             ( $os, $arch ) = split /-/, $target;
         }
@@ -39,9 +40,9 @@ class Brocken v0.0.1 {
         $target_os = Brocken::Target::OS->from_name($os);
         $abi       = Brocken::Target::ABI->new();
         $as
-            = $arch eq 'arm64' ?
-            do   { require Brocken::Target::Architecture::ARM64; Brocken::Target::Architecture::ARM64->new() }
-            : do { require Brocken::Target::Architecture::X64;   Brocken::Target::Architecture::X64->new() };
+            = $arch eq 'arm64'   ? do { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new() }
+            : $arch eq 'riscv64' ? do { require Brocken::Target::Architecture::RISCV64; Brocken::Target::Architecture::RISCV64->new() }
+            :                      do { require Brocken::Target::Architecture::X64;     Brocken::Target::Architecture::X64->new() };
         if    ( $os eq 'win64' ) { require Brocken::Target::Format::PE;    $format = Brocken::Target::Format::PE->new() }
         elsif ( $os eq 'macos' ) { require Brocken::Target::Format::MachO; $format = Brocken::Target::Format::MachO->new() }
         else                     { require Brocken::Target::Format::ELF;   $format = Brocken::Target::Format::ELF->new() }

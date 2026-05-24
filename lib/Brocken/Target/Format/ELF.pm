@@ -68,7 +68,7 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         my $base     = 0x400000;
         my $text_off = 0x1000;
         my $data_off = 0x2000;
-        my $machine  = ( $arch eq 'arm64' ) ? 183 : 62;
+        my $machine  = ( $arch eq 'arm64' ) ? 183 : ( $arch eq 'riscv64' ) ? 243 : 62;
         my ( $osabi, $note_data, $has_pintable ) = $self->_detect_elf_info();
         my $align_f       = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
         my $text_padded   = $text . ( "\0" x ( $align_f->( length($text), 0x1000 ) - length($text) ) );
@@ -139,7 +139,7 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         my $align_f     = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
         my $text_padded = $text . ( "\0" x ( $align_f->( length($text), 0x1000 ) - length($text) ) );
         my $data_padded = $data . ( "\0" x ( $align_f->( length($data), 0x1000 ) - length($data) ) );
-        my $machine     = ( $arch eq 'arm64' ) ? 183 : 62;
+        my $machine     = ( $arch eq 'arm64' ) ? 183 : ( $arch eq 'riscv64' ) ? 243 : 62;
         my ($osabi)     = $self->_detect_elf_info();
         my $num_exports = scalar keys %$exports;
         my $dynsym_size = 24 * ( $num_exports + 1 );
