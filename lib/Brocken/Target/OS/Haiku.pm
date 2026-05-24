@@ -1,0 +1,59 @@
+use v5.40;
+use feature 'class';
+no warnings 'portable', 'experimental::class';
+
+class Brocken::Target::OS::Haiku : isa(Brocken::Target::OS) {
+    ADJUST {
+        die "OS name mismatch" unless $self->name eq 'haiku';
+    }
+    state %cache;
+
+    method syscall_write ($arch) {
+        return $self->haiku_syscall( '_kern_write', $arch );
+    }
+
+    method syscall_exit ($arch) {
+        return $self->haiku_syscall( '_kern_exit_team', $arch );
+    }
+
+    method haiku_syscall ( $name, $arch = 'x64' ) {
+        my $key = "$name|$arch";
+        return $cache{$key} if exists $cache{$key};
+        my $num = 0;
+        if ( -e '/boot/system/lib/libroot.so' ) {
+            my $dump = `objdump -d /boot/system/lib/libroot.so 2>/dev/null | grep -A 5 "<$name>:"`;
+            if ( $arch eq 'x64' ) {
+                if ( $dump =~ /mov\s+\$0x([0-9a-f]+),%[er]?ax/i ) {
+                    $num = hex($1);
+                }
+                elsif ( $dump =~ /mov\s+%[er]?ax,\s*(?:0x)?([0-9a-f]+)/i ) {
+                    $num = hex($1);
+                }
+            }
+            elsif ( $arch eq 'arm64' ) {
+                if ( $dump =~ /mov\s+x8,\s*#?0x([0-9a-f]+)/i ) {
+                    $num = hex($1);
+                }
+            }
+        }
+        if ( !$num ) {
+            my $fallbacks = { '_kern_write' => 131, '_kern_exit_team' => 33, };
+            $num = $fallbacks->{$name} // 0;
+        }
+        return $cache{$key} = $num;
+    }
+
+    method write_syscall_args ( $as, $arch, $data_rva, $off, $text_rva, $len ) {
+        if ( $arch eq 'arm64' ) {
+            $as->mov_imm( 'x1', -1 );
+            $as->lea_rva( 'x2', $data_rva + $off, $text_rva );
+            $as->mov_imm( 'x3', $len );
+        }
+        else {
+            $as->mov_imm( 'rsi', -1 );
+            $as->lea_rva( 'rdx', $data_rva + $off, $text_rva );
+            $as->mov_imm( 'r10', $len );
+        }
+    }
+}
+1;
