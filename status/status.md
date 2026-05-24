@@ -1,18 +1,18 @@
 ## Build and Test Summary
-| OS | Arch | Result |
-|:---|:---|:---|
-| **dragonflybsd** | `x86_64` | ❌ failure |
-| **freebsd** | `aarch64` | ❌ failure |
-| **freebsd** | `x86_64` | ❌ failure |
-| **macos** | `aarch64` | ✅ success |
-| **macos** | `x86_64` | ✅ success |
-| **netbsd** | `aarch64` | ❌ failure |
-| **netbsd** | `x86_64` | ❌ failure |
-| **omnios** | `x86_64` | ❌ failure |
-| **openbsd** | `aarch64` | ❌ failure |
-| **openbsd** | `x86_64` | ❌ failure |
-| **solaris** | `x86_64` | ❌ failure |
-| **ubuntu** | `aarch64` | ✅ success |
-| **ubuntu** | `x86_64` | ✅ success |
-| **windows** | `aarch64` | ❌ failure |
-| **windows** | `x86_64` | ❌ failure |
+| Artifact | Result |
+|:---|:---|
+| test-output-dragonflybsd-6.4.2-perl5.40.2-x86-64 | ✅ success |
+| test-output-freebsd-14.1-perl5.40.2-arm64 | ✅ success |
+| test-output-freebsd-14.1-perl5.40.2-x86-64 | ✅ success |
+| test-output-macos-15-5.42.0 | ✅ success |
+| test-output-macos-15-intel-5.42.0 | ✅ success |
+| test-output-midnightbsd-4.0.4-perl5.40.2-x86-64 | ✅ success |
+| test-output-netbsd-10.1-perl5.40.2-arm64 | ✅ success |
+| test-output-netbsd-10.1-perl5.40.2-x86-64 | ✅ success |
+| test-output-omnios-r151058-perl5.40.2-x86-64 | ✅ success |
+| test-output-openbsd-7.8-perl5.40.2-arm64 | ✅ success |
+| test-output-openbsd-7.8-perl5.40.2-x86-64 | ✅ success |
+| test-output-ubuntu-24.04-5.42.0 | ✅ success |
+| test-output-ubuntu-24.04-arm-5.42.0 | ✅ success |
+| test-output-windows-11-arm-5.42.0-Dusethreads | ✅ success |
+| test-output-windows-2022-5.42.0-Dusethreads | ✅ success |

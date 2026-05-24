@@ -1,31 +1,31 @@
 {
-"dragonflybsd-x86_64-none": "👎🏽 failing"
+"test-output-dragonflybsd-6.4.2-perl5.40.2-x86-64": "success"
 ,
-"freebsd-aarch64-none": "👎🏽 failing"
+"test-output-freebsd-14.1-perl5.40.2-arm64": "success"
 ,
-"freebsd-x86_64-none": "👎🏽 failing"
+"test-output-freebsd-14.1-perl5.40.2-x86-64": "success"
 ,
-"macos-aarch64-none": "👍🏽 passing"
+"test-output-macos-15-5.42.0": "success"
 ,
-"macos-x86_64-none": "👍🏽 passing"
+"test-output-macos-15-intel-5.42.0": "success"
 ,
-"netbsd-aarch64-none": "👎🏽 failing"
+"test-output-midnightbsd-4.0.4-perl5.40.2-x86-64": "success"
 ,
-"netbsd-x86_64-none": "👎🏽 failing"
+"test-output-netbsd-10.1-perl5.40.2-arm64": "success"
 ,
-"omnios-x86_64-none": "👎🏽 failing"
+"test-output-netbsd-10.1-perl5.40.2-x86-64": "success"
 ,
-"openbsd-aarch64-none": "👎🏽 failing"
+"test-output-omnios-r151058-perl5.40.2-x86-64": "success"
 ,
-"openbsd-x86_64-none": "👎🏽 failing"
+"test-output-openbsd-7.8-perl5.40.2-arm64": "success"
 ,
-"solaris-x86_64-none": "👎🏽 failing"
+"test-output-openbsd-7.8-perl5.40.2-x86-64": "success"
 ,
-"ubuntu-aarch64-none": "👍🏽 passing"
+"test-output-ubuntu-24.04-5.42.0": "success"
 ,
-"ubuntu-x86_64-none": "👍🏽 passing"
+"test-output-ubuntu-24.04-arm-5.42.0": "success"
 ,
-"windows-aarch64-none": "👎🏽 failing"
+"test-output-windows-11-arm-5.42.0-Dusethreads": "success"
 ,
-"windows-x86_64-none": "👎🏽 failing"
+"test-output-windows-2022-5.42.0-Dusethreads": "success"
 }
