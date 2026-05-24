@@ -23,6 +23,7 @@ class Brocken v0.0.1 {
         $d_os = 'solaris'     if $^O eq 'solaris';
         $d_os = 'dragonfly'   if $^O eq 'dragonfly';
         $d_os = 'midnightbsd' if $^O eq 'midnightbsd';
+        $d_os = 'haiku'       if $^O eq 'haiku';
         my $d_arch = 'x64';
 
         if ( $d_os eq 'win64' ) {
@@ -34,7 +35,7 @@ class Brocken v0.0.1 {
             use Config;
             $d_arch = 'arm64' if ( $Config{archname} // '' ) =~ /aarch64|arm64|apple-arm64/i;
         }
-        my $os_list = 'linux|win64|macos|freebsd|openbsd|netbsd|solaris|dragonfly|midnightbsd';
+        my $os_list = 'linux|win64|macos|freebsd|openbsd|netbsd|solaris|dragonfly|midnightbsd|haiku';
         if ( @ARGV && $ARGV[0] =~ /^(?:$os_list)-(?:x64|arm64)$/ ) {
             my $target = shift @ARGV;
             ( $os, $arch ) = split /-/, $target;
@@ -94,32 +95,82 @@ class Brocken v0.0.1 {
         return { eq => 4, ne => 5, lt => 0xC, le => 0xE, gt => 0xF, ge => 0xD, z => 4, nz => 5 }->{$name};
     }
 
+    method _haiku_syscall ($name) {
+        state %cache;
+        return $cache{$name} if exists $cache{$name};
+        my $num = 0;
+
+        # Haiku's syscall ABI is completely unstable between builds.
+        # So we briefly disassemble libroot.so (the standard C library) to pull the exact syscall number
+        # for whatever version of the Haiku kernel the user is running on right now.
+        if ( -e '/boot/system/lib/libroot.so' ) {
+            my $dump = `objdump -d /boot/system/lib/libroot.so 2>/dev/null | grep -A 5 "<$name>:"`;
+            if ( $arch eq 'x64' ) {
+                if ( $dump =~ /mov\s+\$0x([0-9a-f]+),%[er]?ax/i ) {
+                    $num = hex($1);
+                }
+                elsif ( $dump =~ /mov\s+%[er]?ax,\s*(?:0x)?([0-9a-f]+)/i ) {
+                    $num = hex($1);
+                }
+            }
+            elsif ( $arch eq 'arm64' ) {
+                if ( $dump =~ /mov\s+x8,\s*#?0x([0-9a-f]+)/i ) {
+                    $num = hex($1);
+                }
+            }
+        }
+
+        if (!$num) {
+            my $fallbacks = {
+                '_kern_write' => 131,
+                '_kern_exit_team' => 33,
+            };
+            $num = $fallbacks->{$name} // 0;
+        }
+
+        return $cache{$name} = $num;
+    }
+
     method print_str ($str) {
         my $as  = $as;
         my $off = length $data;
         $data .= $str;
         my $is_bsd_like = $os =~ /macos|freebsd|openbsd|netbsd|dragonfly|solaris|midnightbsd/;
-        if ( $os eq 'linux' || $is_bsd_like ) {
+        if ( $os eq 'linux' || $is_bsd_like || $os eq 'haiku' ) {
             if ( $arch eq 'arm64' ) {
-                my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 64 );    # write
+                my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $os eq 'haiku' ? $self->_haiku_syscall('_kern_write') : ( $is_bsd_like ? 4 : 64 ) );    # write
                 $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num ) unless $os eq 'netbsd';
                 $as->mov_imm( 'x0', 1 );                                                 # stdout
                 my $page_size = ( $os eq 'macos' ) ? 0x4000 : 0x1000;
                 my $text_rva  = $page_size;
                 my $data_rva  = 2 * $page_size;
-                $as->lea_rva( 'x1', $data_rva + $off, $text_rva );
-                $as->mov_imm( 'x2', length($str) );
+                if ( $os eq 'haiku' ) {
+                    $as->mov_imm( 'x1', -1 ); # pos (Haiku off_t)
+                    $as->lea_rva( 'x2', $data_rva + $off, $text_rva ); # buffer
+                    $as->mov_imm( 'x3', length($str) ); # bufferSize
+                }
+                else {
+                    $as->lea_rva( 'x1', $data_rva + $off, $text_rva );
+                    $as->mov_imm( 'x2', length($str) );
+                }
                 $as->syscall( $os, $num );
             }
             else {
-                my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 1 );
+                my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $os eq 'haiku' ? $self->_haiku_syscall('_kern_write') : ( $is_bsd_like ? 4 : 1 ) );
                 $as->mov_imm( 'rax', $num );
                 $as->mov_imm( 'rdi', 1 );
                 my $page_size = ( $os eq 'macos' ) ? 0x1000 : 0x1000;
                 my $text_rva  = $page_size;
                 my $data_rva  = 2 * $page_size;
-                $as->lea_rva( 'rsi', $data_rva + $off, $text_rva );
-                $as->mov_imm( 'rdx', length($str) );
+                if ( $os eq 'haiku' ) {
+                    $as->mov_imm( 'rsi', -1 ); # pos (Haiku off_t)
+                    $as->lea_rva( 'rdx', $data_rva + $off, $text_rva ); # buffer
+                    $as->mov_imm( 'r10', length($str) ); # bufferSize (Haiku x64 uses r10 for 4th syscall argument)
+                }
+                else {
+                    $as->lea_rva( 'rsi', $data_rva + $off, $text_rva );
+                    $as->mov_imm( 'rdx', length($str) );
+                }
                 $as->syscall( $os, $num );
             }
         }
@@ -149,15 +200,15 @@ class Brocken v0.0.1 {
 
     method exit_proc ($code) {
         my $is_bsd_like = $os =~ /macos|freebsd|openbsd|netbsd|dragonfly|solaris|midnightbsd/;
-        if ( $os eq 'linux' || $is_bsd_like ) {
+        if ( $os eq 'linux' || $is_bsd_like || $os eq 'haiku' ) {
             if ( $arch eq 'arm64' ) {
-                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );    # exit
+                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $os eq 'haiku' ? $self->_haiku_syscall('_kern_exit_team') : ( $is_bsd_like ? 1 : 93 ) );    # exit
                 $as->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num ) unless $os eq 'netbsd';
                 $as->mov_imm( 'x0', $code );
                 $as->syscall( $os, $num );
             }
             else {
-                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 60 );
+                my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $os eq 'haiku' ? $self->_haiku_syscall('_kern_exit_team') : ( $is_bsd_like ? 1 : 60 ) );
                 $as->mov_imm( 'rax', $num );
                 $as->mov_imm( 'rdi', $code );
                 $as->syscall( $os, $num );
