@@ -128,6 +128,43 @@ class Brocken::Target::Architecture::ARM64 {
     }
     method mark_label ($name) { $labels{$name} = length $code }
 
+    method emit_print_str ( $os, $off, $len ) {
+        if ( $os->is_posix ) {
+            my $num = $os->syscall_write('arm64');
+            my $reg = $os->syscall_num_reg('arm64');
+            $self->mov_imm( $reg, $num ) if defined $reg;
+            $self->mov_imm( 'x0', 1 );
+            my $page_size = $os->page_size('arm64');
+            my $text_rva  = $page_size;
+            my $data_rva  = 2 * $page_size;
+            $os->write_syscall_args( $self, 'arm64', $data_rva, $off, $text_rva, $len );
+            $self->syscall( $os->name, $num );
+        }
+        else {
+            $self->mov_imm( 'x0', -11 );
+            $self->call_rva( 0x3008, 0x1000 );
+            $self->mov_reg( 'x0', 'x0' );
+            $self->lea_rva( 'x1', 0x2000 + $off, 0x1000 );
+            $self->mov_imm( 'x2', $len );
+            $self->mov_imm( 'x4', 0 );
+            $self->call_rva( 0x3010, 0x1000 );
+        }
+    }
+
+    method emit_exit_proc ( $os, $code ) {
+        if ( $os->is_posix ) {
+            my $num = $os->syscall_exit('arm64');
+            my $reg = $os->syscall_num_reg('arm64');
+            $self->mov_imm( $reg, $num ) if defined $reg;
+            $self->mov_imm( 'x0', $code );
+            $self->syscall( $os->name, $num );
+        }
+        else {
+            $self->mov_imm( 'x0', $code );
+            $self->call_rva( 0x3000, 0x1000 );
+        }
+    }
+
     method resolve {
         for (@fixups) {
             my $target = $labels{ $_->{target} };
