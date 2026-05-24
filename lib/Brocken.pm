@@ -1,6 +1,7 @@
 use v5.40;
 use feature 'class';
 no warnings 'portable', 'experimental::class';
+#
 class Brocken v0.0.1 {
     field $arch      : reader : param = undef;
     field $os        : reader : param = undef;

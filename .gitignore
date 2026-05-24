@@ -40,3 +40,4 @@ eg/lib/*.pm
 *.session
 
 *.exe
+test_*.pl

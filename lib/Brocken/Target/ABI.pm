@@ -1,7 +1,7 @@
 use v5.40;
 use feature 'class';
 no warnings 'portable', 'experimental::class';
-
+#
 class Brocken::Target::ABI {
 
     method cc ( $arch, $name ) {
@@ -9,4 +9,5 @@ class Brocken::Target::ABI {
         return { eq => 4, ne => 5, lt => 0xC, le => 0xE, gt => 0xF, ge => 0xD, z => 4, nz => 5 }->{$name};
     }
 }
+#
 1;
