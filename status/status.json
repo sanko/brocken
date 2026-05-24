@@ -11,11 +11,13 @@
 ,
 "Windows:ARM": "success"
 ,
-"DragonFly_BSD:Intel": "failure"
+"DragonFly_BSD:Intel": "success"
 ,
 "FreeBSD:Intel": "success"
 ,
 "FreeBSD:ARM": "success"
+,
+"Haiku:Intel": "success"
 ,
 "MidnightBSD:Intel": "success"
 ,
