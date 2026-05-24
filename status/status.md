@@ -3,7 +3,7 @@
 |:---|:---|:---|
 | Linux | Intel | ✅ |
 | Linux | ARM | ✅ |
-| Linux | RISC-V | ❌ |
+| Linux | RISC-V | ✅ |
 | macOS | Intel | ✅ |
 | macOS | Apple Silicon | ✅ |
 | Windows | Intel | ✅ |
