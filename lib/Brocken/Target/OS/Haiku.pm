@@ -35,6 +35,11 @@ class Brocken::Target::OS::Haiku : isa(Brocken::Target::OS) {
                     $num = hex($1);
                 }
             }
+            elsif ( $arch eq 'riscv64' ) {
+                if ( $dump =~ /li\s+a7,\s*#?0x([0-9a-f]+)/i ) {
+                    $num = hex($1);
+                }
+            }
         }
         if ( !$num ) {
             my $fallbacks = { '_kern_write' => 131, '_kern_exit_team' => 33, };
@@ -48,6 +53,11 @@ class Brocken::Target::OS::Haiku : isa(Brocken::Target::OS) {
             $as->mov_imm( 'x1', -1 );
             $as->lea_rva( 'x2', $data_rva + $off, $text_rva );
             $as->mov_imm( 'x3', $len );
+        }
+        elsif ( $arch eq 'riscv64' ) {
+            $as->mov_imm( 'a0', -1 );
+            $as->lea_rva( 'a1', $data_rva + $off, $text_rva );
+            $as->mov_imm( 'a2', $len );
         }
         else {
             $as->mov_imm( 'rsi', -1 );

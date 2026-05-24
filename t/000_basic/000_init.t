@@ -16,7 +16,7 @@ if ( $p->os eq 'win64' ) {
     }
 }
 $p->print_str("# Brocken AOT Engine Starting...\n");
-my $loop_reg = ( $p->arch eq 'arm64' ) ? 'x19' : 'rbx';
+my $loop_reg = ( $p->arch eq 'arm64' ) ? 'x19' : ( $p->arch eq 'riscv64' ) ? 's0' : 'rbx';
 $as->mov_imm( $loop_reg, 1 );
 $as->mark_label('loop');
 $p->print_str("# -> Inside Loop Iteration\n");

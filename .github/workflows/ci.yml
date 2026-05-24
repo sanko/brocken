@@ -34,6 +34,16 @@ jobs:
       os: ubuntu-24.04-arm
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       title: ARM
+  riscv64:
+    name: Linux
+    needs:
+      - setup
+    uses: ./.github/workflows/unix.yml
+    with:
+      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
+      os: ubuntu-24.04-riscv
+      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
+      title: RISC-V
   macos-intel:
     name: macOS
     needs:
@@ -200,6 +210,7 @@ jobs:
     needs:
       - linux-x64
       - linux-arm64
+      - riscv64
       - macos-intel
       - macos-arm
       - win32-x64
@@ -235,6 +246,7 @@ jobs:
           EXPECTED=(
             "Linux:Intel"
             "Linux:ARM"
+            "Linux:RISC-V"
             "macOS:Intel"
             "macOS:Apple Silicon"
             "Windows:Intel"
@@ -254,8 +266,9 @@ jobs:
           # Map artifact dir name → OS:Arch key
           map_name() {
             case "$1" in
-              *"ubuntu-24.04-arm"*)  echo "Linux:ARM" ;;
-              *"ubuntu-24.04"*)      echo "Linux:Intel" ;;
+              *"ubuntu-24.04-arm"*)   echo "Linux:ARM" ;;
+              *"ubuntu-24.04-riscv"*) echo "Linux:RISC-V" ;;
+              *"ubuntu-24.04"*)       echo "Linux:Intel" ;;
               *"macos-15-intel"*)    echo "macOS:Intel" ;;
               *"macos-15"*)          echo "macOS:Apple Silicon" ;;
               *"windows-11-arm"*)    echo "Windows:ARM" ;;

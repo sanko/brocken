@@ -42,8 +42,10 @@ class Brocken::Target::OS {
         return 0x2000004 if $n eq 'macos';
         return 1         if $n eq 'linux'      && $arch eq 'x64';
         return 64        if $n eq 'linux'      && $arch eq 'arm64';
+        return 64        if $n eq 'linux'      && $arch eq 'riscv64';
         return 4         if $self->is_bsd_like && $arch eq 'x64';
         return 4         if $self->is_bsd_like && $arch eq 'arm64';
+        return 4         if $self->is_bsd_like && $arch eq 'riscv64';
         return undef;
     }
 
@@ -52,6 +54,7 @@ class Brocken::Target::OS {
         return 0x2000001 if $n eq 'macos';
         return 60        if $n eq 'linux' && $arch eq 'x64';
         return 93        if $n eq 'linux' && $arch eq 'arm64';
+        return 93        if $n eq 'linux' && $arch eq 'riscv64';
         return 1         if $self->is_bsd_like;
         return undef;
     }
@@ -59,6 +62,7 @@ class Brocken::Target::OS {
     method syscall_num_reg ($arch) {
         return 'rax' if $arch eq 'x64';
         return 'x8'  if $arch eq 'arm64';
+        return 'a7'  if $arch eq 'riscv64';
         return undef;
     }
 
@@ -70,6 +74,10 @@ class Brocken::Target::OS {
         if ( $arch eq 'arm64' ) {
             $as->lea_rva( 'x1', $data_rva + $off, $text_rva );
             $as->mov_imm( 'x2', $len );
+        }
+        elsif ( $arch eq 'riscv64' ) {
+            $as->lea_rva( 'a1', $data_rva + $off, $text_rva );
+            $as->mov_imm( 'a2', $len );
         }
         else {
             $as->lea_rva( 'rsi', $data_rva + $off, $text_rva );
