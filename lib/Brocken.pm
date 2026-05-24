@@ -1,7 +1,7 @@
 use v5.40;
 use feature 'class';
 no warnings 'portable', 'experimental::class';
-#
+
 class Brocken v0.0.1 {
     field $arch   : reader : param = undef;
     field $os     : reader : param = undef;
@@ -23,8 +23,6 @@ class Brocken v0.0.1 {
         $d_os = 'solaris'     if $^O eq 'solaris';
         $d_os = 'dragonfly'   if $^O eq 'dragonfly';
         $d_os = 'midnightbsd' if $^O eq 'midnightbsd';
-        $d_os = 'haiku'      if $^O eq 'haiku';
-        warn $^O;
         my $d_arch = 'x64';
 
         if ( $d_os eq 'win64' ) {
@@ -36,7 +34,7 @@ class Brocken v0.0.1 {
             use Config;
             $d_arch = 'arm64' if ( $Config{archname} // '' ) =~ /aarch64|arm64|apple-arm64/i;
         }
-        my $os_list = 'linux|win64|macos|freebsd|openbsd|netbsd|solaris|dragonfly|midnightbsd|haiku';
+        my $os_list = 'linux|win64|macos|freebsd|openbsd|netbsd|solaris|dragonfly|midnightbsd';
         if ( @ARGV && $ARGV[0] =~ /^(?:$os_list)-(?:x64|arm64)$/ ) {
             my $target = shift @ARGV;
             ( $os, $arch ) = split /-/, $target;
@@ -100,7 +98,7 @@ class Brocken v0.0.1 {
         my $as  = $as;
         my $off = length $data;
         $data .= $str;
-        my $is_bsd_like = $os =~ /macos|freebsd|openbsd|netbsd|dragonfly|solaris|midnightbsd|haiku/;
+        my $is_bsd_like = $os =~ /macos|freebsd|openbsd|netbsd|dragonfly|solaris|midnightbsd/;
         if ( $os eq 'linux' || $is_bsd_like ) {
             if ( $arch eq 'arm64' ) {
                 my $num = ( $os eq 'macos' ) ? 0x2000004 : ( $is_bsd_like ? 4 : 64 );    # write
@@ -150,7 +148,7 @@ class Brocken v0.0.1 {
     }
 
     method exit_proc ($code) {
-        my $is_bsd_like = $os =~ /macos|freebsd|openbsd|netbsd|dragonfly|solaris|midnightbsd|haiku/;
+        my $is_bsd_like = $os =~ /macos|freebsd|openbsd|netbsd|dragonfly|solaris|midnightbsd/;
         if ( $os eq 'linux' || $is_bsd_like ) {
             if ( $arch eq 'arm64' ) {
                 my $num = ( $os eq 'macos' ) ? 0x2000001 : ( $is_bsd_like ? 1 : 93 );    # exit
