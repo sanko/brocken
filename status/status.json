@@ -1,21 +1,33 @@
 {
-"test-output-freebsd-14.1-perl5.40.2-arm64": "success"
+"Linux:Intel": "success"
 ,
-"test-output-freebsd-14.1-perl5.40.2-x86-64": "success"
+"Linux:ARM": "success"
 ,
-"test-output-macos-15-5.42.0": "success"
+"macOS:Intel": "success"
 ,
-"test-output-macos-15-intel-5.42.0": "success"
+"macOS:Apple Silicon": "success"
 ,
-"test-output-openbsd-7.8-perl5.40.2-arm64": "success"
+"Windows:Intel": "success"
 ,
-"test-output-openbsd-7.8-perl5.40.2-x86-64": "success"
+"Windows:ARM": "success"
 ,
-"test-output-ubuntu-24.04-5.42.0": "success"
+"DragonFly_BSD:Intel": "success"
 ,
-"test-output-ubuntu-24.04-arm-5.42.0": "success"
+"FreeBSD:Intel": "success"
 ,
-"test-output-windows-11-arm-5.42.0-Dusethreads": "success"
+"FreeBSD:ARM": "success"
 ,
-"test-output-windows-2022-5.42.0-Dusethreads": "success"
+"Haiku:Intel": "success"
+,
+"MidnightBSD:Intel": "success"
+,
+"NetBSD:Intel": "success"
+,
+"NetBSD:ARM": "success"
+,
+"OmniOS:Intel": "success"
+,
+"OpenBSD:Intel": "success"
+,
+"OpenBSD:ARM": "success"
 }
