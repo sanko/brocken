@@ -20,6 +20,15 @@ class Brocken::AST::Expr::Literal : isa(Brocken::AST::Expression) {
     }
 }
 
+class Brocken::AST::Expr::UnaryOp : isa(Brocken::AST::Expression) {
+    field $operator : reader : param;
+    field $expr     : reader : param;
+
+    method to_string() {
+        return sprintf( "%s(%s)", $operator, $expr->to_string );
+    }
+}
+
 class Brocken::AST::Expr::BinaryOp : isa(Brocken::AST::Expression) {
     field $left     : reader : param;
     field $operator : reader : param;
@@ -27,6 +36,14 @@ class Brocken::AST::Expr::BinaryOp : isa(Brocken::AST::Expression) {
 
     method to_string() {
         return sprintf( "(%s %s %s)", $left->to_string, $operator, $right->to_string );
+    }
+}
+
+class Brocken::AST::Expr::EvalCall : isa(Brocken::AST::Expression) {
+    field $code : reader : param;
+
+    method to_string() {
+        return sprintf("eval(%s)", $code);
     }
 }
 

@@ -25,9 +25,12 @@ class Brocken::AST::ControlFlow::Block : isa(Brocken::AST::Statement) {
 class Brocken::AST::ControlFlow::IfStatement : isa(Brocken::AST::Statement) {
     field $condition  : reader : param;
     field $then_block : reader : param;
+    field $else_block : reader : param = undef;
 
     method to_string() {
-        return sprintf( "if (%s) %s", $condition->to_string, $then_block->to_string );
+        my $str = sprintf( "if (%s) %s", $condition->to_string, $then_block->to_string );
+        $str .= sprintf( " else %s", $else_block->to_string ) if $else_block;
+        return $str;
     }
 }
 

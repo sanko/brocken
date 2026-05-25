@@ -2,7 +2,8 @@ use v5.40;
 use lib 'lib';
 use Brocken::Scanner;
 use Brocken::Parser;
-use Time::HiRes qw(sleep time);
+use Time::HiRes qw[sleep time];
+#
 my $scanner = Brocken::Scanner->new();
 my $parser  = Brocken::Parser->new( mode => 'modern' );
 my @declared_vars;
@@ -13,7 +14,7 @@ sub generate_expr {
     if ( @declared_vars && rand() < 0.5 ) {
         return $declared_vars[ rand @declared_vars ];
     }
-    my $op = (qw(+ - * /))[ rand 4 ];
+    my $op = (qw(+ - * / << >> & | && ||))[ rand 10 ];
     return "(" . generate_expr( $depth + 1 ) . " $op " . generate_expr( $depth + 1 ) . ")";
 }
 
@@ -32,9 +33,16 @@ sub generate_code {
         return $declared_vars[ rand @declared_vars ] . " = " . generate_expr() . ";";
     }
 
-    # 20% Control flow
+    # 20% Control flow (if/elsif/else)
     elsif ( $choice < 0.8 ) {
-        return "if (1) { my \$x_local = " . generate_expr() . "; }";
+        my $case = rand();
+        if ($case < 0.33) {
+            return "if (1) { my \$x_local = " . generate_expr() . "; }";
+        } elsif ($case < 0.66) {
+            return "if (1) { my \$x_local = " . generate_expr() . "; } else { my \$y_local = " . generate_expr() . "; }";
+        } else {
+            return "if (1) { my \$x_local = " . generate_expr() . "; } elsif (2) { my \$z_local = " . generate_expr() . "; } else { my \$y_local = " . generate_expr() . "; }";
+        }
     }
 
     # 20% Subroutine with attributes

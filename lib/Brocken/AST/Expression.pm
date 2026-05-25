@@ -4,8 +4,7 @@ no warnings 'experimental::class';
 use Brocken::AST::Node;
 #
 class Brocken::AST::Expression : isa(Brocken::AST::Node) {
-
-    # Base for expressions
+    field $type : reader : writer;
 }
 #
 1;

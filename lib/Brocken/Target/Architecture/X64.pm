@@ -108,21 +108,23 @@ class Brocken::Target::Architecture::X64 {
             $self->mov_imm( $reg,  $num ) if defined $reg;
             $self->mov_imm( 'rdi', 1 );
             my $page_size = $os->page_size('x64');
-            my $text_rva  = $page_size;
-            my $data_rva  = 2 * $page_size;
+            my $text_rva  = $os->text_rva || $page_size;
+            my $data_rva  = $os->data_rva || (2 * $page_size);
             $os->write_syscall_args( $self, 'x64', $data_rva, $off, $text_rva, $len );
             $self->syscall( $os->name, $num );
         }
         else {
-            $self->mov_imm( 'rcx', -11 );
-            $self->call_rva( 0x3008, 0x1000 );
+            my $text_rva = $os->text_rva;
+            my $data_rva = $os->data_rva;
+            $self->mov_imm( 'rcx', -11 );    # STD_OUTPUT_HANDLE
+            $self->call_rva( $os->symbol_rva('GetStdHandle'), $text_rva );
             $self->mov_reg( 'rcx', 'rax' );
-            $self->lea_rva( 'rdx', 0x2000 + $off, 0x1000 );
+            $self->lea_rva( 'rdx', $data_rva + $off, $text_rva );
             $self->mov_imm( 'r8', $len );
             $self->lea_reg_disp( 'r9', 'rsp', 48 );
             $self->mov_imm( 'r10', 0 );
             $self->store_mem_disp_reg( 'rsp', 32, 'r10' );
-            $self->call_rva( 0x3010, 0x1000 );
+            $self->call_rva( $os->symbol_rva('WriteFile'), $text_rva );
         }
     }
 
@@ -136,7 +138,7 @@ class Brocken::Target::Architecture::X64 {
         }
         else {
             $self->mov_imm( 'rcx', $code );
-            $self->call_rva( 0x3000, 0x1000 );
+            $self->call_rva( $os->symbol_rva('ExitProcess'), $os->text_rva );
         }
     }
 

@@ -70,6 +70,9 @@ class Brocken::Target::OS {
         return 0x1000;
     }
 
+    method text_rva () { return 0; }
+    method data_rva () { return 0; }
+
     method write_syscall_args ( $as, $arch, $data_rva, $off, $text_rva, $len ) {
         if ( $arch eq 'arm64' ) {
             $as->lea_rva( 'x1', $data_rva + $off, $text_rva );

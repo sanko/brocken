@@ -11,7 +11,7 @@ subtest 'Control Flow' => sub {
     is $ast_if->[0]->to_string, 'if (1) { (ASSIGN $x= 10) }', 'If statement parses correctly';
     my $source_unless = 'unless (1) { my $x = 10; }';
     my $ast_unless    = $parser->parse( $scanner->scan($source_unless) );
-    is $ast_unless->[0]->to_string, 'if (1) { (ASSIGN $x= 10) }', 'Unless parses correctly as negated if';
+    is $ast_unless->[0]->to_string, 'if (!(1)) { (ASSIGN $x= 10) }', 'Unless parses correctly as negated if';
     my $source_for = 'for (10) { my $x = 10; }';
     my $ast_for    = $parser->parse( $scanner->scan($source_for) );
     is $ast_for->[0]->to_string, 'while (10) { (ASSIGN $x= 10) }', 'For loop parses correctly';

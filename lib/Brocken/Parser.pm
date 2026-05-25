@@ -5,17 +5,18 @@ use Brocken::AST::ControlFlow;
 use Brocken::AST::Expr;
 use Brocken::AST::ControlFlow::SimpleStatement;
 use Brocken::SymbolTable;
+use Brocken::Type;
 
 class Brocken::Parser {
     field $tokens : reader;
     field $pos                   = 0;
     field $mode : reader : param = 'modern';                      # 'modern' or 'perl'
-    field $symbols               = Brocken::SymbolTable->new();
+    field $symbols : reader     = Brocken::SymbolTable->new();
     my %PRECEDENCE = ( '=' => 1, '||' => 2, '&&' => 3, '==' => 4, '!=' => 4, '<' => 5, '>' => 5, '+' => 10, '-' => 10, '*' => 20, '/' => 20, );
 
     # Simplified builtin registry
     my %BUILTINS = map { $_ => { arity => -1 } } qw(
-        print say die warn return next last redo map grep sort abs chr hex oct ord reverse uc lc ucfirst
+        print say die warn return next last redo map grep sort abs chr hex oct ord reverse uc lc ucfirst eval
     );
 
     method parse($token_list) {
@@ -33,7 +34,7 @@ class Brocken::Parser {
         while ( $self->peek() && $self->peek()->type eq 'ATTRIBUTE' ) {
             push @attributes, Brocken::AST::Expr::Attribute->new( name => $self->consume('ATTRIBUTE')->value );
         }
-        return \@attributes;
+        return @attributes;
     }
 
     method parse_statement() {
@@ -49,6 +50,9 @@ class Brocken::Parser {
             return $self->parse_subroutine();
         }
         elsif ( $token->type eq 'KEYWORD' && $token->value eq 'if' ) {
+            return $self->parse_if();
+        }
+        elsif ( $token->type eq 'KEYWORD' && $token->value eq 'elsif' ) {
             return $self->parse_if();
         }
         elsif ( $token->type eq 'KEYWORD' && $token->value eq 'unless' ) {
@@ -81,7 +85,6 @@ class Brocken::Parser {
         if ( $self->peek() && $self->peek()->type eq 'KEYWORD' && $self->peek()->value =~ /^(if|unless|while|until)$/ ) {
             my $modifier = $self->consume('KEYWORD')->value;
             my $cond     = $self->parse_expression(0);
-            $self->consume('SEMICOLON');
             if ( $modifier eq 'if' || $modifier eq 'unless' ) {
                 return Brocken::AST::ControlFlow::IfStatement->new(
                     condition  => $cond,
@@ -109,24 +112,23 @@ class Brocken::Parser {
 
     method parse_declaration() {
         $self->consume('KEYWORD');
-        my $type;
+        my $type_name = 'Any';
         if ( $self->peek()->type eq 'IDENTIFIER' ) {
-            $type = $self->consume('IDENTIFIER')->value;
-            if ( $self->peek()->type eq 'LBRACKET' ) {
+            $type_name = $self->consume('IDENTIFIER')->value;
+            if ( $self->peek() && $self->peek()->type eq 'LBRACKET' ) {
                 $self->consume('LBRACKET');
                 my $inner_type = $self->consume('IDENTIFIER')->value;
                 $self->consume('COMMA');
                 my $width = $self->consume('NUMBER')->value;
                 $self->consume('RBRACKET');
-                $type = "$type\[$inner_type, $width\]";
+                $type_name = "$type_name\[$inner_type, $width\]";
             }
         }
+        my $type = Brocken::Type::Registry::get_type($type_name) // Brocken::Type::Any->new(name => $type_name);
+        
         my $var_token = $self->consume('VARIABLE');
-
-        # DEBUG:
-        # say "DEBUG: var=" . $var_token->value . " peek=" . ($self->peek() ? $self->peek()->type : "EOF");
-        my $attributes = $self->parse_attributes();
-        $symbols->define( $var_token->value, $type // 'Any' );
+        my @attributes = $self->parse_attributes();
+        $symbols->define( $var_token->value, $type );
         if ( $self->peek() && $self->peek()->type eq 'OPERATOR' && $self->peek()->value eq '=' ) {
             $self->consume( 'OPERATOR', '=' );
             my $expr = $self->parse_expression(0);
@@ -135,7 +137,7 @@ class Brocken::Parser {
                 value      => $expr,
                 line       => $var_token->line,
                 column     => $var_token->column,
-                attributes => $attributes,
+                attributes => \@attributes,
             );
         }
         return Brocken::AST::ControlFlow::Assignment->new(
@@ -143,7 +145,7 @@ class Brocken::Parser {
             value      => Brocken::AST::Expr::Literal->new( value => 'undef', line => $var_token->line, column => $var_token->column ),
             line       => $var_token->line,
             column     => $var_token->column,
-            attributes => $attributes,
+            attributes => \@attributes,
         );
     }
 
@@ -151,6 +153,9 @@ class Brocken::Parser {
         my $var_token = $self->consume('VARIABLE');
         if ( $mode eq 'modern' && !$symbols->lookup( $var_token->value ) ) {
             die "Variable " . $var_token->value . " not declared at " . $var_token->to_string();
+        }
+        if ($mode eq 'perl' && !$symbols->lookup($var_token->value)) {
+            $symbols->define($var_token->value, Brocken::Type::Registry::get_type('Any'));
         }
         $self->consume( 'OPERATOR', '=' );
         my $expr = $self->parse_expression(0);
@@ -163,8 +168,33 @@ class Brocken::Parser {
         );
     }
 
+    method parse_builtin_call_no_consume($name) {
+        $self->consume( 'KEYWORD', $name );
+
+        my @args;
+        if ( $self->peek() && $self->peek()->type eq 'LPAREN' ) {
+            $self->consume('LPAREN');
+            while ( $self->peek() && $self->peek()->type ne 'RPAREN' ) {
+                push @args, $self->parse_expression(0);
+                if ( $self->peek() && $self->peek()->type eq 'COMMA' ) {
+                    $self->consume('COMMA');
+                }
+            }
+            $self->consume('RPAREN');
+        }
+        return Brocken::AST::Expr::BuiltinCall->new( name => $name, args => \@args );
+    }
+
     method parse_generic_builtin($name) {
         $self->consume( 'KEYWORD', $name );
+
+        if ($name eq 'eval') {
+            $self->consume('LPAREN');
+            my $str = $self->consume('STRING');
+            $self->consume('RPAREN');
+            return Brocken::AST::ControlFlow::SimpleStatement->new( keyword => 'eval', args => [ Brocken::AST::Expr::Literal->new(value => $str->value, line => $str->line, column => $str->column) ] );
+        }
+
         my @args;
         if ( $self->peek() && $self->peek()->type eq 'LPAREN' ) {
             $self->consume('LPAREN');
@@ -190,7 +220,7 @@ class Brocken::Parser {
     method parse_subroutine() {
         $self->consume( 'KEYWORD', 'sub' );
         my $name       = $self->consume('IDENTIFIER')->value;
-        my $attributes = $self->parse_attributes();
+        my $attributes = [ $self->parse_attributes() ];
         my $body       = $self->parse_block();
         return Brocken::AST::ControlFlow::Subroutine->new( name => $name, body => $body, attributes => $attributes );
     }
@@ -202,7 +232,12 @@ class Brocken::Parser {
         $self->consume('RPAREN');
         my $then_block = $self->parse_block();
         return Brocken::AST::ControlFlow::IfStatement->new(
-            condition  => $condition,
+            condition  => Brocken::AST::Expr::UnaryOp->new(
+                operator => '!',
+                expr     => $condition,
+                line     => $condition->line,
+                column   => $condition->column
+            ),
             then_block => $then_block,
             line       => $condition->line,
             column     => $condition->column,
@@ -212,6 +247,7 @@ class Brocken::Parser {
     method parse_for() {
         $self->consume('KEYWORD');
         $self->consume('LPAREN');
+        # TODO: Full for(my $i=0; $i<10; $i++) parsing
         my $expr = $self->parse_expression(0);
         $self->consume('RPAREN');
         my $body_block = $self->parse_block();
@@ -224,14 +260,29 @@ class Brocken::Parser {
     }
 
     method parse_if() {
-        $self->consume( 'KEYWORD', 'if' );
+        my $kw = $self->consume('KEYWORD')->value;
+        die "Expected if or elsif but got $kw" unless $kw eq 'if' || $kw eq 'elsif';
         $self->consume('LPAREN');
         my $condition = $self->parse_expression(0);
         $self->consume('RPAREN');
         my $then_block = $self->parse_block();
+        my $else_block;
+        if ( $self->peek() && $self->peek()->type eq 'KEYWORD' && $self->peek()->value eq 'elsif' ) {
+            my $peek = $self->peek();
+            $else_block = Brocken::AST::ControlFlow::Block->new(
+                statements => [ $self->parse_if() ],
+                line       => $peek->line,
+                column     => $peek->column
+            );
+        }
+        elsif ( $self->peek() && $self->peek()->type eq 'KEYWORD' && $self->peek()->value eq 'else' ) {
+            $self->consume( 'KEYWORD', 'else' );
+            $else_block = $self->parse_block();
+        }
         return Brocken::AST::ControlFlow::IfStatement->new(
             condition  => $condition,
             then_block => $then_block,
+            else_block => $else_block,
             line       => $condition->line,
             column     => $condition->column,
         );
@@ -288,6 +339,10 @@ class Brocken::Parser {
             if ( $mode eq 'modern' && !$symbols->lookup( $token->value ) ) {
                 die "Variable " . $token->value . " not declared at " . $token->to_string();
             }
+            # Always define if it doesn't exist to avoid subsequent lookup errors in perl mode
+            if ($mode eq 'perl' && !$symbols->lookup($token->value)) {
+                $symbols->define($token->value, Brocken::Type::Registry::get_type('Any'));
+            }
             return Brocken::AST::Expr::Variable->new( name => $token->value, line => $token->line, column => $token->column );
         }
         if ( $token->type eq 'NUMBER' ) {
@@ -306,21 +361,6 @@ class Brocken::Parser {
         die "Unexpected primary token: " . $token->to_string();
     }
 
-    method parse_builtin_call_no_consume($name) {
-        $self->consume( 'KEYWORD', $name );
-        my @args;
-        if ( $self->peek() && $self->peek()->type eq 'LPAREN' ) {
-            $self->consume('LPAREN');
-            while ( $self->peek() && $self->peek()->type ne 'RPAREN' ) {
-                push @args, $self->parse_expression(0);
-                if ( $self->peek() && $self->peek()->type eq 'COMMA' ) {
-                    $self->consume('COMMA');
-                }
-            }
-            $self->consume('RPAREN');
-        }
-        return Brocken::AST::Expr::BuiltinCall->new( name => $name, args => \@args );
-    }
     method peek() { return $tokens->[$pos]; }
 
     method consume( $type = undef, $value = undef ) {

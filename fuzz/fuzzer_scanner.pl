@@ -17,7 +17,7 @@ sub generate_expr {
     if ( @declared_vars && rand() < 0.5 ) {
         return $declared_vars[ rand @declared_vars ];
     }
-    my $op = (qw(+ - * /))[ rand 4 ];
+    my $op = (qw(+ - * / << >> & | && || . .. ... ** -> => == != <= >=))[ rand 18 ];
     return "(" . generate_expr( $depth + 1 ) . " $op " . generate_expr( $depth + 1 ) . ")";
 }
 
