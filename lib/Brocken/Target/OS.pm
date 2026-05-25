@@ -59,6 +59,109 @@ class Brocken::Target::OS {
         return undef;
     }
 
+    method syscall_fork ($arch) {
+        my $n = $self->name;
+        return 0x2000002 if $n eq 'macos';
+        return 57        if $n eq 'linux' && $arch eq 'x64';
+        return 220       if $n eq 'linux' && $arch eq 'arm64';
+        return 2         if $self->is_bsd_like;
+        return undef;
+    }
+
+    method syscall_wait4 ($arch) {
+        my $n = $self->name;
+        return 0x200000b if $n eq 'macos';
+        return 61        if $n eq 'linux' && $arch eq 'x64';
+        return 260       if $n eq 'linux' && $arch eq 'arm64';
+        return 11        if $self->is_bsd_like;
+        return undef;
+    }
+
+    method syscall_clone ($arch) {
+        my $n = $self->name;
+        return 56  if $n eq 'linux' && $arch eq 'x64';
+        return 220 if $n eq 'linux' && $arch eq 'arm64';
+        return 220 if $n eq 'linux' && $arch eq 'riscv64';
+        return undef;
+    }
+
+    method syscall_mmap ($arch) {
+        my $n = $self->name;
+        return 9   if $n eq 'linux' && $arch eq 'x64';
+        return 222 if $n eq 'linux' && $arch eq 'arm64';
+        return 222 if $n eq 'linux' && $arch eq 'riscv64';
+        return undef;
+    }
+
+    method write_mmap_args ($as, $arch, $len) {
+        if ($arch eq 'x64') {
+            $as->mov_imm('rdi', 0);    # addr
+            $as->mov_imm('rsi', $len);  # len
+            $as->mov_imm('rdx', 0x3);   # prot (PROT_READ | PROT_WRITE)
+            $as->mov_imm('r10', 0x22);  # flags (MAP_PRIVATE | MAP_ANONYMOUS)
+            $as->mov_imm('r8', -1);     # fd
+            $as->mov_imm('r9', 0);      # off
+        }
+        elsif ($arch eq 'arm64') {
+            $as->mov_imm('x0', 0);
+            $as->mov_imm('x1', $len);
+            $as->mov_imm('x2', 0x3);
+            $as->mov_imm('x3', 0x22);
+            $as->mov_imm('x4', -1);
+            $as->mov_imm('x5', 0);
+        }
+        elsif ($arch eq 'riscv64') {
+            $as->mov_imm('a0', 0);
+            $as->mov_imm('a1', $len);
+            $as->mov_imm('a2', 0x3);
+            $as->mov_imm('a3', 0x22);
+            $as->mov_imm('a4', -1);
+            $as->mov_imm('a5', 0);
+        }
+    }
+
+    method syscall_rfork ($arch) {
+        my $n = $self->name;
+        return 465 if ($n eq 'freebsd' || $n eq 'dragonfly') && $arch eq 'x64';
+        return undef;
+    }
+
+    method syscall_bsdthread_create ($arch) {
+        my $n = $self->name;
+        return 0x2000168 if $n eq 'macos';
+        return undef;
+    }
+
+    method syscall_lwp_create ($arch) {
+        my $n = $self->name;
+        # Solaris: _lwp_create (generic/x86/sparc)
+        return 12 if $n eq 'solaris' && $arch eq 'x64';
+        # NetBSD: _lwp_create
+        return 309 if $n eq 'netbsd' && $arch eq 'x64';
+        return undef;
+    }
+
+    method syscall_tfork ($arch) {
+        my $n = $self->name;
+        return 91 if $n eq 'openbsd' && $arch eq 'x64';
+        return undef;
+    }
+
+    method syscall_bsdthread_terminate ($arch) {
+        my $n = $self->name;
+        return 0x2000169 if $n eq 'macos';
+        return undef;
+    }
+
+    method syscall_nanosleep ($arch) {
+        my $n = $self->name;
+        return 0x20000F0 if $n eq 'macos';
+        return 35        if $n eq 'linux' && $arch eq 'x64';
+        return 101       if $n eq 'linux' && $arch eq 'arm64';
+        return 240       if $self->is_bsd_like && $n ne 'macos' && $arch eq 'x64';
+        return undef;
+    }
+
     method syscall_num_reg ($arch) {
         return 'rax' if $arch eq 'x64';
         return 'x8'  if $arch eq 'arm64';
@@ -68,6 +171,25 @@ class Brocken::Target::OS {
 
     method page_size ($arch) {
         return 0x1000;
+    }
+
+    sub detect_arch ($class) {
+        my $os = $^O;
+        if ( $os eq 'MSWin32' || $os eq 'cygwin' ) {
+            my $pa  = $ENV{PROCESSOR_ARCHITECTURE}      // '';
+            my $paw = $ENV{PROCESSOR_ARCHITEW6432} // '';
+            my $pi  = $ENV{PROCESSOR_IDENTIFIER}   // '';
+            return 'arm64' if $pa =~ /ARM64/i || $paw =~ /ARM64/i || $pi =~ /ARM/i;
+            return 'x64';
+        }
+        else {
+            use Config;
+            return 'arm64'   if ( $Config{archname} // '' ) =~ /aarch64|arm64|apple-arm64/i;
+            my $uname_m = `uname -m` // '';
+            return 'arm64'   if $uname_m =~ /aarch64|arm64|armv8/i;
+            return 'riscv64' if $uname_m =~ /riscv64/i;
+            return 'x64';
+        }
     }
 
     method text_rva () { return 0; }

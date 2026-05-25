@@ -15,6 +15,8 @@ class Brocken::Target::OS::Win64 : isa(Brocken::Target::OS) {
             ExitProcess  => 0x3000,
             GetStdHandle => 0x3008,
             WriteFile    => 0x3010,
+            CreateThread => 0x3018,
+            Sleep        => 0x3020,
         }->{$name};
     }
 }

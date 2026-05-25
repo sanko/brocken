@@ -2,12 +2,14 @@ use Test2::V0;
 use lib 'lib';
 use Brocken::Target::ABI;
 use Brocken::Target::Architecture::X64;
+use Brocken::Target::OS;
 use Brocken::Compiler::RegisterAllocator;
 use Brocken::Compiler::InstructionSelector;
 use Brocken::IR;
 
 my $abi = Brocken::Target::ABI->new();
 my $emitter = Brocken::Target::Architecture::X64->new();
+my $os = Brocken::Target::OS->new(name => 'linux');
 
 subtest 'X64 Instruction Selection' => sub {
     my $allocator = Brocken::Compiler::RegisterAllocator->new(abi => $abi, arch => 'x64');
@@ -22,7 +24,7 @@ subtest 'X64 Instruction Selection' => sub {
     $cfg->add_block($entry);
     
     my $mapping = $allocator->allocate($cfg);
-    my $selector = Brocken::Compiler::InstructionSelector->new(arch => 'x64', mapping => $mapping, emitter => $emitter);
+    my $selector = Brocken::Compiler::InstructionSelector->new(arch => 'x64', mapping => $mapping, emitter => $emitter, os => $os);
     
     my $code = $selector->select($cfg);
     ok length($code) > 0, 'Generated code for Load/Store/Call';

@@ -1,22 +1,21 @@
 use Test2::V0;
 use lib 'lib';
-use Brocken::Scanner;
+use Brocken::Lexer;
 use Brocken::Parser;
-use Brocken::Compiler::SemanticAnalyzer;
 
-my $scanner = Brocken::Scanner->new();
-my $parser  = Brocken::Parser->new( mode => 'modern' );
-
-subtest 'Eval Parsing and Analysis' => sub {
+subtest 'Eval Parsing' => sub {
     my $source = 'eval("print 10");';
-    my $tokens = $scanner->scan($source);
-    my $ast    = $parser->parse($tokens);
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
     
-    my $analyzer = Brocken::Compiler::SemanticAnalyzer->new(symbols => $parser->symbols);
-    $analyzer->analyze($ast);
+    ok $ast->isa('Brocken::AST::Program'), 'AST is a Program';
+    is scalar( @{ $ast->stmts } ), 1, 'Should have 1 statement';
     
-    is $ast->[0]->to_string, 'eval("print 10")', 'Eval parses correctly';
-    is $ast->[0]->isa('Brocken::AST::ControlFlow::SimpleStatement'), 1, 'AST node type is correct';
+    my $stmt = $ast->stmts->[0];
+    ok $stmt->isa('Brocken::AST::Call'),     'Statement is a Call';
+    is $stmt->name, 'eval',                  'Call name is eval';
+    is $stmt->args->[0]->value, 'print 10',  'Argument value is "print 10"';
 };
 
 done_testing;

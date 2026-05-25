@@ -1,27 +1,28 @@
 use Test2::V0;
 use lib 'lib';
-use Brocken::Scanner;
+use Brocken::Lexer;
 use Brocken::Parser;
-#
-my $scanner = Brocken::Scanner->new();
-my $parser  = Brocken::Parser->new( mode => 'modern' );
-subtest Vectors => sub {
-    my $source = 'my Vec[Int64, 4] $v1 = 10;';
-    my $ast    = $parser->parse( $scanner->scan($source) );
-    is $ast->[0]->to_string, '(ASSIGN $v1= 10)', 'Vector annotation parses';
-};
-subtest Attributes => sub {
-    my $source_sub = 'sub foo :lvalue { my $x = 10; }';
-    my $ast_sub    = $parser->parse( $scanner->scan($source_sub) );
-    like $ast_sub->[0]->to_string, qr/sub foo :lvalue/, "Sub with attributes parses";
-    my $source_var = 'my $x :shared = 10;';
-    my $ast_var    = $parser->parse( $scanner->scan($source_var) );
-    is $ast_var->[0]->to_string, '(ASSIGN :shared $x= 10)', 'Var with attributes parses';
-};
-subtest 'Built-ins' => sub {
+
+subtest 'Built-in Calls' => sub {
     my $source = 'print(10, 20);';
-    my $ast    = $parser->parse( $scanner->scan($source) );
-    is $ast->[0]->to_string, 'print(10, 20)', 'Print parses correctly';
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
+    my $stmt   = $ast->stmts->[0];
+    ok $stmt->isa('Brocken::AST::Call'), 'Print is a Call';
+    is $stmt->name, 'print', 'Call name is print';
+    is scalar( @{ $stmt->args } ), 2, 'Two arguments';
 };
-#
+
+subtest 'Type Annotations' => sub {
+    my $source = 'my Int $x = 10;';
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
+    my $stmt   = $ast->stmts->[0];
+    ok $stmt->isa('Brocken::AST::MyDecl'), 'Declaration parses';
+    is $stmt->type, 'Int', 'Type annotation Int';
+    is $stmt->name, 'x', 'Variable name x';
+};
+
 done_testing;

@@ -1,16 +1,16 @@
 use Test2::V0;
 use lib 'lib';
-use Brocken::Scanner;
+use Brocken::Lexer;
 use Brocken::Parser;
 use Brocken::Compiler::Lowerer;
 
-my $scanner = Brocken::Scanner->new();
-my $parser  = Brocken::Parser->new(mode => 'modern');
 my $lowerer = Brocken::Compiler::Lowerer->new();
 
 subtest 'While Loop Lowering' => sub {
     my $source = 'while (1) { my $x = 10; }';
-    my $ast    = $parser->parse($scanner->scan($source));
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
     my $cfg    = $lowerer->lower($ast);
     my @blocks = $cfg->blocks;
 

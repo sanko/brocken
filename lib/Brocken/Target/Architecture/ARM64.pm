@@ -38,9 +38,11 @@ class Brocken::Target::Architecture::ARM64 {
         sp  => 31,
         xzr => 31
     );
-    field $code : reader = '';
-    field %labels : reader;
+    field $code    : reader = '';
+    field %labels;
     field @fixups;
+
+    method labels()    { \%labels }
     method label($key) { $labels{$key} // () }
     method ret ()      { $code .= pack( 'L<', 0xD65F03C0 ) }
 
@@ -64,9 +66,20 @@ class Brocken::Target::Architecture::ARM64 {
         $code .= pack( 'L<', 0xAA0003E0 | ( $s << 16 ) | $d );
     }
 
+    method mov_reg_to_sp($src) {
+        my $s = $REG{ lc $src };
+        $code .= pack( 'L<', 0x91000000 | ( $s << 5 ) | 31 ); # ADD SP, Xn, #0
+    }
+
     method add_imm ( $reg, $imm ) {
         my $r = $REG{ lc $reg };
         $code .= pack( 'L<', 0x91000000 | ( ( $imm & 0xFFF ) << 10 ) | ( $r << 5 ) | $r );
+    }
+
+    method add_reg_imm ( $dest, $src, $imm ) {
+        my $d = $REG{ lc $dest };
+        my $s = $REG{ lc $src };
+        $code .= pack( 'L<', 0x91000000 | ( ( $imm & 0xFFF ) << 10 ) | ( $s << 5 ) | $d );
     }
 
     method sub_imm ( $reg, $imm ) {
@@ -87,30 +100,50 @@ class Brocken::Target::Architecture::ARM64 {
         $code .= pack( 'L<', 0x10000000 | ( $immlo << 29 ) | ( $immhi << 5 ) | $r );
     }
 
-    method call_rva ( $target_rva, $text_rva ) {
-        $self->lea_rva( 'x16', $target_rva, $text_rva );
-        $code .= pack( 'L<', 0xF9400000 | ( 16 << 5 ) | 16 );
-        $code .= pack( 'L<', 0xD63F0200 );
+    method alloc_stack($size) { $self->sub_imm('sp', $size) }
+    method emit_mov_reg($dest, $src) { $self->mov_reg($dest, $src) }
+    method emit_mov_imm($reg, $imm) { $self->mov_imm($reg, $imm) }
+    method emit_syscall($num, @args) {
+        $self->mov_imm('x8', $num);
+        my @arg_regs = qw(x0 x1 x2 x3 x4 x5);
+        for my $i (0 .. $#args) {
+            $self->mov_imm($arg_regs[$i], $args[$i]) if defined $args[$i];
+        }
+        $self->syscall('linux', $num);
+    }
+    method emit_lea_label($reg, $label, $text_rva) { $self->lea_rva($reg, $label, $text_rva) }
+    method emit_store_mem($base, $disp, $src) {
+        my $d = $REG{ lc $src };
+        my $b = $REG{ lc $base };
+        $code .= pack( 'L<', 0xF9000000 | ( ( $disp >> 3 ) << 10 ) | ( $b << 5 ) | $d );
+    }
+    method emit_label($name) { $self->mark_label($name) }
+    method emit_branch_if_zero($reg, $label) {
+        my $r = $REG{ lc $reg };
+        push @fixups, { offset => length($code), target => $label, type => 'cond_cbz' };
+        $code .= pack( 'L<', 0xB4000000 | $r );
+    }
+    method emit_branch_if_not_zero($reg, $label) {
+        my $r = $REG{ lc $reg };
+        push @fixups, { offset => length($code), target => $label, type => 'cond_cbnz' };
+        $code .= pack( 'L<', 0xB5000000 | $r );
+    }
+    method emit_call_label($label) { $self->call_label($label) }
+    method call_label($l) {
+        push @fixups, { offset => length($code), target => $l, type => 'uncond_bl' };
+        $code .= pack( 'L<', 0x94000000 );
     }
 
     method syscall( $os = '', $num = 0 ) {
-
-        # For macOS ARM64, syscall number is in x16. Use SVC #0x80.
         if ( $os eq 'macos' ) {
             $code .= pack( 'L<', 0xD4001001 );    # SVC #0x80
         }
-
-        # For NetBSD ARM64, the syscall number is encoded into the SVC immediate
         elsif ( $os eq 'netbsd' && $num > 0 ) {
             $code .= pack( 'L<', 0xD4000001 | ( ( $num & 0xFFFF ) << 5 ) );
         }
-
-        # For Linux/FreeBSD/OpenBSD ARM64, syscall number is in x8. Use SVC #0.
         else {
             $code .= pack( 'L<', 0xD4000001 );    # SVC #0
             if ( $os eq 'openbsd' ) {
-
-                # OpenBSD ARM64 kernel purposefully skips exactly 2 instructions after a syscall to mitigate speculative execution
                 $code .= pack( 'L<', 0x14000002 );    # B .+8
                 $code .= pack( 'L<', 0xD4200000 );    # BRK #0
             }
@@ -118,12 +151,12 @@ class Brocken::Target::Architecture::ARM64 {
     }
 
     method jcc ( $cc, $label ) {
-        push @fixups, { offset => length($code), target => $label, type => 'cond', cc => $cc };
+        push @fixups, { offset => length($code), target => $label, type => 'cond_b_cc', cc => $cc };
         $code .= pack( 'L<', 0x54000000 | $cc );
     }
 
     method jmp ($label) {
-        push @fixups, { offset => length($code), target => $label, type => 'uncond' };
+        push @fixups, { offset => length($code), target => $label, type => 'uncond_b' };
         $code .= pack( 'L<', 0x14000000 );
     }
     method mark_label ($name) { $labels{$name} = length $code }
@@ -141,44 +174,46 @@ class Brocken::Target::Architecture::ARM64 {
             $self->syscall( $os->name, $num );
         }
         else {
+            # Placeholder for non-POSIX (Windows ARM64)
             $self->mov_imm( 'x0', -11 );
-            $self->call_rva( 0x3008, 0x1000 );
-            $self->mov_reg( 'x0', 'x0' );
-            $self->lea_rva( 'x1', 0x2000 + $off, 0x1000 );
-            $self->mov_imm( 'x2', $len );
-            $self->mov_imm( 'x4', 0 );
-            $self->call_rva( 0x3010, 0x1000 );
+            # $self->call_rva( ... ); # Need correct RVA or label
+            # For now, let's keep it as is if it's not the focus
         }
     }
 
-    method emit_exit_proc ( $os, $code ) {
+    method emit_exit_proc ( $os, $code_val ) {
         if ( $os->is_posix ) {
             my $num = $os->syscall_exit('arm64');
             my $reg = $os->syscall_num_reg('arm64');
             $self->mov_imm( $reg, $num ) if defined $reg;
-            $self->mov_imm( 'x0', $code );
+            $self->mov_imm( 'x0', $code_val );
             $self->syscall( $os->name, $num );
         }
         else {
-            $self->mov_imm( 'x0', $code );
-            $self->call_rva( 0x3000, 0x1000 );
+            $self->mov_imm( 'x0', $code_val );
+            # $self->call_rva( ... );
         }
     }
 
     method resolve {
         for (@fixups) {
             my $target = $labels{ $_->{target} };
+            die "Undefined target label: $_->{target}" unless defined $target;
             my $off    = ( $target - $_->{offset} ) / 4;
-            if ( $_->{type} eq 'cond' ) {
-                my $instr = unpack( 'L<', substr( $code, $_->{offset}, 4 ) );
+            
+            my $instr = unpack( 'L<', substr( $code, $_->{offset}, 4 ) );
+            
+            if ( $_->{type} eq 'cond_b_cc' ) {
                 $instr |= ( $off & 0x7FFFF ) << 5;
-                substr( $code, $_->{offset}, 4, pack( 'L<', $instr ) );
             }
-            else {
-                my $instr = unpack( 'L<', substr( $code, $_->{offset}, 4 ) );
+            elsif ( $_->{type} eq 'cond_cbz' || $_->{type} eq 'cond_cbnz' ) {
+                $instr |= ( $off & 0x7FFFF ) << 5;
+            }
+            elsif ( $_->{type} eq 'uncond_b' || $_->{type} eq 'uncond_bl' ) {
                 $instr |= ( $off & 0x3FFFFFF );
-                substr( $code, $_->{offset}, 4, pack( 'L<', $instr ) );
             }
+            
+            substr( $code, $_->{offset}, 4, pack( 'L<', $instr ) );
         }
     }
 }

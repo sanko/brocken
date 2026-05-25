@@ -11,6 +11,8 @@ my %KEYWORDS = map { $_ => 1 } qw(
     true false undef
     try catch finally
     class field
+    fiber yield
+    spawn_thread
 );
 my %OPKEY = map { $_ => 1 } qw(
     not and or xor
@@ -58,7 +60,9 @@ class Brocken::Lexer {
         $self->_skip_ws();
         return undef if $pos >= length($source);
         my $ch = substr $source, $pos, 1;
-        return $self->_scan_pod6()      if $ch eq '=';
+        if ( $ch eq '=' && $pos + 1 < length($source) && substr( $source, $pos + 1, 1 ) =~ /[a-zA-Z_]/ ) {
+            return $self->_scan_pod6();
+        }
         return $self->_scan_ident()     if $ch =~ /[\p{ID_Start}_]/;
         return $self->_scan_number()    if $ch =~ /^[0-9]/;
         return $self->_scan_string($ch) if $ch eq "'" || $ch eq '"';
@@ -70,7 +74,65 @@ class Brocken::Lexer {
         else {
             return $self->_scan_var($ch) if $ch =~ /^[\$\@\%]/;
         }
+        if ( $ch eq '<'
+            && $pos + 2 < length($source)
+            && substr( $source, $pos + 1, 1 ) eq '<'
+            && substr( $source, $pos + 2, 1 ) =~ /[a-zA-Z_]/ )
+        {
+            return $self->_scan_heredoc();
+        }
         return $self->_scan_operator();
+    }
+
+    method _scan_heredoc () {
+        $pos += 2;
+        $col += 2;
+        my $start = $pos;
+        while ( $pos < length($source) ) {
+            my $ch = substr $source, $pos, 1;
+            last unless $ch =~ /\p{ID_Continue}/;
+            $pos++;
+            $col++;
+        }
+        my $marker = substr $source, $start, $pos - $start;
+        while ( $pos < length($source) && substr( $source, $pos, 1 ) =~ /^[ \t]/ ) {
+            $pos++;
+            $col++;
+        }
+        if ( $pos < length($source) && substr( $source, $pos, 1 ) eq ';' ) {
+            $pos++;
+            $col++;
+        }
+        if ( $pos < length($source) && substr( $source, $pos, 1 ) eq "\n" ) {
+            $pos++;
+            $line++;
+            $col = 1;
+        }
+        my $content = '';
+        while ( $pos < length($source) ) {
+            my $line_start = $pos;
+            while ( $pos < length($source) && substr( $source, $pos, 1 ) ne "\n" ) {
+                $pos++;
+                $col++;
+            }
+            my $line_text = substr $source, $line_start, $pos - $line_start;
+            chomp $line_text;
+            if ( $line_text eq $marker ) {
+                if ( $pos < length($source) && substr( $source, $pos, 1 ) eq "\n" ) {
+                    $pos++;
+                    $line++;
+                    $col = 1;
+                }
+                last;
+            }
+            $content .= substr $source, $line_start, $pos - $line_start + 1;
+            if ( $pos < length($source) ) {
+                $pos++;
+                $line++;
+                $col = 1;
+            }
+        }
+        return $self->_tok( 'STRING', $content );
     }
 
     method _scan_pod6 () {

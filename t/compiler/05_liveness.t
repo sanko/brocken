@@ -1,19 +1,18 @@
 use Test2::V0;
 use lib 'lib';
-use Brocken::Scanner;
+use Brocken::Lexer;
 use Brocken::Parser;
 use Brocken::Compiler::Lowerer;
 use Brocken::Compiler::LivenessAnalyzer;
 
-my $scanner = Brocken::Scanner->new();
-my $parser  = Brocken::Parser->new( mode => 'modern' );
 my $lowerer = Brocken::Compiler::Lowerer->new();
 my $analyzer = Brocken::Compiler::LivenessAnalyzer->new();
 
 subtest 'Simple Liveness' => sub {
     my $source = 'my Int $x = 10; my Int $y = $x + 5; print($y);';
-    my $tokens = $scanner->scan($source);
-    my $ast    = $parser->parse($tokens);
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
     my $cfg    = $lowerer->lower($ast);
     
     $analyzer->analyze($cfg);

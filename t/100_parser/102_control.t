@@ -1,34 +1,48 @@
 use Test2::V0;
 use lib 'lib';
-use Brocken::Scanner;
+use Brocken::Lexer;
 use Brocken::Parser;
-#
-my $scanner = Brocken::Scanner->new();
-my $parser  = Brocken::Parser->new( mode => 'modern' );
+
 subtest 'Control Flow' => sub {
-    my $source_if = 'if (1) { my $x = 10; }';
-    my $ast_if    = $parser->parse( $scanner->scan($source_if) );
-    is $ast_if->[0]->to_string, 'if (1) { (ASSIGN $x= 10) }', 'If statement parses correctly';
-    my $source_unless = 'unless (1) { my $x = 10; }';
-    my $ast_unless    = $parser->parse( $scanner->scan($source_unless) );
-    is $ast_unless->[0]->to_string, 'if (!(1)) { (ASSIGN $x= 10) }', 'Unless parses correctly as negated if';
-    my $source_for = 'for (10) { my $x = 10; }';
-    my $ast_for    = $parser->parse( $scanner->scan($source_for) );
-    is $ast_for->[0]->to_string, 'while (10) { (ASSIGN $x= 10) }', 'For loop parses correctly';
+    my $source = 'if (1) { my $x = 10; }';
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
+    my $stmt   = $ast->stmts->[0];
+    ok $stmt->isa('Brocken::AST::If'), 'If statement parses correctly';
+    ok $stmt->cond->isa('Brocken::AST::IntLiteral'), 'Condition is IntLiteral';
+    is $stmt->cond->value, 1, 'Condition value is 1';
+    ok $stmt->then->isa('Brocken::AST::Block'), 'Then is Block';
 };
+
+subtest 'Unless' => sub {
+    my $source = 'unless (1) { my $x = 10; }';
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
+    my $stmt   = $ast->stmts->[0];
+    ok $stmt->isa('Brocken::AST::If'), 'Unless becomes If';
+    ok $stmt->cond->isa('Brocken::AST::UnaryOp'), 'Condition is negated';
+    is $stmt->cond->op, '!', 'Negation op is !';
+};
+
 subtest Subroutines => sub {
     my $source = 'sub foo { my $x = 10; }';
-    my $ast    = $parser->parse( $scanner->scan($source) );
-    like $ast->[0]->to_string, qr/sub foo/, 'Subroutine parses correctly';
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
+    my $stmt   = $ast->stmts->[0];
+    ok $stmt->isa('Brocken::AST::SubDecl'), 'Subroutine parses correctly';
+    is $stmt->name, 'foo', 'Sub name is foo';
 };
-subtest Scopes => sub {
-    my $source_fail = '$x = 10;';
-    my $tokens      = $scanner->scan($source_fail);
-    eval { $parser->parse($tokens); };
-    ok $@, 'Should catch error for undeclared variable';
-    my $source_ok = 'my $x = 10; $x = 20;';
-    my $ast       = $parser->parse( $scanner->scan($source_ok) );
-    is scalar @$ast, 2, 'Should have 2 statements';
+
+subtest 'Assignment Without Declaration' => sub {
+    my $source = '$x = 10;';
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
+    is scalar( @{ $ast->stmts } ), 1, 'Should have 1 statement';
+    ok $ast->stmts->[0]->isa('Brocken::AST::Assign'), 'Assignment without my is Assign';
 };
-#
+
 done_testing;

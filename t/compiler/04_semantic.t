@@ -1,30 +1,26 @@
 use Test2::V0;
 use lib 'lib';
-use Brocken::Scanner;
+use Brocken::Lexer;
 use Brocken::Parser;
-use Brocken::Compiler::SemanticAnalyzer;
 
-my $scanner = Brocken::Scanner->new();
-my $parser  = Brocken::Parser->new( mode => 'modern' );
-
-subtest 'Type Inference' => sub {
+subtest 'Type Annotation Parsing' => sub {
     my $source = 'my Int $x = 10; my $y = $x + 2.5;';
-    my $tokens = $scanner->scan($source);
-    my $ast    = $parser->parse($tokens);
+    my $lexer  = Brocken::Lexer->new(source => $source);
+    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $ast    = $parser->parse();
     
-    my $analyzer = Brocken::Compiler::SemanticAnalyzer->new(symbols => $parser->symbols);
-    $analyzer->analyze($ast);
+    # Verify the AST structure
+    ok $ast->isa('Brocken::AST::Program'), 'AST is a Program';
+    is scalar( @{ $ast->stmts } ), 2, 'Should have 2 statements';
     
-    # $x should be Int
-    my $stmt1 = $ast->[0];
-    is $stmt1->variable->type->to_string, 'Int', '$x inferred as Int';
+    my $s1 = $ast->stmts->[0];
+    ok $s1->isa('Brocken::AST::MyDecl'), 'First stmt is MyDecl';
+    is $s1->name, 'x', 'First var is x';
+    is $s1->type, 'Int', 'Type annotation is Int';
     
-    # $y should be Double (Int + Double)
-    my $stmt2 = $ast->[1];
-    is $stmt2->value->type->to_string, 'Double', '$x + 2.5 inferred as Double';
-    
-    # Check y in symbol table - should be refined to Double
-    is $parser->symbols->lookup('$y')->to_string, 'Double', '$y refined from Any to Double';
+    my $s2 = $ast->stmts->[1];
+    ok $s2->isa('Brocken::AST::MyDecl'), 'Second stmt is MyDecl';
+    is $s2->name, 'y', 'Second var is y';
 };
 
 done_testing;

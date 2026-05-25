@@ -15,7 +15,7 @@ class Brocken::Target::Format::PE : isa(Brocken::Target::Format) {
         my $text_rva    = $sa;
         my $data_rva    = $sa * 2;
         my $idata_rva   = $sa * 3;
-        my @funcs       = qw[ExitProcess GetStdHandle WriteFile];
+        my @funcs       = qw[ExitProcess GetStdHandle WriteFile CreateThread Sleep];
         my $iat_size    = ( @funcs + 1 ) * 8;
         my $rva_iat     = $idata_rva;
         my $rva_ilt     = $rva_iat + $iat_size;
