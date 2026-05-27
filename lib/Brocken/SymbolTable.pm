@@ -5,7 +5,6 @@ use Brocken::Scope;
 
 class Brocken::SymbolTable {
     field $current_scope : reader;
-
     ADJUST {
         $current_scope = Brocken::Scope->new();
     }

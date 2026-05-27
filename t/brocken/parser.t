@@ -5,194 +5,193 @@ use Brocken::Lexer;
 use Brocken::Parser;
 
 sub parse_ok ($source) {
-    my $lexer  = Brocken::Lexer->new(source => $source);
-    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $lexer  = Brocken::Lexer->new( source => $source );
+    my $parser = Brocken::Parser->new( lexer => $lexer );
     return $parser->parse();
 }
 
 # Empty source
 my $ast = parse_ok('');
-ok $ast->isa('Brocken::AST::Program'), 'Empty source gives Program';
-is scalar(@{ $ast->stmts }), 0, 'Empty source has 0 stmts';
+ok $ast->isa('Brocken::AST::Stmt::Program'), 'Empty source gives Program';
+is scalar( @{ $ast->statements } ), 0, 'Empty source has 0 statements';
 
 # Empty semicolons
 $ast = parse_ok(';;');
-is scalar(@{ $ast->stmts }), 0, 'Empty semicolons produce no stmts';
+is scalar( @{ $ast->statements } ), 0, 'Empty semicolons produce no statements';
 
 # Integer literal
 $ast = parse_ok('42;');
-is scalar(@{ $ast->stmts }), 1, 'One stmt for int';
-is $ast->stmts->[0]->value, 42, 'IntLiteral value 42';
+is scalar( @{ $ast->statements } ), 1,  'One stmt for int';
+is $ast->statements->[0]->value,    42, 'IntLiteral value 42';
 
 # Float literal
 $ast = parse_ok('3.14;');
-is $ast->stmts->[0]->value, 3.14, 'FloatLiteral value 3.14';
+is $ast->statements->[0]->value, 3.14, 'FloatLiteral value 3.14';
 
 # String literal
 $ast = parse_ok('"hello";');
-is $ast->stmts->[0]->value, 'hello', 'StrLiteral value';
+is $ast->statements->[0]->value, 'hello', 'StrLiteral value';
 
 # my declaration
 $ast = parse_ok('my $x = 10;');
-my $s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::MyDecl'), 'my decl is MyDecl';
-is $s->name, 'x', 'my var name x';
-is $s->expr->value, 10, 'my var init 10';
+my $s = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::VarDecl'), 'my decl is VarDecl';
+is $s->name,         'x', 'my var name x';
+is $s->value->value, 10,  'my var init 10';
 
 # my without init
 $ast = parse_ok('my $x;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::MyDecl'), 'my without init';
-ok !defined($s->expr), 'No expr';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::VarDecl'), 'my without init';
+ok !defined( $s->value ),                  'No value';
 
 # my with type
 $ast = parse_ok('my Int $x = 5;');
-$s = $ast->stmts->[0];
-is $s->type, 'Int', 'Type annotation Int';
-is $s->name, 'x', 'Name x';
-is $s->expr->value, 5, 'Value 5';
+$s   = $ast->statements->[0];
+is $s->type,         'Int', 'Type annotation Int';
+is $s->name,         'x',   'Name x';
+is $s->value->value, 5,     'Value 5';
 
 # Assignment
 $ast = parse_ok('$x = 20;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::Assign'), 'Assign stmt';
-is $s->name, 'x', 'Assign name x';
-is $s->expr->value, 20, 'Assign value 20';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::Assignment'), 'Assignment stmt';
+is $s->name,         'x', 'Assignment name x';
+is $s->value->value, 20,  'Assignment value 20';
 
 # Binary operation
 $ast = parse_ok('1 + 2;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::BinOp'), 'BinOp stmt';
-is $s->op, '+', 'Op is +';
-is $s->left->value, 1, 'Left 1';
-is $s->right->value, 2, 'Right 2';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Expr::BinOp'), 'BinOp stmt';
+is $s->op,           '+', 'Op is +';
+is $s->left->value,  1,   'Left 1';
+is $s->right->value, 2,   'Right 2';
 
 # Precedence: 1 + 2 * 3
 $ast = parse_ok('1 + 2 * 3;');
-$s = $ast->stmts->[0];
+$s   = $ast->statements->[0];
 is $s->op, '+', 'Top op is +';
-ok $s->right->isa('Brocken::AST::BinOp'), 'Right is BinOp';
+ok $s->right->isa('Brocken::AST::Expr::BinOp'), 'Right is BinOp';
 is $s->right->op, '*', 'Inner op is *';
 
 # Parentheses
 $ast = parse_ok('(1 + 2) * 3;');
-$s = $ast->stmts->[0];
+$s   = $ast->statements->[0];
 is $s->op, '*', 'Top op is *';
-ok $s->left->isa('Brocken::AST::BinOp'), 'Left is BinOp (via parens)';
+ok $s->left->isa('Brocken::AST::Expr::BinOp'), 'Left is BinOp (via parens)';
 
 # Unary minus
 $ast = parse_ok('-5;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::UnaryOp'), 'UnaryOp';
-is $s->op, '-', 'Unary -';
-is $s->operand->value, 5, 'Operand 5';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Expr::UnaryOp'), 'UnaryOp';
+is $s->op,          '-', 'Unary -';
+is $s->expr->value, 5,   'expr 5';
 
 # Unary not
 $ast = parse_ok('!$flag;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::UnaryOp'), 'UnaryOp for !';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Expr::UnaryOp'), 'UnaryOp for !';
 is $s->op, '!', 'Op is !';
 
 # Variable
 $ast = parse_ok('$x;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::Var'), 'Var';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Expr::Var'), 'Var';
 is $s->name, 'x', 'Var name x';
 
 # Call with parens
 $ast = parse_ok('print("hi");');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::Call'), 'Call';
-is $s->name, 'print', 'Call name print';
-is scalar(@{ $s->args }), 1, '1 arg';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Expr::Call'), 'Call';
+is $s->name,                'print', 'Call name print';
+is scalar( @{ $s->args } ), 1,       '1 arg';
 
 # Bareword function call
 $ast = parse_ok('die 42;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::Call'), 'Bare call is Call';
-is $s->name, 'die', 'Bare call name die';
-is $s->args->[0]->value, 42, 'Bare call arg 42';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Expr::Call'), 'Bare call is Call';
+is $s->name,             'die', 'Bare call name die';
+is $s->args->[0]->value, 42,    'Bare call arg 42';
 
 # If statement
 $ast = parse_ok('if (1) { $x = 10; }');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::If'), 'If stmt';
-is $s->cond->value, 1, 'If cond 1';
-ok $s->then->isa('Brocken::AST::Block'), 'If then Block';
-ok !defined($s->else), 'If no else';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::If'), 'If stmt';
+is $s->condition->value, 1, 'If condition 1';
+ok $s->then_block->isa('Brocken::AST::Stmt::Block'), 'If then Block';
+ok !defined( $s->else_block ),                       'If no else_block';
 
 # If/else
 $ast = parse_ok('if (1) { $x; } else { $y; }');
-$s = $ast->stmts->[0];
-ok defined($s->else), 'If with else';
+$s   = $ast->statements->[0];
+ok defined( $s->else_block ), 'If with else_block';
 
 # While
 $ast = parse_ok('while (1) { $x; }');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::While'), 'While stmt';
-is $s->cond->value, 1, 'While cond 1';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::While'), 'While stmt';
+is $s->condition->value, 1, 'While condition 1';
 
 # Return
 $ast = parse_ok('return;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::Return'), 'Return';
-ok !defined($s->expr), 'Return no val';
-
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::Return'), 'Return';
+ok !defined( $s->expr ),                  'Return no val';
 $ast = parse_ok('return 42;');
-$s = $ast->stmts->[0];
+$s   = $ast->statements->[0];
 is $s->expr->value, 42, 'Return val 42';
 
 # Flow statements
 $ast = parse_ok('last; next; redo;');
-is scalar(@{ $ast->stmts }), 3, '3 flow stmts';
-is $ast->stmts->[0]->type, 'last', 'FlowStmt last';
-is $ast->stmts->[1]->type, 'next', 'FlowStmt next';
-is $ast->stmts->[2]->type, 'redo', 'FlowStmt redo';
+is scalar( @{ $ast->statements } ), 3, '3 flow stmts';
+ok $ast->statements->[0]->isa('Brocken::AST::Stmt::Last'), 'Stmt::Last';
+ok $ast->statements->[1]->isa('Brocken::AST::Stmt::Next'), 'Stmt::Next';
+ok $ast->statements->[2]->isa('Brocken::AST::Stmt::Redo'), 'Stmt::Redo';
 
 # Sub declaration
 $ast = parse_ok('sub foo { my $x = 1; }');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::SubDecl'), 'SubDecl';
-is $s->name, 'foo', 'Sub name foo';
-is scalar(@{ $s->params }), 0, 'Sub no params';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::OOP::Method'), 'Method';
+is $s->name,                  'foo', 'Sub name foo';
+is scalar( @{ $s->params } ), 0,     'Sub no params';
 
 # Sub with params
 $ast = parse_ok('sub add ($a, $b) { $a + $b; }');
-$s = $ast->stmts->[0];
-is scalar(@{ $s->params }), 2, 'Sub 2 params';
-is $s->params->[0], 'a', 'Param a';
+$s   = $ast->statements->[0];
+is scalar( @{ $s->params } ), 2,   'Sub 2 params';
+is $s->params->[0],           'a', 'Param a';
 
 # Statement modifier: return if
 $ast = parse_ok('return if $cond;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::If'), 'return if -> If';
-ok $s->then->stmts->[0]->isa('Brocken::AST::Return'), 'If body has Return';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::If'),                                  'return if -> If';
+ok $s->then_block->statements->[0]->isa('Brocken::AST::Stmt::Return'), 'If body has Return';
 
 # Unless
 $ast = parse_ok('unless ($x) { $y; }');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::If'), 'Unless becomes If';
-ok $s->cond->isa('Brocken::AST::UnaryOp'), 'Unless wraps cond in !';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::If'),                 'Unless becomes If';
+ok $s->condition->isa('Brocken::AST::Expr::UnaryOp'), 'Unless wraps cond in !';
 
 # elsif chain
 $ast = parse_ok('if (1) { $a; } elsif (2) { $b; } else { $c; }');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::If'), 'If with elsif';
-ok $s->else->stmts->[0]->isa('Brocken::AST::If'), 'Elsif is nested If';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::If'),                              'If with elsif';
+ok $s->else_block->statements->[0]->isa('Brocken::AST::Stmt::If'), 'Elsif is nested If';
 
 # Compound assignment
 $ast = parse_ok('$x += 5;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::Assign'), 'Compound assign';
-ok $s->expr->isa('Brocken::AST::BinOp'), 'Compound assign value is BinOp';
-is $s->expr->op, '+', 'Compound assign op +';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Stmt::Assignment'),   'Compound assignment';
+ok $s->value->isa('Brocken::AST::Expr::BinOp'), 'Compound assignment value is BinOp';
+is $s->value->op, '+', 'Compound assignment op +';
 
 # Ternary
 $ast = parse_ok('$x ? 1 : 2;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::Ternary'), 'Ternary';
-is $s->if_true->value, 1, 'Ternary true branch';
-is $s->if_false->value, 2, 'Ternary false branch';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Expr::Ternary'), 'Ternary';
+is $s->then->value, 1, 'Ternary then branch';
+is $s->else->value, 2, 'Ternary else branch';
 
 # Error: unexpected token
 my $err;
@@ -207,15 +206,12 @@ ok $err, 'Unterminated string dies';
 
 # Method call via ->
 $ast = parse_ok('$obj->foo;');
-$s = $ast->stmts->[0];
-ok $s->isa('Brocken::AST::BinOp'), '-> is BinOp';
-is $s->op, '->', '-> op';
-ok $s->right->isa('Brocken::AST::Call'), '-> right is Call';
-is $s->right->name, 'foo', 'Method name foo';
+$s   = $ast->statements->[0];
+ok $s->isa('Brocken::AST::Expr::MethodCall'), '-> is MethodCall';
+is $s->method, 'foo', 'Method name foo';
 
 # Method call with args
 $ast = parse_ok('$obj->foo(1, 2);');
-$s = $ast->stmts->[0];
-is scalar(@{ $s->right->args }), 2, 'Method call 2 args';
-
+$s   = $ast->statements->[0];
+is scalar( @{ $s->args } ), 2, 'Method call 2 args';
 done_testing;

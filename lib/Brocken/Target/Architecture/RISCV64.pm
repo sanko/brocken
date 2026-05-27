@@ -102,7 +102,7 @@ class Brocken::Target::Architecture::RISCV64 {
     }
 
     method mov_reg_to_sp($src) {
-        $self->mov_reg('sp', $src);
+        $self->mov_reg( 'sp', $src );
     }
 
     method add_imm ( $reg, $imm ) {
@@ -209,36 +209,40 @@ class Brocken::Target::Architecture::RISCV64 {
             }
         }
     }
+    method alloc_stack($size)          { $self->sub_imm( 'sp', $size ) }
+    method emit_mov_reg( $dest, $src ) { $self->mov_reg( $dest, $src ) }
+    method emit_mov_imm( $reg, $imm )  { $self->mov_imm( $reg, $imm ) }
 
-    method alloc_stack($size) { $self->sub_imm('sp', $size) }
-    method emit_mov_reg($dest, $src) { $self->mov_reg($dest, $src) }
-    method emit_mov_imm($reg, $imm) { $self->mov_imm($reg, $imm) }
-    method emit_syscall($num, @args) {
+    method emit_syscall( $num, @args ) {
         my @arg_regs = qw(a0 a1 a2 a3 a4 a5);
-        for my $i (0 .. $#args) {
-            $self->mov_imm($arg_regs[$i], $args[$i]) if defined $args[$i];
+        for my $i ( 0 .. $#args ) {
+            $self->mov_imm( $arg_regs[$i], $args[$i] ) if defined $args[$i];
         }
-        $self->mov_imm('a7', $num);
+        $self->mov_imm( 'a7', $num );
         $self->syscall();
     }
-    method emit_lea_label($reg, $label, $text_rva) { $self->lea_rva($reg, $label, $text_rva) }
-    method emit_store_mem($base, $disp, $src) {
+    method emit_lea_label( $reg, $label, $text_rva ) { $self->lea_rva( $reg, $label, $text_rva ) }
+
+    method emit_store_mem( $base, $disp, $src ) {
         my $rs2 = $self->_reg($src);
         my $rs1 = $self->_reg($base);
         $self->_sd( $rs2, $disp, $rs1 );
     }
     method emit_label($name) { $self->mark_label($name) }
-    method emit_branch_if_zero($reg, $label) {
+
+    method emit_branch_if_zero( $reg, $label ) {
         my $r = $self->_reg($reg);
         push @fixups, { offset => length($code), target => $label, funct3 => 0, rs1 => $r, rs2 => $REG{zero} };
         $code .= pack( 'L<', 0 );
     }
-    method emit_branch_if_not_zero($reg, $label) {
+
+    method emit_branch_if_not_zero( $reg, $label ) {
         my $r = $self->_reg($reg);
         push @fixups, { offset => length($code), target => $label, funct3 => 1, rs1 => $r, rs2 => $REG{zero} };
         $code .= pack( 'L<', 0 );
     }
     method emit_call_label($label) { $self->call_label($label) }
+
     method call_label($l) {
         push @fixups, { offset => length($code), target => $l, type => 'jal_ra' };
         $code .= pack( 'L<', 0 );

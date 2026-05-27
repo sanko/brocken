@@ -5,7 +5,6 @@ no warnings 'portable', 'experimental::class';
 use Test2::V0;
 use lib '../lib', 'lib';
 require Brocken::Target::Architecture::X64;
-
 subtest 'mov_reg' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->mov_reg( 'rax', 'rbx' );
@@ -13,7 +12,6 @@ subtest 'mov_reg' => sub {
     is length($code),         3,        'mov_reg is 3 bytes';
     is unpack( 'H*', $code ), '4889d8', 'mov rax, rbx encoding';
 };
-
 subtest 'mov_imm' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->mov_imm( 'rax', 42 );
@@ -21,7 +19,6 @@ subtest 'mov_imm' => sub {
     ok length($code) >= 7, 'mov_imm is at least 7 bytes';
     like unpack( 'H*', $code ), qr/^48(?:c7c0|b8)/, 'mov_imm starts with REX.W';
 };
-
 subtest 'push_reg and pop_reg' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->push_reg('rbx');
@@ -31,7 +28,6 @@ subtest 'push_reg and pop_reg' => sub {
     my $code = $as->code;
     ok length($code) >= 4, 'push/pop produces code';
 };
-
 subtest 'Arithmetic immediate' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->add_imm( 'rax', 8 );
@@ -39,7 +35,6 @@ subtest 'Arithmetic immediate' => sub {
     my $code = $as->code;
     ok length($code) > 0, 'arithmetic imm ops produce code';
 };
-
 subtest 'Comparison' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->cmp_reg_reg( 'rax', 'rbx' );
@@ -48,7 +43,6 @@ subtest 'Comparison' => sub {
     my $code = $as->code;
     ok length($code) > 0, 'compare ops produce code';
 };
-
 subtest 'Memory operations' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->store_mem_disp_reg( 'rbx', 0, 'rax' );
@@ -57,7 +51,6 @@ subtest 'Memory operations' => sub {
     my $code = $as->code;
     ok length($code) > 0, 'memory ops produce code';
 };
-
 subtest 'Control flow' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->mark_label('L_start');
@@ -73,7 +66,6 @@ subtest 'Control flow' => sub {
     ok exists $as->labels->{L_start}, 'L_start label exists';
     ok exists $as->labels->{L_mid},   'L_mid label exists';
 };
-
 subtest 'resolve fixups' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->mark_label('L_func');
@@ -86,7 +78,6 @@ subtest 'resolve fixups' => sub {
     my $code = $as->code;
     ok length($code) > 0, 'resolved code produced';
 };
-
 subtest 'SSE2 floating point' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->addsd_reg( 'xmm0', 'xmm1' );
@@ -99,11 +90,9 @@ subtest 'SSE2 floating point' => sub {
     my $code = $as->code;
     ok length($code) > 0, 'SSE2 ops produce code';
 };
-
 subtest 'syscall' => sub {
     my $as = Brocken::Target::Architecture::X64->new;
     $as->syscall();
     is unpack( 'H*', $as->code ), '0f05', 'syscall encoding';
 };
-
 done_testing;

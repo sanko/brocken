@@ -5,6 +5,8 @@ package Brocken::AST::Stmt {
     #
     class Brocken::AST::Stmt::Block : isa(Brocken::AST::Node) { field $statements : param : reader; }
 
+    class Brocken::AST::Stmt::Program : isa(Brocken::AST::Stmt::Block) { }
+
     class Brocken::AST::Stmt::VarDecl : isa(Brocken::AST::Node)
     { field $name : param : reader; field $type : param : reader; field $value : param : reader; }
 
@@ -22,11 +24,16 @@ package Brocken::AST::Stmt {
     class Brocken::AST::Stmt::While : isa(Brocken::AST::Node) { field $condition : param : reader; field $body : param : reader; }
 
     class Brocken::AST::Stmt::For : isa(Brocken::AST::Node) {
-        field $var    : param : reader = undef;    # Can be scalar or arrayref for multiple vars
-        field $source : param : reader;
-        field $body   : param : reader;
-        field $is_my  : param : reader = 0;
+        field $init      : param : reader = undef;    # C-style init
+        field $condition : param : reader = undef;    # C-style cond or While cond
+        field $step      : param : reader = undef;    # C-style step
+        field $body      : param : reader;
+        field $var       : param : reader = undef;    # Iterator-style var
+        field $source    : param : reader = undef;    # Iterator-style source
+        field $is_my     : param : reader = 0;
     }
+
+    class Brocken::AST::Stmt::ForEach : isa(Brocken::AST::Stmt::For) { }
 
     class Brocken::AST::Stmt::Next : isa(Brocken::AST::Node) { }
 
@@ -34,9 +41,9 @@ package Brocken::AST::Stmt {
 
     class Brocken::AST::Stmt::Redo : isa(Brocken::AST::Node) { }
 
-    class Brocken::AST::Stmt::Return : isa(Brocken::AST::Node) { field $expr : param : reader; }
+    class Brocken::AST::Stmt::Return : isa(Brocken::AST::Node) { field $expr : param : reader = undef; }
 
-    class Brocken::AST::Stmt::Exit : isa(Brocken::AST::Node) { field $expr : param : reader; }
+    class Brocken::AST::Stmt::Exit : isa(Brocken::AST::Node) { field $expr : param : reader = undef; }
 
     class Brocken::AST::Stmt::Map : isa(Brocken::AST::Node) { field $expr : param : reader; field $source : param : reader; }
 

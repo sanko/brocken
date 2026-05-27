@@ -5,7 +5,15 @@ package Brocken::AST::Expr {
     #
     class Brocken::AST::Expr::Const : isa(Brocken::AST::Node) { field $value : param : reader; field $type : param : reader; }
 
-    class Brocken::AST::Expr::Var : isa(Brocken::AST::Node) { field $name : param : reader; }
+    class Brocken::AST::Expr::IntLiteral : isa(Brocken::AST::Expr::Const) { }
+
+    class Brocken::AST::Expr::FloatLiteral : isa(Brocken::AST::Expr::Const) { }
+
+    class Brocken::AST::Expr::StrLiteral : isa(Brocken::AST::Expr::Const) { }
+
+    class Brocken::AST::Expr::NilLiteral : isa(Brocken::AST::Expr::Const) { }
+
+    class Brocken::AST::Expr::Var : isa(Brocken::AST::Node) { field $name : param : reader; field $sigil : param : reader = '$'; }
 
     class Brocken::AST::Expr::BinOp : isa(Brocken::AST::Node)
     { field $op : param : reader; field $left : param : reader; field $right : param : reader; }

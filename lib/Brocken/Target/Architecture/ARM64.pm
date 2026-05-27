@@ -38,10 +38,9 @@ class Brocken::Target::Architecture::ARM64 {
         sp  => 31,
         xzr => 31
     );
-    field $code    : reader = '';
+    field $code : reader = '';
     field %labels;
     field @fixups;
-
     method labels()    { \%labels }
     method label($key) { $labels{$key} // () }
     method ret ()      { $code .= pack( 'L<', 0xD65F03C0 ) }
@@ -68,7 +67,7 @@ class Brocken::Target::Architecture::ARM64 {
 
     method mov_reg_to_sp($src) {
         my $s = $REG{ lc $src };
-        $code .= pack( 'L<', 0x91000000 | ( $s << 5 ) | 31 ); # ADD SP, Xn, #0
+        $code .= pack( 'L<', 0x91000000 | ( $s << 5 ) | 31 );    # ADD SP, Xn, #0
     }
 
     method add_imm ( $reg, $imm ) {
@@ -99,36 +98,40 @@ class Brocken::Target::Architecture::ARM64 {
         my $immhi = ( $off >> 2 ) & 0x7FFFF;
         $code .= pack( 'L<', 0x10000000 | ( $immlo << 29 ) | ( $immhi << 5 ) | $r );
     }
+    method alloc_stack($size)          { $self->sub_imm( 'sp', $size ) }
+    method emit_mov_reg( $dest, $src ) { $self->mov_reg( $dest, $src ) }
+    method emit_mov_imm( $reg, $imm )  { $self->mov_imm( $reg, $imm ) }
 
-    method alloc_stack($size) { $self->sub_imm('sp', $size) }
-    method emit_mov_reg($dest, $src) { $self->mov_reg($dest, $src) }
-    method emit_mov_imm($reg, $imm) { $self->mov_imm($reg, $imm) }
-    method emit_syscall($num, @args) {
-        $self->mov_imm('x8', $num);
+    method emit_syscall( $num, @args ) {
+        $self->mov_imm( 'x8', $num );
         my @arg_regs = qw(x0 x1 x2 x3 x4 x5);
-        for my $i (0 .. $#args) {
-            $self->mov_imm($arg_regs[$i], $args[$i]) if defined $args[$i];
+        for my $i ( 0 .. $#args ) {
+            $self->mov_imm( $arg_regs[$i], $args[$i] ) if defined $args[$i];
         }
-        $self->syscall('linux', $num);
+        $self->syscall( 'linux', $num );
     }
-    method emit_lea_label($reg, $label, $text_rva) { $self->lea_rva($reg, $label, $text_rva) }
-    method emit_store_mem($base, $disp, $src) {
+    method emit_lea_label( $reg, $label, $text_rva ) { $self->lea_rva( $reg, $label, $text_rva ) }
+
+    method emit_store_mem( $base, $disp, $src ) {
         my $d = $REG{ lc $src };
         my $b = $REG{ lc $base };
         $code .= pack( 'L<', 0xF9000000 | ( ( $disp >> 3 ) << 10 ) | ( $b << 5 ) | $d );
     }
     method emit_label($name) { $self->mark_label($name) }
-    method emit_branch_if_zero($reg, $label) {
+
+    method emit_branch_if_zero( $reg, $label ) {
         my $r = $REG{ lc $reg };
         push @fixups, { offset => length($code), target => $label, type => 'cond_cbz' };
         $code .= pack( 'L<', 0xB4000000 | $r );
     }
-    method emit_branch_if_not_zero($reg, $label) {
+
+    method emit_branch_if_not_zero( $reg, $label ) {
         my $r = $REG{ lc $reg };
         push @fixups, { offset => length($code), target => $label, type => 'cond_cbnz' };
         $code .= pack( 'L<', 0xB5000000 | $r );
     }
     method emit_call_label($label) { $self->call_label($label) }
+
     method call_label($l) {
         push @fixups, { offset => length($code), target => $l, type => 'uncond_bl' };
         $code .= pack( 'L<', 0x94000000 );
@@ -176,6 +179,7 @@ class Brocken::Target::Architecture::ARM64 {
         else {
             # Placeholder for non-POSIX (Windows ARM64)
             $self->mov_imm( 'x0', -11 );
+
             # $self->call_rva( ... ); # Need correct RVA or label
             # For now, let's keep it as is if it's not the focus
         }
@@ -191,6 +195,7 @@ class Brocken::Target::Architecture::ARM64 {
         }
         else {
             $self->mov_imm( 'x0', $code_val );
+
             # $self->call_rva( ... );
         }
     }
@@ -199,10 +204,8 @@ class Brocken::Target::Architecture::ARM64 {
         for (@fixups) {
             my $target = $labels{ $_->{target} };
             die "Undefined target label: $_->{target}" unless defined $target;
-            my $off    = ( $target - $_->{offset} ) / 4;
-            
+            my $off   = ( $target - $_->{offset} ) / 4;
             my $instr = unpack( 'L<', substr( $code, $_->{offset}, 4 ) );
-            
             if ( $_->{type} eq 'cond_b_cc' ) {
                 $instr |= ( $off & 0x7FFFF ) << 5;
             }
@@ -212,7 +215,6 @@ class Brocken::Target::Architecture::ARM64 {
             elsif ( $_->{type} eq 'uncond_b' || $_->{type} eq 'uncond_bl' ) {
                 $instr |= ( $off & 0x3FFFFFF );
             }
-            
             substr( $code, $_->{offset}, 4, pack( 'L<', $instr ) );
         }
     }

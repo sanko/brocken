@@ -10,7 +10,7 @@ class Brocken::Scanner {
     my %TOKEN_PATTERNS = (
         KEYWORD =>
             qr/\b(my|sub|class|field|method|return|if|elsif|else|while|eval|print|say|our|local|state|use|no|package|for|foreach|do|given|when|default|continue|next|last|redo|goto|unless|until|grep|map|sort|die|warn|keys|values|each|defined|undef|exists|delete|and|or|not|xor|eq|ne|lt|gt|le|ge|cmp|abs|chr|hex|oct|ord|pack|reverse|sprintf|uc|lc|ucfirst|open|close|opendir|closedir|read|readline|write|printf|seek|tell|truncate|binmode|chdir|chmod|chown|chroot|unlink|rename|link|symlink|mkdir|rmdir|stat|lstat|exec|fork|system|kill|wait|waitpid|accept|bind|connect|listen|recv|send|socket|time|times|utime|require|import|length|substr|index|push|pop|shift|unshift|qq|q|qw|qr|qx|try|catch|finally)\b/u,
-        OPERATOR => qr/(\.\.\.|\.\.|<<=|>>=|&&=|\|\|=|\*\*=|->|=>|==|!=|<=|>=|&&|\|\||\*\*|<<|>>|[-+*\/%&|^=<>!~.])/u,
+        OPERATOR     => qr/(\.\.\.|\.\.|<<=|>>=|&&=|\|\|=|\*\*=|->|=>|==|!=|<=|>=|&&|\|\||\*\*|<<|>>|[-+*\/%&|^=<>!~.])/u,
         FILE_TEST_OP => qr/-\w\b/u,
         VARIABLE     => qr/[\$@%&]\w+/u,
         IDENTIFIER   => qr/[a-zA-Z_][a-zA-Z0-9_]*/u,
@@ -68,7 +68,14 @@ class Brocken::Scanner {
                 # If there's a semicolon after the marker (with optional whitespace), consume it
                 if ( $remaining =~ /^(\s*;)/ ) {
                     my $semi_match = $1;
-                    push @tokens, Brocken::Token->new( type => 'SEMICOLON', value => ';', line => $line, column => $col + (length($semi_match) - 1), file => $filename );
+                    push @tokens,
+                        Brocken::Token->new(
+                        type   => 'SEMICOLON',
+                        value  => ';',
+                        line   => $line,
+                        column => $col + ( length($semi_match) - 1 ),
+                        file   => $filename
+                        );
                     $col += length($semi_match);
                     $remaining = substr( $remaining, length($semi_match) );
                 }

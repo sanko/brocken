@@ -2,8 +2,7 @@ use Test2::V0;
 use lib 'lib';
 use Brocken::Lexer;
 use Brocken::Parser;
-
-my $source  = q{
+my $source = q{
     sub main {
         my $x = 10;
         if (1) {
@@ -12,10 +11,9 @@ my $source  = q{
         print($x);
     }
 };
-my $lexer  = Brocken::Lexer->new(source => $source);
-my $parser = Brocken::Parser->new(lexer => $lexer);
+my $lexer  = Brocken::Lexer->new( source => $source );
+my $parser = Brocken::Parser->new( lexer => $lexer );
 my $ast    = $parser->parse();
-is scalar( @{ $ast->stmts } ), 1, 'Should have 1 statement';
-ok $ast->stmts->[0]->isa('Brocken::AST::SubDecl'), 'Subroutine parses';
-
+is scalar( @{ $ast->statements } ), 1, 'Should have 1 statement';
+ok $ast->statements->[0]->isa('Brocken::AST::OOP::Method'), 'Subroutine parses';
 done_testing;

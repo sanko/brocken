@@ -15,7 +15,7 @@ class Brocken::IR::Assign : isa(Brocken::IR::Instruction) {
     field $rhs  : reader : param;
 
     method to_string() {
-        return sprintf("%s = %s %s %s", $dest, $lhs, $op, $rhs);
+        return sprintf( "%s = %s %s %s", $dest, $lhs, $op, $rhs );
     }
 
     method uses() {
@@ -32,9 +32,9 @@ class Brocken::IR::Load : isa(Brocken::IR::Instruction) {
     field $var  : reader : param;
 
     method to_string() {
-        return sprintf("%s = load %s", $dest, $var);
+        return sprintf( "%s = load %s", $dest, $var );
     }
-    method uses() { return () } # Loading from a variable, not a vreg
+    method uses() { return () }        # Loading from a variable, not a vreg
     method defs() { return ($dest) }
 }
 
@@ -43,20 +43,20 @@ class Brocken::IR::Store : isa(Brocken::IR::Instruction) {
     field $src : reader : param;
 
     method to_string() {
-        return sprintf("store %s = %s", $var, $src);
+        return sprintf( "store %s = %s", $var, $src );
     }
     method uses() { return ($src) if $src =~ /^v\d+$/; return () }
-    method defs() { return () } # Storing to a variable, not a vreg
+    method defs() { return () }                                      # Storing to a variable, not a vreg
 }
 
 class Brocken::IR::Jump : isa(Brocken::IR::Instruction) {
     field $label : reader : param;
 
     method to_string() {
-        return sprintf("jmp %s", $label);
+        return sprintf( "jmp %s", $label );
     }
-    method uses() { return () }
-    method defs() { return () }
+    method uses()   { return () }
+    method defs()   { return () }
     method target() { return $label }
 }
 
@@ -65,10 +65,10 @@ class Brocken::IR::Branch : isa(Brocken::IR::Instruction) {
     field $cond  : reader : param;
 
     method to_string() {
-        return sprintf("jz %s, %s", $label, $cond);
+        return sprintf( "jz %s, %s", $label, $cond );
     }
-    method uses() { return ($cond) if $cond =~ /^v\d+$/; return () }
-    method defs() { return () }
+    method uses()   { return ($cond) if $cond =~ /^v\d+$/; return () }
+    method defs()   { return () }
     method target() { return $label }
 }
 
@@ -78,9 +78,12 @@ class Brocken::IR::Call : isa(Brocken::IR::Instruction) {
     field $args : reader : param;
 
     method to_string() {
-        return sprintf("%s = call %s(%s)", $dest, $func, join(', ', @$args));
+        return sprintf( "%s = call %s(%s)", $dest, $func, join( ', ', @$args ) );
     }
-    method uses() { return grep { /^v\d+$/ } @$args }
+
+    method uses() {
+        return grep {/^v\d+$/} @$args;
+    }
     method defs() { return ($dest) }
 }
 
@@ -88,7 +91,7 @@ class Brocken::IR::Return : isa(Brocken::IR::Instruction) {
     field $val : reader : param;
 
     method to_string() {
-        return sprintf("ret %s", $val);
+        return sprintf( "ret %s", $val );
     }
     method uses() { return ($val) if $val =~ /^v\d+$/; return () }
     method defs() { return () }
@@ -98,16 +101,16 @@ class Brocken::IR::Label : isa(Brocken::IR::Instruction) {
     field $name : reader : param;
 
     method to_string() {
-        return sprintf("%s:", $name);
+        return sprintf( "%s:", $name );
     }
 }
 
 class Brocken::IR::BasicBlock {
-    field $name : reader : param;
+    field $name         : reader : param;
     field @instructions : reader;
-    field $terminator : reader;
-    field %live_in : reader;
-    field %live_out : reader;
+    field $terminator   : reader;
+    field %live_in      : reader;
+    field %live_out     : reader;
 
     method add_instruction ($instr) {
         push @instructions, $instr;
@@ -116,18 +119,17 @@ class Brocken::IR::BasicBlock {
     method set_terminator ($instr) {
         $terminator = $instr;
     }
-
-    method set_live_in (%vars) { %live_in = %vars }
+    method set_live_in  (%vars) { %live_in  = %vars }
     method set_live_out (%vars) { %live_out = %vars }
 
     method to_string () {
         my $str = "$name:\n";
-        $str .= "  # LiveIn: " . join(', ', sort keys %live_in) . "\n" if %live_in;
+        $str .= "  # LiveIn: " . join( ', ', sort keys %live_in ) . "\n" if %live_in;
         for my $i (@instructions) {
             $str .= "  " . $i->to_string() . "\n";
         }
-        $str .= "  " . $terminator->to_string() . "\n" if $terminator;
-        $str .= "  # LiveOut: " . join(', ', sort keys %live_out) . "\n" if %live_out;
+        $str .= "  " . $terminator->to_string() . "\n"                     if $terminator;
+        $str .= "  # LiveOut: " . join( ', ', sort keys %live_out ) . "\n" if %live_out;
         return $str;
     }
 }
@@ -139,7 +141,7 @@ class Brocken::IR::CFG {
 
     method add_block ($block) {
         push @blocks, $block;
-        $block_map{$block->name} = $block;
+        $block_map{ $block->name } = $block;
     }
 
     method get_block ($name) {
@@ -157,17 +159,17 @@ class Brocken::IR::CFG {
 
 class Brocken::IR::RefInc : isa(Brocken::IR::Instruction) {
     field $v : reader : param;
-    method to_string() { return sprintf("RefInc %s", $v); }
+    method to_string() { return sprintf( "RefInc %s", $v ); }
 }
 
 class Brocken::IR::RefDec : isa(Brocken::IR::Instruction) {
     field $v : reader : param;
-    method to_string() { return sprintf("RefDec %s", $v); }
+    method to_string() { return sprintf( "RefDec %s", $v ); }
 }
 
 class Brocken::IR::Weaken : isa(Brocken::IR::Instruction) {
     field $v : reader : param;
-    method to_string() { return sprintf("Weaken %s", $v); }
+    method to_string() { return sprintf( "Weaken %s", $v ); }
 }
 
 class Brocken::IR::Builder {

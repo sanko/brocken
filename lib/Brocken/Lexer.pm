@@ -3,6 +3,7 @@ use feature 'class';
 no warnings 'portable', 'experimental::class';
 use Encode 'decode';
 use utf8;
+use Brocken::Token;
 #
 my %KEYWORDS = map { $_ => 1 } qw(
     if elsif else unless while until for foreach
@@ -49,11 +50,11 @@ class Brocken::Lexer {
     }
 
     method _tok ( $type, $value ) {
-        return { type => $type, value => $value, line => $line, col => $col - length($value) };
+        return Brocken::Token->new( type => $type, value => $value, line => $line, col => $col - length($value) );
     }
 
     method _tok_v ( $type, $value, $sigil ) {
-        return { type => $type, value => $value, sigil => $sigil, line => $line, col => $col - length($value) - 1 };
+        return Brocken::Token->new( type => $type, value => $value, sigil => $sigil, line => $line, col => $col - length($value) - 1 );
     }
 
     method _scan () {
@@ -74,11 +75,7 @@ class Brocken::Lexer {
         else {
             return $self->_scan_var($ch) if $ch =~ /^[\$\@\%]/;
         }
-        if ( $ch eq '<'
-            && $pos + 2 < length($source)
-            && substr( $source, $pos + 1, 1 ) eq '<'
-            && substr( $source, $pos + 2, 1 ) =~ /[a-zA-Z_]/ )
-        {
+        if ( $ch eq '<' && $pos + 2 < length($source) && substr( $source, $pos + 1, 1 ) eq '<' && substr( $source, $pos + 2, 1 ) =~ /[a-zA-Z_]/ ) {
             return $self->_scan_heredoc();
         }
         return $self->_scan_operator();

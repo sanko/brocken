@@ -2,21 +2,19 @@ use Test2::V0;
 use lib 'lib';
 use Brocken::Lexer;
 use Brocken::Parser;
-
 subtest 'Built-in Calls' => sub {
     my $source = 'say(abs(10), reverse(20, 30));';
-    my $lexer  = Brocken::Lexer->new(source => $source);
-    my $parser = Brocken::Parser->new(lexer => $lexer);
+    my $lexer  = Brocken::Lexer->new( source => $source );
+    my $parser = Brocken::Parser->new( lexer => $lexer );
     my $ast    = $parser->parse();
-    is scalar( @{ $ast->stmts } ), 1, 'Should have 1 statement';
-    my $call = $ast->stmts->[0];
-    ok $call->isa('Brocken::AST::Call'), 'Top-level is Call';
-    is $call->name, 'say', 'Call name is say';
-    is scalar( @{ $call->args } ), 2, 'Two arguments';
-    ok $call->args->[0]->isa('Brocken::AST::Call'), 'First arg is Call (abs)';
+    is scalar( @{ $ast->statements } ), 1, 'Should have 1 statement';
+    my $call = $ast->statements->[0];
+    ok $call->isa('Brocken::AST::Expr::Call'), 'Top-level is Call';
+    is $call->name,                'say', 'Call name is say';
+    is scalar( @{ $call->args } ), 2,     'Two arguments';
+    ok $call->args->[0]->isa('Brocken::AST::Expr::Call'), 'First arg is Call (abs)';
     is $call->args->[0]->name, 'abs', 'Nested call name is abs';
-    ok $call->args->[1]->isa('Brocken::AST::Call'), 'Second arg is Call (reverse)';
+    ok $call->args->[1]->isa('Brocken::AST::Expr::Call'), 'Second arg is Call (reverse)';
     is $call->args->[1]->name, 'reverse', 'Nested call name is reverse';
 };
-
 done_testing;

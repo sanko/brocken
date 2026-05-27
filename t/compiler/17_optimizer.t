@@ -14,7 +14,6 @@ sub build_ir {
     $b->emit( 'enter_func', 'void', [] );
     return $b;
 }
-
 subtest 'Tail call optimization: call_func -> tail_call_func' => sub {
     my $b = build_ir;
     my $r = $b->emit( 'constant', 'Int', [42] );
@@ -27,7 +26,6 @@ subtest 'Tail call optimization: call_func -> tail_call_func' => sub {
     my $tc = ( grep { $_->{op} eq 'tail_call_func' } @$insts )[0];
     ok $tc, 'tail_call_func exists in output';
 };
-
 subtest 'Tail call not optimized when dest does not match leave_func arg' => sub {
     my $b = build_ir;
     my $r = $b->emit( 'constant', 'Int', [1] );
@@ -39,7 +37,6 @@ subtest 'Tail call not optimized when dest does not match leave_func arg' => sub
     my $cf    = ( grep { $_->{op} eq 'call_func' } @$insts )[0];
     ok $cf, 'call_func still exists when arg mismatch';
 };
-
 subtest 'Dead instruction elimination' => sub {
     my $b  = Brocken::IR::Builder->new;
     my $v1 = $b->emit( 'constant', 'Int', [10] );
@@ -53,16 +50,14 @@ subtest 'Dead instruction elimination' => sub {
     my @unused = grep { $_->{op} eq 'constant' } @$insts;
     is scalar(@unused), 1, 'only one constant left (unused eliminated)';
 };
-
 subtest 'AST substitution' => sub {
     my $opt    = Brocken::Compiler::Optimizer->new;
     my $var    = Brocken::AST::Expr::Var->new( name => '$_' );
     my $repl   = Brocken::AST::Expr::Const->new( value => 99,  type => 'Int' );
-    my $binop  = Brocken::AST::Expr::BinOp->new( op => '+', left => $var, right => Brocken::AST::Expr::Const->new( value => 1, type => 'Int' ) );
+    my $binop  = Brocken::AST::Expr::BinOp->new( op    => '+', left => $var, right => Brocken::AST::Expr::Const->new( value => 1, type => 'Int' ) );
     my $result = $opt->substitute_ast( $binop, '$_', $repl );
     ok $result->isa('Brocken::AST::Expr::BinOp'), 'result is BinOp';
     is $result->left->value,  99, '$_ replaced with 99';
     is $result->right->value, 1,  'right unchanged';
 };
-
 done_testing;

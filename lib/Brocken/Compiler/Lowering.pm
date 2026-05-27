@@ -4249,7 +4249,7 @@ package Brocken::Compiler::Lowering {
             my $eh = scalar @defer_stack;
             my ( $r, $t );
             my $stmts = $node->can('stmts') ? $node->stmts : $node->statements;
-            for my $s ( @$stmts ) { ( $r, $t ) = $self->lower($s) }
+            for my $s (@$stmts) { ( $r, $t ) = $self->lower($s) }
             while ( scalar @defer_stack > $eh ) {
                 my $f = pop @defer_stack;
                 for my $inst (@$f) { $builder->push_instruction($inst) }
@@ -4260,12 +4260,12 @@ package Brocken::Compiler::Lowering {
         }
 
         method lower_If($node) {
-            my $cond = $node->can('condition') ? $node->condition : $node->cond;
+            my $cond = $node->can('condition')  ? $node->condition  : $node->cond;
             my $then = $node->can('then_block') ? $node->then_block : $node->then;
             my $else = $node->can('else_block') ? $node->else_block : $node->else;
-            my $l1 = $builder->new_label();
-            my $l2 = $builder->new_label();
-            my $l3 = $builder->new_label();
+            my $l1   = $builder->new_label();
+            my $l2   = $builder->new_label();
+            my $l3   = $builder->new_label();
             $builder->emit_cond_br( $self->_emit_bool_test( ( $self->lower($cond) )[0] ), $l1, $l2 );
             $builder->emit_label($l1);
             $self->lower($then);
@@ -4277,8 +4277,8 @@ package Brocken::Compiler::Lowering {
         }
 
         method lower_While($node) {
-            my $cond = $node->can('condition') ? $node->condition : $node->cond;
-            my $body = $node->body;
+            my $cond   = $node->can('condition') ? $node->condition : $node->cond;
+            my $body   = $node->body;
             my $redo_l = $builder->new_label();
             my $next_l = $builder->new_label();
             my $last_l = $builder->new_label();
@@ -5574,7 +5574,6 @@ package Brocken::Compiler::Lowering {
         }
 
         # --- New AST Adapters (Pratt parser bridge) ---
-
         method lower_IntLiteral($node) {
             return ( $builder->emit( 'constant', 'i64', [ ( $node->value << 1 ) | 1 ] ), 'Int' );
         }

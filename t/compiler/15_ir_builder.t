@@ -5,7 +5,6 @@ no warnings 'portable', 'experimental::class';
 use Test2::V0;
 use lib 'lib';
 use Brocken::IR;
-
 subtest 'Basic IR Construction' => sub {
     my $b  = Brocken::IR::Builder->new;
     my $v1 = $b->emit( 'constant', 'Int', [42] );
@@ -17,21 +16,18 @@ subtest 'Basic IR Construction' => sub {
     is $insts->[0]{args}[0], 42,         'args[0] is 42';
     is $insts->[0]{dest},    $v1,        'dest is the vreg';
 };
-
 subtest 'emit with explicit dest' => sub {
     my $b  = Brocken::IR::Builder->new;
     my $v1 = $b->emit( 'constant', 'Int', [10], '%custom' );
     is $v1,                         '%custom', 'explicit dest returned';
     is $b->instructions->[0]{dest}, '%custom', 'explicit dest stored';
 };
-
 subtest 'emit void type (no dest)' => sub {
     my $b   = Brocken::IR::Builder->new;
     my $res = $b->emit( 'leave_func', 'void', ['%1'] );
     is $res, undef, 'void emit returns undef';
     ok !defined( $b->instructions->[0]{dest} ), 'void instruction has no dest';
 };
-
 subtest 'Register allocation' => sub {
     my $b = Brocken::IR::Builder->new;
     my @regs;
@@ -39,7 +35,6 @@ subtest 'Register allocation' => sub {
     is $regs[0], '%1', 'registers start at %1';
     is $regs[4], '%5', 'registers end at %5';
 };
-
 subtest 'Label allocation' => sub {
     my $b = Brocken::IR::Builder->new;
     my @labels;
@@ -47,7 +42,6 @@ subtest 'Label allocation' => sub {
     is $labels[0], 'L1', 'labels start at L1';
     is $labels[2], 'L3', 'labels end at L3';
 };
-
 subtest 'emit_label' => sub {
     my $b = Brocken::IR::Builder->new;
     $b->emit_label('L_loop');
@@ -55,7 +49,6 @@ subtest 'emit_label' => sub {
     is $inst->{op},   'label',  'label op';
     is $inst->{name}, 'L_loop', 'label name';
 };
-
 subtest 'emit_jump' => sub {
     my $b = Brocken::IR::Builder->new;
     $b->emit_jump('L_exit');
@@ -63,7 +56,6 @@ subtest 'emit_jump' => sub {
     is $inst->{op},     'jmp',    'jmp op';
     is $inst->{target}, 'L_exit', 'jmp target';
 };
-
 subtest 'emit_cond_br' => sub {
     my $b = Brocken::IR::Builder->new;
     $b->emit_cond_br( '%1', 'L_true', 'L_false' );
@@ -73,7 +65,6 @@ subtest 'emit_cond_br' => sub {
     is $inst->{true_l},  'L_true',  'cond_br true label';
     is $inst->{false_l}, 'L_false', 'cond_br false label';
 };
-
 subtest 'push/pop instructions' => sub {
     my $b = Brocken::IR::Builder->new;
     $b->emit( 'constant', 'Int', [1] );
@@ -84,14 +75,12 @@ subtest 'push/pop instructions' => sub {
     is scalar( @{ $b->instructions } ), 1, 'one instruction after pop';
     is $b->last_instruction->{args}[0], 1, 'last_instruction returns top';
 };
-
 subtest 'set_instructions replaces all' => sub {
     my $b = Brocken::IR::Builder->new;
     $b->set_instructions( { op => 'custom', type => 'void' } );
     is scalar( @{ $b->instructions } ), 1,        'one instruction after set';
     is $b->instructions->[0]{op},       'custom', 'custom op';
 };
-
 subtest 'multiple instruction sequence' => sub {
     my $b  = Brocken::IR::Builder->new;
     my $c1 = $b->emit( 'constant', 'Int', [10] );
@@ -108,5 +97,4 @@ subtest 'multiple instruction sequence' => sub {
     is $insts->[2]{args}[1], $c2,          'add arg2';
     is $insts->[2]{dest},    $r,           'add dest';
 };
-
 done_testing;

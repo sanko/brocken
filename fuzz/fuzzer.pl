@@ -36,12 +36,19 @@ sub generate_code {
     # 20% Control flow (if/elsif/else)
     elsif ( $choice < 0.8 ) {
         my $case = rand();
-        if ($case < 0.33) {
+        if ( $case < 0.33 ) {
             return "if (1) { my \$x_local = " . generate_expr() . "; }";
-        } elsif ($case < 0.66) {
+        }
+        elsif ( $case < 0.66 ) {
             return "if (1) { my \$x_local = " . generate_expr() . "; } else { my \$y_local = " . generate_expr() . "; }";
-        } else {
-            return "if (1) { my \$x_local = " . generate_expr() . "; } elsif (2) { my \$z_local = " . generate_expr() . "; } else { my \$y_local = " . generate_expr() . "; }";
+        }
+        else {
+            return "if (1) { my \$x_local = " .
+                generate_expr() .
+                "; } elsif (2) { my \$z_local = " .
+                generate_expr() .
+                "; } else { my \$y_local = " .
+                generate_expr() . "; }";
         }
     }
 

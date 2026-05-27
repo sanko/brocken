@@ -93,36 +93,36 @@ class Brocken::Target::OS {
         return undef;
     }
 
-    method write_mmap_args ($as, $arch, $len) {
-        if ($arch eq 'x64') {
-            $as->mov_imm('rdi', 0);    # addr
-            $as->mov_imm('rsi', $len);  # len
-            $as->mov_imm('rdx', 0x3);   # prot (PROT_READ | PROT_WRITE)
-            $as->mov_imm('r10', 0x22);  # flags (MAP_PRIVATE | MAP_ANONYMOUS)
-            $as->mov_imm('r8', -1);     # fd
-            $as->mov_imm('r9', 0);      # off
+    method write_mmap_args ( $as, $arch, $len ) {
+        if ( $arch eq 'x64' ) {
+            $as->mov_imm( 'rdi', 0 );       # addr
+            $as->mov_imm( 'rsi', $len );    # len
+            $as->mov_imm( 'rdx', 0x3 );     # prot (PROT_READ | PROT_WRITE)
+            $as->mov_imm( 'r10', 0x22 );    # flags (MAP_PRIVATE | MAP_ANONYMOUS)
+            $as->mov_imm( 'r8',  -1 );      # fd
+            $as->mov_imm( 'r9',  0 );       # off
         }
-        elsif ($arch eq 'arm64') {
-            $as->mov_imm('x0', 0);
-            $as->mov_imm('x1', $len);
-            $as->mov_imm('x2', 0x3);
-            $as->mov_imm('x3', 0x22);
-            $as->mov_imm('x4', -1);
-            $as->mov_imm('x5', 0);
+        elsif ( $arch eq 'arm64' ) {
+            $as->mov_imm( 'x0', 0 );
+            $as->mov_imm( 'x1', $len );
+            $as->mov_imm( 'x2', 0x3 );
+            $as->mov_imm( 'x3', 0x22 );
+            $as->mov_imm( 'x4', -1 );
+            $as->mov_imm( 'x5', 0 );
         }
-        elsif ($arch eq 'riscv64') {
-            $as->mov_imm('a0', 0);
-            $as->mov_imm('a1', $len);
-            $as->mov_imm('a2', 0x3);
-            $as->mov_imm('a3', 0x22);
-            $as->mov_imm('a4', -1);
-            $as->mov_imm('a5', 0);
+        elsif ( $arch eq 'riscv64' ) {
+            $as->mov_imm( 'a0', 0 );
+            $as->mov_imm( 'a1', $len );
+            $as->mov_imm( 'a2', 0x3 );
+            $as->mov_imm( 'a3', 0x22 );
+            $as->mov_imm( 'a4', -1 );
+            $as->mov_imm( 'a5', 0 );
         }
     }
 
     method syscall_rfork ($arch) {
         my $n = $self->name;
-        return 465 if ($n eq 'freebsd' || $n eq 'dragonfly') && $arch eq 'x64';
+        return 465 if ( $n eq 'freebsd' || $n eq 'dragonfly' ) && $arch eq 'x64';
         return undef;
     }
 
@@ -134,8 +134,10 @@ class Brocken::Target::OS {
 
     method syscall_lwp_create ($arch) {
         my $n = $self->name;
+
         # Solaris: _lwp_create (generic/x86/sparc)
         return 12 if $n eq 'solaris' && $arch eq 'x64';
+
         # NetBSD: _lwp_create
         return 309 if $n eq 'netbsd' && $arch eq 'x64';
         return undef;
@@ -176,7 +178,7 @@ class Brocken::Target::OS {
     sub detect_arch ($class) {
         my $os = $^O;
         if ( $os eq 'MSWin32' || $os eq 'cygwin' ) {
-            my $pa  = $ENV{PROCESSOR_ARCHITECTURE}      // '';
+            my $pa  = $ENV{PROCESSOR_ARCHITECTURE} // '';
             my $paw = $ENV{PROCESSOR_ARCHITEW6432} // '';
             my $pi  = $ENV{PROCESSOR_IDENTIFIER}   // '';
             return 'arm64' if $pa =~ /ARM64/i || $paw =~ /ARM64/i || $pi =~ /ARM/i;
@@ -184,14 +186,13 @@ class Brocken::Target::OS {
         }
         else {
             use Config;
-            return 'arm64'   if ( $Config{archname} // '' ) =~ /aarch64|arm64|apple-arm64/i;
+            return 'arm64' if ( $Config{archname} // '' ) =~ /aarch64|arm64|apple-arm64/i;
             my $uname_m = `uname -m` // '';
             return 'arm64'   if $uname_m =~ /aarch64|arm64|armv8/i;
             return 'riscv64' if $uname_m =~ /riscv64/i;
             return 'x64';
         }
     }
-
     method text_rva () { return 0; }
     method data_rva () { return 0; }
 

@@ -4,20 +4,20 @@ no warnings 'experimental::class';
 
 class Brocken::Scope {
     field %symbols : reader;
-    field $parent  : reader : param = undef;
+    field $parent : reader : param = undef;
 
     method define( $name, $type ) {
         $symbols{$name} = { type => $type };
     }
 
-    method get( $name ) {
+    method get($name) {
         return $symbols{$name}->{type} if exists $symbols{$name};
-        return $parent->get($name) if $parent;
+        return $parent->get($name)     if $parent;
         return undef;
     }
 
     method exists($name) {
-        return 1 if exists $symbols{$name};
+        return 1                      if exists $symbols{$name};
         return $parent->exists($name) if $parent;
         return 0;
     }

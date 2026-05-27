@@ -2,19 +2,14 @@ use Test2::V0;
 use lib 'lib';
 use Brocken::SymbolTable;
 use Brocken::Type;
-
-my $st = Brocken::SymbolTable->new();
+my $st       = Brocken::SymbolTable->new();
 my $int_type = Brocken::Type::Registry::get_type('Int');
-
-$st->define('$x', $int_type);
+$st->define( '$x', $int_type );
 is $st->lookup('$x'), $int_type, 'Defined in global';
-
 $st->push_scope();
-$st->define('$y', $int_type);
+$st->define( '$y', $int_type );
 is $st->lookup('$y'), $int_type, 'Defined in nested';
 is $st->lookup('$x'), $int_type, 'Looked up parent';
-
 $st->pop_scope();
 is $st->lookup('$y'), undef, 'Nested scope popped';
-
 done_testing;

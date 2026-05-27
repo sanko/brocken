@@ -5,12 +5,10 @@ use Test2::V0;
 use lib 'lib';
 use Brocken::Codegen;
 use Brocken::IR;
-
 subtest 'Codegen instantiation' => sub {
     my $cg = Brocken::Codegen->new( arch => 'x64' );
     ok $cg->isa('Brocken::Codegen'), 'codegen isa Codegen';
 };
-
 subtest 'Codegen compile with label' => sub {
     my $cg = Brocken::Codegen->new( arch => 'x64' );
     my $b  = Brocken::IR::Builder->new;
@@ -21,7 +19,6 @@ subtest 'Codegen compile with label' => sub {
     my $insts = $b->instructions;
     ok scalar(@$insts) == 4, 'instructions with label';
 };
-
 subtest 'Codegen with conditional branch' => sub {
     my $cg = Brocken::Codegen->new( arch => 'x64' );
     my $b  = Brocken::IR::Builder->new;
@@ -34,5 +31,4 @@ subtest 'Codegen with conditional branch' => sub {
     $b->emit( 'leave_func', 'void', ['%999'] );
     ok scalar( $b->instructions ) >= 7, 'instructions with cond_br';
 };
-
 done_testing;

@@ -141,6 +141,7 @@ package Brocken::Type {
 
 package Brocken::Type::Registry {
     use v5.40;
+
     sub get_type($name) {
         return Brocken::Type->new($name);
     }
