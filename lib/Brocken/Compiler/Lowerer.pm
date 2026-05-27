@@ -78,21 +78,7 @@ class Brocken::Compiler::Lowerer {
             $stmt->name eq 'spawn_thread' &&
             @{ $stmt->args } &&
             $stmt->args->[0]->isa('Brocken::AST::OOP::AnonSub') ) {
-            my $sub          = $stmt->args->[0];
-            my $thread_label = $self->new_label();
-            my $after_label  = $self->new_label();
-            $current_block->set_terminator( Brocken::IR::Jump->new( label => $after_label ) );
-            $self->start_block($thread_label);
-            for my $s ( @{ $sub->body->statements } ) {
-                $self->lower_stmt($s);
-            }
-            if ( !$current_block->terminator ) {
-                $current_block->set_terminator( Brocken::IR::Return->new( val => 'EXIT_THREAD' ) );
-            }
-            $self->start_block($after_label);
-            my $vreg = $self->new_vreg();
-            $current_block->add_instruction( Brocken::IR::Assign->new( dest => $vreg, lhs => $thread_label, op => '', rhs => '' ) );
-            $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'spawn_thread', args => [$vreg] ) );
+            $self->_lower_spawn_thread( $stmt->args->[0] );
         }
         elsif ( $stmt->isa('Brocken::AST::Expr::Call') ) {
             my @arg_regs;
@@ -154,6 +140,24 @@ class Brocken::Compiler::Lowerer {
         }
     }
 
+    method _lower_spawn_thread ($sub) {
+        my $thread_label = $self->new_label();
+        my $after_label  = $self->new_label();
+        $current_block->set_terminator( Brocken::IR::Jump->new( label => $after_label ) );
+        $self->start_block($thread_label);
+        for my $s ( @{ $sub->body->statements } ) {
+            $self->lower_stmt($s);
+        }
+        if ( !$current_block->terminator ) {
+            $current_block->set_terminator( Brocken::IR::Return->new( val => 'EXIT_THREAD' ) );
+        }
+        $self->start_block($after_label);
+        my $vreg = $self->new_vreg();
+        $current_block->add_instruction( Brocken::IR::Assign->new( dest => $vreg, lhs => $thread_label, op => '', rhs => '' ) );
+        $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'spawn_thread', args => [$vreg] ) );
+        return $vreg;
+    }
+
     method lower_expr ($expr) {
         if ( $expr->isa('Brocken::AST::Expr::IntLiteral') ) {
             my $vreg = $self->new_vreg();
@@ -192,6 +196,12 @@ class Brocken::Compiler::Lowerer {
             my $vreg = $self->new_vreg();
             $current_block->add_instruction( Brocken::IR::Load->new( dest => $vreg, var => '$' . $expr->name ) );
             return $vreg;
+        }
+        elsif ( $expr->isa('Brocken::AST::Expr::Call') &&
+            $expr->name eq 'spawn_thread' &&
+            @{ $expr->args } &&
+            $expr->args->[0]->isa('Brocken::AST::OOP::AnonSub') ) {
+            return $self->_lower_spawn_thread( $expr->args->[0] );
         }
         elsif ( $expr->isa('Brocken::AST::Expr::Call') ) {
             my @arg_regs;

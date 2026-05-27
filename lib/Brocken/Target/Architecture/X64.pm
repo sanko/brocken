@@ -183,7 +183,7 @@ class Brocken::Target::Architecture::X64 {
         for my $i ( 0 .. $#args ) {
             my $arg = $args[$i];
             next unless defined $arg;
-            if ( exists $REG{lc $arg} ) {
+            if ( $arg !~ /^-?\d+$/ && exists $REG{lc $arg} ) {
                 $self->mov_reg( $arg_regs[$i], $arg );
             }
             else {
@@ -235,15 +235,17 @@ class Brocken::Target::Architecture::X64 {
         else {
             my $text_rva = $os->text_rva;
             my $data_rva = $os->data_rva;
+            $self->sub_imm( 'rsp', 48 );
             $self->mov_imm( 'rcx', -11 );    # STD_OUTPUT_HANDLE
             $self->call_rva( $os->symbol_rva('GetStdHandle'), $text_rva );
             $self->mov_reg( 'rcx', 'rax' );
             $self->lea_rva( 'rdx', $data_rva + $off, $text_rva );
             $self->mov_imm( 'r8', $len );
-            $self->lea_reg_disp( 'r9', 'rsp', 48 );
+            $self->lea_reg_disp( 'r9', 'rsp', 40 );
             $self->mov_imm( 'r10', 0 );
             $self->store_mem_disp_reg( 'rsp', 32, 'r10' );
             $self->call_rva( $os->symbol_rva('WriteFile'), $text_rva );
+            $self->add_imm( 'rsp', 48 );
         }
     }
 
@@ -275,14 +277,14 @@ class Brocken::Target::Architecture::X64 {
 
     method lea_rva ( $reg, $target, $txtrva = 0 ) {
         my $ri = $self->_reg_idx($reg);
-        if ( $target =~ /^([A-Z_]|DATA:|TEXT:)/i ) {
-            $code .= $self->_rex( 1, $ri, 0, 0 ) . pack( 'CC', 0x8D, 0x05 | ( ( $ri & 7 ) << 3 ) );
-            push @fixups, { offset => length($code), target => $target };
-            $code .= pack( 'L<', 0 );
+        if ( ref $target || $target =~ /^[A-Z_a-z]/ ) {
+            push @fixups, { offset => length($code) + 3, target => $target };
+            $code .= $self->_rex( 1, $ri, 0, 0 ) . pack( 'CC l<', 0x8D, 0x05 | ( ( $ri & 7 ) << 3 ), 0 );
         }
         else {
-            my $next = $txtrva + length($code) + 7;
-            $code .= $self->_rex( 1, $ri, 0, 0 ) . pack( 'CC l<', 0x8D, 0x05 | ( ( $ri & 7 ) << 3 ), $target - $next );
+            my $next_rip = $txtrva + length($code) + 7;
+            my $disp = $target - $next_rip;
+            $code .= $self->_rex( 1, $ri, 0, 0 ) . pack( 'CC l<', 0x8D, 0x05 | ( ( $ri & 7 ) << 3 ), $disp );
         }
     }
 

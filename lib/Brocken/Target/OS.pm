@@ -46,6 +46,7 @@ class Brocken::Target::OS {
         return 4         if $self->is_bsd_like && $arch eq 'x64';
         return 4         if $self->is_bsd_like && $arch eq 'arm64';
         return 4         if $self->is_bsd_like && $arch eq 'riscv64';
+        return 4         if $n eq 'haiku';
         return undef;
     }
 
@@ -56,6 +57,7 @@ class Brocken::Target::OS {
         return 93        if $n eq 'linux' && $arch eq 'arm64';
         return 93        if $n eq 'linux' && $arch eq 'riscv64';
         return 1         if $self->is_bsd_like;
+        return 1         if $n eq 'haiku';
         return undef;
     }
 
@@ -64,7 +66,10 @@ class Brocken::Target::OS {
         return 0x2000002 if $n eq 'macos';
         return 57        if $n eq 'linux' && $arch eq 'x64';
         return 220       if $n eq 'linux' && $arch eq 'arm64';
+        return 220       if $n eq 'linux' && $arch eq 'riscv64';
+        return 2         if $n eq 'openbsd';
         return 2         if $self->is_bsd_like;
+        return 2         if $n eq 'haiku';
         return undef;
     }
 
@@ -73,7 +78,24 @@ class Brocken::Target::OS {
         return 0x200000b if $n eq 'macos';
         return 61        if $n eq 'linux' && $arch eq 'x64';
         return 260       if $n eq 'linux' && $arch eq 'arm64';
-        return 11        if $self->is_bsd_like;
+        return 260       if $n eq 'linux' && $arch eq 'riscv64';
+        return 7         if $self->is_bsd_like;
+        return undef;
+    }
+
+    method syscall_waitpid ($arch) {
+        my $n = $self->name;
+        return 0x2000007 if $n eq 'macos';
+        return undef;
+    }
+
+    method syscall_getpid ($arch) {
+        my $n = $self->name;
+        return 0x2000014 if $n eq 'macos';
+        return 39        if $n eq 'linux' && $arch eq 'x64';
+        return 172       if $n eq 'linux' && $arch eq 'arm64';
+        return 172       if $n eq 'linux' && $arch eq 'riscv64';
+        return 20        if $self->is_bsd_like;
         return undef;
     }
 
@@ -82,6 +104,14 @@ class Brocken::Target::OS {
         return 56  if $n eq 'linux' && $arch eq 'x64';
         return 220 if $n eq 'linux' && $arch eq 'arm64';
         return 220 if $n eq 'linux' && $arch eq 'riscv64';
+        return undef;
+    }
+
+    method syscall_futex ($arch) {
+        my $n = $self->name;
+        return 202 if $n eq 'linux' && $arch eq 'x64';
+        return 98  if $n eq 'linux' && $arch eq 'arm64';
+        return 98  if $n eq 'linux' && $arch eq 'riscv64';
         return undef;
     }
 
@@ -146,6 +176,7 @@ class Brocken::Target::OS {
     method syscall_tfork ($arch) {
         my $n = $self->name;
         return 91 if $n eq 'openbsd' && $arch eq 'x64';
+        return 91 if $n eq 'openbsd' && $arch eq 'riscv64';
         return undef;
     }
 
@@ -160,14 +191,23 @@ class Brocken::Target::OS {
         return 0x20000F0 if $n eq 'macos';
         return 35        if $n eq 'linux' && $arch eq 'x64';
         return 101       if $n eq 'linux' && $arch eq 'arm64';
+        return 101       if $n eq 'linux' && $arch eq 'riscv64';
         return 240       if $self->is_bsd_like && $n ne 'macos' && $arch eq 'x64';
         return undef;
     }
 
     method syscall_num_reg ($arch) {
         return 'rax' if $arch eq 'x64';
+        return 'x16' if $arch eq 'arm64' && $self->name eq 'macos';
         return 'x8'  if $arch eq 'arm64';
         return 'a7'  if $arch eq 'riscv64';
+        return undef;
+    }
+
+    method syscall_ret_reg ($arch) {
+        return 'rax' if $arch eq 'x64';
+        return 'x0'  if $arch eq 'arm64';
+        return 'a0'  if $arch eq 'riscv64';
         return undef;
     }
 

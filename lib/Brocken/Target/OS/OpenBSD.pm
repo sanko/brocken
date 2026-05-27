@@ -6,5 +6,9 @@ class Brocken::Target::OS::OpenBSD : isa(Brocken::Target::OS) {
     ADJUST {
         die "OS name mismatch" unless $self->name eq 'openbsd';
     }
+
+    method syscall_wait4 ($arch) {
+        return 11;
+    }
 }
 1;

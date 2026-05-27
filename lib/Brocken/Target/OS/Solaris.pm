@@ -6,5 +6,13 @@ class Brocken::Target::OS::Solaris : isa(Brocken::Target::OS) {
     ADJUST {
         die "OS name mismatch" unless $self->name eq 'solaris';
     }
+
+    method syscall_fork ($arch) {
+        return 142; # forksys
+    }
+
+    method syscall_wait4 ($arch) {
+        return 257; # waitid
+    }
 }
 1;

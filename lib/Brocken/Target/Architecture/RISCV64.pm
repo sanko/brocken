@@ -228,6 +228,19 @@ class Brocken::Target::Architecture::RISCV64 {
         my $rs1 = $self->_reg($base);
         $self->_sd( $rs2, $disp, $rs1 );
     }
+    method load_reg_mem( $dest, $base, $off = 0 ) {
+        my $rd = $self->_reg($dest);
+        my $rs1 = $self->_reg($base);
+        $self->_ld( $rd, $off, $rs1 );
+    }
+    method push_reg($r) {
+        $self->add_imm( 'sp', -16 );
+        $self->emit_store_mem( 'sp', 0, $r );
+    }
+    method pop_reg($r) {
+        $self->load_reg_mem( $r, 'sp', 0 );
+        $self->add_imm( 'sp', 16 );
+    }
     method emit_label($name) { $self->mark_label($name) }
 
     method emit_branch_if_zero( $reg, $label ) {

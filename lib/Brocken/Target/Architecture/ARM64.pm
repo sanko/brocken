@@ -3,6 +3,7 @@ use feature 'class';
 no warnings 'portable', 'experimental::class';
 #
 class Brocken::Target::Architecture::ARM64 {
+    field $os_name : param : reader = 'linux';
     our %REG = (
         x0  => 0,
         x1  => 1,
@@ -91,24 +92,53 @@ class Brocken::Target::Architecture::ARM64 {
         $code .= pack( 'L<', 0xF1000000 | ( ( $imm & 0xFFF ) << 10 ) | ( $r << 5 ) | 31 );
     }
 
-    method lea_rva ( $reg, $target_rva, $text_rva ) {
-        my $r     = $REG{ lc $reg };
-        my $off   = $target_rva - ( $text_rva + length($code) );
-        my $immlo = $off & 0x3;
-        my $immhi = ( $off >> 2 ) & 0x7FFFF;
-        $code .= pack( 'L<', 0x10000000 | ( $immlo << 29 ) | ( $immhi << 5 ) | $r );
+    method cmp_reg_reg ( $l, $r ) {
+        my $rd = $REG{ lc $l };
+        my $rs = $REG{ lc $r };
+        $code .= pack( 'L<', 0xEB00001F | ( $rs << 16 ) | ( $rd << 5 ) );
+    }
+
+    method lea_rva ( $reg, $target, $txtrva = 0 ) {
+        my $r = $REG{ lc $reg };
+        if ( $target =~ /^([A-Z_]|DATA:|TEXT:)/i ) {
+            push @fixups, { offset => length($code), target => $target, type => 'adrp', reg => $r };
+            $code .= pack( 'L<', 0x90000000 | ( $r & 31 ) );    # ADRP Xn, label
+            push @fixups, { offset => length($code), target => $target, type => 'add_page', reg => $r };
+            $code .= pack( 'L<', 0x91000000 | ( $r << 5 ) | ( $r & 31 ) );    # ADD Xn, Xn, #pg_off
+        }
+        else {
+            my $off   = $target - ( $txtrva + length($code) );
+            my $immlo = $off & 0x3;
+            my $immhi = ( $off >> 2 ) & 0x7FFFF;
+            $code .= pack( 'L<', 0x10000000 | ( $immlo << 29 ) | ( $immhi << 5 ) | $r );
+        }
     }
     method alloc_stack($size)          { $self->sub_imm( 'sp', $size ) }
     method emit_mov_reg( $dest, $src ) { $self->mov_reg( $dest, $src ) }
     method emit_mov_imm( $reg, $imm )  { $self->mov_imm( $reg, $imm ) }
 
+    method load_reg_mem( $dest, $base, $off = 0 ) {
+        my $d = $REG{ lc $dest };
+        my $b = $REG{ lc $base };
+        $code .= pack( 'L<', 0xF9400000 | ( ( $off >> 3 ) << 10 ) | ( $b << 5 ) | $d );
+    }
+    method push_reg($r) {
+        $self->sub_imm( 'sp', 16 );
+        $self->emit_store_mem( 'sp', 0, $r );
+    }
+    method pop_reg($r) {
+        $self->load_reg_mem( $r, 'sp', 0 );
+        $self->add_imm( 'sp', 16 );
+    }
+
     method emit_syscall( $num, @args ) {
-        $self->mov_imm( 'x8', $num );
+        my $os = $self->os_name;
+        $self->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
         my @arg_regs = qw(x0 x1 x2 x3 x4 x5);
         for my $i ( 0 .. $#args ) {
             $self->mov_imm( $arg_regs[$i], $args[$i] ) if defined $args[$i];
         }
-        $self->syscall( 'linux', $num );
+        $self->syscall( $os, $num );
     }
     method emit_lea_label( $reg, $label, $text_rva ) { $self->lea_rva( $reg, $label, $text_rva ) }
 
@@ -117,6 +147,7 @@ class Brocken::Target::Architecture::ARM64 {
         my $b = $REG{ lc $base };
         $code .= pack( 'L<', 0xF9000000 | ( ( $disp >> 3 ) << 10 ) | ( $b << 5 ) | $d );
     }
+    method store_mem_disp_reg( $base, $disp, $src ) { $self->emit_store_mem( $base, $disp, $src ) }
     method emit_label($name) { $self->mark_label($name) }
 
     method emit_branch_if_zero( $reg, $label ) {
@@ -131,6 +162,27 @@ class Brocken::Target::Architecture::ARM64 {
         $code .= pack( 'L<', 0xB5000000 | $r );
     }
     method emit_call_label($label) { $self->call_label($label) }
+    method call_rva_label( $label, $text_rva ) { $self->call_rva( $labels{$label} // 0, $text_rva ) }
+
+    method call_rva( $target_rva, $text_rva ) {
+        my $code_off    = length($code);
+        my $source_page = ( $text_rva + $code_off ) & ~0xFFF;
+        my $target_page = $target_rva & ~0xFFF;
+        my $page_delta  = ( $target_page - $source_page ) >> 12;
+        my $page_offset = $target_rva & 0xFFF;
+
+        # ADRP x16, page_of(IAT_entry)
+        my $immlo = $page_delta & 0x3;
+        my $immhi = ( $page_delta >> 2 ) & 0x7FFFF;
+        $code .= pack( 'L<', 0x90000000 | ( $immlo << 29 ) | ( $immhi << 5 ) | 16 );
+
+        # LDR x16, [x16, #page_offset]
+        my $ldr_imm = $page_offset >> 3;
+        $code .= pack( 'L<', 0xF9400200 | ( $ldr_imm << 10 ) | ( 16 << 5 ) | 16 );
+
+        # BLR x16
+        $code .= pack( 'L<', 0xD63F0200 | ( 16 << 5 ) );
+    }
 
     method call_label($l) {
         push @fixups, { offset => length($code), target => $l, type => 'uncond_bl' };
@@ -177,11 +229,16 @@ class Brocken::Target::Architecture::ARM64 {
             $self->syscall( $os->name, $num );
         }
         else {
-            # Placeholder for non-POSIX (Windows ARM64)
-            $self->mov_imm( 'x0', -11 );
-
-            # $self->call_rva( ... ); # Need correct RVA or label
-            # For now, let's keep it as is if it's not the focus
+            # Windows ARM64: GetStdHandle + WriteFile via IAT
+            my $text_rva = $os->text_rva;
+            $self->mov_imm( 'x0', -11 );                               # STD_OUTPUT_HANDLE
+            $self->call_rva( $os->symbol_rva('GetStdHandle'), $text_rva );
+            my $data_rva = $os->data_rva;
+            $self->lea_rva( 'x1', $data_rva + $off, $text_rva );       # lpBuffer
+            $self->mov_imm( 'x2', $len );                              # nNumberOfBytesToWrite
+            $self->mov_imm( 'x3', 0 );                                 # lpNumberOfBytesWritten = NULL
+            $self->mov_imm( 'x4', 0 );                                 # lpOverlapped = NULL
+            $self->call_rva( $os->symbol_rva('WriteFile'), $text_rva );
         }
     }
 
@@ -195,8 +252,7 @@ class Brocken::Target::Architecture::ARM64 {
         }
         else {
             $self->mov_imm( 'x0', $code_val );
-
-            # $self->call_rva( ... );
+            $self->call_rva( $os->symbol_rva('ExitProcess'), $os->text_rva );
         }
     }
 
@@ -214,6 +270,23 @@ class Brocken::Target::Architecture::ARM64 {
             }
             elsif ( $_->{type} eq 'uncond_b' || $_->{type} eq 'uncond_bl' ) {
                 $instr |= ( $off & 0x3FFFFFF );
+            }
+            elsif ( $_->{type} eq 'adrp' ) {
+                my $target_page = $target & ~0xFFF;
+                my $source_page = $_->{offset} & ~0xFFF;
+                my $page_delta  = ( $target_page - $source_page ) >> 12;
+                my $immlo       = $page_delta & 0x3;
+                my $immhi       = ( $page_delta >> 2 ) & 0x7FFFF;
+                $instr |= ( $immlo << 29 ) | ( $immhi << 5 );
+            }
+            elsif ( $_->{type} eq 'add_page' ) {
+                my $page_offset = $target & 0xFFF;
+                $instr |= ( $page_offset << 10 );
+            }
+            elsif ( $_->{type} eq 'ldr_page' ) {
+                my $page_offset = $target & 0xFFF;
+                my $ldr_imm     = $page_offset >> 3;
+                $instr |= ( $ldr_imm << 10 );
             }
             substr( $code, $_->{offset}, 4, pack( 'L<', $instr ) );
         }

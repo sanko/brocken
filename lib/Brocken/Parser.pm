@@ -435,6 +435,12 @@ class Brocken::Parser {
             my $body = $self->_parse_block();
             return Brocken::AST::Async::FiberBlock->new( params => \@params, body => $body, line => $line, col => $col );
         }
+        if ( $t eq 'KEYWORD' && $val eq 'spawn_thread' ) {
+            my $tok2 = $tok;
+            $self->_next();
+            my $sub  = $self->_nud($tok2);
+            return Brocken::AST::Expr::Call->new( name => 'spawn_thread', args => [$sub], line => $line, col => $col );
+        }
         if ( $t eq 'KEYWORD' && $val eq 'yield' ) {
             my $expr;
             if ( $tok && $tok->type ne ';' && $tok->type ne 'KEYWORD' ) {

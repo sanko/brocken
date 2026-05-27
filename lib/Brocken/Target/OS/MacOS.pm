@@ -16,5 +16,8 @@ class Brocken::Target::OS::MacOS : isa(Brocken::Target::OS) {
         return 0x4000 if $arch eq 'arm64';
         return $self->SUPER::page_size($arch);
     }
+    method syscall_wait4 ($arch) {
+        return 0x200000b;
+    }
 }
 1;
