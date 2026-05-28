@@ -1,0 +1,53 @@
+name: "Debug Threading Issues"
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        required: true
+        type: string
+        description: "OS to debug"
+      arch:
+        required: true
+        type: string
+        description: "Architecture to debug"
+      version:
+        required: true
+        type: string
+        description: "OS Version to debug"
+      host:
+        default: 'ubuntu-latest'
+        required: false
+        type: string
+        description: "Host runner"
+
+jobs:
+  debug:
+    runs-on: ${{ inputs.host }}
+    steps:
+      - uses: actions/checkout@v5.0.0
+      - name: 'Boot ${{ inputs.os }} VM'
+        uses: cross-platform-actions/action@v1.1.0
+        with:
+          architecture: '${{ inputs.arch }}'
+          cpu_count: 4
+          memory: 5G
+          operating_system: '${{ inputs.os }}'
+          version: '${{ inputs.version }}'
+      - name: Run Test with Tracing
+        shell: cpa.sh {0}
+        run: |
+          perl Build.PL && ./Build
+          # Identify tracing command based on OS
+          os=$(uname -s)
+          if [ "$os" = "OpenBSD" ] || [ "$os" = "SunOS" ]; then
+            truss -o debug.log perl -Ilib t/compiler/22_thread.t
+          else
+            # Assume Haiku uses strace or similar
+            strace -o debug.log perl -Ilib t/compiler/22_thread.t
+          fi
+      - name: Upload Debug Logs
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: debug-logs-${{ inputs.os }}-${{ inputs.arch }}
+          path: debug.log
+          retention-days: 7
