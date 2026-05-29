@@ -10,6 +10,7 @@ class Brocken::Target::Format::MachO : isa(Brocken::Target::Format) {
         my $cpu_type    = $is_arm ? 0x0100000C : 0x01000007;
         my $cpu_subtype = $is_arm ? 0x00000000 : 0x00000003;
         my $align_f     = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+        $data = "\0" if length($data) == 0;
         my $text_padded = $text . ( "\0" x ( $align_f->( length($text), $page_size ) - length($text) ) );
         my $data_padded = $data . ( "\0" x ( $align_f->( length($data), $page_size ) - length($data) ) );
 
