@@ -395,12 +395,13 @@ class Brocken::Compiler::InstructionSelector {
                     if ( defined $num ) {
                         if ( $arch eq 'arm64' ) {
                             my $tmp = 'x10';
+                            $emitter->push_reg($tmp);
                             if ( $arg =~ /^\d+$/ ) {
                                 $emitter->mov_imm( $tmp, $arg );
                             }
                             else {
                                 my $arg_reg = $self->_get_reg($arg);
-                                $emitter->mov_reg( $tmp, $arg_reg );
+                                $emitter->mov_reg( $tmp, $arg_reg ) if $arg_reg ne $tmp;
                             }
                             $emitter->sub_imm( 'sp', 16 );
                             $emitter->store_mem_disp_reg( 'sp', 0, $tmp );
@@ -412,15 +413,17 @@ class Brocken::Compiler::InstructionSelector {
                             $emitter->mov_imm( $nr, $num ) if defined $nr;
                             $emitter->syscall( $os->name, $num );
                             $emitter->add_imm( 'sp', 16 );
+                            $emitter->pop_reg($tmp);
                         }
                         elsif ( $arch eq 'riscv64' ) {
                             my $tmp = 't0';
+                            $emitter->push_reg($tmp);
                             if ( $arg =~ /^\d+$/ ) {
                                 $emitter->mov_imm( $tmp, $arg );
                             }
                             else {
                                 my $arg_reg = $self->_get_reg($arg);
-                                $emitter->mov_reg( $tmp, $arg_reg );
+                                $emitter->mov_reg( $tmp, $arg_reg ) if $arg_reg ne $tmp;
                             }
                             $emitter->sub_imm( 'sp', 16 );
                             $emitter->store_mem_disp_reg( 'sp', 0, $tmp );
@@ -432,15 +435,17 @@ class Brocken::Compiler::InstructionSelector {
                             $emitter->mov_imm( $nr, $num ) if defined $nr;
                             $emitter->syscall( $os->name, $num );
                             $emitter->add_imm( 'sp', 16 );
+                            $emitter->pop_reg($tmp);
                         }
                         else {
                             my $tmp = 'r10';
+                            $emitter->push_reg($tmp);
                             if ( $arg =~ /^\d+$/ ) {
                                 $emitter->mov_imm( $tmp, $arg );
                             }
                             else {
                                 my $arg_reg = $self->_get_reg($arg);
-                                $emitter->mov_reg( $tmp, $arg_reg );
+                                $emitter->mov_reg( $tmp, $arg_reg ) if $arg_reg ne $tmp;
                             }
                             $emitter->sub_imm( 'rsp', 16 );
                             $emitter->store_mem_disp_reg( 'rsp', 0, $tmp );
@@ -452,6 +457,7 @@ class Brocken::Compiler::InstructionSelector {
                             $emitter->mov_imm( $nr, $num ) if defined $nr;
                             $emitter->syscall( $os->name, $num );
                             $emitter->add_imm( 'rsp', 16 );
+                            $emitter->pop_reg($tmp);
                         }
                     }
                 }
