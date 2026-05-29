@@ -145,7 +145,7 @@ class Brocken::Compiler::Lowerer {
         elsif ( $stmt->isa('Brocken::AST::Stmt::For') ) {
             my $f = $stmt;
             if ( defined $f->init ) {
-                $self->lower_stmt($f->init);
+                $self->lower_stmt( $f->init );
             }
             my $l_cond = $self->new_label();
             my $l_body = $self->new_label();
@@ -157,7 +157,7 @@ class Brocken::Compiler::Lowerer {
             }
             $self->start_block($l_cond);
             if ( defined $f->condition ) {
-                my $cond_reg = $self->lower_expr($f->condition);
+                my $cond_reg = $self->lower_expr( $f->condition );
                 $current_block->set_terminator( Brocken::IR::Branch->new( label => $l_end, cond => $cond_reg ) );
             }
             $self->start_block($l_body);
@@ -167,7 +167,7 @@ class Brocken::Compiler::Lowerer {
             }
             $self->start_block($l_step);
             if ( defined $f->step ) {
-                $self->lower_stmt($f->step);
+                $self->lower_stmt( $f->step );
             }
             if ( !$current_block->terminator ) {
                 $current_block->set_terminator( Brocken::IR::Jump->new( label => $l_cond ) );
@@ -251,7 +251,7 @@ class Brocken::Compiler::Lowerer {
             my $closure = $self->lower_expr( $stmt->expr );
             my $source  = $self->lower_expr( $stmt->source );
             my $vreg    = $self->new_vreg();
-            $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'map', args => [$closure, $source] ) );
+            $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'map', args => [ $closure, $source ] ) );
         }
         elsif ( $stmt->isa('Brocken::AST::Stmt::Defer') ) {
             for my $s ( @{ $stmt->block->statements } ) {
@@ -357,9 +357,10 @@ class Brocken::Compiler::Lowerer {
             my $l_end     = $self->new_label();
             my $result_vr = $self->new_vreg();
             $current_block->set_terminator( Brocken::IR::Branch->new( label => $l_else, cond => $cond_reg ) );
-            $self->start_block($self->new_label());
+            $self->start_block( $self->new_label() );
             my $then_vr = $self->lower_expr( $expr->then );
             $current_block->add_instruction( Brocken::IR::Assign->new( dest => $result_vr, lhs => $then_vr, op => '', rhs => '' ) );
+
             if ( !$current_block->terminator ) {
                 $current_block->set_terminator( Brocken::IR::Jump->new( label => $l_end ) );
             }
@@ -399,7 +400,8 @@ class Brocken::Compiler::Lowerer {
                 push @arg_regs, $self->lower_expr($arg);
             }
             my $vreg = $self->new_vreg();
-            $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'method_call', args => [ $obj_vreg, $expr->method, @arg_regs ] ) );
+            $current_block->add_instruction(
+                Brocken::IR::Call->new( dest => $vreg, func => 'method_call', args => [ $obj_vreg, $expr->method, @arg_regs ] ) );
             return $vreg;
         }
         elsif ( $expr->isa('Brocken::AST::Expr::IndexExpr') ) {
@@ -425,7 +427,8 @@ class Brocken::Compiler::Lowerer {
                 push @elem_regs, $self->lower_expr($elem);
             }
             my $vreg = $self->new_vreg();
-            $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'array_literal', args => [ scalar @elem_regs, @elem_regs ] ) );
+            $current_block->add_instruction(
+                Brocken::IR::Call->new( dest => $vreg, func => 'array_literal', args => [ scalar @elem_regs, @elem_regs ] ) );
             return $vreg;
         }
         elsif ( $expr->isa('Brocken::AST::Expr::HashLiteral') ) {
@@ -444,7 +447,8 @@ class Brocken::Compiler::Lowerer {
                 push @elem_regs, $self->lower_expr($elem);
             }
             my $vreg = $self->new_vreg();
-            $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'tuple_literal', args => [ scalar @elem_regs, @elem_regs ] ) );
+            $current_block->add_instruction(
+                Brocken::IR::Call->new( dest => $vreg, func => 'tuple_literal', args => [ scalar @elem_regs, @elem_regs ] ) );
             return $vreg;
         }
         elsif ( $expr->isa('Brocken::AST::Expr::Exists') ) {

@@ -13,7 +13,7 @@ class Brocken::Target::OS {
     }
 
     method is_bsd_like () {
-        return $self->name =~ /^(?:macos|freebsd|openbsd|netbsd|dragonfly|solaris|midnightbsd)$/;
+        return $self->name =~ /^(?:macos|freebsd|openbsd|netbsd|dragonfly|midnightbsd)$/;
     }
 
     method uses_syscalls () {
@@ -39,63 +39,75 @@ class Brocken::Target::OS {
 
     method syscall_write ($arch) {
         my $n = $self->name;
-        return 0x2000004 if $n eq 'macos';
-        return 1         if $n eq 'linux'      && $arch eq 'x64';
-        return 64        if $n eq 'linux'      && $arch eq 'arm64';
-        return 64        if $n eq 'linux'      && $arch eq 'riscv64';
-        return 4         if $self->is_bsd_like && $arch eq 'x64';
-        return 4         if $self->is_bsd_like && $arch eq 'arm64';
-        return 4         if $self->is_bsd_like && $arch eq 'riscv64';
-        return 4         if $n eq 'haiku';
+        if ( $n eq 'macos' ) {
+            return $arch eq 'x64' ? 0x2000004 : 4;
+        }
+        return 1  if $n eq 'linux'      && $arch eq 'x64';
+        return 64 if $n eq 'linux'      && $arch eq 'arm64';
+        return 64 if $n eq 'linux'      && $arch eq 'riscv64';
+        return 4  if $self->is_bsd_like && $arch eq 'x64';
+        return 4  if $self->is_bsd_like && $arch eq 'arm64';
+        return 4  if $self->is_bsd_like && $arch eq 'riscv64';
+        return 4  if $n eq 'haiku';
         return undef;
     }
 
     method syscall_exit ($arch) {
         my $n = $self->name;
-        return 0x2000001 if $n eq 'macos';
-        return 60        if $n eq 'linux' && $arch eq 'x64';
-        return 93        if $n eq 'linux' && $arch eq 'arm64';
-        return 93        if $n eq 'linux' && $arch eq 'riscv64';
-        return 1         if $self->is_bsd_like;
-        return 1         if $n eq 'haiku';
+        if ( $n eq 'macos' ) {
+            return $arch eq 'x64' ? 0x2000001 : 1;
+        }
+        return 60 if $n eq 'linux' && $arch eq 'x64';
+        return 93 if $n eq 'linux' && $arch eq 'arm64';
+        return 93 if $n eq 'linux' && $arch eq 'riscv64';
+        return 1  if $self->is_bsd_like;
+        return 1  if $n eq 'haiku';
         return undef;
     }
 
     method syscall_fork ($arch) {
         my $n = $self->name;
-        return 0x2000002 if $n eq 'macos';
-        return 57        if $n eq 'linux' && $arch eq 'x64';
-        return 220       if $n eq 'linux' && $arch eq 'arm64';
-        return 220       if $n eq 'linux' && $arch eq 'riscv64';
-        return 2         if $n eq 'openbsd';
-        return 2         if $self->is_bsd_like;
-        return 2         if $n eq 'haiku';
+        if ( $n eq 'macos' ) {
+            return $arch eq 'x64' ? 0x2000002 : 2;
+        }
+        return 57  if $n eq 'linux' && $arch eq 'x64';
+        return 220 if $n eq 'linux' && $arch eq 'arm64';
+        return 220 if $n eq 'linux' && $arch eq 'riscv64';
+        return 2   if $n eq 'openbsd';
+        return 2   if $self->is_bsd_like;
+        return 2   if $n eq 'haiku';
         return undef;
     }
 
     method syscall_wait4 ($arch) {
         my $n = $self->name;
-        return 0x200000b if $n eq 'macos';
-        return 61        if $n eq 'linux' && $arch eq 'x64';
-        return 260       if $n eq 'linux' && $arch eq 'arm64';
-        return 260       if $n eq 'linux' && $arch eq 'riscv64';
-        return 7         if $self->is_bsd_like;
+        if ( $n eq 'macos' ) {
+            return $arch eq 'x64' ? 0x200000b : 11;
+        }
+        return 61  if $n eq 'linux' && $arch eq 'x64';
+        return 260 if $n eq 'linux' && $arch eq 'arm64';
+        return 260 if $n eq 'linux' && $arch eq 'riscv64';
+        return 7   if $self->is_bsd_like;
         return undef;
     }
 
     method syscall_waitpid ($arch) {
         my $n = $self->name;
-        return 0x2000007 if $n eq 'macos';
+        if ( $n eq 'macos' ) {
+            return $arch eq 'x64' ? 0x2000007 : 7;
+        }
         return undef;
     }
 
     method syscall_getpid ($arch) {
         my $n = $self->name;
-        return 0x2000014 if $n eq 'macos';
-        return 39        if $n eq 'linux' && $arch eq 'x64';
-        return 172       if $n eq 'linux' && $arch eq 'arm64';
-        return 172       if $n eq 'linux' && $arch eq 'riscv64';
-        return 20        if $self->is_bsd_like;
+        if ( $n eq 'macos' ) {
+            return $arch eq 'x64' ? 0x2000014 : 20;
+        }
+        return 39  if $n eq 'linux' && $arch eq 'x64';
+        return 172 if $n eq 'linux' && $arch eq 'arm64';
+        return 172 if $n eq 'linux' && $arch eq 'riscv64';
+        return 20  if $self->is_bsd_like;
         return undef;
     }
 
@@ -187,7 +199,7 @@ class Brocken::Target::OS {
 
     method syscall_snooze ($arch) {
         my $n = $self->name;
-        return $self->haiku_syscall('_kern_snooze', $arch) if $n eq 'haiku';
+        return $self->haiku_syscall( '_kern_snooze', $arch ) if $n eq 'haiku';
         return undef;
     }
 

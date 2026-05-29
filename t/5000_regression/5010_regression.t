@@ -13,30 +13,30 @@ my $host_os = Brocken::Target::OS->detect_host();
 my $os      = $host_os->name;
 my $arch    = Brocken::Target::OS->detect_arch();
 my $format  = do {
-    if    ( $os eq 'win64' )    { require Brocken::Target::Format::PE;    Brocken::Target::Format::PE->new() }
-    elsif ( $os eq 'macos' )    { require Brocken::Target::Format::MachO; Brocken::Target::Format::MachO->new() }
-    else                        { require Brocken::Target::Format::ELF;   Brocken::Target::Format::ELF->new() }
+    if    ( $os eq 'win64' ) { require Brocken::Target::Format::PE;    Brocken::Target::Format::PE->new() }
+    elsif ( $os eq 'macos' ) { require Brocken::Target::Format::MachO; Brocken::Target::Format::MachO->new() }
+    else                     { require Brocken::Target::Format::ELF;   Brocken::Target::Format::ELF->new() }
 };
-my $abi     = Brocken::Target::ABI->new();
-my $lowerer = Brocken::Compiler::Lowerer->new();
+my $abi         = Brocken::Target::ABI->new();
+my $lowerer     = Brocken::Compiler::Lowerer->new();
 my $new_emitter = sub {
-    if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new(os_name => $os) }
+    if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new( os_name => $os ) }
     elsif ( $arch eq 'riscv64' ) { require Brocken::Target::Architecture::RISCV64; Brocken::Target::Architecture::RISCV64->new() }
     else                         { require Brocken::Target::Architecture::X64;     Brocken::Target::Architecture::X64->new() }
 };
 my $compile_and_run = sub {
     my ($source) = @_;
-    my $lexer   = Brocken::Lexer->new( source => $source );
-    my $parser  = Brocken::Parser->new( lexer => $lexer );
-    my $ast     = $parser->parse();
-    my $cfg     = $lowerer->lower($ast);
-    my $alloc   = Brocken::Compiler::RegisterAllocator->new( abi => $abi, arch => $arch );
-    my $mapping = $alloc->allocate($cfg);
-    my $emitter = $new_emitter->();
-    my $sel     = Brocken::Compiler::InstructionSelector->new( arch => $arch, mapping => $mapping, emitter => $emitter, os => $host_os );
-    my $text    = $sel->select($cfg);
-    my $data    = $sel->data_segment();
-    my $exe     = 'test_regr' . $host_os->exe_ext;
+    my $lexer    = Brocken::Lexer->new( source => $source );
+    my $parser   = Brocken::Parser->new( lexer => $lexer );
+    my $ast      = $parser->parse();
+    my $cfg      = $lowerer->lower($ast);
+    my $alloc    = Brocken::Compiler::RegisterAllocator->new( abi => $abi, arch => $arch );
+    my $mapping  = $alloc->allocate($cfg);
+    my $emitter  = $new_emitter->();
+    my $sel      = Brocken::Compiler::InstructionSelector->new( arch => $arch, mapping => $mapping, emitter => $emitter, os => $host_os );
+    my $text     = $sel->select($cfg);
+    my $data     = $sel->data_segment();
+    my $exe      = 'test_regr' . $host_os->exe_ext;
     $format->write_bin( $exe, $text, $data, $arch, $os );
     die "Binary not generated" unless -e $exe;
     my $prefix = ( $^O eq 'MSWin32' ) ? '.\\' : './';
@@ -62,8 +62,8 @@ subtest 'While loop executes body' => sub {
     is $out, 'xxx', 'while loop runs 3 iterations';
 };
 subtest 'Sleep introduces delay' => sub {
-    my $start = time;
-    my $out = $compile_and_run->('sleep(1); print "done";');
+    my $start   = time;
+    my $out     = $compile_and_run->('sleep(1); print "done";');
     my $elapsed = time - $start;
     ok $elapsed >= 1, "sleep(1) waited at least 1 second (elapsed=$elapsed)";
     is $out, 'done', 'output after sleep';
@@ -102,46 +102,46 @@ subtest 'Spawn and join thread' => sub {
     ok $out =~ /after/,  'after in output';
 };
 subtest 'Concurrent thread with sleep' => sub {
-    my $out = $compile_and_run->('say "start"; my $t = spawn_thread sub { say "child_start"; sleep(1); say "child_end"; }; say "parent"; sleep(2); join_thread($t); say "done";');
+    my $out
+        = $compile_and_run->(
+        'say "start"; my $t = spawn_thread sub { say "child_start"; sleep(1); say "child_end"; }; say "parent"; sleep(2); join_thread($t); say "done";'
+        );
     $out =~ s/\r\n/\n/g;
     chomp $out;
-    my @lines = grep { /\S/ } split /\n/, $out;
-    my %pos = map { $lines[$_] => $_ } 0..$#lines;
-    ok defined $pos{start}, 'start present';
+    my @lines = grep {/\S/} split /\n/, $out;
+    my %pos   = map  { $lines[$_] => $_ } 0 .. $#lines;
+    ok defined $pos{start},       'start present';
     ok defined $pos{child_start}, 'child_start present';
-    ok defined $pos{child_end}, 'child_end present';
-    ok defined $pos{parent}, 'parent present';
-    ok defined $pos{done}, 'done present';
+    ok defined $pos{child_end},   'child_end present';
+    ok defined $pos{parent},      'parent present';
+    ok defined $pos{done},        'done present';
 };
 subtest 'Unrecognized function call dies' => sub {
-    my $source = 'nonexistent_func(42);';
-    my $lexer  = Brocken::Lexer->new( source => $source );
-    my $parser = Brocken::Parser->new( lexer => $lexer );
-    my $ast    = $parser->parse();
-    my $cfg    = $lowerer->lower($ast);
-    my $alloc  = Brocken::Compiler::RegisterAllocator->new( abi => $abi, arch => $arch );
+    my $source  = 'nonexistent_func(42);';
+    my $lexer   = Brocken::Lexer->new( source => $source );
+    my $parser  = Brocken::Parser->new( lexer => $lexer );
+    my $ast     = $parser->parse();
+    my $cfg     = $lowerer->lower($ast);
+    my $alloc   = Brocken::Compiler::RegisterAllocator->new( abi => $abi, arch => $arch );
     my $mapping = $alloc->allocate($cfg);
     my $emitter = $new_emitter->();
-    my $sel    = Brocken::Compiler::InstructionSelector->new( arch => $arch, mapping => $mapping, emitter => $emitter, os => $host_os );
+    my $sel     = Brocken::Compiler::InstructionSelector->new( arch => $arch, mapping => $mapping, emitter => $emitter, os => $host_os );
     eval { $sel->select($cfg); };
     ok $@, 'unrecognized function call dies';
     like $@, qr/Unimplemented function call/, 'error mentions Unimplemented function call';
 };
 subtest 'Threading with multiple spawns' => sub {
-    my $out = $compile_and_run->(
-        'my $t1 = spawn_thread sub { print "a"; }; ' .
-        'my $t2 = spawn_thread sub { print "b"; }; ' .
-        'join_thread($t1); join_thread($t2); print "c";'
-    );
+    my $out
+        = $compile_and_run->( 'my $t1 = spawn_thread sub { print "a"; }; ' .
+            'my $t2 = spawn_thread sub { print "b"; }; ' .
+            'join_thread($t1); join_thread($t2); print "c";' );
     ok length($out) == 3 || length($out) == 3, '3 characters output';
     ok $out =~ /a/, 'a in output';
     ok $out =~ /b/, 'b in output';
     ok $out =~ /c/, 'c in output';
 };
 subtest 'Redo repeats current iteration' => sub {
-    my $out = $compile_and_run->(
-        'my $i = 0; while ($i < 3) { $i = $i + 1; if ($i == 2) { redo; } print "x"; }'
-    );
+    my $out = $compile_and_run->('my $i = 0; while ($i < 3) { $i = $i + 1; if ($i == 2) { redo; } print "x"; }');
     is $out, 'xx', 'redo skips increment step and repeats iteration';
 };
 done_testing;

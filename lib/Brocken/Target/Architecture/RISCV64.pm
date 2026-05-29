@@ -152,13 +152,12 @@ class Brocken::Target::Architecture::RISCV64 {
             $self->add_reg( $dest, $base );
         }
     }
-
     method store_mem_disp_reg( $base, $disp, $src ) { $self->emit_store_mem( $base, $disp, $src ) }
 
     method cmp_reg_reg ( $l, $r ) {
         my $l_reg = $self->_reg($l);
         my $r_reg = $self->_reg($r);
-        my $t = $REG{t0};
+        my $t     = $REG{t0};
         $code .= pack( 'L<', ( 0x20 << 25 ) | ( $r_reg << 20 ) | ( $l_reg << 15 ) | ( $t << 7 ) | 0x33 );
     }
 
@@ -212,28 +211,29 @@ class Brocken::Target::Architecture::RISCV64 {
     method syscall ( $os = '', $num = 0 ) {
         $code .= pack( 'L<', 0x00000073 );
     }
+    method halt () { $code .= pack( 'L<', 0x00000000 ) }    # UNIMP
 
     method setcc ( $cc, $r ) {
         my $rd = $self->_reg($r);
         my $z  = $REG{zero};
         my $t  = $REG{t0};
-        if ( $cc == 0x94 ) {        # ==
+        if ( $cc == 0x94 ) {                                # ==
             $self->_sltiu( $rd, $t, 1 );
         }
-        elsif ( $cc == 0x95 ) {     # !=
+        elsif ( $cc == 0x95 ) {                             # !=
             $self->_sltu( $rd, $z, $t );
         }
-        elsif ( $cc == 0x9C ) {     # <
+        elsif ( $cc == 0x9C ) {                             # <
             $self->_slt( $rd, $t, $z );
         }
-        elsif ( $cc == 0x9D ) {     # >=
+        elsif ( $cc == 0x9D ) {                             # >=
             $self->_slt( $rd, $t, $z );
             $self->_xori( $rd, $rd, 1 );
         }
-        elsif ( $cc == 0x9E ) {     # <=
+        elsif ( $cc == 0x9E ) {                             # <=
             $self->_slti( $rd, $t, 1 );
         }
-        elsif ( $cc == 0x9F ) {     # >
+        elsif ( $cc == 0x9F ) {                             # >
             $self->_slt( $rd, $z, $t );
         }
     }
@@ -314,15 +314,18 @@ class Brocken::Target::Architecture::RISCV64 {
         my $rs1 = $self->_reg($base);
         $self->_sd( $rs2, $disp, $rs1 );
     }
+
     method load_reg_mem( $dest, $base, $off = 0 ) {
-        my $rd = $self->_reg($dest);
+        my $rd  = $self->_reg($dest);
         my $rs1 = $self->_reg($base);
         $self->_ld( $rd, $off, $rs1 );
     }
+
     method push_reg($r) {
         $self->add_imm( 'sp', -16 );
         $self->emit_store_mem( 'sp', 0, $r );
     }
+
     method pop_reg($r) {
         $self->load_reg_mem( $r, 'sp', 0 );
         $self->add_imm( 'sp', 16 );
@@ -375,10 +378,12 @@ class Brocken::Target::Architecture::RISCV64 {
             $self->mov_imm( 'a7', $num );
             $self->mov_imm( 'a0', $code );
             $self->syscall( $os->name, $num );
+            $self->halt();
         }
         else {
             $self->mov_imm( 'a0', $code );
             $self->call_rva( 0x3000, 0x1000 );
+            $self->halt();
         }
     }
 }

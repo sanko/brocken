@@ -24,7 +24,7 @@ else {
     $arch = 'arm64' if ( $Config{archname} // '' ) =~ /aarch64|arm64|apple-arm64/i;
 }
 my $emitter = do {
-    if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new(os_name => $os) }
+    if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new( os_name => $os ) }
     elsif ( $arch eq 'riscv64' ) { require Brocken::Target::Architecture::RISCV64; Brocken::Target::Architecture::RISCV64->new() }
     else                         { require Brocken::Target::Architecture::X64;     Brocken::Target::Architecture::X64->new() }
 };

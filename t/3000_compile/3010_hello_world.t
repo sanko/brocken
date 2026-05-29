@@ -26,7 +26,7 @@ else {
 
 # Load arch emitter
 my $emitter = do {
-    if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new(os_name => $os) }
+    if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new( os_name => $os ) }
     elsif ( $arch eq 'riscv64' ) { require Brocken::Target::Architecture::RISCV64; Brocken::Target::Architecture::RISCV64->new() }
     else                         { require Brocken::Target::Architecture::X64;     Brocken::Target::Architecture::X64->new() }
 };
@@ -41,7 +41,7 @@ my $abi     = Brocken::Target::ABI->new();
 my $lowerer = Brocken::Compiler::Lowerer->new();
 subtest 'Hello World Generation' => sub {
     my $emitter = do {
-        if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new(os_name => $os) }
+        if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new( os_name => $os ) }
         elsif ( $arch eq 'riscv64' ) { require Brocken::Target::Architecture::RISCV64; Brocken::Target::Architecture::RISCV64->new() }
         else                         { require Brocken::Target::Architecture::X64;     Brocken::Target::Architecture::X64->new() }
     };
@@ -72,14 +72,14 @@ subtest 'Hello World Generation' => sub {
 };
 subtest 'say keyword' => sub {
     my $emitter = do {
-        if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new(os_name => $os) }
+        if    ( $arch eq 'arm64' )   { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new( os_name => $os ) }
         elsif ( $arch eq 'riscv64' ) { require Brocken::Target::Architecture::RISCV64; Brocken::Target::Architecture::RISCV64->new() }
         else                         { require Brocken::Target::Architecture::X64;     Brocken::Target::Architecture::X64->new() }
     };
-    my $source    = 'say "Hello, World!";';
-    my $lexer     = Brocken::Lexer->new( source => $source );
-    my $parser    = Brocken::Parser->new( lexer => $lexer );
-    my $ast       = $parser->parse();
+    my $source = 'say "Hello, World!";';
+    my $lexer  = Brocken::Lexer->new( source => $source );
+    my $parser = Brocken::Parser->new( lexer => $lexer );
+    my $ast    = $parser->parse();
     ok $ast->isa('Brocken::AST::Stmt::Program'), 'parsed say program';
     my $cfg       = $lowerer->lower($ast);
     my $allocator = Brocken::Compiler::RegisterAllocator->new( abi => $abi, arch => $arch );
@@ -90,6 +90,7 @@ subtest 'say keyword' => sub {
     my $exe       = 'say_test' . $host_os->exe_ext;
     $format->write_bin( $exe, $text, $data, $arch, $os );
     ok -e $exe, 'say executable generated';
+
     if ( $^O eq 'MSWin32' ) {
         my $output = `.\\$exe`;
         is $output, "Hello, World!\n", 'say outputs message with newline';

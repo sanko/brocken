@@ -438,7 +438,7 @@ class Brocken::Parser {
         if ( $t eq 'KEYWORD' && $val eq 'spawn_thread' ) {
             my $tok2 = $tok;
             $self->_next();
-            my $sub  = $self->_nud($tok2);
+            my $sub = $self->_nud($tok2);
             return Brocken::AST::Expr::Call->new( name => 'spawn_thread', args => [$sub], line => $line, col => $col );
         }
         if ( $t eq 'KEYWORD' && $val eq 'yield' ) {

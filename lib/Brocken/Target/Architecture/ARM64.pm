@@ -125,7 +125,7 @@ class Brocken::Target::Architecture::ARM64 {
         my $r = $REG{ lc $reg };
         if ( $target =~ /^([A-Z_]|DATA:|TEXT:)/i ) {
             push @fixups, { offset => length($code), target => $target, type => 'adrp', reg => $r };
-            $code .= pack( 'L<', 0x90000000 | ( $r & 31 ) );    # ADRP Xn, label
+            $code .= pack( 'L<', 0x90000000 | ( $r & 31 ) );                  # ADRP Xn, label
             push @fixups, { offset => length($code), target => $target, type => 'add_page', reg => $r };
             $code .= pack( 'L<', 0x91000000 | ( $r << 5 ) | ( $r & 31 ) );    # ADD Xn, Xn, #pg_off
         }
@@ -139,13 +139,14 @@ class Brocken::Target::Architecture::ARM64 {
     method alloc_stack($size)          { $self->sub_imm( 'sp', $size ) }
     method emit_mov_reg( $dest, $src ) { $self->mov_reg( $dest, $src ) }
     method emit_mov_imm( $reg, $imm )  { $self->mov_imm( $reg, $imm ) }
+
     method lea_reg_disp( $dest, $base, $disp ) {
         if ( $disp <= 0xFFF ) {
             $self->add_reg_imm( $dest, $base, $disp );
         }
         elsif ( ( $disp & 0xFFF ) == 0 && ( $disp >> 12 ) <= 0xFFF ) {
-            my $d = $REG{ lc $dest };
-            my $b = $REG{ lc $base };
+            my $d     = $REG{ lc $dest };
+            my $b     = $REG{ lc $base };
             my $imm12 = $disp >> 12;
             $code .= pack( 'L<', 0x91400000 | ( 1 << 22 ) | ( $imm12 << 10 ) | ( $b << 5 ) | $d );
         }
@@ -165,10 +166,12 @@ class Brocken::Target::Architecture::ARM64 {
             $code .= pack( 'L<', 0xF8400000 | ( ( $off & 0x1FF ) << 12 ) | ( $b << 5 ) | $d );
         }
     }
+
     method push_reg($r) {
         $self->sub_imm( 'sp', 16 );
         $self->emit_store_mem( 'sp', 0, $r );
     }
+
     method pop_reg($r) {
         $self->load_reg_mem( $r, 'sp', 0 );
         $self->add_imm( 'sp', 16 );
@@ -203,12 +206,12 @@ class Brocken::Target::Architecture::ARM64 {
         }
     }
     method store_mem_disp_reg( $base, $disp, $src ) { $self->emit_store_mem( $base, $disp, $src ) }
-    method emit_label($name) { $self->mark_label($name) }
+    method emit_label($name)                        { $self->mark_label($name) }
 
     method setcc ( $cc, $r ) {
         my %arm_cc = ( 0x9C => 0xA, 0x9D => 0xB, 0x9E => 0xC, 0x9F => 0xD, 0x94 => 0x1, 0x95 => 0x0 );
-        my $cond = $arm_cc{$cc} // 0;
-        my $rd = $REG{ lc $r };
+        my $cond   = $arm_cc{$cc} // 0;
+        my $rd     = $REG{ lc $r };
         $code .= pack( 'L<', 0x9A9F07E0 | ( $cond << 12 ) | $rd );
     }
 
@@ -223,7 +226,7 @@ class Brocken::Target::Architecture::ARM64 {
         push @fixups, { offset => length($code), target => $label, type => 'cond_cbnz' };
         $code .= pack( 'L<', 0xB5000000 | $r );
     }
-    method emit_call_label($label) { $self->call_label($label) }
+    method emit_call_label($label)             { $self->call_label($label) }
     method call_rva_label( $label, $text_rva ) { $self->call_rva( $labels{$label} // 0, $text_rva ) }
 
     method call_rva( $target_rva, $text_rva ) {
@@ -269,8 +272,8 @@ class Brocken::Target::Architecture::ARM64 {
 
     method jcc ( $cc, $label ) {
         my $cond = $cc;
-        if    ( $cc == 4 ) { $cond = 0; }     # x86 JZ -> ARM64 EQ
-        elsif ( $cc == 5 ) { $cond = 1; }     # x86 JNZ -> ARM64 NE
+        if    ( $cc == 4 ) { $cond = 0; }    # x86 JZ -> ARM64 EQ
+        elsif ( $cc == 5 ) { $cond = 1; }    # x86 JNZ -> ARM64 NE
         push @fixups, { offset => length($code), target => $label, type => 'cond_b_cc', cc => $cond };
         $code .= pack( 'L<', 0x54000000 | $cond );
     }
@@ -280,6 +283,7 @@ class Brocken::Target::Architecture::ARM64 {
         $code .= pack( 'L<', 0x14000000 );
     }
     method mark_label ($name) { $labels{$name} = length $code }
+    method halt ()            { $code .= pack( 'L<', 0xD4200000 ) }    # BRK #0
 
     method emit_print_str ( $os, $off, $len ) {
         if ( $os->is_posix ) {
@@ -296,13 +300,13 @@ class Brocken::Target::Architecture::ARM64 {
         else {
             # Windows ARM64: GetStdHandle + WriteFile via IAT
             my $text_rva = $os->text_rva;
-            $self->mov_imm( 'x0', -11 );                               # STD_OUTPUT_HANDLE
+            $self->mov_imm( 'x0', -11 );                            # STD_OUTPUT_HANDLE
             $self->call_rva( $os->symbol_rva('GetStdHandle'), $text_rva );
             my $data_rva = $os->data_rva;
-            $self->lea_rva( 'x1', $data_rva + $off, $text_rva );       # lpBuffer
-            $self->mov_imm( 'x2', $len );                              # nNumberOfBytesToWrite
-            $self->mov_imm( 'x3', 0 );                                 # lpNumberOfBytesWritten = NULL
-            $self->mov_imm( 'x4', 0 );                                 # lpOverlapped = NULL
+            $self->lea_rva( 'x1', $data_rva + $off, $text_rva );    # lpBuffer
+            $self->mov_imm( 'x2', $len );                           # nNumberOfBytesToWrite
+            $self->mov_imm( 'x3', 0 );                              # lpNumberOfBytesWritten = NULL
+            $self->mov_imm( 'x4', 0 );                              # lpOverlapped = NULL
             $self->call_rva( $os->symbol_rva('WriteFile'), $text_rva );
         }
     }
@@ -314,10 +318,12 @@ class Brocken::Target::Architecture::ARM64 {
             $self->mov_imm( $reg, $num ) if defined $reg;
             $self->mov_imm( 'x0', $code_val );
             $self->syscall( $os->name, $num );
+            $self->halt();
         }
         else {
             $self->mov_imm( 'x0', $code_val );
             $self->call_rva( $os->symbol_rva('ExitProcess'), $os->text_rva );
+            $self->halt();
         }
     }
 

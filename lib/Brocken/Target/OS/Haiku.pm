@@ -23,7 +23,6 @@ class Brocken::Target::OS::Haiku : isa(Brocken::Target::OS) {
     # Haiku-specific syscall argument setup for _kern_wait_for_child
     # The signature is likely: _kern_wait_for_child(thread_id, ...)
     # I suspect it needs status, options, etc.
-
     method syscall_fork ($arch) {
         return $self->haiku_syscall( '_kern_fork', $arch );
     }

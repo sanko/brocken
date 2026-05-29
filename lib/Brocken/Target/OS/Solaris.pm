@@ -8,11 +8,11 @@ class Brocken::Target::OS::Solaris : isa(Brocken::Target::OS) {
     }
 
     method syscall_fork ($arch) {
-        return 2; # fork
+        return 2;    # fork
     }
 
     method syscall_wait4 ($arch) {
-        return 257; # waitid
+        return 257;    # waitid
     }
 }
 1;

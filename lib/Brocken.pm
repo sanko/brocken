@@ -41,7 +41,8 @@ class Brocken v0.0.1 {
         $target_os = Brocken::Target::OS->from_name($os);
         $abi       = Brocken::Target::ABI->new();
         $as
-            = $arch eq 'arm64'   ? do { require Brocken::Target::Architecture::ARM64;   Brocken::Target::Architecture::ARM64->new(os_name => $target_os->name) }
+            = $arch eq 'arm64' ?
+            do { require Brocken::Target::Architecture::ARM64; Brocken::Target::Architecture::ARM64->new( os_name => $target_os->name ) }
             : $arch eq 'riscv64' ? do { require Brocken::Target::Architecture::RISCV64; Brocken::Target::Architecture::RISCV64->new() }
             :                      do { require Brocken::Target::Architecture::X64;     Brocken::Target::Architecture::X64->new() };
         if    ( $os eq 'win64' ) { require Brocken::Target::Format::PE;    $format = Brocken::Target::Format::PE->new() }

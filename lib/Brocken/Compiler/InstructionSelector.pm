@@ -20,8 +20,8 @@ class Brocken::Compiler::InstructionSelector {
     method _new_label() { return "ISL" . $label_count++ }
 
     method select($cfg) {
-        %var_slots = ();
-        $var_count = 0;
+        %var_slots    = ();
+        $var_count    = 0;
         %const_values = ();
         my @thread_labels;
         for my $block ( $cfg->blocks ) {
@@ -39,7 +39,7 @@ class Brocken::Compiler::InstructionSelector {
                     $const_values{ $instr->dest } = $instr->lhs;
                 }
                 if ( $instr->isa('Brocken::IR::Call') && $instr->func eq 'spawn_thread' ) {
-                    my $arg = $instr->args->[0];
+                    my $arg         = $instr->args->[0];
                     my $entry_label = $string_literals{$arg};
                     push @thread_labels, $entry_label if $entry_label;
                 }
@@ -48,13 +48,31 @@ class Brocken::Compiler::InstructionSelector {
         my $var_space = $var_count * 8;
         $var_space = ( $var_space + 15 ) & ~15 if $arch eq 'arm64';
         my %var_current_src;
-        for my $block ( $cfg->blocks ) {
-            my $is_thread_entry = grep { $_ eq $block->name } @thread_labels;
-            $current_is_thread = 1 if $is_thread_entry;
-            $current_is_thread = 0 if $block->name eq 'entry';
 
+        # Mark all blocks belonging to threads
+        my %is_thread_block;
+        for my $entry_label (@thread_labels) {
+            my @worklist = ($entry_label);
+            while (@worklist) {
+                my $name = shift @worklist;
+                next if $is_thread_block{$name};
+                $is_thread_block{$name} = 1;
+                my $block = $cfg->get_block($name);
+                if ( $block && $block->terminator ) {
+                    if ( $block->terminator->isa('Brocken::IR::Jump') ) {
+                        push @worklist, $block->terminator->label;
+                    }
+                    elsif ( $block->terminator->isa('Brocken::IR::Branch') ) {
+                        push @worklist, $block->terminator->label;
+                    }
+                }
+            }
+        }
+        for my $block ( $cfg->blocks ) {
+            $current_is_thread = $is_thread_block{ $block->name } // 0;
+            my $is_thread_start = grep { $_ eq $block->name } @thread_labels;
             $emitter->mark_label( $block->name );
-            if ( $var_space > 0 && ( $block->name eq 'entry' || $is_thread_entry ) ) {
+            if ( $var_space > 0 && ( $block->name eq 'entry' || $is_thread_start ) ) {
                 my $fp = $os->frame_reg($arch);
                 my $sp = $os->stack_reg($arch);
                 $emitter->push_reg($fp);
@@ -69,7 +87,7 @@ class Brocken::Compiler::InstructionSelector {
                     my $src = $var_current_src{ $instr->var };
                     if ( exists $string_literals{$src} ) {
                         $string_literals{ $instr->dest } = $string_literals{$src};
-                        $string_origins{ $instr->dest } = $src;
+                        $string_origins{ $instr->dest }  = $src;
                     }
                     if ( exists $const_values{$src} ) {
                         $const_values{ $instr->dest } = $const_values{$src};
@@ -87,7 +105,7 @@ class Brocken::Compiler::InstructionSelector {
 
     method _var_offset($var) {
         my $slot = $var_slots{$var};
-        return defined $slot ? -( ($slot + 1) * 8 ) : 0;
+        return defined $slot ? -( ( $slot + 1 ) * 8 ) : 0;
     }
 
     method _emit_instruction($instr) {
@@ -104,8 +122,8 @@ class Brocken::Compiler::InstructionSelector {
                 }
                 else {
                     $string_literals{ $instr->dest } = $instr->lhs;
-                    $string_offsets{ $instr->dest } = $data_offset;
-                    $data_offset += length($instr->lhs) + 1;
+                    $string_offsets{ $instr->dest }  = $data_offset;
+                    $data_offset += length( $instr->lhs ) + 1;
                 }
             }
             elsif ( $instr->op eq '+' ) {
@@ -141,9 +159,9 @@ class Brocken::Compiler::InstructionSelector {
             else {
                 my $lhs_is_imm = $lhs =~ /^-?\d+$/;
                 my $rhs_is_imm = $rhs =~ /^-?\d+$/;
-                my %cmp_cc = ( '<' => 0x9C, '>' => 0x9F, '<=' => 0x9E, '>=' => 0x9D, '==' => 0x94, '!=' => 0x95 );
-                my %cmp_inv = ( '<' => 0x9F, '>' => 0x9C, '<=' => 0x9D, '>=' => 0x9E, '==' => 0x94, '!=' => 0x95 );
-                my $cc = $cmp_cc{$instr->op};
+                my %cmp_cc     = ( '<' => 0x9C, '>' => 0x9F, '<=' => 0x9E, '>=' => 0x9D, '==' => 0x94, '!=' => 0x95 );
+                my %cmp_inv    = ( '<' => 0x9F, '>' => 0x9C, '<=' => 0x9D, '>=' => 0x9E, '==' => 0x94, '!=' => 0x95 );
+                my $cc         = $cmp_cc{ $instr->op };
                 if ( defined $cc ) {
                     $emitter->mov_imm( $dest, 0 );
                     if ( !$lhs_is_imm && !$rhs_is_imm ) {
@@ -156,7 +174,7 @@ class Brocken::Compiler::InstructionSelector {
                     }
                     elsif ( $lhs_is_imm && !$rhs_is_imm ) {
                         $emitter->cmp_reg_imm( $rhs, $lhs );
-                        $emitter->setcc( $cmp_inv{$instr->op}, $dest );
+                        $emitter->setcc( $cmp_inv{ $instr->op }, $dest );
                     }
                     else {
                         $emitter->mov_imm( $dest, $lhs < $rhs ? 1 : 0 );
@@ -200,7 +218,7 @@ class Brocken::Compiler::InstructionSelector {
                 }
                 if ( !exists $string_literals{'__SAY_NL__'} ) {
                     $string_literals{'__SAY_NL__'} = "\n";
-                    $string_offsets{'__SAY_NL__'} = $data_offset;
+                    $string_offsets{'__SAY_NL__'}  = $data_offset;
                     $data_offset += 2;
                 }
                 $emitter->emit_print_str( $os, $string_offsets{'__SAY_NL__'}, 1 );
@@ -222,17 +240,17 @@ class Brocken::Compiler::InstructionSelector {
                         $emitter->mov_reg( $dest_reg, 'x0' );
                     }
                     else {
-                $emitter->sub_imm( 'rsp', 0x28 );
-                $emitter->mov_imm( 'rcx', 0 );
-                $emitter->mov_imm( 'rdx', 0x40000 );
-                $emitter->lea_rva( 'r8', $entry_label, $text_rva );
-                $emitter->mov_imm( 'r9',  0 );
-                $emitter->mov_imm( 'r10', 0 );
-                $emitter->store_mem_disp_reg( 'rsp', 32, 'r10' );
-                $emitter->store_mem_disp_reg( 'rsp', 40, 'r10' );
-                $emitter->call_rva( $os->symbol_rva('CreateThread'), $text_rva );
-                $emitter->mov_reg( $dest_reg, 'rax' );
-                $emitter->add_imm( 'rsp', 0x28 );
+                        $emitter->sub_imm( 'rsp', 0x28 );
+                        $emitter->mov_imm( 'rcx', 0 );
+                        $emitter->mov_imm( 'rdx', 0x40000 );
+                        $emitter->lea_rva( 'r8', $entry_label, $text_rva );
+                        $emitter->mov_imm( 'r9',  0 );
+                        $emitter->mov_imm( 'r10', 0 );
+                        $emitter->store_mem_disp_reg( 'rsp', 32, 'r10' );
+                        $emitter->store_mem_disp_reg( 'rsp', 40, 'r10' );
+                        $emitter->call_rva( $os->symbol_rva('CreateThread'), $text_rva );
+                        $emitter->mov_reg( $dest_reg, 'rax' );
+                        $emitter->add_imm( 'rsp', 0x28 );
                     }
                 }
                 elsif ( $os->name eq 'linux' ) {
@@ -250,18 +268,18 @@ class Brocken::Compiler::InstructionSelector {
                         $emitter->lea_reg_disp( 'rsi', 'rbp', $stack_size );
                         $emitter->mov_imm( 'rdx', 0 );
                         $emitter->mov_reg( 'r10', 'rbp' );
-                        $emitter->mov_imm( 'r8',  0 );
+                        $emitter->mov_imm( 'r8', 0 );
                         $emitter->emit_syscall($clone_num);
                         $emitter->emit_branch_if_zero( $ret_reg, $entry_label );
                         $emitter->mov_reg( $dest_reg, 'rbp' );
                         $emitter->pop_reg('rbp');
                     }
                     elsif ( $arch eq 'arm64' ) {
-                        my $mmap_num  = $os->syscall_mmap($arch);
-                        my $clone_num = $os->syscall_clone($arch);
-                        my $ret_reg   = $os->syscall_ret_reg($arch);
+                        my $mmap_num   = $os->syscall_mmap($arch);
+                        my $clone_num  = $os->syscall_clone($arch);
+                        my $ret_reg    = $os->syscall_ret_reg($arch);
                         my $stack_size = 0x100000;
-                        my $flags     = 0x210900;
+                        my $flags      = 0x210900;
                         $os->write_mmap_args( $emitter, $arch, $stack_size );
                         $emitter->emit_syscall($mmap_num);
                         $emitter->mov_reg( 'x19', $ret_reg );
@@ -286,11 +304,12 @@ class Brocken::Compiler::InstructionSelector {
                     my $nr       = $os->syscall_num_reg($arch);
                     $emitter->mov_imm( $nr, $fork_num );
                     $emitter->syscall( $os->name, $fork_num );
+
                     # On macOS, rax is child PID in both parent and child,
                     # but rdx is 1 in child and 0 in parent.
                     if ( $arch eq 'x64' ) {
                         $emitter->test_reg_reg( 'rdx', 'rdx' );
-                        $emitter->jcc( 5, $entry_label ); # JNZ -> child
+                        $emitter->jcc( 5, $entry_label );    # JNZ -> child
                     }
                     elsif ( $arch eq 'arm64' ) {
                         $emitter->cmp_reg_imm( 'x1', 0 );
@@ -324,6 +343,11 @@ class Brocken::Compiler::InstructionSelector {
                         }
                         else {
                             my $arg_reg = $self->_get_reg($arg);
+                            my $tmp_reg = $arch eq 'x64' ? 'rax' : ( $arch eq 'arm64' ? 'x1' : 't0' );
+                            if ( $arg_reg eq $arg_reg_name ) {
+                                $emitter->mov_reg( $tmp_reg, $arg_reg_name );
+                                $arg_reg = $tmp_reg;
+                            }
                             $emitter->mov_imm( $arg_reg_name, 1000000 );
                             $emitter->mul_reg( $arg_reg_name, $arg_reg );
                         }
@@ -339,6 +363,10 @@ class Brocken::Compiler::InstructionSelector {
                         }
                         else {
                             my $arg_reg = $self->_get_reg($arg);
+                            if ( $arg_reg eq 'x0' ) {
+                                $emitter->mov_reg( 'x1', 'x0' );
+                                $arg_reg = 'x1';
+                            }
                             $emitter->mov_imm( 'x0', 1000 );
                             $emitter->mul_reg( 'x0', $arg_reg );
                         }
@@ -351,6 +379,10 @@ class Brocken::Compiler::InstructionSelector {
                         }
                         else {
                             my $arg_reg = $self->_get_reg($arg);
+                            if ( $arg_reg eq 'rcx' ) {
+                                $emitter->mov_reg( 'rax', 'rcx' );
+                                $arg_reg = 'rax';
+                            }
                             $emitter->mov_imm( 'rcx', 1000 );
                             $emitter->mul_reg( 'rcx', $arg_reg );
                         }
@@ -425,9 +457,9 @@ class Brocken::Compiler::InstructionSelector {
                 }
             }
             elsif ( $instr->func eq 'join_thread' ) {
-                my $arg_vreg  = $instr->args->[0] // '';
-                my $arg_reg   = $self->_get_reg($arg_vreg);
-                my $text_rva  = $os->text_rva;
+                my $arg_vreg = $instr->args->[0] // '';
+                my $arg_reg  = $self->_get_reg($arg_vreg);
+                my $text_rva = $os->text_rva;
                 if ( $os->name eq 'win64' ) {
                     if ( $arch eq 'arm64' ) {
                         $emitter->mov_reg( 'x0', $arg_reg );
@@ -470,52 +502,54 @@ class Brocken::Compiler::InstructionSelector {
                     }
                 }
                 else {
-                    my $wait_num = ($os->name eq 'macos') ? $os->syscall_waitpid($arch) : $os->syscall_wait4($arch);
-                    if ($os->name eq 'haiku') {
-                         $emitter->emit_syscall( $wait_num, $arg_reg, 0, 0, 0 );
-                    } else {
-                         $emitter->emit_syscall( $wait_num, $arg_reg, 0, 0, 0 );
+                    my $wait_num = ( $os->name eq 'macos' ) ? $os->syscall_waitpid($arch) : $os->syscall_wait4($arch);
+                    if ( $os->name eq 'haiku' ) {
+                        $emitter->emit_syscall( $wait_num, $arg_reg, 0, 0, 0 );
+                    }
+                    else {
+                        $emitter->emit_syscall( $wait_num, $arg_reg, 0, 0, 0 );
                     }
                 }
             }
-        elsif ( $instr->func eq 'exit' || $instr->func eq 'die' ) {
-            my $arg    = $instr->args->[0] // '';
-            my $is_die = $instr->func eq 'die';
-            if ( $os->is_posix ) {
-                my $num = $os->syscall_exit($arch);
-                if ( defined $num ) {
-                    my $exit_reg = $os->syscall_exit_arg_reg($arch);
-                    my $nr = $os->syscall_num_reg($arch);
-                    if ($is_die) {
-                        $emitter->mov_imm( $exit_reg, 1 );
-                    }
-                    elsif ( $arg =~ /^\d+$/ ) {
-                        $emitter->mov_imm( $exit_reg, $arg );
-                    }
-                    elsif ( defined $const_values{$arg} ) {
-                        $emitter->mov_imm( $exit_reg, $const_values{$arg} );
-                    }
-                    else {
-                        my $arg_reg = $self->_get_reg($arg);
-                        if ($arg_reg ne $exit_reg) {
-                            $emitter->mov_reg( $exit_reg, $arg_reg );
+            elsif ( $instr->func eq 'exit' || $instr->func eq 'die' ) {
+                my $arg    = $instr->args->[0] // '';
+                my $is_die = $instr->func eq 'die';
+                if ( $os->is_posix ) {
+                    my $num = $os->syscall_exit($arch);
+                    if ( defined $num ) {
+                        my $exit_reg = $os->syscall_exit_arg_reg($arch);
+                        my $nr       = $os->syscall_num_reg($arch);
+                        if ($is_die) {
+                            $emitter->mov_imm( $exit_reg, 1 );
                         }
+                        elsif ( $arg =~ /^\d+$/ ) {
+                            $emitter->mov_imm( $exit_reg, $arg );
+                        }
+                        elsif ( defined $const_values{$arg} ) {
+                            $emitter->mov_imm( $exit_reg, $const_values{$arg} );
+                        }
+                        else {
+                            my $arg_reg = $self->_get_reg($arg);
+                            if ( $arg_reg ne $exit_reg ) {
+                                $emitter->mov_reg( $exit_reg, $arg_reg );
+                            }
+                        }
+                        if ( defined $nr ) {
+                            $emitter->mov_imm( $nr, $num );
+                        }
+                        $emitter->syscall( $os->name, $num );
+                        $emitter->halt();
                     }
-                    if (defined $nr) {
-                        $emitter->mov_imm( $nr, $num );
-                    }
-                    $emitter->syscall( $os->name, $num );
+                }
+                else {
+                    my $code_val = ( $arg =~ /^\d+$/ ) ? $arg : ( defined $const_values{$arg} ? $const_values{$arg} : 42 );
+                    $code_val = $is_die ? 1 : $code_val;
+                    $emitter->emit_exit_proc( $os, $code_val );
                 }
             }
             else {
-                my $code_val = ($arg =~ /^\d+$/) ? $arg : (defined $const_values{$arg} ? $const_values{$arg} : 42);
-                $code_val = $is_die ? 1 : $code_val;
-                $emitter->emit_exit_proc($os, $code_val);
+                die "Unimplemented function call: " . $instr->func;
             }
-        }
-        else {
-            die "Unimplemented function call: " . $instr->func;
-        }
         }
         elsif ( $instr->isa('Brocken::IR::Jump') ) {
             $emitter->jmp( $instr->label );

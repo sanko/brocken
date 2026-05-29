@@ -56,8 +56,8 @@ class Brocken::Target::Architecture::X64 {
     field $code : reader = '';
     field @fixups;
     field %labels;
-    method labels () { return \%labels }              # Returns the HASH reference
-    method ret ()    { $code .= pack( 'C', 0xC3 ) }
+    method labels () { return \%labels }    # Returns the HASH reference
+    method ret ()    { $code .= pack( 'C',  0xC3 ) }
     method pause ()  { $code .= pack( 'CC', 0xF3, 0x90 ) }
 
     method _reg_idx($r) {
@@ -81,7 +81,7 @@ class Brocken::Target::Architecture::X64 {
     method mov_imm ( $reg, $imm ) {
         my $ri = $self->_reg_idx($reg);
         die "mov_imm: imm is undefined" unless defined $imm;
-        if ($imm !~ /^-?\d+$/) {
+        if ( $imm !~ /^-?\d+$/ ) {
             require Carp;
             Carp::cluck("mov_imm: imm '$imm' is not numeric");
             die "mov_imm: imm '$imm' is not numeric";
@@ -186,9 +186,10 @@ class Brocken::Target::Architecture::X64 {
         }
     }
     method syscall( $os = '', $num = 0 ) { $code .= pack 'CC', 0x0F, 0x05 }
-    method alloc_stack($size)            { $self->sub_imm( 'rsp', $size ) }
-    method emit_mov_reg( $dest, $src )   { $self->mov_reg( $dest, $src ) }
-    method emit_mov_imm( $reg, $imm )    { $self->mov_imm( $reg, $imm ) }
+    method halt ()                     { $code .= pack 'C', 0xF4 }
+    method alloc_stack($size)          { $self->sub_imm( 'rsp', $size ) }
+    method emit_mov_reg( $dest, $src ) { $self->mov_reg( $dest, $src ) }
+    method emit_mov_imm( $reg, $imm )  { $self->mov_imm( $reg, $imm ) }
 
     method emit_syscall( $num, @args ) {
         $self->mov_imm( 'rax', $num );
@@ -196,7 +197,7 @@ class Brocken::Target::Architecture::X64 {
         for my $i ( 0 .. $#args ) {
             my $arg = $args[$i];
             next unless defined $arg;
-            if ( $arg !~ /^-?\d+$/ && exists $REG{lc $arg} ) {
+            if ( $arg !~ /^-?\d+$/ && exists $REG{ lc $arg } ) {
                 $self->mov_reg( $arg_regs[$i], $arg );
             }
             else {
@@ -297,7 +298,7 @@ class Brocken::Target::Architecture::X64 {
         }
         else {
             my $next_rip = $txtrva + length($code) + 7;
-            my $disp = $target - $next_rip;
+            my $disp     = $target - $next_rip;
             $code .= $self->_rex( 1, $ri, 0, 0 ) . pack( 'CC l<', 0x8D, 0x05 | ( ( $ri & 7 ) << 3 ), $disp );
         }
     }
