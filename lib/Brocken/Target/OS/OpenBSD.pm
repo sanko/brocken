@@ -12,7 +12,7 @@ class Brocken::Target::OS::OpenBSD : isa(Brocken::Target::OS) {
     }
 
     method syscall_nanosleep ($arch) {
-        return 37;
+        return 240;
     }
 }
 1;
