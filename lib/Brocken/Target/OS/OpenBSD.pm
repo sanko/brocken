@@ -8,7 +8,11 @@ class Brocken::Target::OS::OpenBSD : isa(Brocken::Target::OS) {
     }
 
     method syscall_wait4 ($arch) {
-        return 11;
+        return 7;
+    }
+
+    method syscall_nanosleep ($arch) {
+        return 37;
     }
 }
 1;

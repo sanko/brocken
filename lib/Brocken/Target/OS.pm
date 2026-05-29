@@ -75,7 +75,7 @@ class Brocken::Target::OS {
 
     method syscall_wait4 ($arch) {
         my $n = $self->name;
-        return 0x2000007 if $n eq 'macos';
+        return 0x200000b if $n eq 'macos';
         return 61        if $n eq 'linux' && $arch eq 'x64';
         return 260       if $n eq 'linux' && $arch eq 'arm64';
         return 260       if $n eq 'linux' && $arch eq 'riscv64';
@@ -185,6 +185,12 @@ class Brocken::Target::OS {
         return undef;
     }
 
+    method syscall_snooze ($arch) {
+        my $n = $self->name;
+        return $self->haiku_syscall('_kern_snooze', $arch) if $n eq 'haiku';
+        return undef;
+    }
+
     method syscall_nanosleep ($arch) {
         my $n = $self->name;
         return 0x2000065 if $n eq 'macos';
@@ -192,6 +198,8 @@ class Brocken::Target::OS {
         return 101       if $n eq 'linux' && $arch eq 'arm64';
         return 101       if $n eq 'linux' && $arch eq 'riscv64';
         return 430       if $n eq 'netbsd';
+        return 37        if $n eq 'openbsd';
+        return 199       if $n eq 'solaris';
         return 240       if $self->is_bsd_like;
         return undef;
     }
@@ -233,7 +241,6 @@ class Brocken::Target::OS {
     }
 
     method page_size ($arch) {
-        return 0x4000 if $self->name eq 'macos' && $arch eq 'arm64';
         return 0x1000;
     }
 

@@ -12,15 +12,14 @@ class Brocken::Target::ABI {
     method available_registers ($arch) {
         if ( $arch eq 'x64' ) {
 
-            # rax, rcx, rdx, rbx, rsi, rdi, r8, r9
-            # Excluding r10, r11 (scratch), rsp, rbp
-            return qw(rax rcx rdx rbx rsi rdi r8 r9 r12 r13 r14 r15);
+            # rax, rcx, rdx, rbx, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15
+            # Excluding rsp, rbp for now
+            return qw(rax rcx rdx rbx rsi rdi r8 r9 r10 r11 r12 r13 r14 r15);
         }
         elsif ( $arch eq 'arm64' ) {
 
             # x0-x28, but exclude x8 (syscall num), x16-x18 (linker/intra-procedure-call), x19 (thread base)
-            # and x9, x10, x11 (scratch)
-            return grep { $_ !~ /^x(?:[89]|1[016789])$/ } map {"x$_"} 0 .. 28;
+            return grep { $_ !~ /^x(?:8|16|17|18|19)$/ } map {"x$_"} 0 .. 28;
         }
         elsif ( $arch eq 'riscv64' ) {
 
