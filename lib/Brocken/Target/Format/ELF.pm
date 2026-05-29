@@ -70,7 +70,8 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         my $data_off = 0x2000;
         my $machine  = ( $arch eq 'arm64' ) ? 183 : ( $arch eq 'riscv64' ) ? 243 : 62;
         my ( $osabi, $note_data, $has_pintable ) = $self->_detect_elf_info();
-        my $align_f       = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+        my $align_f = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+        $data = "\0" if length($data) == 0;
         my $text_padded   = $text . ( "\0" x ( $align_f->( length($text), 0x1000 ) - length($text) ) );
         my $data_padded   = $data . ( "\0" x ( $align_f->( length($data), 0x1000 ) - length($data) ) );
         my $pintable_data = '';
@@ -112,6 +113,9 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         if ($note_data) {
             $ph_note = pack( 'LL Q Q Q Q Q Q', 4, 4, $extra_off, $base + $extra_off, $base + $extra_off, length($note_data), length($note_data), 4 );
             $extra_off += length($note_data);
+            my $pad = ( 4 - ( $extra_off % 4 ) ) % 4;
+            $extra_off += $pad;
+            $note_data .= "\0" x $pad;
         }
         if ($pintable_data) {
             $ph_syscalls = pack( 'LL Q Q Q Q Q Q',
@@ -133,10 +137,11 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
     }
 
     method write_lib ( $filename, $text, $data, $arch, $os, $exports ) {
-        my $base        = 0x400000;
-        my $text_off    = 0x1000;
-        my $dyn_off     = 0x3000;
-        my $align_f     = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+        my $base     = 0x400000;
+        my $text_off = 0x1000;
+        my $dyn_off  = 0x3000;
+        my $align_f  = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
+        $data = "\0" if length($data) == 0;
         my $text_padded = $text . ( "\0" x ( $align_f->( length($text), 0x1000 ) - length($text) ) );
         my $data_padded = $data . ( "\0" x ( $align_f->( length($data), 0x1000 ) - length($data) ) );
         my $machine     = ( $arch eq 'arm64' ) ? 183 : ( $arch eq 'riscv64' ) ? 243 : 62;
