@@ -15,7 +15,9 @@ class Brocken::IR::Assign : isa(Brocken::IR::Instruction) {
     field $rhs  : reader : param;
 
     method to_string() {
-        return sprintf( "%s = %s %s %s", $dest, $lhs, $op, $rhs );
+        my $str = sprintf( "%s = %s %s %s", $dest, $lhs, $op, $rhs );
+        $str =~ s/\s+$//;
+        return $str;
     }
 
     method uses() {

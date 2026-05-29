@@ -11,6 +11,7 @@ class Brocken::Target::Format::PE : isa(Brocken::Target::Format) {
         my $machine     = ( $arch eq 'arm64' ) ? 0xAA64 : 0x8664;
         my $align       = sub { my ( $v, $a ) = @_; return ( $v + $a - 1 ) & ~( $a - 1 ); };
         my $text_padded = $text . ( "\0" x ( $align->( length($text), $fa ) - length($text) ) );
+        if ( length($data) == 0 ) { $data = "\0" }
         my $data_padded = $data . ( "\0" x ( $align->( length($data), $fa ) - length($data) ) );
         my $text_rva    = $sa;
         my $data_rva    = $sa * 2;

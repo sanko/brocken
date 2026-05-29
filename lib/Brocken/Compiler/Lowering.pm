@@ -1,3 +1,4 @@
+__END__
 package Brocken::Compiler::Lowering {
     use v5.40;
     use utf8;

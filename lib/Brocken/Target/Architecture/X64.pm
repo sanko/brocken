@@ -124,6 +124,18 @@ class Brocken::Target::Architecture::X64 {
         $code .= $self->_rex( 1, 0, 0, $ri ) . pack( 'CCl<', 0x81, 0xE8 | ( $ri & 7 ), $imm );
     }
 
+    method add_reg( $dest, $src ) {
+        my $di = $self->_reg_idx($dest);
+        my $si = $self->_reg_idx($src);
+        $code .= $self->_rex( 1, $si, 0, $di ) . pack( 'CC', 0x01, 0xC0 | ( ( $si & 7 ) << 3 ) | ( $di & 7 ) );
+    }
+
+    method sub_reg( $dest, $src ) {
+        my $di = $self->_reg_idx($dest);
+        my $si = $self->_reg_idx($src);
+        $code .= $self->_rex( 1, $si, 0, $di ) . pack( 'CC', 0x29, 0xC0 | ( ( $si & 7 ) << 3 ) | ( $di & 7 ) );
+    }
+
     method cmp_reg_imm ( $reg, $imm ) {
         my $ri = $self->_reg_idx($reg);
         $code .= $self->_rex( 1, 0, 0, $ri ) . pack( 'CCl<', 0x81, 0xF8 | ( $ri & 7 ), $imm );
@@ -235,7 +247,7 @@ class Brocken::Target::Architecture::X64 {
         else {
             my $text_rva = $os->text_rva;
             my $data_rva = $os->data_rva;
-            $self->sub_imm( 'rsp', 48 );
+            $self->sub_imm( 'rsp', 0x38 );
             $self->mov_imm( 'rcx', -11 );    # STD_OUTPUT_HANDLE
             $self->call_rva( $os->symbol_rva('GetStdHandle'), $text_rva );
             $self->mov_reg( 'rcx', 'rax' );
@@ -245,7 +257,7 @@ class Brocken::Target::Architecture::X64 {
             $self->mov_imm( 'r10', 0 );
             $self->store_mem_disp_reg( 'rsp', 32, 'r10' );
             $self->call_rva( $os->symbol_rva('WriteFile'), $text_rva );
-            $self->add_imm( 'rsp', 48 );
+            $self->add_imm( 'rsp', 0x38 );
         }
     }
 
@@ -258,6 +270,7 @@ class Brocken::Target::Architecture::X64 {
             $self->syscall( $os->name, $num );
         }
         else {
+            $self->sub_imm( 'rsp', 0x28 );
             $self->mov_imm( 'rcx', $code_val );
             $self->call_rva( $os->symbol_rva('ExitProcess'), $os->text_rva );
         }

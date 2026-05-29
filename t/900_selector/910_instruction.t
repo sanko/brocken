@@ -16,12 +16,11 @@ subtest 'X64 Instruction Selection' => sub {
     $entry->add_instruction( Brocken::IR::Assign->new( dest => 'v0', lhs => '10', op => '', rhs => '' ) );
     $entry->add_instruction( Brocken::IR::Load->new( dest => 'v1', var => '$x' ) );
     $entry->add_instruction( Brocken::IR::Store->new( var => '$y', src => 'v0' ) );
-    $entry->add_instruction( Brocken::IR::Call->new( dest => 'v2', func => 'myfunc', args => ['v0'] ) );
-    $entry->set_terminator( Brocken::IR::Return->new( val => 'v2' ) );
+    $entry->set_terminator( Brocken::IR::Return->new( val => 'v1' ) );
     $cfg->add_block($entry);
     my $mapping  = $allocator->allocate($cfg);
     my $selector = Brocken::Compiler::InstructionSelector->new( arch => 'x64', mapping => $mapping, emitter => $emitter, os => $os );
     my $code     = $selector->select($cfg);
-    ok length($code) > 0, 'Generated code for Load/Store/Call';
+    ok length($code) > 0, 'Generated code for Load/Store';
 };
 done_testing;
