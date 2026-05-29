@@ -259,6 +259,93 @@ subtest 'Stmt::Eval throws' => sub {
     like( $@, qr/disabled/i, 'Eval throws "disabled"' );
 };
 
+# ===== Stmt::Use (direct AST) =====
+subtest 'Stmt::Use' => sub {
+    my $lowerer = Brocken::Compiler::Lowerer->new();
+    my $cfg = $lowerer->lower([ Brocken::AST::Stmt::Use->new(package => 'Foo') ]);
+    my @instr = $cfg->entry_block->instructions;
+    cmp_ok( scalar @instr, '>', 0, 'has instructions (no-op assign)' );
+    cmp_ok( scalar(grep { /= 1/ } map { $_->to_string } @instr), '>', 0, 'assigns 1 as no-op' );
+};
+
+subtest 'Stmt::Require' => sub {
+    my $lowerer = Brocken::Compiler::Lowerer->new();
+    my $cfg = $lowerer->lower([ Brocken::AST::Stmt::Require->new(package => 'Bar') ]);
+    my @instr = $cfg->entry_block->instructions;
+    cmp_ok( scalar @instr, '>', 0, 'has instructions (no-op assign)' );
+    cmp_ok( scalar(grep { /= 1/ } map { $_->to_string } @instr), '>', 0, 'assigns 1 as no-op' );
+};
+
+# ===== Exception::Die (direct AST) =====
+subtest 'Exception::Die' => sub {
+    my $lowerer = Brocken::Compiler::Lowerer->new();
+    my $cfg = $lowerer->lower([ wrap_as_stmt(
+        Brocken::AST::Exception::Die->new( exception => Brocken::AST::Expr::StrLiteral->new(value => 'oops', type => 'String') )
+    ) ]);
+    my @instr = $cfg->entry_block->instructions;
+    my $call = (grep { /call die\(/ } map { $_->to_string } @instr)[0];
+    ok( defined $call, 'die call found from Exception::Die' );
+};
+
+subtest 'Exception::Die without arg' => sub {
+    my $lowerer = Brocken::Compiler::Lowerer->new();
+    my $cfg = $lowerer->lower([ Brocken::AST::Exception::Die->new( exception => undef ) ]);
+    my @instr = $cfg->entry_block->instructions;
+    my $call = (grep { /call die\(/ } map { $_->to_string } @instr)[0];
+    ok( defined $call, 'die call found from Exception::Die with no args' );
+};
+
+# ===== Exception::TryCatch (direct AST) =====
+subtest 'Exception::TryCatch' => sub {
+    my $lowerer = Brocken::Compiler::Lowerer->new();
+    my $cfg = $lowerer->lower([
+        Brocken::AST::Exception::TryCatch->new(
+            try_block   => Brocken::AST::Stmt::Block->new( statements => [
+                Brocken::AST::Expr::Call->new( name => 'print', args => [] )
+            ] ),
+            catch_var   => 'err',
+            catch_block => Brocken::AST::Stmt::Block->new( statements => [
+                Brocken::AST::Expr::Call->new( name => 'die', args => [] )
+            ] ),
+        )
+    ]);
+    my @instr = $cfg->entry_block->instructions;
+    my $print_call = (grep { /call print\(/ } map { $_->to_string } @instr)[0];
+    my $die_call   = (grep { /call die\(/ } map { $_->to_string } @instr)[0];
+    ok( defined $print_call, 'try block lowered (print call found)' );
+    ok( defined $die_call, 'catch block lowered (die call found)' );
+};
+
+# ===== OOP::ClassDecl (direct AST) =====
+subtest 'OOP::ClassDecl' => sub {
+    my $lowerer = Brocken::Compiler::Lowerer->new();
+    my $cfg = $lowerer->lower([
+        Brocken::AST::OOP::ClassDecl->new(
+            name    => 'MyClass',
+            fields  => [],
+            methods => [
+                Brocken::AST::OOP::Method->new(
+                    name   => 'greet',
+                    params => [],
+                    body   => Brocken::AST::Stmt::Block->new( statements => [
+                        Brocken::AST::Expr::Call->new( name => 'print', args => [ Brocken::AST::Expr::StrLiteral->new(value => 'hi', type => 'String') ] )
+                    ] ),
+                )
+            ],
+        )
+    ]);
+    my @instr = $cfg->entry_block->instructions;
+    my $class_call = (grep { /call class_register\(/ } map { $_->to_string } @instr)[0];
+    ok( defined $class_call, 'class_register call found' );
+};
+
+# ===== NativeDecl throws =====
+subtest 'NativeDecl throws' => sub {
+    my $lowerer = Brocken::Compiler::Lowerer->new();
+    eval { $lowerer->lower([ Brocken::AST::NativeDecl->new( library => 'c', name => 'strlen', signature => {} ) ]) };
+    like( $@, qr/not supported/i, 'NativeDecl throws not supported' );
+};
+
 # ===== Stmt::Defer (direct AST) =====
 subtest 'Stmt::Defer (inline execution)' => sub {
     my $lowerer = Brocken::Compiler::Lowerer->new();

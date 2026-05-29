@@ -20,12 +20,12 @@ class Brocken::Target::OS::Haiku : isa(Brocken::Target::OS) {
         return $self->haiku_syscall( '_kern_wait_for_child', $arch );
     }
 
-    # Haiku-specific syscall argument setup for _kern_wait_for_child
-    # The signature is likely: _kern_wait_for_child(thread_id, ...)
-    # I suspect it needs status, options, etc.
-
     method syscall_fork ($arch) {
         return $self->haiku_syscall( '_kern_fork', $arch );
+    }
+
+    method syscall_nanosleep ($arch) {
+        return $self->haiku_syscall( '_kern_snooze_etc', $arch );
     }
 
     method haiku_syscall ( $name, $arch = 'x64' ) {
@@ -57,7 +57,13 @@ class Brocken::Target::OS::Haiku : isa(Brocken::Target::OS) {
             }
         }
         if ( !$num ) {
-            my $fallbacks = { '_kern_write' => 151, '_kern_exit_team' => 41, '_kern_wait_for_child' => 45, '_kern_fork' => 47, };
+            my $fallbacks = {
+                '_kern_write'          => 151,
+                '_kern_exit_team'      => 41,
+                '_kern_wait_for_child' => 45,
+                '_kern_fork'           => 47,
+                '_kern_snooze_etc'     => 185,
+            };
             $num = $fallbacks->{$name} // 0;
         }
         return $cache{$key} = $num;

@@ -58,6 +58,7 @@ class Brocken::Target::Architecture::X64 {
     field %labels;
     method labels () { return \%labels }              # Returns the HASH reference
     method ret ()    { $code .= pack( 'C', 0xC3 ) }
+    method pause ()  { $code .= pack( 'CC', 0xF3, 0x90 ) }
 
     method _reg_idx($r) {
         my $idx = $REG{ lc $r };

@@ -227,9 +227,9 @@ class Brocken::Compiler::Lowerer {
                 $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'exit', args => [] ) );
             }
         }
-        elsif ( $stmt->isa('Brocken::AST::Stmt::Die') ) {
-            if ( defined $stmt->expr ) {
-                my $val_reg = $self->lower_expr( $stmt->expr );
+        elsif ( $stmt->isa('Brocken::AST::Exception::Die') ) {
+            if ( defined $stmt->exception ) {
+                my $val_reg = $self->lower_expr( $stmt->exception );
                 my $vreg    = $self->new_vreg();
                 $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'die', args => [$val_reg] ) );
             }
@@ -257,6 +257,42 @@ class Brocken::Compiler::Lowerer {
             for my $s ( @{ $stmt->block->statements } ) {
                 $self->lower_stmt($s);
             }
+        }
+        elsif ( $stmt->isa('Brocken::AST::Stmt::Use') ) {
+            warn "Use of module '${\$stmt->package}' not supported at compile time";
+            my $vreg = $self->new_vreg();
+            $current_block->add_instruction( Brocken::IR::Assign->new( dest => $vreg, lhs => 1, op => '', rhs => '' ) );
+        }
+        elsif ( $stmt->isa('Brocken::AST::Stmt::Require') ) {
+            warn "Require of module '${\$stmt->package}' not supported at compile time";
+            my $vreg = $self->new_vreg();
+            $current_block->add_instruction( Brocken::IR::Assign->new( dest => $vreg, lhs => 1, op => '', rhs => '' ) );
+        }
+        elsif ( $stmt->isa('Brocken::AST::Exception::TryCatch') ) {
+            for my $s ( @{ $stmt->try_block->statements } ) {
+                $self->lower_stmt($s);
+            }
+            if ( $stmt->catch_block ) {
+                for my $s ( @{ $stmt->catch_block->statements } ) {
+                    $self->lower_stmt($s);
+                }
+            }
+            if ( $stmt->finally_block ) {
+                for my $s ( @{ $stmt->finally_block->statements } ) {
+                    $self->lower_stmt($s);
+                }
+            }
+        }
+        elsif ( $stmt->isa('Brocken::AST::OOP::ClassDecl') ) {
+            for my $method ( @{ $stmt->methods } ) {
+                $self->lower_stmt($method);
+            }
+            my $name_vr = $self->lower_expr( Brocken::AST::Expr::StrLiteral->new( value => $stmt->name, type => 'String' ) );
+            my $vreg    = $self->new_vreg();
+            $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'class_register', args => [$name_vr] ) );
+        }
+        elsif ( $stmt->isa('Brocken::AST::NativeDecl') ) {
+            die "NativeDecl (FFI) not supported";
         }
         else {
             die "Cannot lower statement: " . ref($stmt);
@@ -422,6 +458,19 @@ class Brocken::Compiler::Lowerer {
             my $vreg     = $self->new_vreg();
             $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'delete', args => [$sub_vreg] ) );
             return $vreg;
+        }
+        elsif ( $expr->isa('Brocken::AST::Exception::Die') ) {
+            if ( defined $expr->exception ) {
+                my $val_reg = $self->lower_expr( $expr->exception );
+                my $vreg    = $self->new_vreg();
+                $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'die', args => [$val_reg] ) );
+                return $vreg;
+            }
+            else {
+                my $vreg = $self->new_vreg();
+                $current_block->add_instruction( Brocken::IR::Call->new( dest => $vreg, func => 'die', args => [] ) );
+                return $vreg;
+            }
         }
         elsif ( $expr->isa('Brocken::AST::Async::FiberBlock') ) {
             $self->lower_expr( $expr->body );

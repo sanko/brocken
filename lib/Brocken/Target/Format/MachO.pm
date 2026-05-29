@@ -13,6 +13,10 @@ class Brocken::Target::Format::MachO : isa(Brocken::Target::Format) {
         my $text_padded = $text . ( "\0" x ( $align_f->( length($text), $page_size ) - length($text) ) );
         my $data_padded = $data . ( "\0" x ( $align_f->( length($data), $page_size ) - length($data) ) );
 
+        # Dummy Symbol Table (1 entry for __text)
+        my $symtab_entry = pack( 'L C C S Q', 1, 0x01, 1, 0, 0x100000000 + $page_size ); # n_strx, n_type, n_sect, n_desc, n_value
+        my $strtab = "\0_main\0";
+
         # 12 Load Commands for strict dyld/codesign compliance
         my $ncmds      = 12;
         my $sizeofcmds = 72 + 152 + 152 + 72 + 24 + 24 + 24 + 32 + 56 + 24 + 80 + 48;    # 760 bytes
@@ -48,7 +52,8 @@ class Brocken::Target::Format::MachO : isa(Brocken::Target::Format) {
         # LC_SEGMENT_64 (__LINKEDIT) - Permissions R (1)
         my $link_vmaddr  = 0x100000000 + 3 * $page_size;
         my $link_fileoff = 3 * $page_size;
-        my $lc_linkedit  = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 72, "__LINKEDIT", $link_vmaddr, $page_size, $link_fileoff, $page_size, 1, 1, 0, 0 );
+        my $link_filesize = length($symtab_entry) + length($strtab);
+        my $lc_linkedit  = pack( 'L L a16 Q Q Q Q L L L L', 0x19, 72, "__LINKEDIT", $link_vmaddr, $page_size, $link_fileoff, $align_f->($link_filesize, $page_size), 1, 1, 0, 0 );
 
         # LC_MAIN (Entry point offset)
         my $lc_main = pack( 'L L Q Q', 0x80000028, 24, $page_size, 0 );
@@ -65,8 +70,8 @@ class Brocken::Target::Format::MachO : isa(Brocken::Target::Format) {
         # LC_LOAD_DYLIB
         my $lc_dylib = pack( 'L L L L L L a32', 0x0C, 56, 24, 2, 0x01000000, 0x01000000, "/usr/lib/libSystem.B.dylib" );
 
-        # LC_SYMTAB (Points to start of __LINKEDIT so codesign safely bounds it)
-        my $lc_symtab = pack( 'L L L L L L', 0x02, 24, $link_fileoff, 0, $link_fileoff, 0 );
+        # LC_SYMTAB
+        my $lc_symtab = pack( 'L L L L L L', 0x02, 24, $link_fileoff, 1, $link_fileoff + length($symtab_entry), length($strtab) );
 
         # LC_DYSYMTAB (Required safely zeroed metadata for dyld parsing)
         my $lc_dysymtab = pack( 'L L' . 'L' x 18, 0x0B, 80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
@@ -85,7 +90,8 @@ class Brocken::Target::Format::MachO : isa(Brocken::Target::Format) {
         print $fh ( "\0" x ( $page_size - ( length($header) + $sizeofcmds ) ) );
         print $fh $text_padded;             # Page 1
         print $fh $data_padded;             # Page 2
-        print $fh ( "\0" x $page_size );    # Page 3 (Empty space for `codesign` to overwrite)
+        print $fh $symtab_entry, $strtab;   # Page 3
+        print $fh ( "\0" x ( $page_size - ( length($symtab_entry) + length($strtab) ) ) );
         close $fh;
         chmod 0755, $filename;
         if ( $^O eq 'darwin' ) {

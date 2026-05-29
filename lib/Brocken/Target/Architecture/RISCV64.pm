@@ -75,6 +75,26 @@ class Brocken::Target::Architecture::RISCV64 {
         $code .= pack( 'L<', ( ( $imm12 & 0xFFF ) << 20 ) | ( $rs1 << 15 ) | ( 6 << 12 ) | ( $rd << 7 ) | 0x13 );
     }
 
+    method _xori ( $rd, $rs1, $imm12 ) {
+        $code .= pack( 'L<', ( ( $imm12 & 0xFFF ) << 20 ) | ( $rs1 << 15 ) | ( 4 << 12 ) | ( $rd << 7 ) | 0x13 );
+    }
+
+    method _slt ( $rd, $rs1, $rs2 ) {
+        $code .= pack( 'L<', ( $rs2 << 20 ) | ( $rs1 << 15 ) | ( 2 << 12 ) | ( $rd << 7 ) | 0x33 );
+    }
+
+    method _sltu ( $rd, $rs1, $rs2 ) {
+        $code .= pack( 'L<', ( $rs2 << 20 ) | ( $rs1 << 15 ) | ( 3 << 12 ) | ( $rd << 7 ) | 0x33 );
+    }
+
+    method _slti ( $rd, $rs1, $imm12 ) {
+        $code .= pack( 'L<', ( ( $imm12 & 0xFFF ) << 20 ) | ( $rs1 << 15 ) | ( 2 << 12 ) | ( $rd << 7 ) | 0x13 );
+    }
+
+    method _sltiu ( $rd, $rs1, $imm12 ) {
+        $code .= pack( 'L<', ( ( $imm12 & 0xFFF ) << 20 ) | ( $rs1 << 15 ) | ( 3 << 12 ) | ( $rd << 7 ) | 0x13 );
+    }
+
     method _ld ( $rd, $imm12, $rs1 ) {
         $code .= pack( 'L<', ( ( $imm12 & 0xFFF ) << 20 ) | ( $rs1 << 15 ) | ( 3 << 12 ) | ( $rd << 7 ) | 0x03 );
     }
@@ -103,6 +123,47 @@ class Brocken::Target::Architecture::RISCV64 {
 
     method mov_reg_to_sp($src) {
         $self->mov_reg( 'sp', $src );
+    }
+
+    method add_reg( $dest, $src ) {
+        my $d = $self->_reg($dest);
+        my $s = $self->_reg($src);
+        $code .= pack( 'L<', ( $s << 20 ) | ( $d << 15 ) | ( $d << 7 ) | 0x33 );
+    }
+
+    method sub_reg( $dest, $src ) {
+        my $d = $self->_reg($dest);
+        my $s = $self->_reg($src);
+        $code .= pack( 'L<', ( 0x20 << 25 ) | ( $s << 20 ) | ( $d << 15 ) | ( $d << 7 ) | 0x33 );
+    }
+
+    method mul_reg( $dest, $src ) {
+        my $d = $self->_reg($dest);
+        my $s = $self->_reg($src);
+        $code .= pack( 'L<', ( 1 << 25 ) | ( $s << 20 ) | ( $d << 15 ) | ( $d << 7 ) | 0x33 );
+    }
+
+    method lea_reg_disp( $dest, $base, $disp ) {
+        if ( $disp >= -2048 && $disp <= 2047 ) {
+            $self->add_reg_imm( $dest, $base, $disp );
+        }
+        else {
+            $self->mov_imm( $dest, $disp );
+            $self->add_reg( $dest, $base );
+        }
+    }
+
+    method store_mem_disp_reg( $base, $disp, $src ) { $self->emit_store_mem( $base, $disp, $src ) }
+
+    method cmp_reg_reg ( $l, $r ) {
+        my $l_reg = $self->_reg($l);
+        my $r_reg = $self->_reg($r);
+        my $t = $REG{t0};
+        $code .= pack( 'L<', ( 0x20 << 25 ) | ( $r_reg << 20 ) | ( $l_reg << 15 ) | ( $t << 7 ) | 0x33 );
+    }
+
+    method pause() {
+        $code .= pack( 'L<', 0x00000013 );
     }
 
     method add_imm ( $reg, $imm ) {
@@ -150,6 +211,31 @@ class Brocken::Target::Architecture::RISCV64 {
 
     method syscall ( $os = '', $num = 0 ) {
         $code .= pack( 'L<', 0x00000073 );
+    }
+
+    method setcc ( $cc, $r ) {
+        my $rd = $self->_reg($r);
+        my $z  = $REG{zero};
+        my $t  = $REG{t0};
+        if ( $cc == 0x94 ) {        # ==
+            $self->_sltiu( $rd, $t, 1 );
+        }
+        elsif ( $cc == 0x95 ) {     # !=
+            $self->_sltu( $rd, $z, $t );
+        }
+        elsif ( $cc == 0x9C ) {     # <
+            $self->_slt( $rd, $t, $z );
+        }
+        elsif ( $cc == 0x9D ) {     # >=
+            $self->_slt( $rd, $t, $z );
+            $self->_xori( $rd, $rd, 1 );
+        }
+        elsif ( $cc == 0x9E ) {     # <=
+            $self->_slti( $rd, $t, 1 );
+        }
+        elsif ( $cc == 0x9F ) {     # >
+            $self->_slt( $rd, $z, $t );
+        }
     }
 
     method jcc ( $cc, $label ) {

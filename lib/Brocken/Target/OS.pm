@@ -75,7 +75,7 @@ class Brocken::Target::OS {
 
     method syscall_wait4 ($arch) {
         my $n = $self->name;
-        return 0x200000b if $n eq 'macos';
+        return 0x2000007 if $n eq 'macos';
         return 61        if $n eq 'linux' && $arch eq 'x64';
         return 260       if $n eq 'linux' && $arch eq 'arm64';
         return 260       if $n eq 'linux' && $arch eq 'riscv64';
@@ -175,8 +175,7 @@ class Brocken::Target::OS {
 
     method syscall_tfork ($arch) {
         my $n = $self->name;
-        return 91 if $n eq 'openbsd' && $arch eq 'x64';
-        return 91 if $n eq 'openbsd' && $arch eq 'riscv64';
+        return 91 if $n eq 'openbsd';
         return undef;
     }
 
@@ -188,17 +187,18 @@ class Brocken::Target::OS {
 
     method syscall_nanosleep ($arch) {
         my $n = $self->name;
-        return 0x20000F0 if $n eq 'macos';
+        return 0x2000065 if $n eq 'macos';
         return 35        if $n eq 'linux' && $arch eq 'x64';
         return 101       if $n eq 'linux' && $arch eq 'arm64';
         return 101       if $n eq 'linux' && $arch eq 'riscv64';
-        return 240       if $self->is_bsd_like && $n ne 'macos' && $arch eq 'x64';
+        return 430       if $n eq 'netbsd';
+        return 240       if $self->is_bsd_like;
         return undef;
     }
 
     method syscall_num_reg ($arch) {
         return 'rax' if $arch eq 'x64';
-        return 'x16' if $arch eq 'arm64' && $self->name eq 'macos';
+        return 'x16' if $self->name eq 'macos' && $arch eq 'arm64';
         return 'x8'  if $arch eq 'arm64';
         return 'a7'  if $arch eq 'riscv64';
         return undef;
@@ -211,7 +211,29 @@ class Brocken::Target::OS {
         return undef;
     }
 
+    method syscall_exit_arg_reg ($arch) {
+        return 'rdi' if $arch eq 'x64';
+        return 'x0'  if $arch eq 'arm64';
+        return 'a0'  if $arch eq 'riscv64';
+        return undef;
+    }
+
+    method frame_reg ($arch) {
+        return 'rbp' if $arch eq 'x64';
+        return 'x29' if $arch eq 'arm64';
+        return 's0'  if $arch eq 'riscv64';
+        return undef;
+    }
+
+    method stack_reg ($arch) {
+        return 'rsp' if $arch eq 'x64';
+        return 'sp'  if $arch eq 'arm64';
+        return 'sp'  if $arch eq 'riscv64';
+        return undef;
+    }
+
     method page_size ($arch) {
+        return 0x4000 if $self->name eq 'macos' && $arch eq 'arm64';
         return 0x1000;
     }
 

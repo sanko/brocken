@@ -63,7 +63,12 @@ class Brocken::Target::Architecture::ARM64 {
     method mov_reg ( $dest, $src ) {
         my $d = $REG{ lc $dest };
         my $s = $REG{ lc $src };
-        $code .= pack( 'L<', 0xAA0003E0 | ( $s << 16 ) | $d );
+        if ( lc($dest) eq 'sp' || lc($src) eq 'sp' ) {
+            $code .= pack( 'L<', 0x91000000 | ( $s << 5 ) | $d );
+        }
+        else {
+            $code .= pack( 'L<', 0xAA0003E0 | ( $s << 16 ) | $d );
+        }
     }
 
     method mov_reg_to_sp($src) {
@@ -92,6 +97,24 @@ class Brocken::Target::Architecture::ARM64 {
         $code .= pack( 'L<', 0xF1000000 | ( ( $imm & 0xFFF ) << 10 ) | ( $r << 5 ) | 31 );
     }
 
+    method add_reg( $dest, $src ) {
+        my $d = $REG{ lc $dest };
+        my $s = $REG{ lc $src };
+        $code .= pack( 'L<', 0x8B000000 | ( $s << 16 ) | ( $d << 5 ) | $d );
+    }
+
+    method sub_reg( $dest, $src ) {
+        my $d = $REG{ lc $dest };
+        my $s = $REG{ lc $src };
+        $code .= pack( 'L<', 0xCB000000 | ( $s << 16 ) | ( $d << 5 ) | $d );
+    }
+
+    method mul_reg( $dest, $src ) {
+        my $d = $REG{ lc $dest };
+        my $s = $REG{ lc $src };
+        $code .= pack( 'L<', 0x9B007C00 | ( $s << 16 ) | ( $d << 5 ) | $d );
+    }
+
     method cmp_reg_reg ( $l, $r ) {
         my $rd = $REG{ lc $l };
         my $rs = $REG{ lc $r };
@@ -116,11 +139,31 @@ class Brocken::Target::Architecture::ARM64 {
     method alloc_stack($size)          { $self->sub_imm( 'sp', $size ) }
     method emit_mov_reg( $dest, $src ) { $self->mov_reg( $dest, $src ) }
     method emit_mov_imm( $reg, $imm )  { $self->mov_imm( $reg, $imm ) }
+    method lea_reg_disp( $dest, $base, $disp ) {
+        if ( $disp <= 0xFFF ) {
+            $self->add_reg_imm( $dest, $base, $disp );
+        }
+        elsif ( ( $disp & 0xFFF ) == 0 && ( $disp >> 12 ) <= 0xFFF ) {
+            my $d = $REG{ lc $dest };
+            my $b = $REG{ lc $base };
+            my $imm12 = $disp >> 12;
+            $code .= pack( 'L<', 0x91400000 | ( 1 << 22 ) | ( $imm12 << 10 ) | ( $b << 5 ) | $d );
+        }
+        else {
+            $self->mov_imm( $dest, $disp );
+            $self->add_reg( $dest, $base );
+        }
+    }
 
     method load_reg_mem( $dest, $base, $off = 0 ) {
         my $d = $REG{ lc $dest };
         my $b = $REG{ lc $base };
-        $code .= pack( 'L<', 0xF9400000 | ( ( $off >> 3 ) << 10 ) | ( $b << 5 ) | $d );
+        if ( $off >= 0 ) {
+            $code .= pack( 'L<', 0xF9400000 | ( ( $off >> 3 ) << 10 ) | ( $b << 5 ) | $d );
+        }
+        else {
+            $code .= pack( 'L<', 0xF8400000 | ( ( $off & 0x1FF ) << 12 ) | ( $b << 5 ) | $d );
+        }
     }
     method push_reg($r) {
         $self->sub_imm( 'sp', 16 );
@@ -136,7 +179,14 @@ class Brocken::Target::Architecture::ARM64 {
         $self->mov_imm( $os eq 'macos' ? 'x16' : 'x8', $num );
         my @arg_regs = qw(x0 x1 x2 x3 x4 x5);
         for my $i ( 0 .. $#args ) {
-            $self->mov_imm( $arg_regs[$i], $args[$i] ) if defined $args[$i];
+            my $arg = $args[$i];
+            next unless defined $arg;
+            if ( $arg !~ /^-?\d+$/ && $arg ne 'stack' && exists $REG{ lc $arg } ) {
+                $self->mov_reg( $arg_regs[$i], $arg );
+            }
+            else {
+                $self->mov_imm( $arg_regs[$i], $arg );
+            }
         }
         $self->syscall( $os, $num );
     }
@@ -145,10 +195,22 @@ class Brocken::Target::Architecture::ARM64 {
     method emit_store_mem( $base, $disp, $src ) {
         my $d = $REG{ lc $src };
         my $b = $REG{ lc $base };
-        $code .= pack( 'L<', 0xF9000000 | ( ( $disp >> 3 ) << 10 ) | ( $b << 5 ) | $d );
+        if ( $disp >= 0 ) {
+            $code .= pack( 'L<', 0xF9000000 | ( ( $disp >> 3 ) << 10 ) | ( $b << 5 ) | $d );
+        }
+        else {
+            $code .= pack( 'L<', 0xF8000000 | ( ( $disp & 0x1FF ) << 12 ) | ( $b << 5 ) | $d );
+        }
     }
     method store_mem_disp_reg( $base, $disp, $src ) { $self->emit_store_mem( $base, $disp, $src ) }
     method emit_label($name) { $self->mark_label($name) }
+
+    method setcc ( $cc, $r ) {
+        my %arm_cc = ( 0x9C => 0xA, 0x9D => 0xB, 0x9E => 0xC, 0x9F => 0xD, 0x94 => 0x1, 0x95 => 0x0 );
+        my $cond = $arm_cc{$cc} // 0;
+        my $rd = $REG{ lc $r };
+        $code .= pack( 'L<', 0x9A9F07E0 | ( $cond << 12 ) | $rd );
+    }
 
     method emit_branch_if_zero( $reg, $label ) {
         my $r = $REG{ lc $reg };
@@ -191,7 +253,7 @@ class Brocken::Target::Architecture::ARM64 {
 
     method syscall( $os = '', $num = 0 ) {
         if ( $os eq 'macos' ) {
-            $code .= pack( 'L<', 0xD4001001 );    # SVC #0x80
+            $code .= pack( 'L<', 0xD4000001 );    # SVC #0
         }
         elsif ( $os eq 'netbsd' && $num > 0 ) {
             $code .= pack( 'L<', 0xD4000001 | ( ( $num & 0xFFFF ) << 5 ) );
@@ -206,8 +268,11 @@ class Brocken::Target::Architecture::ARM64 {
     }
 
     method jcc ( $cc, $label ) {
-        push @fixups, { offset => length($code), target => $label, type => 'cond_b_cc', cc => $cc };
-        $code .= pack( 'L<', 0x54000000 | $cc );
+        my $cond = $cc;
+        if    ( $cc == 4 ) { $cond = 0; }     # x86 JZ -> ARM64 EQ
+        elsif ( $cc == 5 ) { $cond = 1; }     # x86 JNZ -> ARM64 NE
+        push @fixups, { offset => length($code), target => $label, type => 'cond_b_cc', cc => $cond };
+        $code .= pack( 'L<', 0x54000000 | $cond );
     }
 
     method jmp ($label) {

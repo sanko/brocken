@@ -6,4 +6,5 @@ require Brocken::AST::Stmt;
 require Brocken::AST::Expr;
 require Brocken::AST::OOP;
 require Brocken::AST::Async;
+require Brocken::AST::Exception;
 1;
