@@ -1,0 +1,171 @@
+{
+   "abstract" : "Compiler?",
+   "author" : [
+      "Sanko Robinson <sanko@cpan.org>"
+   ],
+   "description" : "Compiler?",
+   "dynamic_config" : 1,
+   "generated_by" : "App::mii v1.0.0",
+   "keywords" : [],
+   "license" : [
+      "artistic_2"
+   ],
+   "meta-spec" : {
+      "url" : "https://metacpan.org/pod/CPAN::Meta::Spec",
+      "version" : 2
+   },
+   "name" : "Brocken",
+   "no_index" : {
+      "directory" : [],
+      "file" : [],
+      "namespace" : [],
+      "package" : []
+   },
+   "prereqs" : {
+      "configure" : {
+         "requires" : {
+            "Module::Build::Tiny" : "0.034",
+            "Path::Tiny" : "0",
+            "perl" : "v5.40.0"
+         }
+      },
+      "test" : {
+         "recommends" : {
+            "Affix" : "0"
+         },
+         "requires" : {}
+      }
+   },
+   "provides" : {
+      "Brocken" : {
+         "file" : "lib/Brocken.pm"
+      },
+      "Brocken::Core::AST::Assign" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::BinaryOp" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::FFIDecl" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::If" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::Literal" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::Method" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::MyDecl" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::Node" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::Parameter" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::Signature" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::StructDecl" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::Variable" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::AST::While" : {
+         "file" : "lib/Brocken/Core/AST.pm"
+      },
+      "Brocken::Core::IR::Block" : {
+         "file" : "lib/Brocken/Core/IR.pm"
+      },
+      "Brocken::Core::IR::Instruction" : {
+         "file" : "lib/Brocken/Core/IR.pm"
+      },
+      "Brocken::Core::IRGenerator" : {
+         "file" : "lib/Brocken/Core/IRGenerator.pm"
+      },
+      "Brocken::Core::Lexer" : {
+         "file" : "lib/Brocken/Core/Lexer.pm"
+      },
+      "Brocken::Core::OOP::Class" : {
+         "file" : "lib/Brocken/Core/OOP.pm"
+      },
+      "Brocken::Core::OOP::Field" : {
+         "file" : "lib/Brocken/Core/OOP.pm"
+      },
+      "Brocken::Core::OOP::Resolver" : {
+         "file" : "lib/Brocken/Core/OOP.pm"
+      },
+      "Brocken::Core::Optimizer" : {
+         "file" : "lib/Brocken/Core/Optimizer.pm"
+      },
+      "Brocken::Core::Parser" : {
+         "file" : "lib/Brocken/Core/Parser.pm"
+      },
+      "Brocken::Core::Scope" : {
+         "file" : "lib/Brocken/Core/Scope.pm"
+      },
+      "Brocken::Core::Token" : {
+         "file" : "lib/Brocken/Core/Token.pm"
+      },
+      "Brocken::Core::Type" : {
+         "file" : "lib/Brocken/Core/Type.pm"
+      },
+      "Brocken::Runtime::Memory::Allocator" : {
+         "file" : "lib/Brocken/Runtime/Memory.pm"
+      },
+      "Brocken::Runtime::Memory::Block" : {
+         "file" : "lib/Brocken/Runtime/Memory.pm"
+      },
+      "Brocken::Runtime::Memory::Line" : {
+         "file" : "lib/Brocken/Runtime/Memory.pm"
+      },
+      "Brocken::Target" : {
+         "file" : "lib/Brocken/Target.pm"
+      },
+      "Brocken::Target::Architecture::ARM64" : {
+         "file" : "lib/Brocken/Target/Architecture/ARM64.pm"
+      },
+      "Brocken::Target::Architecture::RISC64" : {
+         "file" : "lib/Brocken/Target/Architecture/RISC64.pm"
+      },
+      "Brocken::Target::Architecture::X64" : {
+         "file" : "lib/Brocken/Target/Architecture/X64.pm"
+      },
+      "Brocken::Target::Format::DWARF" : {
+         "file" : "lib/Brocken/Target/Format/DWARF.pm"
+      },
+      "Brocken::Target::Format::ELF" : {
+         "file" : "lib/Brocken/Target/Format/ELF.pm"
+      },
+      "Brocken::Target::Format::MachO" : {
+         "file" : "lib/Brocken/Target/Format/MachO.pm"
+      },
+      "Brocken::Target::Format::PE" : {
+         "file" : "lib/Brocken/Target/Format/PE.pm"
+      },
+      "Brocken::Target::Triple" : {
+         "file" : "lib/Brocken/Target/Triple.pm"
+      }
+   },
+   "release_status" : "testing",
+   "resources" : {
+      "license" : [
+         "http://www.perlfoundation.org/artistic_license_2_0"
+      ],
+      "repository" : {}
+   },
+   "version" : "v0.0.1",
+   "x_custom_builder" : 1,
+   "x_ignore" : [
+      ".tidyallrc",
+      ".gitignore",
+      ".clang-format",
+      ".github/**"
+   ],
+   "x_no_upload" : 1
+}
