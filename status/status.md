@@ -12,7 +12,7 @@
 | FreeBSD | Intel | ✅ |
 | FreeBSD | ARM | ✅ |
 | Haiku | Intel | ✅ |
-| MidnightBSD | Intel | ✅ |
+| MidnightBSD | Intel | ❌ |
 | NetBSD | Intel | ✅ |
 | NetBSD | ARM | ✅ |
 | OmniOS | Intel | ✅ |
