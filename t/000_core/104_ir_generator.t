@@ -30,16 +30,17 @@ sub compile_to_instructions($code) {
 subtest 'Lexical Declaration & Initialization' => sub {
     my $code  = 'my $x = 42;';
     my $insts = compile_to_instructions($code);
-    is( @$insts, 2, 'emitted exactly 2 instructions for declaration and assignment' );
+    is( @$insts,         3,            'emitted exactly 3 instructions for declaration and assignment' );
+    is( $insts->[0]->op, 'INIT_STDIO', 'first instruction is INIT_STDIO' );
 
     # v0 = ALLOCA
-    is( $insts->[0]->op, 'ALLOCA', 'first instruction is ALLOCA' );
-    ok( defined $insts->[0]->dest, 'ALLOCA has a destination register' );
+    is( $insts->[1]->op, 'ALLOCA', 'second instruction is ALLOCA' );
+    ok( defined $insts->[1]->dest, 'ALLOCA has a destination register' );
 
     # STORE v0, 42
-    is( $insts->[1]->op,        'STORE',           'second instruction is STORE' );
-    is( $insts->[1]->srcs->[0], $insts->[0]->dest, 'STORE destination targets the ALLOCA register' );
-    is( $insts->[1]->srcs->[1], 42,                'STORE source value is the literal 42' );
+    is( $insts->[2]->op,        'STORE',           'third instruction is STORE' );
+    is( $insts->[2]->srcs->[0], $insts->[1]->dest, 'STORE destination targets the ALLOCA register' );
+    is( $insts->[2]->srcs->[1], 42,                'STORE source value is the literal 42' );
 };
 subtest 'Variable Reads & Binary Arithmetic' => sub {
     my $code = q{
@@ -49,25 +50,27 @@ subtest 'Variable Reads & Binary Arithmetic' => sub {
     my $insts = compile_to_instructions($code);
 
     # Expected Sequence:
-    # 0: v0 = ALLOCA
-    # 1: STORE v0, 10
-    # 2: v1 = ALLOCA
-    # 3: v2 = LOAD v0
-    # 4: v3 = ADD v2, 5
-    # 5: STORE v1, v3
-    is( @$insts, 6, 'emitted exactly 6 instructions' );
-    my $x_slot = $insts->[0]->dest;
-    my $y_slot = $insts->[2]->dest;
-    is( $insts->[3]->op,        'LOAD',  'instruction 3 is LOAD' );
-    is( $insts->[3]->srcs->[0], $x_slot, 'LOAD reads from $x slot' );
-    my $loaded_val_reg = $insts->[3]->dest;
-    is( $insts->[4]->op,        'ADD',           'instruction 4 is ADD' );
-    is( $insts->[4]->srcs->[0], $loaded_val_reg, 'ADD reads the loaded value of $x' );
-    is( $insts->[4]->srcs->[1], 5,               'ADD adds literal 5' );
-    my $add_result_reg = $insts->[4]->dest;
-    is( $insts->[5]->op,        'STORE',         'instruction 5 is STORE' );
-    is( $insts->[5]->srcs->[0], $y_slot,         'STORE targets the $y slot' );
-    is( $insts->[5]->srcs->[1], $add_result_reg, 'STORE writes the output of the ADD calculation' );
+    # 0: INIT_STDIO
+    # 1: v0 = ALLOCA
+    # 2: STORE v0, 10
+    # 3: v1 = ALLOCA
+    # 4: v2 = LOAD v0
+    # 5: v3 = ADD v2, 5
+    # 6: STORE v1, v3
+    is( @$insts,         7,            'emitted exactly 7 instructions' );
+    is( $insts->[0]->op, 'INIT_STDIO', 'instruction 0 is INIT_STDIO' );
+    my $x_slot = $insts->[1]->dest;
+    my $y_slot = $insts->[3]->dest;
+    is( $insts->[4]->op,        'LOAD',  'instruction 4 is LOAD' );
+    is( $insts->[4]->srcs->[0], $x_slot, 'LOAD reads from $x slot' );
+    my $loaded_val_reg = $insts->[4]->dest;
+    is( $insts->[5]->op,        'ADD',           'instruction 5 is ADD' );
+    is( $insts->[5]->srcs->[0], $loaded_val_reg, 'ADD reads the loaded value of $x' );
+    is( $insts->[5]->srcs->[1], 5,               'ADD adds literal 5' );
+    my $add_result_reg = $insts->[5]->dest;
+    is( $insts->[6]->op,        'STORE',         'instruction 6 is STORE' );
+    is( $insts->[6]->srcs->[0], $y_slot,         'STORE targets the $y slot' );
+    is( $insts->[6]->srcs->[1], $add_result_reg, 'STORE writes the output of the ADD calculation' );
 };
 subtest 'Compile-Time Variable Scope Violations' => sub {
 
@@ -96,13 +99,14 @@ subtest 'Defined-OR Parameter Defaulting (//=)' => sub {
 
     # Entry Block Analysis
     my $e_insts = $entry->instructions;
-    is( $e_insts->[0]->op,        'ALLOCA',        'allocates variable space' );
-    is( $e_insts->[1]->op,        'LOAD',          'loads slot value to check definedness' );
-    is( $e_insts->[2]->op,        'IS_DEF',        'applies IS_DEF check' );
-    is( $e_insts->[3]->op,        'JUMP_IF_TRUE',  'conditional jump setup' );
-    is( $e_insts->[3]->srcs->[1], $merge->label,   'JUMP_IF_TRUE targets the merge block' );
-    is( $e_insts->[4]->op,        'JUMP',          'unconditional fall-through jump' );
-    is( $e_insts->[4]->srcs->[0], $default->label, 'unconditional JUMP targets the default block' );
+    is( $e_insts->[0]->op,        'INIT_STDIO',    'initializes stdio' );
+    is( $e_insts->[1]->op,        'ALLOCA',        'allocates variable space' );
+    is( $e_insts->[2]->op,        'LOAD',          'loads slot value to check definedness' );
+    is( $e_insts->[3]->op,        'IS_DEF',        'applies IS_DEF check' );
+    is( $e_insts->[4]->op,        'JUMP_IF_TRUE',  'conditional jump setup' );
+    is( $e_insts->[4]->srcs->[1], $merge->label,   'JUMP_IF_TRUE targets the merge block' );
+    is( $e_insts->[5]->op,        'JUMP',          'unconditional fall-through jump' );
+    is( $e_insts->[5]->srcs->[0], $default->label, 'unconditional JUMP targets the default block' );
 
     # Default Block Analysis
     my $d_insts = $default->instructions;
@@ -116,7 +120,7 @@ subtest 'Logical-OR Parameter Defaulting (||=)' => sub {
     my $blocks  = compile_to_blocks($code);
     my $entry   = $blocks->[0];
     my $e_insts = $entry->instructions;
-    is( $e_insts->[2]->op, 'IS_TRUE', 'applies IS_TRUE check for ||= operator' );
+    is( $e_insts->[3]->op, 'IS_TRUE', 'applies IS_TRUE check for ||= operator' );
 };
 subtest 'Conditional Flow Routing (if / elsif / else)' => sub {
     my $code = q{

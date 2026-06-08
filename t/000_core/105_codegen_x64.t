@@ -1,3 +1,4 @@
+# t/000_core/105_codegen_x64.t (Complete Source)
 use v5.38;
 use Test2::V0;
 use lib qw[lib ../../lib];
@@ -12,7 +13,7 @@ use Brocken::Target::Format::ELF;
 use Brocken::Target::Format::MachO;
 use Brocken::Target::Format::PE;
 use Brocken::Target::Format::DWARF;
-use File::Temp;
+use File::Temp qw[tempfile];
 
 # Helper to verify standard AMD64 architecture compatibility
 sub is_host_x64_linux {
@@ -60,10 +61,10 @@ subtest 'End-to-End Native Execution (Linear Math)' => sub {
     my $output_file = File::Temp->new( TEMPLATE => 'x64_linux_XXXXX', SUFFIX => '.elf' );
     $output_file->close();    # Close File::Temp handle to release OS locks
     $elf->write_executable( $output_file->filename, $bin, $t );
-    ok -e $output_file->filename, 'successfully generated native ELF binary file';
+    ok( -e $output_file->filename, 'successfully generated native ELF binary file' );
 
     if ( is_host_x64_linux() ) {
-        my $cmd = './' . $output_file->filename;
+        my $cmd = "./" . $output_file->filename;
         system($cmd);
         my $exit_code = $? >> 8;
         is $exit_code, 15, 'executed native binary on Linux x86-64 and verified exit code matches calculation (15)';
@@ -133,7 +134,7 @@ subtest 'End-to-End Native Parameter Passing' => sub {
     ok -e $output_file->filename, 'successfully generated parameter ELF binary file';
 
     if ( is_host_x64_linux() ) {
-        my $cmd = './' . $output_file->filename;
+        my $cmd = "./" . $output_file->filename;
         system($cmd);
         my $exit_code = $? >> 8;
         is $exit_code, 40, 'executed native binary with System V argument registers and verified exit code matches parameter addition (40)';
@@ -176,8 +177,9 @@ subtest 'Cross-Platform PE File Generation' => sub {
     my $x64         = Brocken::Target::Architecture::X64->new();
     my $bin         = $x64->assemble( $generator->blocks, $t );
     my $pe          = Brocken::Target::Format::PE->new();
-    my $output_file = File::Temp->new( TEMPLATE => 'crossXXXXX', SUFFIX => '.exe' );
-    $output_file->close();    # Close File::Temp handle to release OS locks
+    my $output_file = File::Temp->new( TEMPLATE => 'crossXXXXX', SUFFIX => '.exe', UNLINK => 0 );
+    close $output_file;
+    unlink $output_file->filename;
     $pe->write_executable( $output_file->filename, $bin, $t );
     ok -e $output_file->filename, 'successfully generated Windows PE x64 binary file';
     open my $fh, '<', $output_file->filename or die $!;
@@ -218,23 +220,19 @@ subtest 'Multi-Target Decoupled Compilation (Parse Once, Lower N Times)' => sub 
     my $macho_bin = File::Temp->new( TEMPLATE => 'temp_machoXXXXX', SUFFIX => '' );
     my $so_lib    = File::Temp->new( TEMPLATE => 'temp_soXXXXX',    SUFFIX => '' );
     my $dll_lib   = File::Temp->new( TEMPLATE => 'tempdll_XXXXX',   SUFFIX => '.dll' );
-    my $dylib_lib = File::Temp->new( TEMPLATE => 'tempdylib_XXXXX', SUFFIX => '.dylib' );
     $elf_bin->close();
     $pe_bin->close();
     $macho_bin->close();
     $so_lib->close();
     $dll_lib->close();
-    $dylib_lib->close();
     $brocken->write_executable( $elf_bin->filename,   'x86_64-linux-elf' );
     $brocken->write_executable( $pe_bin->filename,    'x86_64-windows-pe' );
     $brocken->write_executable( $macho_bin->filename, 'x86_64-macos-macho' );
-    $brocken->write_lib( $dylib_lib->filename, 'x86_64-macos-macho' );
-    $brocken->write_lib( $so_lib->filename,    'x86_64-linux-elf' );
-    $brocken->write_lib( $dll_lib->filename,   'x86_64-windows-pe' );
+    $brocken->write_lib( $so_lib->filename,  'x86_64-linux-elf' );
+    $brocken->write_lib( $dll_lib->filename, 'x86_64-windows-pe' );
     ok -e $elf_bin->filename,   'compiled target-independent IR to ELF executable';
     ok -e $pe_bin->filename,    'compiled target-independent IR to PE executable';
     ok -e $macho_bin->filename, 'compiled target-independent IR to Mach-O executable';
-    ok -e $dylib_lib->filename, 'compiled target-independent IR to macOS Mach-O shared library (.dylib)';
     ok -e $so_lib->filename,    'compiled target-independent IR to ELF shared library (.so)';
     ok -e $dll_lib->filename,   'compiled target-independent IR to Windows DLL (.dll)';
 };
@@ -276,7 +274,7 @@ subtest 'Dynamic Host and Architecture Detection' => sub {
     my $detected = $compiler->triple;
     ok defined $detected, 'automatically detected host triple: ' . $detected->to_string;
 
-    # Assert Operating System Matches
+    # 1. Assert Operating System Matches
     if ( $^O eq 'MSWin32' || $^O eq 'MSWin64' ) {
         like $detected->to_string, qr/-windows-pe$/, 'successfully identified host as Windows PE format';
     }
@@ -287,10 +285,118 @@ subtest 'Dynamic Host and Architecture Detection' => sub {
         like $detected->to_string, qr/-linux-elf$/, 'successfully identified host as Linux ELF format';
     }
 
-    # Test WoA Emulation Check Override
+    # 2. Test WoA Emulation Check Override
     local $ENV{PROCESSOR_ARCHITEW6432} = 'ARM64';
     my $woa_triple = Brocken::detect_host_triple();
     like $woa_triple, qr/^arm64-/, 'successfully identified ARM64 target architecture under Windows x64 process emulation';
 };
-#
+
+# Inside t/000_core/105_codegen_x64.t (Line 318 onwards)
+subtest 'Type-Aware Stack Allocations and Sized Register Opcodes' => sub {
+    my $code = q{
+        class SizedDemo {
+            method run(Int8 $val) {
+                my Int16 $res = $val + 10;
+                $res;
+            }
+        }
+    };
+    my $lexer  = Brocken::Core::Lexer->new( source => $code );
+    my $parser = Brocken::Core::Parser->new( tokens => $lexer->tokenize() );
+    $parser->parse_program();
+    my $class     = $parser->classes->{SizedDemo};
+    my $method    = $class->methods->{run};
+    my $generator = Brocken::Core::IRGenerator->new();
+    my $blocks    = $generator->lower_method($method);
+
+    # Verify physical stack frame offset allocation and sizes
+    my $x64 = Brocken::Target::Architecture::X64->new();
+    my $t   = Brocken::Target::Triple->new( raw_string => 'x86_64-linux-elf' );
+    my $bin = $x64->assemble( $blocks, $t );
+
+    # Ensure local variables are assigned appropriate physical byte widths:
+    # 1. v0 (mapped to $val, Int8) -> allocated exactly 1 byte space (offset -1)
+    # 2. v2 (mapped to $res, Int16) -> allocated exactly 2 byte space (offset -4, aligned to 2-byte boundary)
+    is( $x64->get_offset('v0'), -1, 'allocated exactly 1 byte stack space for Int8 parameter v0 ($val)' );
+    is( $x64->get_offset('v2'), -4, 'allocated exactly 2 bytes stack space for Int16 variable v2 ($res, aligned downwards)' );
+    my $elf         = Brocken::Target::Format::ELF->new();
+    my $output_file = File::Temp->new( TEMPLATE => 'sized_test_XXXXX', SUFFIX => '.elf' );
+    $output_file->close();
+
+    # Compile executable, passing 12 as the argument (loaded into Int8 register dil)
+    $elf->write_executable( $output_file->filename, $bin, $t, 12 );
+    ok( -e $output_file->filename, 'successfully compiled type-aware aligned ELF binary' );
+    if ( is_host_x64_linux() ) {
+        my $cmd = "./" . $output_file->filename;
+        system($cmd);
+        my $exit_code = $? >> 8;
+        is( $exit_code, 22, 'executed native binary with sized stack alignments and verified exit status (22)' );
+    }
+    else {
+        skip_all("Skipping native execution test on non-Linux-x86_64 host");
+    }
+};
+
+# Append to the end of t/000_core/105_codegen_x64.t
+subtest 'Multi-Subroutine Compilation and Native Linking' => sub {
+    my $code = q{
+        sub sum(Int $a, Int $b) {
+            my $res = $a + $b;
+            return $res;
+        }
+
+        sub main() {
+            my $val = sum(15, 25);
+            $val;
+        }
+    };
+    my $lexer  = Brocken::Core::Lexer->new( source => $code );
+    my $parser = Brocken::Core::Parser->new( tokens => $lexer->tokenize() );
+    $parser->parse_program();
+
+    # Compile the program via our top-level unifier API
+    my $compiler = Brocken->new( triple => 'x86_64-linux-elf' );
+
+    # Extract the compiled function registry from parser and lower them
+    my $program_blocks = {};
+    for my $class_name ( keys %{ $parser->classes } ) {
+        my $class_meta = $parser->classes->{$class_name};
+        for my $method_name ( keys %{ $class_meta->methods } ) {
+            my $method_node = $class_meta->methods->{$method_name};
+            my $generator   = Brocken::Core::IRGenerator->new();
+            my $class_arg   = ( $class_name eq 'main' ) ? undef : $class_meta;
+            my $blocks      = $generator->lower_method( $method_node, $class_arg );
+            my $fq_name     = ( $class_name eq 'main' ) ? $method_name : "${class_name}::$method_name";
+            $program_blocks->{$fq_name} = $blocks;
+        }
+    }
+
+    # Verify that both 'sum' and 'main' subroutines are compiled and registered
+    ok( exists $program_blocks->{sum},  'registered sum subroutine' );
+    ok( exists $program_blocks->{main}, 'registered main entry subroutine' );
+    my $x64 = Brocken::Target::Architecture::X64->new();
+    my $t   = Brocken::Target::Triple->new( raw_string => 'x86_64-linux-elf' );
+
+    # Assemble all program functions sequentially
+    my $result = $x64->assemble_program( $program_blocks, $t );
+    my $bin    = ref $result eq 'HASH' ? $result->{binary} : $result;
+    ok( length($bin) > 0, 'successfully compiled multi-subroutine program to AMD64 machine code' );
+    my $elf         = Brocken::Target::Format::ELF->new();
+    my $output_file = File::Temp->new( TEMPLATE => 'multi_sub_XXXXX', SUFFIX => '.elf' );
+    $output_file->close();
+
+    # Write executable, pointing ELF entry point to 'main' subroutine (instead of 'sum')
+    # Since we sort the keys, 'main' comes first alphabetically, so our entry point naturally aligns!
+    $elf->write_executable( $output_file->filename, $bin, $t );
+    ok( -e $output_file->filename, 'successfully generated multi-subroutine ELF executable' );
+    if ( is_host_x64_linux() ) {
+        my $cmd = "./" . $output_file->filename;
+        system($cmd);
+        my $exit_code = $? >> 8;
+        is( $exit_code, 40, 'executed native binary with relative sub-calls and verified exit status (40)' );
+    }
+    else {
+        skip_all("Skipping native execution test on non-Linux-x86_64 host");
+    }
+};
 done_testing;

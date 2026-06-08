@@ -1,16 +1,37 @@
+# lib/Brocken/Target/Architecture/RISC64.pm
 use v5.38;
 use feature 'class';
 no warnings 'experimental::class';
 use Brocken::Core::IR;
 
 class Brocken::Target::Architecture::RISC64 {
-    field $stack_offset           = 16;    # Start after saved ra/s0 space (16 bytes)
-    field $offsets                = {};    # Maps variables to positive s0 offsets
-    field $line_mappings : reader = [];
+    field $stack_offset = 16;    # Start after saved ra/s0 space (16 bytes)
+    field $offsets       : reader;
+    field $line_mappings : reader;
 
-    method get_offset($reg) {
+    # Defensively instantiate reference-types inside ADJUST to prevent compiler memory corruption
+    ADJUST {
+        $offsets       = {};
+        $line_mappings = [];
+    }
+
+    method get_offset( $reg, $type = undef ) {
         if ( !exists $offsets->{$reg} ) {
-            $stack_offset += 8;
+            if ( !defined $type || !ref($type) ) {
+                $type = Brocken::Core::Type->new( name => $type // 'Any' );
+            }
+            my $size  = $type->byte_size();
+            my $align = $size;
+            $align = 16 if $align > 16;
+            use integer;
+            my $next_off = $stack_offset + $size;
+            if ( $align > 1 ) {
+                my $rem = $next_off % $align;
+                if ( $rem != 0 ) {
+                    $next_off += ( $align - $rem );
+                }
+            }
+            $stack_offset = $next_off;
             $offsets->{$reg} = $stack_offset;
         }
         return $offsets->{$reg};
@@ -76,27 +97,27 @@ class Brocken::Target::Architecture::RISC64 {
         my %block_addresses;
         my @relocations;
 
-        # Function Prologue (Allocates 128 bytes, saves s0 & ra)
+        # 1. Function Prologue (Allocates 128 bytes, saves s0 & ra)
         # addi sp, sp, -128
-        $bin .= pack 'V', $self->encode_i_type( 19, 0, 2, 2, -128 );
+        $bin .= pack( "V", $self->encode_i_type( 19, 0, 2, 2, -128 ) );
 
         # sd ra, 120(sp)
-        $bin .= pack 'V', $self->encode_s_type( 35, 3, 2, 1, 120 );
+        $bin .= pack( "V", $self->encode_s_type( 35, 3, 2, 1, 120 ) );
 
         # sd s0, 112(sp)
-        $bin .= pack 'V', $self->encode_s_type( 35, 3, 2, 8, 112 );
+        $bin .= pack( "V", $self->encode_s_type( 35, 3, 2, 8, 112 ) );
 
         # addi s0, sp, 128
-        $bin .= pack 'V', $self->encode_i_type( 19, 0, 8, 2, 128 );
+        $bin .= pack( "V", $self->encode_i_type( 19, 0, 8, 2, 128 ) );
 
-        # Pass 1: Emit instructions
+        # 2. Pass 1: Emit instructions
         for my $block (@$blocks) {
             $block_addresses{ $block->label } = length($bin);
             for my $inst ( @{ $block->instructions } ) {
                 $self->record_line_mapping( $inst, length($bin), $triple->os );
                 my $op = $inst->op;
                 if ( $op eq 'ALLOCA' ) {
-                    $self->get_offset( $inst->dest );
+                    $self->get_offset( $inst->dest, $inst->type );
                 }
                 elsif ( $op eq 'STORE' ) {
                     my $slot     = $inst->srcs->[0];
@@ -105,42 +126,42 @@ class Brocken::Target::Architecture::RISC64 {
                     if ( $val =~ /^\d+$/ ) {
 
                         # li a0, val (addi a0, x0, val)
-                        $bin .= pack 'V', $self->encode_i_type( 19, 0, 10, 0, $val );
+                        $bin .= pack( "V", $self->encode_i_type( 19, 0, 10, 0, $val ) );
 
                         # sd a0, -slot_off(s0)
-                        $bin .= pack 'V', $self->encode_s_type( 35, 3, 8, 10, -$slot_off );
+                        $bin .= pack( "V", $self->encode_s_type( 35, 3, 8, 10, -$slot_off ) );
                     }
                     else {
                         # ld a0, -val_off(s0)
                         my $val_off = $self->get_offset($val);
-                        $bin .= pack 'V', $self->encode_i_type( 3, 3, 10, 8, -$val_off );
+                        $bin .= pack( "V", $self->encode_i_type( 3, 3, 10, 8, -$val_off ) );
 
                         # sd a0, -slot_off(s0)
-                        $bin .= pack 'V', $self->encode_s_type( 35, 3, 8, 10, -$slot_off );
+                        $bin .= pack( "V", $self->encode_s_type( 35, 3, 8, 10, -$slot_off ) );
                     }
                 }
                 elsif ( $op eq 'LOAD' ) {
                     my $dest     = $inst->dest;
                     my $slot     = $inst->srcs->[0];
-                    my $dest_off = $self->get_offset($dest);
+                    my $dest_off = $self->get_offset( $dest, $inst->type );
                     my $slot_off = $self->get_offset($slot);
 
                     # ld a0, -slot_off(s0)
-                    $bin .= pack 'V', $self->encode_i_type( 3, 3, 10, 8, -$slot_off );
+                    $bin .= pack( "V", $self->encode_i_type( 3, 3, 10, 8, -$slot_off ) );
 
                     # sd a0, -dest_off(s0)
-                    $bin .= pack 'V', $self->encode_s_type( 35, 3, 8, 10, -$dest_off );
+                    $bin .= pack( "V", $self->encode_s_type( 35, 3, 8, 10, -$dest_off ) );
                 }
                 elsif ( $op eq 'LOAD_ARG' ) {
                     my $dest     = $inst->dest;
                     my $idx      = $inst->srcs->[0];
-                    my $dest_off = $self->get_offset($dest);
+                    my $dest_off = $self->get_offset( $dest, $inst->type );
 
                     # standard LP64D calling convention: a0-a7 (x10-x17) holds first 8 parameters
                     if ( $idx >= 0 && $idx <= 7 ) {
 
                         # sd a[idx], -dest_off(s0)
-                        $bin .= pack 'V', $self->encode_s_type( 35, 3, 8, 10 + $idx, -$dest_off );
+                        $bin .= pack( "V", $self->encode_s_type( 35, 3, 8, 10 + $idx, -$dest_off ) );
                     }
                     else {
                         die "RISC64 Assembling Error: Stack parameters (>8) not supported yet\n";
@@ -150,113 +171,91 @@ class Brocken::Target::Architecture::RISC64 {
                     my $dest     = $inst->dest;
                     my $left     = $inst->srcs->[0];
                     my $right    = $inst->srcs->[1];
-                    my $dest_off = $self->get_offset($dest);
+                    my $dest_off = $self->get_offset( $dest, $inst->type );
 
                     # Load left into a0
                     if ( $left =~ /^\d+$/ ) {
-                        $bin .= pack 'V', $self->encode_i_type( 19, 0, 10, 0, $left );
+                        $bin .= pack( "V", $self->encode_i_type( 19, 0, 10, 0, $left ) );
                     }
                     else {
                         my $left_off = $self->get_offset($left);
-                        $bin .= pack 'V', $self->encode_i_type( 3, 3, 10, 8, -$left_off );
+                        $bin .= pack( "V", $self->encode_i_type( 3, 3, 10, 8, -$left_off ) );
                     }
 
                     # Load right into a1
                     if ( $right =~ /^\d+$/ ) {
-                        $bin .= pack 'V', $self->encode_i_type( 19, 0, 11, 0, $right );
+                        $bin .= pack( "V", $self->encode_i_type( 19, 0, 11, 0, $right ) );
                     }
                     else {
                         my $right_off = $self->get_offset($right);
-                        $bin .= pack 'V', $self->encode_i_type( 3, 3, 11, 8, -$right_off );
+                        $bin .= pack( "V", $self->encode_i_type( 3, 3, 11, 8, -$right_off ) );
                     }
                     if ( $op eq 'ADD' ) {
 
                         # add a0, a0, a1
-                        $bin .= pack 'V', $self->encode_r_type( 51, 0, 0, 10, 10, 11 );
+                        $bin .= pack( "V", $self->encode_r_type( 51, 0, 0, 10, 10, 11 ) );
                     }
                     elsif ( $op eq 'SUB' ) {
 
                         # sub a0, a0, a1
-                        $bin .= pack 'V', $self->encode_r_type( 51, 0, 32, 10, 10, 11 );
+                        $bin .= pack( "V", $self->encode_r_type( 51, 0, 32, 10, 10, 11 ) );
                     }
                     elsif ( $op eq 'MUL' ) {
 
                         # mul a0, a0, a1
-                        $bin .= pack 'V', $self->encode_r_type( 51, 0, 1, 10, 10, 11 );
+                        $bin .= pack( "V", $self->encode_r_type( 51, 0, 1, 10, 10, 11 ) );
                     }
 
-                    # Store result a0 back to dest stack offset
-                    $bin .= pack 'V', $self->encode_s_type( 35, 3, 8, 10, -$dest_off );
+                    # Store result back
+                    $bin .= pack( "V", $self->encode_s_type( 35, 3, 8, 10, -$dest_off ) );
                 }
                 elsif ( $op eq 'JUMP' ) {
                     my $target_label = $inst->srcs->[0];
                     push @relocations, { patch_offset => length($bin), type => 'JAL', target_label => $target_label };
-                    $bin .= pack 'V', 0x0000006f;    # jal x0, #0 placeholder
+                    $bin .= pack( "V", 0x0000006f );
                 }
                 elsif ( $op eq 'JUMP_IF_FALSE' ) {
                     my $cond_reg     = $inst->srcs->[0];
                     my $target_label = $inst->srcs->[1];
                     my $cond_off     = $self->get_offset($cond_reg);
-
-                    # ld a0, -cond_off(s0)
-                    $bin .= pack 'V', $self->encode_i_type( 3, 3, 10, 8, -$cond_off );
-
-                    # beq a0, x0, target placeholder
+                    $bin .= pack( "V", $self->encode_i_type( 3, 3, 10, 8, -$cond_off ) );
                     push @relocations, { patch_offset => length($bin), type => 'BEQ', target_label => $target_label };
-                    $bin .= pack 'V', 0x00050063;    # beq a0, x0, #0 placeholder
+                    $bin .= pack( "V", 0x00050063 );
                 }
                 elsif ( $op eq 'JUMP_IF_TRUE' ) {
                     my $cond_reg     = $inst->srcs->[0];
                     my $target_label = $inst->srcs->[1];
                     my $cond_off     = $self->get_offset($cond_reg);
-
-                    # ld a0, -cond_off(s0)
-                    $bin .= pack 'V', $self->encode_i_type( 3, 3, 10, 8, -$cond_off );
-
-                    # bne a0, x0, target placeholder
+                    $bin .= pack( "V", $self->encode_i_type( 3, 3, 10, 8, -$cond_off ) );
                     push @relocations, { patch_offset => length($bin), type => 'B', target_label => $target_label };
-                    $bin .= pack 'V', 0x00051063;    # bne a0, x0, #0 placeholder
+                    $bin .= pack( "V", 0x00051063 );
                 }
             }
         }
-
-        # Load final calculated temporary into a0 as return value
         if ( $stack_offset != 16 ) {
-            $bin .= pack 'V', $self->encode_i_type( 3, 3, 10, 8, -$stack_offset );
+            $bin .= pack( "V", $self->encode_i_type( 3, 3, 10, 8, -$stack_offset ) );
         }
 
-        # Function Epilogue
-        # ld ra, 120(sp)
-        $bin .= pack 'V', $self->encode_i_type( 3, 3, 1, 2, 120 );
-
-        # ld s0, 112(sp)
-        $bin .= pack 'V', $self->encode_i_type( 3, 3, 8, 2, 112 );
-
-        # addi sp, sp, 128
-        $bin .= pack 'V', $self->encode_i_type( 19, 0, 2, 2, 128 );
-
-        # ret (jalr x0, ra, 0)
-        $bin .= pack 'V', $self->encode_i_type( 103, 0, 0, 1, 0 );
-
-        # Pass 2: Backpatch PC-relative offsets
+        # Epilogue
+        $bin .= pack( "V", $self->encode_i_type( 3,   3, 1, 2, 120 ) );
+        $bin .= pack( "V", $self->encode_i_type( 3,   3, 8, 2, 112 ) );
+        $bin .= pack( "V", $self->encode_i_type( 19,  0, 2, 2, 128 ) );
+        $bin .= pack( "V", $self->encode_i_type( 103, 0, 0, 1, 0 ) );
         for my $reloc (@relocations) {
             my $target_addr = $block_addresses{ $reloc->{target_label} };
             if ( !defined $target_addr ) {
                 die "RISC64 Assembling Error: JUMP target label '" . $reloc->{target_label} . "' is undefined\n";
             }
             my $byte_dist = $target_addr - $reloc->{patch_offset};
-
-            # Inject the relative distance bits into the opcode word
-            my $inst_word = 0;
+            my $inst_word = unpack 'V', substr( $bin, $reloc->{patch_offset}, 4 );
             if ( $reloc->{type} eq 'JAL' ) {
                 $inst_word = $self->encode_j_type( 0x6f, 0, $byte_dist );
             }
             else {
-                # B-Type branch (beq / bne)
                 my $funct3 = ( $reloc->{type} eq 'BEQ' ) ? 0 : 1;
                 $inst_word = $self->encode_b_type( 0x63, $funct3, 10, 0, $byte_dist );
             }
-            substr( $bin, $reloc->{patch_offset}, 4, pack( 'V', $inst_word ) );
+            substr( $bin, $reloc->{patch_offset}, 4, pack( "V", $inst_word ) );
         }
         return $bin;
     }

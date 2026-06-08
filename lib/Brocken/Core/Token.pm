@@ -1,7 +1,7 @@
 use v5.38;
 use feature 'class';
 no warnings 'experimental::class';
-#
+
 class Brocken::Core::Token {
     field $type  : param : reader;    # e.g., 'KEYWORD', 'IDENT', 'OP', 'ASSIGN_DEFAULT'
     field $value : param : reader;    # e.g., 'class', '$id', '//='
@@ -12,5 +12,4 @@ class Brocken::Core::Token {
         return "[$type '$value' at $line:$col]";
     }
 }
-#
 1;

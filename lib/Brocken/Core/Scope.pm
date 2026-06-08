@@ -1,10 +1,16 @@
+# lib/Brocken/Core/Scope.pm
 use v5.38;
 use feature 'class';
 no warnings 'experimental::class';
-#
+
 class Brocken::Core::Scope {
     field $parent : param : reader = undef;
-    field $symbols : reader = {};    # Maps variable names (e.g., '$x') to virtual register slots
+    field $symbols : reader;
+
+    # Defensively instantiate reference-types inside ADJUST to prevent compiler memory corruption
+    ADJUST {
+        $symbols = {};
+    }
 
     # Register a new variable in the current scope
     method define ( $name, $reg ) {

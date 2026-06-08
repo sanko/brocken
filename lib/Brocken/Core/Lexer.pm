@@ -1,7 +1,23 @@
+# lib/Brocken/Core/Lexer.pm
 use v5.38;
 use feature 'class';
 no warnings 'experimental::class';
 use Brocken::Core::Token;
+
+# Defensively declare file-level lexicals outside the class block to prevent interpreter pad segfaults
+my @RULES = (
+    { type => 'WS',         regex => qr/\G(\s+)/ },
+    { type => 'FAT_COMMA',  regex => qr/\G(=>)/ },
+    { type => 'ARROW',      regex => qr/\G(->)/ },
+    { type => 'OP_DEFAULT', regex => qr/\G(\/\/=|\|\|=|=)/ },
+    { type => 'VAR',        regex => qr/\G([\$\@\%][a-zA-Z_][a-zA-Z0-9_]*)/ },
+    { type => 'IDENT',      regex => qr/\G([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)/ },
+    { type => 'INT',        regex => qr/\G(\d+)/ },
+    { type => 'STRING',     regex => qr/\G('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/ },
+    { type => 'OP',         regex => qr/\G([\+\-\*\/])/ },
+    { type => 'COLON',      regex => qr/\G(:)/ },
+    { type => 'DELIMITER',  regex => qr/\G([;{}()\[\],])/ },
+);
 
 class Brocken::Core::Lexer {
     field $source : param;
@@ -9,20 +25,11 @@ class Brocken::Core::Lexer {
     field $pos  = 0;
     field $line = 1;
     field $col  = 1;
-    my @RULES = (
-        { type => 'WS',         regex => qr/\G(\s+)/ }, { type => 'FAT_COMMA', regex => qr/\G(=>)/ },    # High-priority operator evaluated first
-        { type => 'OP_DEFAULT', regex => qr/\G(\/\/=|\|\|=|=)/ },          { type => 'VAR',   regex => qr/\G(\$[a-zA-Z_][a-zA-Z0-9_]*)/ },
-        { type => 'IDENT',      regex => qr/\G([a-zA-Z_][a-zA-Z0-9_]*)/ }, { type => 'INT',   regex => qr/\G(\d+)/ },
-        { type => 'OP',         regex => qr/\G([\+\-\*\/])/ },             { type => 'COLON', regex => qr/\G(:)/ },
-        { type => 'DELIMITER',  regex => qr/\G([;{}()\[\],])/ },
-    );
 
     method tokenize() {
         my $len = length($source);
-
-        # Defensively initialize inside method body to avoid class lexical-load order limits
         state %RESERVED = map { $_ => 1 } qw(
-            class field method role use my if elsif else unless while until for foreach sub return state say print ffi
+            class field method role use my our state if elsif else unless while until for foreach sub return say print ffi struct fiber yield transfer isolate send receive typedef
         );
         while ( $pos < $len ) {
             my $matched = 0;

@@ -1,3 +1,4 @@
+# lib/Brocken/Core/OOP.pm
 use v5.38;
 use feature 'class';
 no warnings 'experimental::class';
@@ -22,11 +23,20 @@ class Brocken::Core::OOP::Field {
 class Brocken::Core::OOP::Class {
     field $name            : param : reader;            # e.g. 'Employee'
     field $superclass_name : param : reader = undef;    # e.g. 'Person' from :isa(Person)
-    field $fields          : reader = {};               # Hashref: name -> Field object
-    field $methods         : reader = {};               # Hashref: name -> Method AST/IR
-    field $roles           : reader = [];               # Array of consumed roles
-    field $vtable          : reader = [];               # Resolved ordered list of methods
-    field $resolved_fields : writer : reader = {};      # Fully resolved, isolated local + inherited fields
+    field $fields  : reader;
+    field $methods : reader;
+    field $roles   : reader;
+    field $vtable  : reader;
+    field $resolved_fields : writer : reader;
+
+    # Defensively instantiate reference-types inside ADJUST to prevent compiler memory corruption
+    ADJUST {
+        $fields          = {};
+        $methods         = {};
+        $roles           = [];
+        $vtable          = [];
+        $resolved_fields = {};
+    }
 
     method add_field ($field) {
         $fields->{ $field->name } = $field;
@@ -50,7 +60,7 @@ class Brocken::Core::OOP::Resolver {
         my @all_fields;
         my %seen_fields;    # Defensively prevent duplicate layout offsets
 
-        # Resolve and clone parent fields first
+        # 1. Resolve and clone parent fields first
         if ( defined $class->superclass_name ) {
             my @parent_fields = $self->resolve_all_fields( $class->superclass_name );
             for my $p_field (@parent_fields) {
@@ -69,7 +79,7 @@ class Brocken::Core::OOP::Resolver {
             }
         }
 
-        # Append locally defined fields
+        # 2. Append locally defined fields
         for my $name ( sort keys %{ $class->fields } ) {
             next if !defined $name || $name eq '';
             next if $seen_fields{$name}++;           # Skip duplicates (such as inherited duplicates)

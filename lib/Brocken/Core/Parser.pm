@@ -1,9 +1,16 @@
+# lib/Brocken/Core/Parser.pm (Complete Source)
 use v5.38;
 use feature 'class';
 no warnings 'experimental::class';
 use Brocken::Core::OOP;
 use Brocken::Core::AST;
 use Brocken::Core::Type;
+
+# Defensively declare file-level lexicals outside the class block to prevent interpreter pad segfaults
+my %PRECEDENCE = (
+    'OP_DEFAULT' => 1,
+    'ARROW'      => 4,    # High precedence for method calls
+);
 
 class Brocken::Core::Parser {
     field $tokens : param;
@@ -14,9 +21,11 @@ class Brocken::Core::Parser {
     ADJUST {
         $classes = {};
     }
-    my %PRECEDENCE = ( 'OP_DEFAULT' => 1, );
 
     method get_precedence($tok) {
+        if ( $tok->type eq 'ARROW' ) {
+            return 4;
+        }
         if ( $tok->type eq 'OP' ) {
             my $v = $tok->value;
             return 2 if $v eq '+' || $v eq '-';
@@ -59,11 +68,18 @@ class Brocken::Core::Parser {
 
         # Defensively initialize inside method body to avoid package lexical-load order limits
         state %STATEMENT_REGISTRY = (
-            'my'    => 'parse_lexical_decl',
-            'if'    => 'parse_if_statement',
-            'while' => 'parse_while_statement',
-            'class' => 'parse_class',
-            'ffi'   => 'parse_ffi_decl',
+            'my'       => 'parse_lexical_decl',
+            'if'       => 'parse_if_statement',
+            'while'    => 'parse_while_statement',
+            'class'    => 'parse_class',
+            'ffi'      => 'parse_ffi_decl',
+            'sub'      => 'parse_sub_decl',
+            'return'   => 'parse_return_stmt',
+            'yield'    => 'parse_yield_stmt',
+            'transfer' => 'parse_transfer_stmt',
+            'send'     => 'parse_send_stmt',
+            'say'      => 'parse_say_stmt',
+            'typedef'  => 'parse_typedef_decl',
         );
 
         # Route statement construction through our Dispatch table
@@ -195,6 +211,11 @@ class Brocken::Core::Parser {
                 $default_op   = $self->advance()->value;
                 $default_expr = $self->parse_expression(0);
             }
+
+            # Invariant Array type-inference by @ sigil
+            if ( $name =~ /^\@/ ) {
+                $type = Brocken::Core::Type->new( name => 'Array', parameter => $type );
+            }
             push @$params, Brocken::Core::AST::Parameter->new(
                 name         => $name,
                 type         => $type,            # Bind the parsed Type object
@@ -231,6 +252,11 @@ class Brocken::Core::Parser {
             $value      = $self->parse_expression(0);
         }
         $self->consume( 'DELIMITER', ';' );
+
+        # Invariant Array type-inference by @ sigil
+        if ( $name =~ /^\@/ ) {
+            $type = Brocken::Core::Type->new( name => 'Array', parameter => $type );
+        }
         return Brocken::Core::AST::MyDecl->new(
             name       => $name,
             value      => $value,
@@ -334,11 +360,60 @@ class Brocken::Core::Parser {
 
     method parse_prefix() {
         my $tok = $self->advance();
+
+        # Handle inline fiber block expressions
+        if ( $tok->type eq 'KEYWORD' && $tok->value eq 'fiber' ) {
+            $self->consume( 'DELIMITER', '{' );
+            my $body = [];
+            while ( !$self->match( 'DELIMITER', '}' ) ) {
+                push @$body, $self->parse_statement();
+            }
+            $self->consume( 'DELIMITER', '}' );
+            return Brocken::Core::AST::FiberBlock->new( body => $body, line => $tok->line, col => $tok->col, );
+        }
+
+        # Handle block isolate expressions
+        if ( $tok->type eq 'KEYWORD' && $tok->value eq 'isolate' ) {
+            $self->consume( 'DELIMITER', '{' );
+            my $body = [];
+            while ( !$self->match( 'DELIMITER', '}' ) ) {
+                push @$body, $self->parse_statement();
+            }
+            $self->consume( 'DELIMITER', '}' );
+            return Brocken::Core::AST::IsolateBlock->new( body => $body, line => $tok->line, col => $tok->col, );
+        }
+
+        # Handle block receive expressions
+        if ( $tok->type eq 'KEYWORD' && $tok->value eq 'receive' ) {
+            return Brocken::Core::AST::ReceiveExpr->new( line => $tok->line, col => $tok->col, );
+        }
         if ( $tok->type eq 'INT' ) {
             return Brocken::Core::AST::Literal->new( value => $tok->value, line => $tok->line, col => $tok->col, );
         }
+        if ( $tok->type eq 'STRING' ) {
+            my $raw = $tok->value;
+            substr $raw,  0, 1, '';
+            substr $raw, -1, 1, '';
+            return Brocken::Core::AST::StringLiteral->new( value => $raw, line => $tok->line, col => $tok->col, );
+        }
         if ( $tok->type eq 'VAR' ) {
             return Brocken::Core::AST::Variable->new( name => $tok->value, line => $tok->line, col => $tok->col, );
+        }
+        if ( $tok->type eq 'IDENT' && $self->match( 'DELIMITER', '(' ) ) {
+            my $name = $tok->value;
+            $self->consume( 'DELIMITER', '(' );
+            my $args = [];
+            while ( !$self->match( 'DELIMITER', ')' ) ) {
+                push @$args, $self->parse_expression(0);
+                if ( $self->match( 'DELIMITER', ',' ) ) {
+                    $self->consume( 'DELIMITER', ',' );
+                }
+                else {
+                    last;
+                }
+            }
+            $self->consume( 'DELIMITER', ')' );
+            return Brocken::Core::AST::SubCall->new( name => $name, args => $args, line => $tok->line, col => $tok->col, );
         }
         if ( $tok->type eq 'DELIMITER' && $tok->value eq '(' ) {
             my $expr = $self->parse_expression(0);
@@ -349,8 +424,35 @@ class Brocken::Core::Parser {
     }
 
     method parse_infix($left) {
-        my $op_tok           = $self->advance();
-        my $op_precedence    = $self->get_precedence($op_tok);
+        my $op_tok        = $self->advance();
+        my $op_precedence = $self->get_precedence($op_tok);
+
+        # Handle Object-Oriented Infix Arrow Calls
+        if ( $op_tok->type eq 'ARROW' ) {
+            my $meth_tok  = $self->consume('IDENT');
+            my $meth_name = $meth_tok->value;
+            my $args      = [];
+            if ( $self->match( 'DELIMITER', '(' ) ) {
+                $self->consume( 'DELIMITER', '(' );
+                while ( !$self->match( 'DELIMITER', ')' ) ) {
+                    push @$args, $self->parse_expression(0);
+                    if ( $self->match( 'DELIMITER', ',' ) ) {
+                        $self->consume( 'DELIMITER', ',' );
+                    }
+                    else {
+                        last;
+                    }
+                }
+                $self->consume( 'DELIMITER', ')' );
+            }
+            return Brocken::Core::AST::MethodCall->new(
+                invocand    => $left,
+                method_name => $meth_name,
+                args        => $args,
+                line        => $op_tok->line,
+                col         => $op_tok->col,
+            );
+        }
         my $right_precedence = ( $op_tok->type eq 'OP_DEFAULT' ) ? ( $op_precedence - 1 ) : $op_precedence;
         my $right            = $self->parse_expression($right_precedence);
         if ( $op_tok->type eq 'OP_DEFAULT' ) {
@@ -391,16 +493,22 @@ class Brocken::Core::Parser {
 
     # Recursively parses complex, nested, and parametric types (including inline Struct)
     method parse_type() {
-        my $name_tok  = $self->consume('IDENT');
-        my $name      = $name_tok->value;
+        my $name_tok = $self->consume('IDENT');
+        my $name     = $name_tok->value;
+
+        # Resolve typedef aliases immediately during compilation
+        my $resolved_alias = Brocken::Core::Type::lookup_typedef($name);
+        if ( defined $resolved_alias ) {
+            return $resolved_alias;
+        }
         my $parameter = undef;
         my $size      = undef;
-        my $fields    = undef;                     # For Struct[...]
+        my $fields    = undef;
         if ( $self->match( 'DELIMITER', '[' ) ) {
             $self->consume( 'DELIMITER', '[' );
-            if ( $name eq 'Struct' ) {
+            if ( $name eq 'Struct' || $name eq 'Union' ) {
 
-                # Parse inline Struct key-value pairs, e.g. name => String, age => Int
+                # Parse inline Struct/Union key-value pairs (e.g. name => String, age => Int)
                 $fields = {};
                 while ( !$self->match( 'DELIMITER', ']' ) ) {
                     my $field_name_tok = $self->consume('IDENT');
@@ -431,4 +539,93 @@ class Brocken::Core::Parser {
         }
         return Brocken::Core::Type->new( name => $name, parameter => $parameter, size => $size, fields => $fields, );
     }
+
+    # Parses typedef declarations, e.g. typedef Person => Struct[name => String];
+    method parse_typedef_decl() {
+        my $typedef_tok = $self->consume( 'KEYWORD', 'typedef' );
+        my $name_tok    = $self->consume('IDENT');
+        my $name        = $name_tok->value;
+        $self->consume( 'FAT_COMMA', '=>' );
+        my $type = $self->parse_type();
+        $self->consume( 'DELIMITER', ';' );
+
+        # Register the alias in our global Type system
+        Brocken::Core::Type::register_typedef( $name, $type );
+        return Brocken::Core::AST::TypedefDecl->new( name => $name, type => $type, line => $typedef_tok->line, col => $typedef_tok->col, );
+    }
+
+    # Parses standard subroutines, registering them under a virtual 'main' class
+    method parse_sub_decl() {
+        my $sub_tok  = $self->consume( 'KEYWORD', 'sub' );
+        my $name_tok = $self->consume('IDENT');
+        my $name     = $name_tok->value;
+        my $sig      = $self->parse_signature();
+        $self->consume( 'DELIMITER', '{' );
+        my $body = [];
+        while ( !$self->match( 'DELIMITER', '}' ) ) {
+            push @$body, $self->parse_statement();
+        }
+        $self->consume( 'DELIMITER', '}' );
+        my $sub_node
+            = Brocken::Core::AST::SubDecl->new( name => $name, signature => $sig, body => $body, line => $sub_tok->line, col => $sub_tok->col, );
+
+        # Register the subroutine under a default virtual class 'main'
+        $classes->{main} //= Brocken::Core::OOP::Class->new( name => 'main' );
+        $classes->{main}->add_method( $name, $sub_node );
+        return $sub_node;
+    }
+
+    # Parses return statements
+    method parse_return_stmt() {
+        my $ret_tok = $self->consume( 'KEYWORD', 'return' );
+        my $expr    = undef;
+        if ( !$self->match( 'DELIMITER', ';' ) ) {
+            $expr = $self->parse_expression(0);
+        }
+        $self->consume( 'DELIMITER', ';' );
+        return Brocken::Core::AST::Return->new( value => $expr, line => $ret_tok->line, col => $ret_tok->col, );
+    }
+
+    # Parses yield statements, e.g. yield $count; or yield;
+    method parse_yield_stmt() {
+        my $yield_tok = $self->consume( 'KEYWORD', 'yield' );
+        my $expr      = undef;
+        if ( !$self->match( 'DELIMITER', ';' ) ) {
+            $expr = $self->parse_expression(0);
+        }
+        $self->consume( 'DELIMITER', ';' );
+        return Brocken::Core::AST::YieldStmt->new( value => $expr, line => $yield_tok->line, col => $yield_tok->col, );
+    }
+
+    # Parses transfer statements, e.g. transfer $f, $val; or transfer $f;
+    method parse_transfer_stmt() {
+        my $trans_tok = $self->consume( 'KEYWORD', 'transfer' );
+        my $target    = $self->parse_expression(0);
+        my $val       = undef;
+        if ( $self->match( 'DELIMITER', ',' ) ) {
+            $self->consume( 'DELIMITER', ',' );
+            $val = $self->parse_expression(0);
+        }
+        $self->consume( 'DELIMITER', ';' );
+        return Brocken::Core::AST::TransferStmt->new( target => $target, value => $val, line => $trans_tok->line, col => $trans_tok->col, );
+    }
+
+    # Parses say statements, e.g. say 'hello';
+    method parse_say_stmt() {
+        my $say_tok = $self->consume( 'KEYWORD', 'say' );
+        my $expr    = $self->parse_expression(0);
+        $self->consume( 'DELIMITER', ';' );
+        return Brocken::Core::AST::SayStmt->new( value => $expr, line => $say_tok->line, col => $say_tok->col, );
+    }
+
+    # Parses send statements, e.g. send $worker, $msg;
+    method parse_send_stmt() {
+        my $send_tok = $self->consume( 'KEYWORD', 'send' );
+        my $target   = $self->parse_expression(0);
+        $self->consume( 'DELIMITER', ',' );
+        my $expr = $self->parse_expression(0);
+        $self->consume( 'DELIMITER', ';' );
+        return Brocken::Core::AST::SendStmt->new( target => $target, value => $expr, line => $send_tok->line, col => $send_tok->col, );
+    }
 }
+1;
