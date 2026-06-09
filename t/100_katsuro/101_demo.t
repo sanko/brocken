@@ -232,6 +232,9 @@ my $platform = Brocken::Katsuro::Platform::parse();
 #~ }
 my $x = Brocken::Katsuro::Platform::parse();
 diag $x->os;
+diag $x->arch;
+diag $x->vendor;
+diag $x->env;
 diag $x->friendly;
 isa_ok $x, ['Brocken::Katsuro::Platform'], 'parsed';
 

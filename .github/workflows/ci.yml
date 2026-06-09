@@ -219,7 +219,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all test output artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with:
           path: results
       - name: Generate summary from test results
@@ -232,7 +232,7 @@ jobs:
           echo "|:---|:---|:---|" >> $SUMMARY_MD
           echo "{" > $STATUS_JSON
           first=true
-          
+
           # All expected (OS, Arch) pairs in display order
           EXPECTED=(
             "Linux:Intel"
@@ -253,7 +253,7 @@ jobs:
             "OpenBSD:Intel"
             "OpenBSD:ARM"
           )
-          
+
           # Map artifact dir name → OS:Arch key
           map_name() {
             case "$1" in
@@ -276,12 +276,12 @@ jobs:
               *"openbsd"*)           echo "OpenBSD:Intel" ;;
             esac
           }
-          
+
           declare -A SEEN
           for entry in "${EXPECTED[@]}"; do
             SEEN["$entry"]=0
           done
-          
+
           if [ -d "results" ]; then
             for dir in results/*/; do
               name=$(basename "$dir")
@@ -297,7 +297,7 @@ jobs:
               fi
             done
           fi
-          
+
           for entry in "${EXPECTED[@]}"; do
             IFS=':' read -r os arch <<< "$entry"
             status="${SEEN[$entry]}"
@@ -311,7 +311,7 @@ jobs:
             echo "\"${os// /_}:$arch\": \"$status\"" >> $STATUS_JSON
             first=false
           done
-          
+
           echo "}" >> $STATUS_JSON
           cat $SUMMARY_MD >> $GITHUB_STEP_SUMMARY
       - name: Upload status files for publishing
