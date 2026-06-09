@@ -1,29 +1,57 @@
 ---
 jobs:
-  setup:
-    name: Generate Testing Matrix
-    outputs:
-      matrix: '${{ steps.matrix.outputs.matrix }}'
-    runs-on: ubuntu-22.04
-    steps:
-      - env:
-          DATA: |
-            {
-              "perl":  ["5.42.0"],
-              "flags": [""]
-            }
-        id: matrix
-        run: "jq -rn 'env.DATA | fromjson | @json \"matrix=\\(.)\"' > $GITHUB_OUTPUT\n"
-  linux-x64:
-    name: Linux
+  dragonflybsd:
+    name: DragonFly BSD
     needs:
       - setup
-    uses: ./.github/workflows/unix.yml
+    uses: ./.github/workflows/cross.yml
     with:
-      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: ubuntu-24.04
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      title: Intel
+      arch: x86-64
+      gcc_pkg: sudo pkg install -y gcc
+      host: ubuntu-latest
+      os: dragonflybsd
+      perl: 5.42
+      pkg: sudo pkg install -y perl5-5.42 || (sudo sed -i '' 's|/quarterly|/latest|' /usr/local/etc/pkg/repos/Avalon.conf && sudo pkg update -f && sudo pkg install -y perl5-5.42) || (curl -sL https://www.cpan.org/src/5.0/perl-5.42.2.tar.gz | tar xz -C /tmp && cd /tmp/perl-5.42.2 && ./Configure -des -Dprefix=/usr/local -Dusedevel && make -j$(getconf NPROCESSORS_ONLN) && sudo make install && sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl)
+      version: 6.4.2
+  freebsd-arm64:
+    name: FreeBSD
+    needs:
+      - setup
+    uses: ./.github/workflows/cross.yml
+    with:
+      arch: arm64
+      gcc_pkg: sudo pkg install -y gcc
+      host: ubuntu-latest
+      os: freebsd
+      perl: 5.40
+      pkg: sudo pkg install -y perl5
+      version: 14.1
+  freebsd-x64:
+    name: FreeBSD
+    needs:
+      - setup
+    uses: ./.github/workflows/cross.yml
+    with:
+      arch: x86-64
+      gcc_pkg: sudo pkg install -y gcc
+      host: ubuntu-latest
+      os: freebsd
+      perl: 5.40
+      pkg: sudo pkg install -y perl5
+      version: 14.1
+  haiku:
+    name: Haiku
+    needs:
+      - setup
+    uses: ./.github/workflows/cross.yml
+    with:
+      arch: x86-64
+      gcc_pkg: sudo pkgman install gcc_x86
+      host: ubuntu-latest
+      os: haiku
+      perl: 5.40
+      pkg: sudo pkgman install perl
+      version: r1beta5
   linux-arm64:
     name: Linux
     needs:
@@ -34,24 +62,14 @@ jobs:
       os: ubuntu-24.04-arm
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       title: ARM
-  riscv64:
+  linux-x64:
     name: Linux
     needs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: ubuntu-24.04-riscv
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      title: RISC-V
-  macos-intel:
-    name: macOS
-    needs:
-      - setup
-    uses: ./.github/workflows/unix.yml
-    with:
-      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: macos-15-intel
+      os: ubuntu-24.04
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       title: Intel
   macos-arm:
@@ -63,79 +81,17 @@ jobs:
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: macos-15
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      title: 'Apple Silicon'
-  win32-x64:
-    name: Windows
+      title: Apple Silicon
+  macos-intel:
+    name: macOS
     needs:
       - setup
-    uses: ./.github/workflows/windows.yml
+    uses: ./.github/workflows/unix.yml
     with:
-      flags: -Dusethreads
-      os: windows-2022
+      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
+      os: macos-15-intel
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       title: Intel
-  win32-arm64:
-    name: Windows
-    needs:
-      - setup
-    uses: ./.github/workflows/windows.yml
-    with:
-      flags: -Dusethreads
-      os: windows-11-arm
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      title: ARM
-  dragonflybsd:
-    name: DragonFly BSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: x86-64
-      host: ubuntu-latest
-      os: dragonflybsd
-      perl: "5.42"
-      pkg: sudo pkg install -y perl5-5.42 || (sudo sed -i '' 's|/quarterly|/latest|' /usr/local/etc/pkg/repos/Avalon.conf && sudo pkg update -f && sudo pkg install -y perl5-5.42) || (curl -sL https://www.cpan.org/src/5.0/perl-5.42.2.tar.gz | tar xz -C /tmp && cd /tmp/perl-5.42.2 && ./Configure -des -Dprefix=/usr/local -Dusedevel && make -j$(getconf NPROCESSORS_ONLN) && sudo make install && sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl)
-      gcc_pkg: sudo pkg install -y gcc
-      version: '6.4.2'
-  freebsd-x64:
-    name: FreeBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: x86-64
-      host: ubuntu-latest
-      os: freebsd
-      perl: "5.40"
-      pkg: sudo pkg install -y perl5
-      gcc_pkg: sudo pkg install -y gcc
-      version: '14.1'
-  freebsd-arm64:
-    name: FreeBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: arm64
-      host: ubuntu-latest
-      os: freebsd
-      perl: "5.40"
-      pkg: sudo pkg install -y perl5
-      gcc_pkg: sudo pkg install -y gcc
-      version: '14.1'
-  haiku:
-    name: Haiku
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: x86-64
-      host: ubuntu-latest
-      os: haiku
-      perl: "5.40"
-      pkg: sudo pkgman install perl
-      gcc_pkg: sudo pkgman install gcc_x86
-      version: r1beta5
   midnightbsd:
     name: MidnightBSD
     needs:
@@ -143,25 +99,12 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
+      gcc_pkg: sudo mport install gcc || true
       host: ubuntu-latest
       os: midnightbsd
-      gcc_pkg: sudo mport install gcc || true
-      perl: "5.42"
+      perl: 5.42
       pkg: sudo mport install perl5.42-5.42.2 || true; sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl
-      version: '4.0.4'
-  netbsd-x64:
-    name: NetBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: x86-64
-      host: ubuntu-latest
-      os: netbsd
-      perl: "5.40"
-      pkg: sudo pkgin -y install perl p5-App-cpanminus p5-Module-Build-Tiny
-      gcc_pkg: sudo pkgin -y install gcc
-      version: '10.1'
+      version: 4.0.4
   netbsd-arm64:
     name: NetBSD
     needs:
@@ -169,12 +112,25 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
+      gcc_pkg: sudo pkgin -y install gcc
       host: ubuntu-latest
       os: netbsd
-      perl: "5.40"
+      perl: 5.40
       pkg: sudo pkgin -y install perl p5-App-cpanminus p5-Module-Build-Tiny
+      version: 10.1
+  netbsd-x64:
+    name: NetBSD
+    needs:
+      - setup
+    uses: ./.github/workflows/cross.yml
+    with:
+      arch: x86-64
       gcc_pkg: sudo pkgin -y install gcc
-      version: '10.1'
+      host: ubuntu-latest
+      os: netbsd
+      perl: 5.40
+      pkg: sudo pkgin -y install perl p5-App-cpanminus p5-Module-Build-Tiny
+      version: 10.1
   omnios:
     name: OmniOS
     needs:
@@ -182,25 +138,12 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
+      gcc_pkg: sudo pkg install developer/gcc49 || sudo pkg install gcc || true
       host: ubuntu-latest
       os: omnios
-      perl: "5.40"
-      pkg: sudo pkg install perl || [ $? -eq 4 ]
-      gcc_pkg: sudo pkg install developer/gcc49 || sudo pkg install gcc || true
+      perl: 5.40
+      pkg: 'sudo pkg install perl || [ $? -eq 4 ]'
       version: r151058
-  openbsd-x64:
-    name: OpenBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: x86-64
-      host: ubuntu-latest
-      os: openbsd
-      perl: "5.40"
-      pkg: sudo pkg_add perl
-      gcc_pkg: sudo pkg_add gcc
-      version: '7.8'
   openbsd-arm64:
     name: OpenBSD
     needs:
@@ -208,12 +151,50 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
+      gcc_pkg: sudo pkg_add gcc
       host: ubuntu-latest
       os: openbsd
-      perl: "5.40"
+      perl: 5.40
       pkg: sudo pkg_add perl
+      version: 7.8
+  openbsd-x64:
+    name: OpenBSD
+    needs:
+      - setup
+    uses: ./.github/workflows/cross.yml
+    with:
+      arch: x86-64
       gcc_pkg: sudo pkg_add gcc
-      version: '7.8'
+      host: ubuntu-latest
+      os: openbsd
+      perl: 5.40
+      pkg: sudo pkg_add perl
+      version: 7.8
+  publish-status:
+    if: ( success() || failure() ) && github.ref == 'refs/heads/main'
+    name: Publish Status Page
+    needs:
+      - results
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download status files
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: status-files
+          path: ./status
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          commit_message: Update build status matrix
+          destination_dir: status
+          github_token: '${{ secrets.GITHUB_TOKEN }}'
+          keep_files: true
+          publish_branch: gh-pages
+          publish_dir: ./status
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          user_name: 'github-actions[bot]'
   results:
     if: always()
     name: Summary
@@ -251,7 +232,7 @@ jobs:
           echo "|:---|:---|:---|" >> $SUMMARY_MD
           echo "{" > $STATUS_JSON
           first=true
-
+          
           # All expected (OS, Arch) pairs in display order
           EXPECTED=(
             "Linux:Intel"
@@ -272,7 +253,7 @@ jobs:
             "OpenBSD:Intel"
             "OpenBSD:ARM"
           )
-
+          
           # Map artifact dir name → OS:Arch key
           map_name() {
             case "$1" in
@@ -295,12 +276,12 @@ jobs:
               *"openbsd"*)           echo "OpenBSD:Intel" ;;
             esac
           }
-
+          
           declare -A SEEN
           for entry in "${EXPECTED[@]}"; do
             SEEN["$entry"]=0
           done
-
+          
           if [ -d "results" ]; then
             for dir in results/*/; do
               name=$(basename "$dir")
@@ -316,7 +297,7 @@ jobs:
               fi
             done
           fi
-
+          
           for entry in "${EXPECTED[@]}"; do
             IFS=':' read -r os arch <<< "$entry"
             status="${SEEN[$entry]}"
@@ -330,7 +311,7 @@ jobs:
             echo "\"${os// /_}:$arch\": \"$status\"" >> $STATUS_JSON
             first=false
           done
-
+          
           echo "}" >> $STATUS_JSON
           cat $SUMMARY_MD >> $GITHUB_STEP_SUMMARY
       - name: Upload status files for publishing
@@ -338,31 +319,50 @@ jobs:
         with:
           name: status-files
           path: status/
-  publish-status:
-    if: ( success() || failure() ) && github.ref == 'refs/heads/main'
-    name: Publish Status Page
+  riscv64:
+    name: Linux
     needs:
-      - results
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
+      - setup
+    uses: ./.github/workflows/unix.yml
+    with:
+      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
+      os: ubuntu-24.04-riscv
+      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
+      title: RISC-V
+  setup:
+    name: Generate Testing Matrix
+    outputs:
+      matrix: '${{ steps.matrix.outputs.matrix }}'
+    runs-on: ubuntu-22.04
     steps:
-      - name: Download status files
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: status-files
-          path: ./status
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          commit_message: Update build status matrix
-          destination_dir: status
-          github_token: '${{ secrets.GITHUB_TOKEN }}'
-          keep_files: true
-          publish_branch: gh-pages
-          publish_dir: ./status
-          user_email: 'github-actions[bot]@users.noreply.github.com'
-          user_name: 'github-actions[bot]'
+      - env:
+          DATA: |
+            {
+              "perl":  ["5.42.0"],
+              "flags": [""]
+            }
+        id: matrix
+        run: "jq -rn 'env.DATA | fromjson | @json \"matrix=\\(.)\"' > $GITHUB_OUTPUT\n"
+  win32-arm64:
+    name: Windows
+    needs:
+      - setup
+    uses: ./.github/workflows/windows.yml
+    with:
+      flags: -Dusethreads
+      os: windows-11-arm
+      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
+      title: ARM
+  win32-x64:
+    name: Windows
+    needs:
+      - setup
+    uses: ./.github/workflows/windows.yml
+    with:
+      flags: -Dusethreads
+      os: windows-2022
+      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
+      title: Intel
 name: CI Matrix
 on:
   pull_request: ~
