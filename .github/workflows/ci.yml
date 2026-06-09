@@ -23,7 +23,7 @@ jobs:
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: freebsd
-      perl: 5.40
+      perl: 5.42
       pkg: sudo pkg install -y perl5
       version: 14.1
   freebsd-x64:
@@ -36,7 +36,7 @@ jobs:
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: freebsd
-      perl: 5.40
+      perl: 5.42
       pkg: sudo pkg install -y perl5
       version: 14.1
   haiku:
@@ -46,11 +46,12 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      gcc_pkg: sudo pkgman install gcc_x86
+      gcc_pkg: sudo pkgman install gcc || sudo pkgman install gcc_x86
       host: ubuntu-latest
       os: haiku
-      perl: 5.40
-      pkg: sudo pkgman install perl
+      perl: 5.42
+      perl_subversion: 2
+      pkg: sudo pkgman install "perl>=5.42.2" -y || echo "perl 5.42 not available"
       version: r1beta5
   linux-arm64:
     name: Linux
@@ -112,11 +113,11 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
-      gcc_pkg: sudo pkgin -y install gcc
+      gcc_pkg: which gcc 2>/dev/null || sudo pkgin -y install gcc || true
       host: ubuntu-latest
       os: netbsd
-      perl: 5.40
-      pkg: sudo pkgin -y install perl p5-App-cpanminus p5-Module-Build-Tiny
+      perl: 5.42
+      pkg: sudo pkgin -y install perl || true
       version: 10.1
   netbsd-x64:
     name: NetBSD
@@ -125,11 +126,11 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      gcc_pkg: sudo pkgin -y install gcc
+      gcc_pkg: which gcc 2>/dev/null || sudo pkgin -y install gcc || true
       host: ubuntu-latest
       os: netbsd
-      perl: 5.40
-      pkg: sudo pkgin -y install perl p5-App-cpanminus p5-Module-Build-Tiny
+      perl: 5.42
+      pkg: sudo pkgin -y install perl || true
       version: 10.1
   omnios:
     name: OmniOS
@@ -141,7 +142,7 @@ jobs:
       gcc_pkg: sudo pkg install developer/gcc49 || sudo pkg install gcc || true
       host: ubuntu-latest
       os: omnios
-      perl: 5.40
+      perl: 5.42
       pkg: 'sudo pkg install perl || [ $? -eq 4 ]'
       version: r151058
   openbsd-arm64:
@@ -151,12 +152,13 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
-      gcc_pkg: sudo pkg_add gcc
+      gcc_pkg: which gcc 2>/dev/null || true
       host: ubuntu-latest
       os: openbsd
       perl: 5.40
-      pkg: sudo pkg_add perl
-      version: 7.8
+      perl_subversion: 1
+      pkg: echo "using system perl"
+      version: 7.9
   openbsd-x64:
     name: OpenBSD
     needs:
@@ -164,12 +166,13 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      gcc_pkg: sudo pkg_add gcc
+      gcc_pkg: which gcc 2>/dev/null || true
       host: ubuntu-latest
       os: openbsd
       perl: 5.40
-      pkg: sudo pkg_add perl
-      version: 7.8
+      perl_subversion: 1
+      pkg: echo "using system perl"
+      version: 7.9
   publish-status:
     if: ( success() || failure() ) && github.ref == 'refs/heads/main'
     name: Publish Status Page

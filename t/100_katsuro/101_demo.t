@@ -170,6 +170,7 @@ class Brocken::Katsuro::Platform {
     }
 
     sub parse( $platform //= gen_triple() ) {
+        warn $platform;
         my ( $arch, $vend, $os, $env ) = $platform =~ m[^(.+?)-(.+?)(?:-(.+?)(?:-(.+?))?)?$];
 
         #~ use Data::Dump;
