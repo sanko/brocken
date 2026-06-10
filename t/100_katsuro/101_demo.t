@@ -58,10 +58,12 @@ class Brocken::Katsuro::Platform {
     }
 
     sub gen_triple() {
+        state $cached_host_triple;
+        return $cached_host_triple if defined $cached_host_triple;
         my $clang_out = get_cmd_output('clang --print-target-triple');
-        return normalize_triple($clang_out) if $clang_out;
+        return $cached_host_triple = normalize_triple($clang_out) if $clang_out;
         my $gcc_out = get_cmd_output('gcc -dumpmachine');
-        return normalize_triple($gcc_out) if $gcc_out;
+        return $cached_host_triple = normalize_triple($gcc_out) if $gcc_out;
         my ( $arch, $vendor, $os, $env ) = ('unknown') x 4;
         if ( $^O =~ /MSWin32|msys|cygwin/i ) {
             $vendor = 'pc';
@@ -94,7 +96,7 @@ class Brocken::Katsuro::Platform {
             elsif ( $^O =~ /bsd/i )                   { $vendor = 'pc';      $os = $^O;           $env = 'elf' }
             elsif ( $^O =~ /solaris|sunos|illumos/i ) { $vendor = 'unknown'; $os = 'solaris';     $env = 'elf' }
         }
-        join '-', $arch || 'unknown', $vendor || 'unknown', $os || 'unknown', $env || 'unknown';
+        $cached_host_triple = join '-', $arch || 'unknown', $vendor || 'unknown', $os || 'unknown', $env || 'unknown';
     }
 
     sub parse( $platform //= gen_triple() ) {
@@ -633,33 +635,33 @@ subtest 'friendly names' => sub {
     is $unknown->friendly, 'sand that does math', 'fallback friendly name';
 };
 subtest 'platform naming' => sub {
-
-    # Linux (ELF)
-    my $linux = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
-    is $linux->bin_name('foo'),                 'foo',           'linux bin_name';
-    is $linux->static_lib_name('foo'),          'libfoo.a',      'linux static_lib_name';
-    is $linux->shared_lib_name('foo'),          'libfoo.so',     'linux shared_lib_name';
-    is $linux->shared_lib_name( 'foo', '1.2' ), 'libfoo.so.1.2', 'linux shared_lib_name with version';
-
-    # Windows (PE)
-    my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
-    is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
-    is $win->static_lib_name('foo'),          'foo.lib',     'windows static_lib_name';
-    is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
-    is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
-
-    # MacOS (Mach-O)
-    my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin');
-    is $mac->bin_name('foo'),                 'foo',              'macos bin_name';
-    is $mac->static_lib_name('foo'),          'libfoo.a',         'macos static_lib_name';
-    is $mac->shared_lib_name('foo'),          'libfoo.dylib',     'macos shared_lib_name';
-    is $mac->shared_lib_name( 'foo', '1.2' ), 'libfoo.1.2.dylib', 'macos shared_lib_name with version';
-
-    # Wasm
-    my $wasm = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
-    is $wasm->bin_name('foo'),        'foo.wasm', 'wasm bin_name';
-    is $wasm->static_lib_name('foo'), 'foo.a',    'wasm static_lib_name';
-    is $wasm->shared_lib_name('foo'), 'foo.wasm', 'wasm shared_lib_name';
+    subtest 'Linux (ELF)' => sub {
+        my $linux = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+        is $linux->bin_name('foo'),                 'foo',           'linux bin_name';
+        is $linux->static_lib_name('foo'),          'libfoo.a',      'linux static_lib_name';
+        is $linux->shared_lib_name('foo'),          'libfoo.so',     'linux shared_lib_name';
+        is $linux->shared_lib_name( 'foo', '1.2' ), 'libfoo.so.1.2', 'linux shared_lib_name with version';
+    };
+    subtest 'Windows (PE)' => sub {
+        my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
+        is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
+        is $win->static_lib_name('foo'),          'foo.lib',     'windows static_lib_name';
+        is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
+        is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
+    };
+    subtest 'MacOS (Mach-O)' => sub {
+        my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin');
+        is $mac->bin_name('foo'),                 'foo',              'macos bin_name';
+        is $mac->static_lib_name('foo'),          'libfoo.a',         'macos static_lib_name';
+        is $mac->shared_lib_name('foo'),          'libfoo.dylib',     'macos shared_lib_name';
+        is $mac->shared_lib_name( 'foo', '1.2' ), 'libfoo.1.2.dylib', 'macos shared_lib_name with version';
+    };
+    subtest 'Wasm' => sub {
+        my $wasm = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
+        is $wasm->bin_name('foo'),        'foo.wasm', 'wasm bin_name';
+        is $wasm->static_lib_name('foo'), 'foo.a',    'wasm static_lib_name';
+        is $wasm->shared_lib_name('foo'), 'foo.wasm', 'wasm shared_lib_name';
+    }
 };
 subtest 'OS syscall numbers' => sub {
     my $bsd = Brocken::Katsuro::Platform::parse('x86_64-pc-freebsd-elf');
@@ -736,9 +738,18 @@ subtest 'known target triples' => sub {
     my @targets = <DATA>;
     chomp @targets;
     my $ok      = 0;
-    my %arch_64 = map { $_ => 1 }
-        qw( x86_64 aarch64 aarch64_be arm64e riscv64 powerpc64 powerpc64le mips64 mips64el loongarch64 s390x sparc64 wasm64 nvptx64 );
+    my %arch_64 = map { $_ => 1 } qw[x86_64
+        aarch64 aarch64_be arm64e
+        riscv64
+        powerpc64 powerpc64le
+        mips64
+        mips64el
+        loongarch64
+        s390x sparc64
+        wasm64
+        nvptx64];
     my %count;
+
     for my $raw (@targets) {
         next if $raw =~ /^\s*#/ || $raw =~ /^\s*$/;
         my $p = Brocken::Katsuro::Platform::parse($raw);
