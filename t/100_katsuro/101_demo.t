@@ -6,7 +6,7 @@ use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 $|++;
-
+#
 class Brocken::Compiler { }
 
 class Brocken::Katsuro::Platform {
@@ -127,7 +127,7 @@ class Brocken::Katsuro::Platform {
         $vendor ||= 'unknown';
         $os     ||= 'unknown';
         $env    ||= 'unknown';
-        my $class = 'Brocken::Katsuro::Platform::Generic';
+        my $class = 'Brocken::Katsuro::Platform';
         if    ( $os =~ /linux/i )                                       { $class = 'Brocken::Katsuro::Platform::Linux' }
         elsif ( $os =~ /darwin|macos|ios/i )                            { $class = 'Brocken::Katsuro::Platform::MacOS' }
         elsif ( $os =~ /windows|win32|mswin/i )                         { $class = 'Brocken::Katsuro::Platform::Windows' }
@@ -136,28 +136,62 @@ class Brocken::Katsuro::Platform {
         elsif ( $os =~ /^haiku$/i )                                     { $class = 'Brocken::Katsuro::Platform::Haiku' }
         elsif ( $arch =~ /^wasm/ || $os =~ /wasi/i || $env =~ /wasi/i ) { $class = 'Brocken::Katsuro::Platform::Wasm' }
         my $friendly;
-
-        if ( $vendor eq 'apple' ) {
-            if ( $arch eq 'aarch64' ) {
-                if    ( $os eq 'darwin' )   { $friendly = 'macOS on Apple Silicon' }
-                elsif ( $os eq 'ios' )      { $friendly = 'iOS' }
-                elsif ( $os eq 'tvos' )     { $friendly = 'Apple TV' }
-                elsif ( $os eq 'visionos' ) { $friendly = 'Apple Vision' }
-            }
-            elsif ( $arch eq 'x86_64' ) {
-                if    ( $os eq 'darwin' )  { $friendly = 'macOS on Intel' }
-                elsif ( $os eq 'watchos' ) { $friendly = 'Apple Watch Simulator' }
-            }
-        }
         $class->new( arch => $arch, vendor => $vendor, os => $os, env => $env, friendly => $friendly, is_native => $is_native );
     }
     field $arch      : reader : param;
     field $vendor    : reader : param;
     field $os        : reader : param = ();
     field $env       : reader : param = ();
-    field $friendly  : reader : param //= 'sand that does math';
+    field $friendly  : reader : param = ();
     field $is_native : reader : param = 0;
     field $abi       : reader = Brocken::Katsuro::Platform::ABI->parse($arch);
+    ADJUST {
+        if ( !defined $friendly ) {
+            if ( $vendor eq 'apple' ) {
+                if ( $arch eq 'aarch64' ) {
+                    if    ( $os eq 'darwin' )   { $friendly = 'macOS on Apple Silicon' }
+                    elsif ( $os eq 'ios' )      { $friendly = 'iOS' }
+                    elsif ( $os eq 'tvos' )     { $friendly = 'Apple TV' }
+                    elsif ( $os eq 'visionos' ) { $friendly = 'Apple Vision' }
+                    elsif ( $os eq 'watchos' )  { $friendly = 'Apple Watch' }
+                }
+                elsif ( $arch eq 'x86_64' ) {
+                    if    ( $os eq 'darwin' )  { $friendly = 'macOS on Intel' }
+                    elsif ( $os eq 'watchos' ) { $friendly = 'Apple Watch Simulator' }
+                }
+            }
+            if ( !defined $friendly ) {
+                my $os_name = ucfirst($os);
+                $os_name = 'Windows'       if $os =~ /windows|win32|mswin/i;
+                $os_name = 'macOS'         if $os =~ /darwin|macos/i;
+                $os_name = 'Linux'         if $os =~ /linux/i;
+                $os_name = 'FreeBSD'       if $os =~ /freebsd/i;
+                $os_name = 'OpenBSD'       if $os =~ /openbsd/i;
+                $os_name = 'NetBSD'        if $os =~ /netbsd/i;
+                $os_name = 'Haiku'         if $os =~ /haiku/i;
+                $os_name = 'Solaris'       if $os =~ /solaris/i;
+                $os_name = 'OmniOS'        if $os =~ /omnios/i;
+                $os_name = 'MidnightBSD'   if $os =~ /midnightbsd/i;
+                $os_name = 'DragonFly BSD' if $os =~ /dragonflybsd/i;
+                $os_name = 'WebAssembly'   if $self->is_wasm;
+                my $arch_name = $arch;
+                $arch_name = 'x64'    if $arch eq 'x86_64';
+                $arch_name = 'ARM64'  if $arch =~ /aarch64|arm64/i;
+                $arch_name = 'RISC-V' if $arch =~ /riscv/i;
+                $arch_name = 'Wasm'   if $arch =~ /wasm/i;
+
+                if ( $os_name eq 'WebAssembly' ) {
+                    $friendly = "WebAssembly ($arch_name)";
+                }
+                elsif ( $os_name eq 'Unknown' && $arch_name eq 'unknown' ) {
+                    $friendly = 'sand that does math';
+                }
+                else {
+                    $friendly = "$os_name on $arch_name";
+                }
+            }
+        }
+    }
     #
     method bin_ext()        {''}
     method lib_ext()        {'.so'}
@@ -310,8 +344,6 @@ class Brocken::Katsuro::Platform {
         method stack_reg() {'sp'}
     }
 }
-
-class Brocken::Katsuro::Platform::Generic : isa(Brocken::Katsuro::Platform) { }
 
 class Brocken::Katsuro::Platform::Linux : isa(Brocken::Katsuro::Platform) {
     method is_linux() {1}
@@ -525,7 +557,6 @@ class Brocken::Katsuro { }
 class Brocken::Lindsay { }
 
 class Brocken::Jenny { }
-
 my $compiler = Brocken::Compiler->new();
 subtest 'platform parsing' => sub {
     my $raw_triple = Brocken::Katsuro::Platform::gen_triple();
@@ -584,6 +615,22 @@ subtest 'platform parsing' => sub {
     my $netbsd = Brocken::Katsuro::Platform::parse('aarch64--netbsd');
     is $netbsd->os, 'netbsd', 'netbsd os identified from empty-vendor triple';
     ok $netbsd->is_bsd, 'is_bsd for netbsd';
+};
+subtest 'friendly names' => sub {
+    my $linux = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+    is $linux->friendly, 'Linux on x64', 'linux friendly name';
+    my $win = Brocken::Katsuro::Platform::parse('aarch64-pc-windows-msvc');
+    is $win->friendly, 'Windows on ARM64', 'windows friendly name';
+    my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin');
+    is $mac->friendly, 'macOS on Apple Silicon', 'macos apple silicon friendly name';
+    my $mac_intel = Brocken::Katsuro::Platform::parse('x86_64-apple-darwin');
+    is $mac_intel->friendly, 'macOS on Intel', 'macos intel friendly name';
+    my $freebsd = Brocken::Katsuro::Platform::parse('riscv64-unknown-freebsd');
+    is $freebsd->friendly, 'FreeBSD on RISC-V', 'freebsd friendly name';
+    my $wasm = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
+    is $wasm->friendly, 'WebAssembly (Wasm)', 'wasm friendly name';
+    my $unknown = Brocken::Katsuro::Platform::parse('unknown-unknown-unknown-unknown');
+    is $unknown->friendly, 'sand that does math', 'fallback friendly name';
 };
 subtest 'platform naming' => sub {
 
@@ -702,6 +749,7 @@ subtest 'known target triples' => sub {
     }
     diag "$ok targets parsed (" . ( $count{64} // 0 ) . ' 64-bit, ' . ( $count{other} // 0 ) . ' other)';
 };
+#
 done_testing;
 __DATA__
 # GitHub runner triples
