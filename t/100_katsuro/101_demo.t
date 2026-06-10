@@ -102,35 +102,10 @@ package Brocken::Katsuro {
         }
 
         sub parse( $platform //= gen_triple() ) {
+            $platform = normalize_triple($platform);
             my $host_triple = gen_triple();
             my $is_native   = ( $platform eq $host_triple ) ? 1 : 0;
-            my @parts       = split /-/, $platform;
-            my ( $arch, $vendor, $os, $env );
-            if    ( @parts == 4 ) { ( $arch, $vendor, $os, $env ) = @parts }
-            elsif ( @parts == 3 ) {
-                if ( ( $parts[1] // '' ) eq '' ) {    # Handle arch--os
-                    $arch   = $parts[0];
-                    $vendor = 'unknown';
-                    $os     = $parts[2];
-                    $env    = 'unknown';
-                }
-                elsif ( $known_vendor{ $parts[1] // '' } ) {
-                    ( $arch, $vendor, $os ) = @parts;
-                    $env = 'unknown';
-                }
-                else {
-                    ( $arch, $os, $env ) = @parts;
-                    $vendor = 'unknown';
-                }
-            }
-            elsif ( @parts == 2 ) { ( $arch, $os ) = @parts; $vendor = 'unknown'; $env = 'unknown' }
-            else                  { $arch = $parts[0]; ( $vendor, $os, $env ) = ('unknown') x 3 }
-
-            # Ensure no field is empty
-            $arch   ||= 'unknown';
-            $vendor ||= 'unknown';
-            $os     ||= 'unknown';
-            $env    ||= 'unknown';
+            my ( $arch, $vendor, $os, $env ) = split /-/, $platform;
             my $class = 'Brocken::Katsuro::Platform';
             if    ( $os =~ /linux/i )                                       { $class = 'Brocken::Katsuro::Platform::Linux' }
             elsif ( $os =~ /darwin|macos|ios/i )                            { $class = 'Brocken::Katsuro::Platform::MacOS' }
@@ -443,16 +418,25 @@ package Brocken::Katsuro {
                 }
             };
         }
+
+        method syscall_num_reg() {
+            my %map = ( x86_64 => 'rax', aarch64 => 'x8', riscv64 => 'a7' );
+            return $map{ $self->arch };
+        }
     }
 
     class Brocken::Katsuro::Platform::Windows : isa(Brocken::Katsuro::Platform) {
-        method is_windows()     {1}
-        method is_posix()       {0}
-        method bin_ext()        {'.exe'}
-        method lib_ext()        {'.dll'}
-        method format()         {'pe'}
-        method lib_prefix()     {''}
-        method static_lib_ext() {'.lib'}
+        method is_windows() {1}
+        method is_posix()   {0}
+        method bin_ext()    {'.exe'}
+        method lib_ext()    {'.dll'}
+        method format()     {'pe'}
+        method lib_prefix() {''}
+
+        method static_lib_ext() {
+            return '.a' if $self->env eq 'gnu';
+            return '.lib';
+        }
 
         method shared_lib_name( $name, $version = undef ) {
             return $name . $self->lib_ext if !defined $version;
@@ -488,7 +472,7 @@ package Brocken::Katsuro {
             my $fn  = $stub{$name} or return undef;
             my $cmd = "objdump -d '$lib' | grep -A 20 '<$fn>:'";
             my $dis = `$cmd 2>/dev/null` or return undef;
-            if    ( $arch =~ /x86_64|x64|amd64/i ) { return $1 if $dis =~ /mov\s+eax,\s*0x([0-9a-f]+)/i }
+            if    ( $arch =~ /x86_64|x64|amd64/i ) { return hex($1) if $dis =~ /mov\s+eax,\s*0x([0-9a-f]+)/i }
             elsif ( $arch =~ /aarch64|arm64/i )    { return hex($1) if $dis =~ /mov\s+x8,\s*#0x([0-9a-f]+)/i }
             elsif ( $arch =~ /riscv64|riscv/i )    { return hex($1) if $dis =~ /li\s+a7,\s*#?0x([0-9a-f]+)/i }
             return undef;
@@ -644,11 +628,20 @@ subtest 'platform naming' => sub {
         is $linux->shared_lib_name( 'foo', '1.2' ), 'libfoo.so.1.2', 'linux shared_lib_name with version';
     };
     subtest 'Windows (PE)' => sub {
-        my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
-        is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
-        is $win->static_lib_name('foo'),          'foo.lib',     'windows static_lib_name';
-        is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
-        is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
+        subtest 'MSVC style' => sub {
+            my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
+            is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
+            is $win->static_lib_name('foo'),          'foo.lib',     'windows static_lib_name';
+            is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
+            is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
+        };
+        subtest 'GNU style' => sub {
+            my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-gnu');
+            is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
+            is $win->static_lib_name('foo'),          'foo.a',       'windows static_lib_name';
+            is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
+            is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
+        };
     };
     subtest 'MacOS (Mach-O)' => sub {
         my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin');
