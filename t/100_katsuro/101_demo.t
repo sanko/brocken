@@ -90,10 +90,11 @@ class Brocken::Katsuro::Platform {
                 $env = 'musl'      if -f '/etc/alpine-release' || $ldd_output =~ /musl/i;
                 $env = 'gnueabihf' if $arch =~ /^arm/;
             }
-            elsif ( $^O eq 'darwin' )                 { $vendor = 'apple';   $os = 'darwin';  $env = 'macho' }
-            elsif ( $^O =~ /bsd/i )                   { $vendor = 'pc';      $os = $^O;       $env = 'elf' }
-            elsif ( $^O eq 'haiku' )                  { $vendor = 'pc';      $os = $^O;       $env = 'elf' }
-            elsif ( $^O =~ /solaris|sunos|illumos/i ) { $vendor = 'unknown'; $os = 'solaris'; $env = 'elf' }
+            elsif ( $^O eq 'darwin' )                 { $vendor = 'apple';   $os = 'darwin';      $env = 'macho' }
+            elsif ( $^O eq 'haiku' )                  { $vendor = 'pc';      $os = 'haiku';       $env = 'elf' }
+            elsif ( $^O eq 'midnightbsd' )            { $vendor = 'pc';      $os = 'midnightbsd'; $env = 'elf' }
+            elsif ( $^O =~ /bsd/i )                   { $vendor = 'pc';      $os = $^O;           $env = 'elf' }
+            elsif ( $^O =~ /solaris|sunos|illumos/i ) { $vendor = 'unknown'; $os = 'solaris';     $env = 'elf' }
         }
         join '-', $arch || 'unknown', $vendor || 'unknown', $os || 'unknown', $env || 'unknown';
     }
@@ -130,12 +131,13 @@ class Brocken::Katsuro::Platform {
         $env    ||= 'unknown';
         $hold{$vendor}{$arch}{ $os // '_' }{ $env // '_' } = $platform;
         my $class = 'Brocken::Katsuro::Platform::Generic';
-        if    ( $os =~ /linux/i )                                            { $class = 'Brocken::Katsuro::Platform::Linux' }
-        elsif ( $os =~ /darwin|macos|ios/i )                                 { $class = 'Brocken::Katsuro::Platform::MacOS' }
-        elsif ( $os =~ /windows|win32|mswin/i )                              { $class = 'Brocken::Katsuro::Platform::Windows' }
-        elsif ( $os =~ /freebsd|openbsd|netbsd|dragonfly|midnightbsd|bsd/i ) { $class = 'Brocken::Katsuro::Platform::BSD' }
-        elsif ( $os =~ /^haiku$/i )                                          { $class = 'Brocken::Katsuro::Platform::Haiku' }
-        elsif ( $arch =~ /^wasm/ || $os =~ /wasi/i || $env =~ /wasi/i )      { $class = 'Brocken::Katsuro::Platform::Wasm' }
+        if    ( $os =~ /linux/i )                                       { $class = 'Brocken::Katsuro::Platform::Linux' }
+        elsif ( $os =~ /darwin|macos|ios/i )                            { $class = 'Brocken::Katsuro::Platform::MacOS' }
+        elsif ( $os =~ /windows|win32|mswin/i )                         { $class = 'Brocken::Katsuro::Platform::Windows' }
+        elsif ( $os =~ /midnightbsd/i )                                 { $class = 'Brocken::Katsuro::Platform::MidnightBSD' }
+        elsif ( $os =~ /freebsd|openbsd|netbsd|dragonfly|bsd/i )        { $class = 'Brocken::Katsuro::Platform::BSD' }
+        elsif ( $os =~ /^haiku$/i )                                     { $class = 'Brocken::Katsuro::Platform::Haiku' }
+        elsif ( $arch =~ /^wasm/ || $os =~ /wasi/i || $env =~ /wasi/i ) { $class = 'Brocken::Katsuro::Platform::Wasm' }
         my $friendly;
 
         if ( $vendor eq 'apple' ) {
@@ -158,17 +160,31 @@ class Brocken::Katsuro::Platform {
     field $env       : reader : param = ();
     field $friendly  : reader : param //= 'sand that does math';
     field $is_native : reader : param = 0;
-    method bin_ext()    {''}
-    method lib_ext()    {'.so'}
-    method format()     {'elf'}
-    method abi_name()   { $self->env }
-    method is_windows() {0}
-    method is_macos()   {0}
-    method is_linux()   {0}
-    method is_bsd()     {0}
-    method is_haiku()   {0}
-    method is_wasm()    {0}
-    method is_posix()   {1}
+    method bin_ext()        {''}
+    method lib_ext()        {'.so'}
+    method format()         {'elf'}
+    method abi_name()       { $self->env }
+    method lib_prefix()     {'lib'}
+    method bin_name($name)  { $name . $self->bin_ext }
+    method static_lib_ext() {'.a'}
+
+    method static_lib_name($name) {
+        $self->lib_prefix . $name . $self->static_lib_ext;
+    }
+
+    method shared_lib_name( $name, $version = undef ) {
+        my $base = $self->lib_prefix . $name . $self->lib_ext;
+        return $base if !defined $version;
+        return "$base.$version";
+    }
+    method is_windows()     {0}
+    method is_macos()       {0}
+    method is_linux()       {0}
+    method is_bsd()         {0}
+    method is_haiku()       {0}
+    method is_midnightbsd() {0}
+    method is_wasm()        {0}
+    method is_posix()       {1}
 
     #~ Syscall Defaults (BSD family)
     method syscalls() {
@@ -334,6 +350,12 @@ class Brocken::Katsuro::Platform::MacOS : isa(Brocken::Katsuro::Platform) {
     method lib_ext()  {'.dylib'}
     method format()   {'macho'}
 
+    method shared_lib_name( $name, $version = undef ) {
+        my $pre = $self->lib_prefix . $name;
+        return $pre . $self->lib_ext if !defined $version;
+        return "$pre.$version" . $self->lib_ext;
+    }
+
     method syscalls() {
         my $off64 = 0x2000000;
         return {
@@ -381,15 +403,26 @@ class Brocken::Katsuro::Platform::MacOS : isa(Brocken::Katsuro::Platform) {
 }
 
 class Brocken::Katsuro::Platform::Windows : isa(Brocken::Katsuro::Platform) {
-    method is_windows() {1}
-    method is_posix()   {0}
-    method bin_ext()    {'.exe'}
-    method lib_ext()    {'.dll'}
-    method format()     {'pe'}
+    method is_windows()     {1}
+    method is_posix()       {0}
+    method bin_ext()        {'.exe'}
+    method lib_ext()        {'.dll'}
+    method format()         {'pe'}
+    method lib_prefix()     {''}
+    method static_lib_ext() {'.lib'}
+
+    method shared_lib_name( $name, $version = undef ) {
+        return $name . $self->lib_ext if !defined $version;
+        return $name . '-' . $version . $self->lib_ext;
+    }
 }
 
 class Brocken::Katsuro::Platform::BSD : isa(Brocken::Katsuro::Platform) {
     method is_bsd() {1}
+}
+
+class Brocken::Katsuro::Platform::MidnightBSD : isa(Brocken::Katsuro::Platform::BSD) {
+    method is_midnightbsd() {1}
 }
 
 class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
@@ -472,11 +505,12 @@ class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
 }
 
 class Brocken::Katsuro::Platform::Wasm : isa(Brocken::Katsuro::Platform) {
-    method is_wasm()  {1}
-    method is_posix() { ( $self->os // '' ) =~ /wasi/i || ( $self->env // '' ) =~ /wasi/i }
-    method bin_ext()  {'.wasm'}
-    method lib_ext()  {'.wasm'}
-    method format()   {'wasm'}
+    method is_wasm()    {1}
+    method is_posix()   { ( $self->os // '' ) =~ /wasi/i || ( $self->env // '' ) =~ /wasi/i }
+    method bin_ext()    {'.wasm'}
+    method lib_ext()    {'.wasm'}
+    method format()     {'wasm'}
+    method lib_prefix() {''}
 }
 
 class Brocken::Katsuro { }
@@ -543,6 +577,35 @@ subtest 'platform parsing' => sub {
     my $netbsd = Brocken::Katsuro::Platform::parse('aarch64--netbsd');
     is $netbsd->os, 'netbsd', 'netbsd os identified from empty-vendor triple';
     ok $netbsd->is_bsd, 'is_bsd for netbsd';
+};
+subtest 'platform naming' => sub {
+
+    # Linux (ELF)
+    my $linux = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+    is $linux->bin_name('foo'),                 'foo',           'linux bin_name';
+    is $linux->static_lib_name('foo'),          'libfoo.a',      'linux static_lib_name';
+    is $linux->shared_lib_name('foo'),          'libfoo.so',     'linux shared_lib_name';
+    is $linux->shared_lib_name( 'foo', '1.2' ), 'libfoo.so.1.2', 'linux shared_lib_name with version';
+
+    # Windows (PE)
+    my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
+    is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
+    is $win->static_lib_name('foo'),          'foo.lib',     'windows static_lib_name';
+    is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
+    is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
+
+    # MacOS (Mach-O)
+    my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin');
+    is $mac->bin_name('foo'),                 'foo',              'macos bin_name';
+    is $mac->static_lib_name('foo'),          'libfoo.a',         'macos static_lib_name';
+    is $mac->shared_lib_name('foo'),          'libfoo.dylib',     'macos shared_lib_name';
+    is $mac->shared_lib_name( 'foo', '1.2' ), 'libfoo.1.2.dylib', 'macos shared_lib_name with version';
+
+    # Wasm
+    my $wasm = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
+    is $wasm->bin_name('foo'),        'foo.wasm', 'wasm bin_name';
+    is $wasm->static_lib_name('foo'), 'foo.a',    'wasm static_lib_name';
+    is $wasm->shared_lib_name('foo'), 'foo.wasm', 'wasm shared_lib_name';
 };
 subtest 'OS syscall numbers' => sub {
     my $bsd = Brocken::Katsuro::Platform::parse('x86_64-pc-freebsd-elf');
