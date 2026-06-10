@@ -24,8 +24,6 @@ class Brocken::Katsuro::Platform {
         nintendo sony mti nvidia fortanix risc0
         esp lynx unikraft kmc wrs
     );
-    my %hold;
-    sub get_hold() { \%hold }
     use Config;
 
     # Hide stderr appropriately for the host OS shell
@@ -129,7 +127,6 @@ class Brocken::Katsuro::Platform {
         $vendor ||= 'unknown';
         $os     ||= 'unknown';
         $env    ||= 'unknown';
-        $hold{$vendor}{$arch}{ $os // '_' }{ $env // '_' } = $platform;
         my $class = 'Brocken::Katsuro::Platform::Generic';
         if    ( $os =~ /linux/i )                                       { $class = 'Brocken::Katsuro::Platform::Linux' }
         elsif ( $os =~ /darwin|macos|ios/i )                            { $class = 'Brocken::Katsuro::Platform::MacOS' }
@@ -160,6 +157,8 @@ class Brocken::Katsuro::Platform {
     field $env       : reader : param = ();
     field $friendly  : reader : param //= 'sand that does math';
     field $is_native : reader : param = 0;
+    field $abi       : reader = Brocken::Katsuro::Platform::ABI->parse($arch);
+    #
     method bin_ext()        {''}
     method lib_ext()        {'.so'}
     method format()         {'elf'}
@@ -248,46 +247,67 @@ class Brocken::Katsuro::Platform {
     }
 
     #~ Register queries from ABI
-    method registers( $category = 'available' ) {
-        return Brocken::Katsuro::Platform::ABI->registers( $category, $self->arch );
-    }
-    method caller_saved() { $self->registers('caller') }
-    method callee_saved() { $self->registers('callee') }
-    method frame_reg()    { Brocken::Katsuro::Platform::ABI->frame_reg( $self->arch ) }
-    method stack_reg()    { Brocken::Katsuro::Platform::ABI->stack_reg( $self->arch ) }
+    method registers( $category = 'available' ) { $self->abi->registers($category) }
+    method caller_saved()                       { $self->abi->caller_saved }
+    method callee_saved()                       { $self->abi->callee_saved }
+    method frame_reg()                          { $self->abi->frame_reg }
+    method stack_reg()                          { $self->abi->stack_reg }
 
     class Brocken::Katsuro::Platform::ABI {
 
-        sub registers( $class, $category = 'available', $arch = 'x86_64' ) {
+        sub parse ( $class, $arch ) {
+            if    ( $arch =~ /x86_64|x64|amd64/i ) { return Brocken::Katsuro::Platform::ABI::X86_64->new }
+            elsif ( $arch =~ /aarch64|arm64/i )    { return Brocken::Katsuro::Platform::ABI::AArch64->new }
+            elsif ( $arch =~ /riscv64/i )          { return Brocken::Katsuro::Platform::ABI::RISCV64->new }
+            return $class->new;
+        }
+        method registers( $category = 'available' ) { [] }
+        method caller_saved()                       { $self->registers('caller') }
+        method callee_saved()                       { $self->registers('callee') }
+        method frame_reg()                          {undef}
+        method stack_reg()                          {undef}
+    }
+
+    class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::ABI) {
+
+        method registers( $category = 'available' ) {
             my %data = (
-                x86_64 => {
-                    available => [qw[rax rcx rdx rbx rsi rdi r8 r9 r10 r11 r12 r13 r14 r15]],
-                    caller    => [qw[rax rcx rdx rsi rdi r8 r9 r10 r11]],
-                    callee    => [qw[rbx r12 r13 r14 r15]],
-                },
-                aarch64 => {
-                    available => [qw[x0 x1 x2 x3 x4 x5 x6 x7 x9 x10 x11 x12 x13 x14 x15 x20 x21 x22 x23 x24 x25 x26 x27 x28]],
-                    caller    => [qw[x0 x1 x2 x3 x4 x5 x6 x7 x9 x10 x11 x12 x13 x14 x15]],
-                    callee    => [qw[x20 x21 x22 x23 x24 x25 x26 x27 x28]],
-                },
-                riscv64 => {
-                    available => [qw[a0 a1 a2 a3 a4 a5 a6 a7 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 t0 t1 t2 t3 t4 t5 t6]],
-                    caller    => [qw[a0 a1 a2 a3 a4 a5 a6 a7 t0 t1 t2 t3 t4 t5 t6]],
-                    callee    => [qw[s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11]],
-                },
+                available => [qw[rax rcx rdx rbx rsi rdi r8 r9 r10 r11 r12 r13 r14 r15]],
+                caller    => [qw[rax rcx rdx rsi rdi r8 r9 r10 r11]],
+                callee    => [qw[rbx r12 r13 r14 r15]]
             );
-            return $data{$arch}{$category} // [];
+            return $data{$category} // [];
         }
+        method frame_reg() {'rbp'}
+        method stack_reg() {'rsp'}
+    }
 
-        sub frame_reg( $class, $arch = 'x86_64' ) {
-            my %map = ( x86_64 => 'rbp', aarch64 => 'x29', riscv64 => 's0' );
-            return $map{$arch};
-        }
+    class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform::ABI) {
 
-        sub stack_reg( $class, $arch = 'x86_64' ) {
-            my %map = ( x86_64 => 'rsp', aarch64 => 'sp', riscv64 => 'sp' );
-            return $map{$arch};
+        method registers( $category = 'available' ) {
+            my %data = (
+                available => [qw[x0 x1 x2 x3 x4 x5 x6 x7 x9 x10 x11 x12 x13 x14 x15 x20 x21 x22 x23 x24 x25 x26 x27 x28]],
+                caller    => [qw[x0 x1 x2 x3 x4 x5 x6 x7 x9 x10 x11 x12 x13 x14 x15]],
+                callee    => [qw[x20 x21 x22 x23 x24 x25 x26 x27 x28]]
+            );
+            return $data{$category} // [];
         }
+        method frame_reg() {'x29'}
+        method stack_reg() {'sp'}
+    }
+
+    class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform::ABI) {
+
+        method registers( $category = 'available' ) {
+            my %data = (
+                available => [qw[a0 a1 a2 a3 a4 a5 a6 a7 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 t0 t1 t2 t3 t4 t5 t6]],
+                caller    => [qw[a0 a1 a2 a3 a4 a5 a6 a7 t0 t1 t2 t3 t4 t5 t6]],
+                callee    => [qw[s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11]]
+            );
+            return $data{$category} // [];
+        }
+        method frame_reg() {'s0'}
+        method stack_reg() {'sp'}
     }
 }
 
@@ -384,20 +404,7 @@ class Brocken::Katsuro::Platform::MacOS : isa(Brocken::Katsuro::Platform) {
                 mmap      => 197,
                 nanosleep => 101,
                 brk       => 45
-            },
-            riscv64 => {
-                write     => 4,
-                read      => 3,
-                open      => 5,
-                close     => 6,
-                exit      => 1,
-                fork      => 2,
-                getpid    => 20,
-                wait4     => 7,
-                mmap      => 197,
-                nanosleep => 101,
-                brk       => 45
-            },
+            }
         };
     }
 }
@@ -518,7 +525,7 @@ class Brocken::Katsuro { }
 class Brocken::Lindsay { }
 
 class Brocken::Jenny { }
-#
+
 my $compiler = Brocken::Compiler->new();
 subtest 'platform parsing' => sub {
     my $raw_triple = Brocken::Katsuro::Platform::gen_triple();
