@@ -541,218 +541,768 @@ package Brocken::Katsuro {
     }
 }
 
-package Brocken::Lindsay { }
+package Brocken::Lindsay {
+
+    class Brocken::Lindsay::IR::Type {
+        field $kind : reader : param;        # 'int', 'float', 'ptr', 'void'
+        field $bits : reader : param = 0;    # 8, 16, 32, 64, ...
+
+        # Singletons for common types to save memory and allow `==` comparison
+        sub i1      { state $t //= __PACKAGE__->new( kind => 'int', bits => 1 );       $t }    # bool
+        sub i32     { state $t //= __PACKAGE__->new( kind => 'int', bits => 32 );      $t }
+        sub i64     { state $t //= __PACKAGE__->new( kind => 'int', bits => 64 );      $t }
+        sub ptr     { state $t //= __PACKAGE__->new( kind => 'ptr' );                  $t }    # opaque pointer
+        sub void    { state $t //= __PACKAGE__->new( kind => 'void' );                 $t }
+        sub dynamic { state $t //= __PACKAGE__->new( kind => 'dynamic', bits => 128 ); $t }    # 16-byte Fat Scalar (Tag + Payload), our SV*
+
+        method as_string() {
+            return "i$bits" if $kind eq 'int';
+            return $kind;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Value {
+        field $type : reader : param;
+        field $name : reader : param = undef;
+
+        # Every value needs a way to print itself in IR dumps
+        method as_string() { $name // '%<anon>' }
+    }
+
+    class Brocken::Lindsay::IR::Constant : isa(Brocken::Lindsay::IR::Value) {
+        field $value : reader : param;
+        method as_string() {$value}
+    }
+
+    class Brocken::Lindsay::IR::Instruction : isa(Brocken::Lindsay::IR::Value) {
+        field $opcode   : reader : param;
+        field $operands : reader : param = [];
+        field $parent   : reader : param = undef;    # The Basic Block
+
+        method render() {
+            my $ops = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $operands->@*;
+            my $res = $self->type->kind eq 'void' ? '' : ( $self->name // '%<anon>' ) . ' = ';
+            return "  $res$opcode $ops";
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::ICmp : isa(Brocken::Lindsay::IR::Instruction) {
+        field $predicate : reader : param;           # 'eq', 'ne', 'sgt' (signed greater than), 'slt', etc.
+
+        method render() {
+            my ( $lhs, $rhs ) = $self->operands->@*;
+            return sprintf '  %s = icmp %s %s %s, %s', ( $self->name // '%<anon>' ), $predicate, $lhs->type->as_string, $lhs->as_string,
+                $rhs->as_string;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::Br : isa(Brocken::Lindsay::IR::Instruction) {
+        field $dest_block : reader : param;
+
+        method render() {
+            return '  br label %' . $dest_block->name;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::CondBr : isa(Brocken::Lindsay::IR::Instruction) {
+        field $true_block  : reader : param;
+        field $false_block : reader : param;
+
+        method render() {
+            my $cond = $self->operands->[0];
+            return sprintf '  br %s %s, label %%%s, label %%%s', $cond->type->as_string, $cond->as_string, $true_block->name, $false_block->name;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::Ret : isa(Brocken::Lindsay::IR::Instruction) {
+
+        method render() {
+            return '  ret void' if $self->type->kind eq 'void';
+            my $val = $self->operands->[0];
+            return '  ret ' . $val->type->as_string . ' ' . $val->as_string;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::Call : isa(Brocken::Lindsay::IR::Instruction) {
+        field $callee : reader : param;    # Brocken::Lindsay::IR::Function
+
+        method render() {
+            my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
+            my $res  = $self->type->kind eq 'void' ? '' : ( $self->name // '%<anon>' ) . ' = ';
+            return sprintf '  %scall %s @%s(%s)', $res, $self->type->as_string, $callee->name, $args;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::Box : isa(Brocken::Lindsay::IR::Instruction) {
+
+        method render() {
+            my $val = $self->operands->[0];
+            return sprintf '  %s = box %s %s to dynamic', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::Unbox : isa(Brocken::Lindsay::IR::Instruction) {
+
+        method render() {
+            my $val = $self->operands->[0];
+            return sprintf '  %s = unbox %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $self->type->as_string;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Block {
+        field $name         : reader : param;
+        field $parent       : reader : param = undef;    # The function
+        field $instructions : reader = [];
+
+        method append_inst($inst) {
+            push $instructions->@*, $inst;
+            return $inst;
+        }
+
+        method as_string() {
+            my $out = "$name:\n";
+            $out .= $_->render . "\n" for $instructions->@*;
+            return $out;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Function {
+        field $name        : reader : param;
+        field $return_type : reader : param;
+        field $params      : reader : param = [];    # Array of Brocken::Lindsay::IR::Value
+        field $blocks      : reader = [];
+
+        method append_block($name) {
+            my $bb = Brocken::Lindsay::IR::Block->new( name => $name, parent => $self );
+            push $blocks->@*, $bb;
+            return $bb;
+        }
+
+        method as_string() {
+
+            # If there are no blocks, this is an FFI declaration
+            if ( scalar( $blocks->@* ) == 0 ) {
+
+                # Declarations usually just list the types, no names needed
+                my $p_str = join ', ', map { $_->type->as_string } $params->@*;
+                return sprintf qq[declare %s @%s(%s)\n], $return_type->as_string, $name, $p_str;
+            }
+            my $p_str = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $params->@*;
+            my $out   = sprintf qq[define %s @%s(%s) {\n], $return_type->as_string, $name, $p_str;
+            $out .= $_->as_string for $blocks->@*;
+            $out .= qq[}\n];
+            return $out;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Module {
+        field $name : reader : param = 'main';
+        field $functions : reader = [];
+
+        method add_function($func) {
+            push $functions->@*, $func;
+            return $func;
+        }
+
+        method as_string() {
+            my $out = "; ModuleID = '$name'\n\n";
+            $out .= $_->as_string . "\n" for $functions->@*;
+            return $out;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Builder {
+        field $insert_block : reader = undef;
+        field $id_counter = 0;
+        method position_at_end($block) { $insert_block = $block }
+        method _next_id()              { '%' . $id_counter++ }
+
+        method build_add( $lhs, $rhs, $name = undef ) {
+            my $inst = Brocken::Lindsay::IR::Instruction->new(
+                name     => $name // $self->_next_id(),
+                type     => $lhs->type,
+                opcode   => 'add',
+                operands => [ $lhs, $rhs ],
+                parent   => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_icmp( $predicate, $lhs, $rhs, $name = undef ) {
+            my $inst = Brocken::Lindsay::IR::Instruction::ICmp->new(
+                name      => $name // $self->_next_id(),
+                type      => Brocken::Lindsay::IR::Type::i1(),    # comparisons yield a boolean
+                opcode    => 'icmp',
+                predicate => $predicate,
+                operands  => [ $lhs, $rhs ],
+                parent    => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_br($dest_block) {
+            my $inst = Brocken::Lindsay::IR::Instruction::Br->new(
+                name       => undef,
+                type       => Brocken::Lindsay::IR::Type::void(),
+                opcode     => 'br',
+                dest_block => $dest_block,
+                parent     => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_cond_br( $cond_val, $true_block, $false_block ) {
+            my $inst = Brocken::Lindsay::IR::Instruction::CondBr->new(
+                name        => undef,
+                type        => Brocken::Lindsay::IR::Type::void(),
+                opcode      => 'br',
+                operands    => [$cond_val],
+                true_block  => $true_block,
+                false_block => $false_block,
+                parent      => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_ret( $val = undef ) {
+            my $type = defined $val ? $val->type : Brocken::Lindsay::IR::Type::void();
+            my $inst = Brocken::Lindsay::IR::Instruction::Ret->new(
+                name     => undef,
+                type     => $type,
+                opcode   => 'ret',
+                operands => defined $val ? [$val] : [],
+                parent   => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_call( $callee, $args, $name = undef ) {
+            my $type = $callee->return_type;
+            my $inst = Brocken::Lindsay::IR::Instruction::Call->new(
+                name     => $type->kind eq 'void' ? undef : ( $name // $self->_next_id() ),
+                type     => $type,
+                opcode   => 'call',
+                callee   => $callee,
+                operands => $args,
+                parent   => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_alloca( $type, $name = undef ) {
+            my $inst = Brocken::Lindsay::IR::Instruction::Alloca->new(
+                name           => $name // $self->_next_id(),
+                type           => Brocken::Lindsay::IR::Type::ptr(),    # allocas yield a ptr
+                opcode         => 'alloca',
+                allocated_type => $type,                                # What we are allocating
+                parent         => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_load( $type, $ptr, $name = undef ) {
+            my $inst = Brocken::Lindsay::IR::Instruction::Load->new(
+                name     => $name // $self->_next_id(),
+                type     => $type,                                      # a load yields the type being loaded
+                opcode   => 'load',
+                operands => [$ptr],
+                parent   => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_store( $val, $ptr ) {
+            my $inst = Brocken::Lindsay::IR::Instruction::Store->new(
+                name     => undef,
+                type     => Brocken::Lindsay::IR::Type::void(),         # stores do not yield an SSA value
+                opcode   => 'store',
+                operands => [ $val, $ptr ],
+                parent   => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_box( $val, $name = undef ) {
+            my $inst = Brocken::Lindsay::IR::Instruction::Box->new(
+                name     => $name // $self->_next_id(),
+                type     => Brocken::Lindsay::IR::Type::dynamic(),      # always yields a dynamic
+                opcode   => 'box',
+                operands => [$val],
+                parent   => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+
+        method build_unbox( $dynamic_val, $dest_type, $name = undef ) {
+            my $inst = Brocken::Lindsay::IR::Instruction::Unbox->new(
+                name     => $name // $self->_next_id(),
+                type     => $dest_type,                                 # yields the requested native type
+                opcode   => 'unbox',
+                operands => [$dynamic_val],
+                parent   => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::Alloca : isa(Brocken::Lindsay::IR::Instruction) {
+        field $allocated_type : reader : param;
+
+        method render() {
+            return sprintf '  %s = alloca %s', ( $self->name // '%<anon>' ), $allocated_type->as_string;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::Load : isa(Brocken::Lindsay::IR::Instruction) {
+
+        method render() {
+            my $ptr = $self->operands->[0];
+
+            # The type of a load instruction *is* the type it loads
+            return sprintf '  %s = load %s, %s %s', ( $self->name // '%<anon>' ), $self->type->as_string, $ptr->type->as_string, $ptr->as_string;
+        }
+    }
+
+    class Brocken::Lindsay::IR::Instruction::Store : isa(Brocken::Lindsay::IR::Instruction) {
+
+        method render() {
+            my ( $val, $ptr ) = $self->operands->@*;
+            return sprintf '  store %s %s, %s %s', $val->type->as_string, $val->as_string, $ptr->type->as_string, $ptr->as_string;
+        }
+    }
+}
 
 package Brocken::Jenny { }
 my $compiler = Brocken::Compiler->new();
-subtest 'platform parsing' => sub {
-    my $raw_triple = Brocken::Katsuro::Platform::gen_triple();
-    diag "Host raw triple: $raw_triple";
-    my $platform = Brocken::Katsuro::Platform::parse($raw_triple);
-    diag 'Host: ' . $platform->os . '/' . $platform->arch;
-    diag 'File: app' . $platform->bin_ext . ' / lib' . $platform->lib_ext;
-    isa_ok $platform, ['Brocken::Katsuro::Platform'], 'parsed host platform';
-    my $linux = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
-    is $linux->arch,    'x86_64', 'linux arch';
-    is $linux->vendor,  'pc',     'linux vendor';
-    is $linux->os,      'linux',  'linux os';
-    is $linux->env,     'gnu',    'linux env';
-    is $linux->bin_ext, '',       'linux bin_ext';
-    is $linux->lib_ext, '.so',    'linux lib_ext';
-    is $linux->format,  'elf',    'linux format';
-    ok $linux->is_linux,    'is_linux';
-    ok $linux->is_posix,    'is_posix';
-    ok !$linux->is_windows, 'not windows';
-    ok !$linux->is_bsd,     'not bsd';
-    ok !$linux->is_haiku,   'not haiku';
-    my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
-    is $win->bin_ext, '.exe', 'windows bin_ext';
-    is $win->lib_ext, '.dll', 'windows lib_ext';
-    is $win->format,  'pe',   'windows format';
-    ok $win->is_windows, 'is_windows';
-    ok !$win->is_posix,  'not posix';
-    my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin-macho');
-    is $mac->bin_ext, '',       'macos bin_ext';
-    is $mac->lib_ext, '.dylib', 'macos lib_ext';
-    is $mac->format,  'macho',  'macos format';
-    ok $mac->is_macos, 'is_macos';
-    ok $mac->is_posix, 'is_posix';
-    my $openbsd = Brocken::Katsuro::Platform::parse('x86_64-unknown-openbsd-elf');
-    is $openbsd->bin_ext, '',    'openbsd bin_ext';
-    is $openbsd->lib_ext, '.so', 'openbsd lib_ext';
-    is $openbsd->format,  'elf', 'openbsd format';
-    ok $openbsd->is_bsd,    'is_bsd';
-    ok $openbsd->is_posix,  'is_posix';
-    ok !$openbsd->is_linux, 'not linux';
-    my $haiku = Brocken::Katsuro::Platform::parse('x86_64-pc-haiku-elf');
-    is $haiku->bin_ext, '',    'haiku bin_ext';
-    is $haiku->lib_ext, '.so', 'haiku lib_ext';
-    is $haiku->format,  'elf', 'haiku format';
-    ok $haiku->is_haiku, 'is_haiku';
-    ok $haiku->is_posix, 'is_posix';
-    ok !$haiku->is_bsd,  'not bsd';
-    my $wasm = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
-    is $wasm->bin_ext, '.wasm', 'wasm bin_ext';
-    is $wasm->format,  'wasm',  'wasm format';
-    ok $wasm->is_wasm,   'is_wasm';
-    ok !$wasm->is_posix, 'wasm-unknown-unknown is not posix';
-    my $wasi = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
-    ok $wasi->is_wasm,  'wasi is_wasm';
-    ok $wasi->is_posix, 'wasi is_posix';
-    my $netbsd = Brocken::Katsuro::Platform::parse('aarch64--netbsd');
-    is $netbsd->os, 'netbsd', 'netbsd os identified from empty-vendor triple';
-    ok $netbsd->is_bsd, 'is_bsd for netbsd';
-};
-subtest 'friendly names' => sub {
-    my $linux = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
-    is $linux->friendly, 'Linux on x64', 'linux friendly name';
-    my $win = Brocken::Katsuro::Platform::parse('aarch64-pc-windows-msvc');
-    is $win->friendly, 'Windows on ARM64', 'windows friendly name';
-    my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin');
-    is $mac->friendly, 'macOS on Apple Silicon', 'macos apple silicon friendly name';
-    my $mac_intel = Brocken::Katsuro::Platform::parse('x86_64-apple-darwin');
-    is $mac_intel->friendly, 'macOS on Intel', 'macos intel friendly name';
-    my $freebsd = Brocken::Katsuro::Platform::parse('riscv64-unknown-freebsd');
-    is $freebsd->friendly, 'FreeBSD on RISC-V', 'freebsd friendly name';
-    my $wasm = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
-    is $wasm->friendly, 'WebAssembly (Wasm)', 'wasm friendly name';
-    my $unknown = Brocken::Katsuro::Platform::parse('unknown-unknown-unknown-unknown');
-    is $unknown->friendly, 'sand that does math', 'fallback friendly name';
-};
-subtest 'platform naming' => sub {
-    subtest 'Linux (ELF)' => sub {
+subtest Katsuro => sub {
+    subtest 'platform parsing' => sub {
+        my $raw_triple = Brocken::Katsuro::Platform::gen_triple();
+        diag "Host raw triple: $raw_triple";
+        my $platform = Brocken::Katsuro::Platform::parse($raw_triple);
+        diag 'Host: ' . $platform->os . '/' . $platform->arch;
+        diag 'File: app' . $platform->bin_ext . ' / lib' . $platform->lib_ext;
+        isa_ok $platform, ['Brocken::Katsuro::Platform'], 'parsed host platform';
         my $linux = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
-        is $linux->bin_name('foo'),                 'foo',           'linux bin_name';
-        is $linux->static_lib_name('foo'),          'libfoo.a',      'linux static_lib_name';
-        is $linux->shared_lib_name('foo'),          'libfoo.so',     'linux shared_lib_name';
-        is $linux->shared_lib_name( 'foo', '1.2' ), 'libfoo.so.1.2', 'linux shared_lib_name with version';
-    };
-    subtest 'Windows (PE)' => sub {
-        subtest 'MSVC style' => sub {
-            my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
-            is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
-            is $win->static_lib_name('foo'),          'foo.lib',     'windows static_lib_name';
-            is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
-            is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
-        };
-        subtest 'GNU style' => sub {
-            my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-gnu');
-            is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
-            is $win->static_lib_name('foo'),          'foo.a',       'windows static_lib_name';
-            is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
-            is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
-        };
-    };
-    subtest 'MacOS (Mach-O)' => sub {
-        my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin');
-        is $mac->bin_name('foo'),                 'foo',              'macos bin_name';
-        is $mac->static_lib_name('foo'),          'libfoo.a',         'macos static_lib_name';
-        is $mac->shared_lib_name('foo'),          'libfoo.dylib',     'macos shared_lib_name';
-        is $mac->shared_lib_name( 'foo', '1.2' ), 'libfoo.1.2.dylib', 'macos shared_lib_name with version';
-    };
-    subtest 'Wasm' => sub {
+        is $linux->arch,    'x86_64', 'linux arch';
+        is $linux->vendor,  'pc',     'linux vendor';
+        is $linux->os,      'linux',  'linux os';
+        is $linux->env,     'gnu',    'linux env';
+        is $linux->bin_ext, '',       'linux bin_ext';
+        is $linux->lib_ext, '.so',    'linux lib_ext';
+        is $linux->format,  'elf',    'linux format';
+        ok $linux->is_linux,    'is_linux';
+        ok $linux->is_posix,    'is_posix';
+        ok !$linux->is_windows, 'not windows';
+        ok !$linux->is_bsd,     'not bsd';
+        ok !$linux->is_haiku,   'not haiku';
+        my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
+        is $win->bin_ext, '.exe', 'windows bin_ext';
+        is $win->lib_ext, '.dll', 'windows lib_ext';
+        is $win->format,  'pe',   'windows format';
+        ok $win->is_windows, 'is_windows';
+        ok !$win->is_posix,  'not posix';
+        my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin-macho');
+        is $mac->bin_ext, '',       'macos bin_ext';
+        is $mac->lib_ext, '.dylib', 'macos lib_ext';
+        is $mac->format,  'macho',  'macos format';
+        ok $mac->is_macos, 'is_macos';
+        ok $mac->is_posix, 'is_posix';
+        my $openbsd = Brocken::Katsuro::Platform::parse('x86_64-unknown-openbsd-elf');
+        is $openbsd->bin_ext, '',    'openbsd bin_ext';
+        is $openbsd->lib_ext, '.so', 'openbsd lib_ext';
+        is $openbsd->format,  'elf', 'openbsd format';
+        ok $openbsd->is_bsd,    'is_bsd';
+        ok $openbsd->is_posix,  'is_posix';
+        ok !$openbsd->is_linux, 'not linux';
+        my $haiku = Brocken::Katsuro::Platform::parse('x86_64-pc-haiku-elf');
+        is $haiku->bin_ext, '',    'haiku bin_ext';
+        is $haiku->lib_ext, '.so', 'haiku lib_ext';
+        is $haiku->format,  'elf', 'haiku format';
+        ok $haiku->is_haiku, 'is_haiku';
+        ok $haiku->is_posix, 'is_posix';
+        ok !$haiku->is_bsd,  'not bsd';
         my $wasm = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
-        is $wasm->bin_name('foo'),        'foo.wasm', 'wasm bin_name';
-        is $wasm->static_lib_name('foo'), 'foo.a',    'wasm static_lib_name';
-        is $wasm->shared_lib_name('foo'), 'foo.wasm', 'wasm shared_lib_name';
-    }
-};
-subtest 'OS syscall numbers' => sub {
-    my $bsd = Brocken::Katsuro::Platform::parse('x86_64-pc-freebsd-elf');
-    is $bsd->syscall('write'), 4,     'bsd x86_64 write';
-    is $bsd->syscall('exit'),  1,     'bsd x86_64 exit';
-    is $bsd->syscall('fork'),  2,     'bsd x86_64 fork';
-    is $bsd->syscall_num_reg,  'rax', 'bsd x86_64 syscall_num_reg';
-    is $bsd->syscall_ret_reg,  'rax', 'bsd x86_64 syscall_ret_reg';
-    my $lnx = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
-    is $lnx->syscall('write'), 1,   'linux x86_64 write';
-    is $lnx->syscall('exit'),  60,  'linux x86_64 exit';
-    is $lnx->syscall('fork'),  57,  'linux x86_64 fork';
-    is $lnx->syscall('futex'), 202, 'linux x86_64 futex';
-    my $lnx64 = Brocken::Katsuro::Platform::parse('aarch64-pc-linux-gnu');
-    is $lnx64->syscall('write'), 64, 'linux aarch64 write';
-    is $lnx64->syscall('exit'),  93, 'linux aarch64 exit';
-    my $mac = Brocken::Katsuro::Platform::parse('x86_64-apple-darwin-macho');
-    is $mac->syscall('write'), 0x2000004, 'macos x86_64 write (with offset)';
-    is $mac->syscall('exit'),  0x2000001, 'macos x86_64 exit (with offset)';
-    ok $mac->syscall('write') != 4, 'macos write != bsd write';
-};
-subtest 'Haiku syscall numbers (fallback)' => sub {
-    my $haiku = Brocken::Katsuro::Platform::parse('x86_64-pc-haiku-elf');
-    is $haiku->syscall('write'),  151, 'haiku x86_64 write fallback';
-    is $haiku->syscall('exit'),   41,  'haiku x86_64 exit fallback';
-    is $haiku->syscall('fork'),   47,  'haiku x86_64 fork fallback';
-    is $haiku->syscall('getpid'), 46,  'haiku x86_64 getpid fallback';
-    is $haiku->syscall('read'),   148, 'haiku x86_64 read fallback';
-};
-subtest 'ABI register sets' => sub {
-    my $p     = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
-    my @avail = $p->registers('available')->@*;
-    ok grep( /^rax$/,  @avail ), 'x86_64 has rax';
-    ok grep( /^r15$/,  @avail ), 'x86_64 has r15';
-    ok !grep( /^rsp$/, @avail ), 'x86_64 excludes rsp';
-    my @caller = $p->caller_saved->@*;
-    ok grep( /^rax$/,  @caller ), 'x86_64 caller rax';
-    ok !grep( /^rbx$/, @caller ), 'x86_64 caller excludes rbx';
-    my @callee = $p->callee_saved->@*;
-    ok grep( /^rbx$/, @callee ), 'x86_64 callee rbx';
-    ok grep( /^r12$/, @callee ), 'x86_64 callee r12';
-    is $p->frame_reg, 'rbp', 'x86_64 frame = rbp';
-    is $p->stack_reg, 'rsp', 'x86_64 stack = rsp';
-    my $aarch    = Brocken::Katsuro::Platform::parse('aarch64-pc-linux-gnu');
-    my @a_caller = $aarch->caller_saved->@*;
-    ok grep( /^x0$/,   @a_caller ), 'aarch64 caller x0';
-    ok grep( /^x15$/,  @a_caller ), 'aarch64 caller x15';
-    ok !grep( /^x19$/, @a_caller ), 'aarch64 caller excludes x19';
-    ok !grep( /^x20$/, @a_caller ), 'aarch64 caller excludes x20';
-    my @a_callee = $aarch->callee_saved->@*;
-    ok grep( /^x20$/, @a_callee ), 'aarch64 callee x20';
-    ok grep( /^x28$/, @a_callee ), 'aarch64 callee x28';
-    is $aarch->frame_reg, 'x29', 'aarch64 frame = x29';
-    my $riscv    = Brocken::Katsuro::Platform::parse('riscv64-pc-linux-gnu');
-    my @r_caller = $riscv->caller_saved->@*;
-    ok grep( /^a0$/, @r_caller ), 'riscv64 caller a0';
-    ok grep( /^t6$/, @r_caller ), 'riscv64 caller t6';
-    my @r_callee = $riscv->callee_saved->@*;
-    ok grep( /^s1$/,  @r_callee ), 'riscv64 callee s1';
-    ok grep( /^s11$/, @r_callee ), 'riscv64 callee s11';
-    is $riscv->frame_reg, 's0', 'riscv64 frame = s0';
-};
-subtest 'triple normalization' => sub {
-    my $norm = Brocken::Katsuro::Platform::normalize_triple('x86_64-apple-darwin21.0.0');
-    is $norm, 'x86_64-apple-darwin21.0.0-macho', '3-field apple triple';
-    $norm = Brocken::Katsuro::Platform::normalize_triple('x86_64-linux-gnu');
-    is $norm, 'x86_64-pc-linux-gnu', '3-field linux triple';
-    $norm = Brocken::Katsuro::Platform::normalize_triple('x86_64-w64-mingw32');
-    is $norm, 'x86_64-pc-windows-gnu', '3-field mingw triple';
-    $norm = Brocken::Katsuro::Platform::normalize_triple('x86_64-unknown-openbsd-elf');
-    is $norm, 'x86_64-unknown-openbsd-elf', '4-field openbsd triple unchanged';
-};
-subtest 'known target triples' => sub {
-    my @targets = <DATA>;
-    chomp @targets;
-    my $ok      = 0;
-    my %arch_64 = map { $_ => 1 } qw[x86_64
-        aarch64 aarch64_be arm64e
-        riscv64
-        powerpc64 powerpc64le
-        mips64
-        mips64el
-        loongarch64
-        s390x sparc64
-        wasm64
-        nvptx64];
-    my %count;
+        is $wasm->bin_ext, '.wasm', 'wasm bin_ext';
+        is $wasm->format,  'wasm',  'wasm format';
+        ok $wasm->is_wasm,   'is_wasm';
+        ok !$wasm->is_posix, 'wasm-unknown-unknown is not posix';
+        my $wasi = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        ok $wasi->is_wasm,  'wasi is_wasm';
+        ok $wasi->is_posix, 'wasi is_posix';
+        my $netbsd = Brocken::Katsuro::Platform::parse('aarch64--netbsd');
+        is $netbsd->os, 'netbsd', 'netbsd os identified from empty-vendor triple';
+        ok $netbsd->is_bsd, 'is_bsd for netbsd';
+    };
+    subtest 'friendly names' => sub {
+        my $linux = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+        is $linux->friendly, 'Linux on x64', 'linux friendly name';
+        my $win = Brocken::Katsuro::Platform::parse('aarch64-pc-windows-msvc');
+        is $win->friendly, 'Windows on ARM64', 'windows friendly name';
+        my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin');
+        is $mac->friendly, 'macOS on Apple Silicon', 'macos apple silicon friendly name';
+        my $mac_intel = Brocken::Katsuro::Platform::parse('x86_64-apple-darwin');
+        is $mac_intel->friendly, 'macOS on Intel', 'macos intel friendly name';
+        my $freebsd = Brocken::Katsuro::Platform::parse('riscv64-unknown-freebsd');
+        is $freebsd->friendly, 'FreeBSD on RISC-V', 'freebsd friendly name';
+        my $wasm = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
+        is $wasm->friendly, 'WebAssembly (Wasm)', 'wasm friendly name';
+        my $unknown = Brocken::Katsuro::Platform::parse('unknown-unknown-unknown-unknown');
+        is $unknown->friendly, 'sand that does math', 'fallback friendly name';
+    };
+    subtest 'platform naming' => sub {
+        subtest 'Linux (ELF)' => sub {
+            my $linux = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+            is $linux->bin_name('foo'),                 'foo',           'linux bin_name';
+            is $linux->static_lib_name('foo'),          'libfoo.a',      'linux static_lib_name';
+            is $linux->shared_lib_name('foo'),          'libfoo.so',     'linux shared_lib_name';
+            is $linux->shared_lib_name( 'foo', '1.2' ), 'libfoo.so.1.2', 'linux shared_lib_name with version';
+        };
+        subtest 'Windows (PE)' => sub {
+            subtest 'MSVC style' => sub {
+                my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
+                is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
+                is $win->static_lib_name('foo'),          'foo.lib',     'windows static_lib_name';
+                is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
+                is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
+            };
+            subtest 'GNU style' => sub {
+                my $win = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-gnu');
+                is $win->bin_name('foo'),                 'foo.exe',     'windows bin_name';
+                is $win->static_lib_name('foo'),          'foo.a',       'windows static_lib_name';
+                is $win->shared_lib_name('foo'),          'foo.dll',     'windows shared_lib_name';
+                is $win->shared_lib_name( 'foo', '1.2' ), 'foo-1.2.dll', 'windows shared_lib_name with version';
+            };
+        };
+        subtest 'MacOS (Mach-O)' => sub {
+            my $mac = Brocken::Katsuro::Platform::parse('aarch64-apple-darwin');
+            is $mac->bin_name('foo'),                 'foo',              'macos bin_name';
+            is $mac->static_lib_name('foo'),          'libfoo.a',         'macos static_lib_name';
+            is $mac->shared_lib_name('foo'),          'libfoo.dylib',     'macos shared_lib_name';
+            is $mac->shared_lib_name( 'foo', '1.2' ), 'libfoo.1.2.dylib', 'macos shared_lib_name with version';
+        };
+        subtest 'Wasm' => sub {
+            my $wasm = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
+            is $wasm->bin_name('foo'),        'foo.wasm', 'wasm bin_name';
+            is $wasm->static_lib_name('foo'), 'foo.a',    'wasm static_lib_name';
+            is $wasm->shared_lib_name('foo'), 'foo.wasm', 'wasm shared_lib_name';
+        }
+    };
+    subtest 'OS syscall numbers' => sub {
+        my $bsd = Brocken::Katsuro::Platform::parse('x86_64-pc-freebsd-elf');
+        is $bsd->syscall('write'), 4,     'bsd x86_64 write';
+        is $bsd->syscall('exit'),  1,     'bsd x86_64 exit';
+        is $bsd->syscall('fork'),  2,     'bsd x86_64 fork';
+        is $bsd->syscall_num_reg,  'rax', 'bsd x86_64 syscall_num_reg';
+        is $bsd->syscall_ret_reg,  'rax', 'bsd x86_64 syscall_ret_reg';
+        my $lnx = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+        is $lnx->syscall('write'), 1,   'linux x86_64 write';
+        is $lnx->syscall('exit'),  60,  'linux x86_64 exit';
+        is $lnx->syscall('fork'),  57,  'linux x86_64 fork';
+        is $lnx->syscall('futex'), 202, 'linux x86_64 futex';
+        my $lnx64 = Brocken::Katsuro::Platform::parse('aarch64-pc-linux-gnu');
+        is $lnx64->syscall('write'), 64, 'linux aarch64 write';
+        is $lnx64->syscall('exit'),  93, 'linux aarch64 exit';
+        my $mac = Brocken::Katsuro::Platform::parse('x86_64-apple-darwin-macho');
+        is $mac->syscall('write'), 0x2000004, 'macos x86_64 write (with offset)';
+        is $mac->syscall('exit'),  0x2000001, 'macos x86_64 exit (with offset)';
+        ok $mac->syscall('write') != 4, 'macos write != bsd write';
+    };
+    subtest 'Haiku syscall numbers (fallback)' => sub {
+        my $haiku = Brocken::Katsuro::Platform::parse('x86_64-pc-haiku-elf');
+        is $haiku->syscall('write'),  151, 'haiku x86_64 write fallback';
+        is $haiku->syscall('exit'),   41,  'haiku x86_64 exit fallback';
+        is $haiku->syscall('fork'),   47,  'haiku x86_64 fork fallback';
+        is $haiku->syscall('getpid'), 46,  'haiku x86_64 getpid fallback';
+        is $haiku->syscall('read'),   148, 'haiku x86_64 read fallback';
+    };
+    subtest 'ABI register sets' => sub {
+        my $p     = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+        my @avail = $p->registers('available')->@*;
+        ok grep( /^rax$/,  @avail ), 'x86_64 has rax';
+        ok grep( /^r15$/,  @avail ), 'x86_64 has r15';
+        ok !grep( /^rsp$/, @avail ), 'x86_64 excludes rsp';
+        my @caller = $p->caller_saved->@*;
+        ok grep( /^rax$/,  @caller ), 'x86_64 caller rax';
+        ok !grep( /^rbx$/, @caller ), 'x86_64 caller excludes rbx';
+        my @callee = $p->callee_saved->@*;
+        ok grep( /^rbx$/, @callee ), 'x86_64 callee rbx';
+        ok grep( /^r12$/, @callee ), 'x86_64 callee r12';
+        is $p->frame_reg, 'rbp', 'x86_64 frame = rbp';
+        is $p->stack_reg, 'rsp', 'x86_64 stack = rsp';
+        my $aarch    = Brocken::Katsuro::Platform::parse('aarch64-pc-linux-gnu');
+        my @a_caller = $aarch->caller_saved->@*;
+        ok grep( /^x0$/,   @a_caller ), 'aarch64 caller x0';
+        ok grep( /^x15$/,  @a_caller ), 'aarch64 caller x15';
+        ok !grep( /^x19$/, @a_caller ), 'aarch64 caller excludes x19';
+        ok !grep( /^x20$/, @a_caller ), 'aarch64 caller excludes x20';
+        my @a_callee = $aarch->callee_saved->@*;
+        ok grep( /^x20$/, @a_callee ), 'aarch64 callee x20';
+        ok grep( /^x28$/, @a_callee ), 'aarch64 callee x28';
+        is $aarch->frame_reg, 'x29', 'aarch64 frame = x29';
+        my $riscv    = Brocken::Katsuro::Platform::parse('riscv64-pc-linux-gnu');
+        my @r_caller = $riscv->caller_saved->@*;
+        ok grep( /^a0$/, @r_caller ), 'riscv64 caller a0';
+        ok grep( /^t6$/, @r_caller ), 'riscv64 caller t6';
+        my @r_callee = $riscv->callee_saved->@*;
+        ok grep( /^s1$/,  @r_callee ), 'riscv64 callee s1';
+        ok grep( /^s11$/, @r_callee ), 'riscv64 callee s11';
+        is $riscv->frame_reg, 's0', 'riscv64 frame = s0';
+    };
+    subtest 'triple normalization' => sub {
+        my $norm = Brocken::Katsuro::Platform::normalize_triple('x86_64-apple-darwin21.0.0');
+        is $norm, 'x86_64-apple-darwin21.0.0-macho', '3-field apple triple';
+        $norm = Brocken::Katsuro::Platform::normalize_triple('x86_64-linux-gnu');
+        is $norm, 'x86_64-pc-linux-gnu', '3-field linux triple';
+        $norm = Brocken::Katsuro::Platform::normalize_triple('x86_64-w64-mingw32');
+        is $norm, 'x86_64-pc-windows-gnu', '3-field mingw triple';
+        $norm = Brocken::Katsuro::Platform::normalize_triple('x86_64-unknown-openbsd-elf');
+        is $norm, 'x86_64-unknown-openbsd-elf', '4-field openbsd triple unchanged';
+    };
+    subtest 'known target triples' => sub {
+        my @targets = <DATA>;
+        chomp @targets;
+        my $ok      = 0;
+        my %arch_64 = map { $_ => 1 } qw[x86_64
+            aarch64 aarch64_be arm64e
+            riscv64
+            powerpc64 powerpc64le
+            mips64 mips64el
+            loongarch64
+            s390x sparc64
+            wasm64
+            nvptx64];
+        my %count;
 
-    for my $raw (@targets) {
-        next if $raw =~ /^\s*#/ || $raw =~ /^\s*$/;
-        my $p = Brocken::Katsuro::Platform::parse($raw);
-        ok defined $p && $p->isa('Brocken::Katsuro::Platform'), "parse($raw)";
-        $ok++;
-        my $arch = $p->arch;
-        $count{ $arch_64{$arch} ? '64' : ( $arch =~ /64/ ? '64' : 'other' ) }++;
+        for my $raw (@targets) {
+            next if $raw =~ /^\s*#/ || $raw =~ /^\s*$/;
+            my $p = Brocken::Katsuro::Platform::parse($raw);
+            ok defined $p && $p->isa('Brocken::Katsuro::Platform'), "parse($raw)";
+            $ok++;
+            my $arch = $p->arch;
+            $count{ $arch_64{$arch} ? '64' : ( $arch =~ /64/ ? '64' : 'other' ) }++;
+        }
+        diag "$ok targets parsed (" . ( $count{64} // 0 ) . ' 64-bit, ' . ( $count{other} // 0 ) . ' other)';
+    };
+};
+subtest Lindsay => sub {
+    subtest 'Lindsay::IR Types & Singletons' => sub {
+        my $i32 = Brocken::Lindsay::IR::Type::i32();
+        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        is $i32->as_string, 'i32', 'i32 renders correctly';
+        is $ptr->as_string, 'ptr', 'ptr renders correctly';
+
+        # Prove they are singletons
+        my $i32_again = Brocken::Lindsay::IR::Type::i32();
+        ref_is $i32, $i32_again, 'Type singletons return the same memory reference';
+    };
+    subtest 'Lindsay::IR Values & Constants' => sub {
+        my $val = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => '%my_var' );
+        is $val->as_string, '%my_var', 'Value renders its name';
+        my $const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => '42' );
+        is $const->as_string, '42', 'Constant renders its underlying value';
+    };
+    subtest 'Lindsay::IR Builder' => sub {
+        my $module = Brocken::Lindsay::IR::Module->new( name => 'test_mod' );
+
+        # Setup Parameters
+        my $param_a = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => '%a' );
+        my $param_b = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => '%b' );
+
+        # Setup Function
+        my $func = Brocken::Lindsay::IR::Function->new(
+            name        => 'add_nums',
+            return_type => Brocken::Lindsay::IR::Type::i32(),
+            params      => [ $param_a, $param_b ]
+        );
+        $module->add_function($func);
+
+        # Use Builder
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        my $entry   = $func->append_block('entry');
+        $builder->position_at_end($entry);
+
+        # Generate instructions
+        my $sum = $builder->build_add( $param_a, $param_b );    # Should assign %0 automatically
+        $builder->build_ret($sum);
+
+        # Verify Internal State
+        is $sum->name,                         '%0', 'Builder assigned correct auto-incremented SSA id';
+        is scalar( $entry->instructions->@* ), 2,    'Two instructions appended to basic block';
+
+        # Verify Stringified IR Output
+        my $expected_ir = <<~'IR';
+    ; ModuleID = 'test_mod'
+
+    define i32 @add_nums(i32 %a, i32 %b) {
+    entry:
+      %0 = add i32 %a, i32 %b
+      ret i32 %0
     }
-    diag "$ok targets parsed (" . ( $count{64} // 0 ) . ' 64-bit, ' . ( $count{other} // 0 ) . ' other)';
+
+    IR
+        is $module->as_string, $expected_ir, 'Generated IR matches LLVM-style expected output';
+    };
+    subtest 'Lindsay::IR Memory Operations' => sub {
+        my $module      = Brocken::Lindsay::IR::Module->new( name => 'mem_test' );
+        my $param_input = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => '%input' );
+        my $func
+            = Brocken::Lindsay::IR::Function->new( name => 'copy_val', return_type => Brocken::Lindsay::IR::Type::void(), params => [$param_input] );
+        $module->add_function($func);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        # Allocate an i32 on the stack (yields a ptr)
+        my $ptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::i32(), '%my_ptr' );
+
+        # Store the input parameter into the pointer
+        $builder->build_store( $param_input, $ptr );
+
+        # Load the value back out
+        my $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::i32(), $ptr, '%loaded_val' );
+
+        # Return
+        $builder->build_ret();
+        my $expected_ir = <<~'IR';
+    ; ModuleID = 'mem_test'
+
+    define void @copy_val(i32 %input) {
+    entry:
+      %my_ptr = alloca i32
+      store i32 %input, ptr %my_ptr
+      %loaded_val = load i32, ptr %my_ptr
+      ret void
+    }
+
+    IR
+        is $module->as_string, $expected_ir, 'Generated Memory IR matches expected LLVM-style output';
+    };
+    subtest 'Lindsay::IR Gradual Typing (Boxing/Unboxing)' => sub {
+        my $module = Brocken::Lindsay::IR::Module->new( name => 'gradual_typing' );
+
+        # Input is a dynamic (Perl-like) scalar
+        my $param_dyn = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::dynamic(), name => '%input_dyn' );
+
+        # Returns a dynamic scalar
+        my $func = Brocken::Lindsay::IR::Function->new( name => 'double_it', return_type => Brocken::Lindsay::IR::Type::dynamic(),
+            params => [$param_dyn] );
+        $module->add_function($func);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        # Unbox the dynamic variable into a native 64-bit integer
+        my $native_i64 = $builder->build_unbox( $param_dyn, Brocken::Lindsay::IR::Type::i64(), '%native_val' );
+
+        # Perform native math (zero GC overhead)
+        my $doubled = $builder->build_add( $native_i64, $native_i64, '%doubled' );
+
+        # Box it back into a dynamic variable to return it
+        my $boxed_result = $builder->build_box( $doubled, '%boxed_res' );
+
+        # Return the dynamic value
+        $builder->build_ret($boxed_result);
+        my $expected_ir = <<~'IR';
+    ; ModuleID = 'gradual_typing'
+
+    define dynamic @double_it(dynamic %input_dyn) {
+    entry:
+      %native_val = unbox dynamic %input_dyn to i64
+      %doubled = add i64 %native_val, i64 %native_val
+      %boxed_res = box i64 %doubled to dynamic
+      ret dynamic %boxed_res
+    }
+
+    IR
+        is $module->as_string, $expected_ir, 'Generated Boxing IR matches expected output';
+    };
+    subtest 'Lindsay::IR Control Flow (If/Else)' => sub {
+        my $module  = Brocken::Lindsay::IR::Module->new( name => 'control_flow' );
+        my $param_a = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => '%a' );
+        my $param_b = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => '%b' );
+        my $func    = Brocken::Lindsay::IR::Function->new(
+            name        => 'max_val',
+            return_type => Brocken::Lindsay::IR::Type::i32(),
+            params      => [ $param_a, $param_b ]
+        );
+        $module->add_function($func);
+
+        # Create the basic blocks
+        my $entry_blk = $func->append_block('entry');
+        my $then_blk  = $func->append_block('if.then');
+        my $else_blk  = $func->append_block('if.else');
+        my $builder   = Brocken::Lindsay::IR::Builder->new();
+
+        # Entry Block
+        $builder->position_at_end($entry_blk);
+
+        # check if %a > %b (sgt = signed greater than)
+        my $cond = $builder->build_icmp( 'sgt', $param_a, $param_b, '%cmp' );
+        $builder->build_cond_br( $cond, $then_blk, $else_blk );
+
+        # Then Block
+        $builder->position_at_end($then_blk);
+        $builder->build_ret($param_a);
+
+        # Else Block
+        $builder->position_at_end($else_blk);
+        $builder->build_ret($param_b);
+        my $expected_ir = <<~'IR';
+    ; ModuleID = 'control_flow'
+
+    define i32 @max_val(i32 %a, i32 %b) {
+    entry:
+      %cmp = icmp sgt i32 %a, %b
+      br i1 %cmp, label %if.then, label %if.else
+    if.then:
+      ret i32 %a
+    if.else:
+      ret i32 %b
+    }
+
+    IR
+        is $module->as_string, $expected_ir, 'Generated If/Else IR matches expected output';
+    };
+    subtest 'Lindsay::IR Function Calls and FFI' => sub {
+        my $module = Brocken::Lindsay::IR::Module->new( name => 'call_test' );
+
+        # Declare an external FFI function (e.g., C's puts)
+        # int puts(char *str);
+        my $ffi_param = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() );
+        my $ffi_puts
+            = Brocken::Lindsay::IR::Function->new( name => 'puts', return_type => Brocken::Lindsay::IR::Type::i32(), params => [$ffi_param] );
+        $module->add_function($ffi_puts);
+
+        # Define our local main function
+        my $func_main = Brocken::Lindsay::IR::Function->new(
+            name        => 'main',
+            return_type => Brocken::Lindsay::IR::Type::i32(),
+            params      => []                                   # no args
+        );
+        $module->add_function($func_main);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func_main->append_block('entry') );
+
+        # Simulate a global string pointer being passed in
+        my $str_ptr = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '@hello_str' );
+
+        # Call the external FFI function
+        my $puts_res = $builder->build_call( $ffi_puts, [$str_ptr], '%puts_res' );
+
+        # Return the result
+        $builder->build_ret($puts_res);
+        my $expected_ir = <<~'IR';
+    ; ModuleID = 'call_test'
+
+    declare i32 @puts(ptr)
+
+    define i32 @main() {
+    entry:
+      %puts_res = call i32 @puts(ptr @hello_str)
+      ret i32 %puts_res
+    }
+
+    IR
+        is $module->as_string, $expected_ir, 'Generated IR supports FFI declarations and calls';
+    };
 };
 #
 done_testing;
