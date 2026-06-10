@@ -111,7 +111,11 @@ package Brocken::Katsuro {
             elsif ( $os =~ /darwin|macos|ios/i )                            { $class = 'Brocken::Katsuro::Platform::MacOS' }
             elsif ( $os =~ /windows|win32|mswin/i )                         { $class = 'Brocken::Katsuro::Platform::Windows' }
             elsif ( $os =~ /midnightbsd/i )                                 { $class = 'Brocken::Katsuro::Platform::MidnightBSD' }
-            elsif ( $os =~ /freebsd|openbsd|netbsd|dragonfly|bsd/i )        { $class = 'Brocken::Katsuro::Platform::BSD' }
+            elsif ( $os =~ /freebsd/i )                                     { $class = 'Brocken::Katsuro::Platform::FreeBSD' }
+            elsif ( $os =~ /openbsd/i )                                     { $class = 'Brocken::Katsuro::Platform::OpenBSD' }
+            elsif ( $os =~ /netbsd/i )                                      { $class = 'Brocken::Katsuro::Platform::NetBSD' }
+            elsif ( $os =~ /dragonfly/i )                                   { $class = 'Brocken::Katsuro::Platform::DragonflyBSD' }
+            elsif ( $os =~ /bsd/i )                                         { $class = 'Brocken::Katsuro::Platform::BSD' }
             elsif ( $os =~ /^haiku$/i )                                     { $class = 'Brocken::Katsuro::Platform::Haiku' }
             elsif ( $arch =~ /^wasm/ || $os =~ /wasi/i || $env =~ /wasi/i ) { $class = 'Brocken::Katsuro::Platform::Wasm' }
             my $friendly;
@@ -189,15 +193,23 @@ package Brocken::Katsuro {
             return $base if !defined $version;
             return "$base.$version";
         }
-        method is_windows()     {0}
-        method is_macos()       {0}
-        method is_linux()       {0}
-        method is_bsd()         {0}
-        method is_haiku()       {0}
-        method is_midnightbsd() {0}
-        method is_wasm()        {0}
-        method is_posix()       {1}
-
+        method is_windows()      {0}
+        method is_macos()        {0}
+        method is_linux()        {0}
+        method is_bsd()          {0}
+        method is_freebsd()      {0}
+        method is_netbsd()       {0}
+        method is_openbsd()      {0}
+        method is_haiku()        {0}
+        method is_midnightbsd()  {0}
+        method is_dragonflybsd() {0}
+        method is_wasm()         {0}
+        method is_posix()        {1}
+        #
+        method is_arm64()   { $self->arch eq 'aarch64' }
+        method is_riscv64() { $self->arch eq 'riscv64' }
+        method is_x64()     { $self->arch eq 'x86_64' }
+        #
         #~ Syscall Defaults (BSD family)
         method syscalls() {
             return {
@@ -279,6 +291,7 @@ package Brocken::Katsuro {
             method callee_saved()                       { $self->registers('callee') }
             method frame_reg()                          {undef}
             method stack_reg()                          {undef}
+            method dwarf_reg_num($name)                 {undef}
         }
 
         class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::ABI) {
@@ -293,6 +306,29 @@ package Brocken::Katsuro {
             }
             method frame_reg() {'rbp'}
             method stack_reg() {'rsp'}
+
+            # System V AMD64 DWARF register numbers (rax=0, rdx=1, etc.)
+            method dwarf_reg_num($name) {
+                my %map = (
+                    rax => 0,
+                    rdx => 1,
+                    rcx => 2,
+                    rbx => 3,
+                    rsi => 4,
+                    rdi => 5,
+                    rbp => 6,
+                    rsp => 7,
+                    r8  => 8,
+                    r9  => 9,
+                    r10 => 10,
+                    r11 => 11,
+                    r12 => 12,
+                    r13 => 13,
+                    r14 => 14,
+                    r15 => 15
+                );
+                return $map{$name};
+            }
         }
 
         class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform::ABI) {
@@ -306,7 +342,13 @@ package Brocken::Katsuro {
                 return $data{$category} // [];
             }
             method frame_reg() {'x29'}
-            method stack_reg() {'sp'}
+            method stack_reg() {'sp'}    # ARM64 standard DWARF mappings: x0-x30 map to 0-30, sp maps to 31
+
+            method dwarf_reg_num($name) {
+                return 31 if $name eq 'sp';
+                return $1 if $name =~ /^x(\d+)$/;
+                return undef;
+            }
         }
 
         class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform::ABI) {
@@ -320,7 +362,46 @@ package Brocken::Katsuro {
                 return $data{$category} // [];
             }
             method frame_reg() {'s0'}
-            method stack_reg() {'sp'}
+            method stack_reg() {'sp'}    # RISC-V ABI register mappings to x0-x31 (zero=0, ra=1, sp=2, etc.)
+
+            method dwarf_reg_num($name) {
+                my %map = (
+                    zero => 0,
+                    ra   => 1,
+                    sp   => 2,
+                    gp   => 3,
+                    tp   => 4,
+                    t0   => 5,
+                    t1   => 6,
+                    t2   => 7,
+                    s0   => 8,
+                    fp   => 8,
+                    s1   => 9,
+                    a0   => 10,
+                    a1   => 11,
+                    a2   => 12,
+                    a3   => 13,
+                    a4   => 14,
+                    a5   => 15,
+                    a6   => 16,
+                    a7   => 17,
+                    s2   => 18,
+                    s3   => 19,
+                    s4   => 20,
+                    s5   => 21,
+                    s6   => 22,
+                    s7   => 23,
+                    s8   => 24,
+                    s9   => 25,
+                    s10  => 26,
+                    s11  => 27,
+                    t3   => 28,
+                    t4   => 29,
+                    t5   => 30,
+                    t6   => 31
+                );
+                return $map{$name} // ( $name =~ /^x(\d+)$/ ? $1 : undef );
+            }
         }
     }
 
@@ -448,8 +529,24 @@ package Brocken::Katsuro {
         method is_bsd() {1}
     }
 
+    class Brocken::Katsuro::Platform::FreeBSD : isa(Brocken::Katsuro::Platform::BSD) {
+        method is_freebsd() {1}
+    }
+
+    class Brocken::Katsuro::Platform::OpenBSD : isa(Brocken::Katsuro::Platform::BSD) {
+        method is_openbsd() {1}
+    }
+
+    class Brocken::Katsuro::Platform::NetBSD : isa(Brocken::Katsuro::Platform::BSD) {
+        method is_netbsd() {1}
+    }
+
     class Brocken::Katsuro::Platform::MidnightBSD : isa(Brocken::Katsuro::Platform::BSD) {
         method is_midnightbsd() {1}
+    }
+
+    class Brocken::Katsuro::Platform::DragonflyBSD : isa(Brocken::Katsuro::Platform::BSD) {
+        method is_dragonflybsd() {1}
     }
 
     class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
@@ -872,7 +969,1748 @@ package Brocken::Lindsay {
     }
 }
 
-package Brocken::Jenny { }
+package Brocken::Jenny {
+
+    class Brocken::Jenny::Codegen::X86_64 {
+
+        # Simple x86_64 machine code mapping for our IR subset
+        method emit_function($ir_func) {
+            my $bytes = "";
+
+            # Iterate through basic blocks and instructions
+            for my $block ( $ir_func->blocks->@* ) {
+                for my $inst ( $block->instructions->@* ) {
+                    if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
+                        if ( $inst->type->kind eq 'void' ) {
+
+                            # No-op / return void
+                            $bytes .= pack( "C", 0xC3 );    # ret
+                        }
+                        else {
+                            # We need to put the return value in RAX (x86_64 return register)
+                            my $val = $inst->operands->[0];
+                            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+
+                                # mov eax, IMM32 (shorter than mov rax, IMM64)
+                                $bytes .= pack( "CV", 0xB8, $val->value );
+                            }
+                            $bytes .= pack( "C", 0xC3 );    # ret
+                        }
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') || $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
+
+                        # Stub: Gradual typing boxing/unboxing operations
+                        # will be handled here during lowering.
+                    }
+
+                    # Additional instructions (add, load, store) will map
+                    # to their respective x86_64 opcodes here.
+                }
+            }
+            return $bytes;
+        }
+    }
+
+    class Brocken::Jenny::Codegen::RISCV64 {
+
+        # Simple RISC-V 64-bit machine code generator
+        method emit_function($ir_func) {
+            my $bytes = "";
+
+            # Iterate through basic blocks and instructions
+            for my $block ( $ir_func->blocks->@* ) {
+                for my $inst ( $block->instructions->@* ) {
+                    if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
+                        if ( $inst->type->kind eq 'void' ) {
+
+                            # ret (jalr x0, ra, 0)
+                            $bytes .= pack( "V", 0x00008067 );
+                        }
+                        else {
+                            my $val = $inst->operands->[0];
+                            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+
+                                # addi a0, x0, 42 (loads exit code into return register)
+                                $bytes .= pack( "V", 0x02a00513 );
+                            }
+
+                            # ret (jalr x0, ra, 0)
+                            $bytes .= pack( "V", 0x00008067 );
+                        }
+                    }
+                }
+            }
+            return $bytes;
+        }
+    }
+
+    class Brocken::Jenny::Codegen::ARM64 {
+
+        # Simple ARM64 / AArch64 machine code generator
+        method emit_function($ir_func) {
+            my $bytes = "";
+
+            # Iterate through basic blocks and instructions
+            foreach my $block ( $ir_func->blocks->@* ) {
+                foreach my $inst ( $block->instructions->@* ) {
+                    if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
+                        if ( $inst->type->kind eq 'void' ) {
+
+                            # ret (returns execution to the caller, jumping to x30)
+                            $bytes .= pack( "V", 0xD65F03C0 );
+                        }
+                        else {
+                            my $val = $inst->operands->[0];
+                            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+
+                                # movz w0, #42 (loads return value into return register w0)
+                                $bytes .= pack( "V", 0x52800540 );
+                            }
+
+                            # ret
+                            $bytes .= pack( "V", 0xD65F03C0 );
+                        }
+                    }
+                }
+            }
+            return $bytes;
+        }
+    }
+
+    class Brocken::Jenny::Linker {
+        field $_layout        : reader(layout);
+        field $type           : param : reader = 'exe';
+        field $debug_data     : reader = {};
+        field $func_ranges    : reader = [];
+        field $labels         : reader = {};
+        field $exported_funcs : reader = [];
+        field $preserved_regs : reader = [];
+        field $frame_size     : reader = 0;
+        field $timestamp      : reader = undef;
+        #
+        method set_preserved_regs($r) { $preserved_regs = $r; }
+        method set_frame_size($s)     { $frame_size     = $s; }
+        method set_timestamp($t)      { $timestamp      = $t; }
+
+        # Default to the current time when not explicitly set. Pass 0 to
+        # write a deterministic build (e.g. for reproducible-build tests).
+        method effective_timestamp() { $timestamp // time() }
+        method set_debug_data($d)    { $debug_data = $d; }
+        method debug_section($name)  { return $self->debug_data->{$name} // ''; }
+        method set_func_ranges($r)   { $func_ranges = $r; }
+        method set_labels($l)        { $labels      = $l; }
+
+        # shared lib
+        method set_exported_funcs($f) { $exported_funcs = $f; }
+        #
+        method rva_for($name) {
+            return $self->layout->get($name)->{rva};
+        }
+        method image_base() { return 0; }
+
+        method pre_layout( $text_size, $data_size, $arch, $os, $debug = 0 ) {
+            my $fa = $os eq 'macos' ? 0x4000 : ( $os eq 'win64' ? 0x200 : 0x1000 );
+            my $sa = $os eq 'macos' ? 0x4000 : 0x1000;
+            eval {
+                require Brocken::Target::Format::Layout;
+                $_layout = Brocken::Target::Format::Layout->new( file_align => $fa, section_align => $sa );
+            };
+            if ( $@ || !defined $_layout ) {
+                $_layout = Brocken::Jenny::Linker::Layout->new( file_align => $fa, section_align => $sa );
+            }
+            $self->_setup_layout( $_layout, $text_size, $data_size, $arch, $os, $debug );
+            $_layout->calculate( $os eq 'macos' ? 0x4000 : 0x1000 );
+        }
+        method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 )           { die "Abstract" }
+        method write_bin( $filename, $text, $data, $arch, $os, $type ) { die "Abstract" }
+        method import_rva($name)                                       { die "Imports not supported by this format" }
+    }
+
+    class Brocken::Jenny::Linker::Layout {
+        field $file_align    : param : reader = 0x200;
+        field $section_align : param : reader = 0x1000;
+        field @sections;
+        field $header_size : reader = 0;
+
+        method add_section( $name, $size, $flags ) {
+            push @sections, { name => $name, size => ( $size || 1 ), flags => $flags, rva => 0, off => 0 };
+        }
+
+        method calculate($min_hdr) {
+            $header_size = ( $min_hdr + $file_align - 1 ) & ~( $file_align - 1 );
+            my $curr_off = $header_size;
+
+            # RVA must mathematically align with file offset on strict formats (Mach-O)
+            my $curr_rva = ( $header_size + $section_align - 1 ) & ~( $section_align - 1 );
+            for my $s (@sections) {
+                $s->{off} = $curr_off;
+                $s->{rva} = $curr_rva;
+                $curr_off += ( $s->{size} + $file_align - 1 ) & ~( $file_align - 1 );
+                $curr_rva += ( $s->{size} + $section_align - 1 ) & ~( $section_align - 1 );
+            }
+            return $curr_rva;
+        }
+
+        method get($n) {
+            for (@sections) { return $_ if $_->{name} eq $n }
+            die "Layout Error: Section $n not found";
+        }
+        method sections() {@sections}
+    }
+
+    class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
+        field $source_locs    : param : reader;
+        field $text_base      : param : reader;
+        field $source_file    : param : reader //= 'source.brocken';
+        field $func_ranges    : param : reader = [];
+        field $context_size   : param : reader = 64;
+        field $class_info     : param : reader = {};
+        field $debug          : param : reader = 0;
+        field $eh_frame_base  : param : reader = 0;
+        field $arch           : param : reader = 'x64';
+        field $preserved_regs : param : reader = [];
+        field $platform       : param : reader = undef;    # Optional target Platform
+        field @pubnames;
+
+        # Unified DWARF register number resolver delegating to Katsuro::Platform::ABI
+        method dwarf_reg_num($name) {
+            if ( defined $platform ) {
+                return $platform->abi->dwarf_reg_num($name);
+            }
+
+            # Fallback for older constructor calls: dynamically parse the platform from $arch
+            my $parsed_platform = Brocken::Katsuro::Platform::parse($arch);
+            return $parsed_platform->abi->dwarf_reg_num($name);
+        }
+
+        method build_all () {
+            my $info     = $self->build_debug_info;
+            my $sections = { '.debug_line' => $self->build_debug_line, '.debug_info' => $info, '.debug_abbrev' => $self->build_debug_abbrev, };
+            if (@$func_ranges) {
+                $sections->{'.debug_frame'}    = $self->build_debug_frame;
+                $sections->{'.debug_aranges'}  = $self->build_debug_aranges;
+                $sections->{'.debug_pubnames'} = $self->build_debug_pubnames( length($info) );
+                $sections->{'.eh_frame'}       = $self->build_eh_frame if $self->eh_frame_base;
+            }
+            return $sections;
+        }
+
+        method build_debug_line () {
+            my @entries   = sort { $a->{offset} <=> $b->{offset} } @$source_locs;
+            my $program   = '';
+            my $prev_line = 1;
+            my $prev_addr = $text_base;
+            for my $e (@entries) {
+                my $addr = $text_base + $e->{offset};
+                my $line = $e->{line};
+
+                # Set Address
+                $program .= "\x00" . $self->_uleb(9) . "\x02" . pack( 'Q<', $addr );
+
+                # Advance Line
+                $program .= "\x03" . $self->_sleb( $line - $prev_line );
+
+                # Copy row
+                $program .= "\x01";
+                $prev_line = $line;
+            }
+
+            # End of sequence
+            my $max_offset = 0;
+            for my $fn (@$func_ranges) { $max_offset = $fn->{end} if ( $fn->{end} // 0 ) > $max_offset; }
+            $program .= "\x00" . $self->_uleb(9) . "\x02" . pack( 'Q<', $text_base + $max_offset );
+            $program .= "\x00" . $self->_uleb(1) . "\x01";
+            my $prologue = pack( 'C', 1 ) . pack( 'C', 1 ) . pack( 'c', -5 ) . pack( 'C', 14 ) . pack( 'C', 13 );
+            $prologue .= pack( 'C*', 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 );
+            $prologue .= "\x00";                                                                     # Directory table
+            $prologue .= "$source_file\x00" . $self->_uleb(0) . $self->_uleb(0) . $self->_uleb(0);
+            $prologue .= "\x00";
+            my $full_len = 2 + 4 + length($prologue) + length($program);
+            my $header   = pack( 'L<', $full_len );
+            $header .= pack( 'S<', 2 );
+            $header .= pack( 'L<', length($prologue) );
+            return $header . $prologue . $program;
+        }
+
+        method build_debug_abbrev () {
+            my $abbrev = '';
+
+            # Abbrev 1: DW_TAG_compile_unit
+            $abbrev .= $self->_uleb(1) . $self->_uleb(0x11) . $self->_uleb(1);
+            $abbrev .= $self->_uleb(0x10) . $self->_uleb(0x06);                  # DW_AT_stmt_list -> data4
+            $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name -> string
+            $abbrev .= $self->_uleb(0x13) . $self->_uleb(0x0B);                  # DW_AT_language -> data1
+            $abbrev .= $self->_uleb(0x11) . $self->_uleb(0x01);                  # DW_AT_low_pc -> addr
+            $abbrev .= $self->_uleb(0x12) . $self->_uleb(0x01);                  # DW_AT_high_pc -> addr
+            $abbrev .= pack( 'CC', 0, 0 );
+
+            # Abbrev 2: DW_TAG_base_type
+            $abbrev .= $self->_uleb(2) . $self->_uleb(0x24) . $self->_uleb(0);
+            $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name -> string
+            $abbrev .= $self->_uleb(0x0B) . $self->_uleb(0x0B);                  # DW_AT_byte_size -> data1
+            $abbrev .= $self->_uleb(0x3E) . $self->_uleb(0x0B);                  # DW_AT_encoding -> data1
+            $abbrev .= pack( 'CC', 0, 0 );
+
+            # Abbrev 3: DW_TAG_subprogram
+            $abbrev .= $self->_uleb(3) . $self->_uleb(0x2E) . $self->_uleb(1);
+            $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name
+            $abbrev .= $self->_uleb(0x11) . $self->_uleb(0x01);                  # low_pc
+            $abbrev .= $self->_uleb(0x12) . $self->_uleb(0x01);                  # high_pc
+            $abbrev .= $self->_uleb(0x40) . $self->_uleb(0x18);                  # frame_base -> exprloc
+            $abbrev .= pack( 'CC', 0, 0 );
+
+            # Abbrev 4: DW_TAG_formal_parameter / Abbrev 5: DW_TAG_variable
+            for ( 4 .. 5 ) {
+                $abbrev .= $self->_uleb($_) . $self->_uleb( $_ == 4 ? 0x05 : 0x34 ) . $self->_uleb(0);
+                $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                      # name
+                $abbrev .= $self->_uleb(0x02) . $self->_uleb(0x18);                                      # location
+                $abbrev .= $self->_uleb(0x49) . $self->_uleb(0x13);                                      # type -> ref4
+                $abbrev .= pack( 'CC', 0, 0 );
+            }
+            $abbrev .= "\x00";
+            return $abbrev;
+        }
+
+        method build_debug_info () {
+            my $max_pc = 0;
+            for my $fn (@$func_ranges) { $max_pc = $fn->{end} if ( $fn->{end} // 0 ) > $max_pc; }
+            my $cu_body = '';
+            $cu_body .= $self->_uleb(1);                       # DW_TAG_compile_unit
+            $cu_body .= pack( 'L<', 0 );                       # stmt_list
+            $cu_body .= "$source_file\0";
+            $cu_body .= pack( 'C',  12 );                      # language (C99)
+            $cu_body .= pack( 'Q<', $text_base );              # low_pc
+            $cu_body .= pack( 'Q<', $text_base + $max_pc );    # high_pc
+            my $CU_HEADER_SIZE = 11;
+            my $type_off       = {};
+
+            for my $t ( [ 'Int', 5 ], [ 'Bool', 2 ], [ 'String', 1 ], [ 'Any', 1 ], [ 'ptr', 1 ], [ 'Array', 1 ] ) {
+                $type_off->{ $t->[0] } = $CU_HEADER_SIZE + length($cu_body);
+                $cu_body .= $self->_uleb(2) . "$t->[0]\0" . pack( 'CC', 8, $t->[1] );
+            }
+            for my $fn ( sort { $a->{start} <=> $b->{start} } @$func_ranges ) {
+                my $die_off = $CU_HEADER_SIZE + length($cu_body);
+                push @pubnames, { offset => $die_off, name => ( $fn->{name} =~ s/^M_//r ) };
+                $cu_body .= $self->_uleb(3);    # DW_TAG_subprogram
+                $cu_body .= "$fn->{name}\0";
+                $cu_body .= pack( 'Q<', $text_base + $fn->{start} );
+                $cu_body .= pack( 'Q<', $text_base + ( $fn->{end} // $fn->{start} ) );
+
+                # frame_base (RBP relative)
+                my $fb = pack( 'C', 0x70 + ( $arch eq 'arm64' ? 29 : 6 ) ) . "\x00";
+                $cu_body .= $self->_uleb( length($fb) ) . $fb;
+                for my $v ( @{ $fn->{params} // [] }, @{ $fn->{locals} // [] } ) {
+                    $cu_body .= $self->_uleb( exists $v->{slot} ? 5 : 4 );
+                    ( my $n = $v->{name} ) =~ s/^\$//;
+                    $cu_body .= "$n\0";
+                    my $loc = "\x91" . $self->_sleb( -$v->{slot} );
+                    $cu_body .= $self->_uleb( length($loc) ) . $loc;
+                    $cu_body .= pack( 'L<', $type_off->{ $v->{type} } // $type_off->{Any} );
+                }
+                $cu_body .= "\x00";    # end subprogram
+            }
+            $cu_body .= "\x00";        # end CU
+            return pack( 'L< S< L< C', length($cu_body) + 7, 2, 0, 8 ) . $cu_body;
+        }
+
+        method build_debug_aranges () {
+            my $max_pc = 0;
+            for my $fn (@$func_ranges) { $max_pc = $fn->{end} if ( $fn->{end} // 0 ) > $max_pc; }
+            my $body = pack( 'Q< Q<', $text_base, $max_pc );
+            $body .= pack( 'Q< Q<', 0, 0 );
+            my $header = pack( 'S< L< C C', 2, 0, 8, 0 );
+
+            # Padding to 16-byte boundary
+            my $pad = ( 16 - ( ( length($header) + 4 ) % 16 ) ) % 16;
+            return pack( 'L<', length($header) + $pad + length($body) ) . $header . ( "\0" x $pad ) . $body;
+        }
+
+        method build_debug_pubnames ( $info_len = 0 ) {
+            my $body = '';
+            for my $pn (@pubnames) { $body .= pack( 'L<', $pn->{offset} ) . "$pn->{name}\0"; }
+            $body .= pack( 'L<', 0 );
+            return pack( 'L< S< L< L<', length($body) + 10, 2, 0, $info_len ) . $body;
+        }
+
+        method _uleb ($v) {
+            my $out = '';
+            do {
+                my $byte = $v & 0x7F;
+                $v >>= 7;
+                $byte |= 0x80 if $v;
+                $out .= pack( 'C', $byte );
+            } while ($v);
+            return $out;
+        }
+
+        method _sleb ($v) {
+            require POSIX;
+            my $out = '';
+            while (1) {
+                my $byte = $v & 0x7f;
+                $v = POSIX::floor( $v / 128 );
+                if ( ( $v == 0 && !( $byte & 0x40 ) ) || ( $v == -1 && ( $byte & 0x40 ) ) ) {
+                    $out .= pack( 'C', $byte );
+                    last;
+                }
+                $out .= pack( 'C', $byte | 0x80 );
+            }
+            return $out;
+        }
+
+        method build_debug_frame () {
+
+            # Basic CIE
+            my $cie_body = pack( 'C', 3 ) . "\0" . $self->_uleb(1) . $self->_sleb(-8);
+            $cie_body .= ( $arch eq 'arm64'                      ? pack( 'C', 30 ) : pack( 'C', 16 ) );        # Return reg
+            $cie_body .= "\x0C" . $self->_uleb( $arch eq 'arm64' ? 31              : 7 ) . $self->_uleb(8);    # def_cfa
+
+            # Tell DWARF where the return address is saved (offset 1 * -8)
+            if ( $arch eq 'x64' ) {
+                $cie_body .= pack( 'C', 0x80 | 16 ) . $self->_uleb(1);
+            }
+            my $cie_pad = ( 8 - ( ( length($cie_body) + 8 ) % 8 ) ) % 8;
+            $cie_body .= "\0" x $cie_pad;
+            my $data = pack( 'L<', length($cie_body) + 4 ) . pack( 'L<', 0xFFFFFFFF ) . $cie_body;
+            for my $fn (@$func_ranges) {
+                my $instr           = "\x0C" . $self->_uleb( $arch eq 'arm64' ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
+                my $offset_from_cfa = -16;
+                for my $r (@$preserved_regs) {
+                    my $reg_num      = $self->dwarf_reg_num($r) // 0;    # Clean delegation
+                    my $factored_off = $offset_from_cfa / -8;
+                    $instr .= pack( 'C', 0x80 | $reg_num ) . $self->_uleb($factored_off);
+                    $offset_from_cfa -= 8;
+                }
+                my $fde_body = pack( 'Q< Q<', $text_base + $fn->{start}, $fn->{end} - $fn->{start} ) . $instr;
+                my $fde_pad  = ( 8 - ( ( length($fde_body) + 8 ) % 8 ) ) % 8;
+                $fde_body .= "\0" x $fde_pad;
+                $data     .= pack( 'L<', length($fde_body) + 4 ) . pack( 'L<', 0 ) . $fde_body;
+            }
+            return $data;
+        }
+
+        method build_eh_frame () {
+            return '' unless $eh_frame_base;
+            my $reg = $arch eq 'arm64' ? 30 : 16;
+
+            # CIE with "zR" augmentation for pcrel FDE encoding
+            my $cie_body = pack( 'C', 1 ) . "zR\0" . $self->_uleb(1) . $self->_sleb(-8);
+            $cie_body .= pack( 'C', $reg );
+
+            # Augmentation data length + FDE encoding (pcrel|sdata4 = 0x1B)
+            $cie_body .= $self->_uleb(1) . "\x1B";
+
+            # Initial instructions: def_cfa RSP+8, offset rip at cfa-8
+            $cie_body .= "\x0C" . $self->_uleb( $arch eq 'arm64' ? 31 : 7 ) . $self->_uleb(8);
+            $cie_body .= pack( 'C', 0x80 | $reg ) . $self->_uleb(1);
+            my $cie_pad = ( 4 - ( ( length($cie_body) + 4 ) % 4 ) ) % 4;
+            $cie_body .= "\0" x $cie_pad;
+            my $data = pack( 'L<', length($cie_body) + 4 ) . pack( 'L<', 0 ) . $cie_body;
+            for my $fn (@$func_ranges) {
+                my $fn_start = $fn->{start};
+                my $fn_len   = ( $fn->{end} // $fn->{start} + 1 ) - $fn->{start};
+                my $instr    = "\x0C" . $self->_uleb( $arch eq 'arm64' ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
+                for my $r (@$preserved_regs) {
+                    my $reg_num      = $self->dwarf_reg_num($r) // 0;    # Clean delegation
+                    my $factored_off = -16 / -8;
+                    $instr .= pack( 'C', 0x80 | $reg_num ) . $self->_uleb($factored_off);
+                }
+
+                # pcrel initial_location: the file-relative offset to fn_start
+                # (Runtime adds the eh_frame_base to resolve)
+                my $fde_body = pack( 'L<', $fn_start ) . pack( 'L<', $fn_len ) . $instr;
+                my $fde_pad  = ( 4 - ( ( length($fde_body) + 4 ) % 4 ) ) % 4;
+                $fde_body .= "\0" x $fde_pad;
+
+                # CIE_pointer = offset of CIE_pointer_field - CIE_offset
+                # CIE is at section offset 0, FDE CIE_pointer field at data_end + 4
+                my $fde_offset = length($data);
+                $data .= pack( 'L<', length($fde_body) + 4 ) . pack( 'L<', $fde_offset + 4 ) . $fde_body;
+            }
+            return $data;
+        }
+    };
+
+    class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
+
+        method _detect_elf_info ( $ref = undef ) {
+            my @candidates = $ref ? ($ref) : ( '/bin/sh', '/sbin/init', '/usr/bin/env', '/boot/system/bin/sh', '/boot/system/bin/env' );
+            for my $candidate (@candidates) {
+                next if !-e $candidate || !-r _;
+                open my $fh, '<:raw', $candidate or next;
+                my $bytes = read( $fh, my $ehdr, 64 );
+                close $fh;
+                next if $bytes != 64;
+                next if substr( $ehdr, 0, 4 ) ne "\x7fELF";
+                my $osabi    = ord( substr( $ehdr, 7, 1 ) );
+                my $ei_class = ord( substr( $ehdr, 4, 1 ) );
+                next if $ei_class != 1 && $ei_class != 2;
+                my ( $e_phoff, $e_phentsize, $e_phnum );
+
+                if ( $ei_class == 2 ) {
+                    $e_phoff     = unpack( 'Q', substr( $ehdr, 32, 8 ) );
+                    $e_phentsize = unpack( 'S', substr( $ehdr, 54, 2 ) );
+                    $e_phnum     = unpack( 'S', substr( $ehdr, 56, 2 ) );
+                }
+                else {
+                    $e_phoff     = unpack( 'L', substr( $ehdr, 28, 4 ) );
+                    $e_phentsize = unpack( 'S', substr( $ehdr, 42, 2 ) );
+                    $e_phnum     = unpack( 'S', substr( $ehdr, 44, 2 ) );
+                }
+                next if !$e_phnum || !$e_phentsize;
+                open my $fh2, '<:raw', $candidate or next;
+                seek( $fh2, $e_phoff, 0 );
+                my $ph_bytes = $e_phentsize * $e_phnum;
+                my $read_ok  = read( $fh2, my $phdrs, $ph_bytes );
+                close $fh2;
+                next if !$read_ok;
+                my ( $note_data, $has_pintable ) = ( '', 0 );
+
+                for my $i ( 0 .. $e_phnum - 1 ) {
+                    my $phdr   = substr( $phdrs, $i * $e_phentsize, $e_phentsize );
+                    my $p_type = unpack( 'L', substr( $phdr, 0, 4 ) );
+                    if ( $p_type == 4 && !$note_data ) {
+                        my ( $p_offset, $p_filesz );
+                        if ( $ei_class == 2 ) {
+                            $p_offset = unpack( 'Q', substr( $phdr, 8,  8 ) );
+                            $p_filesz = unpack( 'Q', substr( $phdr, 32, 8 ) );
+                        }
+                        else {
+                            $p_offset = unpack( 'L', substr( $phdr, 4,  4 ) );
+                            $p_filesz = unpack( 'L', substr( $phdr, 16, 4 ) );
+                        }
+                        open my $fh3, '<:raw', $candidate or next;
+                        seek( $fh3, $p_offset, 0 );
+                        read( $fh3, $note_data, $p_filesz );
+                        close $fh3;
+                    }
+                    elsif ( $p_type == 0x65a3dbe9 && !$has_pintable ) {
+                        $has_pintable = 1;
+                    }
+                }
+                return ( $osabi, $note_data, $has_pintable );
+            }
+            return ( 0, '', 0 );
+        }
+
+        method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 ) {
+            $l->add_section( '.text', $t, 5 );    # RX
+            $l->add_section( '.data', $d, 6 );    # RW
+
+            # We add dynamic sections for both executables and shared libraries to support dynamic imports (FFI)
+            $l->add_section( '.interp',   512,  2 ) if $self->type eq 'exe';
+            $l->add_section( '.dynstr',   4096, 2 );
+            $l->add_section( '.dynsym',   4096, 2 );
+            $l->add_section( '.rela.dyn', 4096, 2 );
+            $l->add_section( '.hash',     4096, 2 );
+            $l->add_section( '.dynamic',  4096, 3 );
+            $l->add_section( '.got',      512,  6 );                           # RW (writable for dynamic linker patching)
+
+            if ( $dbg >= 1 ) {
+                $l->add_section( '.debug_line',     4096, 0 );
+                $l->add_section( '.debug_info',     4096, 0 );
+                $l->add_section( '.debug_abbrev',   4096, 0 );
+                $l->add_section( '.debug_frame',    4096, 0 );
+                $l->add_section( '.debug_aranges',  4096, 0 );
+                $l->add_section( '.debug_pubnames', 4096, 0 );
+                $l->add_section( '.eh_frame',       4096, 0 );
+            }
+        }
+
+        method import_rva($name) {
+            my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16 };
+            return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die "Unknown ELF import: $name" );
+        }
+        method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
+
+        method write_executable ( $output_file, $code_bytes, $platform, $shared = false, $debug_bytes = undef ) {
+            my $text = $code_bytes;
+            if ( $self->type eq 'exe' ) {
+                my $entry_stub = '';
+                my $exit_sys   = $platform->syscall('exit') // 1;
+                if ( $platform->is_arm64 ) {
+
+                    # ARM64 (AArch64 Linux) exit stub:
+                    # - bl main:       0x94000003  (relative offset +12 bytes)
+                    # - movz x8, #93:  0xD2800BA8  (93 in x8 register)
+                    # - svc #0:        0xD4000001  (Trigger syscall)
+                    my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 8;
+                    $entry_stub = pack( "V3", 0x94000003, $movz, 0xD4000001 );
+                }
+                elsif ( $platform->is_riscv64 ) {
+
+                    # RISC-V 64-bit native exit stub:
+                    # - jal ra, 12 (relative call offset +12 bytes -> 4 bytes)
+                    # - li a7, 93  (addi a7, x0, 93 -> 4 bytes)
+                    # - ecall      (trigger syscall -> 4 bytes)
+                    my $li = ( $exit_sys << 20 ) | 0x00000893;
+                    $entry_stub = pack( "V3", 0x006000EF, $li, 0x00000073 );
+                }
+                else {
+                    # x86_64 native exit stub:
+                    my $entry_stub_x64 = pack( "C V", 0xE8, 10 );
+                    $entry_stub_x64 .= pack( "C3",  0x48, 0x89, 0xC7 );
+                    $entry_stub_x64 .= pack( "C V", 0xB8, 60 );
+                    $entry_stub_x64 .= pack( "C2",  0x0F, 0x05 );
+                    $entry_stub = $entry_stub_x64;
+                }
+                $text = $entry_stub . $code_bytes;
+            }
+
+            # Automatically calculate layout if it wasn't called beforehand
+            if ( !defined $self->layout ) {
+                $self->pre_layout( length($text), 0, $platform->arch, $platform->os );
+            }
+            my $l        = $self->layout;
+            my $base     = $self->image_base;
+            my $elf_type = $shared ? 3 : 2;     # ET_DYN or ET_EXEC
+
+            # Probe system binaries for the correct OSABI and PT_NOTE data
+            my ( $osabi, $note_data, $has_pintable ) = $self->_detect_elf_info();
+            if ( !$osabi ) {
+                $osabi = 9  if $platform->is_freebsd;
+                $osabi = 2  if $platform->is_netbsd;
+                $osabi = 12 if $platform->is_openbsd;
+                $osabi = 0  if $platform->is_linux;
+            }
+
+            # Per-OS interpreter path for dynamic executables
+            my %interp_map = (
+                linux       => '/lib64/ld-linux-x86-64.so.2',
+                linux_arm   => '/lib/ld-linux-aarch64.so.1',
+                linux_riscv => '/lib/ld-linux-riscv64-lp64d.so.1',
+                freebsd     => '/libexec/ld-elf.so.1',
+                netbsd      => '/usr/libexec/ld.elf_so',
+                openbsd     => '/usr/libexec/ld.so',
+                dragonfly   => '/libexec/ld-elf.so.2',
+                solaris     => '/lib/64/ld.so.1',
+                midnightbsd => '/libexec/ld-elf.so.1',
+                haiku       => ''
+            );
+
+            # Per-OS libc name for DT_NEEDED
+            my %libc_map = (
+                linux       => 'libc.so.6',
+                linux_arm   => 'libc.so.6',
+                linux_riscv => 'libc.so.6',
+                freebsd     => 'libc.so.7',
+                netbsd      => 'libc.so.12',
+                openbsd     => 'libc.so.98.1',
+                dragonfly   => 'libc.so.8',
+                solaris     => 'libc.so.1',
+                midnightbsd => 'libc.so.7',
+                haiku       => 'libroot.so'
+            );
+
+            # Generate pintable data for OpenBSD (syscall allowlisting)
+            my $pintable_data = '';
+            if ($has_pintable) {
+                my $pos      = 0;
+                my $text_rva = $l->get('.text')->{rva};
+                if ( $platform->is_x64 ) {
+                    while ( ( my $idx = index( $text, "\x0F\x05", $pos ) ) != -1 ) {
+                        my $vaddr = $base + $text_rva + $idx;
+                        $pintable_data .= pack( 'L<L<', $vaddr, 1 );
+                        $pintable_data .= pack( 'L<L<', $vaddr, 4 );
+                        $pos = $idx + 2;
+                    }
+                }
+                else {
+                    while ( ( my $idx = index( $text, "\x01\x00\x00\xd4", $pos ) ) != -1 ) {
+                        my $vaddr = $base + $text_rva + $idx;
+                        $pintable_data .= pack( 'L<L<', $vaddr, 1 );
+                        $pintable_data .= pack( 'L<L<', $vaddr, 4 );
+                        $pos = $idx + 4;
+                    }
+                }
+            }
+
+            # Setup Interp path for executable
+            my $interp     = '';
+            my $has_interp = 0;
+            if ( $self->type eq 'exe' ) {
+                my $interp_key
+                    = ( $platform->is_arm64 && $platform->is_linux ) ? 'linux_arm' :
+                    ( $platform->is_riscv64 && $platform->is_linux ) ? 'linux_riscv' :
+                    $platform->os;
+                my $ipath = $interp_map{$interp_key} // '/lib/ld.so.1';
+                if ( length $ipath ) {
+                    $interp                    = $ipath . "\0";
+                    $l->get('.interp')->{size} = length($interp);
+                    $has_interp                = 1;
+                }
+            }
+
+            # Setup Dynamic Strings Table
+            my @exports = @{ $self->exported_funcs // [] };
+            my @imports = ( 'dlopen', 'dlsym', 'pthread_create' );
+            my $libc    = $libc_map{ $platform->os } // 'libc.so';
+            my @libs    = ($libc);
+            my $dynstr  = "\0";
+            my %str_off;
+            for my $s ( @libs, @imports, @exports ) {
+                next if exists $str_off{$s};
+                $str_off{$s} = length($dynstr);
+                $dynstr .= $s . "\0";
+            }
+            $l->get('.dynstr')->{size} = length($dynstr);
+
+            # Setup Dynamic Symbol Table
+            # Elf64_Sym (24 bytes): Null symbol
+            my $dynsym = pack(
+                'L< C C S< Q< Q<', 0,    # st_name (String table offset)
+                0,                       # st_info (Bind/Type)
+                0,                       # st_other (Visibility)
+                0,                       # st_shndx (Section index)
+                0,                       # st_value (Value/Address)
+                0                        # st_size (Symbol size)
+            );
+            my $sym_idx = 1;
+            my %sym_indices;
+
+            # Undefined dynamic imports
+            for my $name (@imports) {
+                $sym_indices{$name} = $sym_idx++;
+
+                # Elf64_Sym (24 bytes) for undefined global functions
+                $dynsym .= pack(
+                    'L< C C S< Q< Q<', $str_off{$name},    # st_name
+                    0x12,                                  # st_info (STB_GLOBAL | STT_FUNC)
+                    0,                                     # st_other (STV_DEFAULT)
+                    0,                                     # st_shndx (SHN_UNDEF)
+                    0,                                     # st_value
+                    0                                      # st_size
+                );
+            }
+
+            # Exports if shared library
+            if ( $self->type eq 'shared' ) {
+                for my $name (@exports) {
+                    my $rva = $l->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
+                    $sym_indices{$name} = $sym_idx++;
+
+                    # Elf64_Sym (24 bytes) for defined exported functions
+                    $dynsym .= pack(
+                        'L< C C S< Q< Q<', $str_off{$name},    # st_name
+                        0x12,                                  # st_info (STB_GLOBAL | STT_FUNC)
+                        0,                                     # st_other (STV_DEFAULT)
+                        1,                                     # st_shndx (.text section index)
+                        $base + $rva,                          # st_value
+                        0                                      # st_size
+                    );
+                }
+            }
+            $l->get('.dynsym')->{size} = length($dynsym);
+
+            # Setup Relocations (.rela.dyn)
+            my $got_rva  = $l->get('.got')->{rva};
+            my $rel_type = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );    # R_AARCH64_GLOB_DAT or R_X86_64_GLOB_DAT
+            my $rela_dyn = '';
+
+            # Elf64_Rela (24 bytes) for dlopen
+            my $dlopen_slot    = $base + $got_rva + 0;
+            my $dlopen_sym_idx = $sym_indices{'dlopen'};
+            $rela_dyn .= pack(
+                'Q< Q< q<', $dlopen_slot,                 # r_offset
+                ( $dlopen_sym_idx << 32 ) | $rel_type,    # r_info
+                0                                         # r_addend
+            );
+
+            # Elf64_Rela (24 bytes) for dlsym
+            my $dlsym_slot    = $base + $got_rva + 8;
+            my $dlsym_sym_idx = $sym_indices{'dlsym'};
+            $rela_dyn .= pack(
+                'Q< Q< q<', $dlsym_slot,                  # r_offset
+                ( $dlsym_sym_idx << 32 ) | $rel_type,     # r_info
+                0                                         # r_addend
+            );
+
+            # Elf64_Rela (24 bytes) for pthread_create
+            my $pthread_slot    = $base + $got_rva + 16;
+            my $pthread_sym_idx = $sym_indices{'pthread_create'};
+            $rela_dyn .= pack(
+                'Q< Q< q<', $pthread_slot,                 # r_offset
+                ( $pthread_sym_idx << 32 ) | $rel_type,    # r_info
+                0                                          # r_addend
+            );
+            $l->get('.rela.dyn')->{size} = length($rela_dyn);
+
+            # Setup GOT section payload (just three zeroed slots)
+            my $got = pack( 'Q< Q< Q<', 0, 0, 0 );
+            $l->get('.got')->{size} = length($got);
+
+            # Setup Hash Table
+            my $elf_hash = sub {
+                my $name = shift;
+                my $h    = 0;
+                for my $c ( split //, $name ) {
+                    $h = ( $h << 4 ) + ord($c);
+                    $h &= 0xffffffff;
+                    my $g = $h & 0xf0000000;
+                    if ($g) { $h ^= ( $g >> 24 ); }
+                    $h &= 0x0fffffff;
+                }
+                return $h;
+            };
+            my $nbucket = 3;
+            my $nchain  = $sym_idx;
+            my @buckets = (0) x $nbucket;
+            my @chains  = (0) x $nchain;
+            for my $name ( keys %sym_indices ) {
+                my $idx = $sym_indices{$name};
+                my $h   = $elf_hash->($name);
+                my $b   = $h % $nbucket;
+                $chains[$idx] = $buckets[$b];
+                $buckets[$b]  = $idx;
+            }
+            my $hash = pack( 'L<*', $nbucket, $nchain, @buckets, @chains );
+            $l->get('.hash')->{size} = length($hash);
+
+            # Calculate to stabilize RVAs before building .dynamic
+            $l->calculate(0x1000);
+
+            # Setup .dynamic payload
+            my $dyn_rva        = $l->get('.dynamic')->{rva};
+            my $str_rva        = $l->get('.dynstr')->{rva};
+            my $sym_rva        = $l->get('.dynsym')->{rva};
+            my $hash_rva       = $l->get('.hash')->{rva};
+            my $rela_rva       = $l->get('.rela.dyn')->{rva};
+            my $got_rva_actual = $l->get('.got')->{rva};
+            my $dynamic        = '';
+
+            # Elf64_Dyn (16 bytes each) entries
+            $dynamic .= pack( 'Q< Q<', 1,  $str_off{$libc} );            # DT_NEEDED (libc string offset)
+            $dynamic .= pack( 'Q< Q<', 4,  $base + $hash_rva );          # DT_HASH
+            $dynamic .= pack( 'Q< Q<', 5,  $base + $str_rva );           # DT_STRTAB
+            $dynamic .= pack( 'Q< Q<', 6,  $base + $sym_rva );           # DT_SYMTAB
+            $dynamic .= pack( 'Q< Q<', 10, length($dynstr) );            # DT_STRSZ
+            $dynamic .= pack( 'Q< Q<', 11, 24 );                         # DT_SYMENT (sizeof Elf64_Sym)
+            $dynamic .= pack( 'Q< Q<', 7,  $base + $rela_rva );          # DT_RELA
+            $dynamic .= pack( 'Q< Q<', 8,  length($rela_dyn) );          # DT_RELASZ
+            $dynamic .= pack( 'Q< Q<', 9,  24 );                         # DT_RELAENT (sizeof Elf64_Rela)
+            $dynamic .= pack( 'Q< Q<', 3,  $base + $got_rva_actual );    # DT_PLTGOT
+            my $main_lbl = $self->labels->{'L_MAIN_START'};
+
+            if ( defined $main_lbl && $self->type ne 'shared' ) {
+                $dynamic .= pack( 'Q< Q<', 12, $base + $l->get('.text')->{rva} + $main_lbl );    # DT_INIT
+            }
+            $dynamic .= pack( 'Q< Q<', 0, 0 );                                                   # DT_NULL
+            $l->get('.dynamic')->{size} = length($dynamic);
+
+            # Final layout calculation
+            $l->calculate(0x1000);
+
+            # Build Section Names String Table (.shstrtab)
+            my $shstrtab = "\0";
+            my %sh_name_off;
+            for my $s ( $l->sections ) {
+                $sh_name_off{ $s->{name} } = length($shstrtab);
+                $shstrtab .= $s->{name} . "\0";
+            }
+            $sh_name_off{'.shstrtab'} = length($shstrtab);
+            $shstrtab .= ".shstrtab\0";
+            $sh_name_off{'.note.GNU-stack'} = length($shstrtab);
+            $shstrtab .= ".note.GNU-stack\0";
+            my $sec_idx = 1;
+            my %sec_indices;
+            for my $s ( $l->sections ) { $sec_indices{ $s->{name} } = $sec_idx++; }
+
+            # Open file and write payloads based on layout
+            open my $fh, '>', $output_file or die $!;
+            binmode $fh;
+            for my $s ( $l->sections ) {
+                my $payload
+                    = $s->{name} eq '.text'   ? $text :
+                    $s->{name} eq '.interp'   ? $interp :
+                    $s->{name} eq '.dynstr'   ? $dynstr :
+                    $s->{name} eq '.dynsym'   ? $dynsym :
+                    $s->{name} eq '.rela.dyn' ? $rela_dyn :
+                    $s->{name} eq '.hash'     ? $hash :
+                    $s->{name} eq '.dynamic'  ? $dynamic :
+                    $s->{name} eq '.got'      ? $got :
+                    ( $s->{name} =~ /^\.(debug|eh_frame)/ ? ( $self->debug_section( $s->{name} ) || "\0" ) : ( $code_bytes || "\0" ) );
+                $payload .= ( "\0" x ( $s->{size} - length($payload) ) ) if length($payload) < $s->{size};
+                seek( $fh, $s->{off}, 0 );
+                print $fh $payload;
+            }
+
+            # Write Section Header String Table and Section Headers at the end
+            my $shstrtab_off = tell($fh);
+            print $fh $shstrtab;
+            my $shoff = tell($fh);
+            my @shdrs = ();
+
+            # NULL Section (index 0) — Elf64_Shdr (64 bytes)
+            push @shdrs, pack(
+                'L< L< Q< Q< Q< Q< L< L< Q< Q<', 0,    # sh_name
+                0,                                     # sh_type
+                0,                                     # sh_flags
+                0,                                     # sh_addr
+                0,                                     # sh_offset
+                0,                                     # sh_size
+                0,                                     # sh_link
+                0,                                     # sh_info
+                0,                                     # sh_addralign
+                0                                      # sh_entsize
+            );
+
+            # Real sections from layout — Elf64_Shdr (64 bytes each)
+            for my $s ( $l->sections ) {
+                my $type       = 1;                    # SHT_PROGBITS
+                my $flags      = 0;
+                my $sh_link    = 0;
+                my $sh_info    = 0;
+                my $sh_entsize = 0;
+                if ( $s->{name} eq '.text' ) {
+                    $flags = 6;                        # SHF_ALLOC | SHF_EXECINSTR
+                }
+                elsif ( $s->{name} eq '.data' ) {
+                    $flags = 3;                        # SHF_ALLOC | SHF_WRITE
+                }
+                elsif ( $s->{name} eq '.interp' ) {
+                    $type  = 1;                        # SHT_PROGBITS
+                    $flags = 2;                        # SHF_ALLOC
+                }
+                elsif ( $s->{name} eq '.dynstr' ) {
+                    $type  = 3;                        # SHT_STRTAB
+                    $flags = 2;                        # SHF_ALLOC
+                }
+                elsif ( $s->{name} eq '.dynsym' ) {
+                    $type       = 11;                             # SHT_DYNSYM
+                    $flags      = 2;                              # SHF_ALLOC
+                    $sh_link    = $sec_indices{'.dynstr'} // 0;
+                    $sh_info    = 1;                              # One local symbol (the null symbol)
+                    $sh_entsize = 24;
+                }
+                elsif ( $s->{name} eq '.rela.dyn' ) {
+                    $type       = 4;                              # SHT_RELA
+                    $flags      = 2;                              # SHF_ALLOC
+                    $sh_link    = $sec_indices{'.dynsym'} // 0;
+                    $sh_entsize = 24;
+                }
+                elsif ( $s->{name} eq '.hash' ) {
+                    $type       = 5;                              # SHT_HASH
+                    $flags      = 2;                              # SHF_ALLOC
+                    $sh_link    = $sec_indices{'.dynsym'} // 0;
+                    $sh_entsize = 4;
+                }
+                elsif ( $s->{name} eq '.dynamic' ) {
+                    $type       = 6;                              # SHT_DYNAMIC
+                    $flags      = 3;                              # SHF_ALLOC | SHF_WRITE
+                    $sh_link    = $sec_indices{'.dynstr'} // 0;
+                    $sh_entsize = 16;
+                }
+                elsif ( $s->{name} eq '.got' ) {
+                    $type       = 1;                              # SHT_PROGBITS
+                    $flags      = 3;                              # SHF_ALLOC | SHF_WRITE
+                    $sh_entsize = 8;
+                }
+                elsif ( $s->{name} =~ /^\.(debug|eh_frame)/ ) {
+                    $flags = 0;                                   # Debug sections are not loaded
+                }
+                push @shdrs, pack(
+                    'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{ $s->{name} },    # sh_name
+                    $type,                                                          # sh_type
+                    $flags,                                                         # sh_flags
+                    ( $flags & 2 ? $base + $s->{rva} : 0 ),                         # sh_addr
+                    $s->{off},                                                      # sh_offset
+                    $s->{size},                                                     # sh_size
+                    $sh_link,                                                       # sh_link
+                    $sh_info,                                                       # sh_info
+                    1,                                                              # sh_addralign
+                    $sh_entsize                                                     # sh_entsize
+                );
+            }
+            my $shstrtab_idx = scalar(@shdrs);
+
+            # .shstrtab section header — Elf64_Shdr (64 bytes)
+            push @shdrs, pack(
+                'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{'.shstrtab'},    # sh_name
+                3,                                                             # sh_type (SHT_STRTAB)
+                0,                                                             # sh_flags
+                0,                                                             # sh_addr
+                $shstrtab_off,                                                 # sh_offset
+                length($shstrtab),                                             # sh_size
+                0, 0, 1, 0                                                     # sh_link, sh_info, sh_addralign, sh_entsize
+            );
+
+            # .note.GNU-stack section header — Elf64_Shdr (64 bytes)
+            push @shdrs, pack(
+                'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{'.note.GNU-stack'},    # sh_name
+                1,                                                                   # sh_type (SHT_PROGBITS)
+                0,                                                                   # sh_flags
+                0, 0, 0, 0, 0, 1, 0    # sh_addr, sh_offset, sh_size, sh_link, sh_info, sh_addralign, sh_entsize
+            );
+            seek( $fh, $shoff, 0 );
+            print $fh $_ for @shdrs;
+
+            # Program Headers — Elf64_Phdr (56 bytes each)
+            my $num_ph = 5;                       # PT_PHDR, PT_LOAD (RX), PT_LOAD (RW), PT_DYNAMIC, PT_GNU_STACK
+            if ($has_interp)    { $num_ph++; }    # PT_INTERP
+            if ($note_data)     { $num_ph++; }    # PT_NOTE
+            if ($pintable_data) { $num_ph++; }    # PT_OPENBSD_PINTABLE
+            my @phdrs = ();
+
+            # PT_PHDR (type 6) — Elf64_Phdr (56 bytes)
+            push @phdrs, pack(
+                'L< L< Q< Q< Q< Q< Q< Q<', 6,    # p_type (PT_PHDR)
+                4,                               # p_flags (PF_R)
+                64,                              # p_offset (offset immediately following ELF header)
+                $base + 64,                      # p_vaddr
+                $base + 64,                      # p_paddr
+                $num_ph * 56,                    # p_filesz
+                $num_ph * 56,                    # p_memsz
+                8                                # p_align
+            );
+
+            # PT_GNU_STACK (type 0x6474e551) — Elf64_Phdr (56 bytes)
+            push @phdrs, pack(
+                'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e551,    # p_type (PT_GNU_STACK)
+                0, 0, 0, 0, 0, 0, 0x10                    # p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align
+            );
+
+            # PT_INTERP (type 3) — Elf64_Phdr (56 bytes)
+            if ($has_interp) {
+                my $interp_sec = $l->get('.interp');
+                push @phdrs, pack(
+                    'L< L< Q< Q< Q< Q< Q< Q<', 3,    # p_type (PT_INTERP)
+                    4,                               # p_flags (PF_R)
+                    $interp_sec->{off},              # p_offset
+                    $base + $interp_sec->{rva},      # p_vaddr
+                    $base + $interp_sec->{rva},      # p_paddr
+                    $interp_sec->{size},             # p_filesz
+                    $interp_sec->{size},             # p_memsz
+                    1                                # p_align
+                );
+            }
+
+            # PT_LOAD (type 1) RX segment (Headers + .text) — Elf64_Phdr (56 bytes)
+            my $text_sec = $l->get('.text');
+            push @phdrs, pack(
+                'L< L< Q< Q< Q< Q< Q< Q<', 1,            # p_type (PT_LOAD)
+                5,                                       # p_flags (PF_R | PF_X)
+                0,                                       # p_offset
+                $base,                                   # p_vaddr
+                $base,                                   # p_paddr
+                $text_sec->{off} + $text_sec->{size},    # p_filesz
+                $text_sec->{off} + $text_sec->{size},    # p_memsz
+                0x1000                                   # p_align (Page alignment)
+            );
+
+            # PT_LOAD (type 1) RW segment (Covers .data through .got) — Elf64_Phdr (56 bytes)
+            my $data_sec = $l->get('.data');
+            my $got_sec  = $l->get('.got');
+            my $rw_size  = ( $got_sec->{off} + $got_sec->{size} ) - $data_sec->{off};
+            push @phdrs, pack(
+                'L< L< Q< Q< Q< Q< Q< Q<', 1,            # p_type (PT_LOAD)
+                6,                                       # p_flags (PF_R | PF_W)
+                $data_sec->{off},                        # p_offset
+                $base + $data_sec->{rva},                # p_vaddr
+                $base + $data_sec->{rva},                # p_paddr
+                $rw_size,                                # p_filesz
+                $rw_size,                                # p_memsz
+                0x1000                                   # p_align
+            );
+
+            # PT_DYNAMIC (type 2) — Elf64_Phdr (56 bytes)
+            my $dyn_sec = $l->get('.dynamic');
+            push @phdrs, pack(
+                'L< L< Q< Q< Q< Q< Q< Q<', 2,            # p_type (PT_DYNAMIC)
+                6,                                       # p_flags (PF_R | PF_W)
+                $dyn_sec->{off},                         # p_offset
+                $base + $dyn_sec->{rva},                 # p_vaddr
+                $base + $dyn_sec->{rva},                 # p_paddr
+                $dyn_sec->{size},                        # p_filesz
+                $dyn_sec->{size},                        # p_memsz
+                8                                        # p_align
+            );
+            my $extra_off   = 64 + ( $num_ph * 56 );
+            my $note_header = '';
+
+            # PT_NOTE — Elf64_Phdr (56 bytes)
+            if ($note_data) {
+                push @phdrs, pack(
+                    'L< L< Q< Q< Q< Q< Q< Q<', 4,    # p_type (PT_NOTE)
+                    4,                               # p_flags (PF_R)
+                    $extra_off,                      # p_offset
+                    $base + $extra_off,              # p_vaddr
+                    $base + $extra_off,              # p_paddr
+                    length($note_data),              # p_filesz
+                    length($note_data),              # p_memsz
+                    4                                # p_align
+                );
+                $extra_off += length($note_data);
+            }
+            my $syscalls_header = '';
+
+            # PT_OPENBSD_PINTABLE — Elf64_Phdr (56 bytes)
+            if ($pintable_data) {
+                push @phdrs, pack(
+                    'L< L< Q< Q< Q< Q< Q< Q<', 0x65a3dbe9,    # p_type (PT_OPENBSD_PINTABLE)
+                    4,                                        # p_flags (PF_R)
+                    $extra_off,                               # p_offset
+                    $base + $extra_off,                       # p_vaddr
+                    $base + $extra_off,                       # p_paddr
+                    length($pintable_data),                   # p_filesz
+                    length($pintable_data),                   # p_memsz
+                    4                                         # p_align
+                );
+                $extra_off += length($pintable_data);
+            }
+            my $entry_point = $self->type eq 'shared' ? 0 : $base + $l->get('.text')->{rva};
+
+            # Finalize ELF Header (Elf64_Ehdr - Exactly 64 bytes) and write program headers/extra data
+            my $ehdr = pack(
+                'A4 C C C C C x7 S< S< L< Q< Q< Q< L< S< S< S< S< S< S<', "\x7fELF",    # e_ident[0..3] (Magic)
+                2,                                                                      # e_ident[4] (Class: 64-bit)
+                1,                                                                      # e_ident[5] (Data: Little Endian)
+                1,                                                                      # e_ident[6] (Version: 1)
+                $osabi,                                                                 # e_ident[7] (OS/ABI)
+                0,                                                                      # e_ident[8] (ABI Version)
+
+                # e_ident[9..15] (Padding, implicitly added by x7)
+                $elf_type,                                                               # e_type (ET_EXEC = 2 or ET_DYN = 3)
+                ( $platform->is_arm64 ? 183 : ( $platform->is_riscv64 ? 243 : 62 ) ),    # e_machine (EM_AARCH64 = 183 or EM_X86_64 = 62)
+                1,                                                                       # e_version
+                $entry_point,                                                            # e_entry (Starting Virtual Address)
+                64,                                                                      # e_phoff (Program Header Table offset)
+                $shoff,                                                                  # e_shoff (Section Header Table offset)
+                0,                                                                       # e_flags
+                64,                                                                      # e_ehsize (ELF Header Size)
+                56,                                                                      # e_phentsize (Program Header Entry Size)
+                $num_ph,                                                                 # e_phnum (Number of Program Header Entries)
+                64,                                                                      # e_shentsize (Section Header Entry Size)
+                scalar(@shdrs),                                                          # e_shnum (Number of Section Header Entries)
+                $shstrtab_idx                                                            # e_shstrndx (Section index of .shstrtab)
+            );
+            seek( $fh, 0, 0 );
+            print $fh $ehdr, @phdrs, $note_data, $pintable_data;
+            close $fh;
+            chmod 0755, $output_file;
+            return $output_file;
+        }
+    }
+
+    class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
+        no warnings 'portable';
+
+        method write_executable ( $output_file, $code_bytes, $platform, $passed_argument = undef, $debug_bytes = undef ) {
+            my $full_code    = ref $code_bytes eq 'HASH' ? $code_bytes->{binary}                        : $code_bytes;
+            my $writable_off = ref $code_bytes eq 'HASH' ? ( $code_bytes->{writable_data_offset} // 0 ) : 0;
+
+            # Prepend Windows entry stub if it's an executable
+            if ( $self->type eq 'exe' ) {
+                my $entry_stub = "";
+                if ( $platform->is_arm64 ) {
+
+                    # Windows ARM64 (AArch64) native exit stub:
+                    # - bl main (relative call offset +24 bytes -> 6 instructions)
+                    # - mov w1, w0 (copy main's return val to ExitStatus/arg 2)
+                    # - movn x0, #0 (current process handle -1 -> arg 1)
+                    # - movz w8, #0x29 (NtTerminateProcess syscall number 41)
+                    # - svc #1 (trigger syscall)
+                    # - brk #0 (safety crash if svc returns)
+                    $entry_stub = pack( "V6", 0x94000006, 0x2A0003E1, 0x92800000, 0x52800528, 0xD4000021, 0xD4200000 );
+                }
+                else {
+                    # Windows x64 (AMD64) native exit stub
+                    $entry_stub = pack( "C V", 0xE8, 15 );             # call main (offset 15)
+                    $entry_stub .= pack( "C3",  0x48, 0x89, 0xC2 );    # mov rdx, rax
+                    $entry_stub .= pack( "C3",  0x4D, 0x31, 0xD2 );    # xor r10, r10
+                    $entry_stub .= pack( "C V", 0xB8, 0x2C );          # mov eax, 0x2C (NtTerminateProcess)
+                    $entry_stub .= pack( "C2",  0x0F, 0x05 );          # syscall
+                    $entry_stub .= pack( "C2",  0x0F, 0x0B );          # ud2 (safety crash)
+                }
+                $full_code = $entry_stub . $full_code;
+                $writable_off += length($entry_stub) if $writable_off;
+            }
+            my $text_bytes   = $writable_off ? substr( $full_code, 0, $writable_off ) : $full_code;
+            my $data_bytes   = $writable_off ? substr( $full_code, $writable_off ) : '';
+            my $has_data     = length($data_bytes) > 0;
+            my $has_debug    = defined $debug_bytes ? 1 : 0;
+            my $num_sections = 1 + ( $has_data ? 1 : 0 ) + ( $has_debug ? 1 : 0 );
+            open my $fh, '>', $output_file or die "Cannot open $output_file for writing: $!";
+            binmode $fh;
+
+            # DOS MZ Header (64 bytes: a2=magic, S29=29 WORDS, L=e_lfanew)
+            my $dos_header = pack(
+                'a2 S13 S4 S2 S10 L<', 'MZ',     # e_magic: DOS Magic Signature
+                0x0090,                          # e_cblp: Bytes on last page of file (144)
+                0x0003,                          # e_cp: Pages in file (3)
+                0x0000,                          # e_crlc: Relocations (0)
+                0x0004,                          # e_cparhdr: Size of header in paragraphs (4)
+                0x0000,                          # e_minalloc: Minimum extra paragraphs needed (0)
+                0xffff,                          # e_maxalloc: Maximum extra paragraphs needed (65535)
+                0x0000,                          # e_ss: Initial (relative) SS value (0)
+                0x0100,                          # e_sp: Initial SP value (256)
+                0x0000,                          # e_csum: Checksum (0)
+                0x0000,                          # e_ip: Initial IP value (0)
+                0x0000,                          # e_cs: Initial (relative) CS value (0)
+                0x0040,                          # e_lfarlc: File address of relocation table (64)
+                0x0000,                          # e_ovno: Overlay number (0)
+                0, 0, 0, 0,                      # e_res: Reserved words (4 WORDS)
+                0,                               # e_oemid: OEM identifier (0)
+                0,                               # e_oeminfo: OEM information (0)
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,    # e_res2: Reserved words (10 WORDS)
+                0x00000080                       # e_lfanew: File address of new exe header (Offset 128 / 0x80)
+            );
+            my $dos_stub     = ( "\x00" x 64 );    # Pad 64 bytes of padding to reach offset 128 (0x80)
+            my $pe_signature = "PE\x00\x00";       # Matches e_lfanew pointer
+
+            # COFF File Header
+            my $machine     = $platform->is_arm64 ? 0xAA64 : 0x8664;
+            my $timestamp   = $ENV{SOURCE_DATE_EPOCH} // 0;
+            my $file_header = pack(
+                'S2 L3 S2', $machine,    # Machine Architecture (AMD64 / x86_64)
+                $num_sections,           # Number of Sections
+                $timestamp,              # TimeDateStamp
+                0,                       # PointerToSymbolTable (deprecated/0)
+                0,                       # NumberOfSymbols (deprecated/0)
+                240,                     # SizeOfOptionalHeader (PE32+ is 240 bytes)
+                0x0022                   # Characteristics (EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE)
+            );
+
+            # PE32+ Optional Header
+            my $init_data_size = ( $has_data || $has_debug ) ? 4096 : 0;
+            my $size_of_image  = 0x1000 * $num_sections + 0x1000;
+            my $opt_header     = pack(
+                'S C2 L3 L2 Q L2 S4 S2 L L L L S2 Q4 L2', 0x020b,    # Magic Number (PE32+ / 64-bit)
+                1,                                        0,         # MajorLinkerVersion, MinorLinkerVersion
+                4096,                                                # SizeOfCode (.text)
+                $init_data_size,                                     # SizeOfInitializedData
+                0,                                                   # SizeOfUninitializedData
+                0x1000,                                              # AddressOfEntryPoint (RVA)
+                0x1000,                                              # BaseOfCode
+                0x140000000,                                         # ImageBase
+                4096,                                                # SectionAlignment in Memory
+                512,                                                 # FileAlignment on Disk
+                6, 0,                                                # MajorOperatingSystemVersion, MinorOperatingSystemVersion
+                0, 0,                                                # MajorImageVersion, MinorImageVersion
+                6, 0,                                                # MajorSubsystemVersion, MinorSubsystemVersion
+                0,                                                   # Win32VersionValue (reserved)
+                $size_of_image,                                      # SizeOfImage in Memory
+                512,                                                 # SizeOfHeaders (Headers size on disk)
+                0,                                                   # CheckSum
+                3,                                                   # Subsystem (Windows Console)
+                0x8140,                                              # DllCharacteristics (DYNAMIC_BASE | NX_COMPAT)
+                0x100000,                                            # SizeOfStackReserve
+                0x1000,                                              # SizeOfStackCommit
+                0x100000,                                            # SizeOfHeapReserve
+                0x1000,                                              # SizeOfHeapCommit
+                0,                                                   # LoaderFlags (reserved)
+                16                                                   # Number of Data Directory RVAs and Sizes
+            );
+
+            # Data Directories (16 entries, 8 bytes each = 128 bytes of zeroes)
+            my $data_dirs = "\x00" x 128;
+            if ( ref $code_bytes eq 'HASH' ) {
+                my $import_rva  = $code_bytes->{import_descriptor_rva}  // 0;
+                my $import_size = $code_bytes->{import_descriptor_size} // 0;
+                if ($import_rva) {
+                    substr $data_dirs, 8,  4, pack( 'V', $import_rva );
+                    substr $data_dirs, 12, 4, pack( 'V', $import_size );
+                }
+            }
+            $opt_header .= $data_dirs;
+
+            # Section Table
+            my $section_table = '';
+            my $sec_raw_ptr   = 512;
+
+            # Section 1: .text — CODE | EXECUTE | READ
+            my $sec_raw_code_size = ( length($text_bytes) + 511 ) & ~511;
+            $section_table .= pack(
+                'a8 L2 L2 L2 S2 L', ".text\x00\x00\x00",    # Section Name
+                length($text_bytes),                        # Virtual Size (Actual Data Size)
+                0x1000,                                     # Virtual Address (RVA)
+                $sec_raw_code_size,                         # Size of Raw Data (Aligned on Disk)
+                $sec_raw_ptr,                               # Pointer to Raw Data on Disk
+                0, 0,                                       # Pointer to Relocations, Pointer to Line Numbers
+                0, 0,                                       # Number of Relocations, Number of Line Numbers
+                0x60000020                                  # Characteristics (CODE | EXECUTE | READ)
+            );
+            $sec_raw_ptr += $sec_raw_code_size;
+
+            # Section 2: .data — INITIALIZED_DATA | READ | WRITE
+            if ($has_data) {
+                my $sec_raw_data_size = ( length($data_bytes) + 511 ) & ~511;
+                $section_table .= pack(
+                    'a8 L2 L2 L2 S2 L', ".data\x00\x00\x00",    # Section Name
+                    length($data_bytes),                        # Virtual Size
+                    0x2000,                                     # Virtual Address (RVA)
+                    $sec_raw_data_size,                         # Size of Raw Data
+                    $sec_raw_ptr,                               # Pointer to Raw Data on Disk
+                    0, 0,                                       # Pointer to Relocations, Pointer to Line Numbers
+                    0, 0,                                       # Number of Relocations, Number of Line Numbers
+                    0xC0000040                                  # Characteristics (INIT_DATA | READ | WRITE)
+                );
+                $sec_raw_ptr += $sec_raw_data_size;
+            }
+
+            # Section 3: .debug_l — DWARF Line Table (optional)
+            if ($has_debug) {
+                my $sec_raw_debug_size = ( length($debug_bytes) + 511 ) & ~511;
+                $section_table .= pack(
+                    'a8 L2 L2 L2 S2 L', '.debug_l',             # Section Name
+                    length($debug_bytes),                       # Virtual Size
+                    0x3000,                                     # Virtual Address (RVA)
+                    $sec_raw_debug_size,                        # Size of Raw Data
+                    $sec_raw_ptr,                               # Pointer to Raw Data on Disk
+                    0, 0,                                       # Pointer to Relocations, Pointer to Line Numbers
+                    0, 0,                                       # Number of Relocations, Number of Line Numbers
+                    0x42000040                                  # Characteristics (MEM_DISCARDABLE | READ)
+                );
+                $sec_raw_ptr += $sec_raw_debug_size;
+            }
+
+            # Write header buffers to file
+            print $fh $dos_header;
+            print $fh $dos_stub;
+            print $fh $pe_signature;
+            print $fh $file_header;
+            print $fh $opt_header;
+            print $fh $section_table;
+
+            # Pad headers up to 512 disk alignment
+            my $headers_len
+                = length($dos_header)
+                + length($dos_stub)
+                + length($pe_signature)
+                + length($file_header)
+                + length($opt_header)
+                + length($section_table);
+            print $fh ( "\x00" x ( 512 - $headers_len ) );
+
+            # Write .text segment bytes
+            print $fh $text_bytes;
+            print $fh ( "\x00" x ( $sec_raw_code_size - length($text_bytes) ) );
+
+            # Write .data segment bytes
+            if ($has_data) {
+                my $sec_raw_data_size = ( length($data_bytes) + 511 ) & ~511;
+                print $fh $data_bytes;
+                print $fh ( "\x00" x ( $sec_raw_data_size - length($data_bytes) ) );
+            }
+
+            # Write .debug_l segment bytes
+            if ($has_debug) {
+                my $sec_raw_debug_size = ( length($debug_bytes) + 511 ) & ~511;
+                print $fh $debug_bytes;
+                print $fh ( "\x00" x ( $sec_raw_debug_size - length($debug_bytes) ) );
+            }
+            close $fh;
+        }
+
+        method write_shared_library ( $output_file, $code_bytes, $triple, $debug_bytes = undef ) {
+            $self->write_executable( $output_file, $code_bytes, $triple, undef, $debug_bytes );
+            open my $fh, '+<', $output_file or die $!;
+            binmode $fh;
+            seek $fh, 0x96, 0;
+            print $fh pack( "S", 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
+            close $fh;
+        }
+    }
+}
+
+class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
+    no warnings 'portable';
+
+    method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 ) {
+        $l->add_section( '.text',     $t,   5 );    # Read + Execute
+        $l->add_section( '.data',     $d,   3 );    # Read + Write
+        $l->add_section( '.got',      512,  3 );    # Global Offset Table
+        $l->add_section( '.linkedit', 4096, 1 );    # Symbols, Strings, Dynamic linking info
+        if ( $dbg >= 1 ) {
+            $l->add_section( '.debug_line',     4096, 0 );
+            $l->add_section( '.debug_info',     8192, 0 );
+            $l->add_section( '.debug_abbrev',   4096, 0 );
+            $l->add_section( '.debug_frame',    8192, 0 );
+            $l->add_section( '.debug_aranges',  4096, 0 );
+            $l->add_section( '.debug_pubnames', 4096, 0 );
+        }
+    }
+
+    method import_rva($name) {
+        my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16 };
+        return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die "Unknown Mach-O import: $name" );
+    }
+    method image_base () { return hex('100000000'); }    # 64-bit macOS default image base (4GB)
+
+    method write_executable ( $output_file, $code_bytes, $platform, $shared = false, $debug_bytes = undef ) {
+        my $full_code    = ref $code_bytes eq 'HASH' ? $code_bytes->{binary}                        : $code_bytes;
+        my $writable_off = ref $code_bytes eq 'HASH' ? ( $code_bytes->{writable_data_offset} // 0 ) : 0;
+        my $text_raw     = $writable_off             ? substr( $full_code, 0, $writable_off )       : $full_code;
+        my $data_bytes   = $writable_off             ? substr( $full_code, $writable_off )          : '';
+        my $text         = $text_raw;
+        my $arch         = $platform->arch;
+        my $os           = $platform->os;
+
+        # Prepend platform-specific Mach-O _start stubs if compiling an executable
+        if ( $self->type eq 'exe' ) {
+            my $entry_stub = "";
+            if ( $platform->is_arm64 ) {
+
+                # ARM64 (Apple Silicon) native exit stub:
+                # - bl main (relative call offset +16 bytes -> 4 instructions)
+                # - movz x16, #1
+                # - movk x16, #0x2000, lsl #16 (loads 0x2000001 exit syscall with macOS class offset)
+                # - svc #0x80
+                $entry_stub = pack( "V4", 0x94000004, 0xD2800030, 0xF2A40010, 0xD4001001 );
+            }
+            else {
+                # x86_64 (Intel Mac) native exit stub:
+                # - call main:     e8 0a 00 00 00 (Relative call 10 bytes ahead)
+                # - mov rdi, rax:  48 89 c7       (Copy main's return code to first argument)
+                # - mov eax, sys:  b8 01 00 00 02 (0x2000001 is exit syscall with macOS offset)
+                # - syscall:       0f 05
+                $entry_stub = pack( "C V", 0xE8, 10 );
+                $entry_stub .= pack( "C3",  0x48, 0x89, 0xC7 );
+                $entry_stub .= pack( "C V", 0xB8, 0x2000001 );
+                $entry_stub .= pack( "C2",  0x0F, 0x05 );
+            }
+            $text = $entry_stub . $text_raw;
+        }
+
+        # Automatically calculate layout if it wasn't called beforehand
+        if ( !defined $self->layout ) {
+            $self->pre_layout( length($text), length($data_bytes), $arch, $os );
+        }
+        my $l              = $self->layout;
+        my $base           = $self->image_base;
+        my $page_size      = $platform->page_size;                                     # 16KB for Apple Silicon, 4KB for Intel
+        my $cputype        = ( $arch eq 'arm64' )        ? 0x0100000c : 0x01000007;    # CPU_TYPE_ARM64 or CPU_TYPE_X86_64
+        my $cpusubtype     = ( $arch eq 'arm64' )        ? 0          : 3;             # CPU_SUBTYPE_ARM64_ALL or CPU_SUBTYPE_I386_ALL
+        my $filetype       = ( $self->type eq 'shared' ) ? 6          : 2;             # MH_DYLIB or MH_EXECUTE
+        my @debug_sections = grep { $_->{name} =~ /^\.debug/ } $l->sections;
+        my $_uleb          = sub {
+            my $v   = shift;
+            my $out = '';
+            do {
+                my $byte = $v & 0x7F;
+                $v >>= 7;
+                $byte |= 0x80 if $v;
+                $out .= pack( 'C', $byte );
+            } while ($v);
+            return $out;
+        };
+        my $lib_name = "/usr/lib/libSystem.B.dylib\0";
+        while ( length($lib_name) % 8 != 0 ) { $lib_name .= "\0"; }
+
+        # LC_LOAD_DYLIB load command (Loads macOS system library)
+        my $lc_load_libsystem = pack( 'L<6', 0xC, 24 + length($lib_name), 24, 2, 0x010000, 0x010000 ) . $lib_name;
+
+        # Setup dynamic binding info for resolving FFI imports
+        my $bind_info = '';
+        $bind_info .= pack( 'C', 0x11 );
+        $bind_info .= pack( 'C', 0x51 );
+        $bind_info .= pack( 'C', 0x72 ) . $_uleb->( $l->get('.got')->{rva} - $l->get('.data')->{rva} );
+        $bind_info .= pack( 'C', 0x40 ) . "_dlopen\0";
+        $bind_info .= pack( 'C', 0x90 );
+        $bind_info .= pack( 'C', 0x40 ) . "_dlsym\0";
+        $bind_info .= pack( 'C', 0x90 );
+        $bind_info .= pack( 'C', 0x40 ) . "_pthread_create\0";
+        $bind_info .= pack( 'C', 0x90 );
+        $bind_info .= pack( 'C', 0x00 );
+        my $bind_info_size = length($bind_info);
+        while ( length($bind_info) % 8 != 0 ) { $bind_info .= "\0"; }
+        my ( $trie, $symtab, $strtab, $lc_id_dylib ) = ( '', '', '', '' );
+        my ( $num_syms, $le_off, $trie_size, $symtab_size, $strtab_size ) = ( 0, 0, 0, 0, 0 );
+
+        if ( $self->type eq 'shared' ) {
+            require File::Basename;
+            my $dylib_name     = File::Basename::basename($output_file);
+            my $dylib_name_pad = $dylib_name . "\0";
+            while ( length($dylib_name_pad) % 8 != 0 ) { $dylib_name_pad .= "\0"; }
+
+            # LC_ID_DYLIB (Identifies the output dylib name)
+            $lc_id_dylib = pack( 'L<6', 0xD, 24 + length($dylib_name_pad), 24, 1, 1, 1 ) . $dylib_name_pad;
+            my @exports = @{ $self->exported_funcs // [] };
+            my %export_rvas;
+            for my $name (@exports) {
+                $export_rvas{"_$name"} = $l->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
+            }
+            my @syms = sort keys %export_rvas;
+            $num_syms = scalar @syms;
+            $strtab   = "\0";
+            my %strx;
+            for my $sym (@syms) {
+                $strx{$sym} = length($strtab);
+                $strtab .= $sym . "\0";
+            }
+            while ( length($strtab) % 8 != 0 ) { $strtab .= "\0"; }
+            for my $sym (@syms) {
+                $symtab .= pack( 'L< C C S< Q<', $strx{$sym}, 0x0f, 1, 0, $base + $export_rvas{$sym} );
+            }
+            if ( $num_syms > 0 ) {
+                my @nodes;
+                for my $sym (@syms) {
+                    my $rva        = $export_rvas{$sym};
+                    my $flags_u    = $_uleb->(0);
+                    my $rva_u      = $_uleb->($rva);
+                    my $term_data  = $flags_u . $rva_u;
+                    my $node_bytes = $_uleb->( length($term_data) ) . $term_data . pack( 'C', 0 );
+                    push @nodes, { sym => $sym, bytes => $node_bytes };
+                }
+                my %node_offsets;
+                for ( 1 .. 3 ) {
+                    my $root = pack( 'C', 0 ) . pack( 'C', $num_syms );
+                    for my $n (@nodes) { $root .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } // 1024 ); }
+                    my $offset = length($root);
+                    for my $n (@nodes) {
+                        $node_offsets{ $n->{sym} } = $offset;
+                        $offset += length( $n->{bytes} );
+                    }
+                }
+                $trie = pack( 'C', 0 ) . pack( 'C', $num_syms );
+                for my $n (@nodes) { $trie .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } ); }
+                for my $n (@nodes) { $trie .= $n->{bytes}; }
+                while ( length($trie) % 8 != 0 ) { $trie .= "\0"; }
+            }
+        }
+        $trie_size                   = length($trie);
+        $symtab_size                 = length($symtab);
+        $strtab_size                 = length($strtab);
+        $l->get('.linkedit')->{size} = length($bind_info) + $trie_size + $symtab_size + $strtab_size;
+        $l->calculate($page_size);
+        $le_off = $l->get('.linkedit')->{off};
+        my %seg_names = ( '.text' => '__TEXT', '.data' => '__DATA', '.got' => '__DATA', );
+        my %sec_names = ( '.text' => '__text', '.data' => '__data', '.got' => '__got', );
+
+        for my $s ( $l->sections ) {
+            if ( $s->{name} =~ /^\.debug_/ ) {
+                $seg_names{ $s->{name} } = '__DWARF';
+                ( my $macho_name = $s->{name} ) =~ s/^\./__/;
+                $sec_names{ $s->{name} } = $macho_name;
+            }
+        }
+        my @text_sections = grep { $_->{name} eq '.text' } $l->sections;
+        my $t_sec         = $text_sections[0];
+        my @data_sections = grep { $_->{name} eq '.data' || $_->{name} eq '.got' } $l->sections;
+        my $t_vmsize      = $t_sec->{off} + $t_sec->{size};
+        my $t_seg_size    = ( $t_vmsize + $page_size - 1 ) & ~( $page_size - 1 );
+        my $d_start_rva   = $data_sections[0]->{rva};
+        my $d_start_off   = $data_sections[0]->{off};
+        my $d_size        = 0;
+        for (@data_sections) { $d_size += $_->{size}; }
+        my $d_seg_size = ( $d_size + $page_size - 1 ) & ~( $page_size - 1 );
+        my @cmds       = ();
+
+        # PageZero Segment Header
+        if ( $self->type ne 'shared' ) {
+            push @cmds, pack(
+                'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
+                72,                         # cmdsize
+                "__PAGEZERO",               # segname
+                0,                          # vmaddr
+                $base,                      # vmsize
+                0,                          # fileoff
+                0,                          # filesize
+                0,                          # maxprot (none)
+                0,                          # initprot (none)
+                0,                          # nsects
+                0                           # flags
+            );
+        }
+
+        # TEXT Segment Header
+        my $t_cmd_size = 72 + 80 * scalar(@text_sections);
+        my $t_cmd      = pack(
+            'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
+            $t_cmd_size,                # cmdsize
+            "__TEXT",                   # segname
+            $base,                      # vmaddr
+            $t_seg_size,                # vmsize
+            0,                          # fileoff
+            $t_seg_size,                # filesize
+            5,                          # maxprot (VM_PROT_READ | VM_PROT_EXECUTE)
+            5,                          # initprot (VM_PROT_READ | VM_PROT_EXECUTE)
+            scalar(@text_sections),     # nsects
+            0                           # flags
+        );
+        for my $s (@text_sections) {
+
+            # TEXT Sections (80 bytes each)
+            $t_cmd .= pack(
+                'a16 a16 Q<2 L<2 L<3 L<2 L<',
+                $sec_names{ $s->{name} },
+                "__TEXT",   $base + $s->{rva},
+                $s->{size}, $s->{off}, 4, 0, 0, 0x80000400, 0, 0, 0
+            );
+        }
+        push @cmds, $t_cmd;
+
+        # DATA Segment Header
+        my $d_cmd_size = 72 + 80 * scalar(@data_sections);
+        my $d_cmd      = pack(
+            'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
+            $d_cmd_size,                # cmdsize
+            "__DATA",                   # segname
+            $base + $d_start_rva,       # vmaddr
+            $d_seg_size,                # vmsize
+            $d_start_off,               # fileoff
+            $d_size,                    # filesize
+            3,                          # maxprot (VM_PROT_READ | VM_PROT_WRITE)
+            3,                          # initprot (VM_PROT_READ | VM_PROT_WRITE)
+            scalar(@data_sections),     # nsects
+            0                           # flags
+        );
+        for my $s (@data_sections) {
+
+            # DATA Sections (80 bytes each)
+            $d_cmd .= pack(
+                'a16 a16 Q<2 L<2 L<3 L<2 L<',
+                $sec_names{ $s->{name} },
+                "__DATA",   $base + $s->{rva},
+                $s->{size}, $s->{off}, 3, 0, 0, 0, 0, 0, 0
+            );
+        }
+        push @cmds, $d_cmd;
+
+        # LINKEDIT Segment Header
+        my $le_sec      = $l->get('.linkedit');
+        my $le_seg_size = ( $le_sec->{size} + $page_size - 1 ) & ~( $page_size - 1 );
+        push @cmds, pack(
+            'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
+            72,                         # cmdsize
+            "__LINKEDIT",               # segname
+            $base + $le_sec->{rva},     # vmaddr
+            $le_seg_size,               # vmsize
+            $le_sec->{off},             # fileoff
+            $le_sec->{size},            # filesize
+            1,                          # maxprot (VM_PROT_READ)
+            1,                          # initprot (VM_PROT_READ)
+            0,                          # nsects
+            0                           # flags
+        );
+        push @cmds, $lc_id_dylib if $self->type eq 'shared';
+
+        # LC_LOAD_DYLINKER (Loads dynamic linker `/usr/lib/dyld`)
+        push @cmds, pack( 'L<3', 0xE, 32, 12 ) . "/usr/lib/dyld\0\0\0\0\0\0\0";
+        push @cmds, $lc_load_libsystem;
+
+        # LC_DYLD_INFO_ONLY (48 bytes)
+        my $export_off = $self->type eq 'shared' ? $le_off + length($bind_info) : 0;
+        my $export_sz  = $self->type eq 'shared' ? $trie_size                   : 0;
+        push @cmds, pack(
+            'L<12', 0x80000022,         # cmd
+            48,                         # cmdsize
+            0, 0,                       # rebase_off, rebase_size
+            $le_off,                    # bind_off
+            $bind_info_size,            # bind_size
+            0, 0,                       # weak_bind_off, weak_bind_size
+            0, 0,                       # lazy_bind_off, lazy_bind_size
+            $export_off,                # export_off
+            $export_sz                  # export_size
+        );
+
+        # LC_SYMTAB (24 bytes)
+        my $symtab_off = $le_off + length($bind_info) + $trie_size;
+        push @cmds, pack(
+            'L<6', 0x2,                    # cmd
+            24,                            # cmdsize
+            $symtab_off,                   # symoff
+            $num_syms,                     # nsyms
+            $symtab_off + $symtab_size,    # stroff
+            $strtab_size                   # strsize
+        );
+
+        # LC_DYSYMTAB (80 bytes)
+        push @cmds, pack(
+            'L<20', 0xB,                   # cmd
+            80,                            # cmdsize
+            0,         0,                  # ilocalsym, nlocalsym
+            0,         $num_syms,          # iextdefsym, nextdefsym
+            $num_syms, 0,                  # iundefsym, nundefsym
+            (0) x 14                       # reserved / empty
+        );
+
+        # LC_MAIN (24 bytes - Points directly to our TEXT segment start off)
+        push @cmds, pack(
+            'L<2 Q<2', 0x80000028,         # cmd (LC_MAIN)
+            24,                            # cmdsize
+            $t_sec->{off},                 # entryoff (physical offset of _start)
+            0                              # stacksize
+        ) if $self->type eq 'exe';
+        if (@debug_sections) {
+            my $cmdsize      = 72 + 80 * scalar(@debug_sections);
+            my $dw_start_rva = $debug_sections[0]->{rva};
+            my $dw_start_off = $debug_sections[0]->{off};
+            my $dw_size      = 0;
+            for (@debug_sections) { $dw_size += $_->{size}; }
+            my $dw_size_aligned = ( $dw_size + $page_size - 1 ) & ~( $page_size - 1 );
+            my $dw_cmd          = pack( 'L<2 a16 Q<4 L<4',
+                0x19, $cmdsize, "__DWARF", $base + $dw_start_rva,
+                $dw_size_aligned, $dw_start_off, $dw_size_aligned, 0, 0, scalar(@debug_sections), 0 );
+            for my $s (@debug_sections) {
+                $dw_cmd .= pack(
+                    'a16 a16 Q<2 L<2 L<3 L<2 L<',
+                    $sec_names{ $s->{name} },
+                    "__DWARF",  $base + $s->{rva},
+                    $s->{size}, $s->{off}, 0, 0, 0, 0, 0, 0, 0
+                );
+            }
+            push @cmds, $dw_cmd;
+        }
+        my $ncmds      = scalar(@cmds);
+        my $sizeofcmds = 0;
+        for (@cmds) { $sizeofcmds += length($_); }
+        open my $fh, '>', $output_file or die $!;
+        binmode $fh;
+
+        # mach_header_64 (Exactly 32 bytes)
+        my $flags = 0x200085 | 0x00200000;
+        $flags = 0x100085 if $self->type eq 'shared';
+        print $fh pack(
+            'L<7 L<', 0xfeedfacf,    # magic (MH_MAGIC_64)
+            $cputype,                # cputype
+            $cpusubtype,             # cpusubtype
+            $filetype,               # filetype
+            $ncmds,                  # ncmds
+            $sizeofcmds,             # sizeofcmds
+            $flags,                  # flags
+            0                        # reserved
+        );
+        print $fh $_ for @cmds;
+
+        # Write __TEXT,__text segment (padded to layout size)
+        seek( $fh, $t_sec->{off}, 0 );
+        my $text_payload = $text;
+        $text_payload .= ( "\0" x ( $t_sec->{size} - length($text_payload) ) ) if length($text_payload) < $t_sec->{size};
+        print $fh $text_payload;
+
+        # Write __DATA,__data segment (padded to layout size)
+        my $d_sec_actual = $l->get('.data');
+        seek( $fh, $d_sec_actual->{off}, 0 );
+        my $data_payload = $data_bytes // '';
+        $data_payload .= ( "\0" x ( $d_sec_actual->{size} - length($data_payload) ) ) if length($data_payload) < $d_sec_actual->{size};
+        print $fh $data_payload;
+
+        # Write __DATA,__got segment (padded to layout size)
+        my $got_sec = $l->get('.got');
+        seek( $fh, $got_sec->{off}, 0 );
+        my $got_payload = pack( 'Q< Q< Q<', 0, 0, 0 );
+        $got_payload .= ( "\0" x ( $got_sec->{size} - length($got_payload) ) ) if length($got_payload) < $got_sec->{size};
+        print $fh $got_payload;
+
+        # Write LINKEDIT segment (padded to layout size)
+        seek( $fh, $le_sec->{off}, 0 );
+        my $le_payload = $bind_info . $trie . $symtab . $strtab;
+        $le_payload .= ( "\0" x ( $le_sec->{size} - length($le_payload) ) ) if length($le_payload) < $le_sec->{size};
+        print $fh $le_payload;
+        if (@debug_sections) {
+            for my $s (@debug_sections) {
+                seek( $fh, $s->{off}, 0 );
+                my $dw_payload = $self->debug_section( $s->{name} ) || '';
+                $dw_payload .= ( "\0" x ( $s->{size} - length($dw_payload) ) ) if length($dw_payload) < $s->{size};
+                print $fh $dw_payload;
+            }
+        }
+        close $fh;
+        chmod 0755, $output_file;
+        if ( $os eq 'macos' ) { system("codesign -f -s - \"$output_file\" >/dev/null 2>&1"); }
+        return $output_file;
+    }
+}
 my $compiler = Brocken::Compiler->new();
 subtest Katsuro => sub {
     subtest 'platform parsing' => sub {
@@ -1303,6 +3141,121 @@ subtest Lindsay => sub {
     IR
         is $module->as_string, $expected_ir, 'Generated IR supports FFI declarations and calls';
     };
+};
+subtest Jenny => sub {
+    subtest 'Jenny::Linker Pure ELF-64 Generation' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+
+        # Build the IR: int main() { return 42; }
+        my $module    = Brocken::Lindsay::IR::Module->new( name => 'standalone_elf' );
+        my $func_main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+        $module->add_function($func_main);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func_main->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+
+        # Compile IR to native machine code based on host architecture
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new() :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new();
+        my $machine_bytes = $codegen->emit_function($func_main);
+
+        # Link and Write to raw ELF executable file
+        my $output_file = './test_prog';
+        my $linker      = Brocken::Jenny::Linker::ELF64->new();
+        $linker->write_executable( $output_file, $machine_bytes, $platform );
+
+        # Ensure the file was actually written
+        ok -e $output_file, 'Binary executable file created successfully';
+
+        # We can only execute this test on x86_64 Linux hosts
+    SKIP: {
+            skip 'ELF binary execution test requires Linux' unless $platform->is_linux || $platform->is_bsd || $platform->is_haiku;
+
+            # Execute the binary and inspect its exit code!
+            system($output_file);
+            my $exit_code = $? >> 8;
+            is $exit_code, 42, 'Standalone binary executed natively and returned the correct exit code!';
+            note $?;
+            note $exit_code;
+        }
+
+        # Clean up
+        unlink $output_file;
+    };
+    subtest 'Jenny::Linker Pure PE-64 Generation' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+
+        # Build the IR: int main() { return 42; }
+        my $module    = Brocken::Lindsay::IR::Module->new( name => 'standalone_win' );
+        my $func_main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+        $module->add_function($func_main);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func_main->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+
+        # Compile IR to native machine code based on host architecture
+        my $codegen       = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new() : Brocken::Jenny::Codegen::X86_64->new();
+        my $machine_bytes = $codegen->emit_function($func_main);
+
+        # Link and Write to raw PE executable file (.exe)
+        my $output_file = './test_prog.exe';
+        my $linker      = Brocken::Jenny::Linker::PE->new();
+
+        #~ $linker->link_executable( $output_file, $machine_bytes );
+        $linker->write_executable( $output_file, $machine_bytes, $platform );
+        ok -e $output_file, 'Windows executable file created successfully';
+    SKIP: {
+            skip 'PE binary execution test requires x86_64 Windows', 1 unless $platform->is_windows;
+
+            # Execute the binary natively and inspect its exit code!
+            system($output_file);
+            my $exit_code = $? >> 8;
+            is $exit_code, 42, 'Standalone Windows binary executed natively and returned the correct exit code!';
+            note $?;
+            note $exit_code;
+        }
+
+        # Clean up
+        unlink $output_file;
+    };
+    subtest 'Jenny::Linker Pure Mach-O Generation' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+
+        # Build the IR: int main() { return 42; }
+        my $module    = Brocken::Lindsay::IR::Module->new( name => 'standalone_macho' );
+        my $func_main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+        $module->add_function($func_main);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func_main->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+
+        # Compile IR to native machine code based on host architecture
+        my $codegen       = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new() : Brocken::Jenny::Codegen::X86_64->new();
+        my $machine_bytes = $codegen->emit_function($func_main);
+
+        # Link and Write to raw Mach-O executable
+        my $output_file = './test_prog';
+        my $linker      = Brocken::Jenny::Linker::MachO->new();
+        $linker->write_executable( $output_file, $machine_bytes, $platform );
+
+        # Ensure the file was actually written
+        ok -e $output_file, 'Mach-O executable created successfully';
+    SKIP: {
+            skip 'Mach-O binary execution test requires macOS (x64 or ARM64)', 1 unless $platform->is_macos;
+
+            # Execute natively and inspect the exit code!
+            system($output_file);
+            my $exit_code = $? >> 8;
+            is $exit_code, 42, 'Standalone Mach-O binary executed natively and returned the correct exit code!';
+            note $?;
+            note $exit_code;
+        }
+
+        # Clean up
+        unlink $output_file;
+    }
 };
 #
 done_testing;
