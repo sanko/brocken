@@ -2543,221 +2543,177 @@ package Brocken::Jenny {
             return $output_file;
         }
     }
-}
 
-class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
-    no warnings 'portable';
+    class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
 
-    method write_executable ( $output_file, $code_bytes, $platform, $passed_argument = undef, $debug_bytes = undef ) {
-        my $full_code    = ref $code_bytes eq 'HASH' ? $code_bytes->{binary}                        : $code_bytes;
-        my $writable_off = ref $code_bytes eq 'HASH' ? ( $code_bytes->{writable_data_offset} // 0 ) : 0;
+        method write_executable ( $output_file, $code_bytes, $platform, $passed_argument = undef, $debug_bytes = undef ) {
 
-        # Prepend Windows entry stub if it's an executable
-        if ( $self->type eq 'exe' ) {
-            my $entry_stub = "";
-            if ( $platform->is_arm64 ) {
+            # Ensure $platform is normalized into a platform object if a raw string is passed
+            $platform = Brocken::Katsuro::Platform::parse($platform) unless ref $platform;
+            my $full_code    = ref $code_bytes eq 'HASH' ? $code_bytes->{binary}                        : $code_bytes;
+            my $writable_off = ref $code_bytes eq 'HASH' ? ( $code_bytes->{writable_data_offset} // 0 ) : 0;
+            my $text_bytes   = $writable_off             ? substr( $full_code, 0, $writable_off )       : $full_code;
+            my $data_bytes   = $writable_off             ? substr( $full_code, $writable_off )          : '';
+            my $has_data     = length($data_bytes) > 0;
+            my $has_debug    = defined $debug_bytes ? 1 : 0;
+            my $has_reloc    = 1;                              # ARM64 Windows strictly enforces ASLR / .reloc presence
+            my $num_sections = 1 + ( $has_data ? 1 : 0 ) + $has_reloc + ( $has_debug ? 1 : 0 );
+            open my $fh, '>', $output_file or die "Cannot open $output_file for writing: $!";
+            binmode $fh;
 
-                # Windows ARM64 (AArch64) native exit stub:
-                # - bl main (relative call offset +24 bytes -> 6 instructions)
-                # - mov w1, w0 (copy main's return val to ExitStatus/arg 2)
-                # - movn x0, #0 (current process handle -1 -> arg 1)
-                # - movz w8, #0x2c (NtTerminateProcess syscall number 44)
-                # - svc #0 (trigger syscall)
-                # - brk #0 (safety crash if syscall returns)
-                $entry_stub = pack( "V6", 0x94000006, 0x2A0003E1, 0x92800000, 0x52800588, 0xD4000001, 0xD4200000 );
-            }
-            else {
-                # Windows x64 (AMD64) native exit stub
-                $entry_stub = pack( "C V", 0xE8, 16 );             # call main (offset 16)
-                $entry_stub .= pack( "C3",  0x48, 0x89, 0xC2 );    # mov rdx, rax
-                $entry_stub .= pack( "C3",  0x4D, 0x31, 0xD2 );    # xor r10, r10
-                $entry_stub .= pack( "C3",  0x49, 0xF7, 0xD2 );    # not r10 (current process handle -1)
-                $entry_stub .= pack( "C V", 0xB8, 0x2C );          # mov eax, 0x2C (NtTerminateProcess)
-                $entry_stub .= pack( "C2",  0x0F, 0x05 );          # syscall
-            }
-            $full_code = $entry_stub . $full_code;
-            $writable_off += length($entry_stub) if $writable_off;
-        }
-        my $text_bytes   = $writable_off ? substr( $full_code, 0, $writable_off ) : $full_code;
-        my $data_bytes   = $writable_off ? substr( $full_code, $writable_off ) : '';
-        my $has_data     = length($data_bytes) > 0;
-        my $has_debug    = defined $debug_bytes ? 1 : 0;
-        my $has_reloc    = 1;                                                                 # ARM64 Windows strictly enforces ASLR / .reloc presence
-        my $num_sections = 1 + ( $has_data ? 1 : 0 ) + $has_reloc + ( $has_debug ? 1 : 0 );
-        open my $fh, '>', $output_file or die "Cannot open $output_file for writing: $!";
-        binmode $fh;
+            # DOS MZ Header (Exactly 64 bytes: a2=magic, v29=29 WORDS, V=e_lfanew)
+            # We explicitly use v29 and count-matched repetition to avoid pack argument shifts.
+            my $dos_header = pack(
+                'a2 v29 V', 'MZ',    # e_magic: DOS Magic Signature
+                0x0090,              # e_cblp: Bytes on last page of file (144)
+                0x0003,              # e_cp: Pages in file (3)
+                0x0000,              # e_crlc: Relocations (0)
+                0x0004,              # e_cparhdr: Size of header in paragraphs (4)
+                0x0000,              # e_minalloc: Minimum extra paragraphs needed (0)
+                0xffff,              # e_maxalloc: Maximum extra paragraphs needed (65535)
+                0x0000,              # e_ss: Initial (relative) SS value (0)
+                0x0100,              # e_sp: Initial SP value (256)
+                0x0000,              # e_csum: Checksum (0)
+                0x0000,              # e_ip: Initial IP value (0)
+                0x0000,              # e_cs: Initial (relative) CS value (0)
+                0x0040,              # e_lfarlc: File address of relocation table (64)
+                0x0000,              # e_ovno: Overlay number (0)
+                (0) x 4,             # e_res: Reserved words (4 WORDS)
+                0,                   # e_oemid: OEM identifier (0)
+                0,                   # e_oeminfo: OEM information (0)
+                (0) x 10,            # e_res2: Reserved words (10 WORDS)
+                0x00000080           # e_lfanew: File address of new exe header (Offset 128 / 0x80)
+            );
+            my $dos_stub     = ( "\x00" x 64 );    # 64 bytes padding to align PE header at offset 128 (0x80)
+            my $pe_signature = "PE\x00\x00";
 
-        # DOS MZ Header (64 bytes: a2=magic, v29=29 WORDS, V=e_lfanew)
-        my $dos_header = pack(
-            'a2 v13 v4 v2 v10 V', 'MZ',      # e_magic: DOS Magic Signature
-            0x0090,                          # e_cblp: Bytes on last page of file (144)
-            0x0003,                          # e_cp: Pages in file (3)
-            0x0000,                          # e_crlc: Relocations (0)
-            0x0004,                          # e_cparhdr: Size of header in paragraphs (4)
-            0x0000,                          # e_minalloc: Minimum extra paragraphs needed (0)
-            0xffff,                          # e_maxalloc: Maximum extra paragraphs needed (65535)
-            0x0000,                          # e_ss: Initial (relative) SS value (0)
-            0x0100,                          # e_sp: Initial SP value (256)
-            0x0000,                          # e_csum: Checksum (0)
-            0x0000,                          # e_ip: Initial IP value (0)
-            0x0000,                          # e_cs: Initial (relative) CS value (0)
-            0x0040,                          # e_lfarlc: File address of relocation table (64)
-            0x0000,                          # e_ovno: Overlay number (0)
-            0, 0, 0, 0,                      # e_res: Reserved words (4 WORDS)
-            0,                               # e_oemid: OEM identifier (0)
-            0,                               # e_oeminfo: OEM information (0)
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,    # e_res2: Reserved words (10 WORDS)
-            0x00000080                       # e_lfanew: File address of new exe header (Offset 128 / 0x80)
-        );
-        my $dos_stub     = ( "\x00" x 64 );    # Pad 64 bytes of padding to reach offset 128 (0x80)
-        my $pe_signature = "PE\x00\x00";       # Matches e_lfanew pointer
+            # COFF File Header
+            my $machine     = $platform->is_arm64 ? 0xAA64 : 0x8664;
+            my $timestamp   = $ENV{SOURCE_DATE_EPOCH} || time();
+            my $file_header = pack(
+                'v2 V3 v2', $machine,    # Machine Architecture
+                $num_sections,           # Number of Sections
+                $timestamp,              # TimeDateStamp
+                0, 0,                    # PointerToSymbolTable, NumberOfSymbols
+                240,                     # SizeOfOptionalHeader (PE32+)
+                0x0022                   # Characteristics (EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE)
+            );
 
-        # COFF File Header
-        my $machine     = $platform->is_arm64 ? 0xAA64 : 0x8664;
-        my $timestamp   = $ENV{SOURCE_DATE_EPOCH} // 0;
-        my $file_header = pack(
-            'v2 V3 v2', $machine,    # Machine Architecture (AMD64 / x86_64)
-            $num_sections,           # Number of Sections
-            $timestamp,              # TimeDateStamp
-            0,                       # PointerToSymbolTable (deprecated/0)
-            0,                       # NumberOfSymbols (deprecated/0)
-            240,                     # SizeOfOptionalHeader (PE32+ is 240 bytes)
-            0x0022                   # Characteristics (EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE)
-        );
+            # Layout sections
+            my $section_table   = '';
+            my $size_of_headers = ( 392 + ( $num_sections * 40 ) + 511 ) & ~511;
+            my $sec_raw_ptr     = $size_of_headers;
+            my $sec_rva         = 0x1000;
 
-        # Layout sections
-        my $section_table   = '';
-        my $size_of_headers = ( 128 + 20 + 240 + ( $num_sections * 40 ) + 511 ) & ~511;
-        my $sec_raw_ptr     = $size_of_headers;
-        my $sec_rva         = 0x1000;
-
-        # .text
-        my $sec_raw_code_size = ( length($text_bytes) + 511 ) & ~511;
-        $section_table .= pack( 'a8 V2 V2 V2 v2 V', ".text\x00\x00\x00", length($text_bytes), $sec_rva, $sec_raw_code_size, $sec_raw_ptr, 0, 0, 0, 0,
-            0x60000020 );
-        $sec_rva     += ( length($text_bytes) + 4095 ) & ~4095;
-        $sec_raw_ptr += $sec_raw_code_size;
-
-        # .data
-        my $sec_raw_data_size = 0;
-        if ($has_data) {
-            $sec_raw_data_size = ( length($data_bytes) + 511 ) & ~511;
+            # .text
+            my $sec_raw_code_size = ( length($text_bytes) + 511 ) & ~511;
             $section_table .= pack( 'a8 V2 V2 V2 v2 V',
-                ".data\x00\x00\x00", length($data_bytes), $sec_rva, $sec_raw_data_size, $sec_raw_ptr, 0, 0, 0, 0, 0xC0000040 );
-            $sec_rva     += ( length($data_bytes) + 4095 ) & ~4095;
-            $sec_raw_ptr += $sec_raw_data_size;
-        }
+                ".text\x00\x00\x00", length($text_bytes), $sec_rva, $sec_raw_code_size, $sec_raw_ptr, 0, 0, 0, 0, 0x60000020 );
+            $sec_rva     += ( length($text_bytes) + 4095 ) & ~4095;
+            $sec_raw_ptr += $sec_raw_code_size;
 
-        # .reloc
-        my $reloc_bytes        = pack( 'V V v v', 0x1000, 12, 0, 0 );     # Dummy NO-OP relocation to satisfy Windows ARM64 Loader
-        my $reloc_rva          = $sec_rva;
-        my $sec_raw_reloc_size = ( length($reloc_bytes) + 511 ) & ~511;
-        $section_table .= pack( 'a8 V2 V2 V2 v2 V', ".reloc\x00\x00", length($reloc_bytes), $sec_rva, $sec_raw_reloc_size, $sec_raw_ptr, 0, 0, 0, 0,
-            0x42000040 );
-        $sec_rva     += ( length($reloc_bytes) + 4095 ) & ~4095;
-        $sec_raw_ptr += $sec_raw_reloc_size;
-
-        # .debug_l
-        my $sec_raw_debug_size = 0;
-        if ($has_debug) {
-            $sec_raw_debug_size = ( length($debug_bytes) + 511 ) & ~511;
-            $section_table
-                .= pack( 'a8 V2 V2 V2 v2 V', '.debug_l', length($debug_bytes), $sec_rva, $sec_raw_debug_size, $sec_raw_ptr, 0, 0, 0, 0, 0x42000040 );
-            $sec_rva     += ( length($debug_bytes) + 4095 ) & ~4095;
-            $sec_raw_ptr += $sec_raw_debug_size;
-        }
-        my $size_of_image  = $sec_rva;
-        my $init_data_size = ( $has_data || $has_debug || $has_reloc ) ? 4096 : 0;
-
-        # OS Versions: Windows ARM64 absolutely mandates 10.0+. Intel can stay on Vista (6.0).
-        my $os_ver     = $platform->is_arm64 ? 10 : 6;
-        my $opt_header = pack(
-            'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2', 0x020b,    # Magic Number (PE32+ / 64-bit)
-            14,                                         10,        # MajorLinkerVersion, MinorLinkerVersion
-            4096,                                                  # SizeOfCode (.text)
-            $init_data_size,                                       # SizeOfInitializedData
-            0,                                                     # SizeOfUninitializedData
-            0x1000,                                                # AddressOfEntryPoint (RVA)
-            0x1000,                                                # BaseOfCode
-            0x140000000,                                           # ImageBase
-            4096,                                                  # SectionAlignment in Memory
-            512,                                                   # FileAlignment on Disk
-            $os_ver, 0,                                            # MajorOperatingSystemVersion, MinorOperatingSystemVersion
-            0,       0,                                            # MajorImageVersion, MinorImageVersion
-            $os_ver, 0,                                            # MajorSubsystemVersion, MinorSubsystemVersion
-            0,                                                     # Win32VersionValue (reserved)
-            $size_of_image,                                        # SizeOfImage in Memory
-            $size_of_headers,                                      # SizeOfHeaders (Headers size on disk)
-            0,                                                     # CheckSum
-            3,                                                     # Subsystem (Windows Console)
-            0x8140,                                                # DllCharacteristics (DYNAMIC_BASE | NX_COMPAT | TERMINAL_SERVER_AWARE)
-            0x100000,                                              # SizeOfStackReserve
-            0x1000,                                                # SizeOfStackCommit
-            0x100000,                                              # SizeOfHeapReserve
-            0x1000,                                                # SizeOfHeapCommit
-            0,                                                     # LoaderFlags (reserved)
-            16                                                     # Number of Data Directory RVAs and Sizes
-        );
-
-        # Data Directories (16 entries, 8 bytes each = 128 bytes of zeroes)
-        my $data_dirs = "\x00" x 128;
-        if ( ref $code_bytes eq 'HASH' ) {
-            my $import_rva  = $code_bytes->{import_descriptor_rva}  // 0;
-            my $import_size = $code_bytes->{import_descriptor_size} // 0;
-            if ($import_rva) {
-                substr $data_dirs, 8,  4, pack( 'V', $import_rva );
-                substr $data_dirs, 12, 4, pack( 'V', $import_size );
+            # .data
+            my $sec_raw_data_size = 0;
+            if ($has_data) {
+                $sec_raw_data_size = ( length($data_bytes) + 511 ) & ~511;
+                $section_table .= pack( 'a8 V2 V2 V2 v2 V',
+                    ".data\x00\x00\x00", length($data_bytes), $sec_rva, $sec_raw_data_size, $sec_raw_ptr, 0, 0, 0, 0, 0xC0000040 );
+                $sec_rva     += ( length($data_bytes) + 4095 ) & ~4095;
+                $sec_raw_ptr += $sec_raw_data_size;
             }
+
+            # .reloc
+            my $reloc_bytes        = pack( 'V V v v', 0x1000, 12, 0, 0 );
+            my $reloc_rva          = $sec_rva;
+            my $sec_raw_reloc_size = ( length($reloc_bytes) + 511 ) & ~511;
+            $section_table .= pack( 'a8 V2 V2 V2 v2 V',
+                ".reloc\x00\x00", length($reloc_bytes), $sec_rva, $sec_raw_reloc_size, $sec_raw_ptr, 0, 0, 0, 0, 0x42000040 );
+            $sec_rva     += ( length($reloc_bytes) + 4095 ) & ~4095;
+            $sec_raw_ptr += $sec_raw_reloc_size;
+
+            # .debug_l
+            my $sec_raw_debug_size = 0;
+            if ($has_debug) {
+                $sec_raw_debug_size = ( length($debug_bytes) + 511 ) & ~511;
+                $section_table .= pack( 'a8 V2 V2 V2 v2 V', ".debug_l", length($debug_bytes), $sec_rva, $sec_raw_debug_size, $sec_raw_ptr, 0, 0, 0, 0,
+                    0x42000040 );
+                $sec_rva     += ( length($debug_bytes) + 4095 ) & ~4095;
+                $sec_raw_ptr += $sec_raw_debug_size;
+            }
+            my $size_of_image  = $sec_rva;
+            my $size_of_code   = $sec_raw_code_size;
+            my $init_data_size = $sec_raw_data_size + $sec_raw_reloc_size + $sec_raw_debug_size;
+            my $os_ver         = 6;                                                                # Compatibility with older Windows platforms
+            my $opt_header     = pack(
+                'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2', 0x020b,                        # Magic Number (PE32+)
+                14,                                         10,                            # Major/Minor LinkerVersion
+                $size_of_code,                              $init_data_size, 0, 0x1000,    # AddressOfEntryPoint
+                0x1000,                                                                    # BaseOfCode
+                0x140000000,                                                               # ImageBase
+                4096,                                                                      # SectionAlignment
+                512,                                                                       # FileAlignment
+                $os_ver, 0,                                                                # Major/Minor OS
+                0,       0,                                                                # Major/Minor Image
+                $os_ver, 0,                                                                # Major/Minor Subsystem
+                0,                                                                         # Win32VersionValue
+                $size_of_image, $size_of_headers, 0,                                       # CheckSum
+                3,         # Subsystem (Windows Console)
+                0x8160,    # DllCharacteristics (DYNAMIC_BASE | NX_COMPAT | TS_AWARE | HIGH_ENTROPY_VA)
+                0x100000, 0x1000, 0x100000, 0x1000,    # Stack/Heap Reserve/Commit
+                0,                                     # LoaderFlags
+                16                                     # NumberOfRvaAndSizes
+            );
+            my $data_dirs = "\x00" x 128;
+            if ( ref $code_bytes eq 'HASH' ) {
+                my $import_rva  = $code_bytes->{import_descriptor_rva}  // 0;
+                my $import_size = $code_bytes->{import_descriptor_size} // 0;
+                if ($import_rva) {
+                    substr $data_dirs, 8,  4, pack( 'V', $import_rva );
+                    substr $data_dirs, 12, 4, pack( 'V', $import_size );
+                }
+            }
+
+            # Insert Base Relocation Data Directory (Index 5 = Offset 40)
+            substr $data_dirs, 40, 4, pack( 'V', $reloc_rva );
+            substr $data_dirs, 44, 4, pack( 'V', length($reloc_bytes) );
+            $opt_header .= $data_dirs;
+            print $fh $dos_header, $dos_stub, $pe_signature, $file_header, $opt_header, $section_table;
+            my $headers_len
+                = length($dos_header)
+                + length($dos_stub)
+                + length($pe_signature)
+                + length($file_header)
+                + length($opt_header)
+                + length($section_table);
+            print $fh ( "\x00" x ( $size_of_headers - $headers_len ) );
+            print $fh $text_bytes;
+            print $fh ( "\x00" x ( $sec_raw_code_size - length($text_bytes) ) );
+
+            if ($has_data) {
+                print $fh $data_bytes;
+                print $fh ( "\x00" x ( $sec_raw_data_size - length($data_bytes) ) );
+            }
+            if ($has_reloc) {
+                print $fh $reloc_bytes;
+                print $fh ( "\x00" x ( $sec_raw_reloc_size - length($reloc_bytes) ) );
+            }
+            if ($has_debug) {
+                print $fh $debug_bytes;
+                print $fh ( "\x00" x ( $sec_raw_debug_size - length($debug_bytes) ) );
+            }
+            close $fh;
+            chmod 0755, $output_file;
         }
 
-        # Inject Base Relocation Data Directory (Index 5 = Offset 40)
-        substr $data_dirs, 40, 4, pack( 'V', $reloc_rva );
-        substr $data_dirs, 44, 4, pack( 'V', length($reloc_bytes) );
-        $opt_header .= $data_dirs;
-
-        # Write header buffers to file
-        print $fh $dos_header;
-        print $fh $dos_stub;
-        print $fh $pe_signature;
-        print $fh $file_header;
-        print $fh $opt_header;
-        print $fh $section_table;
-
-        # Pad headers up to $size_of_headers disk alignment
-        my $headers_len
-            = length($dos_header) + length($dos_stub) + length($pe_signature) + length($file_header) + length($opt_header) + length($section_table);
-        print $fh ( "\x00" x ( $size_of_headers - $headers_len ) );
-
-        # Write .text segment bytes
-        print $fh $text_bytes;
-        print $fh ( "\x00" x ( $sec_raw_code_size - length($text_bytes) ) );
-
-        # Write .data segment bytes
-        if ($has_data) {
-            print $fh $data_bytes;
-            print $fh ( "\x00" x ( $sec_raw_data_size - length($data_bytes) ) );
+        method write_shared_library ( $output_file, $code_bytes, $platform, $debug_bytes = undef ) {
+            my $p = ref($platform) ? $platform : Brocken::Katsuro::Platform::parse($platform);
+            $self->write_executable( $output_file, $code_bytes, $p, undef, $debug_bytes );
+            open my $fh, '+<', $output_file or die $!;
+            binmode $fh;
+            seek $fh, 0x96, 0;
+            print $fh pack( "v", 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
+            close $fh;
         }
-
-        # Write .reloc segment bytes
-        print $fh $reloc_bytes;
-        print $fh ( "\x00" x ( $sec_raw_reloc_size - length($reloc_bytes) ) );
-
-        # Write .debug_l segment bytes
-        if ($has_debug) {
-            print $fh $debug_bytes;
-            print $fh ( "\x00" x ( $sec_raw_debug_size - length($debug_bytes) ) );
-        }
-        close $fh;
-        chmod 0755, $output_file;
-    }
-
-    method write_shared_library ( $output_file, $code_bytes, $triple, $debug_bytes = undef ) {
-        $self->write_executable( $output_file, $code_bytes, $triple, undef, $debug_bytes );
-        open my $fh, '+<', $output_file or die $!;
-        binmode $fh;
-        seek $fh, 0x96, 0;
-        print $fh pack( "v", 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
-        close $fh;
     }
 }
 my $compiler = Brocken::Compiler->new();
@@ -3274,6 +3230,8 @@ subtest Jenny => sub {
             note $?;
             note $exit_code;
         }
+        note `dumpbin /headers $output_file`;
+        note `objdump -f -p $output_file`;
 
         # Clean up
         unlink $output_file;
