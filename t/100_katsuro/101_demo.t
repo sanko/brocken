@@ -1110,17 +1110,17 @@ package Brocken::Jenny {
 
         method pre_layout( $text_size, $data_size, $arch, $os, $debug = 0 ) {
             my $is_macos = $os =~ /^(macos|darwin)/i;
-            my $fa = $is_macos ? 0x4000 : ( $os eq 'win64' ? 0x200 : 0x1000 );
-            my $sa = $is_macos ? 0x4000 : 0x1000;
+            my $is_arm_mac = $is_macos && $arch =~ /aarch64|arm64/i;
+            my $page_align = $is_arm_mac ? 0x4000 : ( $is_macos ? 0x1000 : ( $os eq 'win64' ? 0x200 : 0x1000 ) );
             eval {
                 require Brocken::Target::Format::Layout;
-                $_layout = Brocken::Target::Format::Layout->new( file_align => $fa, section_align => $sa );
+                $_layout = Brocken::Target::Format::Layout->new( file_align => $page_align, section_align => $page_align );
             };
             if ( $@ || !defined $_layout ) {
-                $_layout = Brocken::Jenny::Linker::Layout->new( file_align => $fa, section_align => $sa );
+                $_layout = Brocken::Jenny::Linker::Layout->new( file_align => $page_align, section_align => $page_align );
             }
             $self->_setup_layout( $_layout, $text_size, $data_size, $arch, $os, $debug );
-            $_layout->calculate( $is_macos ? 0x4000 : 0x1000 );
+            $_layout->calculate( $page_align );
         }
         method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 )           { die "Abstract" }
         method write_bin( $filename, $text, $data, $arch, $os, $type ) { die "Abstract" }
