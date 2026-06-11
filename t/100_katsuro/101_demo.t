@@ -2334,12 +2334,15 @@ package Brocken::Jenny {
 
 class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
     no warnings 'portable';
+    field $has_ffi : reader = false;
+
+    method set_has_ffi($v) { $has_ffi = $v; }
 
     method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 ) {
         $l->add_section( '.text',     $t,   5 );    # Read + Execute
-        $l->add_section( '.data',     $d,   3 );    # Read + Write
-        $l->add_section( '.got',      512,  3 );    # Global Offset Table
-        $l->add_section( '.linkedit', 4096, 1 );    # Symbols, Strings, Dynamic linking info
+        $l->add_section( '.data',     $d,   3 ) if $d > 0;    # Read + Write
+        $l->add_section( '.got',      512,  3 ) if $has_ffi;    # Global Offset Table
+        $l->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );    # Symbols, Strings, Dynamic linking info
         if ( $dbg >= 1 ) {
             $l->add_section( '.debug_line',     4096, 0 );
             $l->add_section( '.debug_info',     8192, 0 );
@@ -2427,18 +2430,24 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
         # Setup dynamic binding info for resolving FFI imports
         my $bind_info = '';
-        $bind_info .= pack( 'C', 0x11 );
-        $bind_info .= pack( 'C', 0x51 );
-        $bind_info .= pack( 'C', 0x72 ) . $_uleb->( $l->get('.got')->{rva} - $l->get('.data')->{rva} );
-        $bind_info .= pack( 'C', 0x40 ) . "_dlopen\0";
-        $bind_info .= pack( 'C', 0x90 );
-        $bind_info .= pack( 'C', 0x40 ) . "_dlsym\0";
-        $bind_info .= pack( 'C', 0x90 );
-        $bind_info .= pack( 'C', 0x40 ) . "_pthread_create\0";
-        $bind_info .= pack( 'C', 0x90 );
-        $bind_info .= pack( 'C', 0x00 );
-        my $bind_info_size = length($bind_info);
-        while ( length($bind_info) % 8 != 0 ) { $bind_info .= "\0"; }
+        my $bind_info_size = 0;
+        my $got_sec = eval { $l->get('.got') };
+        if ($got_sec) {
+            my $data_sec = eval { $l->get('.data') };
+            my $data_rva = $data_sec ? $data_sec->{rva} : $got_sec->{rva};
+            $bind_info .= pack( 'C', 0x11 );
+            $bind_info .= pack( 'C', 0x51 );
+            $bind_info .= pack( 'C', 0x72 ) . $_uleb->( $got_sec->{rva} - $data_rva );
+            $bind_info .= pack( 'C', 0x40 ) . "_dlopen\0";
+            $bind_info .= pack( 'C', 0x90 );
+            $bind_info .= pack( 'C', 0x40 ) . "_dlsym\0";
+            $bind_info .= pack( 'C', 0x90 );
+            $bind_info .= pack( 'C', 0x40 ) . "_pthread_create\0";
+            $bind_info .= pack( 'C', 0x90 );
+            $bind_info .= pack( 'C', 0x00 );
+            $bind_info_size = length($bind_info);
+            while ( length($bind_info) % 8 != 0 ) { $bind_info .= "\0"; }
+        }
         my ( $trie, $symtab, $strtab, $lc_id_dylib ) = ( '', '', '', '' );
         my ( $num_syms, $le_off, $trie_size, $symtab_size, $strtab_size ) = ( 0, 0, 0, 0, 0 );
 
@@ -2514,12 +2523,15 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my @data_sections = grep { $_->{name} eq '.data' || $_->{name} eq '.got' } $l->sections;
         my $t_vmsize      = $t_sec->{off} + $t_sec->{size};
         my $t_seg_size    = ( $t_vmsize + $page_size - 1 ) & ~( $page_size - 1 );
-        my $d_start_rva   = $data_sections[0]->{rva};
-        my $d_start_off   = $data_sections[0]->{off};
-        my $d_size        = 0;
-        for (@data_sections) { $d_size += $_->{size}; }
-        my $d_seg_size = ( $d_size + $page_size - 1 ) & ~( $page_size - 1 );
-        my @cmds       = ();
+        my ( $d_start_rva, $d_start_off, $d_size, $d_seg_size );
+        if (@data_sections) {
+            $d_start_rva = $data_sections[0]->{rva};
+            $d_start_off = $data_sections[0]->{off};
+            $d_size      = 0;
+            for (@data_sections) { $d_size += $_->{size}; }
+            $d_seg_size = ( $d_size + $page_size - 1 ) & ~( $page_size - 1 );
+        }
+        my @cmds = ();
 
         # PageZero Segment Header
         if ( $self->type ne 'shared' ) {
@@ -2540,15 +2552,13 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
         # TEXT Segment Header
         my $t_cmd_size = 72 + 80 * scalar(@text_sections);
-        my $t_text_off = $t_sec->{off};
-        my $t_text_rva = $t_sec->{rva};
         my $t_cmd      = pack(
             'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
             $t_cmd_size,                # cmdsize
             "__TEXT",                   # segname
-            $base + $t_text_rva,        # vmaddr (code start, not header)
+            $base,                      # vmaddr
             $t_seg_size,                # vmsize
-            $t_text_off,                # fileoff (code start, not header)
+            0,                          # fileoff
             $t_seg_size,                # filesize
             5,                          # maxprot (VM_PROT_READ | VM_PROT_EXECUTE)
             5,                          # initprot (VM_PROT_READ | VM_PROT_EXECUTE)
@@ -2567,32 +2577,34 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
         push @cmds, $t_cmd;
 
-        # DATA Segment Header
-        my $d_cmd_size = 72 + 80 * scalar(@data_sections);
-        my $d_cmd      = pack(
-            'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
-            $d_cmd_size,                # cmdsize
-            "__DATA",                   # segname
-            $base + $d_start_rva,       # vmaddr
-            $d_seg_size,                # vmsize
-            $d_start_off,               # fileoff
-            $d_size,                    # filesize
-            3,                          # maxprot (VM_PROT_READ | VM_PROT_WRITE)
-            3,                          # initprot (VM_PROT_READ | VM_PROT_WRITE)
-            scalar(@data_sections),     # nsects
-            0                           # flags
-        );
-        for my $s (@data_sections) {
-
-            # DATA Sections (80 bytes each)
-            $d_cmd .= pack(
-                'a16 a16 Q<2 L<2 L<3 L<2 L<',
-                $sec_names{ $s->{name} },
-                "__DATA",   $base + $s->{rva},
-                $s->{size}, $s->{off}, 3, 0, 0, 0, 0, 0, 0
+        # DATA Segment Header (only if we have data or GOT sections)
+        if (@data_sections) {
+            my $d_cmd_size = 72 + 80 * scalar(@data_sections);
+            my $d_cmd      = pack(
+                'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
+                $d_cmd_size,                # cmdsize
+                "__DATA",                   # segname
+                $base + $d_start_rva,       # vmaddr
+                $d_seg_size,                # vmsize
+                $d_start_off,               # fileoff
+                $d_size,                    # filesize
+                3,                          # maxprot (VM_PROT_READ | VM_PROT_WRITE)
+                3,                          # initprot (VM_PROT_READ | VM_PROT_WRITE)
+                scalar(@data_sections),     # nsects
+                0                           # flags
             );
+            for my $s (@data_sections) {
+
+                # DATA Sections (80 bytes each)
+                $d_cmd .= pack(
+                    'a16 a16 Q<2 L<2 L<3 L<2 L<',
+                    $sec_names{ $s->{name} },
+                    "__DATA",   $base + $s->{rva},
+                    $s->{size}, $s->{off}, 3, 0, 0, 0, 0, 0, 0
+                );
+            }
+            push @cmds, $d_cmd;
         }
-        push @cmds, $d_cmd;
 
         # LINKEDIT Segment Header
         my $le_sec      = $l->get('.linkedit');
@@ -2706,19 +2718,22 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         $text_payload .= ( "\0" x ( $t_sec->{size} - length($text_payload) ) ) if length($text_payload) < $t_sec->{size};
         print $fh $text_payload;
 
-        # Write __DATA,__data segment (padded to layout size)
-        my $d_sec_actual = $l->get('.data');
-        seek( $fh, $d_sec_actual->{off}, 0 );
-        my $data_payload = $data_bytes // '';
-        $data_payload .= ( "\0" x ( $d_sec_actual->{size} - length($data_payload) ) ) if length($data_payload) < $d_sec_actual->{size};
-        print $fh $data_payload;
+        # Write __DATA,__data segment (padded to layout size) if section exists
+        my $d_sec_actual = eval { $l->get('.data') };
+        if ($d_sec_actual) {
+            seek( $fh, $d_sec_actual->{off}, 0 );
+            my $data_payload = $data_bytes // '';
+            $data_payload .= ( "\0" x ( $d_sec_actual->{size} - length($data_payload) ) ) if length($data_payload) < $d_sec_actual->{size};
+            print $fh $data_payload;
+        }
 
-        # Write __DATA,__got segment (padded to layout size)
-        my $got_sec = $l->get('.got');
-        seek( $fh, $got_sec->{off}, 0 );
-        my $got_payload = pack( 'Q< Q< Q<', 0, 0, 0 );
-        $got_payload .= ( "\0" x ( $got_sec->{size} - length($got_payload) ) ) if length($got_payload) < $got_sec->{size};
-        print $fh $got_payload;
+        # Write __DATA,__got segment (padded to layout size) if section exists
+        if ($got_sec) {
+            seek( $fh, $got_sec->{off}, 0 );
+            my $got_payload = pack( 'Q< Q< Q<', 0, 0, 0 );
+            $got_payload .= ( "\0" x ( $got_sec->{size} - length($got_payload) ) ) if length($got_payload) < $got_sec->{size};
+            print $fh $got_payload;
+        }
 
         # Write LINKEDIT segment (padded to layout size)
         seek( $fh, $le_sec->{off}, 0 );
