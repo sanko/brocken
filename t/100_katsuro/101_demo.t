@@ -1546,7 +1546,7 @@ package Brocken::Jenny {
                     # - ecall      (trigger syscall -> 4 bytes)
                     # - unimp      (safety crash -> 4 bytes)
                     my $li = ( $exit_sys << 20 ) | 0x00000893;
-                    $entry_stub = pack( "V4", 0x008000EF, $li, 0x00000073, 0x00000000 );
+                    $entry_stub = pack( "V4", 0x010000EF, $li, 0x00000073, 0x00000000 );
                 }
                 else {
                     # x86_64 native exit stub:
@@ -1576,7 +1576,7 @@ package Brocken::Jenny {
             # Probe system binaries for the correct OSABI and PT_NOTE data
             my ( $osabi, $note_data, $has_pintable ) = $self->_detect_elf_info();
             if ( !$osabi ) {
-                $osabi = 9  if $platform->is_freebsd;
+                $osabi = 9  if $platform->is_freebsd || $platform->is_midnightbsd;
                 $osabi = 2  if $platform->is_netbsd;
                 $osabi = 12 if $platform->is_openbsd;
                 $osabi = 0  if $platform->is_linux;
@@ -1993,31 +1993,40 @@ package Brocken::Jenny {
             }
 
             # PT_LOAD (type 1) RX segment (Headers + .text) — Elf64_Phdr (56 bytes)
-            my $text_sec = $l->get('.text');
+            my $text_sec  = $l->get('.text');
+            my $rx_p_off  = 0;
+            my $rx_p_size = $text_sec->{off} + $text_sec->{size};
             push @phdrs, pack(
-                'L< L< Q< Q< Q< Q< Q< Q<', 1,            # p_type (PT_LOAD)
-                5,                                       # p_flags (PF_R | PF_X)
-                0,                                       # p_offset
-                $base,                                   # p_vaddr
-                $base,                                   # p_paddr
-                $text_sec->{off} + $text_sec->{size},    # p_filesz
-                $text_sec->{off} + $text_sec->{size},    # p_memsz
-                0x1000                                   # p_align (Page alignment)
+                'L< L< Q< Q< Q< Q< Q< Q<', 1,    # p_type (PT_LOAD)
+                5,                               # p_flags (PF_R | PF_X)
+                $rx_p_off,                       # p_offset
+                $base,                           # p_vaddr
+                $base,                           # p_paddr
+                $rx_p_size,                      # p_filesz
+                $rx_p_size,                      # p_memsz
+                0x1000                           # p_align (Page alignment)
             );
 
             # PT_LOAD (type 1) RW segment (Covers .data through .got) — Elf64_Phdr (56 bytes)
+            # NB: p_offset must be congruent with p_vaddr modulo p_align per ELF spec.
+            # The RX segment above starts at p_offset=0, so its p_vaddr=base is
+            # implicitly 0 mod page.  The RW segment uses a page-aligned p_offset
+            # (rounded DOWN) so that p_vaddr = base + data_rva (also page-aligned)
+            # stays congruent.  On strict ELF loaders (FreeBSD, OpenBSD, NetBSD)
+            # this is mandatory; Linux accepts minor misalignment.
             my $data_sec = $l->get('.data');
             my $got_sec  = $l->get('.got');
-            my $rw_size  = ( $got_sec->{off} + $got_sec->{size} ) - $data_sec->{off};
+            my $rw_p_off = $data_sec->{off} & ~0xFFF;
+            my $rw_size  = ( $got_sec->{off} + $got_sec->{size} ) - $rw_p_off;
             push @phdrs, pack(
-                'L< L< Q< Q< Q< Q< Q< Q<', 1,            # p_type (PT_LOAD)
-                6,                                       # p_flags (PF_R | PF_W)
-                $data_sec->{off},                        # p_offset
-                $base + $data_sec->{rva},                # p_vaddr
-                $base + $data_sec->{rva},                # p_paddr
-                $rw_size,                                # p_filesz
-                $rw_size,                                # p_memsz
-                0x1000                                   # p_align
+                'L< L< Q< Q< Q< Q< Q< Q<', 1,    # p_type (PT_LOAD)
+                6,                               # p_flags (PF_R | PF_W)
+                $rw_p_off,                       # p_offset (page-aligned down)
+                $base + $data_sec->{rva},        # p_vaddr
+                $base + $data_sec->{rva},        # p_paddr
+                $rw_size,                        # p_filesz
+                $rw_size,                        # p_memsz
+                0x1000                           # p_align
             );
 
             # PT_DYNAMIC (type 2) — Elf64_Phdr (56 bytes)
