@@ -2540,13 +2540,15 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
         # TEXT Segment Header
         my $t_cmd_size = 72 + 80 * scalar(@text_sections);
+        my $t_text_off = $t_sec->{off};
+        my $t_text_rva = $t_sec->{rva};
         my $t_cmd      = pack(
             'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
             $t_cmd_size,                # cmdsize
             "__TEXT",                   # segname
-            $base,                      # vmaddr
+            $base + $t_text_rva,        # vmaddr (code start, not header)
             $t_seg_size,                # vmsize
-            0,                          # fileoff
+            $t_text_off,                # fileoff (code start, not header)
             $t_seg_size,                # filesize
             5,                          # maxprot (VM_PROT_READ | VM_PROT_EXECUTE)
             5,                          # initprot (VM_PROT_READ | VM_PROT_EXECUTE)
