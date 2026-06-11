@@ -43,7 +43,12 @@ package Brocken::Katsuro {
 
         sub normalize_triple($raw) {
             my @parts = split( /-/, $raw );
-            return $raw if @parts == 4;
+
+            # Canonicalize architecture names before parsing
+            $parts[0] = 'aarch64' if ( $parts[0] // '' ) =~ /^arm64$/i;
+            $parts[0] = 'x86_64'  if ( $parts[0] // '' ) =~ /^(amd64|x64)$/i;
+            $parts[0] = 'i386'    if ( $parts[0] // '' ) =~ /^i[3456]86$/i;
+            return join( '-', @parts ) if @parts == 4;
             if ( @parts == 3 ) {
                 my ( $p1, $p2, $p3 ) = @parts;
                 return join( '-', $p1, $p2,  $p3,       'macho' ) if $p2 eq 'apple' && $p3 =~ /darwin/i;
@@ -485,17 +490,17 @@ package Brocken::Katsuro {
                     brk       => $off64 + 45
                 },
                 aarch64 => {
-                    write     => 4,
-                    read      => 3,
-                    open      => 5,
-                    close     => 6,
-                    exit      => 1,
-                    fork      => 2,
-                    getpid    => 20,
-                    wait4     => 11,
-                    mmap      => 197,
-                    nanosleep => 101,
-                    brk       => 45
+                    write     => $off64 + 4,
+                    read      => $off64 + 3,
+                    open      => $off64 + 5,
+                    close     => $off64 + 6,
+                    exit      => $off64 + 1,
+                    fork      => $off64 + 2,
+                    getpid    => $off64 + 20,
+                    wait4     => $off64 + 11,
+                    mmap      => $off64 + 197,
+                    nanosleep => $off64 + 101,
+                    brk       => $off64 + 45
                 }
             };
         }
@@ -1109,7 +1114,7 @@ package Brocken::Jenny {
         method image_base() { return 0; }
 
         method pre_layout( $text_size, $data_size, $arch, $os, $debug = 0 ) {
-            my $is_macos = $os =~ /^(macos|darwin)/i;
+            my $is_macos   = $os                =~ /^(macos|darwin)/i;
             my $is_arm_mac = $is_macos && $arch =~ /aarch64|arm64/i;
             my $page_align = $is_arm_mac ? 0x4000 : ( $is_macos ? 0x1000 : ( $os eq 'win64' ? 0x200 : 0x1000 ) );
             eval {
@@ -1120,7 +1125,7 @@ package Brocken::Jenny {
                 $_layout = Brocken::Jenny::Linker::Layout->new( file_align => $page_align, section_align => $page_align );
             }
             $self->_setup_layout( $_layout, $text_size, $data_size, $arch, $os, $debug );
-            $_layout->calculate( $page_align );
+            $_layout->calculate($page_align);
         }
         method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 )           { die "Abstract" }
         method write_bin( $filename, $text, $data, $arch, $os, $type ) { die "Abstract" }
@@ -1363,7 +1368,7 @@ package Brocken::Jenny {
 
             # Basic CIE
             my $cie_body = pack( 'C', 3 ) . "\0" . $self->_uleb(1) . $self->_sleb(-8);
-            $cie_body .= ( $arch =~ /aarch64|arm64/i                      ? pack( 'C', 30 ) : pack( 'C', 16 ) );        # Return reg
+            $cie_body .= ( $arch                      =~ /aarch64|arm64/i ? pack( 'C', 30 ) : pack( 'C', 16 ) );        # Return reg
             $cie_body .= "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 31              : 7 ) . $self->_uleb(8);    # def_cfa
 
             # Tell DWARF where the return address is saved (offset 1 * -8)
@@ -1537,7 +1542,7 @@ package Brocken::Jenny {
                     # - svc #0:        0xD4000001  (Trigger syscall)
                     # - brk #0:        0xD4200000  (Safety crash)
                     my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 8;
-                    $entry_stub = pack( "V4", 0x94000004, $movz, 0xD4000001, 0xD4200000 );
+                    $entry_stub = pack( "V4", 0x94000004, $movz, 0xD4001001, 0xD4200000 );
                 }
                 elsif ( $platform->is_riscv64 ) {
 
@@ -1585,32 +1590,32 @@ package Brocken::Jenny {
 
             # Per-OS interpreter path for dynamic executables
             my %interp_map = (
-                linux       => '/lib64/ld-linux-x86-64.so.2',
-                linux_arm   => '/lib/ld-linux-aarch64.so.1',
-                linux_riscv => '/lib/ld-linux-riscv64-lp64d.so.1',
-                freebsd     => '/libexec/ld-elf.so.1',
-                netbsd      => '/usr/libexec/ld.elf_so',
-                openbsd     => '/usr/libexec/ld.so',
-                dragonfly   => '/libexec/ld-elf.so.2',
+                linux        => '/lib64/ld-linux-x86-64.so.2',
+                linux_arm    => '/lib/ld-linux-aarch64.so.1',
+                linux_riscv  => '/lib/ld-linux-riscv64-lp64d.so.1',
+                freebsd      => '/libexec/ld-elf.so.1',
+                netbsd       => '/usr/libexec/ld.elf_so',
+                openbsd      => '/usr/libexec/ld.so',
+                dragonfly    => '/libexec/ld-elf.so.2',
                 dragonflybsd => '/libexec/ld-elf.so.2',
-                solaris     => '/lib/64/ld.so.1',
-                midnightbsd => '/libexec/ld-elf.so.1',
-                haiku       => ''
+                solaris      => '/lib/64/ld.so.1',
+                midnightbsd  => '/libexec/ld-elf.so.1',
+                haiku        => ''
             );
 
             # Per-OS libc name for DT_NEEDED
             my %libc_map = (
-                linux       => 'libc.so.6',
-                linux_arm   => 'libc.so.6',
-                linux_riscv => 'libc.so.6',
-                freebsd     => 'libc.so.7',
-                netbsd      => 'libc.so.12',
-                openbsd     => 'libc.so.98.1',
-                dragonfly   => 'libc.so.8',
+                linux        => 'libc.so.6',
+                linux_arm    => 'libc.so.6',
+                linux_riscv  => 'libc.so.6',
+                freebsd      => 'libc.so.7',
+                netbsd       => 'libc.so.12',
+                openbsd      => 'libc.so.98.1',
+                dragonfly    => 'libc.so.8',
                 dragonflybsd => 'libc.so.8',
-                solaris     => 'libc.so.1',
-                midnightbsd => 'libc.so.7',
-                haiku       => 'libroot.so'
+                solaris      => 'libc.so.1',
+                midnightbsd  => 'libc.so.7',
+                haiku        => 'libroot.so'
             );
 
             # Generate pintable data for OpenBSD (syscall allowlisting)
@@ -2036,14 +2041,14 @@ package Brocken::Jenny {
             # PT_DYNAMIC (type 2) — Elf64_Phdr (56 bytes)
             my $dyn_sec = $l->get('.dynamic');
             push @phdrs, pack(
-                'L< L< Q< Q< Q< Q< Q< Q<', 2,            # p_type (PT_DYNAMIC)
-                6,                                       # p_flags (PF_R | PF_W)
-                $dyn_sec->{off},                         # p_offset
-                $base + $dyn_sec->{rva},                 # p_vaddr
-                $base + $dyn_sec->{rva},                 # p_paddr
-                $dyn_sec->{size},                        # p_filesz
-                $dyn_sec->{size},                        # p_memsz
-                8                                        # p_align
+                'L< L< Q< Q< Q< Q< Q< Q<', 2,    # p_type (PT_DYNAMIC)
+                6,                               # p_flags (PF_R | PF_W)
+                $dyn_sec->{off},                 # p_offset
+                $base + $dyn_sec->{rva},         # p_vaddr
+                $base + $dyn_sec->{rva},         # p_paddr
+                $dyn_sec->{size},                # p_filesz
+                $dyn_sec->{size},                # p_memsz
+                8                                # p_align
             );
             my $extra_off   = 64 + ( $num_ph * 56 );
             my $note_header = '';
@@ -2113,7 +2118,6 @@ package Brocken::Jenny {
     }
 
     class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
-        no warnings 'portable';
 
         method write_executable ( $output_file, $code_bytes, $platform, $passed_argument = undef, $debug_bytes = undef ) {
             my $full_code    = ref $code_bytes eq 'HASH' ? $code_bytes->{binary}                        : $code_bytes;
@@ -2125,12 +2129,13 @@ package Brocken::Jenny {
                 if ( $platform->is_arm64 ) {
 
                     # Windows ARM64 (AArch64) native exit stub:
-                    # - bl main (relative call offset +20 bytes -> 5 instructions)
+                    # - bl main (relative call offset +24 bytes -> 6 instructions)
                     # - mov w1, w0 (copy main's return val to ExitStatus/arg 2)
                     # - movn x0, #0 (current process handle -1 -> arg 1)
-                    # - movz w8, #0x29 (NtTerminateProcess syscall number 41)
-                    # - svc #1 (trigger syscall)
-                    $entry_stub = pack( "V5", 0x94000005, 0x2A0003E1, 0x92800000, 0x52800528, 0xD4000021 );
+                    # - movz w8, #0x2c (NtTerminateProcess syscall number 44)
+                    # - svc #0 (trigger syscall)
+                    # - brk #0 (safety crash if syscall returns)
+                    $entry_stub = pack( "V6", 0x94000006, 0x2A0003E1, 0x92800000, 0x52800588, 0xD4000001, 0xD4200000 );
                 }
                 else {
                     # Windows x64 (AMD64) native exit stub
@@ -2335,14 +2340,13 @@ package Brocken::Jenny {
 class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
     no warnings 'portable';
     field $has_ffi : reader = false;
-
     method set_has_ffi($v) { $has_ffi = $v; }
 
     method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 ) {
-        $l->add_section( '.text',     $t,   5 );    # Read + Execute
-        $l->add_section( '.data',     $d,   3 ) if $d > 0;    # Read + Write
-        $l->add_section( '.got',      512,  3 ) if $has_ffi;    # Global Offset Table
-        $l->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );    # Symbols, Strings, Dynamic linking info
+        $l->add_section( '.text',     $t,                   5 );                # Read + Execute
+        $l->add_section( '.data',     $d,                   3 ) if $d > 0;      # Read + Write
+        $l->add_section( '.got',      512,                  3 ) if $has_ffi;    # Global Offset Table
+        $l->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );                # Symbols, Strings, Dynamic linking info
         if ( $dbg >= 1 ) {
             $l->add_section( '.debug_line',     4096, 0 );
             $l->add_section( '.debug_info',     8192, 0 );
@@ -2406,10 +2410,10 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
         my $l              = $self->layout;
         my $base           = $self->image_base;
-        my $page_size      = $platform->page_size;                                     # 16KB for Apple Silicon, 4KB for Intel
+        my $page_size      = $platform->page_size;                                       # 16KB for Apple Silicon, 4KB for Intel
         my $cputype        = ( $arch =~ /aarch64|arm64/i ) ? 0x0100000c : 0x01000007;    # CPU_TYPE_ARM64 or CPU_TYPE_X86_64
         my $cpusubtype     = ( $arch =~ /aarch64|arm64/i ) ? 0          : 3;             # CPU_SUBTYPE_ARM64_ALL or CPU_SUBTYPE_I386_ALL
-        my $filetype       = ( $self->type eq 'shared' ) ? 6          : 2;             # MH_DYLIB or MH_EXECUTE
+        my $filetype       = ( $self->type eq 'shared' ) ? 6 : 2;                        # MH_DYLIB or MH_EXECUTE
         my @debug_sections = grep { $_->{name} =~ /^\.debug/ } $l->sections;
         my $_uleb          = sub {
             my $v   = shift;
@@ -2429,9 +2433,9 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my $lc_load_libsystem = pack( 'L<6', 0xC, 24 + length($lib_name), 24, 2, 0x010000, 0x010000 ) . $lib_name;
 
         # Setup dynamic binding info for resolving FFI imports
-        my $bind_info = '';
+        my $bind_info      = '';
         my $bind_info_size = 0;
-        my $got_sec = eval { $l->get('.got') };
+        my $got_sec        = eval { $l->get('.got') };
         if ($got_sec) {
             my $data_sec = eval { $l->get('.data') };
             my $data_rva = $data_sec ? $data_sec->{rva} : $got_sec->{rva};
@@ -2450,7 +2454,6 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
         my ( $trie, $symtab, $strtab, $lc_id_dylib ) = ( '', '', '', '' );
         my ( $num_syms, $le_off, $trie_size, $symtab_size, $strtab_size ) = ( 0, 0, 0, 0, 0 );
-
         if ( $self->type eq 'shared' ) {
             require File::Basename;
             my $dylib_name     = File::Basename::basename($output_file);
@@ -2502,15 +2505,17 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 while ( length($trie) % 8 != 0 ) { $trie .= "\0"; }
             }
         }
-        $trie_size                   = length($trie);
-        $symtab_size                 = length($symtab);
-        $strtab_size                 = length($strtab);
-        $l->get('.linkedit')->{size} = length($bind_info) + $trie_size + $symtab_size + $strtab_size;
+        $trie_size   = length($trie);
+        $symtab_size = length($symtab);
+        $strtab_size = length($strtab);
+
+        # Enforce Minimum Linkedit size to prevent sparse file truncation issues
+        my $le_payload_size = length($bind_info) + $trie_size + $symtab_size + $strtab_size;
+        $l->get('.linkedit')->{size} = $le_payload_size > 64 ? $le_payload_size : 64;
         $l->calculate($page_size);
         $le_off = $l->get('.linkedit')->{off};
         my %seg_names = ( '.text' => '__TEXT', '.data' => '__DATA', '.got' => '__DATA', );
         my %sec_names = ( '.text' => '__text', '.data' => '__data', '.got' => '__got', );
-
         for my $s ( $l->sections ) {
             if ( $s->{name} =~ /^\.debug_/ ) {
                 $seg_names{ $s->{name} } = '__DWARF';
@@ -3220,6 +3225,15 @@ subtest Jenny => sub {
     SKIP: {
             skip 'ELF binary execution test requires Linux' unless $platform->is_linux || $platform->is_bsd || $platform->is_haiku;
 
+            # Diagnostic: check executable bit and dump header bytes
+            ok -x $output_file, 'Binary is executable';
+            open my $diag_fh, '<:raw', $output_file or warn "Can't open $output_file: $!";
+            if ($diag_fh) {
+                read( $diag_fh, my $magic, 16 );
+                close $diag_fh;
+                note 'Binary magic hex: ' . unpack( 'H*', $magic );
+            }
+
             # Execute the binary and inspect its exit code!
             system($output_file);
             my $exit_code = $? >> 8;
@@ -3306,16 +3320,16 @@ subtest Jenny => sub {
                 open my $rfh, '>', $ref_src or warn "Can't write $ref_src: $!";
                 print $rfh "int main(void) { return 42; }\n";
                 close $rfh;
-                my $rc = system('clang', '-o', $ref_bin, $ref_src);
-                if ( ($rc >> 8) == 0 ) {
+                my $rc = system( 'clang', '-o', $ref_bin, $ref_src );
+                if ( ( $rc >> 8 ) == 0 ) {
                     note "=== Generated: otool -l ===";
                     note scalar `otool -l "$output_file" 2>&1`;
                     note "=== Reference: otool -l ===";
                     note scalar `otool -l "$ref_bin" 2>&1`;
-                    note "=== Generated: od -A x -t x1z (first 1KB) ===";
-                    note scalar `od -A x -t x1z -v -N 1024 "$output_file" 2>&1`;
-                    note "=== Reference: od -A x -t x1z (first 1KB) ===";
-                    note scalar `od -A x -t x1z -v -N 1024 "$ref_bin" 2>&1`;
+                    note "=== Generated: od -A x -t x1 -c (first 1KB) ===";
+                    note scalar `od -A x -t x1 -c -v -N 1024 "$output_file" 2>&1`;
+                    note "=== Reference: od -A x -t x1 -c (first 1KB) ===";
+                    note scalar `od -A x -t x1 -c -v -N 1024 "$ref_bin" 2>&1`;
                 }
                 else {
                     note "clang compilation failed, exit: " . ( $rc >> 8 );
