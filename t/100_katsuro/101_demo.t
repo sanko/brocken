@@ -1109,7 +1109,7 @@ package Brocken::Jenny {
         method image_base() { return 0; }
 
         method pre_layout( $text_size, $data_size, $arch, $os, $debug = 0 ) {
-            my $is_macos = $os eq 'macos' || $os eq 'darwin';
+            my $is_macos = $os =~ /^(macos|darwin)/i;
             my $fa = $is_macos ? 0x4000 : ( $os eq 'win64' ? 0x200 : 0x1000 );
             my $sa = $is_macos ? 0x4000 : 0x1000;
             eval {
@@ -1592,6 +1592,7 @@ package Brocken::Jenny {
                 netbsd      => '/usr/libexec/ld.elf_so',
                 openbsd     => '/usr/libexec/ld.so',
                 dragonfly   => '/libexec/ld-elf.so.2',
+                dragonflybsd => '/libexec/ld-elf.so.2',
                 solaris     => '/lib/64/ld.so.1',
                 midnightbsd => '/libexec/ld-elf.so.1',
                 haiku       => ''
@@ -1606,6 +1607,7 @@ package Brocken::Jenny {
                 netbsd      => 'libc.so.12',
                 openbsd     => 'libc.so.98.1',
                 dragonfly   => 'libc.so.8',
+                dragonflybsd => 'libc.so.8',
                 solaris     => 'libc.so.1',
                 midnightbsd => 'libc.so.7',
                 haiku       => 'libroot.so'
@@ -1637,11 +1639,12 @@ package Brocken::Jenny {
             # Setup Interp path for executable
             my $interp     = '';
             my $has_interp = 0;
+            my $os_base    = ( $platform->os =~ /^([A-Za-z]+)/ )[0] // $platform->os;
             if ( $self->type eq 'exe' ) {
                 my $interp_key
                     = ( $platform->is_arm64 && $platform->is_linux ) ? 'linux_arm' :
                     ( $platform->is_riscv64 && $platform->is_linux ) ? 'linux_riscv' :
-                    $platform->os;
+                    $os_base;
                 my $ipath = $interp_map{$interp_key} // '/lib/ld.so.1';
                 if ( length $ipath ) {
                     $interp                    = $ipath . "\0";
@@ -1653,7 +1656,7 @@ package Brocken::Jenny {
             # Setup Dynamic Strings Table
             my @exports = @{ $self->exported_funcs // [] };
             my @imports = ( 'dlopen', 'dlsym', 'pthread_create' );
-            my $libc    = $libc_map{ $platform->os } // 'libc.so';
+            my $libc    = $libc_map{$os_base} // 'libc.so';
             my @libs    = ($libc);
             my $dynstr  = "\0";
             my %str_off;
@@ -2730,7 +2733,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
         close $fh;
         chmod 0755, $output_file;
-        if ( $os eq 'macos' || $os eq 'darwin' ) {
+        if ( $os =~ /^(macos|darwin)/i ) {
             my $cs_out = `codesign -f -s - "$output_file" 2>&1`;
             warn "codesign output: $cs_out" if length $cs_out;
             warn "codesign exit: " . ( $? >> 8 ) . "\n";
