@@ -501,7 +501,7 @@ package Brocken::Katsuro {
         }
 
         method syscall_num_reg() {
-            my %map = ( x86_64 => 'rax', aarch64 => 'x8', riscv64 => 'a7' );
+            my %map = ( x86_64 => 'rax', aarch64 => 'x16', riscv64 => 'a7' );
             return $map{ $self->arch };
         }
     }
@@ -1530,28 +1530,36 @@ package Brocken::Jenny {
                 my $exit_sys   = $platform->syscall('exit') // 1;
                 if ( $platform->is_arm64 ) {
 
-                    # ARM64 (AArch64 Linux) exit stub:
-                    # - bl main:       0x94000003  (relative offset +12 bytes)
-                    # - movz x8, #93:  0xD2800BA8  (93 in x8 register)
+                    # ARM64 (AArch64) native exit stub:
+                    # - bl main:       0x94000004  (relative offset +16 bytes)
+                    # - movz x8, #sys: 0xD280...
                     # - svc #0:        0xD4000001  (Trigger syscall)
+                    # - brk #0:        0xD4200000  (Safety crash)
                     my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 8;
-                    $entry_stub = pack( "V3", 0x94000003, $movz, 0xD4000001 );
+                    $entry_stub = pack( "V4", 0x94000004, $movz, 0xD4000001, 0xD4200000 );
                 }
                 elsif ( $platform->is_riscv64 ) {
 
                     # RISC-V 64-bit native exit stub:
-                    # - jal ra, 12 (relative call offset +12 bytes -> 4 bytes)
-                    # - li a7, 93  (addi a7, x0, 93 -> 4 bytes)
+                    # - jal ra, 16 (relative call offset +16 bytes -> 4 instructions)
+                    # - li a7, sys (addi a7, x0, sys -> 4 bytes)
                     # - ecall      (trigger syscall -> 4 bytes)
+                    # - unimp      (safety crash -> 4 bytes)
                     my $li = ( $exit_sys << 20 ) | 0x00000893;
-                    $entry_stub = pack( "V3", 0x006000EF, $li, 0x00000073 );
+                    $entry_stub = pack( "V4", 0x008000EF, $li, 0x00000073, 0x00000000 );
                 }
                 else {
                     # x86_64 native exit stub:
-                    my $entry_stub_x64 = pack( "C V", 0xE8, 10 );
+                    # - call main:      e8 0c 00 00 00 (Relative offset +12 bytes)
+                    # - mov rdi, rax:   48 89 c7       (Copy return val)
+                    # - mov eax, sys:   b8 ...
+                    # - syscall:        0f 05
+                    # - ud2:            0f 0b
+                    my $entry_stub_x64 = pack( "C V", 0xE8, 12 );
                     $entry_stub_x64 .= pack( "C3",  0x48, 0x89, 0xC7 );
-                    $entry_stub_x64 .= pack( "C V", 0xB8, 60 );
+                    $entry_stub_x64 .= pack( "C V", 0xB8, $exit_sys );
                     $entry_stub_x64 .= pack( "C2",  0x0F, 0x05 );
+                    $entry_stub_x64 .= pack( "C2",  0x0F, 0x0B );
                     $entry_stub = $entry_stub_x64;
                 }
                 $text = $entry_stub . $code_bytes;
@@ -2104,22 +2112,21 @@ package Brocken::Jenny {
                 if ( $platform->is_arm64 ) {
 
                     # Windows ARM64 (AArch64) native exit stub:
-                    # - bl main (relative call offset +24 bytes -> 6 instructions)
+                    # - bl main (relative call offset +20 bytes -> 5 instructions)
                     # - mov w1, w0 (copy main's return val to ExitStatus/arg 2)
                     # - movn x0, #0 (current process handle -1 -> arg 1)
                     # - movz w8, #0x29 (NtTerminateProcess syscall number 41)
                     # - svc #1 (trigger syscall)
-                    # - brk #0 (safety crash if svc returns)
-                    $entry_stub = pack( "V6", 0x94000006, 0x2A0003E1, 0x92800000, 0x52800528, 0xD4000021, 0xD4200000 );
+                    $entry_stub = pack( "V5", 0x94000005, 0x2A0003E1, 0x92800000, 0x52800528, 0xD4000021 );
                 }
                 else {
                     # Windows x64 (AMD64) native exit stub
-                    $entry_stub = pack( "C V", 0xE8, 15 );             # call main (offset 15)
+                    $entry_stub = pack( "C V", 0xE8, 16 );             # call main (offset 16)
                     $entry_stub .= pack( "C3",  0x48, 0x89, 0xC2 );    # mov rdx, rax
                     $entry_stub .= pack( "C3",  0x4D, 0x31, 0xD2 );    # xor r10, r10
+                    $entry_stub .= pack( "C3",  0x49, 0xF7, 0xD2 );    # not r10 (current process handle -1)
                     $entry_stub .= pack( "C V", 0xB8, 0x2C );          # mov eax, 0x2C (NtTerminateProcess)
                     $entry_stub .= pack( "C2",  0x0F, 0x05 );          # syscall
-                    $entry_stub .= pack( "C2",  0x0F, 0x0B );          # ud2 (safety crash)
                 }
                 $full_code = $entry_stub . $full_code;
                 $writable_off += length($entry_stub) if $writable_off;
@@ -2348,25 +2355,31 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         # Prepend platform-specific Mach-O _start stubs if compiling an executable
         if ( $self->type eq 'exe' ) {
             my $entry_stub = "";
+            my $exit_sys   = $platform->syscall('exit') // 0x2000001;
             if ( $platform->is_arm64 ) {
 
                 # ARM64 (Apple Silicon) native exit stub:
-                # - bl main (relative call offset +16 bytes -> 4 instructions)
-                # - movz x16, #1
-                # - movk x16, #0x2000, lsl #16 (loads 0x2000001 exit syscall with macOS class offset)
+                # - bl main (relative call offset +20 bytes -> 5 instructions)
+                # - movz x16, #sys_low
+                # - movk x16, #sys_high, lsl #16
                 # - svc #0x80
-                $entry_stub = pack( "V4", 0x94000004, 0xD2800030, 0xF2A40010, 0xD4001001 );
+                # - brk #0 (Safety crash)
+                my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 16;
+                my $movk = 0xF2A00000 | ( ( ( $exit_sys >> 16 ) & 0xffff ) << 5 ) | 16;
+                $entry_stub = pack( "V5", 0x94000005, $movz, $movk, 0xD4001001, 0xD4200000 );
             }
             else {
                 # x86_64 (Intel Mac) native exit stub:
-                # - call main:     e8 0a 00 00 00 (Relative call 10 bytes ahead)
-                # - mov rdi, rax:  48 89 c7       (Copy main's return code to first argument)
-                # - mov eax, sys:  b8 01 00 00 02 (0x2000001 is exit syscall with macOS offset)
-                # - syscall:       0f 05
-                $entry_stub = pack( "C V", 0xE8, 10 );
+                # - call main:      e8 0c 00 00 00 (Relative call 12 bytes ahead)
+                # - mov rdi, rax:   48 89 c7       (Copy main's return code to first argument)
+                # - mov eax, sys:   b8 ...         (0x2000001 is exit syscall with macOS offset)
+                # - syscall:        0f 05
+                # - ud2:            0f 0b
+                $entry_stub = pack( "C V", 0xE8, 12 );
                 $entry_stub .= pack( "C3",  0x48, 0x89, 0xC7 );
-                $entry_stub .= pack( "C V", 0xB8, 0x2000001 );
+                $entry_stub .= pack( "C V", 0xB8, $exit_sys );
                 $entry_stub .= pack( "C2",  0x0F, 0x05 );
+                $entry_stub .= pack( "C2",  0x0F, 0x0B );
             }
             $text = $entry_stub . $text_raw;
         }
