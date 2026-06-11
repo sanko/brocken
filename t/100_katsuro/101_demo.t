@@ -1109,8 +1109,9 @@ package Brocken::Jenny {
         method image_base() { return 0; }
 
         method pre_layout( $text_size, $data_size, $arch, $os, $debug = 0 ) {
-            my $fa = $os eq 'macos' ? 0x4000 : ( $os eq 'win64' ? 0x200 : 0x1000 );
-            my $sa = $os eq 'macos' ? 0x4000 : 0x1000;
+            my $is_macos = $os eq 'macos' || $os eq 'darwin';
+            my $fa = $is_macos ? 0x4000 : ( $os eq 'win64' ? 0x200 : 0x1000 );
+            my $sa = $is_macos ? 0x4000 : 0x1000;
             eval {
                 require Brocken::Target::Format::Layout;
                 $_layout = Brocken::Target::Format::Layout->new( file_align => $fa, section_align => $sa );
@@ -1119,7 +1120,7 @@ package Brocken::Jenny {
                 $_layout = Brocken::Jenny::Linker::Layout->new( file_align => $fa, section_align => $sa );
             }
             $self->_setup_layout( $_layout, $text_size, $data_size, $arch, $os, $debug );
-            $_layout->calculate( $os eq 'macos' ? 0x4000 : 0x1000 );
+            $_layout->calculate( $is_macos ? 0x4000 : 0x1000 );
         }
         method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 )           { die "Abstract" }
         method write_bin( $filename, $text, $data, $arch, $os, $type ) { die "Abstract" }
