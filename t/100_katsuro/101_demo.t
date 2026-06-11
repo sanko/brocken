@@ -2731,9 +2731,9 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         close $fh;
         chmod 0755, $output_file;
         if ( $os eq 'macos' || $os eq 'darwin' ) {
-            my $cs_rc = system("codesign -f -s - \"$output_file\" 2>&1");
-            diag "codesign exit: " . ( $? >> 8 );
-            warn "codesign failed\n" if $?;
+            my $cs_out = `codesign -f -s - "$output_file" 2>&1`;
+            warn "codesign output: $cs_out" if length $cs_out;
+            warn "codesign exit: " . ( $? >> 8 ) . "\n";
         }
         return $output_file;
     }
