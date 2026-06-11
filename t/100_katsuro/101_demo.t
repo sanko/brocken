@@ -2730,7 +2730,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
         close $fh;
         chmod 0755, $output_file;
-        if ( $os eq 'macos' ) { system("codesign -f -s - \"$output_file\" >/dev/null 2>&1"); }
+        if ( $os eq 'macos' || $os eq 'darwin' ) { system("codesign -f -s - \"$output_file\" >/dev/null 2>&1"); }
         return $output_file;
     }
 }
