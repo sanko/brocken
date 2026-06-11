@@ -82,7 +82,7 @@ package Brocken::Katsuro {
                 if ( $arch eq 'unknown' || $@ ) { $arch = $Config{archname}; $arch =~ s/-.*// }
                 $arch = lc($arch);
                 $arch = 'x86_64'  if $arch eq 'amd64';
-                $arch = 'aarch64' if $arch eq 'arm64';
+                $arch = 'aarch64' if $arch =~ /aarch64|arm64/i;
                 $arch = 'i386'    if $arch =~ /^i[3456]86$/;
                 if ( $^O eq 'linux' ) {
                     $vendor = 'pc';
@@ -1298,7 +1298,7 @@ package Brocken::Jenny {
                 $cu_body .= pack( 'Q<', $text_base + ( $fn->{end} // $fn->{start} ) );
 
                 # frame_base (RBP relative)
-                my $fb = pack( 'C', 0x70 + ( $arch eq 'arm64' ? 29 : 6 ) ) . "\x00";
+                my $fb = pack( 'C', 0x70 + ( $arch =~ /aarch64|arm64/i ? 29 : 6 ) ) . "\x00";
                 $cu_body .= $self->_uleb( length($fb) ) . $fb;
                 for my $v ( @{ $fn->{params} // [] }, @{ $fn->{locals} // [] } ) {
                     $cu_body .= $self->_uleb( exists $v->{slot} ? 5 : 4 );
@@ -1363,8 +1363,8 @@ package Brocken::Jenny {
 
             # Basic CIE
             my $cie_body = pack( 'C', 3 ) . "\0" . $self->_uleb(1) . $self->_sleb(-8);
-            $cie_body .= ( $arch eq 'arm64'                      ? pack( 'C', 30 ) : pack( 'C', 16 ) );        # Return reg
-            $cie_body .= "\x0C" . $self->_uleb( $arch eq 'arm64' ? 31              : 7 ) . $self->_uleb(8);    # def_cfa
+            $cie_body .= ( $arch =~ /aarch64|arm64/i                      ? pack( 'C', 30 ) : pack( 'C', 16 ) );        # Return reg
+            $cie_body .= "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 31              : 7 ) . $self->_uleb(8);    # def_cfa
 
             # Tell DWARF where the return address is saved (offset 1 * -8)
             if ( $arch eq 'x64' ) {
@@ -1374,7 +1374,7 @@ package Brocken::Jenny {
             $cie_body .= "\0" x $cie_pad;
             my $data = pack( 'L<', length($cie_body) + 4 ) . pack( 'L<', 0xFFFFFFFF ) . $cie_body;
             for my $fn (@$func_ranges) {
-                my $instr           = "\x0C" . $self->_uleb( $arch eq 'arm64' ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
+                my $instr           = "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
                 my $offset_from_cfa = -16;
                 for my $r (@$preserved_regs) {
                     my $reg_num      = $self->dwarf_reg_num($r) // 0;    # Clean delegation
@@ -1392,7 +1392,7 @@ package Brocken::Jenny {
 
         method build_eh_frame () {
             return '' unless $eh_frame_base;
-            my $reg = $arch eq 'arm64' ? 30 : 16;
+            my $reg = $arch =~ /aarch64|arm64/i ? 30 : 16;
 
             # CIE with "zR" augmentation for pcrel FDE encoding
             my $cie_body = pack( 'C', 1 ) . "zR\0" . $self->_uleb(1) . $self->_sleb(-8);
@@ -1402,7 +1402,7 @@ package Brocken::Jenny {
             $cie_body .= $self->_uleb(1) . "\x1B";
 
             # Initial instructions: def_cfa RSP+8, offset rip at cfa-8
-            $cie_body .= "\x0C" . $self->_uleb( $arch eq 'arm64' ? 31 : 7 ) . $self->_uleb(8);
+            $cie_body .= "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 31 : 7 ) . $self->_uleb(8);
             $cie_body .= pack( 'C', 0x80 | $reg ) . $self->_uleb(1);
             my $cie_pad = ( 4 - ( ( length($cie_body) + 4 ) % 4 ) ) % 4;
             $cie_body .= "\0" x $cie_pad;
@@ -1410,7 +1410,7 @@ package Brocken::Jenny {
             for my $fn (@$func_ranges) {
                 my $fn_start = $fn->{start};
                 my $fn_len   = ( $fn->{end} // $fn->{start} + 1 ) - $fn->{start};
-                my $instr    = "\x0C" . $self->_uleb( $arch eq 'arm64' ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
+                my $instr    = "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
                 for my $r (@$preserved_regs) {
                     my $reg_num      = $self->dwarf_reg_num($r) // 0;    # Clean delegation
                     my $factored_off = -16 / -8;
@@ -2407,8 +2407,8 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my $l              = $self->layout;
         my $base           = $self->image_base;
         my $page_size      = $platform->page_size;                                     # 16KB for Apple Silicon, 4KB for Intel
-        my $cputype        = ( $arch eq 'arm64' )        ? 0x0100000c : 0x01000007;    # CPU_TYPE_ARM64 or CPU_TYPE_X86_64
-        my $cpusubtype     = ( $arch eq 'arm64' )        ? 0          : 3;             # CPU_SUBTYPE_ARM64_ALL or CPU_SUBTYPE_I386_ALL
+        my $cputype        = ( $arch =~ /aarch64|arm64/i ) ? 0x0100000c : 0x01000007;    # CPU_TYPE_ARM64 or CPU_TYPE_X86_64
+        my $cpusubtype     = ( $arch =~ /aarch64|arm64/i ) ? 0          : 3;             # CPU_SUBTYPE_ARM64_ALL or CPU_SUBTYPE_I386_ALL
         my $filetype       = ( $self->type eq 'shared' ) ? 6          : 2;             # MH_DYLIB or MH_EXECUTE
         my @debug_sections = grep { $_->{name} =~ /^\.debug/ } $l->sections;
         my $_uleb          = sub {
