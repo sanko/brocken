@@ -3283,6 +3283,29 @@ subtest Jenny => sub {
             is $exit_code, 42, 'Standalone Mach-O binary executed natively and returned the correct exit code!';
             note $?;
             note $exit_code;
+
+            # Diagnostic: compile reference binary and dump both for comparison
+            if ( $exit_code != 42 ) {
+                my $ref_src = 'ref_prog.c';
+                my $ref_bin = 'ref_prog';
+                open my $rfh, '>', $ref_src or warn "Can't write $ref_src: $!";
+                print $rfh "int main(void) { return 42; }\n";
+                close $rfh;
+                my $rc = system('clang', '-o', $ref_bin, $ref_src);
+                if ( ($rc >> 8) == 0 ) {
+                    note "=== Generated: otool -l ===";
+                    note scalar `otool -l "$output_file" 2>&1`;
+                    note "=== Reference: otool -l ===";
+                    note scalar `otool -l "$ref_bin" 2>&1`;
+                    note "=== Generated: od -A x -t x1z (first 1KB) ===";
+                    note scalar `od -A x -t x1z -v -N 1024 "$output_file" 2>&1`;
+                    note "=== Reference: od -A x -t x1z (first 1KB) ===";
+                    note scalar `od -A x -t x1z -v -N 1024 "$ref_bin" 2>&1`;
+                }
+                else {
+                    note "clang compilation failed, exit: " . ( $rc >> 8 );
+                }
+            }
         }
 
         # Clean up
