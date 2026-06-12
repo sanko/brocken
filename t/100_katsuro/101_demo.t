@@ -2151,7 +2151,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
             # Automatically calculate layout if it wasn't called beforehand
             if ( !defined $self->layout ) {
-                $self->pre_layout( length($code_bytes) + 32, $platform->is_bsd ? 16 : 0, $platform->arch, $platform->os );
+                $self->pre_layout( length($code_bytes) + 32, $platform->is_bsd ? 32 : 0, $platform->arch, $platform->os );
             }
             my $l          = $self->layout;
             my $is_pie     = $platform->is_bsd || $platform->is_haiku;
@@ -2166,13 +2166,25 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 my $entry_stub = '';
                 if ( $platform->is_arm64 ) {
                     # ARM64 (AArch64) Direct syscall exit stub (no GOT dependency, 16 bytes):
-                    # - bl main:       0x94000004 (Relative call 16 bytes ahead)
-                    # - movz x8, #N:   (Load exit syscall number into x8)
-                    # - svc #0:        0xD4000001 (Trigger syscall)
-                    # - brk #0:        0xD4200000 (Safety crash)
                     my $exit_sys = $platform->syscall('exit') // 1;
-                    my $movz     = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 8;
-                    $entry_stub = pack( "V4", 0x94000004, $movz, 0xD4000001, 0xD4200000 );
+                    if ( $platform->is_haiku ) {
+                        # Haiku ARM64 exit stub:
+                        # - bl main:       0x94000005 (Relative call 20 bytes ahead)
+                        # - mov x1, x0:    0xaa0003e1 (Copy status)
+                        # - movn x0, #0:   0x92800000 (Load -1)
+                        # - movz x8, #sys: (Load syscall number)
+                        # - svc #0:        0xD4000001
+                        my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 8;
+                        $entry_stub = pack( "V5", 0x94000005, 0xAA0003E1, 0x92800000, $movz, 0xD4000001 );
+                    }
+                    else {
+                        # - bl main:       0x94000004 (Relative call 16 bytes ahead)
+                        # - movz x8, #N:   (Load exit syscall number into x8)
+                        # - svc #0:        0xD4000001 (Trigger syscall)
+                        # - brk #0:        0xD4200000 (Safety crash)
+                        my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 8;
+                        $entry_stub = pack( "V4", 0x94000004, $movz, 0xD4000001, 0xD4200000 );
+                    }
                 }
                 elsif ( $platform->is_riscv64 ) {
                     # RISC-V 64-bit native exit stub:
@@ -2185,17 +2197,32 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 }
                 else {
                     # x86_64 Direct syscall exit stub (no GOT dependency, 17 bytes):
-                    # - call main:      E8 0C 00 00 00 (Relative call 12 bytes ahead)
-                    # - mov rdi, rax:   48 89 C7       (Copy main's return code to rdi)
-                    # - mov eax, SYS:   B8 <sys_exit>  (Load exit syscall number)
-                    # - syscall:        0F 05          (Invoke kernel)
-                    # - ud2:            0F 0B          (Safety crash)
                     my $exit_sys = $platform->syscall('exit') // 1;
-                    $entry_stub = pack( "C V", 0xE8, 12 );
-                    $entry_stub .= pack( "C3",  0x48, 0x89, 0xC7 );
-                    $entry_stub .= pack( "C V", 0xB8, $exit_sys );
-                    $entry_stub .= pack( "C2",  0x0F, 0x05 );
-                    $entry_stub .= pack( "C2",  0x0F, 0x0B );
+                    if ( $platform->is_haiku ) {
+                        # Haiku x86_64 exit stub (19 bytes):
+                        # - call main:      E8 0E 00 00 00 (Relative call 14 bytes ahead)
+                        # - mov rsi, rax:   48 89 C6       (Copy status to 2nd arg)
+                        # - mov rdi, -1:    48 C7 C7 FF FF FF FF (current team)
+                        # - mov eax, sys:   B8 <sys_exit>
+                        # - syscall:        0F 05
+                        $entry_stub = pack( "C V", 0xE8, 14 );
+                        $entry_stub .= pack( "C3", 0x48, 0x89, 0xC6 );
+                        $entry_stub .= pack( "C3 V", 0x48, 0xC7, 0xC7, 0xFFFFFFFF );
+                        $entry_stub .= pack( "C V", 0xB8, $exit_sys );
+                        $entry_stub .= pack( "C2", 0x0F, 0x05 );
+                    }
+                    else {
+                        # - call main:      E8 0C 00 00 00 (Relative call 12 bytes ahead)
+                        # - mov rdi, rax:   48 89 C7       (Copy main's return code to rdi)
+                        # - mov eax, SYS:   B8 <sys_exit>  (Load exit syscall number)
+                        # - syscall:        0F 05          (Invoke kernel)
+                        # - ud2:            0F 0B          (Safety crash)
+                        $entry_stub = pack( "C V", 0xE8, 12 );
+                        $entry_stub .= pack( "C3",  0x48, 0x89, 0xC7 );
+                        $entry_stub .= pack( "C V", 0xB8, $exit_sys );
+                        $entry_stub .= pack( "C2",  0x0F, 0x05 );
+                        $entry_stub .= pack( "C2",  0x0F, 0x0B );
+                    }
                 }
                 $text = $entry_stub . $code_bytes;
             }
@@ -2218,12 +2245,17 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 $note_data = pack( 'L<3 a8 L<', 7, 4, 1, "NetBSD\0\0", 1099000000 );
             }
             elsif ( $platform->is_openbsd ) {
-                $osabi     = 6;    # ELFOSABI_OPENBSD
+                $osabi     = 0;    # OpenBSD prefers ELFOSABI_NONE
                 $note_data = pack( 'L<3 a8 L<', 8, 4, 1, "OpenBSD\0", 0 );
+                $has_pintable = 1; # Always generate on OpenBSD to be safe
             }
             elsif ( $platform->is_dragonflybsd ) {
                 $osabi     = 9;    # ELFOSABI_FREEBSD (DragonFly uses FreeBSD OSABI)
                 $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600400 );
+            }
+            elsif ( $platform->is_haiku ) {
+                $osabi     = 0;
+                $note_data = pack( 'L<3 a8 L<', 6, 4, 1, "Haiku\0\0", 0 );
             }
 
             # Per-OS interpreter path for dynamic executables
@@ -2258,22 +2290,22 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
             # Generate pintable data for OpenBSD (syscall allowlisting)
             my $pintable_data = '';
-            if ($has_pintable) {
+            if ($has_pintable && $platform->is_openbsd) {
                 my $pos      = 0;
                 my $text_rva_actual = $l->get('.text')->{rva};
+                my $exit_sys = $platform->syscall('exit') // 1;
                 if ( $platform->is_x64 ) {
                     while ( ( my $idx = index( $text, "\x0F\x05", $pos ) ) != -1 ) {
                         my $vaddr = $base + $text_rva_actual + $idx;
-                        $pintable_data .= pack( 'L<L<', $vaddr, 1 );
-                        $pintable_data .= pack( 'L<L<', $vaddr, 4 );
+                        # OpenBSD ELF64 pintable entries are 16 bytes: uint64_t addr, uint32_t syscall, uint32_t pad
+                        $pintable_data .= pack( 'Q< L< x4', $vaddr, $exit_sys );
                         $pos = $idx + 2;
                     }
                 }
                 else {
                     while ( ( my $idx = index( $text, "\x01\x00\x00\xd4", $pos ) ) != -1 ) {
                         my $vaddr = $base + $text_rva_actual + $idx;
-                        $pintable_data .= pack( 'L<L<', $vaddr, 1 );
-                        $pintable_data .= pack( 'L<L<', $vaddr, 4 );
+                        $pintable_data .= pack( 'Q< L< x4', $vaddr, $exit_sys );
                         $pos = $idx + 4;
                     }
                 }
@@ -2755,7 +2787,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             # Declare $extra_off before pushing program headers to prevent compilation errors
             my $extra_off = 64 + ( $num_ph * 56 );
 
-            # 1. PT_PHDR (type 6) — Elf64_Phdr (56 bytes)
+            # PT_PHDR (type 6) — Elf64_Phdr (56 bytes)
             push @phdrs, pack(
                 'L< L< Q< Q< Q< Q< Q< Q<', 6,    # p_type (PT_PHDR)
                 4,                               # p_flags (PF_R)
@@ -2767,7 +2799,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 8                                # p_align
             );
 
-            # 2. PT_INTERP (type 3) — Elf64_Phdr (56 bytes)
+            # PT_INTERP (type 3) — Elf64_Phdr (56 bytes)
             if ($has_interp) {
                 my $interp_sec = $l->get('.interp');
                 push @phdrs, pack(
@@ -2782,7 +2814,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 );
             }
 
-            # 3. PT_LOAD RX segment (Headers + .text through .hash) — Elf64_Phdr (56 bytes)
+            # PT_LOAD RX segment (Headers + .text through .hash) — Elf64_Phdr (56 bytes)
             my $hash_sec  = $l->get('.hash');
             my $rx_p_off  = 0;
             my $rx_p_size = $hash_sec->{off} + $hash_sec->{size};
@@ -2797,7 +2829,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 $page_align                      # p_align
             );
 
-            # 4. PT_LOAD RW segment (Covers .dynamic through .got) — Elf64_Phdr (56 bytes)
+            # PT_LOAD RW segment (Covers .dynamic through .got) — Elf64_Phdr (56 bytes)
             my $dyn_sec  = $l->get('.dynamic');
             my $got_sec  = $l->get('.got');
             my $rw_p_off = $dyn_sec->{off} & ~($page_align - 1);
@@ -2813,7 +2845,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 $page_align                      # p_align
             );
 
-            # 5. PT_DYNAMIC (type 2) — Elf64_Phdr (56 bytes)
+            # PT_DYNAMIC (type 2) — Elf64_Phdr (56 bytes)
             push @phdrs, pack(
                 'L< L< Q< Q< Q< Q< Q< Q<', 2,    # p_type (PT_DYNAMIC)
                 6,                               # p_flags (PF_R | PF_W)
@@ -2825,7 +2857,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 8                                # p_align
             );
 
-            # 6. PT_GNU_RELRO (type 0x6474e552) — Elf64_Phdr (56 bytes) — only for PIE
+            # PT_GNU_RELRO (type 0x6474e552) — Elf64_Phdr (56 bytes) — only for PIE
             # Covers .dynamic through .got to make them read-only after relocation
             if ($is_pie) {
                 my $relro_start = $dyn_sec->{off} & ~($page_align - 1);
@@ -2842,7 +2874,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 );
             }
 
-            # 7. PT_NOTE — Elf64_Phdr (56 bytes)
+            # PT_NOTE — Elf64_Phdr (56 bytes)
             if ($note_data) {
                 push @phdrs, pack(
                     'L< L< Q< Q< Q< Q< Q< Q<', 4,    # p_type (PT_NOTE)
@@ -2872,7 +2904,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 $extra_off += length($pintable_data);
             }
 
-            # 8. PT_GNU_STACK (type 0x6474e551) — Elf64_Phdr (56 bytes)
+            # PT_GNU_STACK (type 0x6474e551) — Elf64_Phdr (56 bytes)
             # p_flags = 6 (PF_R|PF_W) for non-executable stack. Some BSD kernels
             # reject binaries with p_flags=0 on PT_GNU_STACK.
             push @phdrs, pack(
