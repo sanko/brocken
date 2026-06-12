@@ -11,6 +11,46 @@ class Brocken::Compiler { }
 
 package Brocken::Katsuro {
 
+=pod
+
+=head1 NAME
+
+Brocken::Katsuro - Platform and Architecture Abstraction Layer
+
+=head1 DESCRIPTION
+
+This package handles the detection, normalization, and abstraction of target
+platforms (OS and Architecture). It provides a unified interface for querying
+syscall numbers, register sets, and binary format requirements.
+
+=head2 Target Triples
+
+Brocken uses a four-part "normalized" triple format: C<arch-vendor-os-env>.
+
+=over 4
+
+=item * B<arch>: x86_64, aarch64, riscv64, etc.
+
+=item * B<vendor>: pc, apple, unknown, etc.
+
+=item * B<os>: linux, darwin, windows, freebsd, netbsd, openbsd, dragonfly, haiku, solaris, wasi.
+
+=item * B<env>: gnu, msvc, macho, elf, wasi, musl, etc.
+
+=back
+
+=head2 References
+
+=over 4
+
+=item * Target Triplet Wiki: L<https://wiki.osdev.org/Target_Triplet>
+
+=item * LLVM Triple Header: L<https://llvm.org/doxygen/Triple_8h_source.html>
+
+=back
+
+=cut
+
     class Brocken::Katsuro::Platform {
 
         #~ https://wiki.osdev.org/Target_Triplet
@@ -28,7 +68,8 @@ package Brocken::Katsuro {
         );
         use Config;
 
-        # Hide stderr appropriately for the host OS shell
+        # Hide stderr appropriately for the host OS shell.
+        # This is critical for feature detection where commands might fail.
         sub get_cmd_output($cmd) {
             my $redirect = ( $^O =~ /MSWin32/i ) ? '2> NUL' : '2> /dev/null';
             my $output   = `$cmd $redirect`;
@@ -41,22 +82,33 @@ package Brocken::Katsuro {
             return undef;
         }
 
+        # Normalizes various triple formats (e.g., from clang or gcc) into our 4-part canonical form.
+        # This ensures consistency across different toolchains.
         sub normalize_triple($raw) {
             my @parts = split( /-/, $raw );
 
-            # Canonicalize architecture names before parsing
+            # Canonicalize architecture names before parsing.
+            # We prefer 'aarch64' over 'arm64' for consistency with ELF/Linux naming.
             $parts[0] = 'aarch64' if ( $parts[0] // '' ) =~ /^arm64$/i;
             $parts[0] = 'x86_64'  if ( $parts[0] // '' ) =~ /^(amd64|x64)$/i;
             $parts[0] = 'i386'    if ( $parts[0] // '' ) =~ /^i[3456]86$/i;
             return join( '-', @parts ) if @parts == 4;
             if ( @parts == 3 ) {
                 my ( $p1, $p2, $p3 ) = @parts;
+
+                # macOS/Darwin usually reports as <arch>-apple-darwin<ver>
                 return join( '-', $p1, $p2,  $p3,       'macho' ) if $p2 eq 'apple' && $p3 =~ /darwin/i;
+
+                # Linux often reports as <arch>-pc-linux-gnu or similar
                 return join( '-', $p1, 'pc', $p2,       $p3 )     if $p2 eq 'linux';
+
+                # MinGW on Windows
                 return join( '-', $p1, 'pc', 'windows', 'gnu' )   if $p2 =~ /w64/i && $p3 =~ /mingw/i;
 
-                # Handle arch--os (empty vendor)
+                # Handle arch--os (empty vendor) which is common in some cross-compilation environments
                 if ( $p2 eq '' ) { return join( '-', $p1, 'unknown', $p3, 'unknown' ) }
+
+                # Distinguish between vendor and OS if only 3 parts are present
                 return $known_vendor{$p2} ? join( '-', $p1, $p2, $p3, 'unknown' ) : join( '-', $p1, 'unknown', $p2, $p3 );
             }
             if ( @parts == 2 ) { return join( '-', $parts[0], 'unknown', $parts[1], 'unknown' ) }
@@ -64,19 +116,26 @@ package Brocken::Katsuro {
             return join( '-', @parts[ 0 .. 3 ] );
         }
 
+        # Generates a triple for the current host machine by probing compilers or Config.pm.
         sub gen_triple() {
             state $cached_host_triple;
             return $cached_host_triple if defined $cached_host_triple;
+
+            # Try clang first as it provides the most modern triple format
             my $clang_out = get_cmd_output('clang --print-target-triple');
             if ($clang_out) {
                 if ( $^O eq 'midnightbsd' ) { $clang_out =~ s/\bfreebsd[^-]*/midnightbsd/gi }
                 return $cached_host_triple = normalize_triple($clang_out);
             }
+
+            # Fallback to gcc machine dump
             my $gcc_out = get_cmd_output('gcc -dumpmachine');
             if ($gcc_out) {
                 if ( $^O eq 'midnightbsd' ) { $gcc_out =~ s/\bfreebsd[^-]*/midnightbsd/gi }
                 return $cached_host_triple = normalize_triple($gcc_out);
             }
+
+            # Manual detection from Perl's Config and OS environment
             my ( $arch, $vendor, $os, $env ) = ('unknown') x 4;
             if ( $^O =~ /MSWin32|msys|cygwin/i ) {
                 $vendor = 'pc';
@@ -112,6 +171,7 @@ package Brocken::Katsuro {
             $cached_host_triple = join '-', $arch || 'unknown', $vendor || 'unknown', $os || 'unknown', $env || 'unknown';
         }
 
+        # Instantiates the appropriate platform subclass based on the provided triple.
         sub parse( $platform //= gen_triple() ) {
             $platform = normalize_triple($platform);
             my $host_triple = gen_triple();
@@ -140,6 +200,7 @@ package Brocken::Katsuro {
         field $is_native : reader : param = 0;
         field $abi       : reader = Brocken::Katsuro::Platform::ABI->parse($arch);
         ADJUST {
+            # Assign friendly names for display purposes, particularly for Apple platforms.
             if ( !defined $friendly ) {
                 if ( $vendor eq 'apple' ) {
                     if ( $arch eq 'aarch64' ) {
@@ -221,7 +282,10 @@ package Brocken::Katsuro {
         method is_riscv64() { $self->arch eq 'riscv64' }
         method is_x64()     { $self->arch eq 'x86_64' }
         #
-        #~ Syscall Defaults (BSD family)
+
+        # Returns a mapping of common syscall names to their architecture-specific numbers.
+        # Defaults to BSD-style syscall numbering which is shared by FreeBSD, NetBSD, OpenBSD,
+        # DragonFly, and Mach (to some extent).
         method syscalls() {
             return {
                 x86_64 => {
@@ -267,16 +331,20 @@ package Brocken::Katsuro {
         }
         method syscall($name) { $self->syscalls->{ $self->arch }{$name} }
 
+        # The register used to pass the syscall number to the kernel.
         method syscall_num_reg() {
             my %map = ( x86_64 => 'rax', aarch64 => 'x8', riscv64 => 'a7' );
             return $map{ $self->arch };
         }
 
+        # The register where the kernel places the syscall's return value.
         method syscall_ret_reg() {
             my %map = ( x86_64 => 'rax', aarch64 => 'x0', riscv64 => 'a0' );
             return $map{ $self->arch };
         }
 
+        # Operating system page size. Critical for segment alignment and mmap calls.
+        # Apple Silicon (ARM64) macOS uses 16KB pages, while Intel uses 4KB.
         method page_size() {
             return 0x4000 if $self->arch =~ /aarch64|arm64/i;
             return 0x1000;
@@ -288,6 +356,20 @@ package Brocken::Katsuro {
         method callee_saved()                       { $self->abi->callee_saved }
         method frame_reg()                          { $self->abi->frame_reg }
         method stack_reg()                          { $self->abi->stack_reg }
+
+=pod
+
+=head1 NAME
+
+Brocken::Katsuro::Platform::ABI - Low-level Architecture Binary Interface details
+
+=head1 DESCRIPTION
+
+This class and its subclasses define the register sets and DWARF numbering
+for specific architectures. It abstracts the differences between calling
+conventions (e.g., which registers are preserved across calls).
+
+=cut
 
         class Brocken::Katsuro::Platform::ABI {
 
@@ -307,6 +389,9 @@ package Brocken::Katsuro {
 
         class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::ABI) {
 
+            # System V AMD64 Calling Convention
+            # SCRATCH: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11
+            # PRESERVED: rbx, rsp, rbp, r12, r13, r14, r15
             method registers( $category = 'available' ) {
                 my %data = (
                     available => [qw[rax rcx rdx rbx rsi rdi r8 r9 r10 r11 r12 r13 r14 r15]],
@@ -319,6 +404,7 @@ package Brocken::Katsuro {
             method stack_reg() {'rsp'}
 
             # System V AMD64 DWARF register numbers (rax=0, rdx=1, etc.)
+            # Reference: https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
             method dwarf_reg_num($name) {
                 my %map = (
                     rax => 0,
@@ -344,6 +430,9 @@ package Brocken::Katsuro {
 
         class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform::ABI) {
 
+            # ARM64 Procedure Call Standard (AAPCS64)
+            # SCRATCH: x0-x15
+            # PRESERVED: x19-x28, sp, x29 (fp), x30 (lr)
             method registers( $category = 'available' ) {
                 my %data = (
                     available => [qw[x0 x1 x2 x3 x4 x5 x6 x7 x9 x10 x11 x12 x13 x14 x15 x20 x21 x22 x23 x24 x25 x26 x27 x28]],
@@ -353,8 +442,9 @@ package Brocken::Katsuro {
                 return $data{$category} // [];
             }
             method frame_reg() {'x29'}
-            method stack_reg() {'sp'}    # ARM64 standard DWARF mappings: x0-x30 map to 0-30, sp maps to 31
+            method stack_reg() {'sp'}
 
+            # ARM64 standard DWARF mappings: x0-x30 map to 0-30, sp maps to 31
             method dwarf_reg_num($name) {
                 return 31 if $name eq 'sp';
                 return $1 if $name =~ /^x(\d+)$/;
@@ -364,6 +454,9 @@ package Brocken::Katsuro {
 
         class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform::ABI) {
 
+            # RISC-V Calling Convention (lp64)
+            # SCRATCH: a0-a7, t0-t6
+            # PRESERVED: s0-s11, sp, gp, tp, ra
             method registers( $category = 'available' ) {
                 my %data = (
                     available => [qw[a0 a1 a2 a3 a4 a5 a6 a7 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 t0 t1 t2 t3 t4 t5 t6]],
@@ -373,8 +466,9 @@ package Brocken::Katsuro {
                 return $data{$category} // [];
             }
             method frame_reg() {'s0'}
-            method stack_reg() {'sp'}    # RISC-V ABI register mappings to x0-x31 (zero=0, ra=1, sp=2, etc.)
+            method stack_reg() {'sp'}
 
+            # RISC-V ABI register mappings to x0-x31 (zero=0, ra=1, sp=2, etc.)
             method dwarf_reg_num($name) {
                 my %map = (
                     zero => 0,
@@ -420,6 +514,7 @@ package Brocken::Katsuro {
         method is_linux() {1}
         method format()   {'elf'}
 
+        # Linux-specific syscall numbers. These differ significantly from BSD.
         method syscalls() {
             return {
                 x86_64 => {
@@ -479,6 +574,8 @@ package Brocken::Katsuro {
             return "$pre.$version" . $self->lib_ext;
         }
 
+        # macOS syscalls use a 0x2000000 offset for 64-bit processes to distinguish
+        # from Mach-specific or 32-bit BSD syscalls.
         method syscalls() {
             my $off64 = 0x2000000;
             return {
@@ -511,6 +608,7 @@ package Brocken::Katsuro {
             };
         }
 
+        # On ARM64 macOS, x16 is used for the syscall number instead of x8.
         method syscall_num_reg() {
             my %map = ( x86_64 => 'rax', aarch64 => 'x16', riscv64 => 'a7' );
             return $map{ $self->arch };
@@ -564,6 +662,9 @@ package Brocken::Katsuro {
         my %cache;
         method is_haiku() {1}
 
+        # Haiku's syscall numbers are unstable and not officially exposed.
+        # We use a heuristic by disassembling libroot.so functions to find the
+        # 'mov eax, imm' instruction that precedes the syscall.
         sub _detect_syscall( $class, $name, $arch ) {
             my $lib = '/boot/system/lib/libroot.so';
             return undef unless -e $lib;
@@ -593,6 +694,7 @@ package Brocken::Katsuro {
             my $num;
             $num = _detect_syscall( ref($self), $name, $self->arch ) if $self->is_native;
             unless ( defined $num ) {
+                # Fallback syscall numbers for Haiku R1/beta4
                 my %fallback = (
                     x86_64 => {
                         write     => 144,
@@ -641,6 +743,7 @@ package Brocken::Katsuro {
         }
     }
 
+
     class Brocken::Katsuro::Platform::Wasm : isa(Brocken::Katsuro::Platform) {
         method is_wasm()    {1}
         method is_posix()   { ( $self->os // '' ) =~ /wasi/i || ( $self->env // '' ) =~ /wasi/i }
@@ -653,8 +756,37 @@ package Brocken::Katsuro {
 
 package Brocken::Lindsay {
 
+=pod
+
+=head1 NAME
+
+Brocken::Lindsay - Intermediate Representation (IR) and Optimization Layer
+
+=head1 DESCRIPTION
+
+Lindsay is a platform-independent IR inspired by LLVM. It utilizes Static
+Single Assignment (SSA) form, where every variable is assigned exactly once.
+
+=head2 Type System
+
+The IR supports basic native types (int, float, ptr) and a specialized
+C<dynamic> type.
+
+=over 4
+
+=item * B<int>: Fixed-width integers (i1, i8, i16, i32, i64).
+
+=item * B<ptr>: Opaque 64-bit memory addresses.
+
+=item * B<dynamic>: A 128-bit "Fat Scalar" representing Brocken's internal
+data type (SV* equivalent). It contains a type tag and a payload.
+
+=back
+
+=cut
+
     class Brocken::Lindsay::IR::Type {
-        field $kind : reader : param;        # 'int', 'float', 'ptr', 'void'
+        field $kind : reader : param;        # 'int', 'float', 'ptr', 'void', 'dynamic'
         field $bits : reader : param = 0;    # 8, 16, 32, 64, ...
 
         # Singletons for common types to save memory and allow `==` comparison
@@ -984,6 +1116,20 @@ package Brocken::Lindsay {
 
 package Brocken::Jenny {
 
+=pod
+
+=head1 NAME
+
+Brocken::Jenny - Machine Code Generation and Linking Layer
+
+=head1 DESCRIPTION
+
+Jenny is responsible for lowering Lindsay IR into native machine code
+(Jenny::Codegen) and packaging those bytes into executable binary formats
+like ELF, Mach-O, or PE (Jenny::Linker).
+
+=cut
+
     class Brocken::Jenny::Codegen::X86_64 {
 
         # Simple x86_64 machine code mapping for our IR subset
@@ -997,7 +1143,7 @@ package Brocken::Jenny {
                         if ( $inst->type->kind eq 'void' ) {
 
                             # No-op / return void
-                            $bytes .= pack( "C", 0xC3 );    # ret
+                            $bytes .= pack( "C", 0xC3 );    # ret (near)
                         }
                         else {
                             # We need to put the return value in RAX (x86_64 return register)
@@ -1005,9 +1151,10 @@ package Brocken::Jenny {
                             if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
 
                                 # mov eax, IMM32 (shorter than mov rax, IMM64)
+                                # Opcode: B8 +rd id
                                 $bytes .= pack( "CV", 0xB8, $val->value );
                             }
-                            $bytes .= pack( "C", 0xC3 );    # ret
+                            $bytes .= pack( "C", 0xC3 );    # ret (near)
                         }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') || $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
@@ -1037,13 +1184,16 @@ package Brocken::Jenny {
                         if ( $inst->type->kind eq 'void' ) {
 
                             # ret (jalr x0, ra, 0)
+                            # Opcode: 00008067
                             $bytes .= pack( "V", 0x00008067 );
                         }
                         else {
                             my $val = $inst->operands->[0];
                             if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
 
-                                # addi a0, x0, 42 (loads exit code into return register)
+                                # addi a0, x0, IMM (loads exit code into return register a0)
+                                # 0x02a00513 is specifically 'addi a0, zero, 42'
+                                # TODO: Generate dynamic IMM encoding
                                 $bytes .= pack( "V", 0x02a00513 );
                             }
 
@@ -1070,6 +1220,7 @@ package Brocken::Jenny {
                         if ( $inst->type->kind eq 'void' ) {
 
                             # ret (returns execution to the caller, jumping to x30)
+                            # Opcode: D65F03C0
                             $bytes .= pack( "V", 0xD65F03C0 );
                         }
                         else {
@@ -1077,6 +1228,8 @@ package Brocken::Jenny {
                             if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
 
                                 # movz w0, #42 (loads return value into return register w0)
+                                # 0x52800540 is specifically 'movz w0, #42'
+                                # TODO: Generate dynamic IMM encoding
                                 $bytes .= pack( "V", 0x52800540 );
                             }
 
@@ -1091,6 +1244,35 @@ package Brocken::Jenny {
     }
 
     class Brocken::Jenny::Linker {
+
+=pod
+
+=head1 NAME
+
+Brocken::Jenny::Linker - Unified Binary Executable Generator
+
+=head1 DESCRIPTION
+
+The Linker class provides a platform-agnostic interface for taking
+machine code and data segments and packaging them into a final executable
+or shared library.
+
+It handles:
+
+=over 4
+
+=item * B<Layout Calculation>: Assigning file offsets and Virtual Addresses (RVAs).
+
+=item * B<Symbol Resolution>: Mapping internal labels to RVAs.
+
+=item * B<Debug Information>: Generating DWARF sections for source-level debugging.
+
+=item * B<FFI Stubbing>: Generating Import Tables (GOT/PLT) for calling external functions.
+
+=back
+
+=cut
+
         field $_layout        : reader(layout);
         field $type           : param : reader = 'exe';
         field $debug_data     : reader = {};
@@ -1121,6 +1303,12 @@ package Brocken::Jenny {
         }
         method image_base() { return 0; }
 
+        # Prepares the memory and file layout for the binary.
+        # This must handle different alignment requirements:
+        # - x86_64 ELF: 4KB (0x1000)
+        # - ARM64 ELF: 64KB (0x10000) for compatibility with Android/modern kernels.
+        # - Mach-O (Apple Silicon): 16KB (0x4000).
+        # - PE (Windows): 512B (0x200) for files, 4KB (0x1000) for memory.
         method pre_layout( $text_size, $data_size, $arch, $os, $debug = 0 ) {
             my $is_macos   = $os                =~ /^(macos|darwin)/i;
             my $is_arm_mac = $is_macos && $arch =~ /aarch64|arm64/i;
@@ -1147,6 +1335,20 @@ package Brocken::Jenny {
     }
 
     class Brocken::Jenny::Linker::Layout {
+
+=pod
+
+=head1 NAME
+
+Brocken::Jenny::Linker::Layout - Binary Section Alignment and Placement
+
+=head1 DESCRIPTION
+
+This class calculates the physical file offsets and relative virtual
+addresses (RVAs) for binary sections.
+
+=cut
+
         field $file_align    : param : reader = 0x200;
         field $section_align : param : reader = 0x1000;
         field @sections;
@@ -1156,6 +1358,7 @@ package Brocken::Jenny {
             push @sections, { name => $name, size => ( $size || 1 ), flags => $flags, rva => 0, off => 0 };
         }
 
+        # Computes the alignment-corrected offsets and RVAs.
         method calculate($min_hdr) {
             $header_size = ( $min_hdr + $file_align - 1 ) & ~( $file_align - 1 );
             my $curr_off = $header_size;
@@ -1179,6 +1382,37 @@ package Brocken::Jenny {
     }
 
     class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
+
+=pod
+
+=head1 NAME
+
+Brocken::Jenny::Linker::DWARF - Debug Information Generator
+
+=head1 DESCRIPTION
+
+Generates DWARF v2/v3 compliant debug sections.
+
+=head2 Sections Generated:
+
+=over 4
+
+=item * B<.debug_line>: Maps machine code offsets to source lines.
+
+=item * B<.debug_info>: The main Debug Information Entry (DIE) tree.
+
+=item * B<.debug_abbrev>: Definitions of DIE abbreviations.
+
+=item * B<.debug_frame>: Stack unwinding and frame pointer recovery data.
+
+=item * B<.debug_aranges>: Rapid lookup table for address ranges.
+
+=item * B<.eh_frame>: Exception handling frame data (LSDA compatible).
+
+=back
+
+=cut
+
         field $source_locs    : param : reader;
         field $text_base      : param : reader;
         field $source_file    : param : reader //= 'source.brocken';
@@ -1215,6 +1449,11 @@ package Brocken::Jenny {
             return $sections;
         }
 
+        # Generates the line number program.
+        # Uses standard DWARF opcodes:
+        # - 0x02: Set Address (Extended)
+        # - 0x03: Advance Line (Signed)
+        # - 0x01: Copy (Append row to matrix)
         method build_debug_line () {
             my @entries   = sort { $a->{offset} <=> $b->{offset} } @$source_locs;
             my $program   = '';
@@ -1224,13 +1463,13 @@ package Brocken::Jenny {
                 my $addr = $text_base + $e->{offset};
                 my $line = $e->{line};
 
-                # Set Address
+                # Set Address (Opcode 0x02)
                 $program .= "\x00" . $self->_uleb(9) . "\x02" . pack( 'Q<', $addr );
 
-                # Advance Line
+                # Advance Line (Opcode 0x03)
                 $program .= "\x03" . $self->_sleb( $line - $prev_line );
 
-                # Copy row
+                # Copy row (Opcode 0x01)
                 $program .= "\x01";
                 $prev_line = $line;
             }
@@ -1240,11 +1479,14 @@ package Brocken::Jenny {
             for my $fn (@$func_ranges) { $max_offset = $fn->{end} if ( $fn->{end} // 0 ) > $max_offset; }
             $program .= "\x00" . $self->_uleb(9) . "\x02" . pack( 'Q<', $text_base + $max_offset );
             $program .= "\x00" . $self->_uleb(1) . "\x01";
+
+            # Line Number Program Prologue
             my $prologue = pack( 'C', 1 ) . pack( 'C', 1 ) . pack( 'c', -5 ) . pack( 'C', 14 ) . pack( 'C', 13 );
             $prologue .= pack( 'C*', 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 );
             $prologue .= "\x00";                                                                     # Directory table
             $prologue .= "$source_file\x00" . $self->_uleb(0) . $self->_uleb(0) . $self->_uleb(0);
             $prologue .= "\x00";
+
             my $full_len = 2 + 4 + length($prologue) + length($program);
             my $header   = pack( 'L<', $full_len );
             $header .= pack( 'S<', 2 );
@@ -1252,10 +1494,11 @@ package Brocken::Jenny {
             return $header . $prologue . $program;
         }
 
+        # Defines abbreviations used in .debug_info to reduce redundant tags.
         method build_debug_abbrev () {
             my $abbrev = '';
 
-            # Abbrev 1: DW_TAG_compile_unit
+            # Abbrev 1: DW_TAG_compile_unit (0x11)
             $abbrev .= $self->_uleb(1) . $self->_uleb(0x11) . $self->_uleb(1);
             $abbrev .= $self->_uleb(0x10) . $self->_uleb(0x06);                  # DW_AT_stmt_list -> data4
             $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name -> string
@@ -1264,14 +1507,14 @@ package Brocken::Jenny {
             $abbrev .= $self->_uleb(0x12) . $self->_uleb(0x01);                  # DW_AT_high_pc -> addr
             $abbrev .= pack( 'CC', 0, 0 );
 
-            # Abbrev 2: DW_TAG_base_type
+            # Abbrev 2: DW_TAG_base_type (0x24)
             $abbrev .= $self->_uleb(2) . $self->_uleb(0x24) . $self->_uleb(0);
             $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name -> string
             $abbrev .= $self->_uleb(0x0B) . $self->_uleb(0x0B);                  # DW_AT_byte_size -> data1
             $abbrev .= $self->_uleb(0x3E) . $self->_uleb(0x0B);                  # DW_AT_encoding -> data1
             $abbrev .= pack( 'CC', 0, 0 );
 
-            # Abbrev 3: DW_TAG_subprogram
+            # Abbrev 3: DW_TAG_subprogram (0x2E)
             $abbrev .= $self->_uleb(3) . $self->_uleb(0x2E) . $self->_uleb(1);
             $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name
             $abbrev .= $self->_uleb(0x11) . $self->_uleb(0x01);                  # low_pc
@@ -1279,7 +1522,7 @@ package Brocken::Jenny {
             $abbrev .= $self->_uleb(0x40) . $self->_uleb(0x18);                  # frame_base -> exprloc
             $abbrev .= pack( 'CC', 0, 0 );
 
-            # Abbrev 4: DW_TAG_formal_parameter / Abbrev 5: DW_TAG_variable
+            # Abbrev 4: DW_TAG_formal_parameter (0x05) / Abbrev 5: DW_TAG_variable (0x34)
             for ( 4 .. 5 ) {
                 $abbrev .= $self->_uleb($_) . $self->_uleb( $_ == 4 ? 0x05 : 0x34 ) . $self->_uleb(0);
                 $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                      # name
@@ -1291,23 +1534,27 @@ package Brocken::Jenny {
             return $abbrev;
         }
 
+        # Generates the main DIE tree describing functions, parameters, and types.
         method build_debug_info () {
             my $max_pc = 0;
             for my $fn (@$func_ranges) { $max_pc = $fn->{end} if ( $fn->{end} // 0 ) > $max_pc; }
             my $cu_body = '';
             $cu_body .= $self->_uleb(1);                       # DW_TAG_compile_unit
-            $cu_body .= pack( 'L<', 0 );                       # stmt_list
+            $cu_body .= pack( 'L<', 0 );                       # stmt_list (offset into .debug_line)
             $cu_body .= "$source_file\0";
-            $cu_body .= pack( 'C',  12 );                      # language (C99)
+            $cu_body .= pack( 'C',  12 );                      # language (C99 - DW_LANG_C99)
             $cu_body .= pack( 'Q<', $text_base );              # low_pc
             $cu_body .= pack( 'Q<', $text_base + $max_pc );    # high_pc
             my $CU_HEADER_SIZE = 11;
             my $type_off       = {};
 
+            # Built-in types
             for my $t ( [ 'Int', 5 ], [ 'Bool', 2 ], [ 'String', 1 ], [ 'Any', 1 ], [ 'ptr', 1 ], [ 'Array', 1 ] ) {
                 $type_off->{ $t->[0] } = $CU_HEADER_SIZE + length($cu_body);
                 $cu_body .= $self->_uleb(2) . "$t->[0]\0" . pack( 'CC', 8, $t->[1] );
             }
+
+            # Function DIEs
             for my $fn ( sort { $a->{start} <=> $b->{start} } @$func_ranges ) {
                 my $die_off = $CU_HEADER_SIZE + length($cu_body);
                 push @pubnames, { offset => $die_off, name => ( $fn->{name} =~ s/^M_//r ) };
@@ -1316,13 +1563,17 @@ package Brocken::Jenny {
                 $cu_body .= pack( 'Q<', $text_base + $fn->{start} );
                 $cu_body .= pack( 'Q<', $text_base + ( $fn->{end} // $fn->{start} ) );
 
-                # frame_base (RBP relative)
+                # frame_base (DW_AT_frame_base: typically RBP relative on x64, X29 on ARM64)
                 my $fb = pack( 'C', 0x70 + ( $arch =~ /aarch64|arm64/i ? 29 : 6 ) ) . "\x00";
                 $cu_body .= $self->_uleb( length($fb) ) . $fb;
+
+                # Parameter and Local Variable DIEs
                 for my $v ( @{ $fn->{params} // [] }, @{ $fn->{locals} // [] } ) {
                     $cu_body .= $self->_uleb( exists $v->{slot} ? 5 : 4 );
                     ( my $n = $v->{name} ) =~ s/^\$//;
                     $cu_body .= "$n\0";
+
+                    # Variable Location (DW_OP_fbreg + sleb128 offset)
                     my $loc = "\x91" . $self->_sleb( -$v->{slot} );
                     $cu_body .= $self->_uleb( length($loc) ) . $loc;
                     $cu_body .= pack( 'L<', $type_off->{ $v->{type} } // $type_off->{Any} );
@@ -1352,6 +1603,7 @@ package Brocken::Jenny {
             return pack( 'L< S< L< L<', length($body) + 10, 2, 0, $info_len ) . $body;
         }
 
+        # Unsigned LEB128 encoding (Variable length integer)
         method _uleb ($v) {
             my $out = '';
             do {
@@ -1363,6 +1615,7 @@ package Brocken::Jenny {
             return $out;
         }
 
+        # Signed LEB128 encoding
         method _sleb ($v) {
             require POSIX;
             my $out = '';
@@ -1378,25 +1631,37 @@ package Brocken::Jenny {
             return $out;
         }
 
+        # Call Frame Information (CFI) for stack unwinding.
         method build_debug_frame () {
 
-            # Basic CIE
+            # Basic CIE (Common Information Entry)
+            # - code_alignment_factor: 1
+            # - data_alignment_factor: -8
+            # - return_address_register: 16 (x64) or 30 (ARM64)
             my $cie_body = pack( 'C', 3 ) . "\0" . $self->_uleb(1) . $self->_sleb(-8);
-            $cie_body .= ( $arch                      =~ /aarch64|arm64/i ? pack( 'C', 30 ) : pack( 'C', 16 ) );        # Return reg
-            $cie_body .= "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 31              : 7 ) . $self->_uleb(8);    # def_cfa
+            $cie_body .= ( $arch                      =~ /aarch64|arm64/i ? pack( 'C', 30 ) : pack( 'C', 16 ) );
 
-            # Tell DWARF where the return address is saved (offset 1 * -8)
+            # Initial instructions: DW_CFA_def_cfa (0x0C) RSP+8
+            $cie_body .= "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 31              : 7 ) . $self->_uleb(8);
+
+            # Tell DWARF where the return address is saved (offset 1 * -8 from CFA)
+            # DW_CFA_offset (0x80 | reg)
             if ( $arch eq 'x64' ) {
                 $cie_body .= pack( 'C', 0x80 | 16 ) . $self->_uleb(1);
             }
             my $cie_pad = ( 8 - ( ( length($cie_body) + 8 ) % 8 ) ) % 8;
             $cie_body .= "\0" x $cie_pad;
             my $data = pack( 'L<', length($cie_body) + 4 ) . pack( 'L<', 0xFFFFFFFF ) . $cie_body;
+
+            # FDE (Frame Description Entry) per function
             for my $fn (@$func_ranges) {
+                # DW_CFA_def_cfa RBP/X29, offset (context_size + 8)
                 my $instr           = "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
                 my $offset_from_cfa = -16;
+
+                # Register preservation mapping
                 for my $r (@$preserved_regs) {
-                    my $reg_num      = $self->dwarf_reg_num($r) // 0;    # Clean delegation
+                    my $reg_num      = $self->dwarf_reg_num($r) // 0;
                     my $factored_off = $offset_from_cfa / -8;
                     $instr .= pack( 'C', 0x80 | $reg_num ) . $self->_uleb($factored_off);
                     $offset_from_cfa -= 8;
@@ -1409,6 +1674,8 @@ package Brocken::Jenny {
             return $data;
         }
 
+        # Exception Handling frame (LSDA compatible).
+        # Similar to .debug_frame but used at runtime for stack walking.
         method build_eh_frame () {
             return '' unless $eh_frame_base;
             my $reg = $arch =~ /aarch64|arm64/i ? 30 : 16;
@@ -1431,19 +1698,17 @@ package Brocken::Jenny {
                 my $fn_len   = ( $fn->{end} // $fn->{start} + 1 ) - $fn->{start};
                 my $instr    = "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
                 for my $r (@$preserved_regs) {
-                    my $reg_num      = $self->dwarf_reg_num($r) // 0;    # Clean delegation
+                    my $reg_num      = $self->dwarf_reg_num($r) // 0;
                     my $factored_off = -16 / -8;
                     $instr .= pack( 'C', 0x80 | $reg_num ) . $self->_uleb($factored_off);
                 }
 
                 # pcrel initial_location: the file-relative offset to fn_start
-                # (Runtime adds the eh_frame_base to resolve)
                 my $fde_body = pack( 'L<', $fn_start ) . pack( 'L<', $fn_len ) . $instr;
                 my $fde_pad  = ( 4 - ( ( length($fde_body) + 4 ) % 4 ) ) % 4;
                 $fde_body .= "\0" x $fde_pad;
 
                 # CIE_pointer = offset of CIE_pointer_field - CIE_offset
-                # CIE is at section offset 0, FDE CIE_pointer field at data_end + 4
                 my $fde_offset = length($data);
                 $data .= pack( 'L<', length($fde_body) + 4 ) . pack( 'L<', $fde_offset + 4 ) . $fde_body;
             }
@@ -1451,8 +1716,50 @@ package Brocken::Jenny {
         }
     };
 
+
     class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
-        no warnings 'portable';
+
+=pod
+
+=head1 NAME
+
+Brocken::Jenny::Linker::MachO - 64-bit Mach-O Executable Generator
+
+=head1 DESCRIPTION
+
+Generates Mach-O binaries compliant with macOS (Darwin) kernels.
+
+=head2 Load Commands
+
+Mach-O files use "Load Commands" to guide the dynamic linker (dyld).
+
+=over 4
+
+=item * B<LC_SEGMENT_64>: Maps file regions into virtual memory.
+
+=item * B<LC_LOAD_DYLINKER>: Points to C</usr/lib/dyld>.
+
+=item * B<LC_LOAD_DYLIB>: Links against C<libSystem.B.dylib>.
+
+=item * B<LC_MAIN>: Specifies the C<_start> entry point offset.
+
+=item * B<LC_DYLD_INFO_ONLY>: Describes exports and binding opcodes.
+
+=back
+
+=head2 Apple Silicon (ARM64) Quirks
+
+=over 4
+
+=item * B<Page Size>: Must be 16KB (0x4000).
+
+=item * B<Code Signing>: ARM64 macOS strictly forbids execution of
+unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
+
+=back
+
+=cut
+
         field $has_ffi : reader = false;
         method set_has_ffi($v) { $has_ffi = $v; }
 
@@ -1628,8 +1935,8 @@ package Brocken::Jenny {
             $l->get('.linkedit')->{size} = $le_payload_size > 64 ? $le_payload_size : 64;
             $l->calculate($page_size);
             $le_off = $l->get('.linkedit')->{off};
-            my %seg_names = ( '.text' => '__TEXT', '.data' => '__DATA', '.got' => '__DATA', );
-            my %sec_names = ( '.text' => '__text', '.data' => '__data', '.got' => '__got', );
+            my %seg_names = ( '.text' => '__TEXT', '.data' => '__DATA', '.got' => '__DATA' );
+            my %sec_names = ( '.text' => '__text', '.data' => '__data', '.got' => '__got' );
             for my $s ( $l->sections ) {
                 if ( $s->{name} =~ /^\.debug_/ ) {
                     $seg_names{ $s->{name} } = '__DWARF';
@@ -1653,6 +1960,7 @@ package Brocken::Jenny {
             my @cmds = ();
 
             # PageZero Segment Header
+            # Reference: https://opensource.apple.com/source/xnu/xnu-4570.1.46/EXTERNAL_HEADERS/mach-o/loader.h
             if ( $self->type ne 'shared' ) {
                 push @cmds, pack(
                     'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
@@ -1869,6 +2177,8 @@ package Brocken::Jenny {
             }
             close $fh;
             chmod 0755, $output_file;
+
+            # ARM64 macOS mandatory ad-hoc signature
             if ( $os =~ /^(macos|darwin)/i ) {
                 my $cs_out = `codesign -f -s - "$output_file" 2>&1`;
                 warn "codesign output: $cs_out" if length $cs_out;
@@ -1879,6 +2189,54 @@ package Brocken::Jenny {
     }
 
     class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
+
+=pod
+
+=head1 NAME
+
+Brocken::Jenny::Linker::PE - 64-bit Portable Executable (PE32+) Generator
+
+=head1 DESCRIPTION
+
+Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
+
+=head2 Binary Structure
+
+=over 4
+
+=item * B<DOS MZ Header>: Legacy 64-byte header for compatibility.
+
+=item * B<PE Signature>: "PE\0\0" magic.
+
+=item * B<COFF File Header>: Specifies machine type and section count.
+
+=item * B<Optional Header>: The real PE32+ header containing entry point,
+image base, and security flags.
+
+=back
+
+=head2 Windows ARM64 Quirk
+
+Windows on ARM64 strictly mandates the presence of a Base Relocation
+Table (C<.reloc> section) even for executables that don't technically
+need it. If omitted, the loader throws a "Corrupt Executable" error.
+We generate a dummy relocation block to satisfy this.
+
+=head2 Security Flags
+
+We enable several modern Windows security features:
+
+=over 4
+
+=item * B<NX_COMPAT>: No-Execute/Data Execution Prevention (DEP).
+
+=item * B<DYNAMIC_BASE>: ASLR support.
+
+=item * B<HIGH_ENTROPY_VA>: 64-bit ASLR (high entropy).
+
+=back
+
+=cut
 
         method write_executable ( $output_file, $code_bytes, $platform, $passed_argument = undef, $debug_bytes = undef ) {
 
@@ -1921,15 +2279,16 @@ package Brocken::Jenny {
             my $dos_stub     = ( "\x00" x 64 );    # 64 bytes padding to align PE header at offset 128 (0x80)
             my $pe_signature = "PE\x00\x00";
 
-            # COFF File Header
-            my $machine     = $platform->is_arm64 ? 0xAA64 : 0x8664;
+            # COFF File Header (Exactly 20 bytes)
+            # Reference: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#coff-file-header-object-and-image
+            my $machine     = $platform->is_arm64 ? 0xAA64 : 0x8664; # IMAGE_FILE_MACHINE_ARM64 or AMD64
             my $timestamp   = $ENV{SOURCE_DATE_EPOCH} || time();
             my $file_header = pack(
                 'v2 V3 v2', $machine,    # Machine Architecture
                 $num_sections,           # Number of Sections
                 $timestamp,              # TimeDateStamp
-                0, 0,                    # PointerToSymbolTable, NumberOfSymbols
-                240,                     # SizeOfOptionalHeader (PE32+)
+                0, 0,                    # PointerToSymbolTable, NumberOfSymbols (Unused in executable)
+                240,                     # SizeOfOptionalHeader (240 bytes for PE32+)
                 0x0022                   # Characteristics (EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE)
             );
 
@@ -1939,14 +2298,14 @@ package Brocken::Jenny {
             my $sec_raw_ptr     = $size_of_headers;
             my $sec_rva         = 0x1000;
 
-            # .text
+            # .text section (Code)
             my $sec_raw_code_size = ( length($text_bytes) + 511 ) & ~511;
             $section_table .= pack( 'a8 V2 V2 V2 v2 V',
                 ".text\x00\x00\x00", length($text_bytes), $sec_rva, $sec_raw_code_size, $sec_raw_ptr, 0, 0, 0, 0, 0x60000020 );
             $sec_rva     += ( length($text_bytes) + 4095 ) & ~4095;
             $sec_raw_ptr += $sec_raw_code_size;
 
-            # .data
+            # .data section (Initialized Data)
             my $sec_raw_data_size = 0;
             if ($has_data) {
                 $sec_raw_data_size = ( length($data_bytes) + 511 ) & ~511;
@@ -1956,8 +2315,8 @@ package Brocken::Jenny {
                 $sec_raw_ptr += $sec_raw_data_size;
             }
 
-            # .reloc
-            my $reloc_bytes        = pack( 'V V v v', 0x1000, 12, 0, 0 );
+            # .reloc section (Mandatory for ARM64)
+            my $reloc_bytes        = pack( 'V V v v', 0x1000, 12, 0, 0 ); # Base RVA, Block Size, TypeOffset entries (empty)
             my $reloc_rva          = $sec_rva;
             my $sec_raw_reloc_size = ( length($reloc_bytes) + 511 ) & ~511;
             $section_table .= pack( 'a8 V2 V2 V2 v2 V',
@@ -1965,7 +2324,7 @@ package Brocken::Jenny {
             $sec_rva     += ( length($reloc_bytes) + 4095 ) & ~4095;
             $sec_raw_ptr += $sec_raw_reloc_size;
 
-            # .debug_l
+            # .debug_l (Simplified debug section for Windows)
             my $sec_raw_debug_size = 0;
             if ($has_debug) {
                 $sec_raw_debug_size = ( length($debug_bytes) + 511 ) & ~511;
@@ -1974,34 +2333,41 @@ package Brocken::Jenny {
                 $sec_rva     += ( length($debug_bytes) + 4095 ) & ~4095;
                 $sec_raw_ptr += $sec_raw_debug_size;
             }
+
             my $size_of_image  = $sec_rva;
             my $size_of_code   = $sec_raw_code_size;
             my $init_data_size = $sec_raw_data_size + $sec_raw_reloc_size + $sec_raw_debug_size;
-            my $os_ver         = 6;                                                                # Compatibility with older Windows platforms
+            my $os_ver         = 6; # Target Windows Vista/7+ compatibility
+
+            # PE32+ Optional Header (Exactly 240 bytes)
+            # Reference: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#optional-header-image-only
             my $opt_header     = pack(
-                'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2', 0x020b,                        # Magic Number (PE32+)
-                14,                                         10,                            # Major/Minor LinkerVersion
-                $size_of_code,                              $init_data_size, 0, 0x1000,    # AddressOfEntryPoint
+                'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2', 0x020b,                        # Magic Number (PE32+ 64-bit)
+                14,                                         10,                            # Major/Minor LinkerVersion (LLVM/MSVC matches)
+                $size_of_code,                              $init_data_size, 0, 0x1000,    # AddressOfEntryPoint (RVA 0x1000)
                 0x1000,                                                                    # BaseOfCode
-                0x140000000,                                                               # ImageBase
+                0x140000000,                                                               # ImageBase (Modern default 5GB base)
                 4096,                                                                      # SectionAlignment
                 512,                                                                       # FileAlignment
                 $os_ver, 0,                                                                # Major/Minor OS
                 0,       0,                                                                # Major/Minor Image
                 $os_ver, 0,                                                                # Major/Minor Subsystem
                 0,                                                                         # Win32VersionValue
-                $size_of_image, $size_of_headers, 0,                                       # CheckSum
+                $size_of_image, $size_of_headers, 0,                                       # CheckSum (Optional for non-drivers)
                 3,         # Subsystem (Windows Console)
                 0x8160,    # DllCharacteristics (DYNAMIC_BASE | NX_COMPAT | TS_AWARE | HIGH_ENTROPY_VA)
                 0x100000, 0x1000, 0x100000, 0x1000,    # Stack/Heap Reserve/Commit
                 0,                                     # LoaderFlags
-                16                                     # NumberOfRvaAndSizes
+                16                                     # NumberOfRvaAndSizes (Data Directories)
             );
+
+            # Data Directories (16 entries, 8 bytes each)
             my $data_dirs = "\x00" x 128;
             if ( ref $code_bytes eq 'HASH' ) {
                 my $import_rva  = $code_bytes->{import_descriptor_rva}  // 0;
                 my $import_size = $code_bytes->{import_descriptor_size} // 0;
                 if ($import_rva) {
+                    # Import Directory (Index 1)
                     substr $data_dirs, 8,  4, pack( 'V', $import_rva );
                     substr $data_dirs, 12, 4, pack( 'V', $import_size );
                 }
@@ -2011,7 +2377,10 @@ package Brocken::Jenny {
             substr $data_dirs, 40, 4, pack( 'V', $reloc_rva );
             substr $data_dirs, 44, 4, pack( 'V', length($reloc_bytes) );
             $opt_header .= $data_dirs;
+
             print $fh $dos_header, $dos_stub, $pe_signature, $file_header, $opt_header, $section_table;
+
+            # Pad headers to FileAlignment
             my $headers_len
                 = length($dos_header)
                 + length($dos_stub)
@@ -2020,6 +2389,8 @@ package Brocken::Jenny {
                 + length($opt_header)
                 + length($section_table);
             print $fh ( "\x00" x ( $size_of_headers - $headers_len ) );
+
+            # Write section payloads
             print $fh $text_bytes;
             print $fh ( "\x00" x ( $sec_raw_code_size - length($text_bytes) ) );
 
@@ -2044,7 +2415,7 @@ package Brocken::Jenny {
             $self->write_executable( $output_file, $code_bytes, $p, undef, $debug_bytes );
             open my $fh, '+<', $output_file or die $!;
             binmode $fh;
-            seek $fh, 0x96, 0;
+            seek $fh, 0x96, 0; # Offset to COFF Characteristics
             print $fh pack( "v", 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
             close $fh;
         }
@@ -2052,10 +2423,56 @@ package Brocken::Jenny {
 
     class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
+=pod
+
+=head1 NAME
+
+Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
+
+=head1 DESCRIPTION
+
+Generates ELF64 binaries for Linux, BSDs, Haiku, and Solaris.
+
+=head2 Binary Structure
+
+=over 4
+
+=item * B<Elf64_Ehdr>: Main header (64 bytes).
+
+=item * B<Elf64_Phdr>: Program Headers defining memory segments (PT_LOAD, PT_DYNAMIC, etc.).
+
+=item * B<Elf64_Shdr>: Section Headers describing the file's logical sections.
+
+=back
+
+=head2 Platform-Specific Workarounds
+
+=over 4
+
+=item * B<Haiku>: Requires C<_gSharedObjectHaikuABI> and C<_gSharedObjectHaikuVersion>
+symbols in C<.dynsym> to enable modern POSIX APIs.
+
+=item * B<BSDs>: FreeBSD, NetBSD, and DragonFly require C<environ> and
+C<__progname> symbols to be mapped to writable memory to avoid early
+crashes in C<libc> initialization.
+
+=item * B<NetBSD>: Requires a C<PT_NOTE> containing C<NT_NETBSD_IDENT>
+to be recognized as a native binary, plus PaX relaxation notes.
+
+=item * B<OpenBSD>: Requires a C<PT_OPENBSD_PINTABLE> segment listing
+allowed syscall entry points for its "syscall pinning" security feature.
+
+=item * B<DragonFly BSD>: Requires a smaller C<PT_GNU_RELRO> segment
+that doesn't overlap the GOT, or the dynamic linker will crash.
+
+=back
+
+=cut
+
         # Structurally compliant segment layout grouping all read-only sections
         # in the RX segment, and keeping only writable sections in the RW segment.
         method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 ) {
-            $l->add_section( '.text', $t, 5 );    # RX
+            $l->add_section( '.text', $t, 5 );    # RX (Read + Execute)
 
             # Read-only metadata sections (strictly mapped to RX segment)
             $l->add_section( '.interp',   512,  2 ) if $self->type eq 'exe';
@@ -2065,7 +2482,7 @@ package Brocken::Jenny {
             $l->add_section( '.hash',     4096, 2 );
 
             # Writable data and dynamic linking tables (mapped to RW segment)
-            $l->add_section( '.dynamic', 4096, 3 );    # RW
+            $l->add_section( '.dynamic', 4096, 3 );    # RW (Read + Write)
             $l->add_section( '.data',    $d,   6 );    # RW
             $l->add_section( '.got',     512,  6 );    # RW
             if ( $dbg >= 1 ) {
@@ -2092,13 +2509,14 @@ package Brocken::Jenny {
 
             # Automatically calculate layout if it wasn't called beforehand
             if ( !defined $self->layout ) {
+                # Allocate extra data space for platform-specific control variables
                 my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
                 $self->pre_layout( length($code_bytes) + 32, $extra_data, $platform->arch, $platform->os );
             }
             my $l          = $self->layout;
             my $is_pie     = $platform->is_bsd || $platform->is_haiku;
             my $base       = $is_pie ? 0 : $self->image_base;
-            my $elf_type   = $shared ? 3 : ( $is_pie ? 3 : 2 );
+            my $elf_type   = $shared ? 3 : ( $is_pie ? 3 : 2 ); # ET_DYN (3) for PIE, ET_EXEC (2) for static
             my $text_rva   = $l->get('.text')->{rva};
             my $got_rva    = $l->get('.got')->{rva};
             my $page_align = $l->section_align;
@@ -2107,6 +2525,12 @@ package Brocken::Jenny {
             if ( $self->type eq 'exe' ) {
                 my $entry_stub = '';
                 if ( $platform->is_arm64 ) {
+                    # ARM64 Dynamic Exit Stub:
+                    # - bl main
+                    # - adrp x8, :got:exit
+                    # - ldr x8, [x8, :got_lo12:exit]
+                    # - blr x8
+                    # - brk #0
                     my $got_exit  = $got_rva + 24;
                     my $adrp_pc   = $text_rva + 4;
                     my $page_diff = ( $got_exit >> 12 ) - ( $adrp_pc >> 12 );
@@ -2122,6 +2546,12 @@ package Brocken::Jenny {
                     $entry_stub = pack( "V5", $bl_main, $adrp, $ldr, $blr, $brk );
                 }
                 elsif ( $platform->is_riscv64 ) {
+                    # RISC-V 64-bit Entry Stub:
+                    # - jal ra, main
+                    # - auipc t0, %pcrel_hi(exit)
+                    # - ld t0, %pcrel_lo(auipc)(t0)
+                    # - jalr ra, t0
+                    # - ebreak
                     my $got_exit   = $got_rva + 24;
                     my $auipc_pc   = $text_rva + 4;
                     my $diff       = $got_exit - $auipc_pc;
@@ -2138,7 +2568,8 @@ package Brocken::Jenny {
                     $entry_stub = pack( "V5", $jal, $auipc, $ld, $jalr, $ebreak );
                 }
                 else {
-                    # x86_64 Dynamic Exit Stub with System V RSP alignment
+                    # x86_64 Dynamic Exit Stub with System V RSP alignment.
+                    # Reference: https://eg/ABI.md Section 1.1
                     my $got_exit = $got_rva + 24;
                     my $next_ip  = $text_rva + 18;
                     my $rel32    = $got_exit - $next_ip;
@@ -2146,18 +2577,18 @@ package Brocken::Jenny {
                     $entry_stub .= pack( "C V",   0xE8, 11 );              # call main (rel)
                     $entry_stub .= pack( "C3",    0x48, 0x89, 0xC7 );      # mov rdi, rax
                     $entry_stub .= pack( "C2 l<", 0xFF, 0x15, $rel32 );    # call [rip + got_exit]
-                    $entry_stub .= pack( "C2",    0x0F, 0x0B );            # ud2
+                    $entry_stub .= pack( "C2",    0x0F, 0x0B );            # ud2 (Invalid instruction safety)
                 }
                 $text = $entry_stub . $code_bytes;
             }
 
             # Deterministic OSABI and ABI notes explicitly defined per platform.
-            # This replaces buggy runtime detection that trips over PaX logic on CI runners.
+            # Reference: https://eg/ABI.md Section 2.5
             my $osabi        = 0;
             my $note_data    = '';
             my $has_pintable = 0;
             if ( $platform->is_freebsd ) {
-                $osabi     = 9;
+                $osabi     = 9; # ELFOSABI_FREEBSD
                 $note_data = pack( 'L<3 a8 L<', 8, 4, 1, "FreeBSD\0", 1400097 );
             }
             elsif ( $platform->is_midnightbsd ) {
@@ -2165,9 +2596,9 @@ package Brocken::Jenny {
                 $note_data = pack( 'L<3 a12 L<', 12, 4, 1, "MidnightBSD\0", 300000 );
             }
             elsif ( $platform->is_netbsd ) {
-                $osabi     = 2;
+                $osabi     = 2; # ELFOSABI_NETBSD
                 $note_data = pack( 'L<3 a8 L<', 7, 4, 1, "NetBSD\0\0", 1099000000 );
-                $note_data .= pack( 'L<3 a4 L<', 4, 4, 3, "PaX\0", 0x0a );
+                $note_data .= pack( 'L<3 a4 L<', 4, 4, 3, "PaX\0", 0x0a ); # Flag 0x0a relaxes PaX W^X
             }
             elsif ( $platform->is_openbsd ) {
                 $osabi        = 0;
@@ -2252,7 +2683,7 @@ package Brocken::Jenny {
 
             # Setup Dynamic Strings Table
             my @exports   = @{ $self->exported_funcs // [] };
-            my $exit_name = $platform->is_haiku ? 'exit' : '_exit';
+            my $exit_name = $platform->is_haiku ? 'exit' : '_exit'; # Reference: eg/ABI.md Section 2.3
             my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', $exit_name );
             my $libc      = $libc_map{$os_base} // 'libc.so';
 
@@ -2329,12 +2760,18 @@ package Brocken::Jenny {
                 $str_off{$s} = length($dynstr);
                 $dynstr .= $s . "\0";
             }
+
+            # Map BSD internal symbols
+            # Reference: eg/ABI.md Section 2.2
             if ( $platform->is_bsd ) {
                 $str_off{'__progname'} = length($dynstr);
                 $dynstr .= '__progname' . "\0";
                 $str_off{'environ'} = length($dynstr);
                 $dynstr .= 'environ' . "\0";
             }
+
+            # Map Haiku ABI version symbols
+            # Reference: eg/ABI.md Section 2.1
             if ( $platform->is_haiku ) {
                 $str_off{'_gSharedObjectHaikuABI'} = length($dynstr);
                 $dynstr .= "_gSharedObjectHaikuABI\0";
@@ -2409,7 +2846,7 @@ package Brocken::Jenny {
                         0x11,                                # st_info (STB_GLOBAL | STT_OBJECT)
                         0,                                   # st_other (STV_DEFAULT)
                         $data_sec_idx // 0,                  # st_shndx
-                        $base + $data_sec->{rva} + 16,       # st_value (points to Offset 16)
+                        $base + $data_sec->{rva} + 16,       # st_value (points to Offset 16 in .data)
                         8                                    # st_size (pointer size)
                     );
                 }
@@ -2435,13 +2872,13 @@ package Brocken::Jenny {
                         0x11,                               # st_info (STB_GLOBAL | STT_OBJECT)
                         0,                                  # st_other (STV_DEFAULT)
                         $data_sec_idx // 0,                 # st_shndx
-                        $base + $data_sec->{rva} + 8,       # st_value (points to Offset 8)
+                        $base + $data_sec->{rva} + 8,       # st_value (points to Offset 8 in .data)
                         8                                   # st_size (pointer size)
                     );
                 }
             }
 
-            # Define Haiku API variables
+            # Define Haiku ABI variables
             if ( $platform->is_haiku ) {
                 my $abi_off = $str_off{'_gSharedObjectHaikuABI'};
                 my $ver_off = $str_off{'_gSharedObjectHaikuVersion'};
@@ -2507,7 +2944,7 @@ package Brocken::Jenny {
             my $got = pack( 'Q< Q< Q< Q<', 0, 0, 0, 0 );
             $l->get('.got')->{size} = length($got);
 
-            # Setup Hash Table
+            # Setup Hash Table (Standard System V Hash)
             my $elf_hash = sub {
                 my $name = shift;
                 my $h    = 0;
@@ -2615,6 +3052,7 @@ package Brocken::Jenny {
                 }
                 elsif ( $s->{name} eq '.data' ) {
                     if ( $platform->is_bsd && $s->{size} >= 32 ) {
+                        # Satisfy __progname and environ expectations
                         my $empty_env_addr = $base + $s->{rva};
                         my $empty_str_addr = $base + $s->{rva} + 24;
                         $payload = pack( 'Q< Q< Q<', 0, $empty_env_addr, $empty_str_addr );
@@ -2696,7 +3134,7 @@ package Brocken::Jenny {
                 }
                 elsif ( $s->{name} eq '.dynamic' ) {
                     $type       = 6;                              # SHT_DYNAMIC
-                    $flags      = 3;                              # SHF_ALLOC | SHF_WRITE
+                    $flags = ( $platform->is_dragonflybsd ) ? 2 : 3; # Read-only on DFly to avoid RELRO crash
                     $sh_link    = $sec_indices{'.dynstr'} // 0;
                     $sh_entsize = 16;
                 }
@@ -2825,6 +3263,7 @@ package Brocken::Jenny {
 
             # PT_GNU_RELRO (type 0x6474e552) — Elf64_Phdr (56 bytes)
             # Covers ONLY .dynamic to ensure .data and .got remain fully writable.
+            # Reference: eg/ABI.md Section 2.4
             if ($is_pie) {
                 my $relro_start = $dyn_sec->{off} & ~( $page_align - 1 );
                 my $relro_size  = ( $dyn_sec->{off} + $dyn_sec->{size} - $relro_start + $page_align - 1 ) & ~( $page_align - 1 );
@@ -2855,7 +3294,7 @@ package Brocken::Jenny {
                 $extra_off += length($note_data);
             }
 
-            # 7. PT_OPENBSD_PINTABLE — Elf64_Phdr (56 bytes)
+            # PT_OPENBSD_PINTABLE — Elf64_Phdr (56 bytes)
             if ($pintable_data) {
                 push @phdrs, pack(
                     'L< L< Q< Q< Q< Q< Q< Q<', 0x65a3dbe9,                 # p_type (PT_OPENBSD_PINTABLE)
@@ -2880,6 +3319,7 @@ package Brocken::Jenny {
             my $entry_point = $self->type eq 'shared' ? 0 : $base + $l->get('.text')->{rva};
 
             # Finalize ELF Header (Elf64_Ehdr - Exactly 64 bytes) and write program headers/extra data
+            # Reference: https://refspecs.linuxbase.org/elf/gabi4+/ch4.eheader.html
             my $ehdr = pack(
                 'A4 C C C C C x7 S< S< L< Q< Q< Q< L< S< S< S< S< S< S<', "\x7fELF",    # e_ident[0..3] (Magic)
                 2,                                                                      # e_ident[4] (Class: 64-bit)
@@ -3489,6 +3929,7 @@ subtest Jenny => sub {
         # Clean up
         unlink $output_file;
     }
+
 };
 #
 done_testing;
