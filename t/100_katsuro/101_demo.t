@@ -2165,15 +2165,14 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             if ( $self->type eq 'exe' ) {
                 my $entry_stub = '';
                 if ( $platform->is_arm64 ) {
-                    # ARM64 (AArch64) Dynamic exit stub calling exit() via GOT:
-                    # - bl main (offset 32): 0x94000008
-                    # - ldr x16, [pc, 20]:   0x580000b0 (Loads exit GOT slot pointer from stub)
-                    # - ldr x16, [x16]:      0xf9400210 (Dereferences pointer)
-                    # - br x16:              0xd61f0200 (Jumps directly to C exit stub)
-                    # - nops to pad to 24 bytes
-                    # - got_slot_addr:       8-byte pointer to the exit GOT slot
-                    my $got_slot_addr = $base + $got_rva + 24;
-                    $entry_stub = pack( "V6 Q<", 0x94000008, 0x580000b0, 0xf9400210, 0xd61f0200, 0xd503201f, 0xd503201f, $got_slot_addr );
+                    # ARM64 (AArch64) Direct syscall exit stub (no GOT dependency, 16 bytes):
+                    # - bl main:       0x94000004 (Relative call 16 bytes ahead)
+                    # - movz x8, #N:   (Load exit syscall number into x8)
+                    # - svc #0:        0xD4000001 (Trigger syscall)
+                    # - brk #0:        0xD4200000 (Safety crash)
+                    my $exit_sys = $platform->syscall('exit') // 1;
+                    my $movz     = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 8;
+                    $entry_stub = pack( "V4", 0x94000004, $movz, 0xD4000001, 0xD4200000 );
                 }
                 elsif ( $platform->is_riscv64 ) {
                     # RISC-V 64-bit native exit stub:
@@ -2456,7 +2455,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                         0,                                         # st_other (STV_DEFAULT)
                         $data_sec_idx // 0,                        # st_shndx
                         $base + $data_sec->{rva} + $data_sec->{size} - 1,  # st_value (point to NUL byte)
-                        0                                          # st_size
+                        8                                          # st_size (pointer size on x86_64/aarch64)
                     );
                 }
             }
@@ -2563,6 +2562,9 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
             if ( defined $main_lbl && $self->type ne 'shared' ) {
                 $dynamic .= pack( 'Q< Q<', 12, $base + $l->get('.text')->{rva} + $main_lbl );    # DT_INIT
+            }
+            if ($is_pie) {
+                $dynamic .= pack( 'Q< Q<', 0x6ffffffb, 8 );    # DT_FLAGS_1 with DF_1_PIE
             }
             $dynamic .= pack( 'Q< Q<', 0, 0 );                                                   # DT_NULL
             $l->get('.dynamic')->{size} = length($dynamic);
@@ -3340,9 +3342,10 @@ subtest Jenny => sub {
             # Execute the binary and inspect its exit code!
             system($output_file);
             my $exit_code = $? >> 8;
+            my $signal    = $? & 127;
+            my $core      = $? & 128;
+            note "raw \$?=$? exit=$exit_code signal=$signal core=$core";
             is $exit_code, 42, 'Standalone binary executed natively and returned the correct exit code!';
-            note $?;
-            note $exit_code;
         }
 
         # Clean up
