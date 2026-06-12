@@ -580,9 +580,11 @@ package Brocken::Katsuro {
             my $fn  = $stub{$name} or return undef;
             my $cmd = "objdump -d '$lib' | grep -A 20 '<$fn>:'";
             my $dis = `$cmd 2>/dev/null` or return undef;
-            if    ( $arch =~ /x86_64|x64|amd64/i ) { return hex($1) if $dis =~ /mov\s+\$0x([0-9a-f]+),\s*%[er]?ax/i || $dis =~ /mov\s+[er]?ax,\s*0x([0-9a-f]+)/i }
-            elsif ( $arch =~ /aarch64|arm64/i )    { return hex($1) if $dis =~ /mov\s+x8,\s*#0x([0-9a-f]+)/i }
-            elsif ( $arch =~ /riscv64|riscv/i )    { return hex($1) if $dis =~ /li\s+a7,\s*#?0x([0-9a-f]+)/i }
+            if ( $arch =~ /x86_64|x64|amd64/i ) {
+                return hex($1) if $dis =~ /mov\s+\$0x([0-9a-f]+),\s*%[er]?ax/i || $dis =~ /mov\s+[er]?ax,\s*0x([0-9a-f]+)/i;
+            }
+            elsif ( $arch =~ /aarch64|arm64/i ) { return hex($1) if $dis =~ /mov\s+x8,\s*#0x([0-9a-f]+)/i }
+            elsif ( $arch =~ /riscv64|riscv/i ) { return hex($1) if $dis =~ /li\s+a7,\s*#?0x([0-9a-f]+)/i }
             return undef;
         }
 
@@ -2047,69 +2049,8 @@ package Brocken::Jenny {
             close $fh;
         }
     }
-}
 
-class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
-
-        method _detect_elf_info ( $ref = undef ) {
-            my @candidates = $ref ? ($ref) : ( '/bin/sh', '/sbin/init', '/usr/bin/env', '/boot/system/bin/sh', '/boot/system/bin/env' );
-            for my $candidate (@candidates) {
-                next if !-e $candidate || !-r _;
-                open my $fh, '<:raw', $candidate or next;
-                my $bytes = read( $fh, my $ehdr, 64 );
-                close $fh;
-                next if $bytes != 64;
-                next if substr( $ehdr, 0, 4 ) ne "\x7fELF";
-                my $osabi    = ord( substr( $ehdr, 7, 1 ) );
-                my $ei_class = ord( substr( $ehdr, 4, 1 ) );
-                next if $ei_class != 1 && $ei_class != 2;
-                my ( $e_phoff, $e_phentsize, $e_phnum );
-
-                if ( $ei_class == 2 ) {
-                    $e_phoff     = unpack( 'Q', substr( $ehdr, 32, 8 ) );
-                    $e_phentsize = unpack( 'S', substr( $ehdr, 54, 2 ) );
-                    $e_phnum     = unpack( 'S', substr( $ehdr, 56, 2 ) );
-                }
-                else {
-                    $e_phoff     = unpack( 'L', substr( $ehdr, 28, 4 ) );
-                    $e_phentsize = unpack( 'S', substr( $ehdr, 42, 2 ) );
-                    $e_phnum     = unpack( 'S', substr( $ehdr, 44, 2 ) );
-                }
-                next if !$e_phnum || !$e_phentsize;
-                open my $fh2, '<:raw', $candidate or next;
-                seek( $fh2, $e_phoff, 0 );
-                my $ph_bytes = $e_phentsize * $e_phnum;
-                my $read_ok  = read( $fh2, my $phdrs, $ph_bytes );
-                close $fh2;
-                next if !$read_ok;
-                my ( $note_data, $has_pintable ) = ( '', 0 );
-
-                for my $i ( 0 .. $e_phnum - 1 ) {
-                    my $phdr   = substr( $phdrs, $i * $e_phentsize, $e_phentsize );
-                    my $p_type = unpack( 'L', substr( $phdr, 0, 4 ) );
-                    if ( $p_type == 4 && !$note_data ) {
-                        my ( $p_offset, $p_filesz );
-                        if ( $ei_class == 2 ) {
-                            $p_offset = unpack( 'Q', substr( $phdr, 8,  8 ) );
-                            $p_filesz = unpack( 'Q', substr( $phdr, 32, 8 ) );
-                        }
-                        else {
-                            $p_offset = unpack( 'L', substr( $phdr, 4,  4 ) );
-                            $p_filesz = unpack( 'L', substr( $phdr, 16, 4 ) );
-                        }
-                        open my $fh3, '<:raw', $candidate or next;
-                        seek( $fh3, $p_offset, 0 );
-                        read( $fh3, $note_data, $p_filesz );
-                        close $fh3;
-                    }
-                    elsif ( $p_type == 0x65a3dbe9 && !$has_pintable ) {
-                        $has_pintable = 1;
-                    }
-                }
-                return ( $osabi, $note_data, $has_pintable );
-            }
-            return ( 0, '', 0 );
-        }
+    class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
         # Structurally compliant segment layout grouping all read-only sections
         # in the RX segment, and keeping only writable sections in the RW segment.
@@ -2124,10 +2065,9 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             $l->add_section( '.hash',     4096, 2 );
 
             # Writable data and dynamic linking tables (mapped to RW segment)
-            $l->add_section( '.dynamic',  4096, 3 ); # RW
-            $l->add_section( '.data', $d, 6 );    # RW
-            $l->add_section( '.got',      512,  6 );                           # RW
-
+            $l->add_section( '.dynamic', 4096, 3 );    # RW
+            $l->add_section( '.data',    $d,   6 );    # RW
+            $l->add_section( '.got',     512,  6 );    # RW
             if ( $dbg >= 1 ) {
                 $l->add_section( '.debug_line',     4096, 0 );
                 $l->add_section( '.debug_info',     4096, 0 );
@@ -2140,18 +2080,20 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
         }
 
         method import_rva($name) {
-            my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16, exit => 24 };
+            my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16, exit => 24, _exit => 24 };
             return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die "Unknown ELF import: $name" );
         }
         method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
 
         method write_executable ( $output_file, $code_bytes, $platform, $shared = false, $debug_bytes = undef ) {
+
             # Ensure $platform is normalized into a platform object if a raw string is passed
             $platform = Brocken::Katsuro::Platform::parse($platform) unless ref $platform;
 
             # Automatically calculate layout if it wasn't called beforehand
             if ( !defined $self->layout ) {
-                $self->pre_layout( length($code_bytes) + 32, $platform->is_bsd ? 32 : 0, $platform->arch, $platform->os );
+                my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
+                $self->pre_layout( length($code_bytes) + 32, $extra_data, $platform->arch, $platform->os );
             }
             my $l          = $self->layout;
             my $is_pie     = $platform->is_bsd || $platform->is_haiku;
@@ -2160,102 +2102,81 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             my $text_rva   = $l->get('.text')->{rva};
             my $got_rva    = $l->get('.got')->{rva};
             my $page_align = $l->section_align;
+            my $text       = $code_bytes;
 
-            my $text = $code_bytes;
             if ( $self->type eq 'exe' ) {
                 my $entry_stub = '';
                 if ( $platform->is_arm64 ) {
-                    # ARM64 (AArch64) Direct syscall exit stub (no GOT dependency, 16 bytes):
-                    my $exit_sys = $platform->syscall('exit') // 1;
-                    if ( $platform->is_haiku ) {
-                        # Haiku ARM64 exit stub:
-                        # - bl main:       0x94000005 (Relative call 20 bytes ahead)
-                        # - mov x1, x0:    0xaa0003e1 (Copy status)
-                        # - movn x0, #0:   0x92800000 (Load -1)
-                        # - movz x8, #sys: (Load syscall number)
-                        # - svc #0:        0xD4000001
-                        my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 8;
-                        $entry_stub = pack( "V5", 0x94000005, 0xAA0003E1, 0x92800000, $movz, 0xD4000001 );
-                    }
-                    else {
-                        # - bl main:       0x94000004 (Relative call 16 bytes ahead)
-                        # - movz x8, #N:   (Load exit syscall number into x8)
-                        # - svc #0:        0xD4000001 (Trigger syscall)
-                        # - brk #0:        0xD4200000 (Safety crash)
-                        my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 8;
-                        $entry_stub = pack( "V4", 0x94000004, $movz, 0xD4000001, 0xD4200000 );
-                    }
+                    my $got_exit  = $got_rva + 24;
+                    my $adrp_pc   = $text_rva + 4;
+                    my $page_diff = ( $got_exit >> 12 ) - ( $adrp_pc >> 12 );
+                    $page_diff &= 0x1FFFFF;
+                    my $immlo   = $page_diff & 3;
+                    my $immhi   = ( $page_diff >> 2 ) & 0x7FFFF;
+                    my $adrp    = 0x90000000 | ( $immlo << 29 ) | ( $immhi << 5 ) | 8;
+                    my $pimm    = ( $got_exit & 0xFFF ) >> 3;
+                    my $ldr     = 0xF9400000 | ( $pimm << 10 ) | ( 8 << 5 ) | 8;
+                    my $blr     = 0xD63F0100;
+                    my $bl_main = 0x94000005;
+                    my $brk     = 0xD4200000;
+                    $entry_stub = pack( "V5", $bl_main, $adrp, $ldr, $blr, $brk );
                 }
                 elsif ( $platform->is_riscv64 ) {
-                    # RISC-V 64-bit native exit stub:
-                    # - jal ra, 16 (relative call offset +16 bytes -> 4 instructions)
-                    # - li a7, sys (addi a7, x0, sys -> 4 bytes)
-                    # - ecall      (trigger syscall -> 4 bytes)
-                    # - unimp      (safety crash -> 4 bytes)
-                    my $li = ( $platform->syscall('exit') << 20 ) | 0x00000893;
-                    $entry_stub = pack( "V4", 0x010000EF, $li, 0x00000073, 0x00000000 );
+                    my $got_exit   = $got_rva + 24;
+                    my $auipc_pc   = $text_rva + 4;
+                    my $diff       = $got_exit - $auipc_pc;
+                    my $hi20       = ( $diff + 0x800 ) >> 12;
+                    my $lo12       = $diff & 0xFFF;
+                    my $auipc      = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;
+                    my $ld         = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
+                    my $jalr       = ( 0 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 0 << 7 ) | 0x67;
+                    my $jal_offset = 20;
+                    my $jal_imm = ( ( $jal_offset >> 20 ) & 1 ) << 31 | ( ( $jal_offset >> 1 ) & 0x3FF ) << 21 | ( ( $jal_offset >> 11 ) & 1 ) << 20
+                        | ( ( $jal_offset >> 12 ) & 0xFF ) << 12;
+                    my $jal    = $jal_imm | ( 1 << 7 ) | 0x6F;
+                    my $ebreak = 0x00100073;
+                    $entry_stub = pack( "V5", $jal, $auipc, $ld, $jalr, $ebreak );
                 }
                 else {
-                    # x86_64 Direct syscall exit stub (no GOT dependency, 17 bytes):
-                    my $exit_sys = $platform->syscall('exit') // 1;
-                    if ( $platform->is_haiku ) {
-                        # Haiku x86_64 exit stub (19 bytes):
-                        # - call main:      E8 0E 00 00 00 (Relative call 14 bytes ahead)
-                        # - mov rsi, rax:   48 89 C6       (Copy status to 2nd arg)
-                        # - mov rdi, -1:    48 C7 C7 FF FF FF FF (current team)
-                        # - mov eax, sys:   B8 <sys_exit>
-                        # - syscall:        0F 05
-                        $entry_stub = pack( "C V", 0xE8, 14 );
-                        $entry_stub .= pack( "C3", 0x48, 0x89, 0xC6 );
-                        $entry_stub .= pack( "C3 V", 0x48, 0xC7, 0xC7, 0xFFFFFFFF );
-                        $entry_stub .= pack( "C V", 0xB8, $exit_sys );
-                        $entry_stub .= pack( "C2", 0x0F, 0x05 );
-                    }
-                    else {
-                        # - call main:      E8 0C 00 00 00 (Relative call 12 bytes ahead)
-                        # - mov rdi, rax:   48 89 C7       (Copy main's return code to rdi)
-                        # - mov eax, SYS:   B8 <sys_exit>  (Load exit syscall number)
-                        # - syscall:        0F 05          (Invoke kernel)
-                        # - ud2:            0F 0B          (Safety crash)
-                        $entry_stub = pack( "C V", 0xE8, 12 );
-                        $entry_stub .= pack( "C3",  0x48, 0x89, 0xC7 );
-                        $entry_stub .= pack( "C V", 0xB8, $exit_sys );
-                        $entry_stub .= pack( "C2",  0x0F, 0x05 );
-                        $entry_stub .= pack( "C2",  0x0F, 0x0B );
-                    }
+                    # x86_64 Dynamic Exit Stub with System V RSP alignment
+                    my $got_exit = $got_rva + 24;
+                    my $next_ip  = $text_rva + 18;
+                    my $rel32    = $got_exit - $next_ip;
+                    $entry_stub = pack( "C4", 0x48, 0x83, 0xE4, 0xF0 );    # and rsp, -16
+                    $entry_stub .= pack( "C V",   0xE8, 11 );              # call main (rel)
+                    $entry_stub .= pack( "C3",    0x48, 0x89, 0xC7 );      # mov rdi, rax
+                    $entry_stub .= pack( "C2 l<", 0xFF, 0x15, $rel32 );    # call [rip + got_exit]
+                    $entry_stub .= pack( "C2",    0x0F, 0x0B );            # ud2
                 }
                 $text = $entry_stub . $code_bytes;
             }
 
-            # Probe system binaries for the correct OSABI and PT_NOTE data
-            my ( undef, $note_data, $has_pintable ) = $self->_detect_elf_info();
-            my $osabi = 0;
-
-            # Set OSABI and ABI note explicitly per platform to guarantee kernel recognition.
+            # Deterministic OSABI and ABI notes explicitly defined per platform.
+            # This replaces buggy runtime detection that trips over PaX logic on CI runners.
+            my $osabi        = 0;
+            my $note_data    = '';
+            my $has_pintable = 0;
             if ( $platform->is_freebsd ) {
-                $osabi     = 9;    # ELFOSABI_FREEBSD
+                $osabi     = 9;
                 $note_data = pack( 'L<3 a8 L<', 8, 4, 1, "FreeBSD\0", 1400097 );
             }
             elsif ( $platform->is_midnightbsd ) {
-                $osabi     = 9;    # ELFOSABI_FREEBSD (MidnightBSD inherits from FreeBSD)
+                $osabi     = 9;
                 $note_data = pack( 'L<3 a12 L<', 12, 4, 1, "MidnightBSD\0", 300000 );
             }
             elsif ( $platform->is_netbsd ) {
-                $osabi     = 2;    # ELFOSABI_NETBSD
+                $osabi     = 2;
                 $note_data = pack( 'L<3 a8 L<', 7, 4, 1, "NetBSD\0\0", 1099000000 );
+                $note_data .= pack( 'L<3 a4 L<', 4, 4, 3, "PaX\0", 0x0a );
             }
             elsif ( $platform->is_openbsd ) {
-                $osabi     = 0;    # OpenBSD prefers ELFOSABI_NONE
-                $note_data = pack( 'L<3 a8 L<', 8, 4, 1, "OpenBSD\0", 0 );
-                $has_pintable = 1; # Always generate on OpenBSD to be safe
+                $osabi        = 0;
+                $note_data    = pack( 'L<3 a8 L<', 8, 4, 1, "OpenBSD\0", 0 );
+                $has_pintable = 1;
             }
             elsif ( $platform->is_dragonflybsd ) {
-                $osabi     = 9;    # ELFOSABI_FREEBSD (DragonFly uses FreeBSD OSABI)
+                $osabi     = 9;
                 $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600400 );
-            }
-            elsif ( $platform->is_haiku ) {
-                $osabi     = 0;
-                $note_data = pack( 'L<3 a8 L<', 6, 4, 1, "Haiku\0\0", 0 );
             }
 
             # Per-OS interpreter path for dynamic executables
@@ -2290,13 +2211,14 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
             # Generate pintable data for OpenBSD (syscall allowlisting)
             my $pintable_data = '';
-            if ($has_pintable && $platform->is_openbsd) {
-                my $pos      = 0;
+            if ( $has_pintable && $platform->is_openbsd ) {
+                my $pos             = 0;
                 my $text_rva_actual = $l->get('.text')->{rva};
-                my $exit_sys = $platform->syscall('exit') // 1;
+                my $exit_sys        = $platform->syscall('exit') // 1;
                 if ( $platform->is_x64 ) {
                     while ( ( my $idx = index( $text, "\x0F\x05", $pos ) ) != -1 ) {
                         my $vaddr = $base + $text_rva_actual + $idx;
+
                         # OpenBSD ELF64 pintable entries are 16 bytes: uint64_t addr, uint32_t syscall, uint32_t pad
                         $pintable_data .= pack( 'Q< L< x4', $vaddr, $exit_sys );
                         $pos = $idx + 2;
@@ -2329,36 +2251,34 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             }
 
             # Setup Dynamic Strings Table
-            my @exports = @{ $self->exported_funcs // [] };
-            my @imports = ( 'dlopen', 'dlsym', 'pthread_create', 'exit' );
-            my $libc    = $libc_map{$os_base} // 'libc.so';
+            my @exports   = @{ $self->exported_funcs // [] };
+            my $exit_name = $platform->is_haiku ? 'exit' : '_exit';
+            my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', $exit_name );
+            my $libc      = $libc_map{$os_base} // 'libc.so';
 
             # Probe the exact dynamic libc.so name on the host filesystem when running natively
             if ( $platform->is_native ) {
                 my @search_paths = (
-                    '/usr/lib',
-                    '/lib',
-                    '/lib64',
-                    '/usr/lib64',
-                    '/usr/lib/x86_64-linux-gnu',
-                    '/usr/lib/aarch64-linux-gnu',
-                    '/usr/lib/riscv64-linux-gnu',
+                    '/usr/lib', '/lib', '/lib64', '/usr/lib64',
+                    '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
                 );
                 my @found;
                 for my $dir (@search_paths) {
                     next unless -d $dir;
                     my @matches = glob("$dir/libc.so.[0-9]*");
                     for my $m (@matches) {
-                        next if $m =~ /_p\.so/; # skip profiled
+                        next if $m =~ /_p\.so/;    # skip profiled
                         push @found, $m;
                     }
                 }
                 if (@found) {
-                    my $best = (sort {
-                        my ($amaj, $amin) = $a =~ /libc\.so\.(\d+)(?:\.(\d+))?/;
-                        my ($bmaj, $bmin) = $b =~ /libc\.so\.(\d+)(?:\.(\d+))?/;
-                        ($amaj // 0) <=> ($bmaj // 0) || (($amin // 0) <=> ($bmin // 0));
-                    } @found)[-1];
+                    my $best = (
+                        sort {
+                            my ( $amaj, $amin ) = $a =~ /libc\.so\.(\d+)(?:\.(\d+))?/;
+                            my ( $bmaj, $bmin ) = $b =~ /libc\.so\.(\d+)(?:\.(\d+))?/;
+                            ( $amaj // 0 ) <=> ( $bmaj // 0 ) || ( ( $amin // 0 ) <=> ( $bmin // 0 ) );
+                        } @found
+                    )[-1];
                     if ($best) {
                         require File::Basename;
                         $libc = File::Basename::basename($best);
@@ -2371,16 +2291,10 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             if ( !$platform->is_haiku ) {
                 my $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
                 $libpthread = 'libpthread.so' if $platform->is_openbsd || $platform->is_netbsd || $platform->is_dragonflybsd;
-
                 if ( $platform->is_native ) {
                     my @search_paths = (
-                        '/usr/lib',
-                        '/lib',
-                        '/lib64',
-                        '/usr/lib64',
-                        '/usr/lib/x86_64-linux-gnu',
-                        '/usr/lib/aarch64-linux-gnu',
-                        '/usr/lib/riscv64-linux-gnu',
+                        '/usr/lib', '/lib', '/lib64', '/usr/lib64',
+                        '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
                     );
                     my @found;
                     my $prefix = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' : 'libpthread';
@@ -2388,16 +2302,18 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                         next unless -d $dir;
                         my @matches = glob("$dir/$prefix.so.[0-9]*");
                         for my $m (@matches) {
-                            next if $m =~ /_p\.so/; # skip profiled
+                            next if $m =~ /_p\.so/;    # skip profiled
                             push @found, $m;
                         }
                     }
                     if (@found) {
-                        my $best = (sort {
-                            my ($amaj, $amin) = $a =~ /\.so\.(\d+)(?:\.(\d+))?/;
-                            my ($bmaj, $bmin) = $b =~ /\.so\.(\d+)(?:\.(\d+))?/;
-                            ($amaj // 0) <=> ($bmaj // 0) || (($amin // 0) <=> ($bmin // 0));
-                        } @found)[-1];
+                        my $best = (
+                            sort {
+                                my ( $amaj, $amin ) = $a =~ /\.so\.(\d+)(?:\.(\d+))?/;
+                                my ( $bmaj, $bmin ) = $b =~ /\.so\.(\d+)(?:\.(\d+))?/;
+                                ( $amaj // 0 ) <=> ( $bmaj // 0 ) || ( ( $amin // 0 ) <=> ( $bmin // 0 ) );
+                            } @found
+                        )[-1];
                         if ($best) {
                             require File::Basename;
                             $libpthread = File::Basename::basename($best);
@@ -2406,8 +2322,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 }
                 push @libs, $libpthread;
             }
-
-            my $dynstr  = "\0";
+            my $dynstr = "\0";
             my %str_off;
             for my $s ( @libs, @imports, @exports ) {
                 next if exists $str_off{$s};
@@ -2419,6 +2334,12 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 $dynstr .= '__progname' . "\0";
                 $str_off{'environ'} = length($dynstr);
                 $dynstr .= 'environ' . "\0";
+            }
+            if ( $platform->is_haiku ) {
+                $str_off{'_gSharedObjectHaikuABI'} = length($dynstr);
+                $dynstr .= "_gSharedObjectHaikuABI\0";
+                $str_off{'_gSharedObjectHaikuVersion'} = length($dynstr);
+                $dynstr .= "_gSharedObjectHaikuVersion\0";
             }
             $l->get('.dynstr')->{size} = length($dynstr);
 
@@ -2473,7 +2394,6 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 my $progname_off = $str_off{'__progname'};
                 if ( defined $progname_off ) {
                     $sym_indices{'__progname'} = $sym_idx++;
-                    my $data_sec = $l->get('.data');
                     my $data_sec_idx;
                     my $sec_i = 1;
                     for my $s ( $l->sections ) {
@@ -2483,22 +2403,23 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                         }
                         $sec_i++;
                     }
+                    my $data_sec = $l->get('.data');
                     $dynsym .= pack(
-                        'L< C C S< Q< Q<', $progname_off,         # st_name
-                        0x10,                                      # st_info (STB_GLOBAL | STT_NOTYPE)
-                        0,                                         # st_other (STV_DEFAULT)
-                        $data_sec_idx // 0,                        # st_shndx
-                        $base + $data_sec->{rva} + $data_sec->{size} - 1,  # st_value (point to NUL byte)
-                        8                                          # st_size (pointer size on x86_64/aarch64)
+                        'L< C C S< Q< Q<', $progname_off,    # st_name
+                        0x11,                                # st_info (STB_GLOBAL | STT_OBJECT)
+                        0,                                   # st_other (STV_DEFAULT)
+                        $data_sec_idx // 0,                  # st_shndx
+                        $base + $data_sec->{rva} + 16,       # st_value (points to Offset 16)
+                        8                                    # st_size (pointer size)
                     );
                 }
             }
+
             # Define environ for BSD to satisfy libc's dynamic reference (e.g. DragonFly)
             if ( $platform->is_bsd ) {
                 my $environ_off = $str_off{'environ'};
                 if ( defined $environ_off ) {
                     $sym_indices{'environ'} = $sym_idx++;
-                    my $data_sec    = $l->get('.data');
                     my $data_sec_idx;
                     my $sec_i = 1;
                     for my $s ( $l->sections ) {
@@ -2508,15 +2429,36 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                         }
                         $sec_i++;
                     }
+                    my $data_sec = $l->get('.data');
                     $dynsym .= pack(
-                        'L< C C S< Q< Q<', $environ_off,           # st_name
-                        0x12,                                       # st_info (STB_GLOBAL | STT_OBJECT)
-                        0,                                          # st_other (STV_DEFAULT)
-                        $data_sec_idx // 0,                         # st_shndx
-                        $base + $data_sec->{rva},                   # st_value (point to start of .data = 8 zero bytes = NULL pointer)
-                        8                                           # st_size (pointer size on x86_64/aarch64)
+                        'L< C C S< Q< Q<', $environ_off,    # st_name
+                        0x11,                               # st_info (STB_GLOBAL | STT_OBJECT)
+                        0,                                  # st_other (STV_DEFAULT)
+                        $data_sec_idx // 0,                 # st_shndx
+                        $base + $data_sec->{rva} + 8,       # st_value (points to Offset 8)
+                        8                                   # st_size (pointer size)
                     );
                 }
+            }
+
+            # Define Haiku API variables
+            if ( $platform->is_haiku ) {
+                my $abi_off = $str_off{'_gSharedObjectHaikuABI'};
+                my $ver_off = $str_off{'_gSharedObjectHaikuVersion'};
+                my $data_sec_idx;
+                my $sec_i = 1;
+                for my $s ( $l->sections ) {
+                    if ( $s->{name} eq '.data' ) {
+                        $data_sec_idx = $sec_i;
+                        last;
+                    }
+                    $sec_i++;
+                }
+                my $data_sec = $l->get('.data');
+                $sym_indices{'_gSharedObjectHaikuABI'} = $sym_idx++;
+                $dynsym .= pack( 'L< C C S< Q< Q<', $abi_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva}, 4 );
+                $sym_indices{'_gSharedObjectHaikuVersion'} = $sym_idx++;
+                $dynsym .= pack( 'L< C C S< Q< Q<', $ver_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 4, 4 );
             }
             $l->get('.dynsym')->{size} = length($dynsym);
 
@@ -2551,13 +2493,13 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 0                                          # r_addend
             );
 
-            # Elf64_Rela (24 bytes) for exit
+            # Elf64_Rela (24 bytes) for exit mapping
             my $exit_slot    = $base + $got_rva + 24;
-            my $exit_sym_idx = $sym_indices{'exit'};
+            my $exit_sym_idx = $sym_indices{$exit_name};
             $rela_dyn .= pack(
-                'Q< Q< q<', $exit_slot,                 # r_offset
-                ( $exit_sym_idx << 32 ) | $rel_type,    # r_info
-                0                                       # r_addend
+                'Q< Q< q<', $exit_slot,                    # r_offset
+                ( $exit_sym_idx << 32 ) | $rel_type,       # r_info
+                0                                          # r_addend
             );
             $l->get('.rela.dyn')->{size} = length($rela_dyn);
 
@@ -2606,7 +2548,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
             # Elf64_Dyn (16 bytes each) entries
             for my $lib (@libs) {
-                $dynamic .= pack( 'Q< Q<', 1, $str_off{$lib} );          # DT_NEEDED (string offset)
+                $dynamic .= pack( 'Q< Q<', 1, $str_off{$lib} );    # DT_NEEDED (string offset)
             }
             $dynamic .= pack( 'Q< Q<', 4,  $base + $hash_rva );          # DT_HASH
             $dynamic .= pack( 'Q< Q<', 5,  $base + $str_rva );           # DT_STRTAB
@@ -2617,15 +2559,11 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             $dynamic .= pack( 'Q< Q<', 8,  length($rela_dyn) );          # DT_RELASZ
             $dynamic .= pack( 'Q< Q<', 9,  24 );                         # DT_RELAENT (sizeof Elf64_Rela)
             $dynamic .= pack( 'Q< Q<', 3,  $base + $got_rva_actual );    # DT_PLTGOT
-            my $main_lbl = $self->labels->{'L_MAIN_START'};
 
-            if ( defined $main_lbl && $self->type ne 'shared' ) {
-                $dynamic .= pack( 'Q< Q<', 12, $base + $l->get('.text')->{rva} + $main_lbl );    # DT_INIT
-            }
             if ($is_pie) {
-                $dynamic .= pack( 'Q< Q<', 0x6ffffffb, 8 );    # DT_FLAGS_1 with DF_1_PIE
+                $dynamic .= pack( 'Q< Q<', 0x6ffffffb, 8 );              # DT_FLAGS_1 with DF_1_PIE
             }
-            $dynamic .= pack( 'Q< Q<', 0, 0 );                                                   # DT_NULL
+            $dynamic .= pack( 'Q< Q<', 0, 0 );                           # DT_NULL
             $l->get('.dynamic')->{size} = length($dynamic);
 
             # Final layout calculation
@@ -2650,17 +2588,47 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             open my $fh, '>', $output_file or die $!;
             binmode $fh;
             for my $s ( $l->sections ) {
-                my $payload
-                    = $s->{name} eq '.text'   ? $text :
-                    $s->{name} eq '.interp'   ? $interp :
-                    $s->{name} eq '.dynstr'   ? $dynstr :
-                    $s->{name} eq '.dynsym'   ? $dynsym :
-                    $s->{name} eq '.rela.dyn' ? $rela_dyn :
-                    $s->{name} eq '.hash'     ? $hash :
-                    $s->{name} eq '.dynamic'  ? $dynamic :
-                    $s->{name} eq '.got'      ? $got :
-                    $s->{name} eq '.data'     ? ("\0" x $s->{size}) :
-                    ( $s->{name} =~ /^\.(debug|eh_frame)/ ? ( $self->debug_section( $s->{name} ) || "\0" ) : ("\0" x $s->{size}) );
+                my $payload = "\0" x $s->{size};
+                if ( $s->{name} eq '.text' ) {
+                    $payload = $text;
+                }
+                elsif ( $s->{name} eq '.interp' ) {
+                    $payload = $interp;
+                }
+                elsif ( $s->{name} eq '.dynstr' ) {
+                    $payload = $dynstr;
+                }
+                elsif ( $s->{name} eq '.dynsym' ) {
+                    $payload = $dynsym;
+                }
+                elsif ( $s->{name} eq '.rela.dyn' ) {
+                    $payload = $rela_dyn;
+                }
+                elsif ( $s->{name} eq '.hash' ) {
+                    $payload = $hash;
+                }
+                elsif ( $s->{name} eq '.dynamic' ) {
+                    $payload = $dynamic;
+                }
+                elsif ( $s->{name} eq '.got' ) {
+                    $payload = $got;
+                }
+                elsif ( $s->{name} eq '.data' ) {
+                    if ( $platform->is_bsd && $s->{size} >= 32 ) {
+                        my $empty_env_addr = $base + $s->{rva};
+                        my $empty_str_addr = $base + $s->{rva} + 24;
+                        $payload = pack( 'Q< Q< Q<', 0, $empty_env_addr, $empty_str_addr );
+                    }
+                    elsif ( $platform->is_haiku && $s->{size} >= 8 ) {
+                        $payload = pack( 'L< L<', 4, 0 );    # Haiku ABI Version 4
+                    }
+                    else {
+                        $payload = "\0" x $s->{size};
+                    }
+                }
+                elsif ( $s->{name} =~ /^\.(debug|eh_frame)/ ) {
+                    $payload = $self->debug_section( $s->{name} ) || "\0";
+                }
                 $payload .= ( "\0" x ( $s->{size} - length($payload) ) ) if length($payload) < $s->{size};
                 seek( $fh, $s->{off}, 0 );
                 print $fh $payload;
@@ -2734,7 +2702,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 }
                 elsif ( $s->{name} eq '.got' ) {
                     $type       = 1;                              # SHT_PROGBITS
-                    $flags = 3;                        # SHF_ALLOC | SHF_WRITE
+                    $flags      = 3;                              # SHF_ALLOC | SHF_WRITE
                     $sh_entsize = 8;
                 }
                 elsif ( $s->{name} =~ /^\.(debug|eh_frame)/ ) {
@@ -2771,7 +2739,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{'.note.GNU-stack'},    # sh_name
                 1,                                                                   # sh_type (SHT_PROGBITS)
                 0,                                                                   # sh_flags
-                0, 0, 0, 0, 0, 1, 0    # sh_addr, sh_offset, sh_size, l, i, a, e
+                0, 0, 0, 0, 0, 1, 0                                                  # sh_addr, sh_offset, sh_size, l, i, a, e
             );
             seek( $fh, $shoff, 0 );
             print $fh $_ for @shdrs;
@@ -2781,10 +2749,8 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             if ($has_interp)    { $num_ph++; }    # PT_INTERP
             if ($note_data)     { $num_ph++; }    # PT_NOTE
             if ($pintable_data) { $num_ph++; }    # PT_OPENBSD_PINTABLE
-            if ($is_pie)        { $num_ph++; }    # PT_GNU_RELRO (required by strict BSD kernels for PIE)
-            my @phdrs = ();
-
-            # Declare $extra_off before pushing program headers to prevent compilation errors
+            if ($is_pie)        { $num_ph++; }    # PT_GNU_RELRO
+            my @phdrs     = ();
             my $extra_off = 64 + ( $num_ph * 56 );
 
             # PT_PHDR (type 6) — Elf64_Phdr (56 bytes)
@@ -2832,7 +2798,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             # PT_LOAD RW segment (Covers .dynamic through .got) — Elf64_Phdr (56 bytes)
             my $dyn_sec  = $l->get('.dynamic');
             my $got_sec  = $l->get('.got');
-            my $rw_p_off = $dyn_sec->{off} & ~($page_align - 1);
+            my $rw_p_off = $dyn_sec->{off} & ~( $page_align - 1 );
             my $rw_size  = ( $got_sec->{off} + $got_sec->{size} ) - $rw_p_off;
             push @phdrs, pack(
                 'L< L< Q< Q< Q< Q< Q< Q<', 1,    # p_type (PT_LOAD)
@@ -2857,34 +2823,34 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 8                                # p_align
             );
 
-            # PT_GNU_RELRO (type 0x6474e552) — Elf64_Phdr (56 bytes) — only for PIE
-            # Covers .dynamic through .got to make them read-only after relocation
+            # PT_GNU_RELRO (type 0x6474e552) — Elf64_Phdr (56 bytes)
+            # Covers ONLY .dynamic to ensure .data and .got remain fully writable.
             if ($is_pie) {
-                my $relro_start = $dyn_sec->{off} & ~($page_align - 1);
-                my $relro_size  = ($got_sec->{off} + $got_sec->{size} - $relro_start + $page_align - 1) & ~($page_align - 1);
+                my $relro_start = $dyn_sec->{off} & ~( $page_align - 1 );
+                my $relro_size  = ( $dyn_sec->{off} + $dyn_sec->{size} - $relro_start + $page_align - 1 ) & ~( $page_align - 1 );
                 push @phdrs, pack(
-                    'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e552,        # p_type (PT_GNU_RELRO)
-                    4,                                            # p_flags (PF_R)
-                    $relro_start,                                 # p_offset
-                    $base + ($dyn_sec->{rva} & ~($page_align - 1)), # p_vaddr
-                    $base + ($dyn_sec->{rva} & ~($page_align - 1)), # p_paddr
-                    $relro_size,                                   # p_filesz
-                    $relro_size,                                   # p_memsz
-                    1                                              # p_align
+                    'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e552,                 # p_type (PT_GNU_RELRO)
+                    4,                                                     # p_flags (PF_R)
+                    $relro_start,                                          # p_offset
+                    $base + ( $dyn_sec->{rva} & ~( $page_align - 1 ) ),    # p_vaddr
+                    $base + ( $dyn_sec->{rva} & ~( $page_align - 1 ) ),    # p_paddr
+                    $relro_size,                                           # p_filesz
+                    $relro_size,                                           # p_memsz
+                    1                                                      # p_align
                 );
             }
 
             # PT_NOTE — Elf64_Phdr (56 bytes)
             if ($note_data) {
                 push @phdrs, pack(
-                    'L< L< Q< Q< Q< Q< Q< Q<', 4,    # p_type (PT_NOTE)
-                    4,                               # p_flags (PF_R)
-                    $extra_off,                      # p_offset
-                    $base + $extra_off,              # p_vaddr
-                    $base + $extra_off,              # p_paddr
-                    length($note_data),              # p_filesz
-                    length($note_data),              # p_memsz
-                    4                                # p_align
+                    'L< L< Q< Q< Q< Q< Q< Q<', 4,                          # p_type (PT_NOTE)
+                    4,                                                     # p_flags (PF_R)
+                    $extra_off,                                            # p_offset
+                    $base + $extra_off,                                    # p_vaddr
+                    $base + $extra_off,                                    # p_paddr
+                    length($note_data),                                    # p_filesz
+                    length($note_data),                                    # p_memsz
+                    4                                                      # p_align
                 );
                 $extra_off += length($note_data);
             }
@@ -2892,14 +2858,14 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             # 7. PT_OPENBSD_PINTABLE — Elf64_Phdr (56 bytes)
             if ($pintable_data) {
                 push @phdrs, pack(
-                    'L< L< Q< Q< Q< Q< Q< Q<', 0x65a3dbe9,    # p_type (PT_OPENBSD_PINTABLE)
-                    4,                                        # p_flags (PF_R)
-                    $extra_off,                               # p_offset
-                    $base + $extra_off,                       # p_vaddr
-                    $base + $extra_off,                       # p_paddr
-                    length($pintable_data),                   # p_filesz
-                    length($pintable_data),                   # p_memsz
-                    4                                         # p_align
+                    'L< L< Q< Q< Q< Q< Q< Q<', 0x65a3dbe9,                 # p_type (PT_OPENBSD_PINTABLE)
+                    4,                                                     # p_flags (PF_R)
+                    $extra_off,                                            # p_offset
+                    $base + $extra_off,                                    # p_vaddr
+                    $base + $extra_off,                                    # p_paddr
+                    length($pintable_data),                                # p_filesz
+                    length($pintable_data),                                # p_memsz
+                    4                                                      # p_align
                 );
                 $extra_off += length($pintable_data);
             }
@@ -2911,7 +2877,6 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e551,    # p_type (PT_GNU_STACK)
                 6, 0, 0, 0, 0, 0, 0x10                    # p_flags=6(PF_R|PF_W), p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align
             );
-
             my $entry_point = $self->type eq 'shared' ? 0 : $base + $l->get('.text')->{rva};
 
             # Finalize ELF Header (Elf64_Ehdr - Exactly 64 bytes) and write program headers/extra data
@@ -2945,9 +2910,8 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             return $output_file;
         }
     }
-
-
-    my $compiler = Brocken::Compiler->new();
+}
+my $compiler = Brocken::Compiler->new();
 subtest Katsuro => sub {
     subtest 'platform parsing' => sub {
         my $raw_triple = Brocken::Katsuro::Platform::gen_triple();
