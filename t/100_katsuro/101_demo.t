@@ -24,7 +24,7 @@ package Brocken::Katsuro {
         my %known_vendor = map { $_ => 1 } qw(
             pc apple unknown w64 ibm hp sun amd
             nintendo sony mti nvidia fortanix risc0
-            esp lynx unikraft kmc wrs
+            esp lynx unikraft kmc wrs portbld
         );
         use Config;
 
@@ -2215,13 +2215,16 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 $note_data = pack( 'L<3 a12 L<', 12, 4, 1, "MidnightBSD\0", 300000 );
             }
             elsif ( $platform->is_netbsd ) {
-                $osabi = 2;       # ELFOSABI_NETBSD
+                $osabi     = 2;    # ELFOSABI_NETBSD
+                $note_data = pack( 'L<3 a8 L<', 7, 4, 1, "NetBSD\0\0", 1099000000 );
             }
             elsif ( $platform->is_openbsd ) {
-                $osabi = 6;       # ELFOSABI_OPENBSD
+                $osabi     = 6;    # ELFOSABI_OPENBSD
+                $note_data = pack( 'L<3 a8 L<', 8, 4, 1, "OpenBSD\0", 0 );
             }
             elsif ( $platform->is_dragonflybsd ) {
-                $osabi = 9;       # ELFOSABI_FREEBSD (DragonFly uses FreeBSD OSABI)
+                $osabi     = 9;    # ELFOSABI_FREEBSD (DragonFly uses FreeBSD OSABI)
+                $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600400 );
             }
 
             # Per-OS interpreter path for dynamic executables
@@ -2232,11 +2235,11 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 freebsd      => '/libexec/ld-elf.so.1',
                 netbsd       => '/usr/libexec/ld.elf_so',
                 openbsd      => '/usr/libexec/ld.so',
-                dragonfly    => '/libexec/ld-elf.so.2',
-                dragonflybsd => '/libexec/ld-elf.so.2',
+                dragonfly    => '/usr/libexec/ld-elf.so.2',
+                dragonflybsd => '/usr/libexec/ld-elf.so.2',
                 solaris      => '/lib/64/ld.so.1',
                 midnightbsd  => '/libexec/ld-elf.so.1',
-                haiku        => '/system/runtime_loader'
+                haiku        => '/boot/system/runtime_loader'
             );
 
             # Per-OS libc name fallback for DT_NEEDED
