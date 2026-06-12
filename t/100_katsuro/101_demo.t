@@ -580,7 +580,7 @@ package Brocken::Katsuro {
             my $fn  = $stub{$name} or return undef;
             my $cmd = "objdump -d '$lib' | grep -A 20 '<$fn>:'";
             my $dis = `$cmd 2>/dev/null` or return undef;
-            if    ( $arch =~ /x86_64|x64|amd64/i ) { return hex($1) if $dis =~ /mov\s+eax,\s*0x([0-9a-f]+)/i }
+            if    ( $arch =~ /x86_64|x64|amd64/i ) { return hex($1) if $dis =~ /mov\s+\$0x([0-9a-f]+),\s*%[er]?ax/i || $dis =~ /mov\s+[er]?ax,\s*0x([0-9a-f]+)/i }
             elsif ( $arch =~ /aarch64|arm64/i )    { return hex($1) if $dis =~ /mov\s+x8,\s*#0x([0-9a-f]+)/i }
             elsif ( $arch =~ /riscv64|riscv/i )    { return hex($1) if $dis =~ /li\s+a7,\s*#?0x([0-9a-f]+)/i }
             return undef;
@@ -593,8 +593,8 @@ package Brocken::Katsuro {
             unless ( defined $num ) {
                 my %fallback = (
                     x86_64 => {
-                        write     => 151,
-                        exit      => 41,
+                        write     => 144,
+                        exit      => 38,
                         fork      => 47,
                         wait4     => 45,
                         read      => 148,
@@ -606,8 +606,8 @@ package Brocken::Katsuro {
                         brk       => 110
                     },
                     aarch64 => {
-                        write     => 151,
-                        exit      => 41,
+                        write     => 144,
+                        exit      => 38,
                         fork      => 47,
                         wait4     => 45,
                         read      => 148,
@@ -619,8 +619,8 @@ package Brocken::Katsuro {
                         brk       => 110
                     },
                     riscv64 => {
-                        write     => 151,
-                        exit      => 41,
+                        write     => 144,
+                        exit      => 38,
                         fork      => 47,
                         wait4     => 45,
                         read      => 148,
@@ -2151,7 +2151,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
             # Automatically calculate layout if it wasn't called beforehand
             if ( !defined $self->layout ) {
-                $self->pre_layout( length($code_bytes) + 32, 0, $platform->arch, $platform->os );
+                $self->pre_layout( length($code_bytes) + 32, $platform->is_bsd ? 16 : 0, $platform->arch, $platform->os );
             }
             my $l          = $self->layout;
             my $is_pie     = $platform->is_bsd || $platform->is_haiku;
@@ -2385,6 +2385,8 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             if ( $platform->is_bsd ) {
                 $str_off{'__progname'} = length($dynstr);
                 $dynstr .= '__progname' . "\0";
+                $str_off{'environ'} = length($dynstr);
+                $dynstr .= 'environ' . "\0";
             }
             $l->get('.dynstr')->{size} = length($dynstr);
 
@@ -2456,6 +2458,31 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                         $data_sec_idx // 0,                        # st_shndx
                         $base + $data_sec->{rva} + $data_sec->{size} - 1,  # st_value (point to NUL byte)
                         8                                          # st_size (pointer size on x86_64/aarch64)
+                    );
+                }
+            }
+            # Define environ for BSD to satisfy libc's dynamic reference (e.g. DragonFly)
+            if ( $platform->is_bsd ) {
+                my $environ_off = $str_off{'environ'};
+                if ( defined $environ_off ) {
+                    $sym_indices{'environ'} = $sym_idx++;
+                    my $data_sec    = $l->get('.data');
+                    my $data_sec_idx;
+                    my $sec_i = 1;
+                    for my $s ( $l->sections ) {
+                        if ( $s->{name} eq '.data' ) {
+                            $data_sec_idx = $sec_i;
+                            last;
+                        }
+                        $sec_i++;
+                    }
+                    $dynsym .= pack(
+                        'L< C C S< Q< Q<', $environ_off,           # st_name
+                        0x12,                                       # st_info (STB_GLOBAL | STT_OBJECT)
+                        0,                                          # st_other (STV_DEFAULT)
+                        $data_sec_idx // 0,                         # st_shndx
+                        $base + $data_sec->{rva},                   # st_value (point to start of .data = 8 zero bytes = NULL pointer)
+                        8                                           # st_size (pointer size on x86_64/aarch64)
                     );
                 }
             }
@@ -2722,6 +2749,7 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             if ($has_interp)    { $num_ph++; }    # PT_INTERP
             if ($note_data)     { $num_ph++; }    # PT_NOTE
             if ($pintable_data) { $num_ph++; }    # PT_OPENBSD_PINTABLE
+            if ($is_pie)        { $num_ph++; }    # PT_GNU_RELRO (required by strict BSD kernels for PIE)
             my @phdrs = ();
 
             # Declare $extra_off before pushing program headers to prevent compilation errors
@@ -2797,7 +2825,24 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 8                                # p_align
             );
 
-            # 6. PT_NOTE — Elf64_Phdr (56 bytes)
+            # 6. PT_GNU_RELRO (type 0x6474e552) — Elf64_Phdr (56 bytes) — only for PIE
+            # Covers .dynamic through .got to make them read-only after relocation
+            if ($is_pie) {
+                my $relro_start = $dyn_sec->{off} & ~($page_align - 1);
+                my $relro_size  = ($got_sec->{off} + $got_sec->{size} - $relro_start + $page_align - 1) & ~($page_align - 1);
+                push @phdrs, pack(
+                    'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e552,        # p_type (PT_GNU_RELRO)
+                    4,                                            # p_flags (PF_R)
+                    $relro_start,                                 # p_offset
+                    $base + ($dyn_sec->{rva} & ~($page_align - 1)), # p_vaddr
+                    $base + ($dyn_sec->{rva} & ~($page_align - 1)), # p_paddr
+                    $relro_size,                                   # p_filesz
+                    $relro_size,                                   # p_memsz
+                    1                                              # p_align
+                );
+            }
+
+            # 7. PT_NOTE — Elf64_Phdr (56 bytes)
             if ($note_data) {
                 push @phdrs, pack(
                     'L< L< Q< Q< Q< Q< Q< Q<', 4,    # p_type (PT_NOTE)
@@ -2828,9 +2873,11 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
             }
 
             # 8. PT_GNU_STACK (type 0x6474e551) — Elf64_Phdr (56 bytes)
+            # p_flags = 6 (PF_R|PF_W) for non-executable stack. Some BSD kernels
+            # reject binaries with p_flags=0 on PT_GNU_STACK.
             push @phdrs, pack(
                 'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e551,    # p_type (PT_GNU_STACK)
-                0, 0, 0, 0, 0, 0, 0x10                    # p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align
+                6, 0, 0, 0, 0, 0, 0x10                    # p_flags=6(PF_R|PF_W), p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align
             );
 
             my $entry_point = $self->type eq 'shared' ? 0 : $base + $l->get('.text')->{rva};
@@ -3004,8 +3051,8 @@ subtest Katsuro => sub {
     };
     subtest 'Haiku syscall numbers (fallback)' => sub {
         my $haiku = Brocken::Katsuro::Platform::parse('x86_64-pc-haiku-elf');
-        is $haiku->syscall('write'),  151, 'haiku x86_64 write fallback';
-        is $haiku->syscall('exit'),   41,  'haiku x86_64 exit fallback';
+        is $haiku->syscall('write'),  144, 'haiku x86_64 write fallback';
+        is $haiku->syscall('exit'),   38,  'haiku x86_64 exit fallback';
         is $haiku->syscall('fork'),   47,  'haiku x86_64 fork fallback';
         is $haiku->syscall('getpid'), 46,  'haiku x86_64 getpid fallback';
         is $haiku->syscall('read'),   148, 'haiku x86_64 read fallback';
