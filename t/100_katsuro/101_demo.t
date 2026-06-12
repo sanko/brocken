@@ -2,7 +2,6 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', 'blib/lib', '../../blib/lib';
-use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 $|++;
@@ -97,13 +96,13 @@ Brocken uses a four-part "normalized" triple format: C<arch-vendor-os-env>.
                 my ( $p1, $p2, $p3 ) = @parts;
 
                 # macOS/Darwin usually reports as <arch>-apple-darwin<ver>
-                return join( '-', $p1, $p2,  $p3,       'macho' ) if $p2 eq 'apple' && $p3 =~ /darwin/i;
+                return join( '-', $p1, $p2, $p3, 'macho' ) if $p2 eq 'apple' && $p3 =~ /darwin/i;
 
                 # Linux often reports as <arch>-pc-linux-gnu or similar
-                return join( '-', $p1, 'pc', $p2,       $p3 )     if $p2 eq 'linux';
+                return join( '-', $p1, 'pc', $p2, $p3 ) if $p2 eq 'linux';
 
                 # MinGW on Windows
-                return join( '-', $p1, 'pc', 'windows', 'gnu' )   if $p2 =~ /w64/i && $p3 =~ /mingw/i;
+                return join( '-', $p1, 'pc', 'windows', 'gnu' ) if $p2 =~ /w64/i && $p3 =~ /mingw/i;
 
                 # Handle arch--os (empty vendor) which is common in some cross-compilation environments
                 if ( $p2 eq '' ) { return join( '-', $p1, 'unknown', $p3, 'unknown' ) }
@@ -282,7 +281,6 @@ Brocken uses a four-part "normalized" triple format: C<arch-vendor-os-env>.
         method is_riscv64() { $self->arch eq 'riscv64' }
         method is_x64()     { $self->arch eq 'x86_64' }
         #
-
         # Returns a mapping of common syscall names to their architecture-specific numbers.
         # Defaults to BSD-style syscall numbering which is shared by FreeBSD, NetBSD, OpenBSD,
         # DragonFly, and Mach (to some extent).
@@ -694,6 +692,7 @@ conventions (e.g., which registers are preserved across calls).
             my $num;
             $num = _detect_syscall( ref($self), $name, $self->arch ) if $self->is_native;
             unless ( defined $num ) {
+
                 # Fallback syscall numbers for Haiku R1/beta4
                 my %fallback = (
                     x86_64 => {
@@ -742,7 +741,6 @@ conventions (e.g., which registers are preserved across calls).
             return $num;
         }
     }
-
 
     class Brocken::Katsuro::Platform::Wasm : isa(Brocken::Katsuro::Platform) {
         method is_wasm()    {1}
@@ -1486,7 +1484,6 @@ Generates DWARF v2/v3 compliant debug sections.
             $prologue .= "\x00";                                                                     # Directory table
             $prologue .= "$source_file\x00" . $self->_uleb(0) . $self->_uleb(0) . $self->_uleb(0);
             $prologue .= "\x00";
-
             my $full_len = 2 + 4 + length($prologue) + length($program);
             my $header   = pack( 'L<', $full_len );
             $header .= pack( 'S<', 2 );
@@ -1639,10 +1636,10 @@ Generates DWARF v2/v3 compliant debug sections.
             # - data_alignment_factor: -8
             # - return_address_register: 16 (x64) or 30 (ARM64)
             my $cie_body = pack( 'C', 3 ) . "\0" . $self->_uleb(1) . $self->_sleb(-8);
-            $cie_body .= ( $arch                      =~ /aarch64|arm64/i ? pack( 'C', 30 ) : pack( 'C', 16 ) );
+            $cie_body .= ( $arch =~ /aarch64|arm64/i ? pack( 'C', 30 ) : pack( 'C', 16 ) );
 
             # Initial instructions: DW_CFA_def_cfa (0x0C) RSP+8
-            $cie_body .= "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 31              : 7 ) . $self->_uleb(8);
+            $cie_body .= "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 31 : 7 ) . $self->_uleb(8);
 
             # Tell DWARF where the return address is saved (offset 1 * -8 from CFA)
             # DW_CFA_offset (0x80 | reg)
@@ -1655,6 +1652,7 @@ Generates DWARF v2/v3 compliant debug sections.
 
             # FDE (Frame Description Entry) per function
             for my $fn (@$func_ranges) {
+
                 # DW_CFA_def_cfa RBP/X29, offset (context_size + 8)
                 my $instr           = "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
                 my $offset_from_cfa = -16;
@@ -1715,7 +1713,6 @@ Generates DWARF v2/v3 compliant debug sections.
             return $data;
         }
     };
-
 
     class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
@@ -1873,8 +1870,25 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 $bind_info_size = length($bind_info);
                 while ( length($bind_info) % 8 != 0 ) { $bind_info .= "\0"; }
             }
+
+            # Hand-assemble both defined exports and undefined external imports
+            # to make sure dyld dynamic linking validations are strictly met.
             my ( $trie, $symtab, $strtab, $lc_id_dylib ) = ( '', '', '', '' );
             my ( $num_syms, $le_off, $trie_size, $symtab_size, $strtab_size ) = ( 0, 0, 0, 0, 0 );
+            my @syms;
+            my %sym_types;
+            my %sym_rvas;
+
+            # Undefined dynamic external imports
+            if ($got_sec) {
+                for my $name ( '_dlopen', '_dlsym', '_pthread_create' ) {
+                    push @syms, $name;
+                    $sym_types{$name} = 0x01;    # N_UNDF | N_EXT
+                    $sym_rvas{$name}  = 0;
+                }
+            }
+
+            # Defined exports if shared library
             if ( $self->type eq 'shared' ) {
                 require File::Basename;
                 my $dylib_name     = File::Basename::basename($output_file);
@@ -1884,47 +1898,64 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 # LC_ID_DYLIB (Identifies the output dylib name)
                 $lc_id_dylib = pack( 'L<6', 0xD, 24 + length($dylib_name_pad), 24, 1, 1, 1 ) . $dylib_name_pad;
                 my @exports = @{ $self->exported_funcs // [] };
-                my %export_rvas;
                 for my $name (@exports) {
-                    $export_rvas{"_$name"} = $l->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
+                    my $mangled = "_$name";
+                    push @syms, $mangled;
+                    $sym_types{$mangled} = 0x0f;                                                            # N_SECT | N_EXT
+                    $sym_rvas{$mangled}  = $l->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
                 }
-                my @syms = sort keys %export_rvas;
-                $num_syms = scalar @syms;
-                $strtab   = "\0";
-                my %strx;
-                for my $sym (@syms) {
-                    $strx{$sym} = length($strtab);
-                    $strtab .= $sym . "\0";
+            }
+
+            # Sort symbol definitions for LC_DYSYMTAB layout rules (defined first, then undefined)
+            my @defined_ext   = grep { $sym_types{$_} == 0x0f } @syms;
+            my @undefined_ext = grep { $sym_types{$_} == 0x01 } @syms;
+            my @sorted_syms   = ( @defined_ext, @undefined_ext );
+            $num_syms = scalar @sorted_syms;
+
+            # Build string table
+            $strtab = "\0";
+            my %strx;
+            for my $sym (@sorted_syms) {
+                $strx{$sym} = length($strtab);
+                $strtab .= $sym . "\0";
+            }
+            while ( length($strtab) % 8 != 0 ) { $strtab .= "\0"; }
+
+            # Build symbol table entries (nlist_64 structures)
+            for my $sym (@sorted_syms) {
+                my $type = $sym_types{$sym};
+                my $sect = ( $type == 0x0f ) ? 1                           : 0;
+                my $val  = ( $type == 0x0f ) ? ( $base + $sym_rvas{$sym} ) : 0;
+                $symtab .= pack( 'L< C C S< Q<', $strx{$sym}, $type, $sect, 0, $val );
+            }
+
+            # Build the Export Trie if compiling a shared dylib containing exports
+            my $nextdefsym = scalar(@defined_ext);
+            my $nundefsym  = scalar(@undefined_ext);
+            if ( $self->type eq 'shared' && $nextdefsym > 0 ) {
+                my @nodes;
+                for my $sym (@defined_ext) {
+                    my $rva        = $sym_rvas{$sym};
+                    my $flags_u    = $_uleb->(0);
+                    my $rva_u      = $_uleb->($rva);
+                    my $term_data  = $flags_u . $rva_u;
+                    my $node_bytes = $_uleb->( length($term_data) ) . $term_data . pack( 'C', 0 );
+                    push @nodes, { sym => $sym, bytes => $node_bytes };
                 }
-                while ( length($strtab) % 8 != 0 ) { $strtab .= "\0"; }
-                for my $sym (@syms) {
-                    $symtab .= pack( 'L< C C S< Q<', $strx{$sym}, 0x0f, 1, 0, $base + $export_rvas{$sym} );
-                }
-                if ( $num_syms > 0 ) {
-                    my @nodes;
-                    for my $sym (@syms) {
-                        my $rva        = $export_rvas{$sym};
-                        my $flags_u    = $_uleb->(0);
-                        my $rva_u      = $_uleb->($rva);
-                        my $term_data  = $flags_u . $rva_u;
-                        my $node_bytes = $_uleb->( length($term_data) ) . $term_data . pack( 'C', 0 );
-                        push @nodes, { sym => $sym, bytes => $node_bytes };
+                my %node_offsets;
+                for ( 1 .. 3 ) {
+                    my $root = pack( 'C', 0 ) . pack( 'C', $nextdefsym );
+                    for my $n (@nodes) { $root .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } // 1024 ); }
+                    my $offset = length($root);
+                    for my $n (@nodes) {
+                        $node_offsets{ $n->{sym} } = $offset;
+                        $offset += length( $n->{bytes} );
                     }
-                    my %node_offsets;
-                    for ( 1 .. 3 ) {
-                        my $root = pack( 'C', 0 ) . pack( 'C', $num_syms );
-                        for my $n (@nodes) { $root .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } // 1024 ); }
-                        my $offset = length($root);
-                        for my $n (@nodes) {
-                            $node_offsets{ $n->{sym} } = $offset;
-                            $offset += length( $n->{bytes} );
-                        }
-                    }
-                    $trie = pack( 'C', 0 ) . pack( 'C', $num_syms );
-                    for my $n (@nodes) { $trie .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } ); }
-                    for my $n (@nodes) { $trie .= $n->{bytes}; }
-                    while ( length($trie) % 8 != 0 ) { $trie .= "\0"; }
                 }
+                $trie = pack( 'C', 0 ) . pack( 'C', $nextdefsym );
+                for my $n (@nodes) { $trie .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } ); }
+                for my $n (@nodes) { $trie .= $n->{bytes}; }
+                while ( length($trie) % 8 != 0 ) { $trie .= "\0"; }
             }
             $trie_size   = length($trie);
             $symtab_size = length($symtab);
@@ -2056,8 +2087,8 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             push @cmds, $lc_load_libsystem;
 
             # LC_DYLD_INFO_ONLY (48 bytes)
-            my $export_off = $self->type eq 'shared' ? $le_off + length($bind_info) : 0;
-            my $export_sz  = $self->type eq 'shared' ? $trie_size                   : 0;
+            my $export_off = ( $self->type eq 'shared' && $nextdefsym > 0 ) ? $le_off + length($bind_info) : 0;
+            my $export_sz  = ( $self->type eq 'shared' && $nextdefsym > 0 ) ? $trie_size                   : 0;
             push @cmds, pack(
                 'L<12', 0x80000022,         # cmd
                 48,                         # cmdsize
@@ -2082,12 +2113,14 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             );
 
             # LC_DYSYMTAB (80 bytes)
+            my $iextdefsym = 0;
+            my $iundefsym  = $nextdefsym;
             push @cmds, pack(
                 'L<20', 0xB,                   # cmd
                 80,                            # cmdsize
-                0,         0,                  # ilocalsym, nlocalsym
-                0,         $num_syms,          # iextdefsym, nextdefsym
-                $num_syms, 0,                  # iundefsym, nundefsym
+                0,           0,                # ilocalsym, nlocalsym
+                $iextdefsym, $nextdefsym,      # iextdefsym, nextdefsym
+                $iundefsym,  $nundefsym,       # iundefsym, nundefsym
                 (0) x 14                       # reserved / empty
             );
 
@@ -2189,6 +2222,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
     }
 
     class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
+        field $ENABLE_COFF = 0;
 
 =pod
 
@@ -2249,7 +2283,65 @@ We enable several modern Windows security features:
             my $has_data     = length($data_bytes) > 0;
             my $has_debug    = defined $debug_bytes ? 1 : 0;
             my $has_reloc    = 1;                              # ARM64 Windows strictly enforces ASLR / .reloc presence
-            my $num_sections = 1 + ( $has_data ? 1 : 0 ) + $has_reloc + ( $has_debug ? 1 : 0 );
+
+            # Check for dynamic exports to write the .edata payload
+            my $has_exports        = ( ref $self->exported_funcs eq 'ARRAY' && scalar( @{ $self->exported_funcs } ) > 0 ) ? 1 : 0;
+            my $edata_bytes        = '';
+            my $sec_raw_edata_size = 0;
+            my $edata_rva          = 0;
+            my @sorted_exports     = ();
+            if ($has_exports) {
+                my $text_rva = 0x1000;
+                my $data_rva = 0x1000 + ( ( length($text_bytes) + 4095 ) & ~4095 );
+                $edata_rva = $data_rva;
+                if ($has_data) {
+                    $edata_rva += ( ( length($data_bytes) + 4095 ) & ~4095 );
+                }
+
+                # Initialize with 40 placeholder bytes for the Export Directory Table at offset 0
+                $edata_bytes = "\x00" x 40;
+                require File::Basename;
+                my $dll_name     = File::Basename::basename($output_file);
+                my $dll_name_off = length($edata_bytes);
+                $edata_bytes .= $dll_name . "\0";
+                @sorted_exports = sort @{ $self->exported_funcs };
+                my %name_offsets;
+
+                for my $name (@sorted_exports) {
+                    $name_offsets{$name} = length($edata_bytes);
+                    $edata_bytes .= $name . "\0";
+                }
+                my $eat_off = length($edata_bytes);
+                for my $name (@sorted_exports) {
+                    my $label_val = $self->labels->{"E_$name"} // $self->labels->{$name} // 0;
+                    my $func_rva  = $text_rva + $label_val;
+                    $edata_bytes .= pack( "V", $func_rva );
+                }
+                my $enpt_off = length($edata_bytes);
+                for my $name (@sorted_exports) {
+                    my $name_rva = $edata_rva + $name_offsets{$name};
+                    $edata_bytes .= pack( "V", $name_rva );
+                }
+                my $eot_off = length($edata_bytes);
+                my $idx     = 0;
+                for my $name (@sorted_exports) {
+                    $edata_bytes .= pack( "v", $idx++ );
+                }
+
+                # Pad with 4 trailing null bytes to satisfy strict peXXigen.c bounds checks (offset + size < datasize)
+                $edata_bytes .= "\x00" x 4;
+
+                # Overwrite the first 40 bytes with the actual Export Directory Table
+                my $timestamp        = $ENV{SOURCE_DATE_EPOCH} || time();
+                my $export_dir_table = pack( "V2 v2 V7",
+                    0, $timestamp, 0, 0, $edata_rva + $dll_name_off,
+                    1, scalar(@sorted_exports), scalar(@sorted_exports),
+                    $edata_rva + $eat_off,
+                    $edata_rva + $enpt_off,
+                    $edata_rva + $eot_off );
+                substr( $edata_bytes, 0, 40, $export_dir_table );
+            }
+            my $num_sections = 1 + ( $has_data ? 1 : 0 ) + ( $has_exports ? 1 : 0 ) + $has_reloc + ( $has_debug ? 1 : 0 );
             open my $fh, '>', $output_file or die "Cannot open $output_file for writing: $!";
             binmode $fh;
 
@@ -2281,16 +2373,8 @@ We enable several modern Windows security features:
 
             # COFF File Header (Exactly 20 bytes)
             # Reference: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#coff-file-header-object-and-image
-            my $machine     = $platform->is_arm64 ? 0xAA64 : 0x8664; # IMAGE_FILE_MACHINE_ARM64 or AMD64
-            my $timestamp   = $ENV{SOURCE_DATE_EPOCH} || time();
-            my $file_header = pack(
-                'v2 V3 v2', $machine,    # Machine Architecture
-                $num_sections,           # Number of Sections
-                $timestamp,              # TimeDateStamp
-                0, 0,                    # PointerToSymbolTable, NumberOfSymbols (Unused in executable)
-                240,                     # SizeOfOptionalHeader (240 bytes for PE32+)
-                0x0022                   # Characteristics (EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE)
-            );
+            my $machine   = $platform->is_arm64 ? 0xAA64 : 0x8664;    # IMAGE_FILE_MACHINE_ARM64 or AMD64
+            my $timestamp = $ENV{SOURCE_DATE_EPOCH} || time();
 
             # Layout sections
             my $section_table   = '';
@@ -2315,8 +2399,17 @@ We enable several modern Windows security features:
                 $sec_raw_ptr += $sec_raw_data_size;
             }
 
+            # .edata section
+            if ($has_exports) {
+                $sec_raw_edata_size = ( length($edata_bytes) + 511 ) & ~511;
+                $section_table .= pack( 'a8 V2 V2 V2 v2 V',
+                    ".edata\x00\x00", length($edata_bytes), $sec_rva, $sec_raw_edata_size, $sec_raw_ptr, 0, 0, 0, 0, 0x40000040 );
+                $sec_rva     += ( length($edata_bytes) + 4095 ) & ~4095;
+                $sec_raw_ptr += $sec_raw_edata_size;
+            }
+
             # .reloc section (Mandatory for ARM64)
-            my $reloc_bytes        = pack( 'V V v v', 0x1000, 12, 0, 0 ); # Base RVA, Block Size, TypeOffset entries (empty)
+            my $reloc_bytes        = pack( 'V V v v', 0x1000, 12, 0, 0 );     # Base RVA, Block Size, TypeOffset entries (empty)
             my $reloc_rva          = $sec_rva;
             my $sec_raw_reloc_size = ( length($reloc_bytes) + 511 ) & ~511;
             $section_table .= pack( 'a8 V2 V2 V2 v2 V',
@@ -2334,16 +2427,69 @@ We enable several modern Windows security features:
                 $sec_raw_ptr += $sec_raw_debug_size;
             }
 
+            # Build the COFF Symbol Table (18 bytes per symbol) and String Table
+            my $coff_symtab      = '';
+            my $coff_strtab      = '';
+            my $num_coff_symbols = 0;
+
+            # Keeping legacy COFF Symbol Table fields zeroed out for pristine executables/libraries
+            my $pointer_to_symbol_table = 0;
+            if ( $ENABLE_COFF && $has_exports && scalar(@sorted_exports) > 0 ) {
+                my $str_payload = '';
+                my %coff_str_offsets;
+                for my $name (@sorted_exports) {
+                    $coff_str_offsets{$name} = 4 + length($str_payload);
+                    $str_payload .= $name . "\0";
+                }
+                for my $name (@sorted_exports) {
+                    my $label_val = $self->labels->{"E_$name"} // $self->labels->{$name} // 0;
+                    my $func_rva  = 0x1000 + $label_val;                                         # .text section RVA starts at 0x1000
+                    my $entry_name_field;
+                    if ( length($name) <= 8 ) {
+                        $entry_name_field = pack( "a8", $name );
+                    }
+                    else {
+                        $entry_name_field = pack( "V2", 0, $coff_str_offsets{$name} );
+                    }
+
+                    # IMAGE_SYMBOL struct size is 18 bytes
+                    $coff_symtab .= pack(
+                        'a8 V v v C2', $entry_name_field,    # union: ShortName / Offset
+                        $func_rva,                           # Value (Address relative to ImageBase)
+                        1,                                   # SectionNumber (1-based index, .text is 1)
+                        0x20,                                # Type (0x0020 = Function)
+                        2,                                   # StorageClass (2 = External/Global)
+                        0                                    # NumberOfAuxSymbols
+                    );
+                    $num_coff_symbols++;
+                }
+                if ( length($str_payload) > 0 ) {
+                    $coff_strtab = pack( "V", 4 + length($str_payload) ) . $str_payload;
+                }
+
+                # Position table offset directly after raw section data on disk
+                $pointer_to_symbol_table = $sec_raw_ptr;
+            }
+            my $file_header = pack(
+                'v2 V3 v2', $machine,        # Machine Architecture
+                $num_sections,               # Number of Sections
+                $timestamp,                  # TimeDateStamp
+                $pointer_to_symbol_table,    # PointerToSymbolTable (zeroed for clean images)
+                $num_coff_symbols,           # NumberOfSymbols (zeroed for clean images)
+                240,                         # SizeOfOptionalHeader (240 bytes for PE32+)
+                0x0022                       # Characteristics (EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE)
+            );
+            #
             my $size_of_image  = $sec_rva;
             my $size_of_code   = $sec_raw_code_size;
             my $init_data_size = $sec_raw_data_size + $sec_raw_reloc_size + $sec_raw_debug_size;
-            my $os_ver         = 6; # Target Windows Vista/7+ compatibility
+            my $os_ver         = 6;                                                                # Target Windows Vista/7+ compatibility
 
             # PE32+ Optional Header (Exactly 240 bytes)
             # Reference: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#optional-header-image-only
-            my $opt_header     = pack(
+            my $opt_header = pack(
                 'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2', 0x020b,                        # Magic Number (PE32+ 64-bit)
-                14,                                         10,                            # Major/Minor LinkerVersion (LLVM/MSVC matches)
+                14,                                         10,                            # Major/Minor LinkerVersion
                 $size_of_code,                              $init_data_size, 0, 0x1000,    # AddressOfEntryPoint (RVA 0x1000)
                 0x1000,                                                                    # BaseOfCode
                 0x140000000,                                                               # ImageBase (Modern default 5GB base)
@@ -2367,17 +2513,24 @@ We enable several modern Windows security features:
                 my $import_rva  = $code_bytes->{import_descriptor_rva}  // 0;
                 my $import_size = $code_bytes->{import_descriptor_size} // 0;
                 if ($import_rva) {
+
                     # Import Directory (Index 1)
                     substr $data_dirs, 8,  4, pack( 'V', $import_rva );
                     substr $data_dirs, 12, 4, pack( 'V', $import_size );
                 }
+            }
+            #
+            if ($has_exports) {
+
+                # VirtualAddress points to standard RVA 0x2000; Size spans the entire export payload block
+                substr $data_dirs, 0, 4, pack( 'V', $edata_rva );
+                substr $data_dirs, 4, 4, pack( 'V', length($edata_bytes) );
             }
 
             # Insert Base Relocation Data Directory (Index 5 = Offset 40)
             substr $data_dirs, 40, 4, pack( 'V', $reloc_rva );
             substr $data_dirs, 44, 4, pack( 'V', length($reloc_bytes) );
             $opt_header .= $data_dirs;
-
             print $fh $dos_header, $dos_stub, $pe_signature, $file_header, $opt_header, $section_table;
 
             # Pad headers to FileAlignment
@@ -2393,10 +2546,13 @@ We enable several modern Windows security features:
             # Write section payloads
             print $fh $text_bytes;
             print $fh ( "\x00" x ( $sec_raw_code_size - length($text_bytes) ) );
-
             if ($has_data) {
                 print $fh $data_bytes;
                 print $fh ( "\x00" x ( $sec_raw_data_size - length($data_bytes) ) );
+            }
+            if ($has_exports) {
+                print $fh $edata_bytes;
+                print $fh ( "\x00" x ( $sec_raw_edata_size - length($edata_bytes) ) );
             }
             if ($has_reloc) {
                 print $fh $reloc_bytes;
@@ -2405,6 +2561,12 @@ We enable several modern Windows security features:
             if ($has_debug) {
                 print $fh $debug_bytes;
                 print $fh ( "\x00" x ( $sec_raw_debug_size - length($debug_bytes) ) );
+            }
+
+            # Append the dynamic COFF symbol table block at the calculated file offset
+            if ( $pointer_to_symbol_table > 0 ) {
+                print $fh $coff_symtab;
+                print $fh $coff_strtab;
             }
             close $fh;
             chmod 0755, $output_file;
@@ -2415,7 +2577,7 @@ We enable several modern Windows security features:
             $self->write_executable( $output_file, $code_bytes, $p, undef, $debug_bytes );
             open my $fh, '+<', $output_file or die $!;
             binmode $fh;
-            seek $fh, 0x96, 0; # Offset to COFF Characteristics
+            seek $fh, 0x96, 0;                # Offset to COFF Characteristics
             print $fh pack( "v", 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
             close $fh;
         }
@@ -2485,6 +2647,11 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $l->add_section( '.dynamic', 4096, 3 );    # RW (Read + Write)
             $l->add_section( '.data',    $d,   6 );    # RW
             $l->add_section( '.got',     512,  6 );    # RW
+
+            # Non-alloc symbol and string tables for static linking/debugging (nm)
+            $l->add_section( '.symtab', 4096, 0 );
+            $l->add_section( '.strtab', 4096, 0 );
+            #
             if ( $dbg >= 1 ) {
                 $l->add_section( '.debug_line',     4096, 0 );
                 $l->add_section( '.debug_info',     4096, 0 );
@@ -2509,6 +2676,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
 
             # Automatically calculate layout if it wasn't called beforehand
             if ( !defined $self->layout ) {
+
                 # Allocate extra data space for platform-specific control variables
                 my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
                 $self->pre_layout( length($code_bytes) + 32, $extra_data, $platform->arch, $platform->os );
@@ -2516,7 +2684,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             my $l          = $self->layout;
             my $is_pie     = $platform->is_bsd || $platform->is_haiku;
             my $base       = $is_pie ? 0 : $self->image_base;
-            my $elf_type   = $shared ? 3 : ( $is_pie ? 3 : 2 ); # ET_DYN (3) for PIE, ET_EXEC (2) for static
+            my $elf_type   = $shared ? 3 : ( $is_pie ? 3 : 2 );    # ET_DYN (3) for PIE, ET_EXEC (2) for static
             my $text_rva   = $l->get('.text')->{rva};
             my $got_rva    = $l->get('.got')->{rva};
             my $page_align = $l->section_align;
@@ -2525,6 +2693,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             if ( $self->type eq 'exe' ) {
                 my $entry_stub = '';
                 if ( $platform->is_arm64 ) {
+
                     # ARM64 Dynamic Exit Stub:
                     # - bl main
                     # - adrp x8, :got:exit
@@ -2546,6 +2715,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     $entry_stub = pack( "V5", $bl_main, $adrp, $ldr, $blr, $brk );
                 }
                 elsif ( $platform->is_riscv64 ) {
+
                     # RISC-V 64-bit Entry Stub:
                     # - jal ra, main
                     # - auipc t0, %pcrel_hi(exit)
@@ -2588,7 +2758,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             my $note_data    = '';
             my $has_pintable = 0;
             if ( $platform->is_freebsd ) {
-                $osabi     = 9; # ELFOSABI_FREEBSD
+                $osabi     = 9;                                                    # ELFOSABI_FREEBSD
                 $note_data = pack( 'L<3 a8 L<', 8, 4, 1, "FreeBSD\0", 1400097 );
             }
             elsif ( $platform->is_midnightbsd ) {
@@ -2596,9 +2766,9 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 $note_data = pack( 'L<3 a12 L<', 12, 4, 1, "MidnightBSD\0", 300000 );
             }
             elsif ( $platform->is_netbsd ) {
-                $osabi     = 2; # ELFOSABI_NETBSD
+                $osabi     = 2;                                                        # ELFOSABI_NETBSD
                 $note_data = pack( 'L<3 a8 L<', 7, 4, 1, "NetBSD\0\0", 1099000000 );
-                $note_data .= pack( 'L<3 a4 L<', 4, 4, 3, "PaX\0", 0x0a ); # Flag 0x0a relaxes PaX W^X
+                $note_data .= pack( 'L<3 a4 L<', 4, 4, 3, "PaX\0", 0x0a );             # Flag 0x0a relaxes PaX W^X
             }
             elsif ( $platform->is_openbsd ) {
                 $osabi        = 0;
@@ -2683,7 +2853,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
 
             # Setup Dynamic Strings Table
             my @exports   = @{ $self->exported_funcs // [] };
-            my $exit_name = $platform->is_haiku ? 'exit' : '_exit'; # Reference: eg/ABI.md Section 2.3
+            my $exit_name = $platform->is_haiku ? 'exit' : '_exit';                # Reference: eg/ABI.md Section 2.3
             my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', $exit_name );
             my $libc      = $libc_map{$os_base} // 'libc.so';
 
@@ -2971,6 +3141,10 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             my $hash = pack( 'L<*', $nbucket, $nchain, @buckets, @chains );
             $l->get('.hash')->{size} = length($hash);
 
+            # Size the static .symtab and .strtab sections before final layout calculations
+            $l->get('.symtab')->{size} = length($dynsym);
+            $l->get('.strtab')->{size} = length($dynstr);
+
             # Calculate to stabilize RVAs before building .dynamic
             $l->calculate($page_align);
 
@@ -3038,6 +3212,12 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 elsif ( $s->{name} eq '.dynsym' ) {
                     $payload = $dynsym;
                 }
+                elsif ( $s->{name} eq '.symtab' ) {
+                    $payload = $dynsym;
+                }
+                elsif ( $s->{name} eq '.strtab' ) {
+                    $payload = $dynstr;
+                }
                 elsif ( $s->{name} eq '.rela.dyn' ) {
                     $payload = $rela_dyn;
                 }
@@ -3052,6 +3232,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 }
                 elsif ( $s->{name} eq '.data' ) {
                     if ( $platform->is_bsd && $s->{size} >= 32 ) {
+
                         # Satisfy __progname and environ expectations
                         my $empty_env_addr = $base + $s->{rva};
                         my $empty_str_addr = $base + $s->{rva} + 24;
@@ -3120,6 +3301,17 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     $sh_info    = 1;                              # One local symbol (the null symbol)
                     $sh_entsize = 24;
                 }
+                elsif ( $s->{name} eq '.symtab' ) {
+                    $type       = 2;                              # SHT_SYMTAB
+                    $flags      = 0;                              # Not SHF_ALLOC
+                    $sh_link    = $sec_indices{'.strtab'} // 0;
+                    $sh_info    = 1;
+                    $sh_entsize = 24;
+                }
+                elsif ( $s->{name} eq '.strtab' ) {
+                    $type  = 3;                                   # SHT_STRTAB
+                    $flags = 0;                                   # Not SHF_ALLOC
+                }
                 elsif ( $s->{name} eq '.rela.dyn' ) {
                     $type       = 4;                              # SHT_RELA
                     $flags      = 2;                              # SHF_ALLOC
@@ -3133,18 +3325,18 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     $sh_entsize = 4;
                 }
                 elsif ( $s->{name} eq '.dynamic' ) {
-                    $type       = 6;                              # SHT_DYNAMIC
-                    $flags = ( $platform->is_dragonflybsd ) ? 2 : 3; # Read-only on DFly to avoid RELRO crash
+                    $type       = 6;                                         # SHT_DYNAMIC
+                    $flags      = ( $platform->is_dragonflybsd ) ? 2 : 3;    # Read-only on DFly to avoid RELRO crash
                     $sh_link    = $sec_indices{'.dynstr'} // 0;
                     $sh_entsize = 16;
                 }
                 elsif ( $s->{name} eq '.got' ) {
-                    $type       = 1;                              # SHT_PROGBITS
-                    $flags      = 3;                              # SHF_ALLOC | SHF_WRITE
+                    $type       = 1;                                         # SHT_PROGBITS
+                    $flags      = 3;                                         # SHF_ALLOC | SHF_WRITE
                     $sh_entsize = 8;
                 }
                 elsif ( $s->{name} =~ /^\.(debug|eh_frame)/ ) {
-                    $flags = 0;                                   # Debug sections are not loaded
+                    $flags = 0;                                              # Debug sections are not loaded
                 }
                 push @shdrs, pack(
                     'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{ $s->{name} },    # sh_name
@@ -3834,10 +4026,43 @@ subtest Jenny => sub {
         # Clean up
         unlink $output_file;
     };
-    subtest 'Jenny::Linker Pure PE-64 Generation' => sub {
+    subtest 'Jenny::Linker Pure ELF-64 Shared Library Generation' => sub {
         my $platform = Brocken::Katsuro::Platform::parse();
-
-        # Build the IR: int main() { return 42; }
+        my $module   = Brocken::Lindsay::IR::Module->new( name => 'shared_elf' );
+        my $func_ext = Brocken::Lindsay::IR::Function->new( name => 'my_func', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+        $module->add_function($func_ext);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func_ext->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new() :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new();
+        my $machine_bytes = $codegen->emit_function($func_ext);
+        my $output_file   = './libtest_prog.so';
+        my $linker        = Brocken::Jenny::Linker::ELF64->new( type => 'shared' );
+        $linker->set_exported_funcs( ['my_func'] );
+        $linker->set_labels( { E_my_func => 0 } );
+        $linker->write_executable( $output_file, $machine_bytes, $platform, 1 );
+        ok -e $output_file, 'ELF Shared library created successfully';
+    SKIP: {
+            skip 'Shared library loading test requires Linux/BSD/Haiku native host', 1
+                unless ( $platform->is_linux || $platform->is_bsd || $platform->is_haiku ) && $platform->is_native;
+            require DynaLoader;
+            require File::Spec;
+            my $abs_path = File::Spec->rel2abs($output_file);
+            my $libref   = DynaLoader::dl_load_file($abs_path);
+            ok $libref, 'Loaded ELF shared library natively via DynaLoader';
+            if ($libref) {
+                my $symref = DynaLoader::dl_find_symbol( $libref, 'my_func' );
+                ok $symref, 'Successfully resolved exported symbol "my_func"';
+                DynaLoader::dl_unload_file($libref);
+            }
+        }
+        unlink $output_file;
+    };
+    subtest 'Jenny::Linker Pure PE-64 Generation' => sub {
+        my $platform  = Brocken::Katsuro::Platform::parse();
         my $module    = Brocken::Lindsay::IR::Module->new( name => 'standalone_win' );
         my $func_main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
         $module->add_function($func_main);
@@ -3870,10 +4095,45 @@ subtest Jenny => sub {
         # Clean up
         unlink $output_file;
     };
-    subtest 'Jenny::Linker Pure Mach-O Generation' => sub {
+    subtest 'Jenny::Linker Pure PE-64 Shared Library Generation' => sub {
         my $platform = Brocken::Katsuro::Platform::parse();
+        my $module   = Brocken::Lindsay::IR::Module->new( name => 'shared_pe' );
+        my $func_ext = Brocken::Lindsay::IR::Function->new( name => 'my_func', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+        $module->add_function($func_ext);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func_ext->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        my $codegen       = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new() : Brocken::Jenny::Codegen::X86_64->new();
+        my $machine_bytes = $codegen->emit_function($func_ext);
+        my $output_file   = './libtest_prog.dll';
 
-        # Build the IR: int main() { return 42; }
+        # The main PE Linker now supports symbol exporting natively
+        my $linker = Brocken::Jenny::Linker::PE->new( type => 'shared' );
+        $linker->set_exported_funcs( ['my_func'] );
+        $linker->set_labels( { E_my_func => 0 } );
+        $linker->write_shared_library( $output_file, $machine_bytes, $platform );
+        ok -e $output_file, 'PE Shared library (DLL) created successfully';
+    SKIP: {
+            use Config;
+
+            # Skip native loading test under emulation mismatch to prevent crash errors
+            skip 'Shared library loading test requires native execution support (no emulation mismatch)', 1
+                unless $platform->is_windows && $platform->is_native && ( $platform->is_arm64 ? ( $Config{archname} !~ /x86_64|x64/i ) : 1 );
+            require DynaLoader;
+            require File::Spec;
+            my $abs_path = File::Spec->rel2abs($output_file);
+            my $libref   = DynaLoader::dl_load_file($abs_path);
+            ok $libref, 'Loaded PE DLL natively via DynaLoader';
+            if ($libref) {
+                my $symref = DynaLoader::dl_find_symbol( $libref, 'my_func' );
+                ok $symref, 'Successfully resolved exported symbol "my_func" natively via DynaLoader';
+                DynaLoader::dl_unload_file($libref);
+            }
+        }
+        unlink $output_file;
+    };
+    subtest 'Jenny::Linker Pure Mach-O Generation' => sub {
+        my $platform  = Brocken::Katsuro::Platform::parse();
         my $module    = Brocken::Lindsay::IR::Module->new( name => 'standalone_macho' );
         my $func_main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
         $module->add_function($func_main);
@@ -3928,8 +4188,243 @@ subtest Jenny => sub {
 
         # Clean up
         unlink $output_file;
-    }
+    };
+    subtest 'Jenny::Linker Pure Mach-O Shared Library Generation' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+        my $module   = Brocken::Lindsay::IR::Module->new( name => 'shared_macho' );
+        my $func_ext = Brocken::Lindsay::IR::Function->new( name => 'my_func', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+        $module->add_function($func_ext);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func_ext->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        my $codegen       = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new() : Brocken::Jenny::Codegen::X86_64->new();
+        my $machine_bytes = $codegen->emit_function($func_ext);
+        my $output_file   = './libtest_prog.dylib';
+        my $linker        = Brocken::Jenny::Linker::MachO->new( type => 'shared' );
+        $linker->set_exported_funcs( ['my_func'] );
+        $linker->set_labels( { E_my_func => 0 } );
+        $linker->write_executable( $output_file, $machine_bytes, $platform );
+        ok -e $output_file, 'Mach-O Shared library created successfully';
+    SKIP: {
+            skip 'Shared library loading test requires macOS native host', 1 unless $platform->is_macos && $platform->is_native;
+            require DynaLoader;
+            require File::Spec;
+            my $abs_path = File::Spec->rel2abs($output_file);
+            my $libref   = DynaLoader::dl_load_file($abs_path);
+            ok $libref, 'Loaded Mach-O shared library natively via DynaLoader';
+            if ($libref) {
+                my $symref = DynaLoader::dl_find_symbol( $libref, 'my_func' );
+                ok $symref, 'Successfully resolved exported symbol "my_func"';
+                diag $symref;
+                DynaLoader::dl_unload_file($libref);
+            }
+        }
+        unlink $output_file;
+    };
+    subtest 'Jenny::Linker Early FFI Integration Test' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
 
+        # Determine platform properties
+        my $is_arm64   = $platform->is_arm64;
+        my $is_x64     = $platform->is_x64;
+        my $is_windows = $platform->is_windows;
+        my $is_posix   = $platform->is_posix;
+
+        # 1. Build the shared library IR: int my_func() { return 42; }
+        my $module   = Brocken::Lindsay::IR::Module->new( name => 'shared_lib' );
+        my $func_ext = Brocken::Lindsay::IR::Function->new( name => 'my_func', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+        $module->add_function($func_ext);
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func_ext->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        my $codegen
+            = $is_arm64           ? Brocken::Jenny::Codegen::ARM64->new() :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new();
+        my $machine_bytes = $codegen->emit_function($func_ext);
+        my $ext           = $platform->lib_ext;
+        my $lib_file      = './libtest_prog' . $ext;
+
+        # Build and write shared library
+        if ($is_windows) {
+            my $shared_linker = Brocken::Jenny::Linker::PE->new( type => 'shared' );
+            $shared_linker->set_exported_funcs( ['my_func'] );
+            $shared_linker->set_labels( { E_my_func => 0 } );
+            $shared_linker->write_shared_library( $lib_file, $machine_bytes, $platform );
+        }
+        elsif ( $platform->is_macos ) {
+            my $shared_linker = Brocken::Jenny::Linker::MachO->new( type => 'shared' );
+            $shared_linker->set_exported_funcs( ['my_func'] );
+            $shared_linker->set_labels( { E_my_func => 0 } );
+            $shared_linker->write_executable( $lib_file, $machine_bytes, $platform, 1 );
+        }
+        else {
+            my $shared_linker = Brocken::Jenny::Linker::ELF64->new( type => 'shared' );
+            $shared_linker->set_exported_funcs( ['my_func'] );
+            $shared_linker->set_labels( { E_my_func => 0 } );
+            $shared_linker->write_executable( $lib_file, $machine_bytes, $platform, 1 );
+        }
+        ok -e $lib_file, "Shared library compiled at $lib_file";
+
+        # Verify that the expected symbol is physically exported in the binary via nm
+        my $nm_out = $^O eq 'MSWin32' ? `objdump -p $lib_file` : `nm "$lib_file"`;
+        diag $nm_out;
+        diag `dumpbin /headers $lib_file`;
+        diag `dumpbin /exports $lib_file`;
+        diag `llvm-readobj --coff-exports $lib_file`;
+        if ( $? == 0 && defined $nm_out && $nm_out ne '' ) {
+            my $expected_sym = $platform->is_macos ? '_my_func' : 'my_func';
+            like $nm_out, qr/\b$expected_sym\b/, "Verified via 'nm' that '$expected_sym' is present in $lib_file";
+        }
+        else {
+            note "nm is not available or failed; skipping symbol table extraction check";
+        }
+
+        # POSIX x86_64 Wrapper Generator with 16-byte Stack Alignment Fix
+        my $make_x64_wrapper = sub {
+            my ( $ext_str, $got, $text, $macho ) = @_;
+            my $lib_path         = "./libtest_prog$ext_str\0";
+            my $func_name        = "my_func\0";
+            my $lib_path_offset  = 50;
+            my $func_name_offset = $lib_path_offset + length($lib_path);
+            my $disp_libpath     = $lib_path_offset - 12;
+            my $disp_funcname    = $func_name_offset - 36;
+            my $entry_stub_len   = $macho ? 17 : 20;
+            my $main_rva         = $text + $entry_stub_len;
+            my $disp_dlopen      = $got - ( $main_rva + 23 );
+            my $disp_dlsym       = ( $got + 8 ) - ( $main_rva + 42 );
+            my $code             = pack( "C", 0x53 );                      # push rbx
+            $code .= pack( "C4",    0x48, 0x83, 0xEC, 0x10 );              # sub rsp, 16 (Keep stack aligned to 16-bytes)
+            $code .= pack( "C3 l<", 0x48, 0x8D, 0x3D, $disp_libpath );     # lea rdi, [rip + disp_libpath]
+            $code .= pack( "C5", 0xBE, 0x02, 0x00, 0x00, 0x00 );           # mov esi, 2 (RTLD_NOW)
+            $code .= pack( "C2 l<", 0xFF, 0x15, $disp_dlopen );            # call [rip + disp_dlopen]
+            $code .= pack( "C3",    0x48, 0x89, 0xC3 );                    # mov rbx, rax
+            $code .= pack( "C3",    0x48, 0x89, 0xDF );                    # mov rdi, rbx
+            $code .= pack( "C3 l<", 0x48, 0x8D, 0x35, $disp_funcname );    # lea rsi, [rip + disp_funcname]
+            $code .= pack( "C2 l<", 0xFF, 0x15, $disp_dlsym );             # call [rip + disp_dlsym]
+            $code .= pack( "C2", 0xFF, 0xD0 );                             # call rax
+            $code .= pack( "C4", 0x48, 0x83, 0xC4, 0x10 );                 # add rsp, 16
+            $code .= pack( "C", 0x5B );                                    # pop rbx
+            $code .= pack( "C", 0xC3 );                                    # ret
+            $code .= "\x00" while length($code) < 50;
+            $code .= $lib_path . $func_name;
+            return $code;
+        };
+
+        # POSIX ARM64 Wrapper Generator
+        my $make_arm64_wrapper = sub {
+            my ( $ext_str, $got, $text, $macho ) = @_;
+            my $lib_path         = "./libtest_prog$ext_str\0";
+            my $func_name        = "my_func\0";
+            my $lib_path_offset  = 64;
+            my $func_name_offset = $lib_path_offset + length($lib_path);
+            my $disp_libpath     = $lib_path_offset - 12;
+            my $disp_funcname    = $func_name_offset - 36;
+            my $main_rva         = $text + 20;
+            my $offset_dlopen    = $got - ( $main_rva + 20 );
+            my $offset_dlsym     = ( $got + 8 ) - ( $main_rva + 40 );
+            my $imm19_dlopen     = ( $offset_dlopen / 4 ) & 0x7FFFF;
+            my $imm19_dlsym      = ( $offset_dlsym / 4 ) & 0x7FFFF;
+            my $adr_x0           = 0x10000000 | ( ( $disp_libpath & 3 ) << 29 ) | ( ( ( $disp_libpath >> 2 ) & 0x7FFFF ) << 5 ) | 0;
+            my $adr_x1           = 0x10000000 | ( ( $disp_funcname & 3 ) << 29 ) | ( ( ( $disp_funcname >> 2 ) & 0x7FFFF ) << 5 ) | 1;
+            my $ldr_dlopen       = 0x58000008 | ( $imm19_dlopen << 5 );
+            my $ldr_dlsym        = 0x58000008 | ( $imm19_dlsym << 5 );
+            my $code             = pack(
+                "V*", 0xA9BF7BFD,    # stp x29, x30, [sp, #-32]!
+                0xF9000BE3,          # str x19, [sp, #16]
+                $adr_x0,             # adr x0, lib_path
+                0xD2800041,          # mov x1, #2 (RTLD_NOW)
+                $ldr_dlopen,         # ldr x8, got_slot_dlopen
+                0xD63F0100,          # blr x8
+                0xAA0003F3,          # mov x19, x0
+                0xAA1303E0,          # mov x0, x19
+                $adr_x1,             # adr x1, func_name
+                $ldr_dlsym,          # ldr x8, got_slot_dlsym
+                0xD63F0100,          # blr x8
+                0xD63F0000,          # blr x0
+                0xF9400BE3,          # ldr x19, [sp, #16]
+                0xA8C27BFD,          # ldp x29, x30, [sp], #32
+                0xD65F03C0,          # ret
+            );
+            $code .= "\x00" while length($code) < 64;
+            $code .= $lib_path . $func_name;
+            return $code;
+        };
+    SKIP: {
+            if ($is_windows) {
+
+                # Load the compiled PE DLL natively via the standard Win32::API module
+                # On Windows ARM64, an emulated x64 Perl process cannot load native ARM64 DLLs.
+                skip "Win32::API loader skipped due to emulation mismatch", 2 if $platform->is_arm64 && $Config{archname} =~ /x86_64|x64/i;
+                require File::Spec;
+                my $abs_path = File::Spec->rel2abs($lib_file);
+                eval {
+                    require Win32::API;
+                    my $func = Win32::API->new( $abs_path, 'int my_func()' );
+                    ok $func, "Natively bound my_func from compiled DLL with exports";
+                    if ($func) {
+                        my $ret = $func->Call();
+                        is $ret, 42, "Invoked DLL export successfully via Win32::API, returned 42";
+                    }
+                };
+                if ($@) {
+                    skip "Win32::API loader failure: $@", 2;
+                }
+            }
+            elsif ( $is_posix && ( $is_x64 || $is_arm64 ) ) {
+
+                # Compile native POSIX binary wrapper
+                my $wrapper_file = './test_wrapper';
+                my $wrapper_linker
+                    = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new( type => 'exe' ) : Brocken::Jenny::Linker::ELF64->new( type => 'exe' );
+                $wrapper_linker->set_has_ffi(1) if $platform->is_macos;
+
+                # 1. Pass a dummy byte array first to allow the linker to calculate
+                # the exact metadata structures and final section tables.
+                my $code_sz     = $is_arm64 ? 128 : 96;
+                my $dummy_bytes = "\x00" x $code_sz;
+                $wrapper_linker->write_executable( $wrapper_file, $dummy_bytes, $platform );
+
+                # 2. Extract stabilized, correct section RVAs and text file offset
+                my $got_rva  = $wrapper_linker->layout->get('.got')->{rva};
+                my $text_rva = $wrapper_linker->layout->get('.text')->{rva};
+                my $text_off = $wrapper_linker->layout->get('.text')->{off};
+
+                # 3. Assemble the actual FFI machine code referencing the real RVAs
+                my $wrapper_bytes = $is_arm64 ? $make_arm64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos ) :
+                    $make_x64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos );
+
+                # 4. Patch the binary file at its physical entry offset directly
+                my $entry_stub_len = $platform->is_macos ? 17 : 20;
+                open my $fh, '+<:raw', $wrapper_file or die $!;
+                seek( $fh, $text_off + $entry_stub_len, 0 );
+                print $fh $wrapper_bytes;
+                close $fh;
+
+                # Re-apply ad-hoc code signature required strictly on macOS ARM64
+                if ( $platform->is_macos ) {
+                    system("codesign -f -s - \"$wrapper_file\" 2>/dev/null");
+                }
+                ok -e $wrapper_file, "POSIX wrapper compiled at $wrapper_file";
+                ok -x $wrapper_file, "POSIX wrapper has execution permissions";
+
+                # Execute POSIX native executable
+                local $ENV{LD_LIBRARY_PATH}   = join( ':', '.', $ENV{LD_LIBRARY_PATH}   // () );
+                local $ENV{DYLD_LIBRARY_PATH} = join( ':', '.', $ENV{DYLD_LIBRARY_PATH} // () );
+                system("./test_wrapper");
+                my $status    = $?;
+                my $exit_code = $status >> 8;
+                my $signal    = $status & 127;
+                is $signal,    0,  "Native wrapper ran cleanly without crash/segfault signals";
+                is $exit_code, 42, "Native wrapper loaded library, resolved symbol via GOT table FFI, and returned 42";
+                unlink $wrapper_file;
+            }
+            else {
+                skip "No native FFI wrapper assembly available for " . $platform->friendly, 2;
+            }
+        }
+        unlink $lib_file;
+    };
 };
 #
 done_testing;
