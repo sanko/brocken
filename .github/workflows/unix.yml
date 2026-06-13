@@ -36,7 +36,9 @@ jobs:
         run: |
           if [[ $(uname -o) == GNU/Linux ]]; then
             sudo apt-get update -y
-            sudo apt-get install -y valgrind || true
+            sudo apt-get install -y valgrind nodejs || true
+            curl https://wasmtime.dev/install.sh -sSf | bash
+            echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
           fi
           source ~/perl5/perlbrew/etc/bashrc
           perlbrew switch cache-${{ inputs.os }}-${{ inputs.perl }}${{ inputs.flags }}
