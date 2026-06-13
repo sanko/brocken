@@ -247,17 +247,14 @@ Brocken uses a four-part "normalized" triple format: C<arch-vendor-os-env>.
             }
         }
         #
-        method bin_ext()        {''}
-        method lib_ext()        {'.so'}
-        method format()         {'elf'}
-        method abi_name()       { $self->env }
-        method lib_prefix()     {'lib'}
-        method bin_name($name)  { $name . $self->bin_ext }
-        method static_lib_ext() {'.a'}
-
-        method static_lib_name($name) {
-            $self->lib_prefix . $name . $self->static_lib_ext;
-        }
+        method bin_ext()              {''}
+        method lib_ext()              {'.so'}
+        method format()               {'elf'}
+        method abi_name()             { $self->env }
+        method lib_prefix()           {'lib'}
+        method bin_name($name)        { $name . $self->bin_ext }
+        method static_lib_ext()       {'.a'}
+        method static_lib_name($name) { $self->lib_prefix . $name . $self->static_lib_ext }
 
         method shared_lib_name( $name, $version = undef ) {
             my $base = $self->lib_prefix . $name . $self->lib_ext;
@@ -514,7 +511,7 @@ conventions (e.g., which registers are preserved across calls).
 
         # Linux-specific syscall numbers. These differ significantly from BSD.
         method syscalls() {
-            return {
+            state $syscalls //= {
                 x86_64 => {
                     write     => 1,
                     read      => 0,
@@ -556,8 +553,9 @@ conventions (e.g., which registers are preserved across calls).
                     nanosleep => 101,
                     futex     => 98,
                     brk       => 214
-                },
+                }
             };
+            $syscalls;
         }
     }
 
@@ -575,8 +573,10 @@ conventions (e.g., which registers are preserved across calls).
         # macOS syscalls use a 0x2000000 offset for 64-bit processes to distinguish
         # from Mach-specific or 32-bit BSD syscalls.
         method syscalls() {
+            state $syscalls;
+            return $syscalls if defined $syscalls;
             my $off64 = 0x2000000;
-            return {
+            $syscalls = {
                 x86_64 => {
                     write     => $off64 + 4,
                     read      => $off64 + 3,
@@ -666,7 +666,7 @@ conventions (e.g., which registers are preserved across calls).
         sub _detect_syscall( $class, $name, $arch ) {
             my $lib = '/boot/system/lib/libroot.so';
             return undef unless -e $lib;
-            my %stub = (
+            my $stub //= {
                 write  => '_kern_write',
                 exit   => '_kern_exit_team',
                 fork   => '_kern_fork',
@@ -675,8 +675,8 @@ conventions (e.g., which registers are preserved across calls).
                 open   => '_kern_open',
                 close  => '_kern_close',
                 getpid => '_kern_getpid'
-            );
-            my $fn  = $stub{$name} or return undef;
+            };
+            my $fn  = $stub->{$name} or return undef;
             my $cmd = "objdump -d '$lib' | grep -A 20 '<$fn>:'";
             my $dis = `$cmd 2>/dev/null` or return undef;
             if ( $arch =~ /x86_64|x64|amd64/i ) {
@@ -694,7 +694,7 @@ conventions (e.g., which registers are preserved across calls).
             unless ( defined $num ) {
 
                 # Fallback syscall numbers for Haiku R1/beta4
-                my %fallback = (
+                state $fallback //= {
                     x86_64 => {
                         write     => 144,
                         exit      => 38,
@@ -733,9 +733,9 @@ conventions (e.g., which registers are preserved across calls).
                         mmap      => 103,
                         nanosleep => 156,
                         brk       => 110
-                    },
-                );
-                $num = $fallback{ $self->arch }{$name};
+                    }
+                };
+                $num = $fallback->{ $self->arch }{$name};
             }
             $cache{ $self->arch }{$name} = $num;
             return $num;
@@ -1122,8 +1122,7 @@ Brocken::Jenny - Machine Code Generation and Linking Layer
 
 =head1 DESCRIPTION
 
-Jenny is responsible for lowering Lindsay IR into native machine code
-(Jenny::Codegen) and packaging those bytes into executable binary formats
+Jenny is responsible for lowering Lindsay IR into native machine code (Jenny::Codegen) and packaging those bytes into executable binary formats
 like ELF, Mach-O, or PE (Jenny::Linker).
 
 =cut
@@ -1132,7 +1131,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
         # Simple x86_64 machine code mapping for our IR subset
         method emit_function($ir_func) {
-            my $bytes = "";
+            my $bytes = '';
 
             # Iterate through basic blocks and instructions
             for my $block ( $ir_func->blocks->@* ) {
@@ -1141,7 +1140,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         if ( $inst->type->kind eq 'void' ) {
 
                             # No-op / return void
-                            $bytes .= pack( "C", 0xC3 );    # ret (near)
+                            $bytes .= pack( 'C', 0xC3 );    # ret (near)
                         }
                         else {
                             # We need to put the return value in RAX (x86_64 return register)
@@ -1150,9 +1149,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
                                 # mov eax, IMM32 (shorter than mov rax, IMM64)
                                 # Opcode: B8 +rd id
-                                $bytes .= pack( "CV", 0xB8, $val->value );
+                                $bytes .= pack( 'CV', 0xB8, $val->value );
                             }
-                            $bytes .= pack( "C", 0xC3 );    # ret (near)
+                            $bytes .= pack( 'C', 0xC3 );    # ret (near)
                         }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') || $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
@@ -1173,7 +1172,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
         # Simple RISC-V 64-bit machine code generator
         method emit_function($ir_func) {
-            my $bytes = "";
+            my $bytes = '';
 
             # Iterate through basic blocks and instructions
             for my $block ( $ir_func->blocks->@* ) {
@@ -1183,7 +1182,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
                             # ret (jalr x0, ra, 0)
                             # Opcode: 00008067
-                            $bytes .= pack( "V", 0x00008067 );
+                            $bytes .= pack( 'V', 0x00008067 );
                         }
                         else {
                             my $val = $inst->operands->[0];
@@ -1192,11 +1191,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 # addi a0, x0, IMM (loads exit code into return register a0)
                                 # 0x02a00513 is specifically 'addi a0, zero, 42'
                                 # TODO: Generate dynamic IMM encoding
-                                $bytes .= pack( "V", 0x02a00513 );
+                                $bytes .= pack( 'V', 0x02a00513 );
                             }
 
                             # ret (jalr x0, ra, 0)
-                            $bytes .= pack( "V", 0x00008067 );
+                            $bytes .= pack( 'V', 0x00008067 );
                         }
                     }
                 }
@@ -1209,17 +1208,17 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
         # Simple ARM64 / AArch64 machine code generator
         method emit_function($ir_func) {
-            my $bytes = "";
+            my $bytes = '';
 
             # Iterate through basic blocks and instructions
-            foreach my $block ( $ir_func->blocks->@* ) {
-                foreach my $inst ( $block->instructions->@* ) {
+            for my $block ( $ir_func->blocks->@* ) {
+                for my $inst ( $block->instructions->@* ) {
                     if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                         if ( $inst->type->kind eq 'void' ) {
 
                             # ret (returns execution to the caller, jumping to x30)
                             # Opcode: D65F03C0
-                            $bytes .= pack( "V", 0xD65F03C0 );
+                            $bytes .= pack( 'V', 0xD65F03C0 );
                         }
                         else {
                             my $val = $inst->operands->[0];
@@ -1228,11 +1227,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 # movz w0, #42 (loads return value into return register w0)
                                 # 0x52800540 is specifically 'movz w0, #42'
                                 # TODO: Generate dynamic IMM encoding
-                                $bytes .= pack( "V", 0x52800540 );
+                                $bytes .= pack( 'V', 0x52800540 );
                             }
 
                             # ret
-                            $bytes .= pack( "V", 0xD65F03C0 );
+                            $bytes .= pack( 'V', 0xD65F03C0 );
                         }
                     }
                 }
@@ -1251,8 +1250,7 @@ Brocken::Jenny::Linker - Unified Binary Executable Generator
 
 =head1 DESCRIPTION
 
-The Linker class provides a platform-agnostic interface for taking
-machine code and data segments and packaging them into a final executable
+The Linker class provides a platform-agnostic interface for taking machine code and data segments and packaging them into a final executable
 or shared library.
 
 It handles:
@@ -1307,29 +1305,21 @@ It handles:
         # - ARM64 ELF: 64KB (0x10000) for compatibility with Android/modern kernels.
         # - Mach-O (Apple Silicon): 16KB (0x4000).
         # - PE (Windows): 512B (0x200) for files, 4KB (0x1000) for memory.
-        method pre_layout( $text_size, $data_size, $arch, $os, $debug = 0 ) {
-            my $is_macos   = $os                =~ /^(macos|darwin)/i;
-            my $is_arm_mac = $is_macos && $arch =~ /aarch64|arm64/i;
+        method pre_layout( $text_size, $data_size, $platform, $debug = 0 ) {
             my $page_align
-                = $is_arm_mac                 ? 0x4000 :
-                $is_macos                     ? 0x1000 :
-                $os eq 'win64'                ? 0x200 :
-                ( $arch =~ /aarch64|arm64/i ) ? 0x10000    # 64KB alignment for ARM64 ELF
+                = $platform->is_macos ? ( $platform->is_arm64 ? 0x4000 : 0x1000 ) :
+                $platform->is_windows ? 0x200 :
+                $platform->is_arm64 ?
+                0x10000    # 64KB alignment for ARM64 ELF
                 :
                 0x1000;
-            eval {
-                require Brocken::Target::Format::Layout;
-                $_layout = Brocken::Target::Format::Layout->new( file_align => $page_align, section_align => $page_align );
-            };
-            if ( $@ || !defined $_layout ) {
-                $_layout = Brocken::Jenny::Linker::Layout->new( file_align => $page_align, section_align => $page_align );
-            }
-            $self->_setup_layout( $_layout, $text_size, $data_size, $arch, $os, $debug );
+            $_layout = Brocken::Jenny::Linker::Layout->new( file_align => $page_align, section_align => $page_align );
+            $self->_setup_layout( $_layout, $text_size, $data_size, $platform, $debug );
             $_layout->calculate($page_align);
         }
-        method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 )           { die "Abstract" }
-        method write_bin( $filename, $text, $data, $arch, $os, $type ) { die "Abstract" }
-        method import_rva($name)                                       { die "Imports not supported by this format" }
+        method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 )           {...}
+        method write_bin( $filename, $text, $data, $arch, $os, $type ) {...}
+        method import_rva($name)                                       {...}
     }
 
     class Brocken::Jenny::Linker::Layout {
@@ -1374,7 +1364,8 @@ addresses (RVAs) for binary sections.
 
         method get($n) {
             for (@sections) { return $_ if $_->{name} eq $n }
-            die "Layout Error: Section $n not found";
+
+            #~ warn "Layout Error: Section $n not found";
         }
         method sections() {@sections}
     }
@@ -1678,7 +1669,7 @@ Generates DWARF v2/v3 compliant debug sections.
             return '' unless $eh_frame_base;
             my $reg = $arch =~ /aarch64|arm64/i ? 30 : 16;
 
-            # CIE with "zR" augmentation for pcrel FDE encoding
+            # CIE with 'zR' augmentation for pcrel FDE encoding
             my $cie_body = pack( 'C', 1 ) . "zR\0" . $self->_uleb(1) . $self->_sleb(-8);
             $cie_body .= pack( 'C', $reg );
 
@@ -1760,24 +1751,24 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
         field $has_ffi : reader = false;
         method set_has_ffi($v) { $has_ffi = $v; }
 
-        method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 ) {
-            $l->add_section( '.text',     $t,                   5 );                # Read + Execute
-            $l->add_section( '.data',     $d,                   3 ) if $d > 0;      # Read + Write
-            $l->add_section( '.got',      512,                  3 ) if $has_ffi;    # Global Offset Table
-            $l->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );                # Symbols, Strings, Dynamic linking info
+        method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
+            $layout->add_section( '.text',     $text_size,           5 );                      # Read + Execute
+            $layout->add_section( '.data',     $data_size,           3 ) if $data_size > 0;    # Read + Write
+            $layout->add_section( '.got',      512,                  3 ) if $has_ffi;          # Global Offset Table
+            $layout->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );                      # Symbols, Strings, Dynamic linking info
             if ( $dbg >= 1 ) {
-                $l->add_section( '.debug_line',     4096, 0 );
-                $l->add_section( '.debug_info',     8192, 0 );
-                $l->add_section( '.debug_abbrev',   4096, 0 );
-                $l->add_section( '.debug_frame',    8192, 0 );
-                $l->add_section( '.debug_aranges',  4096, 0 );
-                $l->add_section( '.debug_pubnames', 4096, 0 );
+                $layout->add_section( '.debug_line',     4096, 0 );
+                $layout->add_section( '.debug_info',     8192, 0 );
+                $layout->add_section( '.debug_abbrev',   4096, 0 );
+                $layout->add_section( '.debug_frame',    8192, 0 );
+                $layout->add_section( '.debug_aranges',  4096, 0 );
+                $layout->add_section( '.debug_pubnames', 4096, 0 );
             }
         }
 
         method import_rva($name) {
             my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16 };
-            return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die "Unknown Mach-O import: $name" );
+            return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown Mach-O import: ' . $name );
         }
         method image_base () { return hex('100000000'); }    # 64-bit macOS default image base (4GB)
 
@@ -1792,7 +1783,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
 
             # Prepend platform-specific Mach-O _start stubs if compiling an executable
             if ( $self->type eq 'exe' ) {
-                my $entry_stub = "";
+                my $entry_stub = '';
                 my $exit_sys   = $platform->syscall('exit') // 0x2000001;
                 if ( $platform->is_arm64 ) {
 
@@ -1804,7 +1795,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                     # - brk #0 (Safety crash)
                     my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 16;
                     my $movk = 0xF2A00000 | ( ( ( $exit_sys >> 16 ) & 0xffff ) << 5 ) | 16;
-                    $entry_stub = pack( "V5", 0x94000005, $movz, $movk, 0xD4001001, 0xD4200000 );
+                    $entry_stub = pack( 'V5', 0x94000005, $movz, $movk, 0xD4001001, 0xD4200000 );
                 }
                 else {
                     # x86_64 (Intel Mac) native exit stub:
@@ -1813,26 +1804,25 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                     # - mov eax, sys:   b8 ...         (0x2000001 is exit syscall with macOS offset)
                     # - syscall:        0f 05
                     # - ud2:            0f 0b
-                    $entry_stub = pack( "C V", 0xE8, 12 );
-                    $entry_stub .= pack( "C3",  0x48, 0x89, 0xC7 );
-                    $entry_stub .= pack( "C V", 0xB8, $exit_sys );
-                    $entry_stub .= pack( "C2",  0x0F, 0x05 );
-                    $entry_stub .= pack( "C2",  0x0F, 0x0B );
+                    $entry_stub = pack( 'C V', 0xE8, 12 );
+                    $entry_stub .= pack( 'C3',  0x48, 0x89, 0xC7 );
+                    $entry_stub .= pack( 'C V', 0xB8, $exit_sys );
+                    $entry_stub .= pack( 'C2',  0x0F, 0x05 );
+                    $entry_stub .= pack( 'C2',  0x0F, 0x0B );
                 }
                 $text = $entry_stub . $text_raw;
             }
 
             # Automatically calculate layout if it wasn't called beforehand
             if ( !defined $self->layout ) {
-                $self->pre_layout( length($text), length($data_bytes), $arch, $os );
+                $self->pre_layout( length($text), length($data_bytes), $platform );
             }
-            my $l              = $self->layout;
             my $base           = $self->image_base;
             my $page_size      = $platform->page_size;                                       # 16KB for Apple Silicon, 4KB for Intel
             my $cputype        = ( $arch =~ /aarch64|arm64/i ) ? 0x0100000c : 0x01000007;    # CPU_TYPE_ARM64 or CPU_TYPE_X86_64
             my $cpusubtype     = ( $arch =~ /aarch64|arm64/i ) ? 0          : 3;             # CPU_SUBTYPE_ARM64_ALL or CPU_SUBTYPE_I386_ALL
             my $filetype       = ( $self->type eq 'shared' ) ? 6 : 2;                        # MH_DYLIB or MH_EXECUTE
-            my @debug_sections = grep { $_->{name} =~ /^\.debug/ } $l->sections;
+            my @debug_sections = grep { $_->{name} =~ /^\.debug/ } $self->layout->sections;
             my $_uleb          = sub {
                 my $v   = shift;
                 my $out = '';
@@ -1853,9 +1843,9 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             # Setup dynamic binding info for resolving FFI imports
             my $bind_info      = '';
             my $bind_info_size = 0;
-            my $got_sec        = eval { $l->get('.got') };
+            my $got_sec        = $self->layout->get('.got');
             if ($got_sec) {
-                my $data_sec = eval { $l->get('.data') };
+                my $data_sec = $self->layout->get('.data');
                 my $data_rva = $data_sec ? $data_sec->{rva} : $got_sec->{rva};
                 $bind_info .= pack( 'C', 0x11 );
                 $bind_info .= pack( 'C', 0x51 );
@@ -1901,8 +1891,8 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 for my $name (@exports) {
                     my $mangled = "_$name";
                     push @syms, $mangled;
-                    $sym_types{$mangled} = 0x0f;                                                            # N_SECT | N_EXT
-                    $sym_rvas{$mangled}  = $l->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
+                    $sym_types{$mangled} = 0x0f;                                                                       # N_SECT | N_EXT
+                    $sym_rvas{$mangled}  = $self->layout->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
                 }
             }
 
@@ -1963,21 +1953,21 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
 
             # Enforce Minimum Linkedit size to prevent sparse file truncation issues
             my $le_payload_size = length($bind_info) + $trie_size + $symtab_size + $strtab_size;
-            $l->get('.linkedit')->{size} = $le_payload_size > 64 ? $le_payload_size : 64;
-            $l->calculate($page_size);
-            $le_off = $l->get('.linkedit')->{off};
+            $self->layout->get('.linkedit')->{size} = $le_payload_size > 64 ? $le_payload_size : 64;
+            $self->layout->calculate($page_size);
+            $le_off = $self->layout->get('.linkedit')->{off};
             my %seg_names = ( '.text' => '__TEXT', '.data' => '__DATA', '.got' => '__DATA' );
             my %sec_names = ( '.text' => '__text', '.data' => '__data', '.got' => '__got' );
-            for my $s ( $l->sections ) {
+            for my $s ( $self->layout->sections ) {
                 if ( $s->{name} =~ /^\.debug_/ ) {
                     $seg_names{ $s->{name} } = '__DWARF';
                     ( my $macho_name = $s->{name} ) =~ s/^\./__/;
                     $sec_names{ $s->{name} } = $macho_name;
                 }
             }
-            my @text_sections = grep { $_->{name} eq '.text' } $l->sections;
+            my @text_sections = grep { $_->{name} eq '.text' } $self->layout->sections;
             my $t_sec         = $text_sections[0];
-            my @data_sections = grep { $_->{name} eq '.data' || $_->{name} eq '.got' } $l->sections;
+            my @data_sections = grep { $_->{name} eq '.data' || $_->{name} eq '.got' } $self->layout->sections;
             my $t_vmsize      = $t_sec->{off} + $t_sec->{size};
             my $t_seg_size    = ( $t_vmsize + $page_size - 1 ) & ~( $page_size - 1 );
             my ( $d_start_rva, $d_start_off, $d_size, $d_seg_size );
@@ -1996,7 +1986,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 push @cmds, pack(
                     'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
                     72,                         # cmdsize
-                    "__PAGEZERO",               # segname
+                    '__PAGEZERO',               # segname
                     0,                          # vmaddr
                     $base,                      # vmsize
                     0,                          # fileoff
@@ -2013,7 +2003,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             my $t_cmd      = pack(
                 'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
                 $t_cmd_size,                # cmdsize
-                "__TEXT",                   # segname
+                '__TEXT',                   # segname
                 $base,                      # vmaddr
                 $t_seg_size,                # vmsize
                 0,                          # fileoff
@@ -2029,7 +2019,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 $t_cmd .= pack(
                     'a16 a16 Q<2 L<2 L<3 L<2 L<',
                     $sec_names{ $s->{name} },
-                    "__TEXT",   $base + $s->{rva},
+                    '__TEXT',   $base + $s->{rva},
                     $s->{size}, $s->{off}, 4, 0, 0, 0x80000400, 0, 0, 0
                 );
             }
@@ -2041,7 +2031,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 my $d_cmd      = pack(
                     'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
                     $d_cmd_size,                # cmdsize
-                    "__DATA",                   # segname
+                    '__DATA',                   # segname
                     $base + $d_start_rva,       # vmaddr
                     $d_seg_size,                # vmsize
                     $d_start_off,               # fileoff
@@ -2057,7 +2047,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                     $d_cmd .= pack(
                         'a16 a16 Q<2 L<2 L<3 L<2 L<',
                         $sec_names{ $s->{name} },
-                        "__DATA",   $base + $s->{rva},
+                        '__DATA',   $base + $s->{rva},
                         $s->{size}, $s->{off}, 3, 0, 0, 0, 0, 0, 0
                     );
                 }
@@ -2065,12 +2055,12 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             }
 
             # LINKEDIT Segment Header
-            my $le_sec      = $l->get('.linkedit');
+            my $le_sec      = $self->layout->get('.linkedit');
             my $le_seg_size = ( $le_sec->{size} + $page_size - 1 ) & ~( $page_size - 1 );
             push @cmds, pack(
                 'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
                 72,                         # cmdsize
-                "__LINKEDIT",               # segname
+                '__LINKEDIT',               # segname
                 $base + $le_sec->{rva},     # vmaddr
                 $le_seg_size,               # vmsize
                 $le_sec->{off},             # fileoff
@@ -2139,13 +2129,13 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 for (@debug_sections) { $dw_size += $_->{size}; }
                 my $dw_size_aligned = ( $dw_size + $page_size - 1 ) & ~( $page_size - 1 );
                 my $dw_cmd          = pack( 'L<2 a16 Q<4 L<4',
-                    0x19, $cmdsize, "__DWARF", $base + $dw_start_rva,
+                    0x19, $cmdsize, '__DWARF', $base + $dw_start_rva,
                     $dw_size_aligned, $dw_start_off, $dw_size_aligned, 0, 0, scalar(@debug_sections), 0 );
                 for my $s (@debug_sections) {
                     $dw_cmd .= pack(
                         'a16 a16 Q<2 L<2 L<3 L<2 L<',
                         $sec_names{ $s->{name} },
-                        "__DWARF",  $base + $s->{rva},
+                        '__DWARF',  $base + $s->{rva},
                         $s->{size}, $s->{off}, 0, 0, 0, 0, 0, 0, 0
                     );
                 }
@@ -2179,7 +2169,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             print $fh $text_payload;
 
             # Write __DATA,__data segment (padded to layout size) if section exists
-            my $d_sec_actual = eval { $l->get('.data') };
+            my $d_sec_actual = $self->layout->get('.data');
             if ($d_sec_actual) {
                 seek( $fh, $d_sec_actual->{off}, 0 );
                 my $data_payload = $data_bytes // '';
@@ -2214,8 +2204,8 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             # ARM64 macOS mandatory ad-hoc signature
             if ( $os =~ /^(macos|darwin)/i ) {
                 my $cs_out = `codesign -f -s - "$output_file" 2>&1`;
-                warn "codesign output: $cs_out" if length $cs_out;
-                warn "codesign exit: " . ( $? >> 8 ) . "\n";
+                warn 'codesign output: ' . $cs_out if length $cs_out;
+                warn 'codesign exit: ' . ( $? >> 8 ) . "\n";
             }
             return $output_file;
         }
@@ -2315,17 +2305,17 @@ We enable several modern Windows security features:
                 for my $name (@sorted_exports) {
                     my $label_val = $self->labels->{"E_$name"} // $self->labels->{$name} // 0;
                     my $func_rva  = $text_rva + $label_val;
-                    $edata_bytes .= pack( "V", $func_rva );
+                    $edata_bytes .= pack( 'V', $func_rva );
                 }
                 my $enpt_off = length($edata_bytes);
                 for my $name (@sorted_exports) {
                     my $name_rva = $edata_rva + $name_offsets{$name};
-                    $edata_bytes .= pack( "V", $name_rva );
+                    $edata_bytes .= pack( 'V', $name_rva );
                 }
                 my $eot_off = length($edata_bytes);
                 my $idx     = 0;
                 for my $name (@sorted_exports) {
-                    $edata_bytes .= pack( "v", $idx++ );
+                    $edata_bytes .= pack( 'v', $idx++ );
                 }
 
                 # Pad with 4 trailing null bytes to satisfy strict peXXigen.c bounds checks (offset + size < datasize)
@@ -2333,7 +2323,7 @@ We enable several modern Windows security features:
 
                 # Overwrite the first 40 bytes with the actual Export Directory Table
                 my $timestamp        = $ENV{SOURCE_DATE_EPOCH} || time();
-                my $export_dir_table = pack( "V2 v2 V7",
+                my $export_dir_table = pack( 'V2 v2 V7',
                     0, $timestamp, 0, 0, $edata_rva + $dll_name_off,
                     1, scalar(@sorted_exports), scalar(@sorted_exports),
                     $edata_rva + $eat_off,
@@ -2421,7 +2411,7 @@ We enable several modern Windows security features:
             my $sec_raw_debug_size = 0;
             if ($has_debug) {
                 $sec_raw_debug_size = ( length($debug_bytes) + 511 ) & ~511;
-                $section_table .= pack( 'a8 V2 V2 V2 v2 V', ".debug_l", length($debug_bytes), $sec_rva, $sec_raw_debug_size, $sec_raw_ptr, 0, 0, 0, 0,
+                $section_table .= pack( 'a8 V2 V2 V2 v2 V', '.debug_l', length($debug_bytes), $sec_rva, $sec_raw_debug_size, $sec_raw_ptr, 0, 0, 0, 0,
                     0x42000040 );
                 $sec_rva     += ( length($debug_bytes) + 4095 ) & ~4095;
                 $sec_raw_ptr += $sec_raw_debug_size;
@@ -2446,10 +2436,10 @@ We enable several modern Windows security features:
                     my $func_rva  = 0x1000 + $label_val;                                         # .text section RVA starts at 0x1000
                     my $entry_name_field;
                     if ( length($name) <= 8 ) {
-                        $entry_name_field = pack( "a8", $name );
+                        $entry_name_field = pack( 'a8', $name );
                     }
                     else {
-                        $entry_name_field = pack( "V2", 0, $coff_str_offsets{$name} );
+                        $entry_name_field = pack( 'V2', 0, $coff_str_offsets{$name} );
                     }
 
                     # IMAGE_SYMBOL struct size is 18 bytes
@@ -2464,7 +2454,7 @@ We enable several modern Windows security features:
                     $num_coff_symbols++;
                 }
                 if ( length($str_payload) > 0 ) {
-                    $coff_strtab = pack( "V", 4 + length($str_payload) ) . $str_payload;
+                    $coff_strtab = pack( 'V', 4 + length($str_payload) ) . $str_payload;
                 }
 
                 # Position table offset directly after raw section data on disk
@@ -2578,7 +2568,7 @@ We enable several modern Windows security features:
             open my $fh, '+<', $output_file or die $!;
             binmode $fh;
             seek $fh, 0x96, 0;                # Offset to COFF Characteristics
-            print $fh pack( "v", 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
+            print $fh pack( 'v', 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
             close $fh;
         }
     }
@@ -2633,39 +2623,41 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
 
         # Structurally compliant segment layout grouping all read-only sections
         # in the RX segment, and keeping only writable sections in the RW segment.
-        method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 ) {
-            $l->add_section( '.text', $t, 5 );    # RX (Read + Execute)
+        method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
+
+            #method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 ) {
+            $layout->add_section( '.text', $text_size, 5 );    # RX (Read + Execute)
 
             # Read-only metadata sections (strictly mapped to RX segment)
-            $l->add_section( '.interp',   512,  2 ) if $self->type eq 'exe';
-            $l->add_section( '.dynstr',   4096, 2 );
-            $l->add_section( '.dynsym',   4096, 2 );
-            $l->add_section( '.rela.dyn', 4096, 2 );
-            $l->add_section( '.hash',     4096, 2 );
+            $layout->add_section( '.interp',   512,  2 ) if $self->type eq 'exe';
+            $layout->add_section( '.dynstr',   4096, 2 );
+            $layout->add_section( '.dynsym',   4096, 2 );
+            $layout->add_section( '.rela.dyn', 4096, 2 );
+            $layout->add_section( '.hash',     4096, 2 );
 
             # Writable data and dynamic linking tables (mapped to RW segment)
-            $l->add_section( '.dynamic', 4096, 3 );    # RW (Read + Write)
-            $l->add_section( '.data',    $d,   6 );    # RW
-            $l->add_section( '.got',     512,  6 );    # RW
+            $layout->add_section( '.dynamic', 4096,       3 );    # RW (Read + Write)
+            $layout->add_section( '.data',    $data_size, 6 );    # RW
+            $layout->add_section( '.got',     512,        6 );    # RW
 
             # Non-alloc symbol and string tables for static linking/debugging (nm)
-            $l->add_section( '.symtab', 4096, 0 );
-            $l->add_section( '.strtab', 4096, 0 );
+            $layout->add_section( '.symtab', 4096, 0 );
+            $layout->add_section( '.strtab', 4096, 0 );
             #
             if ( $dbg >= 1 ) {
-                $l->add_section( '.debug_line',     4096, 0 );
-                $l->add_section( '.debug_info',     4096, 0 );
-                $l->add_section( '.debug_abbrev',   4096, 0 );
-                $l->add_section( '.debug_frame',    4096, 0 );
-                $l->add_section( '.debug_aranges',  4096, 0 );
-                $l->add_section( '.debug_pubnames', 4096, 0 );
-                $l->add_section( '.eh_frame',       4096, 0 );
+                $layout->add_section( '.debug_line',     4096, 0 );
+                $layout->add_section( '.debug_info',     4096, 0 );
+                $layout->add_section( '.debug_abbrev',   4096, 0 );
+                $layout->add_section( '.debug_frame',    4096, 0 );
+                $layout->add_section( '.debug_aranges',  4096, 0 );
+                $layout->add_section( '.debug_pubnames', 4096, 0 );
+                $layout->add_section( '.eh_frame',       4096, 0 );
             }
         }
 
         method import_rva($name) {
             my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16, exit => 24, _exit => 24 };
-            return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die "Unknown ELF import: $name" );
+            return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown ELF import: ' . $name );
         }
         method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
 
@@ -2679,15 +2671,15 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
 
                 # Allocate extra data space for platform-specific control variables
                 my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
-                $self->pre_layout( length($code_bytes) + 32, $extra_data, $platform->arch, $platform->os );
+                $self->pre_layout( length($code_bytes) + 32, $extra_data, $platform );
             }
             my $l          = $self->layout;
             my $is_pie     = $platform->is_bsd || $platform->is_haiku;
             my $base       = $is_pie ? 0 : $self->image_base;
             my $elf_type   = $shared ? 3 : ( $is_pie ? 3 : 2 );    # ET_DYN (3) for PIE, ET_EXEC (2) for static
-            my $text_rva   = $l->get('.text')->{rva};
-            my $got_rva    = $l->get('.got')->{rva};
-            my $page_align = $l->section_align;
+            my $text_rva   = $self->layout->get('.text')->{rva};
+            my $got_rva    = $self->layout->get('.got')->{rva};
+            my $page_align = $self->layout->section_align;
             my $text       = $code_bytes;
 
             if ( $self->type eq 'exe' ) {
@@ -2712,7 +2704,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     my $blr     = 0xD63F0100;
                     my $bl_main = 0x94000005;
                     my $brk     = 0xD4200000;
-                    $entry_stub = pack( "V5", $bl_main, $adrp, $ldr, $blr, $brk );
+                    $entry_stub = pack( 'V5', $bl_main, $adrp, $ldr, $blr, $brk );
                 }
                 elsif ( $platform->is_riscv64 ) {
 
@@ -2735,7 +2727,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                         | ( ( $jal_offset >> 12 ) & 0xFF ) << 12;
                     my $jal    = $jal_imm | ( 1 << 7 ) | 0x6F;
                     my $ebreak = 0x00100073;
-                    $entry_stub = pack( "V5", $jal, $auipc, $ld, $jalr, $ebreak );
+                    $entry_stub = pack( 'V5', $jal, $auipc, $ld, $jalr, $ebreak );
                 }
                 else {
                     # x86_64 Dynamic Exit Stub with System V RSP alignment.
@@ -2743,11 +2735,11 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     my $got_exit = $got_rva + 24;
                     my $next_ip  = $text_rva + 18;
                     my $rel32    = $got_exit - $next_ip;
-                    $entry_stub = pack( "C4", 0x48, 0x83, 0xE4, 0xF0 );    # and rsp, -16
-                    $entry_stub .= pack( "C V",   0xE8, 11 );              # call main (rel)
-                    $entry_stub .= pack( "C3",    0x48, 0x89, 0xC7 );      # mov rdi, rax
-                    $entry_stub .= pack( "C2 l<", 0xFF, 0x15, $rel32 );    # call [rip + got_exit]
-                    $entry_stub .= pack( "C2",    0x0F, 0x0B );            # ud2 (Invalid instruction safety)
+                    $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );    # and rsp, -16
+                    $entry_stub .= pack( 'C V',   0xE8, 11 );              # call main (rel)
+                    $entry_stub .= pack( 'C3',    0x48, 0x89, 0xC7 );      # mov rdi, rax
+                    $entry_stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );    # call [rip + got_exit]
+                    $entry_stub .= pack( 'C2',    0x0F, 0x0B );            # ud2 (Invalid instruction safety)
                 }
                 $text = $entry_stub . $code_bytes;
             }
@@ -2814,7 +2806,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             my $pintable_data = '';
             if ( $has_pintable && $platform->is_openbsd ) {
                 my $pos             = 0;
-                my $text_rva_actual = $l->get('.text')->{rva};
+                my $text_rva_actual = $self->layout->get('.text')->{rva};
                 my $exit_sys        = $platform->syscall('exit') // 1;
                 if ( $platform->is_x64 ) {
                     while ( ( my $idx = index( $text, "\x0F\x05", $pos ) ) != -1 ) {
@@ -2845,9 +2837,9 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     $os_base;
                 my $ipath = $interp_map{$interp_key} // '/lib/ld.so.1';
                 if ( length $ipath ) {
-                    $interp                    = $ipath . "\0";
-                    $l->get('.interp')->{size} = length($interp);
-                    $has_interp                = 1;
+                    $interp                               = $ipath . "\0";
+                    $self->layout->get('.interp')->{size} = length($interp);
+                    $has_interp                           = 1;
                 }
             }
 
@@ -2948,7 +2940,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 $str_off{'_gSharedObjectHaikuVersion'} = length($dynstr);
                 $dynstr .= "_gSharedObjectHaikuVersion\0";
             }
-            $l->get('.dynstr')->{size} = length($dynstr);
+            $self->layout->get('.dynstr')->{size} = length($dynstr);
 
             # Setup Dynamic Symbol Table
             # Elf64_Sym (24 bytes): Null symbol
@@ -2981,7 +2973,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             # Exports if shared library
             if ( $self->type eq 'shared' ) {
                 for my $name (@exports) {
-                    my $rva = $l->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
+                    my $rva = $self->layout->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
                     $sym_indices{$name} = $sym_idx++;
 
                     # Elf64_Sym (24 bytes) for defined exported functions
@@ -3003,14 +2995,14 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     $sym_indices{'__progname'} = $sym_idx++;
                     my $data_sec_idx;
                     my $sec_i = 1;
-                    for my $s ( $l->sections ) {
+                    for my $s ( $self->layout->sections ) {
                         if ( $s->{name} eq '.data' ) {
                             $data_sec_idx = $sec_i;
                             last;
                         }
                         $sec_i++;
                     }
-                    my $data_sec = $l->get('.data');
+                    my $data_sec = $self->layout->get('.data');
                     $dynsym .= pack(
                         'L< C C S< Q< Q<', $progname_off,    # st_name
                         0x11,                                # st_info (STB_GLOBAL | STT_OBJECT)
@@ -3029,14 +3021,14 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     $sym_indices{'environ'} = $sym_idx++;
                     my $data_sec_idx;
                     my $sec_i = 1;
-                    for my $s ( $l->sections ) {
+                    for my $s ( $self->layout->sections ) {
                         if ( $s->{name} eq '.data' ) {
                             $data_sec_idx = $sec_i;
                             last;
                         }
                         $sec_i++;
                     }
-                    my $data_sec = $l->get('.data');
+                    my $data_sec = $self->layout->get('.data');
                     $dynsym .= pack(
                         'L< C C S< Q< Q<', $environ_off,    # st_name
                         0x11,                               # st_info (STB_GLOBAL | STT_OBJECT)
@@ -3054,20 +3046,20 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 my $ver_off = $str_off{'_gSharedObjectHaikuVersion'};
                 my $data_sec_idx;
                 my $sec_i = 1;
-                for my $s ( $l->sections ) {
+                for my $s ( $self->layout->sections ) {
                     if ( $s->{name} eq '.data' ) {
                         $data_sec_idx = $sec_i;
                         last;
                     }
                     $sec_i++;
                 }
-                my $data_sec = $l->get('.data');
+                my $data_sec = $self->layout->get('.data');
                 $sym_indices{'_gSharedObjectHaikuABI'} = $sym_idx++;
                 $dynsym .= pack( 'L< C C S< Q< Q<', $abi_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva}, 4 );
                 $sym_indices{'_gSharedObjectHaikuVersion'} = $sym_idx++;
                 $dynsym .= pack( 'L< C C S< Q< Q<', $ver_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 4, 4 );
             }
-            $l->get('.dynsym')->{size} = length($dynsym);
+            $self->layout->get('.dynsym')->{size} = length($dynsym);
 
             # Setup Relocations (.rela.dyn)
             my $rel_type = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );    # R_AARCH64_GLOB_DAT or R_X86_64_GLOB_DAT
@@ -3108,11 +3100,11 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 ( $exit_sym_idx << 32 ) | $rel_type,       # r_info
                 0                                          # r_addend
             );
-            $l->get('.rela.dyn')->{size} = length($rela_dyn);
+            $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
             # Setup GOT section payload (four zeroed slots: dlopen, dlsym, pthread_create, exit)
             my $got = pack( 'Q< Q< Q< Q<', 0, 0, 0, 0 );
-            $l->get('.got')->{size} = length($got);
+            $self->layout->get('.got')->{size} = length($got);
 
             # Setup Hash Table (Standard System V Hash)
             my $elf_hash = sub {
@@ -3139,22 +3131,22 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 $buckets[$b]  = $idx;
             }
             my $hash = pack( 'L<*', $nbucket, $nchain, @buckets, @chains );
-            $l->get('.hash')->{size} = length($hash);
+            $self->layout->get('.hash')->{size} = length($hash);
 
             # Size the static .symtab and .strtab sections before final layout calculations
-            $l->get('.symtab')->{size} = length($dynsym);
-            $l->get('.strtab')->{size} = length($dynstr);
+            $self->layout->get('.symtab')->{size} = length($dynsym);
+            $self->layout->get('.strtab')->{size} = length($dynstr);
 
             # Calculate to stabilize RVAs before building .dynamic
-            $l->calculate($page_align);
+            $self->layout->calculate($page_align);
 
             # Setup .dynamic payload
-            my $dyn_rva        = $l->get('.dynamic')->{rva};
-            my $str_rva        = $l->get('.dynstr')->{rva};
-            my $sym_rva        = $l->get('.dynsym')->{rva};
-            my $hash_rva       = $l->get('.hash')->{rva};
-            my $rela_rva       = $l->get('.rela.dyn')->{rva};
-            my $got_rva_actual = $l->get('.got')->{rva};
+            my $dyn_rva        = $self->layout->get('.dynamic')->{rva};
+            my $str_rva        = $self->layout->get('.dynstr')->{rva};
+            my $sym_rva        = $self->layout->get('.dynsym')->{rva};
+            my $hash_rva       = $self->layout->get('.hash')->{rva};
+            my $rela_rva       = $self->layout->get('.rela.dyn')->{rva};
+            my $got_rva_actual = $self->layout->get('.got')->{rva};
             my $dynamic        = '';
 
             # Elf64_Dyn (16 bytes each) entries
@@ -3175,15 +3167,15 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 $dynamic .= pack( 'Q< Q<', 0x6ffffffb, 8 );              # DT_FLAGS_1 with DF_1_PIE
             }
             $dynamic .= pack( 'Q< Q<', 0, 0 );                           # DT_NULL
-            $l->get('.dynamic')->{size} = length($dynamic);
+            $self->layout->get('.dynamic')->{size} = length($dynamic);
 
             # Final layout calculation
-            $l->calculate($page_align);
+            $self->layout->calculate($page_align);
 
             # Build Section Names String Table (.shstrtab)
             my $shstrtab = "\0";
             my %sh_name_off;
-            for my $s ( $l->sections ) {
+            for my $s ( $self->layout->sections ) {
                 $sh_name_off{ $s->{name} } = length($shstrtab);
                 $shstrtab .= $s->{name} . "\0";
             }
@@ -3193,12 +3185,12 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $shstrtab .= ".note.GNU-stack\0";
             my $sec_idx = 1;
             my %sec_indices;
-            for my $s ( $l->sections ) { $sec_indices{ $s->{name} } = $sec_idx++; }
+            for my $s ( $self->layout->sections ) { $sec_indices{ $s->{name} } = $sec_idx++; }
 
             # Open file and write payloads based on layout
             open my $fh, '>', $output_file or die $!;
             binmode $fh;
-            for my $s ( $l->sections ) {
+            for my $s ( $self->layout->sections ) {
                 my $payload = "\0" x $s->{size};
                 if ( $s->{name} eq '.text' ) {
                     $payload = $text;
@@ -3274,7 +3266,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             );
 
             # Real sections from layout — Elf64_Shdr (64 bytes each)
-            for my $s ( $l->sections ) {
+            for my $s ( $self->layout->sections ) {
                 my $type       = 1;                    # SHT_PROGBITS
                 my $flags      = 0;
                 my $sh_link    = 0;
@@ -3397,7 +3389,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
 
             # PT_INTERP (type 3) — Elf64_Phdr (56 bytes)
             if ($has_interp) {
-                my $interp_sec = $l->get('.interp');
+                my $interp_sec = $self->layout->get('.interp');
                 push @phdrs, pack(
                     'L< L< Q< Q< Q< Q< Q< Q<', 3,    # p_type (PT_INTERP)
                     4,                               # p_flags (PF_R)
@@ -3411,7 +3403,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             }
 
             # PT_LOAD RX segment (Headers + .text through .hash) — Elf64_Phdr (56 bytes)
-            my $hash_sec  = $l->get('.hash');
+            my $hash_sec  = $self->layout->get('.hash');
             my $rx_p_off  = 0;
             my $rx_p_size = $hash_sec->{off} + $hash_sec->{size};
             push @phdrs, pack(
@@ -3426,8 +3418,8 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             );
 
             # PT_LOAD RW segment (Covers .dynamic through .got) — Elf64_Phdr (56 bytes)
-            my $dyn_sec  = $l->get('.dynamic');
-            my $got_sec  = $l->get('.got');
+            my $dyn_sec  = $self->layout->get('.dynamic');
+            my $got_sec  = $self->layout->get('.got');
             my $rw_p_off = $dyn_sec->{off} & ~( $page_align - 1 );
             my $rw_size  = ( $got_sec->{off} + $got_sec->{size} ) - $rw_p_off;
             push @phdrs, pack(
@@ -3508,7 +3500,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e551,    # p_type (PT_GNU_STACK)
                 6, 0, 0, 0, 0, 0, 0x10                    # p_flags=6(PF_R|PF_W), p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align
             );
-            my $entry_point = $self->type eq 'shared' ? 0 : $base + $l->get('.text')->{rva};
+            my $entry_point = $self->type eq 'shared' ? 0 : $base + $self->layout->get('.text')->{rva};
 
             # Finalize ELF Header (Elf64_Ehdr - Exactly 64 bytes) and write program headers/extra data
             # Reference: https://refspecs.linuxbase.org/elf/gabi4+/ch4.eheader.html
@@ -3547,7 +3539,7 @@ my $compiler = Brocken::Compiler->new();
 subtest Katsuro => sub {
     subtest 'platform parsing' => sub {
         my $raw_triple = Brocken::Katsuro::Platform::gen_triple();
-        diag "Host raw triple: $raw_triple";
+        diag 'Host raw triple: ' . $raw_triple;
         my $platform = Brocken::Katsuro::Platform::parse($raw_triple);
         diag 'Host: ' . $platform->os . '/' . $platform->arch;
         diag 'File: app' . $platform->bin_ext . ' / lib' . $platform->lib_ext;
@@ -4052,6 +4044,7 @@ subtest Jenny => sub {
             require File::Spec;
             my $abs_path = File::Spec->rel2abs($output_file);
             my $libref   = DynaLoader::dl_load_file($abs_path);
+            diag `nm $abs_path`;
             ok $libref, 'Loaded ELF shared library natively via DynaLoader';
             if ($libref) {
                 my $symref = DynaLoader::dl_find_symbol( $libref, 'my_func' );
@@ -4171,17 +4164,17 @@ subtest Jenny => sub {
                 close $rfh;
                 my $rc = system( 'clang', '-o', $ref_bin, $ref_src );
                 if ( ( $rc >> 8 ) == 0 ) {
-                    note "=== Generated: otool -l ===";
+                    note '=== Generated: otool -l ===';
                     note scalar `otool -l "$output_file" 2>&1`;
-                    note "=== Reference: otool -l ===";
+                    note '=== Reference: otool -l ===';
                     note scalar `otool -l "$ref_bin" 2>&1`;
-                    note "=== Generated: od -A x -t x1 -c (first 1KB) ===";
+                    note '=== Generated: od -A x -t x1 -c (first 1KB) ===';
                     note scalar `od -A x -t x1 -c -v -N 1024 "$output_file" 2>&1`;
-                    note "=== Reference: od -A x -t x1 -c (first 1KB) ===";
+                    note '=== Reference: od -A x -t x1 -c (first 1KB) ===';
                     note scalar `od -A x -t x1 -c -v -N 1024 "$ref_bin" 2>&1`;
                 }
                 else {
-                    note "clang compilation failed, exit: " . ( $rc >> 8 );
+                    note 'clang compilation failed, exit: ' . ( $rc >> 8 );
                 }
             }
         }
@@ -4230,7 +4223,7 @@ subtest Jenny => sub {
         my $is_windows = $platform->is_windows;
         my $is_posix   = $platform->is_posix;
 
-        # 1. Build the shared library IR: int my_func() { return 42; }
+        # Build the shared library IR: int my_func() { return 42; }
         my $module   = Brocken::Lindsay::IR::Module->new( name => 'shared_lib' );
         my $func_ext = Brocken::Lindsay::IR::Function->new( name => 'my_func', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
         $module->add_function($func_ext);
@@ -4264,7 +4257,7 @@ subtest Jenny => sub {
             $shared_linker->set_labels( { E_my_func => 0 } );
             $shared_linker->write_executable( $lib_file, $machine_bytes, $platform, 1 );
         }
-        ok -e $lib_file, "Shared library compiled at $lib_file";
+        ok -e $lib_file, 'Shared library compiled at ' . $lib_file;
 
         # Verify that the expected symbol is physically exported in the binary via nm
         my $nm_out = $^O eq 'MSWin32' ? `objdump -p $lib_file` : `nm "$lib_file"`;
@@ -4277,7 +4270,7 @@ subtest Jenny => sub {
             like $nm_out, qr/\b$expected_sym\b/, "Verified via 'nm' that '$expected_sym' is present in $lib_file";
         }
         else {
-            note "nm is not available or failed; skipping symbol table extraction check";
+            note 'nm is not available or failed; skipping symbol table extraction check';
         }
 
         # POSIX x86_64 Wrapper Generator with 16-byte Stack Alignment Fix
@@ -4293,19 +4286,19 @@ subtest Jenny => sub {
             my $main_rva         = $text + $entry_stub_len;
             my $disp_dlopen      = $got - ( $main_rva + 23 );
             my $disp_dlsym       = ( $got + 8 ) - ( $main_rva + 42 );
-            my $code             = pack( "C", 0x53 );                      # push rbx
-            $code .= pack( "C4",    0x48, 0x83, 0xEC, 0x10 );              # sub rsp, 16 (Keep stack aligned to 16-bytes)
-            $code .= pack( "C3 l<", 0x48, 0x8D, 0x3D, $disp_libpath );     # lea rdi, [rip + disp_libpath]
-            $code .= pack( "C5", 0xBE, 0x02, 0x00, 0x00, 0x00 );           # mov esi, 2 (RTLD_NOW)
-            $code .= pack( "C2 l<", 0xFF, 0x15, $disp_dlopen );            # call [rip + disp_dlopen]
-            $code .= pack( "C3",    0x48, 0x89, 0xC3 );                    # mov rbx, rax
-            $code .= pack( "C3",    0x48, 0x89, 0xDF );                    # mov rdi, rbx
-            $code .= pack( "C3 l<", 0x48, 0x8D, 0x35, $disp_funcname );    # lea rsi, [rip + disp_funcname]
-            $code .= pack( "C2 l<", 0xFF, 0x15, $disp_dlsym );             # call [rip + disp_dlsym]
-            $code .= pack( "C2", 0xFF, 0xD0 );                             # call rax
-            $code .= pack( "C4", 0x48, 0x83, 0xC4, 0x10 );                 # add rsp, 16
-            $code .= pack( "C", 0x5B );                                    # pop rbx
-            $code .= pack( "C", 0xC3 );                                    # ret
+            my $code             = pack( 'C', 0x53 );                      # push rbx
+            $code .= pack( 'C4',    0x48, 0x83, 0xEC, 0x10 );              # sub rsp, 16 (Keep stack aligned to 16-bytes)
+            $code .= pack( 'C3 l<', 0x48, 0x8D, 0x3D, $disp_libpath );     # lea rdi, [rip + disp_libpath]
+            $code .= pack( 'C5', 0xBE, 0x02, 0x00, 0x00, 0x00 );           # mov esi, 2 (RTLD_NOW)
+            $code .= pack( 'C2 l<', 0xFF, 0x15, $disp_dlopen );            # call [rip + disp_dlopen]
+            $code .= pack( 'C3',    0x48, 0x89, 0xC3 );                    # mov rbx, rax
+            $code .= pack( 'C3',    0x48, 0x89, 0xDF );                    # mov rdi, rbx
+            $code .= pack( 'C3 l<', 0x48, 0x8D, 0x35, $disp_funcname );    # lea rsi, [rip + disp_funcname]
+            $code .= pack( 'C2 l<', 0xFF, 0x15, $disp_dlsym );             # call [rip + disp_dlsym]
+            $code .= pack( 'C2', 0xFF, 0xD0 );                             # call rax
+            $code .= pack( 'C4', 0x48, 0x83, 0xC4, 0x10 );                 # add rsp, 16
+            $code .= pack( 'C', 0x5B );                                    # pop rbx
+            $code .= pack( 'C', 0xC3 );                                    # ret
             $code .= "\x00" while length($code) < 50;
             $code .= $lib_path . $func_name;
             return $code;
@@ -4330,7 +4323,7 @@ subtest Jenny => sub {
             my $ldr_dlopen       = 0x58000008 | ( $imm19_dlopen << 5 );
             my $ldr_dlsym        = 0x58000008 | ( $imm19_dlsym << 5 );
             my $code             = pack(
-                "V*", 0xA9BF7BFD,    # stp x29, x30, [sp, #-32]!
+                'V*', 0xA9BF7BFD,    # stp x29, x30, [sp, #-32]!
                 0xF9000BE3,          # str x19, [sp, #16]
                 $adr_x0,             # adr x0, lib_path
                 0xD2800041,          # mov x1, #2 (RTLD_NOW)
@@ -4355,20 +4348,20 @@ subtest Jenny => sub {
 
                 # Load the compiled PE DLL natively via the standard Win32::API module
                 # On Windows ARM64, an emulated x64 Perl process cannot load native ARM64 DLLs.
-                skip "Win32::API loader skipped due to emulation mismatch", 2 if $platform->is_arm64 && $Config{archname} =~ /x86_64|x64/i;
+                skip 'Win32::API loader skipped due to emulation mismatch', 2 if $platform->is_arm64 && $Config{archname} =~ /x86_64|x64/i;
                 require File::Spec;
                 my $abs_path = File::Spec->rel2abs($lib_file);
                 eval {
                     require Win32::API;
                     my $func = Win32::API->new( $abs_path, 'int my_func()' );
-                    ok $func, "Natively bound my_func from compiled DLL with exports";
+                    ok $func, 'Natively bound my_func from compiled DLL with exports';
                     if ($func) {
                         my $ret = $func->Call();
-                        is $ret, 42, "Invoked DLL export successfully via Win32::API, returned 42";
+                        is $ret, 42, 'Invoked DLL export successfully via Win32::API, returned 42';
                     }
                 };
                 if ($@) {
-                    skip "Win32::API loader failure: $@", 2;
+                    skip 'Win32::API loader failure: ' . $@, 2;
                 }
             }
             elsif ( $is_posix && ( $is_x64 || $is_arm64 ) ) {
@@ -4379,22 +4372,22 @@ subtest Jenny => sub {
                     = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new( type => 'exe' ) : Brocken::Jenny::Linker::ELF64->new( type => 'exe' );
                 $wrapper_linker->set_has_ffi(1) if $platform->is_macos;
 
-                # 1. Pass a dummy byte array first to allow the linker to calculate
+                # Pass a dummy byte array first to allow the linker to calculate
                 # the exact metadata structures and final section tables.
                 my $code_sz     = $is_arm64 ? 128 : 96;
                 my $dummy_bytes = "\x00" x $code_sz;
                 $wrapper_linker->write_executable( $wrapper_file, $dummy_bytes, $platform );
 
-                # 2. Extract stabilized, correct section RVAs and text file offset
+                # Extract stabilized, correct section RVAs and text file offset
                 my $got_rva  = $wrapper_linker->layout->get('.got')->{rva};
                 my $text_rva = $wrapper_linker->layout->get('.text')->{rva};
                 my $text_off = $wrapper_linker->layout->get('.text')->{off};
 
-                # 3. Assemble the actual FFI machine code referencing the real RVAs
+                # Assemble the actual FFI machine code referencing the real RVAs
                 my $wrapper_bytes = $is_arm64 ? $make_arm64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos ) :
                     $make_x64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos );
 
-                # 4. Patch the binary file at its physical entry offset directly
+                # Patch the binary file at its physical entry offset directly
                 my $entry_stub_len = $platform->is_macos ? 17 : 20;
                 open my $fh, '+<:raw', $wrapper_file or die $!;
                 seek( $fh, $text_off + $entry_stub_len, 0 );
@@ -4402,25 +4395,23 @@ subtest Jenny => sub {
                 close $fh;
 
                 # Re-apply ad-hoc code signature required strictly on macOS ARM64
-                if ( $platform->is_macos ) {
-                    system("codesign -f -s - \"$wrapper_file\" 2>/dev/null");
-                }
-                ok -e $wrapper_file, "POSIX wrapper compiled at $wrapper_file";
-                ok -x $wrapper_file, "POSIX wrapper has execution permissions";
+                system("codesign -f -s - \"$wrapper_file\" 2>/dev/null") if $platform->is_macos;
+                ok -e $wrapper_file, 'POSIX wrapper compiled at ' . $wrapper_file;
+                ok -x $wrapper_file, 'POSIX wrapper has execution permissions';
 
                 # Execute POSIX native executable
                 local $ENV{LD_LIBRARY_PATH}   = join( ':', '.', $ENV{LD_LIBRARY_PATH}   // () );
                 local $ENV{DYLD_LIBRARY_PATH} = join( ':', '.', $ENV{DYLD_LIBRARY_PATH} // () );
-                system("./test_wrapper");
+                system('./test_wrapper');
                 my $status    = $?;
                 my $exit_code = $status >> 8;
                 my $signal    = $status & 127;
-                is $signal,    0,  "Native wrapper ran cleanly without crash/segfault signals";
-                is $exit_code, 42, "Native wrapper loaded library, resolved symbol via GOT table FFI, and returned 42";
+                is $signal,    0,  'Native wrapper ran cleanly without crash/segfault signals';
+                is $exit_code, 42, 'Native wrapper loaded library, resolved symbol via GOT table FFI, and returned 42';
                 unlink $wrapper_file;
             }
             else {
-                skip "No native FFI wrapper assembly available for " . $platform->friendly, 2;
+                skip 'No native FFI wrapper assembly available for ' . $platform->friendly, 2;
             }
         }
         unlink $lib_file;
