@@ -1730,10 +1730,16 @@ like ELF, Mach-O, or PE (Jenny::Linker).
         method emit_function($ir_func) {
             my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
             my $mf      = $lowerer->lower($ir_func);
-            return $self->_encode( $mf, $ir_func->params );
+            my %ir_types;
+            for my $block ($ir_func->blocks->@*) {
+                for my $inst ($block->instructions->@*) {
+                    $ir_types{$inst->name} = $inst->type if $inst->name;
+                }
+            }
+            return $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type );
         }
 
-        method _encode( $mf, $ir_params ) {
+        method _encode( $mf, $ir_params, $ir_types, $return_type ) {
             my $bytes      = '';
             my %vreg_map   = ();
             my $next_local = scalar( $ir_params->@* );
@@ -1758,6 +1764,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'i32_const' ) {
                         $bytes .= pack( 'C', 0x41 ) . $self->_sleb( $ops[0]->value );
                     }
+                    elsif ( $opcode eq 'i64_const' ) {
+                        $bytes .= pack( 'C', 0x42 ) . $self->_sleb( $ops[0]->value );
+                    }
                     elsif ( $opcode eq 'i32_add' )   { $bytes .= pack( 'C', 0x6A ) }
                     elsif ( $opcode eq 'i32_sub' )   { $bytes .= pack( 'C', 0x6B ) }
                     elsif ( $opcode eq 'i32_mul' )   { $bytes .= pack( 'C', 0x6C ) }
@@ -1767,11 +1776,26 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'i32_shl' )   { $bytes .= pack( 'C', 0x74 ) }
                     elsif ( $opcode eq 'i32_shr_s' ) { $bytes .= pack( 'C', 0x75 ) }
                     elsif ( $opcode eq 'i32_shr_u' ) { $bytes .= pack( 'C', 0x76 ) }
+                    elsif ( $opcode eq 'i64_add' )   { $bytes .= pack( 'C', 0x7C ) }
+                    elsif ( $opcode eq 'i64_sub' )   { $bytes .= pack( 'C', 0x7D ) }
+                    elsif ( $opcode eq 'i64_mul' )   { $bytes .= pack( 'C', 0x7E ) }
+                    elsif ( $opcode eq 'i64_and' )   { $bytes .= pack( 'C', 0x83 ) }
+                    elsif ( $opcode eq 'i64_or' )    { $bytes .= pack( 'C', 0x84 ) }
+                    elsif ( $opcode eq 'i64_xor' )   { $bytes .= pack( 'C', 0x85 ) }
+                    elsif ( $opcode eq 'i64_shl' )   { $bytes .= pack( 'C', 0x86 ) }
+                    elsif ( $opcode eq 'i64_shr_s' ) { $bytes .= pack( 'C', 0x87 ) }
+                    elsif ( $opcode eq 'i64_shr_u' ) { $bytes .= pack( 'C', 0x88 ) }
                     elsif ( $opcode eq 'i32_load' ) {
                         $bytes .= pack( 'C', 0x28 ) . $self->_uleb(2) . $self->_uleb(0);
                     }
+                    elsif ( $opcode eq 'i64_load' ) {
+                        $bytes .= pack( 'C', 0x29 ) . $self->_uleb(3) . $self->_uleb(0);
+                    }
                     elsif ( $opcode eq 'i32_store' ) {
                         $bytes .= pack( 'C', 0x36 ) . $self->_uleb(2) . $self->_uleb(0);
+                    }
+                    elsif ( $opcode eq 'i64_store' ) {
+                        $bytes .= pack( 'C', 0x37 ) . $self->_uleb(3) . $self->_uleb(0);
                     }
                     elsif ( $opcode eq 'i32_eq' )   { $bytes .= pack( 'C', 0x46 ) }
                     elsif ( $opcode eq 'i32_ne' )   { $bytes .= pack( 'C', 0x47 ) }
@@ -1783,6 +1807,16 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'i32_gt_u' ) { $bytes .= pack( 'C', 0x4B ) }
                     elsif ( $opcode eq 'i32_le_u' ) { $bytes .= pack( 'C', 0x4D ) }
                     elsif ( $opcode eq 'i32_ge_u' ) { $bytes .= pack( 'C', 0x4F ) }
+                    elsif ( $opcode eq 'i64_eq' )   { $bytes .= pack( 'C', 0x51 ) }
+                    elsif ( $opcode eq 'i64_ne' )   { $bytes .= pack( 'C', 0x52 ) }
+                    elsif ( $opcode eq 'i64_lt_s' ) { $bytes .= pack( 'C', 0x53 ) }
+                    elsif ( $opcode eq 'i64_gt_s' ) { $bytes .= pack( 'C', 0x55 ) }
+                    elsif ( $opcode eq 'i64_le_s' ) { $bytes .= pack( 'C', 0x57 ) }
+                    elsif ( $opcode eq 'i64_ge_s' ) { $bytes .= pack( 'C', 0x59 ) }
+                    elsif ( $opcode eq 'i64_lt_u' ) { $bytes .= pack( 'C', 0x54 ) }
+                    elsif ( $opcode eq 'i64_gt_u' ) { $bytes .= pack( 'C', 0x56 ) }
+                    elsif ( $opcode eq 'i64_le_u' ) { $bytes .= pack( 'C', 0x58 ) }
+                    elsif ( $opcode eq 'i64_ge_u' ) { $bytes .= pack( 'C', 0x5A ) }
                     elsif ( $opcode eq 'local_set' ) {
                         my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
                         $bytes .= pack( 'C', 0x21 ) . $self->_uleb($lid);
@@ -1794,12 +1828,29 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             my $num_extra_locals = $next_local - $num_params;
             my $locals_block     = '';
             if ( $num_extra_locals > 0 ) {
-                $locals_block = $self->_uleb(1) . $self->_uleb($num_extra_locals) . pack( 'C', 0x7F );
+                # Build reverse mapping: local_id => vreg name
+                my %lid_to_name = reverse %vreg_map;
+                # Count extra locals by wasm valtype
+                my %type_counts;
+                for my $lid ( $num_params .. $next_local - 1 ) {
+                    my $name  = $lid_to_name{$lid} // '';
+                    my $itype = $name ? $ir_types->{$name} : undef;
+                    my $wt    = $itype ? $self->_wasm_valtype($itype) : 0x7F;
+                    $type_counts{$wt}++;
+                }
+                # Group declarations
+                my $num_groups = scalar( keys %type_counts );
+                $locals_block = $self->_uleb($num_groups);
+                for my $wt ( 0x7F, 0x7E, 0x7D, 0x7C ) {
+                    next unless ( $type_counts{$wt} // 0 ) > 0;
+                    $locals_block .= $self->_uleb( $type_counts{$wt} ) . pack( 'C', $wt );
+                }
             }
             else {
                 $locals_block = $self->_uleb(0);
             }
-            return { body => $bytes . pack( 'C', 0x0B ), locals => $locals_block, num_locals => $next_local };
+            my $ret_valtype = $return_type ? $self->_wasm_valtype($return_type) : 0x7F;
+            return { body => $bytes . pack( 'C', 0x0B ), locals => $locals_block, num_locals => $next_local, return_valtype => $ret_valtype };
         }
 
         method _wasm_valtype($ir_type) {
@@ -3083,6 +3134,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     my $opcode = $inst->opcode;
                     if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
+                        my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
+                        my $p = $bits >= 64 ? 'i64' : 'i32';
 
                         # Push LHS onto Wasm stack
                         $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS' ) );
@@ -3090,9 +3143,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
                         # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
                         my %map = (
-                            add => 'i32_add', sub => 'i32_sub', mul => 'i32_mul',
-                            and => 'i32_and', or  => 'i32_or',  xor => 'i32_xor',
-                            shl => 'i32_shl', lshr => 'i32_shr_u', ashr => 'i32_shr_s',
+                            add => "${p}_add", sub => "${p}_sub", mul => "${p}_mul",
+                            and => "${p}_and", or  => "${p}_or",  xor => "${p}_xor",
+                            shl => "${p}_shl", lshr => "${p}_shr_u", ashr => "${p}_shr_s",
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3162,9 +3215,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                         my $ptr = $inst->operands->[0];
+                        my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
+                        my $op = $bits >= 64 ? 'i64_load' : 'i32_load';
                         $mbb->add_instruction( $self->_wasm_push($ptr, 'load: ptr') );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_load', operands => [], comment => 'load' )
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'load' )
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3176,10 +3231,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
                         my ($val, $ptr) = $inst->operands->@*;
+                        my $bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 32;
+                        my $op = $bits >= 64 ? 'i64_store' : 'i32_store';
                         $mbb->add_instruction( $self->_wasm_push($ptr, 'store: ptr') );
                         $mbb->add_instruction( $self->_wasm_push($val, 'store: val') );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'store' )
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'store' )
                         );
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
@@ -3253,7 +3310,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ICmp') ) {
                         my ($lhs, $rhs) = $inst->operands->@*;
                         my $pred = $inst->predicate;
-                        my %map = (eq => 'i32_eq', ne => 'i32_ne', slt => 'i32_lt_s', sgt => 'i32_gt_s', sle => 'i32_le_s', sge => 'i32_ge_s', ult => 'i32_lt_u', ugt => 'i32_gt_u', ule => 'i32_le_u', uge => 'i32_ge_u');
+                        my $bits = $lhs->type && $lhs->type->kind eq 'int' ? $lhs->type->bits : 32;
+                        my $p = $bits >= 64 ? 'i64' : 'i32';
+                        my %map = (eq => "${p}_eq", ne => "${p}_ne", slt => "${p}_lt_s", sgt => "${p}_gt_s", sle => "${p}_le_s", sge => "${p}_ge_s", ult => "${p}_lt_u", ugt => "${p}_gt_u", ule => "${p}_le_u", uge => "${p}_ge_u");
                         $mbb->add_instruction( $self->_wasm_push( $lhs, 'icmp lhs' ) );
                         $mbb->add_instruction( $self->_wasm_push( $rhs, 'icmp rhs' ) );
                         $mbb->add_instruction(
@@ -3283,8 +3342,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
         method _wasm_push( $ir_val, $label ) {
             if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
+                my $bits = $ir_val->type && $ir_val->type->kind eq 'int' ? $ir_val->type->bits : 32;
+                my $op = $bits >= 64 ? 'i64_const' : 'i32_const';
                 return Brocken::Jenny::MIR::MachineInstruction->new(
-                    opcode   => 'i32_const',
+                    opcode   => $op,
                     operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value ) ],
                     comment  => "push $label=" . $ir_val->value
                 );
@@ -5865,8 +5926,11 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         my $type_idx = 0;
         my $func_idx = 0;
 
-        # Type Section (ID 1): () -> i32
-        my $type_sec = pack( 'C', 0x60 ) . "\x00\x01\x7F";    # form=func, params=0, returns=1, i32
+        # Type Section (ID 1): () -> return_type
+        my $ret_valtype = $codegen_output->{return_valtype} // 0x7F;
+        my $type_sec = $ret_valtype eq 'void'
+            ? pack( 'C', 0x60 ) . "\x00\x00"
+            : pack( 'C', 0x60 ) . "\x00\x01" . pack( 'C', $ret_valtype );
         $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb(1) . $type_sec;
 
         # Memory Section (ID 5): 1 page (64KB)
@@ -6971,6 +7035,109 @@ subtest Jenny => sub {
             }
             else {
                 skip 'Neither wesmtime nor node are installed', 1;
+            }
+        }
+        unlink $output_file if -e $output_file;
+    };
+    subtest 'Jenny::Codegen i64 Arithmetic (Wasm)' => sub {
+        my $host     = Brocken::Katsuro::Platform::parse();
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i64() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        my $v1 = $builder->build_add(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 4000000000 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1000000000 ),
+            '%v1'
+        );
+        my $v2 = $builder->build_sub( $v1, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 8 ), '%v2' );
+        $builder->build_ret($v2);
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        ok( length( $res->{body} ) > 0, 'Generated Wasm i64 math bytes' );
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './i64_math_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm i64 math file exists' );
+        my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+        my $node_path = `which node 2>/dev/null`;
+        chomp $node_path if $node_path;
+    SKIP: {
+            if ( $wasmtime_path && -x $wasmtime_path ) {
+                my $output = qx["$wasmtime_path" run --invoke main $output_file];
+                chomp $output;
+                is $output, 4999999992, 'i64 math (4000000000+1000000000-8=4999999992) via wasmtime';
+            }
+            elsif ( $node_path && -x $node_path ) {
+                my $js = sprintf <<~'', $output_file;
+                    const fs = require('fs'); const buf = fs.readFileSync('%s');
+                    WebAssembly.instantiate(buf)
+                        .then(res => {
+                            const result = res.instance.exports.main();
+                            const big = BigInt(result);
+                            process.exit(big === 4999999992n ? 0 : 1);
+                        })
+                        .catch(e => { console.error(e); process.exit(1); });
+
+                system( 'node', '-e', $js );
+                is $? >> 8, 0, 'i64 math (4000000000+1000000000-8=4999999992) via node';
+            }
+            else {
+                skip 'Neither wasmtime nor node are installed', 1;
+            }
+        }
+        unlink $output_file if -e $output_file;
+    };
+    subtest 'Jenny::Codegen i64 Memory (Wasm)' => sub {
+        my $host     = Brocken::Katsuro::Platform::parse();
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i64() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        my $ptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%ptr' );
+        $builder->build_store(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 5000000000 ),
+            $ptr
+        );
+        my $val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $ptr, '%val' );
+        $builder->build_ret($val);
+
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        ok( length( $res->{body} ) > 0, 'Generated Wasm i64 memory bytes' );
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './i64_mem_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm i64 memory file exists' );
+        my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+        my $node_path = `which node 2>/dev/null`;
+        chomp $node_path if $node_path;
+    SKIP: {
+            if ( $wasmtime_path && -x $wasmtime_path ) {
+                my $output = qx["$wasmtime_path" run --invoke main $output_file];
+                chomp $output;
+                is $output, 5000000000, 'i64 memory store/load 5000000000 via wasmtime';
+            }
+            elsif ( $node_path && -x $node_path ) {
+                my $js = sprintf <<~'', $output_file;
+                    const fs = require('fs'); const buf = fs.readFileSync('%s');
+                    WebAssembly.instantiate(buf)
+                        .then(res => {
+                            const result = res.instance.exports.main();
+                            const big = BigInt(result);
+                            process.exit(big === 5000000000n ? 0 : 1);
+                        })
+                        .catch(e => { console.error(e); process.exit(1); });
+
+                system( 'node', '-e', $js );
+                is $? >> 8, 0, 'i64 memory store/load 5000000000 via node';
+            }
+            else {
+                skip 'Neither wasmtime nor node are installed', 1;
             }
         }
         unlink $output_file if -e $output_file;
