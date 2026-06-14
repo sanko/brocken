@@ -348,6 +348,7 @@ Brocken uses a four-part "normalized" triple format: C<arch-vendor-os-env>.
 
         #~ Register queries from ABI
         method registers( $category = 'available' ) { $self->abi->registers($category) }
+        method fp_registers( $category = 'available' ) { $self->abi->fp_registers($category) }
         method caller_saved()                       { $self->abi->caller_saved }
         method callee_saved()                       { $self->abi->callee_saved }
         method frame_reg()                          { $self->abi->frame_reg }
@@ -376,6 +377,7 @@ conventions (e.g., which registers are preserved across calls).
                 return $class->new;
             }
             method registers( $category = 'available' ) { [] }
+            method fp_registers( $category = 'available' ) { [] }
             method caller_saved()                       { $self->registers('caller') }
             method callee_saved()                       { $self->registers('callee') }
             method frame_reg()                          {undef}
@@ -393,6 +395,15 @@ conventions (e.g., which registers are preserved across calls).
                     available => [qw[rax rcx rdx rbx rsi rdi r8 r9 r10 r11 r12 r13 r14 r15]],
                     caller    => [qw[rax rcx rdx rsi rdi r8 r9 r10 r11]],
                     callee    => [qw[rbx r12 r13 r14 r15]]
+                );
+                return $data{$category} // [];
+            }
+            # SSE/AVX XMM registers (all caller-saved on SysV AMD64)
+            method fp_registers( $category = 'available' ) {
+                my %data = (
+                    available => [qw[xmm0 xmm1 xmm2 xmm3 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15]],
+                    caller    => [qw[xmm0 xmm1 xmm2 xmm3 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15]],
+                    callee    => [],
                 );
                 return $data{$category} // [];
             }
@@ -798,6 +809,7 @@ data type (SV* equivalent). It contains a type tag and a payload.
         sub i16     { state $t //= __PACKAGE__->new( kind => 'int', bits => 16 );      $t }    # short / int16 / uint16
         sub i32     { state $t //= __PACKAGE__->new( kind => 'int', bits => 32 );      $t }    # int / char / int32 / uint32
         sub i64     { state $t //= __PACKAGE__->new( kind => 'int', bits => 64 );      $t }    # long / int64 / uint64
+        sub i128    { state $t //= __PACKAGE__->new( kind => 'int', bits => 128 );     $t }    # __int128
         sub f32     { state $t //= __PACKAGE__->new( kind => 'float', bits => 32 );    $t }    # float
         sub f64     { state $t //= __PACKAGE__->new( kind => 'float', bits => 64 );    $t }    # double
         sub ptr     { state $t //= __PACKAGE__->new( kind => 'ptr' );                  $t }    # opaque pointer
@@ -1226,9 +1238,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
             my $mf      = $lowerer->lower($ir_func);
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
-            my $result  = $alloc->allocate( $mf, $platform );
-            $alloc->insert_spill_code( $mf, $result->{spill_slots}, $result->{spill_temp}, $platform->stack_reg );
-            return $self->_encode( $mf, $result->{assignment}, $result->{used_callee} );
+            my $int_res = $alloc->allocate( $mf, $platform, 0 );
+            $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
+            my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+            $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
+            my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+            my @used_callee = $int_res->{used_callee}->@*;
+            return $self->_encode( $mf, \%assignment, \@used_callee );
         }
 
         # Encode MIR to x86_64 machine code bytes (registers pre-allocated)
@@ -1236,6 +1252,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             my $bytes       = '';
             my $total_frame = 0;
             my %reg_id_map  = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
+            for my $i ( 0 .. 15 ) { $reg_id_map{ "xmm$i" } = $i }
             my $reg_id = sub ($r) { return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
 
             for my $reg ( $used_callee->@* ) {
@@ -1417,6 +1434,63 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         $bytes .= pack( 'C', 0xC7 ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
                         $bytes .= pack( 'V', $imm->value );
+                    }
+                    # SSE float opcodes
+                    elsif ( $opcode eq 'fload' ) {
+                        my $dst_r  = $resolve->($dst);
+                        my $did    = $reg_id->($dst_r);
+                        my ( $modrm, $extra ) = $mem_modrm->( $src, $did );
+                        my $bits   = $dst->type ? $dst->type->bits : 32;
+                        my $op     = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
+                        my $rex    = 0x40 | ( $did >= 8 ? 4 : 0 );
+                        if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'CCC', $op->@* ) . pack( 'C', $modrm );
+                        $bytes .= join '', $extra->@*;
+                    }
+                    elsif ( $opcode eq 'fstore' ) {
+                        my $src_r  = $resolve->($src);
+                        my $sid    = $reg_id->($src_r);
+                        my ( $modrm, $extra ) = $mem_modrm->( $dst, $sid );
+                        my $bits   = $src->type ? $src->type->bits : 32;
+                        my $op     = $bits >= 64 ? [ 0xF2, 0x0F, 0x11 ] : [ 0xF3, 0x0F, 0x11 ];
+                        my $rex    = 0x40 | ( $sid >= 8 ? 1 : 0 );
+                        if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'CCC', $op->@* ) . pack( 'C', $modrm );
+                        $bytes .= join '', $extra->@*;
+                    }
+                    elsif ( $opcode eq 'fmov' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $src_r = $resolve->($src);
+                        my $did   = $reg_id->($dst_r);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 32;
+                        my $op    = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
+                        my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                        $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
+                    }
+                    elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $src_r = $resolve->($src);
+                        my $did   = $reg_id->($dst_r);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 32;
+                        my %ss_op = ( fadd => 0x58, fsub => 0x5C, fmul => 0x59, fdiv => 0x5E );
+                        my $op    = $bits >= 64 ? [ 0xF2, 0x0F, $ss_op{$opcode} ] : [ 0xF3, 0x0F, $ss_op{$opcode} ];
+                        my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                        $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
+                    }
+                    elsif ( $opcode eq 'fcmp' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $src_r = $resolve->($src);
+                        my $did   = $reg_id->($dst_r);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 32;
+                        my $op    = $bits >= 64 ? [ 0x66, 0x0F, 0x2E ] : [ 0x0F, 0x2E ];
+                        my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                        $bytes .= pack( 'C' x ( $bits >= 64 ? 4 : 3 ), $rex, $op->@* ) . pack( 'C', $modrm );
                     }
                     elsif ( $opcode eq 'label' ) {
                         $labels{ $dst->value } = $current_offset->();
@@ -1855,7 +1929,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
         method _wasm_valtype($ir_type) {
             return 0x7F if $ir_type->kind eq 'int' && $ir_type->bits <= 32;    # i32
-            return 0x7E if $ir_type->kind eq 'int' && $ir_type->bits >= 64;    # i64
+            return 0x7E if $ir_type->kind eq 'int' && $ir_type->bits == 64;    # i64
             return 0x7D if $ir_type->kind eq 'float' && $ir_type->bits <= 32;  # f32
             return 0x7C if $ir_type->kind eq 'float' && $ir_type->bits >= 64;  # f64
             return 0x7F;                                                        # default i32
@@ -2163,19 +2237,22 @@ like ELF, Mach-O, or PE (Jenny::Linker).
     }
 
     class Brocken::Jenny::RegAlloc::LinearScan {
-        method allocate($mf, $platform) {
-            my @intervals = $self->_compute_live_intervals($mf);
-            return $self->_linear_scan(\@intervals, $platform);
+        method allocate($mf, $platform, $is_float = 0) {
+            my @intervals = $self->_compute_live_intervals($mf, $is_float);
+            return $self->_linear_scan(\@intervals, $platform, $is_float);
         }
 
-        method _compute_live_intervals($mf) {
+        method _compute_live_intervals($mf, $is_float) {
             my (%first, %last);
             my $idx = 0;
             for my $bb ( $mf->blocks->@* ) {
                 for my $inst ( $bb->instructions->@* ) {
                     for my $op ( $inst->operands->@* ) {
                         if ( $op->kind eq 'virt_reg' ) {
-                            my $name = $op->value;
+                            my $name = $op->name;
+                            my $type = $op->type;
+                            my $is_f = $type && $type->kind eq 'float';
+                            next if $is_float != $is_f;
                             $first{$name} //= $idx;
                             $last{$name}  = $idx;
                         }
@@ -2198,9 +2275,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             return @intervals;
         }
 
-        method _linear_scan( $intervals, $platform ) {
-            my @caller_regs = $platform->registers('caller')->@*;
-            my @callee_regs = $platform->registers('callee')->@*;
+        method _linear_scan( $intervals, $platform, $is_float ) {
+            my @caller_regs = $is_float ? $platform->fp_registers('caller')->@* : $platform->registers('caller')->@*;
+            my @callee_regs = $is_float ? $platform->fp_registers('callee')->@* : $platform->registers('callee')->@*;
             my $spill_temp  = pop @caller_regs;
             my @regs        = ( @caller_regs, @callee_regs );
 
@@ -2241,8 +2318,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             };
         }
 
-        method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg ) {
+        method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0 ) {
             return unless $spill_slots && keys %$spill_slots;
+            my $load_op  = $is_float ? 'fload' : 'load';
+            my $store_op = $is_float ? 'fstore' : 'store';
             for my $vreg ( keys %$spill_slots ) {
                 my $offset = $spill_slots->{$vreg};
                 for my $bb ( $mf->blocks->@* ) {
@@ -2282,7 +2361,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 type  => undef,
                             );
                             push @new, Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => 'load',
+                                opcode => $load_op,
                                 operands => [
                                     Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp ),
                                     $mem,
@@ -2305,7 +2384,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 type  => undef,
                             );
                             push @new, Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => 'store',
+                                opcode => $store_op,
                                 operands => [
                                     $mem,
                                     Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp ),
@@ -2784,6 +2863,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
         method _type_tag($type) {
             return 1 if $type->kind eq 'int' && $type->bits <= 32;
             return 2 if $type->kind eq 'int' && $type->bits == 64;
+            return 6 if $type->kind eq 'int' && $type->bits == 128;
             return 3 if $type->kind eq 'float';
             return 4 if $type->kind eq 'ptr';
             return 5 if $type->kind eq 'dynamic';
@@ -3106,6 +3186,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
         method _type_tag($type) {
             return 1 if $type->kind eq 'int' && $type->bits <= 32;
             return 2 if $type->kind eq 'int' && $type->bits == 64;
+            return 6 if $type->kind eq 'int' && $type->bits == 128;
             return 3 if $type->kind eq 'float';
             return 4 if $type->kind eq 'ptr';
             return 5 if $type->kind eq 'dynamic';
@@ -3376,6 +3457,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
         method _type_tag($type) {
             return 1 if $type->kind eq 'int' && $type->bits <= 32;
             return 2 if $type->kind eq 'int' && $type->bits == 64;
+            return 6 if $type->kind eq 'int' && $type->bits == 128;
             return 3 if $type->kind eq 'float';
             return 4 if $type->kind eq 'ptr';
             return 5 if $type->kind eq 'dynamic';
@@ -5973,6 +6055,7 @@ subtest Lindsay => sub {
         my $i16  = Brocken::Lindsay::IR::Type::i16();
         my $i32  = Brocken::Lindsay::IR::Type::i32();
         my $i64  = Brocken::Lindsay::IR::Type::i64();
+        my $i128 = Brocken::Lindsay::IR::Type::i128();
         my $f32  = Brocken::Lindsay::IR::Type::f32();
         my $f64  = Brocken::Lindsay::IR::Type::f64();
         my $ptr  = Brocken::Lindsay::IR::Type::ptr();
@@ -5983,6 +6066,7 @@ subtest Lindsay => sub {
         is $i16->as_string,  'i16',  'i16 renders correctly';
         is $i32->as_string,  'i32',  'i32 renders correctly';
         is $i64->as_string,  'i64',  'i64 renders correctly';
+        is $i128->as_string, 'i128', 'i128 renders correctly';
         is $f32->as_string,  'f32',  'f32 renders correctly';
         is $f64->as_string,  'f64',  'f64 renders correctly';
         is $ptr->as_string,  'ptr',  'ptr renders correctly';
@@ -5995,6 +6079,7 @@ subtest Lindsay => sub {
         ref_is $i8,  Brocken::Lindsay::IR::Type::i8(),  'i8 singleton';
         ref_is $i16, Brocken::Lindsay::IR::Type::i16(), 'i16 singleton';
         ref_is $i64, Brocken::Lindsay::IR::Type::i64(), 'i64 singleton';
+        ref_is $i128, Brocken::Lindsay::IR::Type::i128(), 'i128 singleton';
         ref_is $f32, Brocken::Lindsay::IR::Type::f32(), 'f32 singleton';
         ref_is $f64, Brocken::Lindsay::IR::Type::f64(), 'f64 singleton';
         ref_is $ptr, Brocken::Lindsay::IR::Type::ptr(), 'ptr singleton';
