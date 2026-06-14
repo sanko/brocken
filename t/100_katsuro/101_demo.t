@@ -794,14 +794,19 @@ data type (SV* equivalent). It contains a type tag and a payload.
 
         # Singletons for common types to save memory and allow `==` comparison
         sub i1      { state $t //= __PACKAGE__->new( kind => 'int', bits => 1 );       $t }    # bool
-        sub i32     { state $t //= __PACKAGE__->new( kind => 'int', bits => 32 );      $t }
-        sub i64     { state $t //= __PACKAGE__->new( kind => 'int', bits => 64 );      $t }
+        sub i8      { state $t //= __PACKAGE__->new( kind => 'int', bits => 8 );       $t }    # byte / int8 / uint8
+        sub i16     { state $t //= __PACKAGE__->new( kind => 'int', bits => 16 );      $t }    # short / int16 / uint16
+        sub i32     { state $t //= __PACKAGE__->new( kind => 'int', bits => 32 );      $t }    # int / char / int32 / uint32
+        sub i64     { state $t //= __PACKAGE__->new( kind => 'int', bits => 64 );      $t }    # long / int64 / uint64
+        sub f32     { state $t //= __PACKAGE__->new( kind => 'float', bits => 32 );    $t }    # float
+        sub f64     { state $t //= __PACKAGE__->new( kind => 'float', bits => 64 );    $t }    # double
         sub ptr     { state $t //= __PACKAGE__->new( kind => 'ptr' );                  $t }    # opaque pointer
         sub void    { state $t //= __PACKAGE__->new( kind => 'void' );                 $t }
         sub dynamic { state $t //= __PACKAGE__->new( kind => 'dynamic', bits => 128 ); $t }    # 16-byte Fat Scalar (Tag + Payload), our SV*
 
         method as_string() {
             return "i$bits" if $kind eq 'int';
+            return "f$bits" if $kind eq 'float';
             return $kind;
         }
     }
@@ -1216,92 +1221,270 @@ like ELF, Mach-O, or PE (Jenny::Linker).
     class Brocken::Jenny::Codegen::X86_64 {
         field $platform : param = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
 
-        # Simple x86_64 machine code mapping for our IR subset
+        # Lower Lindsay IR to MIR, allocate registers, then encode to x86_64 machine code
         method emit_function($ir_func) {
-            my $bytes = '';
-            my %vreg_map;
-            my @scratch      = $platform->registers('caller')->@*;
-            my $next_scratch = 0;
-            my $reg_to_id    = sub ($r) {
-                my %map = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
-                return $map{$r} if exists $map{$r};
-                return $1       if $r =~ /^r(\d+)$/;
-                return 0;
+            my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+            my $mf      = $lowerer->lower($ir_func);
+            my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
+            my $result  = $alloc->allocate( $mf, $platform );
+            $alloc->insert_spill_code( $mf, $result->{spill_slots}, $result->{spill_temp}, $platform->stack_reg );
+            return $self->_encode( $mf, $result->{assignment}, $result->{used_callee} );
+        }
+
+        # Encode MIR to x86_64 machine code bytes (registers pre-allocated)
+        method _encode( $mf, $assignment, $used_callee ) {
+            my $bytes       = '';
+            my $total_frame = 0;
+            my %reg_id_map  = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
+            my $reg_id = sub ($r) { return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
+
+            for my $reg ( $used_callee->@* ) {
+                my $rid = $reg_id->($reg);
+                if ( $rid < 8 ) { $bytes .= pack( 'C', 0x50 + $rid ) }
+                else            { $bytes .= pack( 'CC', 0x41, 0x50 + ( $rid - 8 ) ) }
+            }
+
+            my $resolve = sub ($op) {
+                return $assignment->{ $op->value } if $op->kind eq 'virt_reg';
+                return $op->value                  if $op->kind eq 'phys_reg';
+                die "Unexpected operand kind: ${\$op->kind}";
             };
 
-            # Iterate through basic blocks and instructions
-            for my $block ( $ir_func->blocks->@* ) {
-                for my $inst ( $block->instructions->@* ) {
-                    my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' ) {
-                        my ( $lhs, $rhs ) = $inst->operands->@*;
-                        my $phys = $scratch[ $next_scratch++ ];
-                        $vreg_map{ $inst->name } = $phys;
-                        my $rid = $reg_to_id->($phys);
+            my %labels;
+            my @fixups;
+            my $current_offset = sub { return length $bytes };
 
-                        # Load LHS into the destination physical register
-                        if ( $lhs->isa('Brocken::Lindsay::IR::Constant') ) {
+            my $mem_modrm = sub ($mem_op, $reg_idx) {
+                my $addr = $mem_op->value;
+                my $base_r = $resolve->(
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} )
+                );
+                my $bid  = $reg_id->($base_r);
+                my $disp = $addr->{disp} // 0;
+                my $rm   = $bid & 7;
+                my ( $mod, @extra );
 
-                            # mov r64, imm32
-                            if ( $rid < 8 ) { $bytes .= pack( 'CV', 0xB8 + $rid, $lhs->value ) }
-                            else            { $bytes .= pack( 'CCV', 0x41, 0xB8 + ( $rid - 8 ), $lhs->value ) }
+                if ( $rm == 4 ) {
+                    $rm = 4;
+                    if ( $disp == 0 )        { $mod = 0 }
+                    elsif ( $disp >= -128 && $disp <= 127 ) { $mod = 1; @extra = ( pack( 'c', $disp ), "\x24" ) }
+                    else                     { $mod = 2; @extra = ( pack( 'V', $disp ), "\x24" ) }
+                }
+                elsif ( $disp == 0 && $rm != 5 ) {
+                    $mod = 0;
+                }
+                else {
+                    if ( $disp >= -128 && $disp <= 127 ) { $mod = 1; @extra = ( pack( 'c', $disp ) ) }
+                    else                                 { $mod = 2; @extra = ( pack( 'V', $disp ) ) }
+                }
+                my $modrm = ( $mod << 6 ) | ( ( $reg_idx & 7 ) << 3 ) | $rm;
+                return ( $modrm, \@extra );
+            };
+
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    my $opcode   = $inst->opcode;
+                    my ( $dst, $src ) = $inst->operands->@*;
+
+                    if ( $opcode eq 'mov' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+
+                        if ( $src->kind eq 'imm' ) {
+                            my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
+                            my $rex_b = $did >= 8 ? 0x01 : 0x00;
+                            if ( $rex_w ) {
+                                $bytes .= pack( 'CCC', 0x48 | $rex_b, 0xC7, 0xC0 | ( $did & 7 ) );
+                                $bytes .= pack( 'V', $src->value );
+                            }
+                            elsif ( $rex_b ) {
+                                $bytes .= pack( 'CCV', 0x41, 0xB8 + ( $did & 7 ), $src->value );
+                            }
+                            else {
+                                $bytes .= pack( 'CV', 0xB8 + $did, $src->value );
+                            }
                         }
                         else {
-                            # mov r64, r/m64 (using 8B /r)
-                            my $src_phys = $vreg_map{ $lhs->name } // die 'Unknown vreg: ' . $lhs->name;
-                            my $sid      = $reg_to_id->($src_phys);
-                            my $rex      = 0x48 | ( $rid >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
-                            my $modrm    = 0xC0 | ( ( $rid & 7 ) << 3 ) | ( $sid & 7 );
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+                            my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
+                            my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                            my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
                             $bytes .= pack( 'CCC', $rex, 0x8B, $modrm );
                         }
+                    }
+                    elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my %imm_ext = ( add => 0, sub => 5, and => 4, or => 1, xor => 6 );
+                        my %reg_op  = ( add => 0x01, sub => 0x29, and => 0x21, or => 0x09, xor => 0x31 );
+                        my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
 
-                        # Perform the arithmetic operation with RHS
-                        if ( $rhs->isa('Brocken::Lindsay::IR::Constant') ) {
-
-                            # add/sub r/m64, imm32 (81 /0 or /5)
-                            my $rex   = 0x48 | ( $rid >= 8 ? 1 : 0 );
-                            my $ext   = ( $opcode eq 'add' ? 0 : 5 );
-                            my $modrm = 0xC0 | ( $ext << 3 ) | ( $rid & 7 );
-                            $bytes .= pack( 'CCCV', $rex, 0x81, $modrm, $rhs->value );
+                        if ( $src->kind eq 'imm' ) {
+                            my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                            my $ext   = $imm_ext{$opcode};
+                            my $modrm = 0xC0 | ( $ext << 3 ) | ( $did & 7 );
+                            $bytes .= pack( 'CCCV', $rex, 0x81, $modrm, $src->value );
                         }
                         else {
-                            # add/sub r/m64, r64 (01 /r or 29 /r)
-                            my $src_phys = $vreg_map{ $rhs->name } // die 'Unknown vreg: ' . $rhs->name;
-                            my $sid      = $reg_to_id->($src_phys);
-                            my $rex      = 0x48 | ( $sid >= 8 ? 4 : 0 ) | ( $rid >= 8 ? 1 : 0 );
-                            my $op       = ( $opcode eq 'add' ? 0x01 : 0x29 );
-                            my $modrm    = 0xC0 | ( ( $sid & 7 ) << 3 ) | ( $rid & 7 );
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+                            my $rex   = 0x40 | $rex_w | ( $sid >= 8 ? 4 : 0 ) | ( $did >= 8 ? 1 : 0 );
+                            my $op    = $reg_op{$opcode};
+                            my $modrm = 0xC0 | ( ( $sid & 7 ) << 3 ) | ( $did & 7 );
                             $bytes .= pack( 'CCC', $rex, $op, $modrm );
                         }
                     }
-                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
-                        if ( $inst->type->kind eq 'void' ) {
-                            $bytes .= pack( 'C', 0xC3 );    # ret
+                    elsif ( $opcode eq 'mul' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
+                        if ( $src->kind eq 'imm' ) {
+                            # imul dst, dst, imm32  => REX.W 69 /r
+                            my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                            my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $did & 7 );
+                            $bytes .= pack( 'CCCV', $rex, 0x69, $modrm, $src->value );
                         }
                         else {
-                            my $val = $inst->operands->[0];
-                            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
-
-                                # mov eax, imm32
-                                $bytes .= pack( 'CV', 0xB8, $val->value );
-                            }
-                            else {
-                                # Move virtual register result into RAX
-                                my $phys = $vreg_map{ $val->name } // die 'Unknown vreg: ' . $val->name;
-                                if ( $phys ne 'rax' ) {
-                                    my $sid   = $reg_to_id->($phys);
-                                    my $rex   = 0x48 | ( $sid >= 8 ? 1 : 0 );
-                                    my $modrm = 0xC0 | ( 0 << 3 ) | ( $sid & 7 );    # mov rax, r64
-                                    $bytes .= pack( 'CCC', $rex, 0x8B, $modrm );
-                                }
-                            }
-                            $bytes .= pack( 'C', 0xC3 );                             # ret
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+                            my $rex   = 0x40 | $rex_w | ( $sid >= 8 ? 4 : 0 ) | ( $did >= 8 ? 1 : 0 );
+                            # imul dst, src  => REX.W 0F AF /r
+                            my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                            $bytes .= pack( 'CCC', $rex, 0x0F, 0xAF ) . pack( 'C', $modrm );
                         }
                     }
-                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') || $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
-
-                        # Stub: Gradual typing boxing/unboxing operations
+                    elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                        my $dst_r  = $resolve->($dst);
+                        my $did    = $reg_id->($dst_r);
+                        my $bits   = $dst->type ? $dst->type->bits : 64;
+                        my %ext    = ( shl => 4, lshr => 5, ashr => 7 );
+                        my $rex_w  = ( $bits >= 64 ) ? 0x08 : 0x00;
+                        my $rex    = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                        my $extval = $ext{$opcode};
+                        if ( $src->kind eq 'imm' ) {
+                            # shift by imm8: REX.W C1 /ext ib
+                            my $modrm = 0xC0 | ( $extval << 3 ) | ( $did & 7 );
+                            $bytes .= pack( 'CCCC', $rex, 0xC1, $modrm, $src->value );
+                        }
+                        else {
+                            die "x86_64 shift by register requires CL" . ( $src->value // '' );
+                        }
                     }
+                    elsif ( $opcode eq 'alloca' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $size  = $src->value;
+                        $total_frame += $size;
+                        # sub rsp, size  (48 81 EC <size32>) — rsp is always 64-bit
+                        my $rex   = 0x48;
+                        my $modrm = 0xC0 | ( 5 << 3 ) | 4;    # /5 = sub, r/m = rsp
+                        $bytes .= pack( 'CCCV', $rex, 0x81, $modrm, $size );
+                        # mov dst, rsp  (48 8B <modrm>) — rsp is always 64-bit
+                        my $rex2  = 0x48 | ( $did >= 8 ? 4 : 0 );
+                        my $mr2   = 0xC0 | ( ( $did & 7 ) << 3 ) | 4;
+                        $bytes .= pack( 'CCC', $rex2, 0x8B, $mr2 );
+                    }
+                    elsif ( $opcode eq 'load' ) {
+                        my $dst_r  = $resolve->($dst);
+                        my $did    = $reg_id->($dst_r);
+                        my ( $modrm, $extra ) = $mem_modrm->( $src, $did );
+                        my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
+                        my $rex = ( $bits == 64 ? 0x48 : 0 ) | ( $did >= 8 ? 4 : 0 );
+                        if ( $rex ) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'C', 0x8B ) . pack( 'C', $modrm );
+                        $bytes .= join '', $extra->@*;
+                    }
+                    elsif ( $opcode eq 'store' ) {
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my ( $modrm, $extra ) = $mem_modrm->( $dst, $sid );
+                        my $bits = ($src->type && $src->type->kind eq 'int') ? $src->type->bits : 64;
+                        my $rex = ( $bits == 64 ? 0x48 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                        if ( $rex ) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'C', 0x89 ) . pack( 'C', $modrm );
+                        $bytes .= join '', $extra->@*;
+                    }
+                    elsif ( $opcode eq 'store_imm' ) {
+                        my ( $mem, $imm ) = $inst->operands->@*;
+                        my ( $modrm, $extra ) = $mem_modrm->( $mem, 0 );    # /0 ext = mov
+                        my $bits = ($imm->type && $imm->type->kind eq 'int') ? $imm->type->bits : 64;
+                        my $rex = ( $bits == 64 ? 0x48 : 0 );
+                        if ( $rex ) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'C', 0xC7 ) . pack( 'C', $modrm );
+                        $bytes .= join '', $extra->@*;
+                        $bytes .= pack( 'V', $imm->value );
+                    }
+                    elsif ( $opcode eq 'label' ) {
+                        $labels{ $dst->value } = $current_offset->();
+                    }
+                    elsif ( $opcode eq 'jmp' ) {
+                        push @fixups, { offset => $current_offset->(), type => 'jmp_rel32', target => $dst->value, size => 5 };
+                        $bytes .= pack( 'C', 0xE9 ) . "\x00\x00\x00\x00";
+                    }
+                    elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
+                        my $cond_r = $resolve->($dst);
+                        my $cid    = $reg_id->($cond_r);
+                        # cmp reg, 0: REX.W 83 /7 0  (4 bytes)
+                        my $rex   = 0x48 | ( $cid >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( 7 << 3 ) | ( $cid & 7 );
+                        $bytes .= pack( 'CCCC', $rex, 0x83, $modrm, 0 );
+                        my $jcc = ( $opcode eq 'beq' ? 0x84 : 0x85 );
+                        push @fixups, { offset => $current_offset->(), type => 'jcc_rel32', jcc => $jcc, target => $src->value, size => 6 };
+                        $bytes .= pack( 'CC', 0x0F, $jcc ) . "\x00\x00\x00\x00";
+                    }
+                    elsif ( $opcode eq 'cmp' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
+                        if ( $src->kind eq 'imm' ) {
+                            my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                            my $modrm = 0xC0 | ( 7 << 3 ) | ( $did & 7 );
+                            $bytes .= pack( 'CCCV', $rex, 0x81, $modrm, $src->value );
+                        }
+                        else {
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+                            my $rex   = 0x40 | $rex_w | ( $sid >= 8 ? 4 : 0 ) | ( $did >= 8 ? 1 : 0 );
+                            my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                            $bytes .= pack( 'CCC', $rex, 0x3B, $modrm );
+                        }
+                    }
+                    elsif ( $opcode eq 'sete' || $opcode eq 'setne' || $opcode eq 'setl' || $opcode eq 'setg' || $opcode eq 'setle' || $opcode eq 'setge' || $opcode eq 'setb' || $opcode eq 'seta' || $opcode eq 'setbe' || $opcode eq 'setae' ) {
+                        my %cc = ( sete => 0x94, setne => 0x95, setl => 0x9C, setg => 0x9F, setle => 0x9E, setge => 0x9D, setb => 0x92, seta => 0x97, setbe => 0x96, setae => 0x93 );
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $rex   = 0x40 | ( $did >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $did & 7 );
+                        $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
+                    }
+                    elsif ( $opcode eq 'ret' ) {
+                        if ( $total_frame > 0 ) {
+                            $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 0 << 3 ) | 4, $total_frame );
+                        }
+                        for my $reg ( reverse $used_callee->@* ) {
+                            my $rid = $reg_id->($reg);
+                            if ( $rid < 8 ) { $bytes .= pack( 'C', 0x58 + $rid ) }
+                            else            { $bytes .= pack( 'CC', 0x41, 0x58 + ( $rid - 8 ) ) }
+                        }
+                        $bytes .= pack( 'C', 0xC3 );
+                    }
+                }
+            }
+            for my $fixup ( @fixups ) {
+                my $target_pos = $labels{ $fixup->{target} };
+                die "undefined label: $fixup->{target}" unless defined $target_pos;
+                my $src_pos = $fixup->{offset};
+                my $rel = $target_pos - ( $src_pos + $fixup->{size} );
+                if ( $fixup->{type} eq 'jmp_rel32' ) {
+                    substr $bytes, $fixup->{offset} + 1, 4, pack( 'V', $rel & 0xFFFFFFFF );
+                }
+                elsif ( $fixup->{type} eq 'jcc_rel32' ) {
+                    substr $bytes, $fixup->{offset} + 2, 4, pack( 'V', $rel & 0xFFFFFFFF );
                 }
             }
             return $bytes;
@@ -1311,120 +1494,230 @@ like ELF, Mach-O, or PE (Jenny::Linker).
     class Brocken::Jenny::Codegen::RISCV64 {
         field $platform : param = Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu');
 
-        # Simple RISC-V 64-bit machine code generator
         method emit_function($ir_func) {
-            my $bytes = '';
-            my %vreg_map;
-            my @scratch      = $platform->registers('caller')->@*;
-            my $next_scratch = 0;
-            my $reg_to_id    = sub ($r) {
+            my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
+            my $mf      = $lowerer->lower($ir_func);
+            my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
+            my $result  = $alloc->allocate( $mf, $platform );
+            $alloc->insert_spill_code( $mf, $result->{spill_slots}, $result->{spill_temp}, $platform->stack_reg );
+            return $self->_encode( $mf, $result->{assignment}, $result->{used_callee} );
+        }
+
+        method _encode( $mf, $assignment, $used_callee ) {
+            my $bytes        = '';
+            my $total_frame  = 0;
+            my $callee_frame = scalar($used_callee->@*) * 8;
+            my $reg_id    = sub ($r) {
                 my %map = (
-                    zero => 0,
-                    ra   => 1,
-                    sp   => 2,
-                    gp   => 3,
-                    tp   => 4,
-                    t0   => 5,
-                    t1   => 6,
-                    t2   => 7,
-                    s0   => 8,
-                    fp   => 8,
-                    s1   => 9,
-                    a0   => 10,
-                    a1   => 11,
-                    a2   => 12,
-                    a3   => 13,
-                    a4   => 14,
-                    a5   => 15,
-                    a6   => 16,
-                    a7   => 17,
-                    s2   => 18,
-                    s3   => 19,
-                    s4   => 20,
-                    s5   => 21,
-                    s6   => 22,
-                    s7   => 23,
-                    s8   => 24,
-                    s9   => 25,
-                    s10  => 26,
-                    s11  => 27,
-                    t3   => 28,
-                    t4   => 29,
-                    t5   => 30,
-                    t6   => 31
+                    zero => 0, ra => 1, sp => 2, gp => 3, tp => 4,
+                    t0 => 5, t1 => 6, t2 => 7, s0 => 8, fp => 8, s1 => 9,
+                    a0 => 10, a1 => 11, a2 => 12, a3 => 13, a4 => 14, a5 => 15,
+                    a6 => 16, a7 => 17, s2 => 18, s3 => 19, s4 => 20, s5 => 21,
+                    s6 => 22, s7 => 23, s8 => 24, s9 => 25, s10 => 26, s11 => 27,
+                    t3 => 28, t4 => 29, t5 => 30, t6 => 31
                 );
                 return $map{$r} // ( $r =~ /^x(\d+)$/ ? $1 : 0 );
             };
 
-            # Iterate through basic blocks and instructions
-            for my $block ( $ir_func->blocks->@* ) {
-                for my $inst ( $block->instructions->@* ) {
-                    my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' ) {
-                        my ( $lhs, $rhs ) = $inst->operands->@*;
-                        my $phys = $scratch[ $next_scratch++ ];
-                        $vreg_map{ $inst->name } = $phys;
-                        my $rd = $reg_to_id->($phys);
+            my $resolve = sub ($op) {
+                return $assignment->{ $op->value } if $op->kind eq 'virt_reg';
+                return $op->value                  if $op->kind eq 'phys_reg';
+                die "Unexpected operand kind: ${\$op->kind}";
+            };
 
-                        # Load LHS into the destination physical register
-                        if ( $lhs->isa('Brocken::Lindsay::IR::Constant') ) {
+            if ( $callee_frame > 0 ) {
+                my $neg = ( -$callee_frame ) & 0xFFF;
+                $bytes .= pack( 'V', ( $neg << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | 0x13 );
+                for my $i ( 0 .. $used_callee->$#* ) {
+                    my $rid    = $reg_id->( $used_callee->[$i] );
+                    my $off    = $i * 8;
+                    my $imm_lo = $off & 0x1F;
+                    my $imm_hi = ( $off >> 5 ) & 0x7F;
+                    $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | 0x23 );
+                }
+            }
 
+            my %labels;
+            my @fixups;
+            my $current_offset = sub { return length $bytes };
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    my $opcode   = $inst->opcode;
+                    my ( $dst, $src ) = $inst->operands->@*;
+
+                    if ( $opcode eq 'label' ) {
+                        $labels{ $dst->value } = $current_offset->();
+                    }
+                    elsif ( $opcode eq 'jmp' ) {
+                        push @fixups, { offset => $current_offset->(), type => 'jal', target => $dst->value };
+                        $bytes .= pack( 'V', 0x0000006F );
+                    }
+                    elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
+                        my $cond_r = $resolve->($dst);
+                        my $cid    = $reg_id->($cond_r);
+                        my $funct3 = ( $opcode eq 'bne' ? 1 : 0 );
+                        # BEQ/BNE rs1=cond, rs2=x0, offset placeholder
+                        push @fixups, { offset => $current_offset->(), type => 'bcc', target => $src->value, rs1 => $cid, funct3 => $funct3 };
+                        $bytes .= pack( 'V', ( $cid << 15 ) | ( $funct3 << 12 ) | 0x63 );
+                    }
+                    elsif ( $opcode eq 'mv' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+
+                        if ( $src->kind eq 'imm' ) {
                             # li rd, imm (addi rd, zero, imm)
-                            my $imm = $lhs->value & 0xFFF;
-                            $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13 );
+                            my $imm = $src->value & 0xFFF;
+                            $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x13 );
                         }
                         else {
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
                             # mv rd, rs (addi rd, rs, 0)
-                            my $src_phys = $vreg_map{ $lhs->name } // die 'Unknown vreg: ' . $lhs->name;
-                            my $rs       = $reg_to_id->($src_phys);
-                            $bytes .= pack( 'V', ( 0 << 20 ) | ( $rs << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13 );
+                            $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x13 );
                         }
+                    }
+                    elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'mul' || $opcode eq 'slt' || $opcode eq 'sltu' || $opcode eq 'sltiu' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my %imm_f3 = ( add => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3, sltiu => 3 );
+                        my %reg_f7 = ( add => 0x00, sub => 0x20, mul => 0x01, and => 0x00, or => 0x00, xor => 0x00, slt => 0x00, sltu => 0x00 );
+                        my %reg_f3 = ( add => 0, sub => 0, mul => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3 );
 
-                        # Perform the arithmetic operation with RHS
-                        if ( $rhs->isa('Brocken::Lindsay::IR::Constant') ) {
-
-                            # addi/subi rd, rd, imm
-                            # RISC-V doesn't have subi, use addi with negative imm
-                            my $imm = $rhs->value;
+                        if ( $src->kind eq 'imm' && exists $imm_f3{$opcode} ) {
+                            # I-type: opcode 0x13, funct3 from %imm_f3
+                            my $imm = $src->value;
                             $imm = -$imm if $opcode eq 'sub';
                             $imm &= 0xFFF;
-                            $bytes .= pack( 'V', ( $imm << 20 ) | ( $rd << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13 );
+                            $bytes .= pack( 'V', ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | 0x13 );
                         }
                         else {
-                            # add/sub rd, rd, rs2
-                            my $src_phys = $vreg_map{ $rhs->name } // die 'Unknown vreg: ' . $rhs->name;
-                            my $rs2      = $reg_to_id->($src_phys);
-                            my $funct7   = ( $opcode eq 'add' ? 0x00 : 0x20 );
-                            $bytes .= pack( 'V', ( $funct7 << 25 ) | ( $rs2 << 20 ) | ( $rd << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x33 );
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+                            $bytes .= pack( 'V', ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | 0x33 );
                         }
                     }
-                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
-                        if ( $inst->type->kind eq 'void' ) {
-
-                            # ret (jalr zero, ra, 0)
-                            $bytes .= pack( 'V', 0x00008067 );
+                    elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        if ( $src->kind eq 'imm' ) {
+                            # I-type shift: SLLI/SRLI/SRAI, funct3=1/5/5, opcode=0x13
+                            my $shamt = $src->value;
+                            my %f3 = ( shl => 1, lshr => 5, ashr => 5 );
+                            my $extra = ( $opcode eq 'ashr' ? 0x20000000 : 0x00000000 );
+                            $bytes .= pack( 'V', $extra | ( $shamt << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | 0x13 );
                         }
                         else {
-                            my $val = $inst->operands->[0];
-                            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
-
-                                # li a0, imm (addi a0, zero, imm)
-                                my $imm = $val->value & 0xFFF;
-                                $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( 10 << 7 ) | 0x13 );
-                            }
-                            else {
-                                # mv a0, rs (addi a0, rs, 0)
-                                my $phys = $vreg_map{ $val->name } // die 'Unknown vreg: ' . $val->name;
-                                my $rs   = $reg_to_id->($phys);
-                                if ( $rs != 10 ) {
-                                    $bytes .= pack( 'V', ( 0 << 20 ) | ( $rs << 15 ) | ( 0 << 12 ) | ( 10 << 7 ) | 0x13 );
-                                }
-                            }
-
-                            # ret
-                            $bytes .= pack( 'V', 0x00008067 );
+                            # R-type shift: SLL/SRL/SRA, funct7=0x00/0x00/0x20, funct3=1/5/5
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+                            my %f3 = ( shl => 1, lshr => 5, ashr => 5 );
+                            my %f7 = ( shl => 0x00, lshr => 0x00, ashr => 0x20 );
+                            $bytes .= pack( 'V', ( $f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | 0x33 );
                         }
                     }
+                    elsif ( $opcode eq 'alloca' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $size  = $src->value;
+                        $total_frame += $size;
+                        # addi sp, sp, -size
+                        my $neg_size = ( -$size ) & 0xFFF;
+                        $bytes .= pack( 'V', ( $neg_size << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | 0x13 );
+                        # addi xd, sp, 0
+                        $bytes .= pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x13 );
+                    }
+                    elsif ( $opcode eq 'load' ) {
+                        my $dst_r  = $resolve->($dst);
+                        my $did    = $reg_id->($dst_r);
+                        my $addr   = $src->value;
+                        my $base_r = $resolve->(
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} )
+                        );
+                        my $bid    = $reg_id->($base_r);
+                        my $disp   = $addr->{disp} // 0;
+                        my $bits   = ($dst->type && $dst->type->kind eq 'int') ? $dst->type->bits : 64;
+                        my $funct3 = $bits == 32 ? 2 : 3;
+                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | 0x03 );
+                    }
+                    elsif ( $opcode eq 'store' ) {
+                        my $src_r  = $resolve->($src);
+                        my $sid    = $reg_id->($src_r);
+                        my $addr   = $dst->value;
+                        my $base_r = $resolve->(
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} )
+                        );
+                        my $bid    = $reg_id->($base_r);
+                        my $disp   = $addr->{disp} // 0;
+                        my $bits   = ($src->type && $src->type->kind eq 'int') ? $src->type->bits : 64;
+                        my $funct3 = $bits == 32 ? 2 : 3;
+                        my $imm_lo = $disp & 0x1F;
+                        my $imm_hi = ( $disp >> 5 ) & 0x7F;
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | 0x23 );
+                    }
+                    elsif ( $opcode eq 'store_imm' ) {
+                        my ($mem, $imm) = $inst->operands->@*;
+                        my $addr   = $mem->value;
+                        my $base_r = $resolve->(
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} )
+                        );
+                        my $bid    = $reg_id->($base_r);
+                        my $disp   = $addr->{disp} // 0;
+                        my $bits   = ($imm->type && $imm->type->kind eq 'int') ? $imm->type->bits : 64;
+                        my $funct3 = $bits == 32 ? 2 : 3;
+                        # find a temporary register not in use
+                        my %used;
+                        @used{ values %$assignment } = ();
+                        my $tmp_r;
+                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
+                        die 'no temp register for store_imm' unless $tmp_r;
+                        my $tid = $reg_id->($tmp_r);
+                        # li xtmp, imm  (addi xtmp, zero, imm12)
+                        my $im = $imm->value & 0xFFF;
+                        $bytes .= pack( 'V', ( $im << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | 0x13 );
+                        # sd/sw xtmp, disp(rs1)
+                        my $imm_lo = $disp & 0x1F;
+                        my $imm_hi = ( $disp >> 5 ) & 0x7F;
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | 0x23 );
+                    }
+                    elsif ( $opcode eq 'ret' ) {
+                        if ( $total_frame > 0 ) {
+                            $bytes .= pack( 'V', ( ( $total_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | 0x13 );
+                        }
+                        if ( $callee_frame > 0 ) {
+                            for my $i ( reverse 0 .. $used_callee->$#* ) {
+                                my $rid    = $reg_id->( $used_callee->[$i] );
+                                my $off    = $i * 8;
+                                $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | 0x03 );
+                            }
+                            $bytes .= pack( 'V', ( ( $callee_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | 0x13 );
+                        }
+                        $bytes .= pack( 'V', 0x00008067 );
+                    }
+                }
+            }
+            for my $fixup ( @fixups ) {
+                my $target_pos = $labels{ $fixup->{target} };
+                die "undefined label: $fixup->{target}" unless defined $target_pos;
+                my $rel = $target_pos - ( $fixup->{offset} + 4 );
+                if ( $fixup->{type} eq 'jal' ) {
+                    my $imm20 = ( $rel >> 1 ) & 0x1FFFFF;
+                    my $enc = ( ( $imm20 >> 20 ) & 1 ) << 31
+                            | ( ( $imm20 & 0x7FE ) << 20 )
+                            | ( ( $imm20 >> 11 ) & 1 ) << 20
+                            | ( $imm20 & 0xFF000 )
+                            | 0x6F;
+                    substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
+                }
+                elsif ( $fixup->{type} eq 'bcc' ) {
+                    my $imm13 = ( $rel >> 1 ) & 0x1FFF;
+                    my $enc = ( ( $imm13 >> 12 ) & 1 ) << 31
+                            | ( ( $imm13 >> 5 ) & 0x3F ) << 25
+                            | ( $fixup->{rs1} << 15 )
+                            | ( $fixup->{funct3} << 12 )
+                            | ( ( $imm13 & 0x1E ) << 7 )
+                            | ( ( $imm13 >> 11 ) & 1 ) << 7
+                            | 0x63;
+                    substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
                 }
             }
             return $bytes;
@@ -1434,77 +1727,87 @@ like ELF, Mach-O, or PE (Jenny::Linker).
     class Brocken::Jenny::Codegen::Wasm {
         field $platform : param = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 
-        # Simple WebAssembly machine code generator
         method emit_function($ir_func) {
+            my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
+            my $mf      = $lowerer->lower($ir_func);
+            return $self->_encode( $mf, $ir_func->params );
+        }
+
+        method _encode( $mf, $ir_params ) {
             my $bytes      = '';
             my %vreg_map   = ();
-            my $ir_params  = $ir_func->params;
             my $next_local = scalar( $ir_params->@* );
 
             # Map parameters to locals 0..N-1
             for my $i ( 0 .. ( $next_local - 1 ) ) {
-                my $p_name = $ir_params->[$i]->name;
-                $vreg_map{$p_name} = $i;
+                $vreg_map{ $ir_params->[$i]->name } = $i;
             }
 
-            # Wasm instructions
-            for my $block ( $ir_func->blocks->@* ) {
-                for my $inst ( $block->instructions->@* ) {
+            # Reserve a local for the linear-memory heap bump pointer
+            $vreg_map{'%heap_ptr'} = $next_local++;
+
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' ) {
-                        my ( $lhs, $rhs ) = $inst->operands->@*;
+                    my @ops    = $inst->operands->@*;
 
-                        # Push LHS
-                        if ( $lhs->isa('Brocken::Lindsay::IR::Constant') ) {
-                            $bytes .= pack( 'C', 0x41 ) . $self->_sleb( $lhs->value );
-                        }
-                        else {
-                            $bytes .= pack( 'C', 0x20 ) . $self->_uleb( $vreg_map{ $lhs->name } );
-                        }
-
-                        # Push RHS
-                        if ( $rhs->isa('Brocken::Lindsay::IR::Constant') ) {
-                            $bytes .= pack( 'C', 0x41 ) . $self->_sleb( $rhs->value );
-                        }
-                        else {
-                            $bytes .= pack( 'C', 0x20 ) . $self->_uleb( $vreg_map{ $rhs->name } );
-                        }
-
-                        # Opcode
-                        my %map = ( add => 0x6A, sub => 0x6B, mul => 0x6C );
-                        $bytes .= pack( 'C', $map{$opcode} );
-
-                        # Store result in a new local
-                        my $lid = $next_local++;
-                        $vreg_map{ $inst->name } = $lid;
-                        $bytes .= pack( 'C', 0x21 ) . $self->_uleb($lid);
+                    if ( $opcode eq 'local_get' ) {
+                        my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
+                        $bytes .= pack( 'C', 0x20 ) . $self->_uleb($lid);
                     }
-                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
-                        if ( $inst->type->kind ne 'void' ) {
-                            my $val = $inst->operands->[0];
-                            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
-                                $bytes .= pack( 'C', 0x41 ) . $self->_sleb( $val->value );
-                            }
-                            else {
-                                $bytes .= pack( 'C', 0x20 ) . $self->_uleb( $vreg_map{ $val->name } );
-                            }
-                        }
+                    elsif ( $opcode eq 'i32_const' ) {
+                        $bytes .= pack( 'C', 0x41 ) . $self->_sleb( $ops[0]->value );
+                    }
+                    elsif ( $opcode eq 'i32_add' )   { $bytes .= pack( 'C', 0x6A ) }
+                    elsif ( $opcode eq 'i32_sub' )   { $bytes .= pack( 'C', 0x6B ) }
+                    elsif ( $opcode eq 'i32_mul' )   { $bytes .= pack( 'C', 0x6C ) }
+                    elsif ( $opcode eq 'i32_and' )   { $bytes .= pack( 'C', 0x71 ) }
+                    elsif ( $opcode eq 'i32_or' )    { $bytes .= pack( 'C', 0x72 ) }
+                    elsif ( $opcode eq 'i32_xor' )   { $bytes .= pack( 'C', 0x73 ) }
+                    elsif ( $opcode eq 'i32_shl' )   { $bytes .= pack( 'C', 0x74 ) }
+                    elsif ( $opcode eq 'i32_shr_s' ) { $bytes .= pack( 'C', 0x75 ) }
+                    elsif ( $opcode eq 'i32_shr_u' ) { $bytes .= pack( 'C', 0x76 ) }
+                    elsif ( $opcode eq 'i32_load' ) {
+                        $bytes .= pack( 'C', 0x28 ) . $self->_uleb(2) . $self->_uleb(0);
+                    }
+                    elsif ( $opcode eq 'i32_store' ) {
+                        $bytes .= pack( 'C', 0x36 ) . $self->_uleb(2) . $self->_uleb(0);
+                    }
+                    elsif ( $opcode eq 'i32_eq' )   { $bytes .= pack( 'C', 0x46 ) }
+                    elsif ( $opcode eq 'i32_ne' )   { $bytes .= pack( 'C', 0x47 ) }
+                    elsif ( $opcode eq 'i32_lt_s' ) { $bytes .= pack( 'C', 0x48 ) }
+                    elsif ( $opcode eq 'i32_gt_s' ) { $bytes .= pack( 'C', 0x4A ) }
+                    elsif ( $opcode eq 'i32_le_s' ) { $bytes .= pack( 'C', 0x4C ) }
+                    elsif ( $opcode eq 'i32_ge_s' ) { $bytes .= pack( 'C', 0x4E ) }
+                    elsif ( $opcode eq 'i32_lt_u' ) { $bytes .= pack( 'C', 0x49 ) }
+                    elsif ( $opcode eq 'i32_gt_u' ) { $bytes .= pack( 'C', 0x4B ) }
+                    elsif ( $opcode eq 'i32_le_u' ) { $bytes .= pack( 'C', 0x4D ) }
+                    elsif ( $opcode eq 'i32_ge_u' ) { $bytes .= pack( 'C', 0x4F ) }
+                    elsif ( $opcode eq 'local_set' ) {
+                        my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
+                        $bytes .= pack( 'C', 0x21 ) . $self->_uleb($lid);
                     }
                 }
             }
 
-            # Return locals info and body
-            # For simplicity, all locals are i32
             my $num_params       = scalar( $ir_params->@* );
             my $num_extra_locals = $next_local - $num_params;
             my $locals_block     = '';
             if ( $num_extra_locals > 0 ) {
-                $locals_block = $self->_uleb(1) . $self->_uleb($num_extra_locals) . pack( 'C', 0x7F );    # 0x7F = i32
+                $locals_block = $self->_uleb(1) . $self->_uleb($num_extra_locals) . pack( 'C', 0x7F );
             }
             else {
                 $locals_block = $self->_uleb(0);
             }
             return { body => $bytes . pack( 'C', 0x0B ), locals => $locals_block, num_locals => $next_local };
+        }
+
+        method _wasm_valtype($ir_type) {
+            return 0x7F if $ir_type->kind eq 'int' && $ir_type->bits <= 32;    # i32
+            return 0x7E if $ir_type->kind eq 'int' && $ir_type->bits >= 64;    # i64
+            return 0x7D if $ir_type->kind eq 'float' && $ir_type->bits <= 32;  # f32
+            return 0x7C if $ir_type->kind eq 'float' && $ir_type->bits >= 64;  # f64
+            return 0x7F;                                                        # default i32
         }
 
         method _uleb ($v) {
@@ -1537,85 +1840,1485 @@ like ELF, Mach-O, or PE (Jenny::Linker).
     class Brocken::Jenny::Codegen::ARM64 {
         field $platform : param = Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu');
 
-        # Simple ARM64 / AArch64 machine code generator
         method emit_function($ir_func) {
-            my $bytes = '';
-            my %vreg_map;
-            my @scratch      = $platform->registers('caller')->@*;
-            my $next_scratch = 0;
-            my $reg_to_id    = sub ($r) {
+            my $lowerer = Brocken::Jenny::Lowerer::ARM64->new();
+            my $mf      = $lowerer->lower($ir_func);
+            my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
+            my $result  = $alloc->allocate( $mf, $platform );
+            $alloc->insert_spill_code( $mf, $result->{spill_slots}, $result->{spill_temp}, $platform->stack_reg );
+            return $self->_encode( $mf, $result->{assignment}, $result->{used_callee} );
+        }
+
+        method _encode( $mf, $assignment, $used_callee ) {
+            my $bytes        = '';
+            my $total_frame  = 0;
+            my $callee_frame = scalar($used_callee->@*) * 8;
+            my $reg_id    = sub ($r) {
+                return 31 if $r eq 'sp';
                 return $1 if $r =~ /^[xw](\d+)$/;
                 return 0;
             };
 
-            # Iterate through basic blocks and instructions
-            for my $block ( $ir_func->blocks->@* ) {
-                for my $inst ( $block->instructions->@* ) {
-                    my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' ) {
-                        my ( $lhs, $rhs ) = $inst->operands->@*;
-                        my $phys = $scratch[ $next_scratch++ ];
-                        $vreg_map{ $inst->name } = $phys;
-                        my $rd = $reg_to_id->($phys);
+            my $resolve = sub ($op) {
+                return $assignment->{ $op->value } if $op->kind eq 'virt_reg';
+                return $op->value                  if $op->kind eq 'phys_reg';
+                die "Unexpected operand kind: ${\$op->kind}";
+            };
 
-                        # Load LHS into the destination physical register
-                        if ( $lhs->isa('Brocken::Lindsay::IR::Constant') ) {
+            if ( $callee_frame > 0 ) {
+                $bytes .= pack( 'V', 0xD10003FF | ( ( $callee_frame & 0xFFF ) << 10 ) );
+                for my $i ( 0 .. $used_callee->$#* ) {
+                    my $rid = $reg_id->( $used_callee->[$i] );
+                    $bytes .= pack( 'V', 0xF9000000 | ( $i << 10 ) | ( 31 << 5 ) | $rid );
+                }
+            }
 
-                            # movz xd, #imm16
-                            $bytes .= pack( 'V', 0xD2800000 | ( ( $lhs->value & 0xFFFF ) << 5 ) | $rd );
+            my %labels;
+            my @fixups;
+            my $current_offset = sub { return length $bytes };
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    my $opcode   = $inst->opcode;
+                    my ( $dst, $src ) = $inst->operands->@*;
+
+                    if ( $opcode eq 'label' ) {
+                        $labels{ $dst->value } = $current_offset->();
+                    }
+                    elsif ( $opcode eq 'jmp' ) {
+                        push @fixups, { offset => $current_offset->(), type => 'b', target => $dst->value };
+                        $bytes .= pack( 'V', 0x14000000 );
+                    }
+                    elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
+                        my $cond_r = $resolve->($dst);
+                        my $cid    = $reg_id->($cond_r);
+                        my $base   = ( $opcode eq 'bne' ? 0xB5000000 : 0xB4000000 );
+                        push @fixups, { offset => $current_offset->(), type => 'cbz', target => $src->value, rid => $cid, base => $base };
+                        $bytes .= pack( 'V', $base | $cid );
+                    }
+                    elsif ( $opcode eq 'mov' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+
+                        if ( $src->kind eq 'imm' ) {
+                            my $bits = $dst->type ? $dst->type->bits : 64;
+                            my $sf   = ( $bits >= 64 ) ? 0x80000000 : 0x00000000;
+                            $bytes .= pack( 'V', $sf | 0x52800000 | ( ( $src->value & 0xFFFF ) << 5 ) | $did );
                         }
                         else {
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
                             # mov xd, xn -> orr xd, xzr, xn
-                            my $src_phys = $vreg_map{ $lhs->name } // die 'Unknown vreg: ' . $lhs->name;
-                            my $rn       = $reg_to_id->($src_phys);
-                            $bytes .= pack( 'V', 0xAA0003E0 | ( $rn << 16 ) | $rd );
-                        }
-
-                        # Perform the arithmetic operation with RHS
-                        if ( $rhs->isa('Brocken::Lindsay::IR::Constant') ) {
-
-                            # add/sub xd, xn, #imm12
-                            my $op    = ( $opcode eq 'add' ? 0x91000000 : 0xD1000000 );
-                            my $imm12 = $rhs->value & 0xFFF;
-                            $bytes .= pack( 'V', $op | ( $imm12 << 10 ) | ( $rd << 5 ) | $rd );
-                        }
-                        else {
-                            # add/sub xd, xn, xm
-                            my $src_phys = $vreg_map{ $rhs->name } // die 'Unknown vreg: ' . $rhs->name;
-                            my $rm       = $reg_to_id->($src_phys);
-                            my $op       = ( $opcode eq 'add' ? 0x8B000000 : 0xCB000000 );
-                            $bytes .= pack( 'V', $op | ( $rm << 16 ) | ( $rd << 5 ) | $rd );
+                            $bytes .= pack( 'V', 0xAA0003E0 | ( $sid << 16 ) | $did );
                         }
                     }
-                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
-                        if ( $inst->type->kind eq 'void' ) {
+                    elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'mul' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;  # width-aware
+                        my %reg_op = (
+                            add => ($bits >= 64 ? 0x8B000000 : 0x0B000000),
+                            sub => ($bits >= 64 ? 0xCB000000 : 0x4B000000),
+                            and => ($bits >= 64 ? 0x8A000000 : 0x0A000000),
+                            or  => ($bits >= 64 ? 0xAA000000 : 0x2A000000),
+                            xor => ($bits >= 64 ? 0xCA000000 : 0x4A000000),
+                            mul => ($bits >= 64 ? 0x9B007C00 : 0x1B007C00),
+                        );
 
-                            # ret (x30)
-                            $bytes .= pack( 'V', 0xD65F03C0 );
+                        if ( $src->kind eq 'imm' && ( $opcode eq 'add' || $opcode eq 'sub' ) ) {
+                            my $sf     = ( $bits >= 64 ) ? 0x80000000 : 0x00000000;
+                            my $op     = $sf | ( $opcode eq 'add' ? 0x11000000 : 0x51000000 );
+                            my $imm12  = $src->value & 0xFFF;
+                            $bytes .= pack( 'V', $op | ( $imm12 << 10 ) | ( $did << 5 ) | $did );
                         }
                         else {
-                            my $val = $inst->operands->[0];
-                            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
-
-                                # movz x0, #imm16
-                                $bytes .= pack( 'V', 0xD2800000 | ( ( $val->value & 0xFFFF ) << 5 ) | 0 );
-                            }
-                            else {
-                                # Move result to x0
-                                my $phys = $vreg_map{ $val->name } // die 'Unknown vreg: ' . $val->name;
-                                my $rn   = $reg_to_id->($phys);
-                                if ( $rn != 0 ) {
-                                    $bytes .= pack( 'V', 0xAA0003E0 | ( $rn << 16 ) | 0 );
-                                }
-                            }
-
-                            # ret
-                            $bytes .= pack( 'V', 0xD65F03C0 );
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+                            my $op = $reg_op{$opcode};
+                            $bytes .= pack( 'V', $op | ( $sid << 16 ) | ( $did << 5 ) | $did );
                         }
+                    }
+                    elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        die "ARM64 shift requires immediate amount" unless $src->kind eq 'imm';
+                        my $imm = $src->value;
+                        if ( $opcode eq 'shl' ) {
+                            # LSL Xd, Xn, #imm  = UBFM Xd, Xn, #(64-imm), #(63-imm)
+                            my $immr = ( 64 - $imm ) & 0x3F;
+                            my $imms = ( 63 - $imm ) & 0x3F;
+                            $bytes .= pack( 'V', 0xD3400000 | ( $immr << 16 ) | ( $imms << 10 ) | ( $did << 5 ) | $did );
+                        }
+                        elsif ( $opcode eq 'lshr' ) {
+                            # LSR Xd, Xn, #imm  = UBFM Xd, Xn, #imm, #63
+                            $bytes .= pack( 'V', 0xD3400000 | ( $imm << 16 ) | ( 63 << 10 ) | ( $did << 5 ) | $did );
+                        }
+                        else {
+                            # ASR Xd, Xn, #imm  = SBFM Xd, Xn, #imm, #63
+                            $bytes .= pack( 'V', 0x93400000 | ( $imm << 16 ) | ( 63 << 10 ) | ( $did << 5 ) | $did );
+                        }
+                    }
+                    elsif ( $opcode eq 'alloca' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $size  = $src->value;
+                        $total_frame += $size;
+                        # sub sp, sp, #size
+                        $bytes .= pack( 'V', 0xD10003FF | ( ( $size & 0xFFF ) << 10 ) );
+                        # mov xd, sp  (add xd, sp, #0)
+                        $bytes .= pack( 'V', 0x910003E0 | $did );
+                    }
+                    elsif ( $opcode eq 'load' ) {
+                        my $dst_r  = $resolve->($dst);
+                        my $did    = $reg_id->($dst_r);
+                        my $addr   = $src->value;
+                        my $base_r = $resolve->(
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} )
+                        );
+                        my $bid    = $reg_id->($base_r);
+                        my $disp   = $addr->{disp} // 0;
+                        my $bits   = ($dst->type && $dst->type->kind eq 'int') ? $dst->type->bits : 64;
+                        my $imm12  = $disp >> ( $bits == 32 ? 2 : 3 );
+                        my $base   = $bits == 32 ? 0xB9400000 : 0xF9400000;
+                        $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
+                    }
+                    elsif ( $opcode eq 'store' ) {
+                        my $src_r  = $resolve->($src);
+                        my $sid    = $reg_id->($src_r);
+                        my $addr   = $dst->value;
+                        my $base_r = $resolve->(
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} )
+                        );
+                        my $bid    = $reg_id->($base_r);
+                        my $disp   = $addr->{disp} // 0;
+                        my $bits   = ($src->type && $src->type->kind eq 'int') ? $src->type->bits : 64;
+                        my $imm12  = $disp >> ( $bits == 32 ? 2 : 3 );
+                        my $base   = $bits == 32 ? 0xB9000000 : 0xF9000000;
+                        $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
+                    }
+                    elsif ( $opcode eq 'store_imm' ) {
+                        my ($mem, $imm) = $inst->operands->@*;
+                        my $addr   = $mem->value;
+                        my $base_r = $resolve->(
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} )
+                        );
+                        my $bid    = $reg_id->($base_r);
+                        my $disp   = $addr->{disp} // 0;
+                        my $bits   = ($imm->type && $imm->type->kind eq 'int') ? $imm->type->bits : 64;
+                        my $imm12  = $disp >> ( $bits == 32 ? 2 : 3 );
+                        # find a temporary register not in use
+                        my %used;
+                        @used{ values %$assignment } = ();
+                        my $tmp_r;
+                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
+                        die 'no temp register for store_imm' unless $tmp_r;
+                        my $tid = $reg_id->($tmp_r);
+                        if ( $bits == 32 ) {
+                            # movz wtmp, #imm16  (32-bit)
+                            $bytes .= pack( 'V', 0x52800000 | ( ( $imm->value & 0xFFFF ) << 5 ) | $tid );
+                            # str wtmp, [xn, #pimm]  (32-bit)
+                            $bytes .= pack( 'V', 0xB9000000 | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
+                        } else {
+                            # movz xtmp, #imm16  (64-bit)
+                            $bytes .= pack( 'V', 0xD2800000 | ( ( $imm->value & 0xFFFF ) << 5 ) | $tid );
+                            # str xtmp, [xn, #pimm]  (64-bit)
+                            $bytes .= pack( 'V', 0xF9000000 | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
+                        }
+                    }
+                    elsif ( $opcode eq 'cmp' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        # CMP Xn/Wn, Xm/Wm  => SUBS XZR, Xn, Xm
+                        my $bits = $dst->type ? $dst->type->bits : 64;
+                        my $sf   = ( $bits >= 64 ) ? 0x80000000 : 0x00000000;
+                        $bytes .= pack( 'V', $sf | 0x6B00001F | ( $sid << 16 ) | ( $did << 5 ) );
+                    }
+                    elsif ( $opcode eq 'cset_eq' || $opcode eq 'cset_ne' || $opcode eq 'cset_lt' || $opcode eq 'cset_gt' || $opcode eq 'cset_le' || $opcode eq 'cset_ge' || $opcode eq 'cset_cc' || $opcode eq 'cset_cs' || $opcode eq 'cset_hi' || $opcode eq 'cset_ls' ) {
+                        my %arm_cond = ( cset_eq => 1, cset_ne => 0, cset_lt => 0xA, cset_gt => 0xD, cset_le => 0xC, cset_ge => 0xB, cset_cc => 2, cset_cs => 3, cset_hi => 9, cset_ls => 8 );
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $cond  = $arm_cond{$opcode};
+                        # CSET Xd, cond  => CSINC Xd, XZR, XZR, inv(cond)
+                        $bytes .= pack( 'V', 0xAA7F03E0 | ( $cond << 12 ) | $did );
+                    }
+                    elsif ( $opcode eq 'ret' ) {
+                        if ( $total_frame > 0 ) {
+                            $bytes .= pack( 'V', 0x910003FF | ( ( $total_frame & 0xFFF ) << 10 ) );
+                        }
+                        if ( $callee_frame > 0 ) {
+                            for my $i ( reverse 0 .. $used_callee->$#* ) {
+                                my $rid = $reg_id->( $used_callee->[$i] );
+                                $bytes .= pack( 'V', 0xF9400000 | ( $i << 10 ) | ( 31 << 5 ) | $rid );
+                            }
+                            $bytes .= pack( 'V', 0x910003FF | ( ( $callee_frame & 0xFFF ) << 10 ) );
+                        }
+                        $bytes .= pack( 'V', 0xD65F03C0 );
                     }
                 }
             }
+            for my $fixup ( @fixups ) {
+                my $target_pos = $labels{ $fixup->{target} };
+                die "undefined label: $fixup->{target}" unless defined $target_pos;
+                my $rel = $target_pos - ( $fixup->{offset} + 4 );
+                if ( $fixup->{type} eq 'b' ) {
+                    substr $bytes, $fixup->{offset}, 4, pack( 'V', 0x14000000 | ( ( $rel / 4 ) & 0x3FFFFFF ) );
+                }
+                elsif ( $fixup->{type} eq 'cbz' ) {
+                    my $inst = unpack( 'V', substr $bytes, $fixup->{offset}, 4 );
+                    $inst = ( $inst & 0xFF00001F ) | ( ( ( $rel / 4 ) & 0x7FFFF ) << 5 );
+                    substr $bytes, $fixup->{offset}, 4, pack( 'V', $inst );
+                }
+            }
             return $bytes;
+        }
+    }
+
+    # ---------------------------------------------------------------------------
+    # Machine IR (MIR) - Target-agnostic intermediate representation
+    # ---------------------------------------------------------------------------
+    class Brocken::Jenny::MIR::MachineOperand {
+        field $kind  :param :reader;
+        field $value :param :reader;
+        field $type  :param :reader = undef;
+    }
+
+    class Brocken::Jenny::MIR::MachineInstruction {
+        field $opcode   :param :reader;
+        field $operands :param :reader = [];
+        field $comment  :param :reader = '';
+    }
+
+    class Brocken::Jenny::MIR::MachineBasicBlock {
+        field $name         :param :reader;
+        field $instructions :param :reader = [];
+        method add_instruction($inst) { push $self->instructions->@*, $inst }
+    }
+
+    class Brocken::Jenny::MIR::MachineFunction {
+        field $name       :param :reader;
+        field $blocks     :param :reader = [];
+        field $frame_size :param :reader = 0;
+        method add_block($block) { push $self->blocks->@*, $block }
+    }
+
+    # ---------------------------------------------------------------------------
+    # Register Allocator: Linear Scan
+    # ---------------------------------------------------------------------------
+    class Brocken::Jenny::RegAlloc::LiveInterval {
+        field $name  :param :reader;
+        field $start :param :reader;
+        field $end   :param :reader;
+    }
+
+    class Brocken::Jenny::RegAlloc::LinearScan {
+        method allocate($mf, $platform) {
+            my @intervals = $self->_compute_live_intervals($mf);
+            return $self->_linear_scan(\@intervals, $platform);
+        }
+
+        method _compute_live_intervals($mf) {
+            my (%first, %last);
+            my $idx = 0;
+            for my $bb ( $mf->blocks->@* ) {
+                for my $inst ( $bb->instructions->@* ) {
+                    for my $op ( $inst->operands->@* ) {
+                        if ( $op->kind eq 'virt_reg' ) {
+                            my $name = $op->value;
+                            $first{$name} //= $idx;
+                            $last{$name}  = $idx;
+                        }
+                        elsif ( $op->kind eq 'mem' ) {
+                            my $base = $op->value->{base};
+                            $first{$base} //= $idx;
+                            $last{$base}  = $idx;
+                        }
+                    }
+                    $idx++;
+                }
+            }
+            my @intervals;
+            for my $name ( sort { $first{$a} <=> $first{$b} } keys %first ) {
+                push @intervals,
+                    Brocken::Jenny::RegAlloc::LiveInterval->new(
+                    name => $name, start => $first{$name}, end => $last{$name}
+                    );
+            }
+            return @intervals;
+        }
+
+        method _linear_scan( $intervals, $platform ) {
+            my @caller_regs = $platform->registers('caller')->@*;
+            my @callee_regs = $platform->registers('callee')->@*;
+            my $spill_temp  = pop @caller_regs;
+            my @regs        = ( @caller_regs, @callee_regs );
+
+            my %assignment;
+            my %used_callee;
+            my %spill_slots;
+            my @active;
+            my $next_spill = 0;
+
+            for my $int ( $intervals->@* ) {
+                @active = grep { $_->end >= $int->start } @active;
+
+                if ( @active < @regs ) {
+                    my %taken;
+                    for my $a (@active) { $taken{ $assignment{ $a->name } } = 1 }
+                    my $free;
+                    for my $r (@regs) { unless ( $taken{$r} ) { $free = $r; last } }
+                    $assignment{ $int->name } = $free;
+                    $used_callee{$free} = 1 if grep { $_ eq $free } @callee_regs;
+                    push @active, $int;
+                }
+                else {
+                    my ($spill) = sort { $b->end <=> $a->end } @active;
+                    my $freed_reg = $assignment{ $spill->name };
+                    $spill_slots{ $spill->name } = $next_spill++ * 8;
+                    $assignment{ $spill->name }  = 'spill(' . $spill_slots{ $spill->name } . ')';
+                    @active = grep { $_->name ne $spill->name } @active;
+                    $assignment{ $int->name } = $freed_reg;
+                    $used_callee{$freed_reg} = 1 if grep { $_ eq $freed_reg } @callee_regs;
+                    push @active, $int;
+                }
+            }
+            return {
+                assignment  => \%assignment,
+                used_callee => [ sort keys %used_callee ],
+                spill_slots => \%spill_slots,
+                spill_temp  => $spill_temp,
+            };
+        }
+
+        method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg ) {
+            return unless $spill_slots && keys %$spill_slots;
+            for my $vreg ( keys %$spill_slots ) {
+                my $offset = $spill_slots->{$vreg};
+                for my $bb ( $mf->blocks->@* ) {
+                    my @new;
+                    for my $inst ( $bb->instructions->@* ) {
+                        my $opcode = $inst->opcode;
+                        my @ops    = $inst->operands->@*;
+
+                        my $spilled_dst = 0;
+                        my $spilled_src = 0;
+                        my $spilled_mem = 0;
+
+                        if ( @ops >= 1 && $ops[0]->kind eq 'virt_reg' && $ops[0]->value eq $vreg ) {
+                            $spilled_dst = 1;
+                            $ops[0] = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'phys_reg', value => $spill_temp, type => $ops[0]->type
+                            );
+                        }
+                        if ( @ops >= 2 && $ops[1]->kind eq 'virt_reg' && $ops[1]->value eq $vreg ) {
+                            $spilled_src = 1;
+                            $ops[1] = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'phys_reg', value => $spill_temp, type => $ops[1]->type
+                            );
+                        }
+                        for my $op (@ops) {
+                            next unless $op->kind eq 'mem';
+                            if ( ( $op->value->{base} // '' ) eq $vreg ) {
+                                $spilled_mem = 1;
+                                $op->value->{base} = $spill_temp;
+                            }
+                        }
+
+                        if ($spilled_src || $spilled_mem) {
+                            my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem',
+                                value => { base => $stack_reg, disp => $offset },
+                                type  => undef,
+                            );
+                            push @new, Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'load',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp ),
+                                    $mem,
+                                ],
+                                comment => 'spill-reload',
+                            );
+                        }
+
+                        my $new_inst = Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => $opcode,
+                            operands => \@ops,
+                            comment  => $inst->comment,
+                        );
+                        push @new, $new_inst;
+
+                        if ($spilled_dst) {
+                            my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem',
+                                value => { base => $stack_reg, disp => $offset },
+                                type  => undef,
+                            );
+                            push @new, Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'store',
+                                operands => [
+                                    $mem,
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp ),
+                                ],
+                                comment => 'spill-store',
+                            );
+                        }
+                    }
+                    $bb->instructions->@* = @new;
+                }
+            }
+        }
+    }
+
+    # ---------------------------------------------------------------------------
+    # Lowerer: Lindsay IR -> Machine IR (x86_64)
+    # ---------------------------------------------------------------------------
+     class Brocken::Jenny::Lowerer::X86_64 {
+        method lower($ir_func) {
+            my $mf = Brocken::Jenny::MIR::MachineFunction->new(name => $ir_func->name);
+            for my $block ( $ir_func->blocks->@* ) {
+                my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new(name => $block->name);
+                if ( $ir_func->blocks->[0] != $block ) {
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode => 'label',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $block->name ) ],
+                            comment => 'block: ' . $block->name
+                        )
+                    );
+                }
+                for my $inst ( $block->instructions->@* ) {
+                    my $opcode = $inst->opcode;
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                        my ( $lhs, $rhs ) = $inst->operands->@*;
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                comment  => 'load ' . ( $lhs->name || $lhs->value )
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => $opcode,
+                                operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                comment  => $opcode
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'jmp',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->dest_block->name ) ],
+                                comment  => 'br ' . $inst->dest_block->name
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::CondBr') ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'bne',
+                                operands => [ $self->_lower_opnd( $inst->operands->[0] ), Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->true_block->name ) ],
+                                comment  => 'cond_br: true'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'jmp',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->false_block->name ) ],
+                                comment  => 'cond_br: false'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ICmp') ) {
+                        my ($lhs, $rhs) = $inst->operands->@*;
+                        my $pred = $inst->predicate;
+                        my %cond = (eq => 'e', ne => 'ne', slt => 'l', sgt => 'g', sle => 'le', sge => 'ge', ult => 'b', ugt => 'a', ule => 'be', uge => 'ae');
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                comment  => 'load lhs'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'cmp',
+                                operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                comment  => 'icmp ' . $pred
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'set' . $cond{$pred},
+                                operands => [$dst],
+                                comment  => 'set' . $cond{$pred}
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
+                        if ( $inst->type->kind ne 'void' ) {
+                            my $val = $inst->operands->[0];
+                            my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $rax, $self->_lower_opnd($val) ],
+                                    comment  => '=> rax'
+                                )
+                            );
+                        }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'ret', operands => [], comment => ''
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        my $size = $inst->allocated_type->bits / 8;
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'alloca',
+                                operands => [
+                                    $dst,
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size )
+                                ],
+                                comment => "alloca $size bytes"
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
+                        my $ptr       = $inst->operands->[0];
+                        my $mem       = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $ptr->name, disp => 0 },
+                            type  => $inst->type
+                        );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'load', operands => [ $dst, $mem ],
+                                comment => 'load'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
+                        my ( $val, $ptr ) = $inst->operands->@*;
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $ptr->name, disp => 0 },
+                            type  => $val->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'),
+                                operands => [ $mem, $self->_lower_opnd($val) ],
+                                comment  => 'store'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
+                        my $val  = $inst->operands->[0];
+                        my $tag  = $self->_type_tag( $val->type );
+                        my $size = 16;    # fat scalar: 16 bytes (8 payload + 8 tag)
+                        my $dyn  = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        # alloca %dyn, 16
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'alloca',
+                                operands => [
+                                    $dyn,
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size )
+                                ],
+                                comment => 'box: alloca 16'
+                            )
+                        );
+                        # store [%dyn + 0], %val
+                        my $mem_val = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $inst->name, disp => 0 },
+                            type  => $val->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'),
+                                operands => [ $mem_val, $self->_lower_opnd($val) ],
+                                comment  => 'box: store payload'
+                            )
+                        );
+                        # store [%dyn + 8], tag
+                        my $mem_tag = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $inst->name, disp => 8 },
+                            type  => Brocken::Lindsay::IR::Type::i64()
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'store_imm',
+                                operands => [
+                                    $mem_tag,
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $tag, type => Brocken::Lindsay::IR::Type::i64() )
+                                ],
+                                comment => 'box: store tag'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
+                        my $dyn = $inst->operands->[0];
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $dyn->name, disp => 0 },
+                            type  => $inst->type
+                        );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'load', operands => [ $dst, $mem ],
+                                comment => 'unbox: load payload'
+                            )
+                        );
+                    }
+                }
+                $mf->add_block($mbb);
+            }
+            return $mf;
+        }
+
+        method _type_tag($type) {
+            return 1 if $type->kind eq 'int' && $type->bits <= 32;   # i1, i8, i16, i32
+            return 2 if $type->kind eq 'int' && $type->bits == 64;
+            return 3 if $type->kind eq 'float';                     # f32, f64
+            return 4 if $type->kind eq 'ptr';
+            return 5 if $type->kind eq 'dynamic';
+            return 0;
+        }
+
+        method _lower_opnd($ir_val) {
+            if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Jenny::MIR::MachineOperand->new(
+                    kind => 'imm', value => $ir_val->value, type => $ir_val->type
+                );
+            }
+            return Brocken::Jenny::MIR::MachineOperand->new(
+                kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type
+            );
+        }
+    }
+
+    # ---------------------------------------------------------------------------
+    # Lowerer: Lindsay IR -> Machine IR (ARM64 / AArch64)
+    # ---------------------------------------------------------------------------
+        class Brocken::Jenny::Lowerer::ARM64 {
+        method lower($ir_func) {
+            my $mf = Brocken::Jenny::MIR::MachineFunction->new(name => $ir_func->name);
+            for my $block ( $ir_func->blocks->@* ) {
+                my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new(name => $block->name);
+                if ( $ir_func->blocks->[0] != $block ) {
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode => 'label',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $block->name ) ],
+                            comment => 'block: ' . $block->name
+                        )
+                    );
+                }
+                for my $inst ( $block->instructions->@* ) {
+                    my $opcode = $inst->opcode;
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                        my ( $lhs, $rhs ) = $inst->operands->@*;
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                comment  => 'load ' . ( $lhs->name || $lhs->value )
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => $opcode,
+                                operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                comment  => $opcode
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'jmp',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->dest_block->name ) ],
+                                comment  => 'br ' . $inst->dest_block->name
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::CondBr') ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'bne',
+                                operands => [ $self->_lower_opnd( $inst->operands->[0] ), Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->true_block->name ) ],
+                                comment  => 'cond_br: true'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'jmp',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->false_block->name ) ],
+                                comment  => 'cond_br: false'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        my $size = $inst->allocated_type->bits / 8;
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'alloca', operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                                comment => "alloca $size bytes"
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
+                        my $ptr = $inst->operands->[0];
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $inst->type
+                        );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'load', operands => [ $dst, $mem ], comment => 'load'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
+                        my ($val, $ptr) = $inst->operands->@*;
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $val->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
+                        my $val  = $inst->operands->[0];
+                        my $size = 16;
+                        my $dyn  = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'alloca', operands => [ $dyn, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                                comment => 'box: alloca 16'
+                            )
+                        );
+                        my $payload_mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $inst->name, disp => 0 }, type => $val->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $payload_mem, $self->_lower_opnd($val) ],
+                                comment => 'box: store payload'
+                            )
+                        );
+                        my $tag_mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $inst->name, disp => 8 }, type => Brocken::Lindsay::IR::Type::i64()
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'store_imm', operands => [ $tag_mem, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $self->_type_tag($val->type), type => Brocken::Lindsay::IR::Type::i64() ) ],
+                                comment => 'box: store tag'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
+                        my $dyn = $inst->operands->[0];
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $dyn->name, disp => 0 }, type => $inst->type
+                        );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'load', operands => [ $dst, $mem ], comment => 'unbox: load payload'
+                                )
+                            );
+                        }
+                        elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ICmp') ) {
+                            my ($lhs, $rhs) = $inst->operands->@*;
+                            my $pred = $inst->predicate;
+                            my %cond = (eq => 'cset_eq', ne => 'cset_ne', slt => 'cset_lt', sgt => 'cset_gt', sle => 'cset_le', sge => 'cset_ge', ult => 'cset_cc', ugt => 'cset_hi', ule => 'cset_ls', uge => 'cset_cs');
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name, type => $inst->type
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    comment  => 'load lhs'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'cmp',
+                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    comment  => 'icmp ' . $pred
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $cond{$pred},
+                                    operands => [$dst],
+                                    comment  => $pred
+                                )
+                            );
+                        }
+                        elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
+                            if ( $inst->type->kind ne 'void' ) {
+                                my $val = $inst->operands->[0];
+                                my $x0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $x0, $self->_lower_opnd($val) ],
+                                        comment  => '=> x0'
+                                    )
+                                );
+                            }
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'ret', operands => [], comment => ''
+                                )
+                            );
+                        }
+                    }
+                    $mf->add_block($mbb);
+                }
+                return $mf;
+            }
+    
+            method _lower_opnd($ir_val) {
+            if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Jenny::MIR::MachineOperand->new(
+                    kind => 'imm', value => $ir_val->value, type => $ir_val->type
+                );
+            }
+            return Brocken::Jenny::MIR::MachineOperand->new(
+                kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type
+            );
+        }
+
+        method _type_tag($type) {
+            return 1 if $type->kind eq 'int' && $type->bits <= 32;
+            return 2 if $type->kind eq 'int' && $type->bits == 64;
+            return 3 if $type->kind eq 'float';
+            return 4 if $type->kind eq 'ptr';
+            return 5 if $type->kind eq 'dynamic';
+            return 0;
+        }
+    }
+
+    # ---------------------------------------------------------------------------
+    # Lowerer: Lindsay IR -> Machine IR (RISC-V 64)
+    # ---------------------------------------------------------------------------
+        class Brocken::Jenny::Lowerer::RISCV64 {
+        method lower($ir_func) {
+            my $mf = Brocken::Jenny::MIR::MachineFunction->new(name => $ir_func->name);
+            for my $block ( $ir_func->blocks->@* ) {
+                my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new(name => $block->name);
+                if ( $ir_func->blocks->[0] != $block ) {
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode => 'label',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $block->name ) ],
+                            comment => 'block: ' . $block->name
+                        )
+                    );
+                }
+                for my $inst ( $block->instructions->@* ) {
+                    my $opcode = $inst->opcode;
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                        my ( $lhs, $rhs ) = $inst->operands->@*;
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mv',
+                                operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                comment  => 'load ' . ( $lhs->name || $lhs->value )
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => $opcode,
+                                operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                comment  => $opcode
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'jmp',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->dest_block->name ) ],
+                                comment  => 'br ' . $inst->dest_block->name
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::CondBr') ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'bne',
+                                operands => [ $self->_lower_opnd( $inst->operands->[0] ), Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->true_block->name ) ],
+                                comment  => 'cond_br: true'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'jmp',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->false_block->name ) ],
+                                comment  => 'cond_br: false'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        my $size = $inst->allocated_type->bits / 8;
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'alloca', operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                                comment => "alloca $size bytes"
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
+                        my $ptr = $inst->operands->[0];
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $inst->type
+                        );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'load', operands => [ $dst, $mem ], comment => 'load'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
+                        my ($val, $ptr) = $inst->operands->@*;
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $val->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
+                        my $val  = $inst->operands->[0];
+                        my $size = 16;
+                        my $dyn  = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'alloca', operands => [ $dyn, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                                comment => 'box: alloca 16'
+                            )
+                        );
+                        my $payload_mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $inst->name, disp => 0 }, type => $val->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $payload_mem, $self->_lower_opnd($val) ],
+                                comment => 'box: store payload'
+                            )
+                        );
+                        my $tag_mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $inst->name, disp => 8 }, type => Brocken::Lindsay::IR::Type::i64()
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'store_imm', operands => [ $tag_mem, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $self->_type_tag($val->type), type => Brocken::Lindsay::IR::Type::i64() ) ],
+                                comment => 'box: store tag'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
+                        my $dyn = $inst->operands->[0];
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'mem', value => { base => $dyn->name, disp => 0 }, type => $inst->type
+                        );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'load', operands => [ $dst, $mem ], comment => 'unbox: load payload'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ICmp') ) {
+                        my ($lhs, $rhs) = $inst->operands->@*;
+                        my $pred = $inst->predicate;
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        if ( $pred eq 'eq' || $pred eq 'ne' ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'xor',
+                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    comment  => 'icmp ' . $pred . ': xor lhs'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'xor',
+                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    comment  => 'icmp ' . $pred . ': xor rhs'
+                                )
+                            );
+                            if ( $pred eq 'eq' ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'sltiu',
+                                        operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
+                                        comment  => 'seqz'
+                                    )
+                                );
+                            } else {
+                                # snez: sltu dst, x0, dst
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'sltu',
+                                        operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' ) ],
+                                        comment  => 'snez'
+                                    )
+                                );
+                            }
+                        }
+                        elsif ( $pred eq 'ult' || $pred eq 'ugt' || $pred eq 'ule' || $pred eq 'uge' ) {
+                            # ult/ugt/ule/uge: sltu rd, rs1, rs2
+                            if ( $pred eq 'ugt' || $pred eq 'ule' ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => 'icmp ' . $pred . ': mv rhs'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'sltu',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'icmp ' . $pred . ': sltu'
+                                    )
+                                );
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'icmp ' . $pred . ': mv lhs'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'sltu',
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => 'icmp ' . $pred . ': sltu'
+                                    )
+                                );
+                            }
+                            if ( $pred eq 'ule' || $pred eq 'uge' ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'xor',
+                                        operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
+                                        comment  => 'xori 1'
+                                    )
+                                );
+                            }
+                        }
+                        else {
+                            # slt/sgt/sle/sge: slt rd, rs1, rs2
+                            if ( $pred eq 'sgt' || $pred eq 'sle' ) {
+                                # slt dst, rhs, lhs  →  mv dst, rhs; slt dst, lhs
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => 'icmp ' . $pred . ': mv rhs'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'slt',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'icmp ' . $pred . ': slt'
+                                    )
+                                );
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'icmp ' . $pred . ': mv lhs'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'slt',
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => 'icmp ' . $pred . ': slt'
+                                    )
+                                );
+                            }
+                            if ( $pred eq 'sle' || $pred eq 'sge' ) {
+                                # xori dst, dst, 1
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'xor',
+                                        operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
+                                        comment  => 'xori 1'
+                                    )
+                                );
+                            }
+                        }
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
+                        if ( $inst->type->kind ne 'void' ) {
+                            my $val = $inst->operands->[0];
+                            my $a0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mv',
+                                    operands => [ $a0, $self->_lower_opnd($val) ],
+                                    comment  => '=> a0'
+                                )
+                            );
+                        }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'ret', operands => [], comment => ''
+                            )
+                        );
+                    }
+                }
+                $mf->add_block($mbb);
+            }
+            return $mf;
+        }
+
+        method _lower_opnd($ir_val) {
+            if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Jenny::MIR::MachineOperand->new(
+                    kind => 'imm', value => $ir_val->value, type => $ir_val->type
+                );
+            }
+            return Brocken::Jenny::MIR::MachineOperand->new(
+                kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type
+            );
+        }
+
+        method _type_tag($type) {
+            return 1 if $type->kind eq 'int' && $type->bits <= 32;
+            return 2 if $type->kind eq 'int' && $type->bits == 64;
+            return 3 if $type->kind eq 'float';
+            return 4 if $type->kind eq 'ptr';
+            return 5 if $type->kind eq 'dynamic';
+            return 0;
+        }
+    }
+
+    # ---------------------------------------------------------------------------
+    # Lowerer: Lindsay IR -> Machine IR (Wasm)
+    # ---------------------------------------------------------------------------
+     class Brocken::Jenny::Lowerer::Wasm {
+        method lower($ir_func) {
+            my $mf = Brocken::Jenny::MIR::MachineFunction->new(name => $ir_func->name);
+            for my $block ( $ir_func->blocks->@* ) {
+                my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new(name => $block->name);
+                if ( $ir_func->blocks->[0] != $block ) {
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode => 'label',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $block->name ) ],
+                            comment => 'block: ' . $block->name
+                        )
+                    );
+                }
+                for my $inst ( $block->instructions->@* ) {
+                    my $opcode = $inst->opcode;
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                        my ( $lhs, $rhs ) = $inst->operands->@*;
+
+                        # Push LHS onto Wasm stack
+                        $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS' ) );
+                        # Push RHS onto Wasm stack
+                        $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
+                        # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
+                        my %map = (
+                            add => 'i32_add', sub => 'i32_sub', mul => 'i32_mul',
+                            and => 'i32_and', or  => 'i32_or',  xor => 'i32_xor',
+                            shl => 'i32_shl', lshr => 'i32_shr_u', ashr => 'i32_shr_s',
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => $map{$opcode}, operands => [], comment => $opcode
+                            )
+                        );
+                        # Store result from stack to a local
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'jmp',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->dest_block->name ) ],
+                                comment  => 'br ' . $inst->dest_block->name
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::CondBr') ) {
+                        $mbb->add_instruction( $self->_wasm_push( $inst->operands->[0], 'cond' ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'bne',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->true_block->name ) ],
+                                comment  => 'cond_br: true'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'jmp',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->false_block->name ) ],
+                                comment  => 'cond_br: false'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
+                        my $size = $inst->allocated_type->bits / 8;
+                        # save current heap_ptr as result
+                        $mbb->add_instruction( $self->_wasm_push_vreg('%heap_ptr', 'alloca: push heap') );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'local_set',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                                comment => 'alloca: save to ' . $inst->name
+                            )
+                        );
+                        # heap_ptr += size
+                        $mbb->add_instruction( $self->_wasm_push_vreg('%heap_ptr', 'alloca: push heap') );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i32_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                                comment  => "alloca: size $size"
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'alloca: add' )
+                        );
+                        $mbb->add_instruction( $self->_wasm_set_vreg('%heap_ptr', 'alloca: save heap') );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
+                        my $ptr = $inst->operands->[0];
+                        $mbb->add_instruction( $self->_wasm_push($ptr, 'load: ptr') );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_load', operands => [], comment => 'load' )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'local_set',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                                comment => 'load: save to ' . $inst->name
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
+                        my ($val, $ptr) = $inst->operands->@*;
+                        $mbb->add_instruction( $self->_wasm_push($ptr, 'store: ptr') );
+                        $mbb->add_instruction( $self->_wasm_push($val, 'store: val') );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'store' )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
+                        my $val = $inst->operands->[0];
+                        my $tag = $self->_type_tag($val->type);
+                        # save heap_ptr as result
+                        $mbb->add_instruction( $self->_wasm_push_vreg('%heap_ptr', 'box: push heap') );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'local_set',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                                comment => 'box: save to ' . $inst->name
+                            )
+                        );
+                        # heap_ptr += 16
+                        $mbb->add_instruction( $self->_wasm_push_vreg('%heap_ptr', 'box: push heap') );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i32_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16 ) ],
+                                comment  => 'box: bump 16'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'box: add' )
+                        );
+                        $mbb->add_instruction( $self->_wasm_set_vreg('%heap_ptr', 'box: save heap') );
+                        # store payload at [%dyn + 0]
+                        $mbb->add_instruction( $self->_wasm_push_vreg($inst->name, 'box: push dyn') );
+                        $mbb->add_instruction( $self->_wasm_push($val, 'box: push val') );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store payload' )
+                        );
+                        # store tag at [%dyn + 8]
+                        $mbb->add_instruction( $self->_wasm_push_vreg($inst->name, 'box: push dyn') );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i32_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8 ) ],
+                                comment  => 'box: offset 8'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'box: add offset' )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i32_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $tag ) ],
+                                comment  => 'box: tag'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store tag' )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
+                        my $dyn = $inst->operands->[0];
+                        $mbb->add_instruction( $self->_wasm_push($dyn, 'unbox: push dyn') );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_load', operands => [], comment => 'unbox: load payload' )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'local_set',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                                comment => 'unbox: save to ' . $inst->name
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ICmp') ) {
+                        my ($lhs, $rhs) = $inst->operands->@*;
+                        my $pred = $inst->predicate;
+                        my %map = (eq => 'i32_eq', ne => 'i32_ne', slt => 'i32_lt_s', sgt => 'i32_gt_s', sle => 'i32_le_s', sge => 'i32_ge_s', ult => 'i32_lt_u', ugt => 'i32_gt_u', ule => 'i32_le_u', uge => 'i32_ge_u');
+                        $mbb->add_instruction( $self->_wasm_push( $lhs, 'icmp lhs' ) );
+                        $mbb->add_instruction( $self->_wasm_push( $rhs, 'icmp rhs' ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => $map{$pred}, operands => [], comment => 'icmp ' . $pred
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'local_set',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                                comment => 'icmp store'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
+                        if ( $inst->type->kind ne 'void' ) {
+                            my $val = $inst->operands->[0];
+                            $mbb->add_instruction( $self->_wasm_push( $val, 'retval' ) );
+                        }
+                    }
+                }
+                $mf->add_block($mbb);
+            }
+            return $mf;
+        }
+
+        method _wasm_push( $ir_val, $label ) {
+            if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'i32_const',
+                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value ) ],
+                    comment  => "push $label=" . $ir_val->value
+                );
+            }
+            return Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'local_get',
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name ) ],
+                comment  => "push $label=" . $ir_val->name
+            );
+        }
+
+        method _wasm_push_vreg( $name, $label ) {
+            return Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'local_get',
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name ) ],
+                comment  => $label
+            );
+        }
+
+        method _wasm_set_vreg( $name, $label ) {
+            return Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'local_set',
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name ) ],
+                comment  => $label
+            );
+        }
+
+        method _type_tag($type) {
+            return 1 if $type->kind eq 'int' && $type->bits <= 32;
+            return 2 if $type->kind eq 'int' && $type->bits == 64;
+            return 3 if $type->kind eq 'float';
+            return 4 if $type->kind eq 'ptr';
+            return 5 if $type->kind eq 'dynamic';
+            return 0;
         }
     }
 
@@ -4166,6 +5869,10 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         my $type_sec = pack( 'C', 0x60 ) . "\x00\x01\x7F";    # form=func, params=0, returns=1, i32
         $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb(1) . $type_sec;
 
+        # Memory Section (ID 5): 1 page (64KB)
+        my $mem_content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb(1);    # count=1, flags=0(no max), initial=1
+        my $mem_sec     = pack( 'C', 5 ) . $self->_uleb( length($mem_content) ) . $mem_content;
+
         # Function Section (ID 3)
         my $func_sec = $self->_uleb(1) . $self->_uleb($type_idx);
         $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) ) . $func_sec;
@@ -4180,7 +5887,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_sec) ) . $code_sec;
         open my $fh, '>:raw', $output_file or die $!;
         print $fh "\0asm\x01\x00\x00\x00";    # Magic + Version
-        print $fh $type_sec, $func_sec, $export_sec, $code_sec;
+        print $fh $type_sec, $func_sec, $mem_sec, $export_sec, $code_sec;
         close $fh;
     }
 
@@ -4197,14 +5904,38 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
 }
 subtest Lindsay => sub {
     subtest 'Lindsay::IR Types & Singletons' => sub {
-        my $i32 = Brocken::Lindsay::IR::Type::i32();
-        my $ptr = Brocken::Lindsay::IR::Type::ptr();
-        is $i32->as_string, 'i32', 'i32 renders correctly';
-        is $ptr->as_string, 'ptr', 'ptr renders correctly';
+        my $i1   = Brocken::Lindsay::IR::Type::i1();
+        my $i8   = Brocken::Lindsay::IR::Type::i8();
+        my $i16  = Brocken::Lindsay::IR::Type::i16();
+        my $i32  = Brocken::Lindsay::IR::Type::i32();
+        my $i64  = Brocken::Lindsay::IR::Type::i64();
+        my $f32  = Brocken::Lindsay::IR::Type::f32();
+        my $f64  = Brocken::Lindsay::IR::Type::f64();
+        my $ptr  = Brocken::Lindsay::IR::Type::ptr();
+        my $void = Brocken::Lindsay::IR::Type::void();
+        my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
+        is $i1->as_string,   'i1',   'i1 renders correctly';
+        is $i8->as_string,   'i8',   'i8 renders correctly';
+        is $i16->as_string,  'i16',  'i16 renders correctly';
+        is $i32->as_string,  'i32',  'i32 renders correctly';
+        is $i64->as_string,  'i64',  'i64 renders correctly';
+        is $f32->as_string,  'f32',  'f32 renders correctly';
+        is $f64->as_string,  'f64',  'f64 renders correctly';
+        is $ptr->as_string,  'ptr',  'ptr renders correctly';
+        is $void->as_string, 'void', 'void renders correctly';
+        is $dyn->as_string,  'dynamic', 'dynamic renders correctly';
 
         # Prove they are singletons
-        my $i32_again = Brocken::Lindsay::IR::Type::i32();
-        ref_is $i32, $i32_again, 'Type singletons return the same memory reference';
+        ref_is $i32, Brocken::Lindsay::IR::Type::i32(), 'i32 singleton';
+        ref_is $i1,  Brocken::Lindsay::IR::Type::i1(),  'i1 singleton';
+        ref_is $i8,  Brocken::Lindsay::IR::Type::i8(),  'i8 singleton';
+        ref_is $i16, Brocken::Lindsay::IR::Type::i16(), 'i16 singleton';
+        ref_is $i64, Brocken::Lindsay::IR::Type::i64(), 'i64 singleton';
+        ref_is $f32, Brocken::Lindsay::IR::Type::f32(), 'f32 singleton';
+        ref_is $f64, Brocken::Lindsay::IR::Type::f64(), 'f64 singleton';
+        ref_is $ptr, Brocken::Lindsay::IR::Type::ptr(), 'ptr singleton';
+        ref_is $void, Brocken::Lindsay::IR::Type::void(), 'void singleton';
+        ref_is $dyn, Brocken::Lindsay::IR::Type::dynamic(), 'dynamic singleton';
     };
     subtest 'Lindsay::IR Values & Constants' => sub {
         my $val = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => '%my_var' );
@@ -5034,6 +6765,164 @@ subtest Jenny => sub {
             unlink $output_file;
         }
     };
+    subtest 'Jenny::Codegen ICmp (Cross-Platform)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'icmp_signed', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        my $entry    = $func->append_block('entry');
+        my $t_block  = $func->append_block('if.then');
+        my $f_block  = $func->append_block('if.else');
+        $builder->position_at_end($entry);
+        my $cond = $builder->build_icmp('sgt',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ),
+            '%cmp'
+        );
+        $builder->build_cond_br( $cond, $t_block, $f_block );
+        $builder->position_at_end($t_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        $builder->position_at_end($f_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        my $bytes = $codegen->emit_function($func);
+        ok( length($bytes) > 0, 'Generated signed icmp bytes for ' . $platform->friendly );
+        my $linker
+            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+            Brocken::Jenny::Linker::ELF64->new();
+    SKIP: {
+            skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+            my $output_file = './icmp_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file || $platform->is_windows, 'ICmp binary exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'ICmp signed (42 sgt 0 = true) returned 42 on ' . $platform->friendly );
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen ICmp Unsigned (Cross-Platform)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'icmp_unsigned', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        my $entry    = $func->append_block('entry');
+        my $t_block  = $func->append_block('if.then');
+        my $f_block  = $func->append_block('if.else');
+        $builder->position_at_end($entry);
+        my $cond = $builder->build_icmp('ugt',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ),
+            '%cmp'
+        );
+        $builder->build_cond_br( $cond, $t_block, $f_block );
+        $builder->position_at_end($t_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        $builder->position_at_end($f_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        my $bytes = $codegen->emit_function($func);
+        ok( length($bytes) > 0, 'Generated unsigned icmp bytes for ' . $platform->friendly );
+        my $linker
+            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+            Brocken::Jenny::Linker::ELF64->new();
+    SKIP: {
+            skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+            my $output_file = './icmp_unsigned_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file || $platform->is_windows, 'ICmp unsigned binary exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'ICmp unsigned (42 ugt 0 = true) returned 42 on ' . $platform->friendly );
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen ICmp (Wasm)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'icmp_wasm', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        my $entry    = $func->append_block('entry');
+        my $t_block  = $func->append_block('if.then');
+        my $f_block  = $func->append_block('if.else');
+        $builder->position_at_end($entry);
+        my $cond = $builder->build_icmp('sgt',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ),
+            '%cmp'
+        );
+        $builder->build_cond_br( $cond, $t_block, $f_block );
+        $builder->position_at_end($t_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        $builder->position_at_end($f_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        ok( length( $res->{body} ) > 0, 'Generated Wasm icmp bytes' );
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './icmp_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm icmp file exists' );
+        my $wasmtime_path = `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+    SKIP: {
+            if ( $wasmtime_path && -x $wasmtime_path ) {
+                my $output = qx["$wasmtime_path" run --invoke main $output_file];
+                chomp $output;
+                is $output, 42, 'Wasm icmp (42 sgt 0 = true) returned 42';
+            }
+            else {
+                skip 'wasmtime not available', 1;
+            }
+        }
+        unlink $output_file;
+    };
+    subtest 'Jenny::Codegen ICmp Unsigned (Wasm)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'icmp_unsigned_wasm', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        my $entry    = $func->append_block('entry');
+        my $t_block  = $func->append_block('if.then');
+        my $f_block  = $func->append_block('if.else');
+        $builder->position_at_end($entry);
+        my $cond = $builder->build_icmp('ugt',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ),
+            '%cmp'
+        );
+        $builder->build_cond_br( $cond, $t_block, $f_block );
+        $builder->position_at_end($t_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        $builder->position_at_end($f_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        ok( length( $res->{body} ) > 0, 'Generated Wasm unsigned icmp bytes' );
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './icmp_unsigned_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm unsigned icmp file exists' );
+        my $wasmtime_path = `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+    SKIP: {
+            if ( $wasmtime_path && -x $wasmtime_path ) {
+                my $output = qx["$wasmtime_path" run --invoke main $output_file];
+                chomp $output;
+                is $output, 42, 'Wasm unsigned icmp (42 ugt 0 = true) returned 42';
+            }
+            else {
+                skip 'wasmtime not available', 1;
+            }
+        }
+        unlink $output_file;
+    };
     subtest 'Jenny::Codegen Arithmetic (Wasm)' => sub {
         my $host     = Brocken::Katsuro::Platform::parse();
         my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
@@ -5085,6 +6974,248 @@ subtest Jenny => sub {
             }
         }
         unlink $output_file if -e $output_file;
+    };
+    subtest 'Jenny::Codegen Memory Operations (Cross-Platform)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        my $ptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::i32(), '%ptr' );
+        $builder->build_store(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ),
+            $ptr
+        );
+        my $val = $builder->build_load( Brocken::Lindsay::IR::Type::i32(), $ptr, '%val' );
+        $builder->build_ret($val);
+
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        my $bytes = $codegen->emit_function($func);
+        ok( length($bytes) > 0, 'Generated memory op bytes for ' . $platform->friendly );
+
+        my $linker
+            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+            Brocken::Jenny::Linker::ELF64->new();
+
+    SKIP: {
+            skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+            my $output_file = './mem_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -x $output_file || $platform->is_windows, 'Memory binary exists' );
+
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'Memory binary returned 42 on ' . $platform->friendly );
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen Box/Unbox (Cross-Platform)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        my $boxed = $builder->build_box(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ),
+            '%boxed'
+        );
+        my $val = $builder->build_unbox( $boxed, Brocken::Lindsay::IR::Type::i32(), '%val' );
+        $builder->build_ret($val);
+
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        my $bytes = $codegen->emit_function($func);
+        ok( length($bytes) > 0, 'Generated box/unbox bytes for ' . $platform->friendly );
+
+        my $linker
+            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+            Brocken::Jenny::Linker::ELF64->new();
+
+    SKIP: {
+            skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+            my $output_file = './box_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -x $output_file || $platform->is_windows, 'Box/unbox binary exists' );
+
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'Box/unbox binary returned 42 on ' . $platform->friendly );
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen Memory Operations (Wasm)' => sub {
+        my $host     = Brocken::Katsuro::Platform::parse();
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        my $ptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::i32(), '%ptr' );
+        $builder->build_store(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ),
+            $ptr
+        );
+        my $val = $builder->build_load( Brocken::Lindsay::IR::Type::i32(), $ptr, '%val' );
+        $builder->build_ret($val);
+
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        ok( length( $res->{body} ) > 0, 'Generated Wasm memory bytes' );
+
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './mem_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm memory file exists' );
+
+        my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+        my $node_path = `which node 2>/dev/null`;
+        chomp $node_path if $node_path;
+    SKIP: {
+            if ( $wasmtime_path && -f $wasmtime_path ) {
+                my $output = qx["$wasmtime_path" run --invoke main $output_file];
+                chomp $output;
+                is $output, 42, 'Memory Wasm returned 42 via wasmtime';
+            }
+            elsif ( $node_path && -x $node_path ) {
+                my $js = 'const fs=require("fs");const buf=fs.readFileSync("' . $output_file . '");'
+                    . 'WebAssembly.instantiate(buf)'
+                    . '.then(res=>{process.exit(res.instance.exports.main());})'
+                    . '.catch(e=>{console.error(e);process.exit(1);});';
+                system( 'node', '-e', $js );
+                is $? >> 8, 42, 'Memory Wasm returned 42 via node';
+            }
+            else {
+                skip 'Neither wasmtime nor node are installed', 1;
+            }
+        }
+        unlink $output_file if -e $output_file;
+    };
+    subtest 'Jenny::Codegen Box/Unbox (Wasm)' => sub {
+        my $host     = Brocken::Katsuro::Platform::parse();
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        my $boxed = $builder->build_box(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ),
+            '%boxed'
+        );
+        my $val = $builder->build_unbox( $boxed, Brocken::Lindsay::IR::Type::i32(), '%val' );
+        $builder->build_ret($val);
+
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        ok( length( $res->{body} ) > 0, 'Generated Wasm box/unbox bytes' );
+
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './box_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm box/unbox file exists' );
+
+        my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+        my $node_path = `which node 2>/dev/null`;
+        chomp $node_path if $node_path;
+    SKIP: {
+            if ( $wasmtime_path && -f $wasmtime_path ) {
+                my $output = qx["$wasmtime_path" run --invoke main $output_file];
+                chomp $output;
+                is $output, 42, 'Box/unbox Wasm returned 42 via wasmtime';
+            }
+            elsif ( $node_path && -x $node_path ) {
+                my $js = 'const fs=require("fs");const buf=fs.readFileSync("' . $output_file . '");'
+                    . 'WebAssembly.instantiate(buf)'
+                    . '.then(res=>{process.exit(res.instance.exports.main());})'
+                    . '.catch(e=>{console.error(e);process.exit(1);});';
+                system( 'node', '-e', $js );
+                is $? >> 8, 42, 'Box/unbox Wasm returned 42 via node';
+            }
+            else {
+                skip 'Neither wasmtime nor node are installed', 1;
+            }
+        }
+        unlink $output_file if -e $output_file;
+    };
+    subtest 'RegAlloc::LinearScan basic allocation' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+        my $mf = Brocken::Jenny::MIR::MachineFunction->new( name => 'test', blocks => [
+            Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry', instructions => [
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%0' ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ),
+                ] ),
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%1' ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 2 ),
+                ] ),
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [] ),
+            ] ),
+        ] );
+        my $alloc  = Brocken::Jenny::RegAlloc::LinearScan->new();
+        my $result = $alloc->allocate( $mf, $platform );
+        ok defined $result->{assignment}, 'assignment map returned';
+        ok exists $result->{assignment}{'%0'}, '%0 allocated';
+        ok exists $result->{assignment}{'%1'}, '%1 allocated';
+        is scalar( $result->{used_callee}->@* ), 0, 'no callee regs used with 2 vregs on x86_64';
+        is scalar( keys $result->{spill_slots}->%* ), 0, 'no spills needed';
+        ok defined $result->{spill_temp}, 'spill temp defined';
+    };
+    subtest 'RegAlloc::LinearScan callee-saved allocation' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+        my $alloc  = Brocken::Jenny::RegAlloc::LinearScan->new();
+        my @intervals;
+        for my $i ( 0 .. 10 ) {
+            push @intervals, Brocken::Jenny::RegAlloc::LiveInterval->new( name => "%$i", start => 0, end => 10 );
+        }
+        my $result = $alloc->_linear_scan( \@intervals, $platform );
+        ok ( scalar( $result->{used_callee}->@* ) > 0 ), 'callee registers used when 11 overlapping vregs on x86_64';
+    };
+    subtest 'RegAlloc::LinearScan spilling' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+        my $alloc  = Brocken::Jenny::RegAlloc::LinearScan->new();
+        my @intervals;
+        for my $i ( 0 .. 19 ) {
+            push @intervals, Brocken::Jenny::RegAlloc::LiveInterval->new( name => "%$i", start => 0, end => 10 );
+        }
+        my $result = $alloc->_linear_scan( \@intervals, $platform );
+        ok ( scalar( keys $result->{spill_slots}->%* ) > 0 ), 'spill slots created with 20 overlapping vregs';
+    };
+    subtest 'RegAlloc::LinearScan insert_spill_code' => sub {
+        my $mf = Brocken::Jenny::MIR::MachineFunction->new( name => 'test', blocks => [
+            Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry', instructions => [
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%v0' ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ),
+                ] ),
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%v1' ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%v0' ),
+                ] ),
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [] ),
+            ] ),
+        ] );
+        my $spill_slots = { '%v0' => 0, '%v1' => 8 };
+        my $alloc = Brocken::Jenny::RegAlloc::LinearScan->new();
+        $alloc->insert_spill_code( $mf, $spill_slots, 'r9', 'rsp' );
+        my @all_ops;
+        for my $bb ( $mf->blocks->@* ) {
+            for my $inst ( $bb->instructions->@* ) {
+                push @all_ops, $inst->opcode;
+            }
+        }
+        ok grep( /^load$/,  @all_ops ), 'spill-reload loads inserted';
+        ok grep( /^store$/, @all_ops ), 'spill-store stores inserted';
     };
 };
 #
