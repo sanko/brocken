@@ -1992,7 +1992,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             for my $fixup ( @fixups ) {
                 my $target_pos = $labels{ $fixup->{target} };
                 die "undefined label: $fixup->{target}" unless defined $target_pos;
-                my $rel = $target_pos - ( $fixup->{offset} + 4 );
+                my $rel = $target_pos - $fixup->{offset};
                 if ( $fixup->{type} eq 'jal' ) {
                     my $imm20 = ( $rel >> 1 ) & 0x1FFFFF;
                     my $enc = ( ( $imm20 >> 20 ) & 1 ) << 31
@@ -2634,7 +2634,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             for my $fixup ( @fixups ) {
                 my $target_pos = $labels{ $fixup->{target} };
                 die "undefined label: $fixup->{target}" unless defined $target_pos;
-                my $rel = $target_pos - ( $fixup->{offset} + 4 );
+                my $rel = $target_pos - $fixup->{offset};
                 if ( $fixup->{type} eq 'b' ) {
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', B | ( ( $rel / 4 ) & 0x3FFFFFF ) );
                 }
