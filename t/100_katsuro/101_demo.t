@@ -7488,7 +7488,6 @@ subtest Jenny => sub {
         unlink $output_file;
     };
     subtest 'Jenny::Linker Early FFI Integration Test' => sub {
-        my $todo     = todo 'It is way too early to do this...';
         my $platform = Brocken::Katsuro::Platform::parse();
 
         # Determine platform properties
@@ -7631,8 +7630,8 @@ subtest Jenny => sub {
             my $main_rva         = $text + $entry_stub_len;
 
             # PC-relative offsets for auipc instructions (where PC = instruction address itself)
-            my $off_libpath   = $lib_path_offset - $entry_stub_len - 16;    # auipc at $main_rva + 16
-            my $off_funcname  = $func_name_offset - $entry_stub_len - 48;   # auipc at $main_rva + 48
+            my $off_libpath   = $lib_path_offset - 16;    # auipc at $main_rva + 16
+            my $off_funcname  = $func_name_offset - 48;   # auipc at $main_rva + 48
             my $off_dlopen    = $got - ( $main_rva + 28 );                  # auipc at $main_rva + 28
             my $off_dlsym     = ( $got + 8 ) - ( $main_rva + 56 );          # auipc at $main_rva + 56
 
