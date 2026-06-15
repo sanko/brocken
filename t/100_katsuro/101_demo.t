@@ -1272,6 +1272,25 @@ like ELF, Mach-O, or PE (Jenny::Linker).
     class Brocken::Jenny::Codegen::X86_64 {
         field $platform : param = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
 
+        use constant {
+            REX_W       => 0x08,
+            REX_B       => 0x01,
+            MOV_EAX_IMM => 0xB8,
+            MOV_RM_R    => 0x8B,
+            MOV_R_RM    => 0x89,
+            MOV_IMM_RM  => 0xC7,
+            ARITH_IMM   => 0x81,
+            CMP_IMM8    => 0x83,
+            SHIFT_IMM   => 0xC1,
+            IMUL_IMM    => 0x69,
+            JMP_REL32   => 0xE9,
+            JE          => 0x84,
+            JNE         => 0x85,
+            RET_BYTE    => 0xC3,
+            POP_BASE    => 0x58,
+            PUSH_BASE   => 0x50,
+        };
+
         # Lower Lindsay IR to MIR, allocate registers, then encode to x86_64 machine code
         method emit_function($ir_func) {
             my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
@@ -1299,8 +1318,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
             for my $reg ( $used_callee->@* ) {
                 my $rid = $reg_id->($reg);
-                if ( $rid < 8 ) { $bytes .= pack( 'C', 0x50 + $rid ) }
-                else            { $bytes .= pack( 'CC', 0x41, 0x50 + ( $rid - 8 ) ) }
+                if ( $rid < 8 ) { $bytes .= pack( 'C', PUSH_BASE + $rid ) }
+                else            { $bytes .= pack( 'CC', 0x41, PUSH_BASE + ( $rid - 8 ) ) }
             }
 
             my $resolve = sub ($op) {
@@ -1351,29 +1370,29 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $bits  = $dst->type ? $dst->type->bits : 64;
 
                         if ( $src->kind eq 'imm' ) {
-                            my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
-                            my $rex_b = $did >= 8 ? 0x01 : 0x00;
+                            my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
+                            my $rex_b = $did >= 8 ? REX_B : 0;
                             if ( $rex_w && ( abs($src->value) > 0x7FFFFFFF ) ) {
-                                $bytes .= pack( 'C', 0x48 | $rex_b ) . pack( 'C', 0xB8 + ( $did & 7 ) ) . pack( 'Q', $src->value );
+                                $bytes .= pack( 'C', 0x48 | $rex_b ) . pack( 'C', MOV_EAX_IMM + ( $did & 7 ) ) . pack( 'Q', $src->value );
                             }
                             elsif ( $rex_w ) {
-                                $bytes .= pack( 'CCC', 0x48 | $rex_b, 0xC7, 0xC0 | ( $did & 7 ) );
+                                $bytes .= pack( 'CCC', 0x48 | $rex_b, MOV_IMM_RM, 0xC0 | ( $did & 7 ) );
                                 $bytes .= pack( 'V', $src->value );
                             }
                             elsif ( $rex_b ) {
-                                $bytes .= pack( 'CCV', 0x41, 0xB8 + ( $did & 7 ), $src->value );
+                                $bytes .= pack( 'CCV', 0x41, MOV_EAX_IMM + ( $did & 7 ), $src->value );
                             }
                             else {
-                                $bytes .= pack( 'CV', 0xB8 + $did, $src->value );
+                                $bytes .= pack( 'CV', MOV_EAX_IMM + $did, $src->value );
                             }
                         }
                         else {
                             my $src_r = $resolve->($src);
                             my $sid   = $reg_id->($src_r);
-                            my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
+                            my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
                             my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                             my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                            $bytes .= pack( 'CCC', $rex, 0x8B, $modrm );
+                            $bytes .= pack( 'CCC', $rex, MOV_RM_R, $modrm );
                         }
                     }
                     elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' ) {
@@ -1382,13 +1401,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $bits  = $dst->type ? $dst->type->bits : 64;
                         my %imm_ext = ( add => 0, sub => 5, and => 4, or => 1, xor => 6 );
                         my %reg_op  = ( add => 0x01, sub => 0x29, and => 0x21, or => 0x09, xor => 0x31 );
-                        my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
+                        my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
 
                         if ( $src->kind eq 'imm' ) {
                             my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                             my $ext   = $imm_ext{$opcode};
                             my $modrm = 0xC0 | ( $ext << 3 ) | ( $did & 7 );
-                            $bytes .= pack( 'CCCV', $rex, 0x81, $modrm, $src->value );
+                            $bytes .= pack( 'CCCV', $rex, ARITH_IMM, $modrm, $src->value );
                         }
                         else {
                             my $src_r = $resolve->($src);
@@ -1403,12 +1422,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
+                        my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
                         if ( $src->kind eq 'imm' ) {
                             # imul dst, dst, imm32  => REX.W 69 /r
                             my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                             my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $did & 7 );
-                            $bytes .= pack( 'CCCV', $rex, 0x69, $modrm, $src->value );
+                            $bytes .= pack( 'CCCV', $rex, IMUL_IMM, $modrm, $src->value );
                         }
                         else {
                             my $src_r = $resolve->($src);
@@ -1424,13 +1443,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $did    = $reg_id->($dst_r);
                         my $bits   = $dst->type ? $dst->type->bits : 64;
                         my %ext    = ( shl => 4, lshr => 5, ashr => 7 );
-                        my $rex_w  = ( $bits >= 64 ) ? 0x08 : 0x00;
+                        my $rex_w  = ( $bits >= 64 ) ? REX_W : 0;
                         my $rex    = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                         my $extval = $ext{$opcode};
                         if ( $src->kind eq 'imm' ) {
                             # shift by imm8: REX.W C1 /ext ib
                             my $modrm = 0xC0 | ( $extval << 3 ) | ( $did & 7 );
-                            $bytes .= pack( 'CCCC', $rex, 0xC1, $modrm, $src->value );
+                            $bytes .= pack( 'CCCC', $rex, SHIFT_IMM, $modrm, $src->value );
                         }
                         else {
                             die "x86_64 shift by register requires CL" . ( $src->value // '' );
@@ -1444,11 +1463,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         # sub rsp, size  (48 81 EC <size32>) — rsp is always 64-bit
                         my $rex   = 0x48;
                         my $modrm = 0xC0 | ( 5 << 3 ) | 4;    # /5 = sub, r/m = rsp
-                        $bytes .= pack( 'CCCV', $rex, 0x81, $modrm, $size );
+                        $bytes .= pack( 'CCCV', $rex, ARITH_IMM, $modrm, $size );
                         # mov dst, rsp  (48 8B <modrm>) — rsp is always 64-bit
                         my $rex2  = 0x48 | ( $did >= 8 ? 4 : 0 );
                         my $mr2   = 0xC0 | ( ( $did & 7 ) << 3 ) | 4;
-                        $bytes .= pack( 'CCC', $rex2, 0x8B, $mr2 );
+                        $bytes .= pack( 'CCC', $rex2, MOV_RM_R, $mr2 );
                     }
                     elsif ( $opcode eq 'load' ) {
                         my $dst_r  = $resolve->($dst);
@@ -1457,7 +1476,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
                         my $rex = ( $bits == 64 ? 0x48 : 0 ) | ( $did >= 8 ? 4 : 0 );
                         if ( $rex ) { $bytes .= pack( 'C', $rex ) }
-                        $bytes .= pack( 'C', 0x8B ) . pack( 'C', $modrm );
+                        $bytes .= pack( 'C', MOV_RM_R ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
                     }
                     elsif ( $opcode eq 'store' ) {
@@ -1467,7 +1486,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $bits = ($src->type && $src->type->kind eq 'int') ? $src->type->bits : 64;
                         my $rex = ( $bits == 64 ? 0x48 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                         if ( $rex ) { $bytes .= pack( 'C', $rex ) }
-                        $bytes .= pack( 'C', 0x89 ) . pack( 'C', $modrm );
+                        $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
                     }
                     elsif ( $opcode eq 'store_imm' ) {
@@ -1476,7 +1495,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $bits = ($imm->type && $imm->type->kind eq 'int') ? $imm->type->bits : 64;
                         my $rex = ( $bits == 64 ? 0x48 : 0 );
                         if ( $rex ) { $bytes .= pack( 'C', $rex ) }
-                        $bytes .= pack( 'C', 0xC7 ) . pack( 'C', $modrm );
+                        $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
                         $bytes .= pack( 'V', $imm->value );
                     }
@@ -1571,7 +1590,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $opcode eq 'jmp' ) {
                         push @fixups, { offset => $current_offset->(), type => 'jmp_rel32', target => $dst->value, size => 5 };
-                        $bytes .= pack( 'C', 0xE9 ) . "\x00\x00\x00\x00";
+                        $bytes .= pack( 'C', JMP_REL32 ) . "\x00\x00\x00\x00";
                     }
                     elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
                         my $cond_r = $resolve->($dst);
@@ -1579,8 +1598,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         # cmp reg, 0: REX.W 83 /7 0  (4 bytes)
                         my $rex   = 0x48 | ( $cid >= 8 ? 1 : 0 );
                         my $modrm = 0xC0 | ( 7 << 3 ) | ( $cid & 7 );
-                        $bytes .= pack( 'CCCC', $rex, 0x83, $modrm, 0 );
-                        my $jcc = ( $opcode eq 'beq' ? 0x84 : 0x85 );
+                        $bytes .= pack( 'CCCC', $rex, CMP_IMM8, $modrm, 0 );
+                        my $jcc = ( $opcode eq 'beq' ? JE : JNE );
                         push @fixups, { offset => $current_offset->(), type => 'jcc_rel32', jcc => $jcc, target => $src->value, size => 6 };
                         $bytes .= pack( 'CC', 0x0F, $jcc ) . "\x00\x00\x00\x00";
                     }
@@ -1588,11 +1607,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
+                        my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
                         if ( $src->kind eq 'imm' ) {
                             my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                             my $modrm = 0xC0 | ( 7 << 3 ) | ( $did & 7 );
-                            $bytes .= pack( 'CCCV', $rex, 0x81, $modrm, $src->value );
+                            $bytes .= pack( 'CCCV', $rex, ARITH_IMM, $modrm, $src->value );
                         }
                         else {
                             my $src_r = $resolve->($src);
@@ -1616,10 +1635,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         }
                         for my $reg ( reverse $used_callee->@* ) {
                             my $rid = $reg_id->($reg);
-                            if ( $rid < 8 ) { $bytes .= pack( 'C', 0x58 + $rid ) }
-                            else            { $bytes .= pack( 'CC', 0x41, 0x58 + ( $rid - 8 ) ) }
+                            if ( $rid < 8 ) { $bytes .= pack( 'C', POP_BASE + $rid ) }
+                            else            { $bytes .= pack( 'CC', 0x41, POP_BASE + ( $rid - 8 ) ) }
                         }
-                        $bytes .= pack( 'C', 0xC3 );
+                        $bytes .= pack( 'C', RET_BYTE );
                     }
                 }
             }
@@ -1641,6 +1660,26 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
     class Brocken::Jenny::Codegen::RISCV64 {
         field $platform : param = Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu');
+
+        use constant {
+            JAL     => 0x0000006F,
+            JALR    => 0x00008067,
+            SRAI_B  => 0x40000000,
+            FSGNJ   => 0x20000000,
+            FMINMAX => 0x28000000,
+            FSQRT   => 0x58000000,
+            FMV_W_X => 0xF0000000,
+            FMV_D_X => 0xF2000000,
+            FP_FMT  => 0x02000000,
+            OP_IMM  => 0x13,
+            OP      => 0x33,
+            LOAD    => 0x03,
+            STORE   => 0x23,
+            FLOAD   => 0x07,
+            FSTORE  => 0x27,
+            FP_OP   => 0x53,
+            BCC     => 0x63,
+        };
 
         method emit_function($ir_func) {
             my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
@@ -1685,13 +1724,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
             if ( $callee_frame > 0 ) {
                 my $neg = ( -$callee_frame ) & 0xFFF;
-                $bytes .= pack( 'V', ( $neg << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | 0x13 );
+                $bytes .= pack( 'V', ( $neg << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
                 for my $i ( 0 .. $used_callee->$#* ) {
                     my $rid    = $reg_id->( $used_callee->[$i] );
                     my $off    = $i * 8;
                     my $imm_lo = $off & 0x1F;
                     my $imm_hi = ( $off >> 5 ) & 0x7F;
-                    $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | 0x23 );
+                    $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                 }
             }
 
@@ -1708,7 +1747,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $opcode eq 'jmp' ) {
                         push @fixups, { offset => $current_offset->(), type => 'jal', target => $dst->value };
-                        $bytes .= pack( 'V', 0x0000006F );
+                        $bytes .= pack( 'V', JAL );
                     }
                     elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
                         my $cond_r = $resolve->($dst);
@@ -1716,7 +1755,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $funct3 = ( $opcode eq 'bne' ? 1 : 0 );
                         # BEQ/BNE rs1=cond, rs2=x0, offset placeholder
                         push @fixups, { offset => $current_offset->(), type => 'bcc', target => $src->value, rs1 => $cid, funct3 => $funct3 };
-                        $bytes .= pack( 'V', ( $cid << 15 ) | ( $funct3 << 12 ) | 0x63 );
+                        $bytes .= pack( 'V', ( $cid << 15 ) | ( $funct3 << 12 ) | BCC );
                     }
                     elsif ( $opcode eq 'mv' ) {
                         my $dst_r = $resolve->($dst);
@@ -1725,13 +1764,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         if ( $src->kind eq 'imm' ) {
                             # li rd, imm (addi rd, zero, imm)
                             my $imm = $src->value & 0xFFF;
-                            $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x13 );
+                            $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                         }
                         else {
                             my $src_r = $resolve->($src);
                             my $sid   = $reg_id->($src_r);
                             # mv rd, rs (addi rd, rs, 0)
-                            $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x13 );
+                            $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                         }
                     }
                     elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'slt' || $opcode eq 'sltu' || $opcode eq 'sltiu' ) {
@@ -1746,12 +1785,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             my $imm = $src->value;
                             $imm = -$imm if $opcode eq 'sub';
                             $imm &= 0xFFF;
-                            $bytes .= pack( 'V', ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | 0x13 );
+                            $bytes .= pack( 'V', ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
                         }
                         else {
                             my $src_r = $resolve->($src);
                             my $sid   = $reg_id->($src_r);
-                            $bytes .= pack( 'V', ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | 0x33 );
+                            $bytes .= pack( 'V', ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
                         }
                     }
                     elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
@@ -1761,8 +1800,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             # I-type shift: SLLI/SRLI/SRAI, funct3=1/5/5, opcode=0x13
                             my $shamt = $src->value;
                             my %f3 = ( shl => 1, lshr => 5, ashr => 5 );
-                            my $extra = ( $opcode eq 'ashr' ? 0x40000000 : 0x00000000 );
-                            $bytes .= pack( 'V', $extra | ( $shamt << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | 0x13 );
+                            my $extra = ( $opcode eq 'ashr' ? SRAI_B : 0x00000000 );
+                            $bytes .= pack( 'V', $extra | ( $shamt << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
                         }
                         else {
                             # R-type shift: SLL/SRL/SRA, funct7=0x00/0x00/0x20, funct3=1/5/5
@@ -1770,7 +1809,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             my $sid   = $reg_id->($src_r);
                             my %f3 = ( shl => 1, lshr => 5, ashr => 5 );
                             my %f7 = ( shl => 0x00, lshr => 0x00, ashr => 0x20 );
-                            $bytes .= pack( 'V', ( $f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | 0x33 );
+                            $bytes .= pack( 'V', ( $f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
                         }
                     }
                     elsif ( $opcode eq 'alloca' ) {
@@ -1780,9 +1819,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         $total_frame += $size;
                         # addi sp, sp, -size
                         my $neg_size = ( -$size ) & 0xFFF;
-                        $bytes .= pack( 'V', ( $neg_size << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | 0x13 );
+                        $bytes .= pack( 'V', ( $neg_size << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
                         # addi xd, sp, 0
-                        $bytes .= pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x13 );
+                        $bytes .= pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                     elsif ( $opcode eq 'load' ) {
                         my $dst_r  = $resolve->($dst);
@@ -1795,7 +1834,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $disp   = $addr->{disp} // 0;
                         my $bits   = ($dst->type && $dst->type->kind eq 'int') ? $dst->type->bits : 64;
                         my $funct3 = $bits == 32 ? 2 : 3;
-                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | 0x03 );
+                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | LOAD );
                     }
                     elsif ( $opcode eq 'store' ) {
                         my $src_r  = $resolve->($src);
@@ -1810,9 +1849,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $funct3 = $bits == 32 ? 2 : 3;
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | 0x23 );
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                     }
                     elsif ( $opcode eq 'store_imm' ) {
+
                         my ($mem, $imm) = $inst->operands->@*;
                         my $addr   = $mem->value;
                         my $base_r = $resolve->(
@@ -1831,11 +1871,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $tid = $reg_id->($tmp_r);
                         # li xtmp, imm  (addi xtmp, zero, imm12)
                         my $im = $imm->value & 0xFFF;
-                        $bytes .= pack( 'V', ( $im << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | 0x13 );
+                        $bytes .= pack( 'V', ( $im << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
                         # sd/sw xtmp, disp(rs1)
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | 0x23 );
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                     }
                     elsif ( $opcode eq 'fload' ) {
                         my $dst_r  = $resolve->($dst);
@@ -1847,7 +1887,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $bid    = $reg_id->($base_r);
                         my $disp   = $addr->{disp} // 0;
                         my $funct3 = ($dst->type && $dst->type->bits <= 32) ? 2 : 3;
-                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | 0x07 );
+                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | FLOAD );
                     }
                     elsif ( $opcode eq 'fstore' ) {
                         my $src_r  = $resolve->($src);
@@ -1861,7 +1901,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $funct3 = ($src->type && $src->type->bits <= 32) ? 2 : 3;
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | 0x27 );
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
                     }
                     elsif ( $opcode eq 'fmov' ) {
                         my $dst_r = $resolve->($dst);
@@ -1870,12 +1910,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
                         if ( $bits <= 32 ) {
-                            # fmv.s = fsgnj.s rd, rs1, rs1: funct5=00100, fmt=00, rm=000
-                            $bytes .= pack( 'V', 0x20000000 | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | 0x53 );
+                            $bytes .= pack( 'V', FSGNJ | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                         }
                         else {
-                            # fmv.d = fsgnj.d rd, rs1, rs1: funct5=00100, fmt=01, rm=000
-                            $bytes .= pack( 'V', 0x22000000 | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | 0x53 );
+                            $bytes .= pack( 'V', FSGNJ | FP_FMT | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                         }
                     }
                     elsif ( $opcode eq 'fmov_gp2f' ) {
@@ -1885,12 +1923,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
                         if ( $bits <= 32 ) {
-                            # fmv.w.x: funct5=11110, fmt=00, rs2=0, rm=000
-                            $bytes .= pack( 'V', 0xF0000000 | ( $sid << 15 ) | ( $did << 7 ) | 0x53 );
+                            $bytes .= pack( 'V', FMV_W_X | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                         }
                         else {
-                            # fmv.d.x: funct5=11110, fmt=01, rs2=0, rm=000
-                            $bytes .= pack( 'V', 0xF2000000 | ( $sid << 15 ) | ( $did << 7 ) | 0x53 );
+                            $bytes .= pack( 'V', FMV_D_X | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                         }
                     }
                     elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' ) {
@@ -1901,8 +1937,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $bits  = $dst->type ? $dst->type->bits : 64;
                         my %fop5 = ( fadd => 0x00, fsub => 0x01, fmul => 0x02, fdiv => 0x03 );
                         my $funct5 = $fop5{$opcode};
-                        my $enc = ( $funct5 << 27 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $did << 7 ) | 0x53;
-                        $enc |= ( 1 << 25 ) if $bits > 32;
+                        my $enc = ( $funct5 << 27 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $did << 7 ) | FP_OP;
+                        $enc |= FP_FMT if $bits > 32;
                         $bytes .= pack( 'V', $enc );
                     }
                     elsif ( $opcode eq 'fneg' || $opcode eq 'fabs' ) {
@@ -1911,11 +1947,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        # fsgnjn.s (fneg): funct5=00100, rm=001
-                        # fsgnjx.s (fabs): funct5=00100, rm=010
                         my $rm = $opcode eq 'fneg' ? 1 : 2;
-                        my $enc = 0x20000000 | ( $sid << 20 ) | ( $sid << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | 0x53;
-                        $enc |= ( 1 << 25 ) if $bits > 32;
+                        my $enc = FSGNJ | ( $sid << 20 ) | ( $sid << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | FP_OP;
+                        $enc |= FP_FMT if $bits > 32;
                         $bytes .= pack( 'V', $enc );
                     }
                     elsif ( $opcode eq 'fmin' || $opcode eq 'fmax' ) {
@@ -1924,11 +1958,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        # fmin.s: funct5=00101, rm=000
-                        # fmax.s: funct5=00101, rm=001
                         my $rm = $opcode eq 'fmin' ? 0 : 1;
-                        my $enc = 0x28000000 | ( $sid << 20 ) | ( $did << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | 0x53;
-                        $enc |= ( 1 << 25 ) if $bits > 32;
+                        my $enc = FMINMAX | ( $sid << 20 ) | ( $did << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | FP_OP;
+                        $enc |= FP_FMT if $bits > 32;
                         $bytes .= pack( 'V', $enc );
                     }
                     elsif ( $opcode eq 'fsqrt' ) {
@@ -1937,24 +1969,23 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        # fsqrt.s: funct5=01011, fmt=00, rs2=0, rm=000
-                        my $enc = 0x58000000 | ( $sid << 15 ) | ( $did << 7 ) | 0x53;
-                        $enc |= ( 1 << 25 ) if $bits > 32;
+                        my $enc = FSQRT | ( $sid << 15 ) | ( $did << 7 ) | FP_OP;
+                        $enc |= FP_FMT if $bits > 32;
                         $bytes .= pack( 'V', $enc );
                     }
                     elsif ( $opcode eq 'ret' ) {
                         if ( $total_frame > 0 ) {
-                            $bytes .= pack( 'V', ( ( $total_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | 0x13 );
+                            $bytes .= pack( 'V', ( ( $total_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
                         }
                         if ( $callee_frame > 0 ) {
                             for my $i ( reverse 0 .. $used_callee->$#* ) {
                                 my $rid    = $reg_id->( $used_callee->[$i] );
                                 my $off    = $i * 8;
-                                $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | 0x03 );
+                                $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | LOAD );
                             }
-                            $bytes .= pack( 'V', ( ( $callee_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | 0x13 );
+                            $bytes .= pack( 'V', ( ( $callee_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
                         }
-                        $bytes .= pack( 'V', 0x00008067 );
+                        $bytes .= pack( 'V', JALR );
                     }
                 }
             }
@@ -1968,7 +1999,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             | ( ( $imm20 & 0x7FE ) << 20 )
                             | ( ( $imm20 >> 11 ) & 1 ) << 20
                             | ( $imm20 & 0xFF000 )
-                            | 0x6F;
+                            | JAL;
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
                 }
                 elsif ( $fixup->{type} eq 'bcc' ) {
@@ -1979,7 +2010,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             | ( $fixup->{funct3} << 12 )
                             | ( ( $imm13 & 0x1E ) << 7 )
                             | ( ( $imm13 >> 11 ) & 1 ) << 7
-                            | 0x63;
+                            | BCC;
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
                 }
             }
@@ -2245,6 +2276,62 @@ like ELF, Mach-O, or PE (Jenny::Linker).
     class Brocken::Jenny::Codegen::ARM64 {
         field $platform : param = Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu');
 
+        use constant {
+            B       => 0x14000000,
+            CBZ     => 0xB4000000,
+            CBNZ    => 0xB5000000,
+            ADD_W   => 0x0B000000,
+            SUB_W   => 0x4B000000,
+            AND_W   => 0x0A000000,
+            ORR_W   => 0x2A000000,
+            EOR_W   => 0x4A000000,
+            MUL_W   => 0x1B007C00,
+            ADD_X   => 0x8B000000,
+            SUB_X   => 0xCB000000,
+            AND_X   => 0x8A000000,
+            ORR_X   => 0xAA000000,
+            EOR_X   => 0xCA000000,
+            MUL_X   => 0x9B007C00,
+            ADD_IMM => 0x11000000,
+            SUB_IMM => 0x51000000,
+            UBFM    => 0xD3400000,
+            SBFM    => 0x93400000,
+            MOVZ_32 => 0x52800000,
+            MOVZ_64 => 0xD2800000,
+            MOV_X   => 0xAA0003E0,
+            SUB_SP  => 0xD10003FF,
+            ADD_SP  => 0x910003FF,
+            MOV_SP  => 0x910003E0,
+            LDR_32  => 0xB9400000,
+            LDR_64  => 0xF9400000,
+            STR_32  => 0xB9000000,
+            STR_64  => 0xF9000000,
+            FLDR_32 => 0xBD400000,
+            FLDR_64 => 0xFD400000,
+            FSTR_32 => 0xBD000000,
+            FSTR_64 => 0xFD000000,
+            CMP_IMM => 0x7100001F,
+            CMP_REG => 0x6B00001F,
+            CSINC   => 0x9A7E0BE0,
+            FABS_32 => 0x1E20C000,
+            FNEG_32 => 0x1E214000,
+            FSQRT_32=> 0x1E21C000,
+            FMOV_32 => 0x1E204000,
+            FMOV_GP2F_32 => 0x1E270000,
+            FMOV_GP2F_64 => 0x9E670000,
+            FCMP_32 => 0x1E202000,
+            FCMP_64 => 0x1E602000,
+            FP_SZ   => 0x00400000,
+            FADD    => 0x1E202800,
+            FSUB    => 0x1E203800,
+            FMUL    => 0x1E200800,
+            FDIV    => 0x1E201800,
+            FMIN    => 0x1E205800,
+            FMAX    => 0x1E204800,
+            SF      => 0x80000000,
+            RET     => 0xD65F03C0,
+        };
+
         method emit_function($ir_func) {
             my $lowerer = Brocken::Jenny::Lowerer::ARM64->new();
             my $mf      = $lowerer->lower($ir_func);
@@ -2280,11 +2367,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
             if ( $callee_frame > 0 ) {
                 my $call_stk = ( ( $callee_frame + 15 ) & ~15 );
-                $bytes .= pack( 'V', 0xD10003FF | ( ( $call_stk & 0xFFF ) << 10 ) );
+                $bytes .= pack( 'V', SUB_SP | ( ( $call_stk & 0xFFF ) << 10 ) );
                 for my $i ( 0 .. $used_callee->$#* ) {
                     my $reg = $used_callee->[$i];
                     my $rid = $reg_id->($reg);
-                    my $base = $reg =~ /^v/ ? 0xFD000000 : 0xF9000000;
+                    my $base = $reg =~ /^v/ ? FSTR_64 : STR_64;
                     $bytes .= pack( 'V', $base | ( $i << 10 ) | ( 31 << 5 ) | $rid );
                 }
             }
@@ -2302,12 +2389,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $opcode eq 'jmp' ) {
                         push @fixups, { offset => $current_offset->(), type => 'b', target => $dst->value };
-                        $bytes .= pack( 'V', 0x14000000 );
+                        $bytes .= pack( 'V', B );
                     }
                     elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
                         my $cond_r = $resolve->($dst);
                         my $cid    = $reg_id->($cond_r);
-                        my $base   = ( $opcode eq 'bne' ? 0xB5000000 : 0xB4000000 );
+                        my $base   = ( $opcode eq 'bne' ? CBNZ : CBZ );
                         push @fixups, { offset => $current_offset->(), type => 'cbz', target => $src->value, rid => $cid, base => $base };
                         $bytes .= pack( 'V', $base | $cid );
                     }
@@ -2317,14 +2404,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
                         if ( $src->kind eq 'imm' ) {
                             my $bits = $dst->type ? $dst->type->bits : 64;
-                            my $sf   = ( $bits >= 64 ) ? 0x80000000 : 0x00000000;
-                            $bytes .= pack( 'V', $sf | 0x52800000 | ( ( $src->value & 0xFFFF ) << 5 ) | $did );
+                            my $sf   = ( $bits >= 64 ) ? SF : 0x00000000;
+                            $bytes .= pack( 'V', $sf | MOVZ_32 | ( ( $src->value & 0xFFFF ) << 5 ) | $did );
                         }
                         else {
                             my $src_r = $resolve->($src);
                             my $sid   = $reg_id->($src_r);
-                            # mov xd, xn -> orr xd, xzr, xn
-                            $bytes .= pack( 'V', 0xAA0003E0 | ( $sid << 16 ) | $did );
+                            $bytes .= pack( 'V', MOV_X | ( $sid << 16 ) | $did );
                         }
                     }
                     elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'mul' ) {
@@ -2332,17 +2418,17 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $did   = $reg_id->($dst_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;  # width-aware
                         my %reg_op = (
-                            add => ($bits >= 64 ? 0x8B000000 : 0x0B000000),
-                            sub => ($bits >= 64 ? 0xCB000000 : 0x4B000000),
-                            and => ($bits >= 64 ? 0x8A000000 : 0x0A000000),
-                            or  => ($bits >= 64 ? 0xAA000000 : 0x2A000000),
-                            xor => ($bits >= 64 ? 0xCA000000 : 0x4A000000),
-                            mul => ($bits >= 64 ? 0x9B007C00 : 0x1B007C00),
+                            add => ($bits >= 64 ? ADD_X : ADD_W),
+                            sub => ($bits >= 64 ? SUB_X : SUB_W),
+                            and => ($bits >= 64 ? AND_X : AND_W),
+                            or  => ($bits >= 64 ? ORR_X : ORR_W),
+                            xor => ($bits >= 64 ? EOR_X : EOR_W),
+                            mul => ($bits >= 64 ? MUL_X : MUL_W),
                         );
 
                         if ( $src->kind eq 'imm' && ( $opcode eq 'add' || $opcode eq 'sub' ) ) {
-                            my $sf     = ( $bits >= 64 ) ? 0x80000000 : 0x00000000;
-                            my $op     = $sf | ( $opcode eq 'add' ? 0x11000000 : 0x51000000 );
+                            my $sf     = ( $bits >= 64 ) ? SF : 0x00000000;
+                            my $op     = $sf | ( $opcode eq 'add' ? ADD_IMM : SUB_IMM );
                             my $imm12  = $src->value & 0xFFF;
                             $bytes .= pack( 'V', $op | ( $imm12 << 10 ) | ( $did << 5 ) | $did );
                         }
@@ -2359,18 +2445,15 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         die "ARM64 shift requires immediate amount" unless $src->kind eq 'imm';
                         my $imm = $src->value;
                         if ( $opcode eq 'shl' ) {
-                            # LSL Xd, Xn, #imm  = UBFM Xd, Xn, #(64-imm), #(63-imm)
                             my $immr = ( 64 - $imm ) & 0x3F;
                             my $imms = ( 63 - $imm ) & 0x3F;
-                            $bytes .= pack( 'V', 0xD3400000 | ( $immr << 16 ) | ( $imms << 10 ) | ( $did << 5 ) | $did );
+                            $bytes .= pack( 'V', UBFM | ( $immr << 16 ) | ( $imms << 10 ) | ( $did << 5 ) | $did );
                         }
                         elsif ( $opcode eq 'lshr' ) {
-                            # LSR Xd, Xn, #imm  = UBFM Xd, Xn, #imm, #63
-                            $bytes .= pack( 'V', 0xD3400000 | ( $imm << 16 ) | ( 63 << 10 ) | ( $did << 5 ) | $did );
+                            $bytes .= pack( 'V', UBFM | ( $imm << 16 ) | ( 63 << 10 ) | ( $did << 5 ) | $did );
                         }
                         else {
-                            # ASR Xd, Xn, #imm  = SBFM Xd, Xn, #imm, #63
-                            $bytes .= pack( 'V', 0x93400000 | ( $imm << 16 ) | ( 63 << 10 ) | ( $did << 5 ) | $did );
+                            $bytes .= pack( 'V', SBFM | ( $imm << 16 ) | ( 63 << 10 ) | ( $did << 5 ) | $did );
                         }
                     }
                     elsif ( $opcode eq 'alloca' ) {
@@ -2378,10 +2461,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $did   = $reg_id->($dst_r);
                         my $size  = $src->value;
                         $total_frame += $size;
-                        # sub sp, sp, #size
-                        $bytes .= pack( 'V', 0xD10003FF | ( ( $size & 0xFFF ) << 10 ) );
-                        # mov xd, sp  (add xd, sp, #0)
-                        $bytes .= pack( 'V', 0x910003E0 | $did );
+                        $bytes .= pack( 'V', SUB_SP | ( ( $size & 0xFFF ) << 10 ) );
+                        $bytes .= pack( 'V', MOV_SP | $did );
                     }
                     elsif ( $opcode eq 'load' ) {
                         my $dst_r  = $resolve->($dst);
@@ -2394,7 +2475,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $disp   = $addr->{disp} // 0;
                         my $bits   = ($dst->type && $dst->type->kind eq 'int') ? $dst->type->bits : 64;
                         my $imm12  = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $base   = $bits == 32 ? 0xB9400000 : 0xF9400000;
+                        my $base   = $bits == 32 ? LDR_32 : LDR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
                     }
                     elsif ( $opcode eq 'store' ) {
@@ -2408,7 +2489,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $disp   = $addr->{disp} // 0;
                         my $bits   = ($src->type && $src->type->kind eq 'int') ? $src->type->bits : 64;
                         my $imm12  = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $base   = $bits == 32 ? 0xB9000000 : 0xF9000000;
+                        my $base   = $bits == 32 ? STR_32 : STR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
                     }
                     elsif ( $opcode eq 'store_imm' ) {
@@ -2429,32 +2510,26 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         die 'no temp register for store_imm' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         if ( $bits == 32 ) {
-                            # movz wtmp, #imm16  (32-bit)
-                            $bytes .= pack( 'V', 0x52800000 | ( ( $imm->value & 0xFFFF ) << 5 ) | $tid );
-                            # str wtmp, [xn, #pimm]  (32-bit)
-                            $bytes .= pack( 'V', 0xB9000000 | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
+                            $bytes .= pack( 'V', MOVZ_32 | ( ( $imm->value & 0xFFFF ) << 5 ) | $tid );
+                            $bytes .= pack( 'V', STR_32 | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
                         } else {
-                            # movz xtmp, #imm16  (64-bit)
-                            $bytes .= pack( 'V', 0xD2800000 | ( ( $imm->value & 0xFFFF ) << 5 ) | $tid );
-                            # str xtmp, [xn, #pimm]  (64-bit)
-                            $bytes .= pack( 'V', 0xF9000000 | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
+                            $bytes .= pack( 'V', MOVZ_64 | ( ( $imm->value & 0xFFFF ) << 5 ) | $tid );
+                            $bytes .= pack( 'V', STR_64 | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
                         }
                     }
                     elsif ( $opcode eq 'cmp' ) {
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my $sf    = ( $bits >= 64 ) ? 0x80000000 : 0x00000000;
+                        my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
                         if ( $src->kind eq 'imm' ) {
-                            # SUBS XZR, Xn, #imm12
                             my $imm12 = $src->value & 0xFFF;
-                            $bytes .= pack( 'V', $sf | 0x7100001F | ( $imm12 << 10 ) | ( $did << 5 ) );
+                            $bytes .= pack( 'V', $sf | CMP_IMM | ( $imm12 << 10 ) | ( $did << 5 ) );
                         }
                         else {
                             my $src_r = $resolve->($src);
                             my $sid   = $reg_id->($src_r);
-                            # CMP Xn/Wn, Xm/Wm  => SUBS XZR, Xn, Xm
-                            $bytes .= pack( 'V', $sf | 0x6B00001F | ( $sid << 16 ) | ( $did << 5 ) );
+                            $bytes .= pack( 'V', $sf | CMP_REG | ( $sid << 16 ) | ( $did << 5 ) );
                         }
                     }
                     elsif ( $opcode eq 'cset_eq' || $opcode eq 'cset_ne' || $opcode eq 'cset_lt' || $opcode eq 'cset_gt' || $opcode eq 'cset_le' || $opcode eq 'cset_ge' || $opcode eq 'cset_cc' || $opcode eq 'cset_cs' || $opcode eq 'cset_hi' || $opcode eq 'cset_ls' || $opcode eq 'cset_vc' || $opcode eq 'cset_vs' ) {
@@ -2462,8 +2537,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $cond  = $arm_cond{$opcode};
-                        # CSET Xd, cond  => CSINC Xd, XZR, XZR, inv(cond)
-                        $bytes .= pack( 'V', 0x9A7E0BE0 | ( $cond << 12 ) | $did );
+                        $bytes .= pack( 'V', CSINC | ( $cond << 12 ) | $did );
                     }
                     elsif ( $opcode eq 'fload' ) {
                         my $dst_r = $resolve->($dst);
@@ -2474,7 +2548,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $disp  = $addr->{disp} // 0;
                         my $bits  = $dst->type ? $dst->type->bits : 64;
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $base  = $bits == 32 ? 0xBD400000 : 0xFD400000;
+                        my $base  = $bits == 32 ? FLDR_32 : FLDR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
                     }
                     elsif ( $opcode eq 'fstore' ) {
@@ -2487,7 +2561,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $disp   = $addr->{disp} // 0;
                         my $bits   = $src->type ? $src->type->bits : 64;
                         my $imm12  = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $base   = $bits == 32 ? 0xBD000000 : 0xFD000000;
+                        my $base   = $bits == 32 ? FSTR_32 : FSTR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
                     }
                     elsif ( $opcode eq 'fmov' ) {
@@ -2496,7 +2570,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my $base  = $bits == 32 ? 0x1E204000 : 0x1E604000;
+                        my $base  = $bits == 32 ? FMOV_32 : ( FMOV_32 | FP_SZ );
                         $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                     }
                     elsif ( $opcode eq 'fmov_gp2f' ) {
@@ -2505,7 +2579,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my $base  = $bits == 32 ? 0x1E270000 : 0x9E670000;
+                        my $base  = $bits == 32 ? FMOV_GP2F_32 : FMOV_GP2F_64;
                         $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                     }
                     elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' || $opcode eq 'fmin' || $opcode eq 'fmax' ) {
@@ -2514,9 +2588,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my %fop   = ( fadd => 0x1E202800, fsub => 0x1E203800, fmul => 0x1E200800, fdiv => 0x1E201800, fmin => 0x1E205800, fmax => 0x1E204800 );
+                        my %fop   = ( fadd => FADD, fsub => FSUB, fmul => FMUL, fdiv => FDIV, fmin => FMIN, fmax => FMAX );
                         my $base  = $fop{$opcode};
-                        $base = $bits == 32 ? $base : ( $base | 0x00400000 );
+                        $base = $bits == 32 ? $base : ( $base | FP_SZ );
                         $bytes .= pack( 'V', $base | ( $sid << 16 ) | ( $did << 5 ) | $did );
                     }
                     elsif ( $opcode eq 'fsqrt' || $opcode eq 'fabs' || $opcode eq 'fneg' ) {
@@ -2525,9 +2599,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my %fop   = ( fsqrt => 0x1E21C000, fabs => 0x1E20C000, fneg => 0x1E214000 );
+                        my %fop   = ( fsqrt => FSQRT_32, fabs => FABS_32, fneg => FNEG_32 );
                         my $base  = $fop{$opcode};
-                        $base = $bits == 32 ? $base : ( $base | 0x00400000 );
+                        $base = $bits == 32 ? $base : ( $base | FP_SZ );
                         $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                     }
                     elsif ( $opcode eq 'fcmp' ) {
@@ -2536,24 +2610,24 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $rhs_r = $resolve->($src);
                         my $rid   = $reg_id->($rhs_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my $base  = $bits == 32 ? 0x1E202000 : 0x1E602000;
+                        my $base  = $bits == 32 ? FCMP_32 : FCMP_64;
                         $bytes .= pack( 'V', $base | ( $rid << 16 ) | ( $lid << 5 ) );
                     }
                     elsif ( $opcode eq 'ret' ) {
                         if ( $total_frame > 0 ) {
-                            $bytes .= pack( 'V', 0x910003FF | ( ( $total_frame & 0xFFF ) << 10 ) );
+                            $bytes .= pack( 'V', ADD_SP | ( ( $total_frame & 0xFFF ) << 10 ) );
                         }
                         if ( $callee_frame > 0 ) {
                             for my $i ( reverse 0 .. $used_callee->$#* ) {
                                 my $reg = $used_callee->[$i];
                                 my $rid = $reg_id->($reg);
-                                my $base = $reg =~ /^v/ ? 0xFD400000 : 0xF9400000;
+                                my $base = $reg =~ /^v/ ? FLDR_64 : LDR_64;
                                 $bytes .= pack( 'V', $base | ( $i << 10 ) | ( 31 << 5 ) | $rid );
                             }
                             my $call_stk = ( ( $callee_frame + 15 ) & ~15 );
-                            $bytes .= pack( 'V', 0x910003FF | ( ( $call_stk & 0xFFF ) << 10 ) );
+                            $bytes .= pack( 'V', ADD_SP | ( ( $call_stk & 0xFFF ) << 10 ) );
                         }
-                        $bytes .= pack( 'V', 0xD65F03C0 );
+                        $bytes .= pack( 'V', RET );
                     }
                 }
             }
@@ -2562,7 +2636,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 die "undefined label: $fixup->{target}" unless defined $target_pos;
                 my $rel = $target_pos - ( $fixup->{offset} + 4 );
                 if ( $fixup->{type} eq 'b' ) {
-                    substr $bytes, $fixup->{offset}, 4, pack( 'V', 0x14000000 | ( ( $rel / 4 ) & 0x3FFFFFF ) );
+                    substr $bytes, $fixup->{offset}, 4, pack( 'V', B | ( ( $rel / 4 ) & 0x3FFFFFF ) );
                 }
                 elsif ( $fixup->{type} eq 'cbz' ) {
                     my $inst = unpack( 'V', substr $bytes, $fixup->{offset}, 4 );
