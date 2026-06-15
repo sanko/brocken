@@ -2380,7 +2380,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my $base  = $bits == 32 ? 0x1E270000 : 0x9EAA0000;
+                        my $base  = $bits == 32 ? 0x1E270000 : 0x9E670000;
                         $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                     }
                     elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' || $opcode eq 'fmin' || $opcode eq 'fmax' ) {
@@ -7587,6 +7587,10 @@ subtest Jenny => sub {
             Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
         my $bytes = $codegen->emit_function($func);
         ok( length($bytes) > 0, 'Generated signed icmp bytes for ' . $platform->friendly );
+        if ( $platform->is_arm64 ) {
+            diag 'ARM64 ICmp bytes: ' . unpack( 'H*', $bytes );
+            diag 'ARM64 ICmp length: ' . length($bytes);
+        }
         my $linker
             = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
             $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
@@ -8249,6 +8253,10 @@ subtest Jenny => sub {
             Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
         my $bytes = $codegen->emit_function($func);
         ok( length($bytes) > 0, 'Generated float icmp bytes for ' . $platform->friendly );
+        if ( $platform->is_arm64 ) {
+            diag 'ARM64 Float ICmp bytes: ' . unpack( 'H*', $bytes );
+            diag 'ARM64 Float ICmp length: ' . length($bytes);
+        }
         my $linker
             = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
             $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
@@ -8319,6 +8327,10 @@ subtest Jenny => sub {
             Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
         my $bytes = $codegen->emit_function($func);
         ok( length($bytes) > 0, 'Generated float battery bytes for ' . $platform->friendly );
+        if ( $platform->is_arm64 ) {
+            diag 'ARM64 Float Battery bytes: ' . unpack( 'H*', $bytes );
+            diag 'ARM64 Float Battery length: ' . length($bytes);
+        }
         my $linker
             = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
             $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
@@ -8416,6 +8428,10 @@ subtest Jenny => sub {
             Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
         my $bytes = $codegen->emit_function($func);
         ok( length($bytes) > 0, 'Generated float unary/minmax bytes for ' . $platform->friendly );
+        if ( $platform->is_arm64 ) {
+            diag 'ARM64 Float Unary bytes: ' . unpack( 'H*', $bytes );
+            diag 'ARM64 Float Unary length: ' . length($bytes);
+        }
         my $linker
             = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
             $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
