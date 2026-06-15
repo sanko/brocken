@@ -2312,7 +2312,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             FSTR_64 => 0xFD000000,
             CMP_IMM => 0x7100001F,
             CMP_REG => 0x6B00001F,
-            CSINC   => 0x9A7E0BE0,
+            CSINC   => 0x9A9F07E0,
             FABS_32 => 0x1E20C000,
             FNEG_32 => 0x1E214000,
             FSQRT_32=> 0x1E21C000,
@@ -2533,7 +2533,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         }
                     }
                     elsif ( $opcode eq 'cset_eq' || $opcode eq 'cset_ne' || $opcode eq 'cset_lt' || $opcode eq 'cset_gt' || $opcode eq 'cset_le' || $opcode eq 'cset_ge' || $opcode eq 'cset_cc' || $opcode eq 'cset_cs' || $opcode eq 'cset_hi' || $opcode eq 'cset_ls' || $opcode eq 'cset_vc' || $opcode eq 'cset_vs' ) {
-                        my %arm_cond = ( cset_eq => 1, cset_ne => 0, cset_lt => 0xA, cset_gt => 0xC, cset_le => 0xD, cset_ge => 0xB, cset_cc => 2, cset_cs => 3, cset_hi => 9, cset_ls => 8, cset_vc => 6, cset_vs => 7 );
+                        my %arm_cond = ( cset_eq => 0, cset_ne => 1, cset_lt => 0xB, cset_gt => 0xC, cset_le => 0xD, cset_ge => 0xA, cset_cc => 3, cset_cs => 2, cset_hi => 8, cset_ls => 9, cset_vc => 7, cset_vs => 6 );
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $cond  = $arm_cond{$opcode};
@@ -7667,8 +7667,8 @@ subtest Jenny => sub {
             my $offset_dlsym     = ( $got + 8 ) - ( $main_rva + 36 );
             my $imm19_dlopen     = ( $offset_dlopen / 4 ) & 0x7FFFF;
             my $imm19_dlsym      = ( $offset_dlsym / 4 ) & 0x7FFFF;
-            my $adr_x0           = ( ( $disp_libpath & 3 ) << 28 ) | ( ( ( $disp_libpath >> 2 ) & 0x7FFFF ) << 5 ) | 0;
-            my $adr_x1           = ( ( $disp_funcname & 3 ) << 28 ) | ( ( ( $disp_funcname >> 2 ) & 0x7FFFF ) << 5 ) | 1;
+            my $adr_x0           = 0x10000000 | ( ( $disp_libpath & 3 ) << 29 ) | ( ( ( $disp_libpath >> 2 ) & 0x7FFFF ) << 5 ) | 0;
+            my $adr_x1           = 0x10000000 | ( ( $disp_funcname & 3 ) << 29 ) | ( ( ( $disp_funcname >> 2 ) & 0x7FFFF ) << 5 ) | 1;
             my $ldr_dlopen       = 0x58000008 | ( $imm19_dlopen << 5 );
             my $ldr_dlsym        = 0x58000008 | ( $imm19_dlsym << 5 );
             my $code             = pack(
