@@ -7493,6 +7493,7 @@ subtest Jenny => sub {
 
         # Determine platform properties
         my $is_arm64   = $platform->is_arm64;
+        my $is_riscv64 = $platform->is_riscv64;
         my $is_x64     = $platform->is_x64;
         my $is_windows = $platform->is_windows;
         my $is_posix   = $platform->is_posix;
@@ -7618,6 +7619,75 @@ subtest Jenny => sub {
             $code .= $lib_path . $func_name;
             return $code;
         };
+
+        # POSIX RISC-V 64-bit Wrapper Generator
+        my $make_riscv64_wrapper = sub {
+            my ( $ext_str, $got, $text, $macho ) = @_;
+            my $lib_path         = "./libtest_prog$ext_str\0";
+            my $func_name        = "my_func\0";
+            my $lib_path_offset  = 96;
+            my $func_name_offset = $lib_path_offset + length($lib_path);
+            my $entry_stub_len   = $macho ? 17 : 20;
+            my $main_rva         = $text + $entry_stub_len;
+
+            # PC-relative offsets for auipc instructions (where PC = instruction address itself)
+            my $off_libpath   = $lib_path_offset - $entry_stub_len - 16;    # auipc at $main_rva + 16
+            my $off_funcname  = $func_name_offset - $entry_stub_len - 48;   # auipc at $main_rva + 48
+            my $off_dlopen    = $got - ( $main_rva + 28 );                  # auipc at $main_rva + 28
+            my $off_dlsym     = ( $got + 8 ) - ( $main_rva + 56 );          # auipc at $main_rva + 56
+
+            # Encode auipc + addi pair for PC-relative address load: rd = PC + imm20<<12 + imm12
+            my $hi_lib   = ( $off_libpath + 0x800 ) >> 12;
+            my $lo_lib   = $off_libpath & 0xFFF;
+            my $auipc_a0 = ( ( $hi_lib & 0xFFFFF ) << 12 ) | ( 10 << 7 ) | 0x17;    # auipc a0, hi(off)
+            my $addi_a0  = ( ( $lo_lib & 0xFFF ) << 20 ) | ( 10 << 15 ) | ( 0 << 12 ) | ( 10 << 7 ) | 0x13;
+
+            my $hi_fn   = ( $off_funcname + 0x800 ) >> 12;
+            my $lo_fn   = $off_funcname & 0xFFF;
+            my $auipc_a1 = ( ( $hi_fn & 0xFFFFF ) << 12 ) | ( 11 << 7 ) | 0x17;    # auipc a1, hi(off)
+            my $addi_a1  = ( ( $lo_fn & 0xFFF ) << 20 ) | ( 11 << 15 ) | ( 0 << 12 ) | ( 11 << 7 ) | 0x13;
+
+            # Encode auipc + ld for GOT indirection: rd = *(PC + imm20<<12 + imm12)
+            my $hi_dl   = ( $off_dlopen + 0x800 ) >> 12;
+            my $lo_dl   = $off_dlopen & 0xFFF;
+            my $auipc_dl = ( ( $hi_dl & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;     # auipc t0, hi(off)
+            my $ld_dl    = ( ( $lo_dl & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
+
+            my $hi_ds   = ( $off_dlsym + 0x800 ) >> 12;
+            my $lo_ds   = $off_dlsym & 0xFFF;
+            my $auipc_ds = ( ( $hi_ds & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;     # auipc t0, hi(off)
+            my $ld_ds    = ( ( $lo_ds & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
+
+            my $code = pack(
+                'V*',
+                0xFE010113,         # addi sp, sp, -32
+                0x00113C23,         # sd ra, 24(sp)
+                0x00813423,         # sd s0, 16(sp)
+                0x00913423,         # sd s1, 8(sp)
+                $auipc_a0,          # auipc a0, hi(lib_path)
+                $addi_a0,           # addi a0, a0, lo(lib_path)
+                0x00200593,          # addi a1, x0, 2 (RTLD_NOW)
+                $auipc_dl,          # auipc t0, hi(got_dlopen)
+                $ld_dl,             # ld t0, lo(got_dlopen)(t0)
+                0x000280E7,          # jalr ra, t0 (call dlopen)
+                0x00050413,          # mv s0, a0
+                0x00040513,          # mv a0, s0
+                $auipc_a1,          # auipc a1, hi(func_name)
+                $addi_a1,           # addi a1, a1, lo(func_name)
+                $auipc_ds,          # auipc t0, hi(got_dlsym)
+                $ld_ds,             # ld t0, lo(got_dlsym)(t0)
+                0x000280E7,          # jalr ra, t0 (call dlsym)
+                0x000500E7,          # jalr ra, a0 (call my_func)
+                0x00813483,          # ld s1, 8(sp)
+                0x01013403,          # ld s0, 16(sp)
+                0x01813083,          # ld ra, 24(sp)
+                0x02010113,          # addi sp, sp, 32
+                0x00008067,          # ret
+            );
+            $code .= "\x00" while length($code) < $lib_path_offset;
+            $code .= $lib_path . $func_name;
+            return $code;
+        };
     SKIP: {
             if ($is_windows) {
 
@@ -7639,7 +7709,7 @@ subtest Jenny => sub {
                     skip 'Win32::API loader failure: ' . $@, 2;
                 }
             }
-            elsif ( $is_posix && ( $is_x64 || $is_arm64 ) ) {
+            elsif ( $is_posix && ( $is_x64 || $is_arm64 || $is_riscv64 ) ) {
 
                 # Compile native POSIX binary wrapper
                 my $wrapper_file = './test_wrapper';
@@ -7649,7 +7719,7 @@ subtest Jenny => sub {
 
                 # Pass a dummy byte array first to allow the linker to calculate
                 # the exact metadata structures and final section tables.
-                my $code_sz     = $is_arm64 ? 128 : 96;
+                my $code_sz     = ( $is_arm64 || $is_riscv64 ) ? 128 : 96;
                 my $dummy_bytes = "\x00" x $code_sz;
                 $wrapper_linker->write_executable( $wrapper_file, $dummy_bytes, $platform );
 
@@ -7659,7 +7729,8 @@ subtest Jenny => sub {
                 my $text_off = $wrapper_linker->layout->get('.text')->{off};
 
                 # Assemble the actual FFI machine code referencing the real RVAs
-                my $wrapper_bytes = $is_arm64 ? $make_arm64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos ) :
+                my $wrapper_bytes = $is_arm64   ? $make_arm64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos ) :
+                    $is_riscv64   ? $make_riscv64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos ) :
                     $make_x64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos );
 
                 # Patch the binary file at its physical entry offset directly
