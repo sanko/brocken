@@ -451,10 +451,22 @@ conventions (e.g., which registers are preserved across calls).
             method frame_reg() {'x29'}
             method stack_reg() {'sp'}
 
+            # ARM64 FP/SIMD registers (AAPCS64 calling convention)
+            # Note: v0-v7 are caller-saved, v8-v15 are callee-saved (only the lower 64 bits)
+            method fp_registers( $category = 'available' ) {
+                my %data = (
+                    available => [qw[v0 v1 v2 v3 v4 v5 v6 v7 v8 v9 v10 v11 v12 v13 v14 v15]],
+                    caller    => [qw[v0 v1 v2 v3 v4 v5 v6 v7]],
+                    callee    => [qw[v8 v9 v10 v11 v12 v13 v14 v15]]
+                );
+                return $data{$category} // [];
+            }
+
             # ARM64 standard DWARF mappings: x0-x30 map to 0-30, sp maps to 31
             method dwarf_reg_num($name) {
                 return 31 if $name eq 'sp';
                 return $1 if $name =~ /^x(\d+)$/;
+                return $1 if $name =~ /^v(\d+)$/;
                 return undef;
             }
         }
@@ -1031,12 +1043,29 @@ data type (SV* equivalent). It contains a type tag and a payload.
         method build_add( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'add',  $lhs, $rhs, $name ) }
         method build_sub( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'sub',  $lhs, $rhs, $name ) }
         method build_mul( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'mul',  $lhs, $rhs, $name ) }
+        method build_div( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'div',  $lhs, $rhs, $name ) }
         method build_shl( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'shl',  $lhs, $rhs, $name ) }
         method build_lshr( $lhs, $rhs, $name = undef ) { $self->build_binop( 'lshr', $lhs, $rhs, $name ) }
         method build_ashr( $lhs, $rhs, $name = undef ) { $self->build_binop( 'ashr', $lhs, $rhs, $name ) }
         method build_and( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'and',  $lhs, $rhs, $name ) }
         method build_or( $lhs, $rhs, $name   = undef ) { $self->build_binop( 'or',   $lhs, $rhs, $name ) }
         method build_xor( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'xor',  $lhs, $rhs, $name ) }
+        method build_min( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'min',  $lhs, $rhs, $name ) }
+        method build_max( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'max',  $lhs, $rhs, $name ) }
+
+        method build_unop( $opcode, $operand, $name = undef ) {
+            my $inst = Brocken::Lindsay::IR::Instruction->new(
+                name     => $name // $self->_next_id(),
+                type     => $operand->type,
+                opcode   => $opcode,
+                operands => [ $operand ],
+                parent   => $insert_block
+            );
+            return $insert_block->append_inst($inst);
+        }
+        method build_neg( $operand, $name  = undef ) { $self->build_unop( 'neg',  $operand, $name ) }
+        method build_abs( $operand, $name  = undef ) { $self->build_unop( 'abs',  $operand, $name ) }
+        method build_sqrt( $operand, $name = undef ) { $self->build_unop( 'sqrt', $operand, $name ) }
 
         method build_phi( $type, $name = undef ) {
             my $inst = Brocken::Lindsay::IR::Instruction::Phi->new(
@@ -1243,7 +1272,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             my $fp_res = $alloc->allocate( $mf, $platform, 1 );
             $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
             my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
-            my @used_callee = $int_res->{used_callee}->@*;
+            my %callee_seen;
+            @callee_seen{ $int_res->{used_callee}->@* } = ();
+            @callee_seen{ $fp_res->{used_callee}->@* } = ();
+            my @used_callee = sort keys %callee_seen;
             return $self->_encode( $mf, \%assignment, \@used_callee );
         }
 
@@ -1311,7 +1343,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         if ( $src->kind eq 'imm' ) {
                             my $rex_w = ( $bits >= 64 ) ? 0x08 : 0x00;
                             my $rex_b = $did >= 8 ? 0x01 : 0x00;
-                            if ( $rex_w ) {
+                            if ( $rex_w && ( abs($src->value) > 0x7FFFFFFF ) ) {
+                                $bytes .= pack( 'C', 0x48 | $rex_b ) . pack( 'C', 0xB8 + ( $did & 7 ) ) . pack( 'Q', $src->value );
+                            }
+                            elsif ( $rex_w ) {
                                 $bytes .= pack( 'CCC', 0x48 | $rex_b, 0xC7, 0xC0 | ( $did & 7 ) );
                                 $bytes .= pack( 'V', $src->value );
                             }
@@ -1469,17 +1504,46 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
                         $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
                     }
-                    elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' ) {
+                    elsif ( $opcode eq 'fmov_gp2f' ) {
                         my $dst_r = $resolve->($dst);
                         my $src_r = $resolve->($src);
                         my $did   = $reg_id->($dst_r);
                         my $sid   = $reg_id->($src_r);
                         my $bits  = $dst->type ? $dst->type->bits : 32;
-                        my %ss_op = ( fadd => 0x58, fsub => 0x5C, fmul => 0x59, fdiv => 0x5E );
+                        my $rex = $bits >= 64 ? 0x48 : 0x40;
+                        $rex |= ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                        $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                        $bytes .= pack( 'CCC', 0x66, 0x0F, 0x6E ) . pack( 'C', $modrm );
+                    }
+                    elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' || $opcode eq 'fsqrt' || $opcode eq 'fmin' || $opcode eq 'fmax' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $src_r = $resolve->($src);
+                        my $did   = $reg_id->($dst_r);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 32;
+                        my %ss_op = ( fadd => 0x58, fsub => 0x5C, fmul => 0x59, fdiv => 0x5E, fsqrt => 0x51, fmin => 0x5D, fmax => 0x5F );
                         my $op    = $bits >= 64 ? [ 0xF2, 0x0F, $ss_op{$opcode} ] : [ 0xF3, 0x0F, $ss_op{$opcode} ];
                         my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                         my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
                         $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
+                    }
+                    elsif ( $opcode eq 'fxor' || $opcode eq 'fand' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $src_r = $resolve->($src);
+                        my $did   = $reg_id->($dst_r);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 32;
+                        my %ss_op = ( fxor => 0x57, fand => 0x54 );
+                        my $op    = $bits >= 64 ? [ 0x66, 0x0F, $ss_op{$opcode} ] : [ 0x0F, $ss_op{$opcode} ];
+                        my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                        if ($bits >= 64) {
+                            $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
+                        }
+                        else {
+                            $bytes .= pack( 'CCC', $rex, $op->[0], $op->[1] ) . pack( 'C', $modrm );
+                        }
                     }
                     elsif ( $opcode eq 'fcmp' ) {
                         my $dst_r = $resolve->($dst);
@@ -1528,8 +1592,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             $bytes .= pack( 'CCC', $rex, 0x3B, $modrm );
                         }
                     }
-                    elsif ( $opcode eq 'sete' || $opcode eq 'setne' || $opcode eq 'setl' || $opcode eq 'setg' || $opcode eq 'setle' || $opcode eq 'setge' || $opcode eq 'setb' || $opcode eq 'seta' || $opcode eq 'setbe' || $opcode eq 'setae' ) {
-                        my %cc = ( sete => 0x94, setne => 0x95, setl => 0x9C, setg => 0x9F, setle => 0x9E, setge => 0x9D, setb => 0x92, seta => 0x97, setbe => 0x96, setae => 0x93 );
+                    elsif ( $opcode eq 'sete' || $opcode eq 'setne' || $opcode eq 'setl' || $opcode eq 'setg' || $opcode eq 'setle' || $opcode eq 'setge' || $opcode eq 'setb' || $opcode eq 'seta' || $opcode eq 'setbe' || $opcode eq 'setae' || $opcode eq 'setp' || $opcode eq 'setnp' ) {
+                        my %cc = ( sete => 0x94, setne => 0x95, setl => 0x9C, setg => 0x9F, setle => 0x9E, setge => 0x9D, setb => 0x92, seta => 0x97, setbe => 0x96, setae => 0x93, setp => 0x9A, setnp => 0x9B );
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $rex   = 0x40 | ( $did >= 8 ? 1 : 0 );
@@ -1826,76 +1890,164 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             # Reserve a local for the linear-memory heap bump pointer
             $vreg_map{'%heap_ptr'} = $next_local++;
 
-            for my $mbb ( $mf->blocks->@* ) {
+            my @blocks = $mf->blocks->@*;
+            my %label_to_block_idx;
+            for my $bi ( 0 .. $#blocks ) {
+                for my $inst ( $blocks[$bi]->instructions->@* ) {
+                    $label_to_block_idx{ $inst->operands->[0]->value } = $bi if $inst->opcode eq 'label';
+                }
+            }
+            my $num_non_entry = $#blocks;
+            my $entry_bytes   = '';
+            my @non_entry_bytes;
+
+            for my $bi ( 0 .. $#blocks ) {
+                my $mbb = $blocks[$bi];
+                my $buf = $bi == 0 ? \$entry_bytes : \( $non_entry_bytes[ $bi - 1 ] = '' );
                 for my $inst ( $mbb->instructions->@* ) {
+                    next if $bi > 0 && $inst->opcode eq 'label';
                     my $opcode = $inst->opcode;
                     my @ops    = $inst->operands->@*;
+                    print STDERR ">>> ENCODE block=$bi op=$opcode ops=" . join(',', map { ($_->value // 'undef') . '(' . ($_->kind // '?') . ')' } @ops) . "\n";
 
-                    if ( $opcode eq 'local_get' ) {
+                    if ( $opcode eq 'bne' ) {
+                        my $depth = $num_non_entry - $label_to_block_idx{ $ops[0]->value };
+                        $$buf .= pack( 'C', 0x0D ) . $self->_uleb($depth);
+                    }
+                    elsif ( $opcode eq 'jmp' ) {
+                        my $depth = $num_non_entry - $label_to_block_idx{ $ops[0]->value };
+                        $$buf .= pack( 'C', 0x0C ) . $self->_uleb($depth);
+                    }
+                    elsif ( $opcode eq 'local_get' ) {
                         my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
-                        $bytes .= pack( 'C', 0x20 ) . $self->_uleb($lid);
+                        $$buf .= pack( 'C', 0x20 ) . $self->_uleb($lid);
                     }
                     elsif ( $opcode eq 'i32_const' ) {
-                        $bytes .= pack( 'C', 0x41 ) . $self->_sleb( $ops[0]->value );
+                        $$buf .= pack( 'C', 0x41 ) . $self->_sleb( $ops[0]->value );
                     }
                     elsif ( $opcode eq 'i64_const' ) {
-                        $bytes .= pack( 'C', 0x42 ) . $self->_sleb( $ops[0]->value );
+                        $$buf .= pack( 'C', 0x42 ) . $self->_sleb( $ops[0]->value );
                     }
-                    elsif ( $opcode eq 'i32_add' )   { $bytes .= pack( 'C', 0x6A ) }
-                    elsif ( $opcode eq 'i32_sub' )   { $bytes .= pack( 'C', 0x6B ) }
-                    elsif ( $opcode eq 'i32_mul' )   { $bytes .= pack( 'C', 0x6C ) }
-                    elsif ( $opcode eq 'i32_and' )   { $bytes .= pack( 'C', 0x71 ) }
-                    elsif ( $opcode eq 'i32_or' )    { $bytes .= pack( 'C', 0x72 ) }
-                    elsif ( $opcode eq 'i32_xor' )   { $bytes .= pack( 'C', 0x73 ) }
-                    elsif ( $opcode eq 'i32_shl' )   { $bytes .= pack( 'C', 0x74 ) }
-                    elsif ( $opcode eq 'i32_shr_s' ) { $bytes .= pack( 'C', 0x75 ) }
-                    elsif ( $opcode eq 'i32_shr_u' ) { $bytes .= pack( 'C', 0x76 ) }
-                    elsif ( $opcode eq 'i64_add' )   { $bytes .= pack( 'C', 0x7C ) }
-                    elsif ( $opcode eq 'i64_sub' )   { $bytes .= pack( 'C', 0x7D ) }
-                    elsif ( $opcode eq 'i64_mul' )   { $bytes .= pack( 'C', 0x7E ) }
-                    elsif ( $opcode eq 'i64_and' )   { $bytes .= pack( 'C', 0x83 ) }
-                    elsif ( $opcode eq 'i64_or' )    { $bytes .= pack( 'C', 0x84 ) }
-                    elsif ( $opcode eq 'i64_xor' )   { $bytes .= pack( 'C', 0x85 ) }
-                    elsif ( $opcode eq 'i64_shl' )   { $bytes .= pack( 'C', 0x86 ) }
-                    elsif ( $opcode eq 'i64_shr_s' ) { $bytes .= pack( 'C', 0x87 ) }
-                    elsif ( $opcode eq 'i64_shr_u' ) { $bytes .= pack( 'C', 0x88 ) }
+                    elsif ( $opcode eq 'f32_const' ) {
+                        print STDERR ">>> f32_const value=" . $ops[0]->value . " hex=" . unpack('H*', pack('f', $ops[0]->value)) . "\n";
+                        $$buf .= pack( 'C', 0x43 ) . pack( 'f', $ops[0]->value );
+                    }
+                    elsif ( $opcode eq 'f64_const' ) {
+                        $$buf .= pack( 'C', 0x44 ) . pack( 'd', $ops[0]->value );
+                    }
+                    elsif ( $opcode eq 'i32_add' )   { $$buf .= pack( 'C', 0x6A ) }
+                    elsif ( $opcode eq 'i32_sub' )   { $$buf .= pack( 'C', 0x6B ) }
+                    elsif ( $opcode eq 'i32_mul' )   { $$buf .= pack( 'C', 0x6C ) }
+                    elsif ( $opcode eq 'i32_and' )   { $$buf .= pack( 'C', 0x71 ) }
+                    elsif ( $opcode eq 'i32_or' )    { $$buf .= pack( 'C', 0x72 ) }
+                    elsif ( $opcode eq 'i32_xor' )   { $$buf .= pack( 'C', 0x73 ) }
+                    elsif ( $opcode eq 'i32_shl' )   { $$buf .= pack( 'C', 0x74 ) }
+                    elsif ( $opcode eq 'i32_shr_s' ) { $$buf .= pack( 'C', 0x75 ) }
+                    elsif ( $opcode eq 'i32_shr_u' ) { $$buf .= pack( 'C', 0x76 ) }
+                    elsif ( $opcode eq 'i64_add' )   { $$buf .= pack( 'C', 0x7C ) }
+                    elsif ( $opcode eq 'i64_sub' )   { $$buf .= pack( 'C', 0x7D ) }
+                    elsif ( $opcode eq 'i64_mul' )   { $$buf .= pack( 'C', 0x7E ) }
+                    elsif ( $opcode eq 'i64_and' )   { $$buf .= pack( 'C', 0x83 ) }
+                    elsif ( $opcode eq 'i64_or' )    { $$buf .= pack( 'C', 0x84 ) }
+                    elsif ( $opcode eq 'i64_xor' )   { $$buf .= pack( 'C', 0x85 ) }
+                    elsif ( $opcode eq 'i64_shl' )   { $$buf .= pack( 'C', 0x86 ) }
+                    elsif ( $opcode eq 'i64_shr_s' ) { $$buf .= pack( 'C', 0x87 ) }
+                    elsif ( $opcode eq 'i64_shr_u' ) { $$buf .= pack( 'C', 0x88 ) }
                     elsif ( $opcode eq 'i32_load' ) {
-                        $bytes .= pack( 'C', 0x28 ) . $self->_uleb(2) . $self->_uleb(0);
+                        $$buf .= pack( 'C', 0x28 ) . $self->_uleb(2) . $self->_uleb(0);
                     }
                     elsif ( $opcode eq 'i64_load' ) {
-                        $bytes .= pack( 'C', 0x29 ) . $self->_uleb(3) . $self->_uleb(0);
+                        $$buf .= pack( 'C', 0x29 ) . $self->_uleb(3) . $self->_uleb(0);
                     }
                     elsif ( $opcode eq 'i32_store' ) {
-                        $bytes .= pack( 'C', 0x36 ) . $self->_uleb(2) . $self->_uleb(0);
+                        $$buf .= pack( 'C', 0x36 ) . $self->_uleb(2) . $self->_uleb(0);
                     }
                     elsif ( $opcode eq 'i64_store' ) {
-                        $bytes .= pack( 'C', 0x37 ) . $self->_uleb(3) . $self->_uleb(0);
+                        $$buf .= pack( 'C', 0x37 ) . $self->_uleb(3) . $self->_uleb(0);
                     }
-                    elsif ( $opcode eq 'i32_eq' )   { $bytes .= pack( 'C', 0x46 ) }
-                    elsif ( $opcode eq 'i32_ne' )   { $bytes .= pack( 'C', 0x47 ) }
-                    elsif ( $opcode eq 'i32_lt_s' ) { $bytes .= pack( 'C', 0x48 ) }
-                    elsif ( $opcode eq 'i32_gt_s' ) { $bytes .= pack( 'C', 0x4A ) }
-                    elsif ( $opcode eq 'i32_le_s' ) { $bytes .= pack( 'C', 0x4C ) }
-                    elsif ( $opcode eq 'i32_ge_s' ) { $bytes .= pack( 'C', 0x4E ) }
-                    elsif ( $opcode eq 'i32_lt_u' ) { $bytes .= pack( 'C', 0x49 ) }
-                    elsif ( $opcode eq 'i32_gt_u' ) { $bytes .= pack( 'C', 0x4B ) }
-                    elsif ( $opcode eq 'i32_le_u' ) { $bytes .= pack( 'C', 0x4D ) }
-                    elsif ( $opcode eq 'i32_ge_u' ) { $bytes .= pack( 'C', 0x4F ) }
-                    elsif ( $opcode eq 'i64_eq' )   { $bytes .= pack( 'C', 0x51 ) }
-                    elsif ( $opcode eq 'i64_ne' )   { $bytes .= pack( 'C', 0x52 ) }
-                    elsif ( $opcode eq 'i64_lt_s' ) { $bytes .= pack( 'C', 0x53 ) }
-                    elsif ( $opcode eq 'i64_gt_s' ) { $bytes .= pack( 'C', 0x55 ) }
-                    elsif ( $opcode eq 'i64_le_s' ) { $bytes .= pack( 'C', 0x57 ) }
-                    elsif ( $opcode eq 'i64_ge_s' ) { $bytes .= pack( 'C', 0x59 ) }
-                    elsif ( $opcode eq 'i64_lt_u' ) { $bytes .= pack( 'C', 0x54 ) }
-                    elsif ( $opcode eq 'i64_gt_u' ) { $bytes .= pack( 'C', 0x56 ) }
-                    elsif ( $opcode eq 'i64_le_u' ) { $bytes .= pack( 'C', 0x58 ) }
-                    elsif ( $opcode eq 'i64_ge_u' ) { $bytes .= pack( 'C', 0x5A ) }
+                    elsif ( $opcode eq 'i32_eq' )   { $$buf .= pack( 'C', 0x46 ) }
+                    elsif ( $opcode eq 'i32_ne' )   { $$buf .= pack( 'C', 0x47 ) }
+                    elsif ( $opcode eq 'i32_lt_s' ) { $$buf .= pack( 'C', 0x48 ) }
+                    elsif ( $opcode eq 'i32_gt_s' ) { $$buf .= pack( 'C', 0x4A ) }
+                    elsif ( $opcode eq 'i32_le_s' ) { $$buf .= pack( 'C', 0x4C ) }
+                    elsif ( $opcode eq 'i32_ge_s' ) { $$buf .= pack( 'C', 0x4E ) }
+                    elsif ( $opcode eq 'i32_lt_u' ) { $$buf .= pack( 'C', 0x49 ) }
+                    elsif ( $opcode eq 'i32_gt_u' ) { $$buf .= pack( 'C', 0x4B ) }
+                    elsif ( $opcode eq 'i32_le_u' ) { $$buf .= pack( 'C', 0x4D ) }
+                    elsif ( $opcode eq 'i32_ge_u' ) { $$buf .= pack( 'C', 0x4F ) }
+                    elsif ( $opcode eq 'i64_eq' )   { $$buf .= pack( 'C', 0x51 ) }
+                    elsif ( $opcode eq 'i64_ne' )   { $$buf .= pack( 'C', 0x52 ) }
+                    elsif ( $opcode eq 'i64_lt_s' ) { $$buf .= pack( 'C', 0x53 ) }
+                    elsif ( $opcode eq 'i64_gt_s' ) { $$buf .= pack( 'C', 0x55 ) }
+                    elsif ( $opcode eq 'i64_le_s' ) { $$buf .= pack( 'C', 0x57 ) }
+                    elsif ( $opcode eq 'i64_ge_s' ) { $$buf .= pack( 'C', 0x59 ) }
+                    elsif ( $opcode eq 'i64_lt_u' ) { $$buf .= pack( 'C', 0x54 ) }
+                    elsif ( $opcode eq 'i64_gt_u' ) { $$buf .= pack( 'C', 0x56 ) }
+                    elsif ( $opcode eq 'i64_le_u' ) { $$buf .= pack( 'C', 0x58 ) }
+                    elsif ( $opcode eq 'i64_ge_u' ) { $$buf .= pack( 'C', 0x5A ) }
+                    elsif ( $opcode eq 'f32_load' ) {
+                        $$buf .= pack( 'C', 0x2A ) . $self->_uleb(2) . $self->_uleb(0);
+                    }
+                    elsif ( $opcode eq 'f64_load' ) {
+                        $$buf .= pack( 'C', 0x2B ) . $self->_uleb(3) . $self->_uleb(0);
+                    }
+                    elsif ( $opcode eq 'f32_store' ) {
+                        $$buf .= pack( 'C', 0x3A ) . $self->_uleb(2) . $self->_uleb(0);
+                    }
+                    elsif ( $opcode eq 'f64_store' ) {
+                        $$buf .= pack( 'C', 0x3B ) . $self->_uleb(3) . $self->_uleb(0);
+                    }
+                    elsif ( $opcode eq 'f32_add' )   { $$buf .= pack( 'C', 0x92 ) }
+                    elsif ( $opcode eq 'f32_sub' )   { $$buf .= pack( 'C', 0x93 ) }
+                    elsif ( $opcode eq 'f32_mul' )   { $$buf .= pack( 'C', 0x94 ) }
+                    elsif ( $opcode eq 'f32_div' )   { $$buf .= pack( 'C', 0x95 ) }
+                    elsif ( $opcode eq 'f32_min' )   { $$buf .= pack( 'C', 0x96 ) }
+                    elsif ( $opcode eq 'f32_max' )   { $$buf .= pack( 'C', 0x97 ) }
+                    elsif ( $opcode eq 'f32_abs' )   { $$buf .= pack( 'C', 0x8B ) }
+                    elsif ( $opcode eq 'f32_neg' )   { $$buf .= pack( 'C', 0x8C ) }
+                    elsif ( $opcode eq 'f32_sqrt' )  { $$buf .= pack( 'C', 0x91 ) }
+                    elsif ( $opcode eq 'f64_add' )   { $$buf .= pack( 'C', 0xA0 ) }
+                    elsif ( $opcode eq 'f64_sub' )   { $$buf .= pack( 'C', 0xA1 ) }
+                    elsif ( $opcode eq 'f64_mul' )   { $$buf .= pack( 'C', 0xA2 ) }
+                    elsif ( $opcode eq 'f64_div' )   { $$buf .= pack( 'C', 0xA3 ) }
+                    elsif ( $opcode eq 'f64_min' )   { $$buf .= pack( 'C', 0xA4 ) }
+                    elsif ( $opcode eq 'f64_max' )   { $$buf .= pack( 'C', 0xA5 ) }
+                    elsif ( $opcode eq 'f64_abs' )   { $$buf .= pack( 'C', 0x99 ) }
+                    elsif ( $opcode eq 'f64_neg' )   { $$buf .= pack( 'C', 0x9A ) }
+                    elsif ( $opcode eq 'f64_sqrt' )  { $$buf .= pack( 'C', 0x9F ) }
+                    elsif ( $opcode eq 'f32_eq' )   { $$buf .= pack( 'C', 0x5B ) }
+                    elsif ( $opcode eq 'f32_ne' )   { $$buf .= pack( 'C', 0x5C ) }
+                    elsif ( $opcode eq 'f32_lt' )   { $$buf .= pack( 'C', 0x5D ) }
+                    elsif ( $opcode eq 'f32_gt' )   { $$buf .= pack( 'C', 0x5E ) }
+                    elsif ( $opcode eq 'f32_le' )   { $$buf .= pack( 'C', 0x5F ) }
+                    elsif ( $opcode eq 'f32_ge' )   { $$buf .= pack( 'C', 0x60 ) }
+                    elsif ( $opcode eq 'f64_eq' )   { $$buf .= pack( 'C', 0x61 ) }
+                    elsif ( $opcode eq 'f64_ne' )   { $$buf .= pack( 'C', 0x62 ) }
+                    elsif ( $opcode eq 'f64_lt' )   { $$buf .= pack( 'C', 0x63 ) }
+                    elsif ( $opcode eq 'f64_gt' )   { $$buf .= pack( 'C', 0x64 ) }
+                    elsif ( $opcode eq 'f64_le' )   { $$buf .= pack( 'C', 0x65 ) }
+                    elsif ( $opcode eq 'f64_ge' )   { $$buf .= pack( 'C', 0x66 ) }
+                    elsif ( $opcode eq 'ret' ) {
+                        $$buf .= pack( 'C', 0x0F );
+                    }
                     elsif ( $opcode eq 'local_set' ) {
                         my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
-                        $bytes .= pack( 'C', 0x21 ) . $self->_uleb($lid);
+                        $$buf .= pack( 'C', 0x21 ) . $self->_uleb($lid);
                     }
                 }
+            }
+
+            # Open nested blocks (outermost first).  br N targets N levels out;
+            # after the matching `end`, control continues.  So each block's
+            # body must come *after* that block's `end`, not before it.
+            for my $bi ( 1 .. $num_non_entry ) {
+                $bytes .= pack( 'C', 0x02 ) . pack( 'C', 0x40 );
+            }
+            $bytes .= $entry_bytes;
+            # Close innermost first, emitting each block's code *after* its end
+            for my $bi ( reverse 1 .. $num_non_entry ) {
+                $bytes .= pack( 'C', 0x0B );
+                $bytes .= $non_entry_bytes[ $bi - 1 ];
             }
 
             my $num_params       = scalar( $ir_params->@* );
@@ -1904,20 +2056,23 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             if ( $num_extra_locals > 0 ) {
                 # Build reverse mapping: local_id => vreg name
                 my %lid_to_name = reverse %vreg_map;
-                # Count extra locals by wasm valtype
-                my %type_counts;
+                # Scan locals sequentially and group consecutive same-type
+                my @groups;
+                my $prev_wt;
                 for my $lid ( $num_params .. $next_local - 1 ) {
                     my $name  = $lid_to_name{$lid} // '';
                     my $itype = $name ? $ir_types->{$name} : undef;
                     my $wt    = $itype ? $self->_wasm_valtype($itype) : 0x7F;
-                    $type_counts{$wt}++;
+                    if ( !defined $prev_wt || $wt ne $prev_wt ) {
+                        push @groups, [ $wt, 0 ];
+                        $prev_wt = $wt;
+                    }
+                    $groups[-1][1]++;
                 }
-                # Group declarations
-                my $num_groups = scalar( keys %type_counts );
+                my $num_groups = scalar @groups;
                 $locals_block = $self->_uleb($num_groups);
-                for my $wt ( 0x7F, 0x7E, 0x7D, 0x7C ) {
-                    next unless ( $type_counts{$wt} // 0 ) > 0;
-                    $locals_block .= $self->_uleb( $type_counts{$wt} ) . pack( 'C', $wt );
+                for my $g (@groups) {
+                    $locals_block .= $self->_uleb( $g->[1] ) . pack( 'C', $g->[0] );
                 }
             }
             else {
@@ -1969,9 +2124,16 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             my $lowerer = Brocken::Jenny::Lowerer::ARM64->new();
             my $mf      = $lowerer->lower($ir_func);
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
-            my $result  = $alloc->allocate( $mf, $platform );
-            $alloc->insert_spill_code( $mf, $result->{spill_slots}, $result->{spill_temp}, $platform->stack_reg );
-            return $self->_encode( $mf, $result->{assignment}, $result->{used_callee} );
+            my $int_res = $alloc->allocate( $mf, $platform, 0 );
+            $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
+            my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+            $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
+            my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+            my %callee_seen;
+            @callee_seen{ $int_res->{used_callee}->@* } = ();
+            @callee_seen{ $fp_res->{used_callee}->@* } = ();
+            my @used_callee = sort keys %callee_seen;
+            return $self->_encode( $mf, \%assignment, \@used_callee );
         }
 
         method _encode( $mf, $assignment, $used_callee ) {
@@ -1981,6 +2143,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             my $reg_id    = sub ($r) {
                 return 31 if $r eq 'sp';
                 return $1 if $r =~ /^[xw](\d+)$/;
+                return $1 if $r =~ /^v(\d+)$/;
                 return 0;
             };
 
@@ -1991,10 +2154,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             };
 
             if ( $callee_frame > 0 ) {
-                $bytes .= pack( 'V', 0xD10003FF | ( ( $callee_frame & 0xFFF ) << 10 ) );
+                my $call_stk = ( ( $callee_frame + 15 ) & ~15 );
+                $bytes .= pack( 'V', 0xD10003FF | ( ( $call_stk & 0xFFF ) << 10 ) );
                 for my $i ( 0 .. $used_callee->$#* ) {
-                    my $rid = $reg_id->( $used_callee->[$i] );
-                    $bytes .= pack( 'V', 0xF9000000 | ( $i << 10 ) | ( 31 << 5 ) | $rid );
+                    my $reg = $used_callee->[$i];
+                    my $rid = $reg_id->($reg);
+                    my $base = $reg =~ /^v/ ? 0xFD000000 : 0xF9000000;
+                    $bytes .= pack( 'V', $base | ( $i << 10 ) | ( 31 << 5 ) | $rid );
                 }
             }
 
@@ -2152,20 +2318,101 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'cmp' ) {
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
-                        my $src_r = $resolve->($src);
-                        my $sid   = $reg_id->($src_r);
-                        # CMP Xn/Wn, Xm/Wm  => SUBS XZR, Xn, Xm
-                        my $bits = $dst->type ? $dst->type->bits : 64;
-                        my $sf   = ( $bits >= 64 ) ? 0x80000000 : 0x00000000;
-                        $bytes .= pack( 'V', $sf | 0x6B00001F | ( $sid << 16 ) | ( $did << 5 ) );
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my $sf    = ( $bits >= 64 ) ? 0x80000000 : 0x00000000;
+                        if ( $src->kind eq 'imm' ) {
+                            # SUBS XZR, Xn, #imm12
+                            my $imm12 = $src->value & 0xFFF;
+                            $bytes .= pack( 'V', $sf | 0x7100001F | ( $imm12 << 10 ) | ( $did << 5 ) );
+                        }
+                        else {
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+                            # CMP Xn/Wn, Xm/Wm  => SUBS XZR, Xn, Xm
+                            $bytes .= pack( 'V', $sf | 0x6B00001F | ( $sid << 16 ) | ( $did << 5 ) );
+                        }
                     }
-                    elsif ( $opcode eq 'cset_eq' || $opcode eq 'cset_ne' || $opcode eq 'cset_lt' || $opcode eq 'cset_gt' || $opcode eq 'cset_le' || $opcode eq 'cset_ge' || $opcode eq 'cset_cc' || $opcode eq 'cset_cs' || $opcode eq 'cset_hi' || $opcode eq 'cset_ls' ) {
-                        my %arm_cond = ( cset_eq => 1, cset_ne => 0, cset_lt => 0xA, cset_gt => 0xD, cset_le => 0xC, cset_ge => 0xB, cset_cc => 2, cset_cs => 3, cset_hi => 9, cset_ls => 8 );
+                    elsif ( $opcode eq 'cset_eq' || $opcode eq 'cset_ne' || $opcode eq 'cset_lt' || $opcode eq 'cset_gt' || $opcode eq 'cset_le' || $opcode eq 'cset_ge' || $opcode eq 'cset_cc' || $opcode eq 'cset_cs' || $opcode eq 'cset_hi' || $opcode eq 'cset_ls' || $opcode eq 'cset_vc' || $opcode eq 'cset_vs' ) {
+                        my %arm_cond = ( cset_eq => 1, cset_ne => 0, cset_lt => 0xA, cset_gt => 0xD, cset_le => 0xC, cset_ge => 0xB, cset_cc => 2, cset_cs => 3, cset_hi => 9, cset_ls => 8, cset_vc => 6, cset_vs => 7 );
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $cond  = $arm_cond{$opcode};
                         # CSET Xd, cond  => CSINC Xd, XZR, XZR, inv(cond)
                         $bytes .= pack( 'V', 0xAA7F03E0 | ( $cond << 12 ) | $did );
+                    }
+                    elsif ( $opcode eq 'fload' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $addr  = $src->value;
+                        my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                        my $bid   = $reg_id->($base_r);
+                        my $disp  = $addr->{disp} // 0;
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
+                        my $base  = $bits == 32 ? 0xBD400000 : 0xFD400000;
+                        $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
+                    }
+                    elsif ( $opcode eq 'fstore' ) {
+                        my $mem    = $dst;
+                        my $src_r  = $resolve->($src);
+                        my $sid    = $reg_id->($src_r);
+                        my $addr   = $mem->value;
+                        my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                        my $bid    = $reg_id->($base_r);
+                        my $disp   = $addr->{disp} // 0;
+                        my $bits   = $src->type ? $src->type->bits : 64;
+                        my $imm12  = $disp >> ( $bits == 32 ? 2 : 3 );
+                        my $base   = $bits == 32 ? 0xBD000000 : 0xFD000000;
+                        $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
+                    }
+                    elsif ( $opcode eq 'fmov' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my $base  = $bits == 32 ? 0x1E204000 : 0x1E604000;
+                        $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
+                    }
+                    elsif ( $opcode eq 'fmov_gp2f' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my $base  = $bits == 32 ? 0x1E270000 : 0x9EAA0000;
+                        $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
+                    }
+                    elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' || $opcode eq 'fmin' || $opcode eq 'fmax' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my %fop   = ( fadd => 0x1E202800, fsub => 0x1E203800, fmul => 0x1E200800, fdiv => 0x1E201800, fmin => 0x1E205800, fmax => 0x1E204800 );
+                        my $base  = $fop{$opcode};
+                        $base = $bits == 32 ? $base : ( $base | 0x00400000 );
+                        $bytes .= pack( 'V', $base | ( $sid << 16 ) | ( $did << 5 ) | $did );
+                    }
+                    elsif ( $opcode eq 'fsqrt' || $opcode eq 'fabs' || $opcode eq 'fneg' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my %fop   = ( fsqrt => 0x1E21C000, fabs => 0x1E20C000, fneg => 0x1E214000 );
+                        my $base  = $fop{$opcode};
+                        $base = $bits == 32 ? $base : ( $base | 0x00400000 );
+                        $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
+                    }
+                    elsif ( $opcode eq 'fcmp' ) {
+                        my $lhs_r = $resolve->($dst);
+                        my $lid   = $reg_id->($lhs_r);
+                        my $rhs_r = $resolve->($src);
+                        my $rid   = $reg_id->($rhs_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my $base  = $bits == 32 ? 0x1E202000 : 0x1E602000;
+                        $bytes .= pack( 'V', $base | ( $rid << 16 ) | ( $lid << 5 ) );
                     }
                     elsif ( $opcode eq 'ret' ) {
                         if ( $total_frame > 0 ) {
@@ -2173,10 +2420,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         }
                         if ( $callee_frame > 0 ) {
                             for my $i ( reverse 0 .. $used_callee->$#* ) {
-                                my $rid = $reg_id->( $used_callee->[$i] );
-                                $bytes .= pack( 'V', 0xF9400000 | ( $i << 10 ) | ( 31 << 5 ) | $rid );
+                                my $reg = $used_callee->[$i];
+                                my $rid = $reg_id->($reg);
+                                my $base = $reg =~ /^v/ ? 0xFD400000 : 0xF9400000;
+                                $bytes .= pack( 'V', $base | ( $i << 10 ) | ( 31 << 5 ) | $rid );
                             }
-                            $bytes .= pack( 'V', 0x910003FF | ( ( $callee_frame & 0xFFF ) << 10 ) );
+                            my $call_stk = ( ( $callee_frame + 15 ) & ~15 );
+                            $bytes .= pack( 'V', 0x910003FF | ( ( $call_stk & 0xFFF ) << 10 ) );
                         }
                         $bytes .= pack( 'V', 0xD65F03C0 );
                     }
@@ -2249,15 +2499,16 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 for my $inst ( $bb->instructions->@* ) {
                     for my $op ( $inst->operands->@* ) {
                         if ( $op->kind eq 'virt_reg' ) {
-                            my $name = $op->name;
+                            my $name = $op->value;
                             my $type = $op->type;
-                            my $is_f = $type && $type->kind eq 'float';
+                            my $is_f = $type ? ($type->kind eq 'float') : 0;
                             next if $is_float != $is_f;
                             $first{$name} //= $idx;
                             $last{$name}  = $idx;
                         }
                         elsif ( $op->kind eq 'mem' ) {
                             my $base = $op->value->{base};
+                            next if $is_float;
                             $first{$base} //= $idx;
                             $last{$base}  = $idx;
                         }
@@ -2418,25 +2669,44 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mov',
-                                operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                comment  => 'load ' . ( $lhs->name || $lhs->value )
-                            )
-                        );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => $opcode,
-                                operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                comment  => $opcode
-                            )
-                        );
+                        my $is_float = $inst->type && $inst->type->kind eq 'float';
+                        if ($is_float) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'fmov',
+                                    operands => [ $dst, $self->_materialize($mbb, $lhs) ],
+                                    comment  => 'fload ' . ( $lhs->name || $lhs->value )
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'f' . $opcode,
+                                    operands => [ $dst, $self->_materialize($mbb, $rhs) ],
+                                    comment  => 'f' . $opcode
+                                )
+                            );
+                        }
+                        else {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $opcode,
+                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    comment  => $opcode
+                                )
+                            );
+                        }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
                         $mbb->add_instruction(
@@ -2467,42 +2737,111 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my ($lhs, $rhs) = $inst->operands->@*;
                         my $pred = $inst->predicate;
                         my %cond = (eq => 'e', ne => 'ne', slt => 'l', sgt => 'g', sle => 'le', sge => 'ge', ult => 'b', ugt => 'a', ule => 'be', uge => 'ae');
+                        my %fcond = (eq => 'e', ne => 'ne', lt => 'b', le => 'be', gt => 'a', ge => 'ae');
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mov',
-                                operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                comment  => 'load lhs'
-                            )
-                        );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'cmp',
-                                operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                comment  => 'icmp ' . $pred
-                            )
-                        );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'set' . $cond{$pred},
-                                operands => [$dst],
-                                comment  => 'set' . $cond{$pred}
-                            )
-                        );
+                        if ($lhs->type && $lhs->type->kind eq 'float') {
+                            my $lhs_op = $self->_materialize($mbb, $lhs);
+                            my $rhs_op = $self->_materialize($mbb, $rhs);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'fcmp', operands => [ $lhs_op, $rhs_op ],
+                                    comment => 'fcmp ' . $pred
+                                )
+                            );
+                            # NaN-correct float comparison (IEEE 754 ordered/unordered)
+                            # After UCOMISS: PF=1 when unordered (NaN); only setnp/setp check PF.
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'mov',
+                                    operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0) ],
+                                    comment => 'zero dst'
+                                )
+                            );
+                            if ( $pred eq 'ne' ) {
+                                # ne: unordered OR not equal  => setp OR setne
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'setp', operands => [$dst],
+                                        comment => 'setp: unordered (PF=1)'
+                                    )
+                                );
+                            }
+                            else {
+                                # ordered predicates: setnp AND setCC
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'setnp', operands => [$dst],
+                                        comment => 'setnp: ordered (PF=0)'
+                                    )
+                                );
+                            }
+                            my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name . '_pf', type => Brocken::Lindsay::IR::Type::i1()
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'set' . $fcond{$pred},
+                                    operands => [$tmp],
+                                    comment => 'set' . $fcond{$pred}
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => ( $pred eq 'ne' ? 'or' : 'and' ),
+                                    operands => [ $dst, $tmp ],
+                                    comment => ( $pred eq 'ne' ? 'unordered OR not equal' : 'ordered AND condition' )
+                                )
+                            );
+                        }
+                        else {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    comment  => 'load lhs'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'cmp',
+                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    comment  => 'icmp ' . $pred
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'set' . $cond{$pred},
+                                    operands => [$dst],
+                                    comment  => 'set' . $cond{$pred}
+                                )
+                            );
+                        }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                         if ( $inst->type->kind ne 'void' ) {
                             my $val = $inst->operands->[0];
-                            my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'mov',
-                                    operands => [ $rax, $self->_lower_opnd($val) ],
-                                    comment  => '=> rax'
-                                )
-                            );
+                            if ($inst->type->kind eq 'float') {
+                                my $xmm0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'xmm0' );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'fmov',
+                                        operands => [ $xmm0, $self->_materialize($mbb, $val) ],
+                                        comment  => '=> xmm0'
+                                    )
+                                );
+                            }
+                            else {
+                                my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $rax, $self->_lower_opnd($val) ],
+                                        comment  => '=> rax'
+                                    )
+                                );
+                            }
                         }
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2536,9 +2875,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
+                        my $load_op = ($inst->type && $inst->type->kind eq 'float') ? 'fload' : 'load';
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => 'load', operands => [ $dst, $mem ],
+                                opcode => $load_op, operands => [ $dst, $mem ],
                                 comment => 'load'
                             )
                         );
@@ -2550,13 +2890,85 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             value => { base => $ptr->name, disp => 0 },
                             type  => $val->type
                         );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'),
-                                operands => [ $mem, $self->_lower_opnd($val) ],
-                                comment  => 'store'
-                            )
+                        if ($val->type && $val->type->kind eq 'float') {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'fstore',
+                                    operands => [ $mem, $self->_materialize($mbb, $val) ],
+                                    comment  => 'fstore'
+                                )
+                            );
+                        }
+                        else {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'),
+                                    operands => [ $mem, $self->_lower_opnd($val) ],
+                                    comment  => 'store'
+                                )
+                            );
+                        }
+                    }
+                    elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
+                        my ($val) = $inst->operands->@*;
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
+                        if ( $inst->type && $inst->type->kind eq 'float' ) {
+                            my $src = $self->_materialize($mbb, $val);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'fmov', operands => [ $dst, $src ],
+                                    comment => 'load ' . $opcode . ' operand'
+                                )
+                            );
+                            if ( $opcode eq 'sqrt' ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'fsqrt', operands => [ $dst, $dst ],
+                                        comment => 'fsqrt'
+                                    )
+                                );
+                            }
+                            else {
+                                my $bits = $inst->type->bits;
+                                my $mask_val = $opcode eq 'neg'
+                                    ? ( $bits >= 64 ? 0x8000000000000000 : 0x80000000 )
+                                    : ( $bits >= 64 ? 0x7FFFFFFFFFFFFFFF : 0x7FFFFFFF );
+                                my $mname = $inst->name . '_m';
+                                my $mask_gp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $mname, type => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'mov',
+                                        operands => [ $mask_gp, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $mask_val) ],
+                                        comment => 'mask constant'
+                                    )
+                                );
+                                my $mask_fp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $mname . 'f', type => $inst->type
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'fmov_gp2f',
+                                        operands => [ $mask_fp, $mask_gp ],
+                                        comment => 'mask -> XMM'
+                                    )
+                                );
+                                my $fop = $opcode eq 'neg' ? 'fxor' : 'fand';
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => $fop,
+                                        operands => [ $dst, $mask_fp ],
+                                        comment => $fop
+                                    )
+                                );
+                            }
+                        }
+                        else {
+                            die "Unsupported unary op $opcode for non-float type";
+                        }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
                         my $val  = $inst->operands->[0];
@@ -2638,6 +3050,34 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             return 0;
         }
 
+        method _materialize($mbb, $ir_val) {
+            state $fc = 0;
+            if ($ir_val->isa('Brocken::Lindsay::IR::Constant') && $ir_val->type && $ir_val->type->kind eq 'float') {
+                my $bits = $ir_val->type->bits;
+                my $value = $ir_val->value;
+                my $bit_pattern = $bits >= 64 ? unpack('Q', pack('d', $value)) : unpack('V', pack('f', $value));
+                my $gp_name = '%fmcgp_' . $fc++;
+                my $fp_name = '%fmcfp_' . $fc++;
+                my $gp_type = Brocken::Lindsay::IR::Type::i64();
+                my $gp = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $gp_name, type => $gp_type);
+                my $fp = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $fp_name, type => $ir_val->type);
+                $mbb->add_instruction(
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode => 'mov', operands => [$gp, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $bit_pattern, type => $gp_type)],
+                        comment => 'fmc: bit pattern'
+                    )
+                );
+                $mbb->add_instruction(
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode => 'fmov_gp2f', operands => [$fp, $gp],
+                        comment => 'fmc: gp->xmm'
+                    )
+                );
+                return $fp;
+            }
+            return $self->_lower_opnd($ir_val);
+        }
+
         method _lower_opnd($ir_val) {
             if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
                 return Brocken::Jenny::MIR::MachineOperand->new(
@@ -2669,25 +3109,46 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
+                        my $is_float = $lhs->type && $lhs->type->kind eq 'float';
+                        my $mop = $is_float ? "f$opcode" : $opcode;
+                        $mop = $opcode if $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr';
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mov',
-                                operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                comment  => 'load ' . ( $lhs->name || $lhs->value )
-                            )
-                        );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => $opcode,
-                                operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                comment  => $opcode
-                            )
-                        );
+                        if ($is_float) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'fmov',
+                                    operands => [ $dst, $self->_materialize($mbb, $lhs) ],
+                                    comment  => 'fload ' . ( $lhs->name || $lhs->value )
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $mop,
+                                    operands => [ $dst, $self->_materialize($mbb, $rhs) ],
+                                    comment  => $opcode
+                                )
+                            );
+                        }
+                        else {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $opcode,
+                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    comment  => $opcode
+                                )
+                            );
+                        }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
                         $mbb->add_instruction(
@@ -2734,9 +3195,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
+                        my $lop = ($inst->type && $inst->type->kind eq 'float') ? 'fload' : 'load';
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => 'load', operands => [ $dst, $mem ], comment => 'load'
+                                opcode => $lop, operands => [ $dst, $mem ], comment => $lop
                             )
                         );
                     }
@@ -2745,11 +3207,21 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $mem = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $val->type
                         );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
-                            )
-                        );
+                        if ($val->type && $val->type->kind eq 'float') {
+                            my $src = $val->isa('Brocken::Lindsay::IR::Constant') ? $self->_materialize($mbb, $val) : $self->_lower_opnd($val);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'fstore', operands => [ $mem, $src ], comment => 'fstore'
+                                )
+                            );
+                        }
+                        else {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
+                                )
+                            );
+                        }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
                         my $val  = $inst->operands->[0];
@@ -2800,42 +3272,117 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             my ($lhs, $rhs) = $inst->operands->@*;
                             my $pred = $inst->predicate;
                             my %cond = (eq => 'cset_eq', ne => 'cset_ne', slt => 'cset_lt', sgt => 'cset_gt', sle => 'cset_le', sge => 'cset_ge', ult => 'cset_cc', ugt => 'cset_hi', ule => 'cset_ls', uge => 'cset_cs');
+                            my %fcond = (eq => 'cset_eq', ne => 'cset_ne', lt => 'cset_lt', le => 'cset_le', gt => 'cset_gt', ge => 'cset_ge');
                             my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind => 'virt_reg', value => $inst->name, type => $inst->type
                             );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'mov',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                    comment  => 'load lhs'
-                                )
-                            );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'cmp',
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                    comment  => 'icmp ' . $pred
-                                )
-                            );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => $cond{$pred},
-                                    operands => [$dst],
-                                    comment  => $pred
-                                )
-                            );
+                            if ($lhs->type && $lhs->type->kind eq 'float') {
+                                my $lhs_op = $self->_materialize($mbb, $lhs);
+                                my $rhs_op = $self->_materialize($mbb, $rhs);
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'fcmp', operands => [ $lhs_op, $rhs_op ],
+                                        comment => 'fcmp ' . $pred
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'mov',
+                                        operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0) ],
+                                        comment => 'zero dst'
+                                    )
+                                );
+                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $inst->name . '_pf', type => Brocken::Lindsay::IR::Type::i1()
+                                );
+                                if ( $pred eq 'ne' ) {
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode => 'cset_vs', operands => [$dst],
+                                            comment => 'unordered'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode => 'cset_ne', operands => [$tmp],
+                                            comment => 'ne'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode => 'or', operands => [ $dst, $tmp ],
+                                            comment => 'unordered OR ne'
+                                        )
+                                    );
+                                }
+                                else {
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode => 'cset_vc', operands => [$dst],
+                                            comment => 'ordered'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode => $fcond{$pred}, operands => [$tmp],
+                                            comment => $pred
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode => 'and', operands => [ $dst, $tmp ],
+                                            comment => 'ordered AND condition'
+                                        )
+                                    );
+                                }
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load lhs'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'cmp',
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => 'icmp ' . $pred
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => $cond{$pred},
+                                        operands => [$dst],
+                                        comment  => $pred
+                                    )
+                                );
+                            }
                         }
                         elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                             if ( $inst->type->kind ne 'void' ) {
                                 my $val = $inst->operands->[0];
-                                my $x0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ $x0, $self->_lower_opnd($val) ],
-                                        comment  => '=> x0'
-                                    )
-                                );
+                                if ($inst->type->kind eq 'float') {
+                                    my $v0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'v0' );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'fmov',
+                                            operands => [ $v0, $self->_materialize($mbb, $val) ],
+                                            comment  => '=> v0'
+                                        )
+                                    );
+                                }
+                                else {
+                                    my $x0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mov',
+                                            operands => [ $x0, $self->_lower_opnd($val) ],
+                                            comment  => '=> x0'
+                                        )
+                                    );
+                                }
                             }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2849,6 +3396,34 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 return $mf;
             }
     
+        method _materialize($mbb, $ir_val) {
+            state $fc = 0;
+            if ($ir_val->isa('Brocken::Lindsay::IR::Constant') && $ir_val->type && $ir_val->type->kind eq 'float') {
+                my $bits = $ir_val->type->bits;
+                my $value = $ir_val->value;
+                my $bit_pattern = $bits >= 64 ? unpack('Q', pack('d', $value)) : unpack('V', pack('f', $value));
+                my $gp_name = '%fmcgp_' . $fc++;
+                my $fp_name = '%fmcfp_' . $fc++;
+                my $gp_type = Brocken::Lindsay::IR::Type::i64();
+                my $gp = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $gp_name, type => $gp_type);
+                my $fp = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $fp_name, type => $ir_val->type);
+                $mbb->add_instruction(
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode => 'mov', operands => [$gp, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $bit_pattern, type => $gp_type)],
+                        comment => 'fmc: bit pattern'
+                    )
+                );
+                $mbb->add_instruction(
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode => 'fmov_gp2f', operands => [$fp, $gp],
+                        comment => 'fmc: gp->fp'
+                    )
+                );
+                return $fp;
+            }
+            return $self->_lower_opnd($ir_val);
+        }
+
             method _lower_opnd($ir_val) {
             if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
                 return Brocken::Jenny::MIR::MachineOperand->new(
@@ -2892,19 +3467,22 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     my $opcode = $inst->opcode;
                     if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
+                        my $is_float = $lhs->type && $lhs->type->kind eq 'float';
+                        my $mop = $is_float ? "f$opcode" : $opcode;
+                        $mop = $opcode if $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr';
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mv',
+                                opcode   => $is_float ? 'fmov' : 'mov',
                                 operands => [ $dst, $self->_lower_opnd($lhs) ],
                                 comment  => 'load ' . ( $lhs->name || $lhs->value )
                             )
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => $opcode,
+                                opcode   => $mop,
                                 operands => [ $dst, $self->_lower_opnd($rhs) ],
                                 comment  => $opcode
                             )
@@ -2955,9 +3533,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
+                        my $lop = ($inst->type && $inst->type->kind eq 'float') ? 'fload' : 'load';
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => 'load', operands => [ $dst, $mem ], comment => 'load'
+                                opcode => $lop, operands => [ $dst, $mem ], comment => $lop
                             )
                         );
                     }
@@ -2966,11 +3545,21 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $mem = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $val->type
                         );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
-                            )
-                        );
+                        if ($val->type && $val->type->kind eq 'float') {
+                            my $src = $val->isa('Brocken::Lindsay::IR::Constant') ? $self->_materialize($mbb, $val) : $self->_lower_opnd($val);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'fstore', operands => [ $mem, $src ], comment => 'fstore'
+                                )
+                            );
+                        }
+                        else {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
+                                )
+                            );
+                        }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
                         my $val  = $inst->operands->[0];
@@ -3213,10 +3802,16 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
-                        my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
-                        my $p = $bits >= 64 ? 'i64' : 'i32';
+                        my $p;
+                        if ($inst->type && $inst->type->kind eq 'float') {
+                            $p = $inst->type->bits >= 64 ? 'f64' : 'f32';
+                        }
+                        else {
+                            my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
+                            $p = $bits >= 64 ? 'i64' : 'i32';
+                        }
 
                         # Push LHS onto Wasm stack
                         $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS' ) );
@@ -3227,6 +3822,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             add => "${p}_add", sub => "${p}_sub", mul => "${p}_mul",
                             and => "${p}_and", or  => "${p}_or",  xor => "${p}_xor",
                             shl => "${p}_shl", lshr => "${p}_shr_u", ashr => "${p}_shr_s",
+                            min => "${p}_min", max => "${p}_max",
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3234,6 +3830,26 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             )
                         );
                         # Store result from stack to a local
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name
+                            )
+                        );
+                    }
+                    elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
+                        my ($val) = $inst->operands->@*;
+                        die "Wasm unary op $opcode requires float type" unless $inst->type && $inst->type->kind eq 'float';
+                        my $p = $inst->type->bits >= 64 ? 'f64' : 'f32';
+                        print STDERR ">>> UNARY $opcode: pushing val of type " . ($val->type ? $val->type->kind : 'undef') . " val=" . ($val->isa('Brocken::Lindsay::IR::Constant') ? 'Const:' . $val->value : ($val->name // 'anon')) . "\n";
+                        $mbb->add_instruction( $self->_wasm_push( $val, 'unop: val' ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => "${p}_${opcode}", operands => [], comment => $opcode
+                            )
+                        );
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
@@ -3296,8 +3912,14 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                         my $ptr = $inst->operands->[0];
-                        my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
-                        my $op = $bits >= 64 ? 'i64_load' : 'i32_load';
+                        my $op;
+                        if ($inst->type && $inst->type->kind eq 'float') {
+                            $op = $inst->type->bits >= 64 ? 'f64_load' : 'f32_load';
+                        }
+                        else {
+                            my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
+                            $op = $bits >= 64 ? 'i64_load' : 'i32_load';
+                        }
                         $mbb->add_instruction( $self->_wasm_push($ptr, 'load: ptr') );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'load' )
@@ -3312,8 +3934,14 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
                         my ($val, $ptr) = $inst->operands->@*;
-                        my $bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 32;
-                        my $op = $bits >= 64 ? 'i64_store' : 'i32_store';
+                        my $op;
+                        if ($val->type && $val->type->kind eq 'float') {
+                            $op = $val->type->bits >= 64 ? 'f64_store' : 'f32_store';
+                        }
+                        else {
+                            my $bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 32;
+                            $op = $bits >= 64 ? 'i64_store' : 'i32_store';
+                        }
                         $mbb->add_instruction( $self->_wasm_push($ptr, 'store: ptr') );
                         $mbb->add_instruction( $self->_wasm_push($val, 'store: val') );
                         $mbb->add_instruction(
@@ -3391,9 +4019,18 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ICmp') ) {
                         my ($lhs, $rhs) = $inst->operands->@*;
                         my $pred = $inst->predicate;
-                        my $bits = $lhs->type && $lhs->type->kind eq 'int' ? $lhs->type->bits : 32;
-                        my $p = $bits >= 64 ? 'i64' : 'i32';
-                        my %map = (eq => "${p}_eq", ne => "${p}_ne", slt => "${p}_lt_s", sgt => "${p}_gt_s", sle => "${p}_le_s", sge => "${p}_ge_s", ult => "${p}_lt_u", ugt => "${p}_gt_u", ule => "${p}_le_u", uge => "${p}_ge_u");
+                        my $p;
+                        my $float = $lhs->type && $lhs->type->kind eq 'float';
+                        if ($float) {
+                            $p = $lhs->type->bits >= 64 ? 'f64' : 'f32';
+                        }
+                        else {
+                            my $bits = $lhs->type && $lhs->type->kind eq 'int' ? $lhs->type->bits : 32;
+                            $p = $bits >= 64 ? 'i64' : 'i32';
+                        }
+                        my %map = $float
+                            ? (eq => "${p}_eq", ne => "${p}_ne", lt => "${p}_lt", gt => "${p}_gt", le => "${p}_le", ge => "${p}_ge")
+                            : (eq => "${p}_eq", ne => "${p}_ne", slt => "${p}_lt_s", sgt => "${p}_gt_s", sle => "${p}_le_s", sge => "${p}_ge_s", ult => "${p}_lt_u", ugt => "${p}_gt_u", ule => "${p}_le_u", uge => "${p}_ge_u");
                         $mbb->add_instruction( $self->_wasm_push( $lhs, 'icmp lhs' ) );
                         $mbb->add_instruction( $self->_wasm_push( $rhs, 'icmp rhs' ) );
                         $mbb->add_instruction(
@@ -3414,6 +4051,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             my $val = $inst->operands->[0];
                             $mbb->add_instruction( $self->_wasm_push( $val, 'retval' ) );
                         }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'ret', operands => [], comment => ''
+                            )
+                        );
                     }
                 }
                 $mf->add_block($mbb);
@@ -3423,8 +4065,14 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
         method _wasm_push( $ir_val, $label ) {
             if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
-                my $bits = $ir_val->type && $ir_val->type->kind eq 'int' ? $ir_val->type->bits : 32;
-                my $op = $bits >= 64 ? 'i64_const' : 'i32_const';
+                my $op;
+                if ($ir_val->type && $ir_val->type->kind eq 'float') {
+                    $op = $ir_val->type->bits >= 64 ? 'f64_const' : 'f32_const';
+                }
+                else {
+                    my $bits = $ir_val->type && $ir_val->type->kind eq 'int' ? $ir_val->type->bits : 32;
+                    $op = $bits >= 64 ? 'i64_const' : 'i32_const';
+                }
                 return Brocken::Jenny::MIR::MachineInstruction->new(
                     opcode   => $op,
                     operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value ) ],
@@ -6762,15 +7410,16 @@ subtest Jenny => sub {
             my $func_name        = "my_func\0";
             my $lib_path_offset  = 64;
             my $func_name_offset = $lib_path_offset + length($lib_path);
-            my $disp_libpath     = $lib_path_offset - 12;
-            my $disp_funcname    = $func_name_offset - 36;
-            my $main_rva         = $text + 20;
-            my $offset_dlopen    = $got - ( $main_rva + 20 );
-            my $offset_dlsym     = ( $got + 8 ) - ( $main_rva + 40 );
+            my $entry_stub_len   = $macho ? 17 : 20;
+            my $main_rva         = $text + $entry_stub_len;
+            my $disp_libpath     = $lib_path_offset - $entry_stub_len - 8;
+            my $disp_funcname    = $func_name_offset - $entry_stub_len - 32;
+            my $offset_dlopen    = $got - ( $main_rva + 16 );
+            my $offset_dlsym     = ( $got + 8 ) - ( $main_rva + 36 );
             my $imm19_dlopen     = ( $offset_dlopen / 4 ) & 0x7FFFF;
             my $imm19_dlsym      = ( $offset_dlsym / 4 ) & 0x7FFFF;
-            my $adr_x0           = 0x10000000 | ( ( $disp_libpath & 3 ) << 29 ) | ( ( ( $disp_libpath >> 2 ) & 0x7FFFF ) << 5 ) | 0;
-            my $adr_x1           = 0x10000000 | ( ( $disp_funcname & 3 ) << 29 ) | ( ( ( $disp_funcname >> 2 ) & 0x7FFFF ) << 5 ) | 1;
+            my $adr_x0           = ( ( $disp_libpath & 3 ) << 28 ) | ( ( ( $disp_libpath >> 2 ) & 0x7FFFF ) << 5 ) | 0;
+            my $adr_x1           = ( ( $disp_funcname & 3 ) << 28 ) | ( ( ( $disp_funcname >> 2 ) & 0x7FFFF ) << 5 ) | 1;
             my $ldr_dlopen       = 0x58000008 | ( $imm19_dlopen << 5 );
             my $ldr_dlsym        = 0x58000008 | ( $imm19_dlsym << 5 );
             my $code             = pack(
@@ -7227,6 +7876,234 @@ subtest Jenny => sub {
         }
         unlink $output_file if -e $output_file;
     };
+    subtest 'Jenny::Codegen f32 Arithmetic (Wasm)' => sub {
+        my $host     = Brocken::Katsuro::Platform::parse();
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::f32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $v1 = $builder->build_add(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 10.5 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 20.5 ),
+            '%v1'
+        );
+        $builder->build_ret($v1);
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        ok( length( $res->{body} ) > 0, 'Generated Wasm f32 math bytes' );
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './f32_math_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm f32 math file exists' );
+        my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+    SKIP: {
+        if ( $wasmtime_path && -x $wasmtime_path ) {
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            ok( abs( $output - 31.0 ) < 0.001, "f32 math (10.5+20.5=31.0) via wasmtime (got $output)" );
+        }
+        else {
+            skip 'wasmtime not available', 1;
+        } }
+        unlink $output_file if -e $output_file;
+    };
+    subtest 'Jenny::Codegen f64 Arithmetic (Wasm)' => sub {
+        my $host     = Brocken::Katsuro::Platform::parse();
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::f64() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $v1 = $builder->build_add(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f64(), value => 100.5 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f64(), value => 200.25 ),
+            '%v1'
+        );
+        $builder->build_ret($v1);
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        ok( length( $res->{body} ) > 0, 'Generated Wasm f64 math bytes' );
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './f64_math_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm f64 math file exists' );
+        my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+    SKIP: {
+        if ( $wasmtime_path && -x $wasmtime_path ) {
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            ok( abs( $output - 300.75 ) < 0.001, "f64 math (100.5+200.25=300.75) via wasmtime (got $output)" );
+        }
+        else {
+            skip 'wasmtime not available', 1;
+        } }
+        unlink $output_file if -e $output_file;
+    };
+    subtest 'Jenny::Codegen Float ICmp (Wasm)' => sub {
+        my $host     = Brocken::Katsuro::Platform::parse();
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $c1 = $builder->build_icmp('eq',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c1'
+        );
+        my $c2 = $builder->build_icmp('ne',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 0.0 ),
+            '%c2'
+        );
+        my $c3 = $builder->build_icmp('lt',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 10.5 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 20.5 ),
+            '%c3'
+        );
+        my $c4 = $builder->build_icmp('gt',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 10.5 ),
+            '%c4'
+        );
+        my $c5 = $builder->build_icmp('le',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c5'
+        );
+        my $c6 = $builder->build_icmp('ge',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 10.5 ),
+            '%c6'
+        );
+        my $all = $builder->build_and( $c1, $c2, '%a' );
+        $all = $builder->build_and( $all, $c3, '%b' );
+        $all = $builder->build_and( $all, $c4, '%c' );
+        $all = $builder->build_and( $all, $c5, '%d' );
+        $all = $builder->build_and( $all, $c6, '%e' );
+        my $t_block = $func->append_block('if.then');
+        my $f_block = $func->append_block('if.else');
+        $builder->build_cond_br( $all, $t_block, $f_block );
+        $builder->position_at_end($t_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        $builder->position_at_end($f_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        print STDERR "\n=== FLOAT ICMP BODY HEX ===\n" . unpack('H*', $res->{body}) . "\n===\n";
+        print STDERR "\n=== FLOAT ICMP LOCALS ===\n" . unpack('H*', $res->{locals}) . "\n===\n";
+
+        open my $dbg, '>>', './wasm_hex_dbg.txt' or warn "can't open debug $!";
+        print $dbg "\n=== FLOAT ICMP BODY HEX ===\n" . unpack('H*', $res->{body}) . "\n===\n";
+        print $dbg "\n=== FLOAT ICMP LOCALS ===\n" . unpack('H*', $res->{locals}) . "\n===\n";
+        close $dbg;
+
+        ok( length( $res->{body} ) > 0, 'Generated Wasm float icmp bytes' );
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './ficmp_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm float icmp file exists' );
+        my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+    SKIP: {
+        if ( $wasmtime_path && -x $wasmtime_path ) {
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            is( $output, 42, 'Float icmp Wasm returned 42 via wasmtime' );
+        }
+        else {
+            skip 'wasmtime not available', 1;
+        } }
+        unlink $output_file if -e $output_file;
+    };
+    subtest 'Jenny::Codegen Float Unary MinMax (Wasm)' => sub {
+        my $host     = Brocken::Katsuro::Platform::parse();
+        my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $neg = $builder->build_neg(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => -42.0 ),
+            '%neg'
+        );
+        my $c1 = $builder->build_icmp('eq',
+            $neg, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c1'
+        );
+        my $abs = $builder->build_abs(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => -42.0 ),
+            '%abs'
+        );
+        my $c2 = $builder->build_icmp('eq',
+            $abs, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c2'
+        );
+        my $sqrt = $builder->build_sqrt(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 1764.0 ),
+            '%sqrt'
+        );
+        my $c3 = $builder->build_icmp('eq',
+            $sqrt, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c3'
+        );
+        my $min = $builder->build_min(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 99.0 ),
+            '%min'
+        );
+        my $c4 = $builder->build_icmp('eq',
+            $min, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c4'
+        );
+        my $max = $builder->build_max(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => -1.0 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%max'
+        );
+        my $c5 = $builder->build_icmp('eq',
+            $max, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c5'
+        );
+        my $all = $builder->build_and( $c1, $c2, '%a' );
+        $all = $builder->build_and( $all, $c3, '%b' );
+        $all = $builder->build_and( $all, $c4, '%c' );
+        $all = $builder->build_and( $all, $c5, '%d' );
+        my $t_block = $func->append_block('if.then');
+        my $f_block = $func->append_block('if.else');
+        $builder->build_cond_br( $all, $t_block, $f_block );
+        $builder->position_at_end($t_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        $builder->position_at_end($f_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+        my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+        my $res     = $codegen->emit_function($func);
+        ok( length( $res->{body} ) > 0, 'Generated Wasm float unary/minmax bytes' );
+        open my $dbg2, '>>', './wasm_hex_dbg.txt' or warn "can't open debug $!";
+        print $dbg2 "\n=== FLOAT UNARY BODY HEX ===\n" . unpack('H*', $res->{body}) . "\n===\n";
+        print $dbg2 "\n=== FLOAT UNARY LOCALS ===\n" . unpack('H*', $res->{locals}) . "\n===\n";
+        close $dbg2;
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = './fum_test.wasm';
+        $linker->write_executable( $output_file, $res, $platform );
+        ok( -e $output_file, 'Wasm float unary/minmax file exists' );
+        my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+    SKIP: {
+        if ( $wasmtime_path && -x $wasmtime_path ) {
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            is( $output, 42, 'Float unary/minmax Wasm returned 42 via wasmtime' );
+        }
+        else {
+            skip 'wasmtime not available', 1;
+        } }
+        if (-e $output_file) {
+            open my $fh2, '<:raw', $output_file or die $!;
+            my $data; read($fh2, $data, 999999); close $fh2;
+            print STDERR "\n=== FULL WASM HEX ===\n" . unpack('H*', $data) . "\n===\n";
+        }
+        # unlink $output_file if -e $output_file;
+    };
     subtest 'Jenny::Codegen Memory Operations (Cross-Platform)' => sub {
         my $platform = Brocken::Katsuro::Platform::parse();
         my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
@@ -7301,6 +8178,260 @@ subtest Jenny => sub {
             system($cmd);
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Box/unbox binary returned 42 on ' . $platform->friendly );
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen Float Arithmetic (Cross-Platform)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $fptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::f32(), '%fptr' );
+        $builder->build_store(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 10.5 ),
+            $fptr
+        );
+        my $fv = $builder->build_load( Brocken::Lindsay::IR::Type::f32(), $fptr, '%fv' );
+        my $fres = $builder->build_add( $fv, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 20.5 ), '%fres' );
+        $builder->build_store( $fres, $fptr );
+        my $ret = $builder->build_add(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 40 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 2 ),
+            '%ret'
+        );
+        $builder->build_ret($ret);
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        my $bytes = $codegen->emit_function($func);
+        ok( length($bytes) > 0, 'Generated float math bytes for ' . $platform->friendly );
+        my $linker
+            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+            Brocken::Jenny::Linker::ELF64->new();
+    SKIP: {
+            skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+            my $output_file = './float_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Float math binary exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            my $ret = system($cmd);
+            SKIP: {
+                skip "system() failed to spawn ($!)", 1 if $ret == -1;
+                my $exit_code = $? >> 8;
+                is( $exit_code, 42, 'Float math binary returned 42 on ' . $platform->friendly );
+            }
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen Float ICmp (Cross-Platform)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'icmp_float', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        my $entry    = $func->append_block('entry');
+        my $t_block  = $func->append_block('if.then');
+        my $f_block  = $func->append_block('if.else');
+        $builder->position_at_end($entry);
+        my $cond = $builder->build_icmp('lt',
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 10.5 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 20.5 ),
+            '%cmp'
+        );
+        $builder->build_cond_br( $cond, $t_block, $f_block );
+        $builder->position_at_end($t_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        $builder->position_at_end($f_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        my $bytes = $codegen->emit_function($func);
+        ok( length($bytes) > 0, 'Generated float icmp bytes for ' . $platform->friendly );
+        my $linker
+            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+            Brocken::Jenny::Linker::ELF64->new();
+    SKIP: {
+            skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+            my $output_file = './ficmp_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Float icmp binary exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            my $ret = system($cmd);
+            SKIP: {
+                skip "system() failed to spawn ($!)", 1 if $ret == -1;
+                my $exit_code = $? >> 8;
+                is( $exit_code, 42, 'Float icmp returned 42 on ' . $platform->friendly );
+            }
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen Float Arithmetic Battery (Cross-Platform)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        # f32 sub: 42.0 - 0.0 = 42.0, stored/loaded
+        my $fptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::f32(), '%fptr' );
+        $builder->build_store(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            $fptr
+        );
+        my $fv = $builder->build_load( Brocken::Lindsay::IR::Type::f32(), $fptr, '%fv' );
+        $builder->build_sub( $fv, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 0.0 ), '%fres' );
+
+        # f32 mul: 21.0 * 2.0 = 42.0
+        my $fptr2 = $builder->build_alloca( Brocken::Lindsay::IR::Type::f32(), '%fptr2' );
+        $builder->build_store(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 21.0 ),
+            $fptr2
+        );
+        my $fv2 = $builder->build_load( Brocken::Lindsay::IR::Type::f32(), $fptr2, '%fv2' );
+        $builder->build_mul( $fv2, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 2.0 ), '%fres2' );
+
+        # f32 div: 84.0 / 2.0 = 42.0
+        my $fptr3 = $builder->build_alloca( Brocken::Lindsay::IR::Type::f32(), '%fptr3' );
+        $builder->build_store(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 84.0 ),
+            $fptr3
+        );
+        my $fv3 = $builder->build_load( Brocken::Lindsay::IR::Type::f32(), $fptr3, '%fv3' );
+        $builder->build_div( $fv3, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 2.0 ), '%fres3' );
+
+        # f64 add: 21.25 + 20.75 = 42.0
+        my $fptr4 = $builder->build_alloca( Brocken::Lindsay::IR::Type::f64(), '%fptr4' );
+        $builder->build_store(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f64(), value => 21.25 ),
+            $fptr4
+        );
+        my $fv4 = $builder->build_load( Brocken::Lindsay::IR::Type::f64(), $fptr4, '%fv4' );
+        $builder->build_add( $fv4, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f64(), value => 20.75 ), '%fres4' );
+
+        $builder->build_ret(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 )
+        );
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        my $bytes = $codegen->emit_function($func);
+        ok( length($bytes) > 0, 'Generated float battery bytes for ' . $platform->friendly );
+        my $linker
+            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+            Brocken::Jenny::Linker::ELF64->new();
+    SKIP: {
+            skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+            my $output_file = './fbat_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Float battery binary exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            my $ret = system($cmd);
+            SKIP: {
+                skip "system() failed to spawn ($!)", 1 if $ret == -1;
+                my $exit_code = $? >> 8;
+                is( $exit_code, 42, 'Float battery returned 42 on ' . $platform->friendly );
+            }
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen Float Unary MinMax (Cross-Platform)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        # f32 neg: neg(-42.0) == 42.0
+        my $neg = $builder->build_neg(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => -42.0 ),
+            '%neg'
+        );
+        my $c1 = $builder->build_icmp('eq',
+            $neg, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c1'
+        );
+
+        # f32 abs: abs(-42.0) == 42.0
+        my $abs = $builder->build_abs(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => -42.0 ),
+            '%abs'
+        );
+        my $c2 = $builder->build_icmp('eq',
+            $abs, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c2'
+        );
+
+        # f32 sqrt: sqrt(1764.0) == 42.0
+        my $sqrt = $builder->build_sqrt(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 1764.0 ),
+            '%sqrt'
+        );
+        my $c3 = $builder->build_icmp('eq',
+            $sqrt, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c3'
+        );
+
+        # f32 min: min(42.0, 99.0) == 42.0
+        my $min = $builder->build_min(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 99.0 ),
+            '%min'
+        );
+        my $c4 = $builder->build_icmp('eq',
+            $min, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c4'
+        );
+
+        # f32 max: max(-1.0, 42.0) == 42.0
+        my $max = $builder->build_max(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => -1.0 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%max'
+        );
+        my $c5 = $builder->build_icmp('eq',
+            $max, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f32(), value => 42.0 ),
+            '%c5'
+        );
+
+        # Combine all conditions with AND
+        my $all = $builder->build_and( $c1, $c2, '%a' );
+        $all = $builder->build_and( $all, $c3, '%b' );
+        $all = $builder->build_and( $all, $c4, '%c' );
+        $all = $builder->build_and( $all, $c5, '%d' );
+
+        my $t_block = $func->append_block('if.then');
+        my $f_block = $func->append_block('if.else');
+        $builder->build_cond_br( $all, $t_block, $f_block );
+        $builder->position_at_end($t_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+        $builder->position_at_end($f_block);
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+
+        my $codegen
+            = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+            $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+            Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        my $bytes = $codegen->emit_function($func);
+        ok( length($bytes) > 0, 'Generated float unary/minmax bytes for ' . $platform->friendly );
+        my $linker
+            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+            Brocken::Jenny::Linker::ELF64->new();
+    SKIP: {
+            skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+            my $output_file = './fum_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Float unary/minmax binary exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            my $ret = system($cmd);
+            SKIP: {
+                skip "system() failed to spawn ($!)", 1 if $ret == -1;
+                my $exit_code = $? >> 8;
+                is( $exit_code, 42, 'Float unary/minmax returned 42 on ' . $platform->friendly );
+            }
             unlink $output_file;
         }
     };
@@ -7430,7 +8561,7 @@ subtest Jenny => sub {
         for my $i ( 0 .. 10 ) {
             push @intervals, Brocken::Jenny::RegAlloc::LiveInterval->new( name => "%$i", start => 0, end => 10 );
         }
-        my $result = $alloc->_linear_scan( \@intervals, $platform );
+        my $result = $alloc->_linear_scan( \@intervals, $platform, 0 );
         ok ( scalar( $result->{used_callee}->@* ) > 0 ), 'callee registers used when 11 overlapping vregs on x86_64';
     };
     subtest 'RegAlloc::LinearScan spilling' => sub {
@@ -7440,7 +8571,7 @@ subtest Jenny => sub {
         for my $i ( 0 .. 19 ) {
             push @intervals, Brocken::Jenny::RegAlloc::LiveInterval->new( name => "%$i", start => 0, end => 10 );
         }
-        my $result = $alloc->_linear_scan( \@intervals, $platform );
+        my $result = $alloc->_linear_scan( \@intervals, $platform, 0 );
         ok ( scalar( keys $result->{spill_slots}->%* ) > 0 ), 'spill slots created with 20 overlapping vregs';
     };
     subtest 'RegAlloc::LinearScan insert_spill_code' => sub {
