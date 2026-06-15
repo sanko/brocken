@@ -526,6 +526,16 @@ conventions (e.g., which registers are preserved across calls).
                 );
                 return $map{$name} // ( $name =~ /^x(\d+)$/ ? $1 : undef );
             }
+
+            # RISC-V FP registers (lp64d calling convention)
+            method fp_registers( $category = 'available' ) {
+                my %data = (
+                    available => [qw[f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 f17 f18 f19 f20 f21 f22 f23 f24 f25 f26 f27 f28 f29 f30 f31]],
+                    caller    => [qw[f0 f1 f2 f3 f4 f5 f6 f7 f10 f11 f12 f13 f14 f15 f16 f17 f28 f29 f30 f31]],
+                    callee    => [qw[f8 f9 f18 f19 f20 f21 f22 f23 f24 f25 f26 f27]]
+                );
+                return $data{$category} // [];
+            }
         }
     }
 
@@ -1636,9 +1646,16 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
             my $mf      = $lowerer->lower($ir_func);
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
-            my $result  = $alloc->allocate( $mf, $platform );
-            $alloc->insert_spill_code( $mf, $result->{spill_slots}, $result->{spill_temp}, $platform->stack_reg );
-            return $self->_encode( $mf, $result->{assignment}, $result->{used_callee} );
+            my $int_res = $alloc->allocate( $mf, $platform, 0 );
+            $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
+            my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+            $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
+            my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+            my %callee_seen;
+            @callee_seen{ $int_res->{used_callee}->@* } = ();
+            @callee_seen{ $fp_res->{used_callee}->@* } = ();
+            my @used_callee = sort keys %callee_seen;
+            return $self->_encode( $mf, \%assignment, \@used_callee );
         }
 
         method _encode( $mf, $assignment, $used_callee ) {
@@ -1654,7 +1671,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     s6 => 22, s7 => 23, s8 => 24, s9 => 25, s10 => 26, s11 => 27,
                     t3 => 28, t4 => 29, t5 => 30, t6 => 31
                 );
-                return $map{$r} // ( $r =~ /^x(\d+)$/ ? $1 : 0 );
+                return $map{$r} if exists $map{$r};
+                return $1 if $r =~ /^x(\d+)$/;
+                return $1 if $r =~ /^f(\d+)$/ && $1 <= 31;
+                return 0;
             };
 
             my $resolve = sub ($op) {
@@ -1714,12 +1734,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x13 );
                         }
                     }
-                    elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'mul' || $opcode eq 'slt' || $opcode eq 'sltu' || $opcode eq 'sltiu' ) {
+                    elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'slt' || $opcode eq 'sltu' || $opcode eq 'sltiu' ) {
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
-                        my %imm_f3 = ( add => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3, sltiu => 3 );
-                        my %reg_f7 = ( add => 0x00, sub => 0x20, mul => 0x01, and => 0x00, or => 0x00, xor => 0x00, slt => 0x00, sltu => 0x00 );
-                        my %reg_f3 = ( add => 0, sub => 0, mul => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3 );
+                        my %imm_f3 = ( add => 0, sub => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3, sltiu => 3 );
+                        my %reg_f7 = ( add => 0x00, sub => 0x20, mul => 0x01, div => 0x01, and => 0x00, or => 0x00, xor => 0x00, slt => 0x00, sltu => 0x00 );
+                        my %reg_f3 = ( add => 0, sub => 0, mul => 0, div => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3, sltiu => 3 );
 
                         if ( $src->kind eq 'imm' && exists $imm_f3{$opcode} ) {
                             # I-type: opcode 0x13, funct3 from %imm_f3
@@ -1741,7 +1761,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             # I-type shift: SLLI/SRLI/SRAI, funct3=1/5/5, opcode=0x13
                             my $shamt = $src->value;
                             my %f3 = ( shl => 1, lshr => 5, ashr => 5 );
-                            my $extra = ( $opcode eq 'ashr' ? 0x20000000 : 0x00000000 );
+                            my $extra = ( $opcode eq 'ashr' ? 0x40000000 : 0x00000000 );
                             $bytes .= pack( 'V', $extra | ( $shamt << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | 0x13 );
                         }
                         else {
@@ -1816,6 +1836,111 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | 0x23 );
+                    }
+                    elsif ( $opcode eq 'fload' ) {
+                        my $dst_r  = $resolve->($dst);
+                        my $did    = $reg_id->($dst_r);
+                        my $addr   = $src->value;
+                        my $base_r = $resolve->(
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} )
+                        );
+                        my $bid    = $reg_id->($base_r);
+                        my $disp   = $addr->{disp} // 0;
+                        my $funct3 = ($dst->type && $dst->type->bits <= 32) ? 2 : 3;
+                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | 0x07 );
+                    }
+                    elsif ( $opcode eq 'fstore' ) {
+                        my $src_r  = $resolve->($src);
+                        my $sid    = $reg_id->($src_r);
+                        my $addr   = $dst->value;
+                        my $base_r = $resolve->(
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} )
+                        );
+                        my $bid    = $reg_id->($base_r);
+                        my $disp   = $addr->{disp} // 0;
+                        my $funct3 = ($src->type && $src->type->bits <= 32) ? 2 : 3;
+                        my $imm_lo = $disp & 0x1F;
+                        my $imm_hi = ( $disp >> 5 ) & 0x7F;
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | 0x27 );
+                    }
+                    elsif ( $opcode eq 'fmov' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        if ( $bits <= 32 ) {
+                            # fmv.s = fsgnj.s rd, rs1, rs1: funct5=00100, fmt=00, rm=000
+                            $bytes .= pack( 'V', 0x20000000 | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | 0x53 );
+                        }
+                        else {
+                            # fmv.d = fsgnj.d rd, rs1, rs1: funct5=00100, fmt=01, rm=000
+                            $bytes .= pack( 'V', 0x22000000 | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | 0x53 );
+                        }
+                    }
+                    elsif ( $opcode eq 'fmov_gp2f' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        if ( $bits <= 32 ) {
+                            # fmv.w.x: funct5=11110, fmt=00, rs2=0, rm=000
+                            $bytes .= pack( 'V', 0xF0000000 | ( $sid << 15 ) | ( $did << 7 ) | 0x53 );
+                        }
+                        else {
+                            # fmv.d.x: funct5=11110, fmt=01, rs2=0, rm=000
+                            $bytes .= pack( 'V', 0xF2000000 | ( $sid << 15 ) | ( $did << 7 ) | 0x53 );
+                        }
+                    }
+                    elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my %fop5 = ( fadd => 0x00, fsub => 0x01, fmul => 0x02, fdiv => 0x03 );
+                        my $funct5 = $fop5{$opcode};
+                        my $enc = ( $funct5 << 27 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $did << 7 ) | 0x53;
+                        $enc |= ( 1 << 25 ) if $bits > 32;
+                        $bytes .= pack( 'V', $enc );
+                    }
+                    elsif ( $opcode eq 'fneg' || $opcode eq 'fabs' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        # fsgnjn.s (fneg): funct5=00100, rm=001
+                        # fsgnjx.s (fabs): funct5=00100, rm=010
+                        my $rm = $opcode eq 'fneg' ? 1 : 2;
+                        my $enc = 0x20000000 | ( $sid << 20 ) | ( $sid << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | 0x53;
+                        $enc |= ( 1 << 25 ) if $bits > 32;
+                        $bytes .= pack( 'V', $enc );
+                    }
+                    elsif ( $opcode eq 'fmin' || $opcode eq 'fmax' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        # fmin.s: funct5=00101, rm=000
+                        # fmax.s: funct5=00101, rm=001
+                        my $rm = $opcode eq 'fmin' ? 0 : 1;
+                        my $enc = 0x28000000 | ( $sid << 20 ) | ( $did << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | 0x53;
+                        $enc |= ( 1 << 25 ) if $bits > 32;
+                        $bytes .= pack( 'V', $enc );
+                    }
+                    elsif ( $opcode eq 'fsqrt' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        # fsqrt.s: funct5=01011, fmt=00, rs2=0, rm=000
+                        my $enc = 0x58000000 | ( $sid << 15 ) | ( $did << 7 ) | 0x53;
+                        $enc |= ( 1 << 25 ) if $bits > 32;
+                        $bytes .= pack( 'V', $enc );
                     }
                     elsif ( $opcode eq 'ret' ) {
                         if ( $total_frame > 0 ) {
@@ -3465,7 +3590,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
                         my $is_float = $lhs->type && $lhs->type->kind eq 'float';
                         my $mop = $is_float ? "f$opcode" : $opcode;
@@ -3473,20 +3598,38 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => $is_float ? 'fmov' : 'mov',
-                                operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                comment  => 'load ' . ( $lhs->name || $lhs->value )
-                            )
-                        );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => $mop,
-                                operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                comment  => $opcode
-                            )
-                        );
+                        if ($is_float) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'fmov',
+                                    operands => [ $dst, $self->_materialize($mbb, $lhs) ],
+                                    comment  => 'fload ' . ( $lhs->name || $lhs->value )
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $mop,
+                                    operands => [ $dst, $self->_materialize($mbb, $rhs) ],
+                                    comment  => $opcode
+                                )
+                            );
+                        }
+                        else {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mv',
+                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $mop,
+                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    comment  => $opcode
+                                )
+                            );
+                        }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
                         $mbb->add_instruction(
@@ -3615,9 +3758,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         if ( $pred eq 'eq' || $pred eq 'ne' ) {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'xor',
+                                    opcode   => 'mv',
                                     operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                    comment  => 'icmp ' . $pred . ': xor lhs'
+                                    comment  => 'icmp ' . $pred . ': mv lhs'
                                 )
                             );
                             $mbb->add_instruction(
@@ -3627,21 +3770,19 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                     comment  => 'icmp ' . $pred . ': xor rhs'
                                 )
                             );
-                            if ( $pred eq 'eq' ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'sltiu',
+                                    operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
+                                    comment  => 'seqz'
+                                )
+                            );
+                            if ( $pred eq 'ne' ) {
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sltiu',
+                                        opcode   => 'xor',
                                         operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
-                                        comment  => 'seqz'
-                                    )
-                                );
-                            } else {
-                                # snez: sltu dst, x0, dst
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sltu',
-                                        operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' ) ],
-                                        comment  => 'snez'
+                                        comment  => 'xori 1'
                                     )
                                 );
                             }
@@ -3759,6 +3900,34 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 $mf->add_block($mbb);
             }
             return $mf;
+        }
+
+        method _materialize($mbb, $ir_val) {
+            state $fc = 0;
+            if ($ir_val->isa('Brocken::Lindsay::IR::Constant') && $ir_val->type && $ir_val->type->kind eq 'float') {
+                my $bits = $ir_val->type->bits;
+                my $value = $ir_val->value;
+                my $bit_pattern = $bits >= 64 ? unpack('Q', pack('d', $value)) : unpack('V', pack('f', $value));
+                my $gp_name = '%fmcgp_' . $fc++;
+                my $fp_name = '%fmcfp_' . $fc++;
+                my $gp_type = Brocken::Lindsay::IR::Type::i64();
+                my $gp = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $gp_name, type => $gp_type);
+                my $fp = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $fp_name, type => $ir_val->type);
+                $mbb->add_instruction(
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode => 'mv', operands => [$gp, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $bit_pattern, type => $gp_type)],
+                        comment => 'fmc: bit pattern'
+                    )
+                );
+                $mbb->add_instruction(
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode => 'fmov_gp2f', operands => [$fp, $gp],
+                        comment => 'fmc: gp->fp'
+                    )
+                );
+                return $fp;
+            }
+            return $self->_lower_opnd($ir_val);
         }
 
         method _lower_opnd($ir_val) {
