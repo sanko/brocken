@@ -2458,12 +2458,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         }
                     }
                     elsif ( $opcode eq 'cset_eq' || $opcode eq 'cset_ne' || $opcode eq 'cset_lt' || $opcode eq 'cset_gt' || $opcode eq 'cset_le' || $opcode eq 'cset_ge' || $opcode eq 'cset_cc' || $opcode eq 'cset_cs' || $opcode eq 'cset_hi' || $opcode eq 'cset_ls' || $opcode eq 'cset_vc' || $opcode eq 'cset_vs' ) {
-                        my %arm_cond = ( cset_eq => 1, cset_ne => 0, cset_lt => 0xA, cset_gt => 0xD, cset_le => 0xC, cset_ge => 0xB, cset_cc => 2, cset_cs => 3, cset_hi => 9, cset_ls => 8, cset_vc => 6, cset_vs => 7 );
+                        my %arm_cond = ( cset_eq => 1, cset_ne => 0, cset_lt => 0xA, cset_gt => 0xC, cset_le => 0xD, cset_ge => 0xB, cset_cc => 2, cset_cs => 3, cset_hi => 9, cset_ls => 8, cset_vc => 6, cset_vs => 7 );
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $cond  = $arm_cond{$opcode};
                         # CSET Xd, cond  => CSINC Xd, XZR, XZR, inv(cond)
-                        $bytes .= pack( 'V', 0x9A9F03E0 | ( $cond << 12 ) | $did );
+                        $bytes .= pack( 'V', 0x9A7E0BE0 | ( $cond << 12 ) | $did );
                     }
                     elsif ( $opcode eq 'fload' ) {
                         my $dst_r = $resolve->($dst);
@@ -7587,8 +7587,8 @@ subtest Jenny => sub {
             my $func_name_offset = $lib_path_offset + length($lib_path);
             my $entry_stub_len   = $macho ? 17 : 20;
             my $main_rva         = $text + $entry_stub_len;
-            my $disp_libpath     = $lib_path_offset - $entry_stub_len - 8;
-            my $disp_funcname    = $func_name_offset - $entry_stub_len - 32;
+            my $disp_libpath     = $lib_path_offset - 8;
+            my $disp_funcname    = $func_name_offset - 32;
             my $offset_dlopen    = $got - ( $main_rva + 16 );
             my $offset_dlsym     = ( $got + 8 ) - ( $main_rva + 36 );
             my $imm19_dlopen     = ( $offset_dlopen / 4 ) & 0x7FFFF;
