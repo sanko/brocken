@@ -4667,17 +4667,20 @@ Generates DWARF v2/v3 compliant debug sections.
             # Basic CIE (Common Information Entry)
             # - code_alignment_factor: 1
             # - data_alignment_factor: -8
-            # - return_address_register: 16 (x64) or 30 (ARM64)
+            # - return_address_register: 16 (x64), 30 (ARM64), or 1 (RISC-V ra)
+            my $cie_ra  = $arch =~ /aarch64|arm64/i ? 30 : ( $arch eq 'riscv64' ? 1 : 16 );
+            my $cie_cfa = $arch =~ /aarch64|arm64/i ? 31 : ( $arch eq 'riscv64' ? 2 : 7 );
+            my $cie_fp  = $arch =~ /aarch64|arm64/i ? 29 : ( $arch eq 'riscv64' ? 8 : 6 );
             my $cie_body = pack( 'C', 3 ) . "\0" . $self->_uleb(1) . $self->_sleb(-8);
-            $cie_body .= ( $arch =~ /aarch64|arm64/i ? pack( 'C', 30 ) : pack( 'C', 16 ) );
+            $cie_body .= pack( 'C', $cie_ra );
 
-            # Initial instructions: DW_CFA_def_cfa (0x0C) RSP+8
-            $cie_body .= "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 31 : 7 ) . $self->_uleb(8);
+            # Initial instructions: DW_CFA_def_cfa (0x0C) SP+8
+            $cie_body .= "\x0C" . $self->_uleb($cie_cfa) . $self->_uleb(8);
 
             # Tell DWARF where the return address is saved (offset 1 * -8 from CFA)
             # DW_CFA_offset (0x80 | reg)
-            if ( $arch eq 'x64' ) {
-                $cie_body .= pack( 'C', 0x80 | 16 ) . $self->_uleb(1);
+            if ( $arch eq 'x64' || $arch eq 'riscv64' ) {
+                $cie_body .= pack( 'C', 0x80 | $cie_ra ) . $self->_uleb(1);
             }
             my $cie_pad = ( 8 - ( ( length($cie_body) + 8 ) % 8 ) ) % 8;
             $cie_body .= "\0" x $cie_pad;
@@ -4686,8 +4689,8 @@ Generates DWARF v2/v3 compliant debug sections.
             # FDE (Frame Description Entry) per function
             for my $fn (@$func_ranges) {
 
-                # DW_CFA_def_cfa RBP/X29, offset (context_size + 8)
-                my $instr           = "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
+                # DW_CFA_def_cfa FP, offset (context_size + 8)
+                my $instr           = "\x0C" . $self->_uleb($cie_fp) . $self->_uleb( $context_size + 8 );
                 my $offset_from_cfa = -16;
 
                 # Register preservation mapping
@@ -4709,7 +4712,9 @@ Generates DWARF v2/v3 compliant debug sections.
         # Similar to .debug_frame but used at runtime for stack walking.
         method build_eh_frame () {
             return '' unless $eh_frame_base;
-            my $reg = $arch =~ /aarch64|arm64/i ? 30 : 16;
+            my $reg  = $arch =~ /aarch64|arm64/i ? 30 : ( $arch eq 'riscv64' ? 1 : 16 );
+            my $cfa  = $arch =~ /aarch64|arm64/i ? 31 : ( $arch eq 'riscv64' ? 2 : 7 );
+            my $fpr  = $arch =~ /aarch64|arm64/i ? 29 : ( $arch eq 'riscv64' ? 8 : 6 );
 
             # CIE with 'zR' augmentation for pcrel FDE encoding
             my $cie_body = pack( 'C', 1 ) . "zR\0" . $self->_uleb(1) . $self->_sleb(-8);
@@ -4718,8 +4723,8 @@ Generates DWARF v2/v3 compliant debug sections.
             # Augmentation data length + FDE encoding (pcrel|sdata4 = 0x1B)
             $cie_body .= $self->_uleb(1) . "\x1B";
 
-            # Initial instructions: def_cfa RSP+8, offset rip at cfa-8
-            $cie_body .= "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 31 : 7 ) . $self->_uleb(8);
+            # Initial instructions: def_cfa SP+8, offset ra at cfa-8
+            $cie_body .= "\x0C" . $self->_uleb($cfa) . $self->_uleb(8);
             $cie_body .= pack( 'C', 0x80 | $reg ) . $self->_uleb(1);
             my $cie_pad = ( 4 - ( ( length($cie_body) + 4 ) % 4 ) ) % 4;
             $cie_body .= "\0" x $cie_pad;
@@ -4727,7 +4732,7 @@ Generates DWARF v2/v3 compliant debug sections.
             for my $fn (@$func_ranges) {
                 my $fn_start = $fn->{start};
                 my $fn_len   = ( $fn->{end} // $fn->{start} + 1 ) - $fn->{start};
-                my $instr    = "\x0C" . $self->_uleb( $arch =~ /aarch64|arm64/i ? 29 : 6 ) . $self->_uleb( $context_size + 8 );
+                my $instr    = "\x0C" . $self->_uleb($fpr) . $self->_uleb( $context_size + 8 );
                 for my $r (@$preserved_regs) {
                     my $reg_num      = $self->dwarf_reg_num($r) // 0;
                     my $factored_off = -16 / -8;
@@ -6131,7 +6136,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $self->layout->get('.dynsym')->{size} = length($dynsym);
 
             # Setup Relocations (.rela.dyn)
-            my $rel_type = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );    # R_AARCH64_GLOB_DAT or R_X86_64_GLOB_DAT
+            my $rel_type = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 20 : 6 );    # R_RISCV_GLOB_DAT (20) or R_AARCH64_GLOB_DAT (1025) or R_X86_64_GLOB_DAT (6)
             my $rela_dyn = '';
 
             # Elf64_Rela (24 bytes) for dlopen
@@ -6588,7 +6593,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 $entry_point,                                                            # e_entry (Starting Virtual Address)
                 64,                                                                      # e_phoff (Program Header Table offset)
                 $shoff,                                                                  # e_shoff (Section Header Table offset)
-                0,                                                                       # e_flags
+                ( $platform->is_riscv64 ? 0x0004 : 0 ),                                   # e_flags (EF_RISCV_FLOAT_ABI_DOUBLE for RISC-V lp64d)
                 64,                                                                      # e_ehsize (ELF Header Size)
                 56,                                                                      # e_phentsize (Program Header Entry Size)
                 $num_ph,                                                                 # e_phnum (Number of Program Header Entries)
