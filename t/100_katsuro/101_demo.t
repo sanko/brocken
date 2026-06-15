@@ -2338,7 +2338,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $did   = $reg_id->($dst_r);
                         my $cond  = $arm_cond{$opcode};
                         # CSET Xd, cond  => CSINC Xd, XZR, XZR, inv(cond)
-                        $bytes .= pack( 'V', 0xAA7F03E0 | ( $cond << 12 ) | $did );
+                        $bytes .= pack( 'V', 0x9A9F03E0 | ( $cond << 12 ) | $did );
                     }
                     elsif ( $opcode eq 'fload' ) {
                         my $dst_r = $resolve->($dst);
