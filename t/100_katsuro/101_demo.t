@@ -6136,7 +6136,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $self->layout->get('.dynsym')->{size} = length($dynsym);
 
             # Setup Relocations (.rela.dyn)
-            my $rel_type = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 20 : 6 );    # R_RISCV_GLOB_DAT (20) or R_AARCH64_GLOB_DAT (1025) or R_X86_64_GLOB_DAT (6)
+            my $rel_type = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );    # R_RISCV_64 (2) or R_AARCH64_GLOB_DAT (1025) or R_X86_64_GLOB_DAT (6)
             my $rela_dyn = '';
 
             # Elf64_Rela (24 bytes) for dlopen
@@ -7317,6 +7317,7 @@ subtest Jenny => sub {
             my $abs_path = File::Spec->rel2abs($output_file);
             my $libref   = DynaLoader::dl_load_file($abs_path);
             diag `nm $abs_path`;
+            diag "dl_error: " . ( DynaLoader::dl_error() || $! || 'unknown' ) unless $libref;
             ok $libref, 'Loaded ELF shared library natively via DynaLoader';
             if ($libref) {
                 my $symref = DynaLoader::dl_find_symbol( $libref, 'my_func' );
