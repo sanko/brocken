@@ -2298,6 +2298,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             SBFM    => 0x93400000,
             MOVZ_32 => 0x52800000,
             MOVZ_64 => 0xD2800000,
+            MOVK_32 => 0x53800000,
+            MOVK_64 => 0xD3800000,
             MOV_X   => 0xAA0003E0,
             SUB_SP  => 0xD10003FF,
             ADD_SP  => 0x910003FF,
@@ -2403,9 +2405,19 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $did   = $reg_id->($dst_r);
 
                         if ( $src->kind eq 'imm' ) {
-                            my $bits = $dst->type ? $dst->type->bits : 64;
-                            my $sf   = ( $bits >= 64 ) ? SF : 0x00000000;
-                            $bytes .= pack( 'V', $sf | MOVZ_32 | ( ( $src->value & 0xFFFF ) << 5 ) | $did );
+                            my $bits  = $dst->type ? $dst->type->bits : 64;
+                            my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
+                            my $value = $src->value;
+                            my $max_hw = int(($bits + 15) / 16) - 1;
+                            my $emitted = 0;
+                            for my $hw (0 .. $max_hw) {
+                                my $chunk = ($value >> ($hw * 16)) & 0xFFFF;
+                                if ($chunk || !$emitted) {
+                                    my $base = $emitted ? MOVK_32 : MOVZ_32;
+                                    $bytes .= pack('V', $sf | $base | ($chunk << 5) | ($hw << 21) | $did);
+                                    $emitted = 1;
+                                }
+                            }
                         }
                         else {
                             my $src_r = $resolve->($src);
@@ -2508,14 +2520,18 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $tmp_r;
                         for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
                         die 'no temp register for store_imm' unless $tmp_r;
-                        my $tid = $reg_id->($tmp_r);
-                        if ( $bits == 32 ) {
-                            $bytes .= pack( 'V', MOVZ_32 | ( ( $imm->value & 0xFFFF ) << 5 ) | $tid );
-                            $bytes .= pack( 'V', STR_32 | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
-                        } else {
-                            $bytes .= pack( 'V', MOVZ_64 | ( ( $imm->value & 0xFFFF ) << 5 ) | $tid );
-                            $bytes .= pack( 'V', STR_64 | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
+                        my $tid      = $reg_id->($tmp_r);
+                        my $imm_val  = $imm->value;
+                        my $max_hw   = int(($bits + 15) / 16) - 1;
+                        for my $hw (0 .. $max_hw) {
+                            my $chunk = ($imm_val >> ($hw * 16)) & 0xFFFF;
+                            if ($chunk || $hw == 0) {
+                                my $base = $hw == 0 ? ( $bits >= 64 ? MOVZ_64 : MOVZ_32 ) : ( $bits >= 64 ? MOVK_64 : MOVK_32 );
+                                $bytes .= pack('V', $base | ($chunk << 5) | ($hw << 21) | $tid);
+                            }
                         }
+                        my $str_base = $bits >= 64 ? STR_64 : STR_32;
+                        $bytes .= pack( 'V', $str_base | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
                     }
                     elsif ( $opcode eq 'cmp' ) {
                         my $dst_r = $resolve->($dst);
@@ -2533,7 +2549,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         }
                     }
                     elsif ( $opcode eq 'cset_eq' || $opcode eq 'cset_ne' || $opcode eq 'cset_lt' || $opcode eq 'cset_gt' || $opcode eq 'cset_le' || $opcode eq 'cset_ge' || $opcode eq 'cset_cc' || $opcode eq 'cset_cs' || $opcode eq 'cset_hi' || $opcode eq 'cset_ls' || $opcode eq 'cset_vc' || $opcode eq 'cset_vs' ) {
-                        my %arm_cond = ( cset_eq => 0, cset_ne => 1, cset_lt => 0xB, cset_gt => 0xC, cset_le => 0xD, cset_ge => 0xA, cset_cc => 3, cset_cs => 2, cset_hi => 8, cset_ls => 9, cset_vc => 7, cset_vs => 6 );
+                        my %arm_cond = ( cset_eq => 1, cset_ne => 0, cset_lt => 0xA, cset_gt => 0xD, cset_le => 0xC, cset_ge => 0xB, cset_cc => 2, cset_cs => 3, cset_hi => 9, cset_ls => 8, cset_vc => 6, cset_vs => 7 );
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $cond  = $arm_cond{$opcode};
