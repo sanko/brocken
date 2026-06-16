@@ -2320,7 +2320,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             FSQRT_32=> 0x1E21C000,
             FMOV_32 => 0x1E204000,
             FMOV_GP2F_32 => 0x1E270000,
-            FMOV_GP2F_64 => 0x9E270000,
+            FMOV_GP2F_64 => 0x9E670000,
             FCMP_32 => 0x1E202000,
             FCMP_64 => 0x1E602000,
             FP_SZ   => 0x00400000,
