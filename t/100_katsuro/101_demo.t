@@ -777,7 +777,8 @@ conventions (e.g., which registers are preserved across calls).
     }
 
     class Brocken::Katsuro::Platform::Solaris : isa(Brocken::Katsuro::Platform) {
-        method format() {'elf'}
+        method is_solaris() {1}
+        method format()    {'elf'}
     }
 
     class Brocken::Katsuro::Platform::Wasm : isa(Brocken::Katsuro::Platform) {
@@ -6107,7 +6108,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
 
             # Dynamic libraries loaded by DT_NEEDED
             my @libs = ($libc);
-            if ( !$platform->is_haiku ) {
+            if ( !$platform->is_haiku && !$platform->is_solaris ) {
                 my $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
                 $libpthread = 'libpthread.so' if $platform->is_openbsd || $platform->is_netbsd || $platform->is_dragonflybsd;
                 if ( $platform->is_native ) {
@@ -7942,6 +7943,19 @@ subtest Jenny => sub {
                     diag `otool -l "$wrapper_file" 2>&1 | head -200`;
                     diag `otool -tV "$wrapper_file" 2>&1 | head -40`;
                     diag `otool -L "$wrapper_file" 2>&1`;
+                }
+                elsif ( $platform->format eq 'elf' ) {
+                    diag 'Wrapper hex (first 64B after entry stub):';
+                    open my $fh2, '<:raw', $wrapper_file or die $!;
+                    seek( $fh2, $text_off + $entry_stub_len, 0 );
+                    my $buf;
+                    read( $fh2, $buf, 64 );
+                    close $fh2;
+                    diag join( ' ', map { sprintf '%02x', ord($_) } split //, $buf );
+                    diag `readelf -h "$wrapper_file" 2>&1 | head -20`;
+                    diag `readelf -l "$wrapper_file" 2>&1 | head -40`;
+                    diag `readelf -d "$wrapper_file" 2>&1 | head -20`;
+                    diag `readelf -S "$wrapper_file" 2>&1 | head -20`;
                 }
 
                 # Execute POSIX native executable
