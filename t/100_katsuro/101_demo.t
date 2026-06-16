@@ -5239,11 +5239,12 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 for my $s (@data_sections) {
 
                     # DATA Sections (80 bytes each)
+                    my $sec_flags = $s->{name} eq '.got' ? 0x00000006 : 0;
                     $d_cmd .= pack(
                         'a16 a16 Q<2 L<2 L<3 L<2 L<',
                         $sec_names{ $s->{name} },
                         '__DATA',   $base + $s->{rva},
-                        $s->{size}, $s->{off}, 3, 0, 0, 0, 0, 0, 0
+                        $s->{size}, $s->{off}, 3, 0, 0, $sec_flags, 0, 0, 0
                     );
                 }
                 push @cmds, $d_cmd;
@@ -7938,7 +7939,7 @@ subtest Jenny => sub {
                     read( $fh2, $buf, 64 );
                     close $fh2;
                     diag join( ' ', map { sprintf '%02x', ord($_) } split //, $buf );
-                    diag `otool -l "$wrapper_file" 2>&1 | head -80`;
+                    diag `otool -l "$wrapper_file" 2>&1 | head -200`;
                     diag `otool -tV "$wrapper_file" 2>&1 | head -40`;
                     diag `otool -L "$wrapper_file" 2>&1`;
                 }
