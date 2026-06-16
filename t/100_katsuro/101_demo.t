@@ -2030,18 +2030,18 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     my $enc = ( ( $imm20 >> 19 ) & 1 ) << 31
                             | ( ( $imm20 & 0x3FF ) << 21 )
                             | ( ( $imm20 >> 10 ) & 1 ) << 20
-                            | ( $imm20 & 0xFF000 )
+                            | ( ( $imm20 >> 11 ) & 0xFF ) << 12
                             | JAL;
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
                 }
                 elsif ( $fixup->{type} eq 'bcc' ) {
                     my $imm13 = ( $rel >> 1 ) & 0x1FFF;
-                    my $enc = ( ( $imm13 >> 12 ) & 1 ) << 31
-                            | ( ( $imm13 >> 5 ) & 0x3F ) << 25
+                    my $enc = ( ( $imm13 >> 11 ) & 1 ) << 31
+                            | ( ( $imm13 >> 4 ) & 0x3F ) << 25
                             | ( $fixup->{rs1} << 15 )
                             | ( $fixup->{funct3} << 12 )
-                            | ( ( $imm13 & 0x1E ) << 7 )
-                            | ( ( $imm13 >> 11 ) & 1 ) << 7
+                            | ( ( $imm13 & 0x0F ) << 8 )
+                            | ( ( $imm13 >> 10 ) & 1 ) << 7
                             | BCC;
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
                 }
