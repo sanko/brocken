@@ -25,9 +25,9 @@ MANIFEST
 /_build_params
 
 MYMETA.*
- 
+
 /Brocken-*
- 
+
 test-output-*/
 fum_test.wasm
 gh_run_*.log
@@ -45,3 +45,4 @@ eg/lib/*.pm
 
 *.session
 
+*.txt

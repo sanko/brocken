@@ -1681,6 +1681,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             FSTORE  => 0x27,
             FP_OP   => 0x53,
             BCC     => 0x63,
+            LUI     => 0x37,
         };
 
         method emit_function($ir_func) {
@@ -1779,9 +1780,18 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $did   = $reg_id->($dst_r);
 
                         if ( $src->kind eq 'imm' ) {
-                            # li rd, imm (addi rd, zero, imm)
-                            my $imm = $src->value & 0xFFF;
-                            $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            my $val = $src->value;
+                            if ($val >= -2048 && $val <= 2047) {
+                                # li rd, imm (addi rd, zero, imm)
+                                my $imm = $val & 0xFFF;
+                                $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            } else {
+                                # 32-bit immediate: lui + addi
+                                my $hi = ($val + 0x800) >> 12;
+                                my $lo = $val & 0xFFF;
+                                $bytes .= pack( 'V', ( ($hi & 0xFFFFF) << 12 ) | ( $did << 7 ) | LUI );
+                                $bytes .= pack( 'V', ( ($lo & 0xFFF) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            }
                         }
                         else {
                             my $src_r = $resolve->($src);
@@ -2585,7 +2595,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $cond  = $arm_cond{$opcode};
-                        $bytes .= pack( 'V', CSINC | ( $cond << 12 ) | $did );
+                        $bytes .= pack( 'V', CSINC | ( 31 << 16 ) | ( $cond << 12 ) | ( 31 << 5 ) | $did );
                     }
                     elsif ( $opcode eq 'fload' ) {
                         my $dst_r = $resolve->($dst);
@@ -3026,6 +3036,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             }
                             my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind => 'virt_reg', value => $inst->name . '_pf', type => Brocken::Lindsay::IR::Type::i1()
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'mov',
+                                    operands => [ $tmp, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0) ],
+                                    comment => 'zero tmp'
+                                )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3773,6 +3790,35 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                     comment  => $opcode
                                 )
                             );
+                        }
+                    }
+                    elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' || $opcode eq 'min' || $opcode eq 'max' ) {
+                        my @ops = $inst->operands->@*;
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        if ( $inst->type && $inst->type->kind eq 'float' ) {
+                            my $src = $self->_materialize($mbb, $ops[0]);
+                            if ($opcode eq 'min' || $opcode eq 'max') {
+                                my $src2 = $self->_materialize($mbb, $ops[1]);
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => "f$opcode", operands => [ $dst, $src, $src2 ],
+                                        comment => "f$opcode"
+                                    )
+                                );
+                            } else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => "f$opcode", operands => [ $dst, $src ],
+                                        comment => "f$opcode"
+                                    )
+                                );
+                            }
+                        }
+                        else {
+                            # Integer neg/abs/etc. (not strictly needed for the float task but good for completeness if we can)
+                            # For now just skip if not float as we don't have them in IR yet for int
                         }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
