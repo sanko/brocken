@@ -5021,13 +5021,12 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                     }
                     for ( 0 .. $#segseq ) { $data_seg = $_ if $segseq[$_] eq '__DATA'; }
                 }
+                $bind_info .= pack( 'C', 0x70 | $data_seg ) . $_uleb->( $got_off );
                 for my $name ( '_dlopen', '_dlsym', '_pthread_create' ) {
-                    $bind_info .= pack( 'C', 0x60 | $data_seg ) . $_uleb->( $got_off );
                     $bind_info .= pack( 'C', 0x11 );
                     $bind_info .= pack( 'C', 0x51 );
                     $bind_info .= pack( 'C', 0x40 ) . "${name}\0";
                     $bind_info .= pack( 'C', 0x90 );
-                    $got_off += 8;
                 }
                 $bind_info .= pack( 'C', 0x00 );
                 $bind_info_size = length($bind_info);
