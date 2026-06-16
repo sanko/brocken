@@ -1696,6 +1696,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* } = ();
             my @used_callee = sort keys %callee_seen;
+            print STDERR ">>> ASSIGN: " . join(', ', map { "$_ => $assignment{$_}" } sort keys %assignment) . "\n";
+            for my $block ($mf->blocks->@*) {
+                for my $inst ($block->instructions->@*) {
+                    my @ops = $inst->operands->@*;
+                    print STDERR ">>> MIR: " . $inst->opcode . " " . join(', ', map { ($_->kind eq 'imm' ? $_->value : $_->kind eq 'virt_reg' ? "virt(${\$_->value})" : $_->kind eq 'label' ? "label(${\$_->value})" : $_->kind eq 'phys_reg' ? "phys(${\$_->value})" : $_->kind eq 'mem' ? 'mem(...)' : '?') } @ops) . "\n";
+                }
+            }
             return $self->_encode( $mf, \%assignment, \@used_callee );
         }
 
@@ -1719,8 +1726,14 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             };
 
             my $resolve = sub ($op) {
-                return $assignment->{ $op->value } if $op->kind eq 'virt_reg';
-                return $op->value                  if $op->kind eq 'phys_reg';
+                print STDERR ">>> resolve(${\$op->kind}, ${\$op->value}): ";
+                if ( $op->kind eq 'virt_reg' ) {
+                    my $r = $assignment->{ $op->value };
+                    print STDERR "assignment lookup => " . ( defined $r ? $r : 'undef(MISSING!)' ) . "\n";
+                    return $r;
+                }
+                print STDERR "phys_reg => ${\$op->value}\n";
+                return $op->value if $op->kind eq 'phys_reg';
                 die "Unexpected operand kind: ${\$op->kind}";
             };
 
@@ -1742,7 +1755,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
                     my $opcode   = $inst->opcode;
-                    my ( $dst, $src ) = $inst->operands->@*;
+                    my @ops      = $inst->operands->@*;
+                    my ( $dst, $src ) = @ops;
+                    print STDERR ">>> ENC op=$opcode off=" . length($bytes) . " ops=" . join(',', map { ($_->kind eq 'imm' ? "imm(${\$_->value})" : $_->kind eq 'virt_reg' ? "virt(${\$_->value})" : $_->kind eq 'label' ? "label(${\$_->value})" : $_->kind eq 'phys_reg' ? "phys(${\$_->value})" : $_->kind eq 'mem' ? 'mem(...)' : '?') } @ops) . "\n";
 
                     if ( $opcode eq 'label' ) {
                         $labels{ $dst->value } = $current_offset->();
