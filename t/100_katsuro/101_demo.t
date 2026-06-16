@@ -1419,12 +1419,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             $bytes .= pack( 'CCC', $rex, MOV_RM_R, $modrm );
                         }
                     }
-                    elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' ) {
+                    elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'adc' || $opcode eq 'sbb' ) {
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my %imm_ext = ( add => 0, sub => 5, and => 4, or => 1, xor => 6 );
-                        my %reg_op  = ( add => 0x01, sub => 0x29, and => 0x21, or => 0x09, xor => 0x31 );
+                        my %imm_ext = ( add => 0, sub => 5, and => 4, or => 1, xor => 6, adc => 2, sbb => 3 );
+                        my %reg_op  = ( add => 0x01, sub => 0x29, and => 0x21, or => 0x09, xor => 0x31, adc => 0x11, sbb => 0x19 );
                         my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
 
                         if ( $src->kind eq 'imm' ) {
@@ -1805,7 +1805,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         push @fixups, { offset => $current_offset->(), type => 'bcc', target => $src->value, rs1 => $cid, funct3 => $funct3 };
                         $bytes .= pack( 'V', ( $cid << 15 ) | ( $funct3 << 12 ) | BCC );
                     }
-                    elsif ( $opcode eq 'mv' ) {
+                    elsif ( $opcode eq 'mov' || $opcode eq 'mv' ) {
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
 
@@ -2168,6 +2168,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     $ir_types{$inst->name} = $inst->type if $inst->name;
                 }
             }
+            for my $mbb ($mf->blocks->@*) {
+                for my $mi ($mbb->instructions->@*) {
+                    for my $mo ($mi->operands->@*) {
+                        $ir_types{$mo->value} = $mo->type if $mo->kind eq 'virt_reg' && $mo->value && $mo->type;
+                    }
+                }
+            }
             return $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type );
         }
 
@@ -2276,6 +2283,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'i64_le_s' ) { $$buf .= pack( 'C', 0x57 ) }
                     elsif ( $opcode eq 'i64_ge_s' ) { $$buf .= pack( 'C', 0x59 ) }
                     elsif ( $opcode eq 'i64_lt_u' ) { $$buf .= pack( 'C', 0x54 ) }
+                    elsif ( $opcode eq 'i64_extend_i32_u' ) { $$buf .= pack( 'C', 0xAC ) }
                     elsif ( $opcode eq 'i64_gt_u' ) { $$buf .= pack( 'C', 0x56 ) }
                     elsif ( $opcode eq 'i64_le_u' ) { $$buf .= pack( 'C', 0x58 ) }
                     elsif ( $opcode eq 'i64_ge_u' ) { $$buf .= pack( 'C', 0x5A ) }
@@ -2372,7 +2380,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             else {
                 $locals_block = $self->_uleb(0);
             }
-            my $ret_valtype = $return_type ? $self->_wasm_valtype($return_type) : 0x7F;
+            my $ret_valtype;
+            if ($return_type && $return_type->kind eq 'int' && $return_type->bits == 128) {
+                $ret_valtype = [0x7E, 0x7E];
+            }
+            else {
+                $ret_valtype = $return_type ? $self->_wasm_valtype($return_type) : 0x7F;
+            }
             return { body => $bytes . pack( 'C', 0x0B ), locals => $locals_block, num_locals => $next_local, return_valtype => $ret_valtype };
         }
 
@@ -2426,6 +2440,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             MUL_W   => 0x1B007C00,
             ADD_X   => 0x8B000000,
             SUB_X   => 0xCB000000,
+            ADCS_X  => 0x9A000000,
+            SBCS_X  => 0xDA000000,
             AND_X   => 0x8A000000,
             ORR_X   => 0xAA000000,
             EOR_X   => 0xCA000000,
@@ -2546,7 +2562,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         push @fixups, { offset => $current_offset->(), type => 'cbz', target => $src->value, rid => $cid, base => $base };
                         $bytes .= pack( 'V', $base | $cid );
                     }
-                    elsif ( $opcode eq 'mov' ) {
+                    elsif ( $opcode eq 'mov' || $opcode eq 'mv' ) {
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
 
@@ -2571,7 +2587,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             $bytes .= pack( 'V', MOV_X | ( $sid << 16 ) | $did );
                         }
                     }
-                    elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'mul' ) {
+                    elsif ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'mul' || $opcode eq 'adc' || $opcode eq 'sbb' ) {
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $bits  = $dst->type ? $dst->type->bits : 64;  # width-aware
@@ -2582,6 +2598,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             or  => ($bits >= 64 ? ORR_X : ORR_W),
                             xor => ($bits >= 64 ? EOR_X : EOR_W),
                             mul => ($bits >= 64 ? MUL_X : MUL_W),
+                            adc => ADCS_X,
+                            sbb => SBCS_X,
                         );
 
                         if ( $src->kind eq 'imm' && ( $opcode eq 'add' || $opcode eq 'sub' ) ) {
@@ -2724,6 +2742,14 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $did   = $reg_id->($dst_r);
                         my $cond  = $arm_cond{$opcode};
                         $bytes .= pack( 'V', CSINC | ( 31 << 16 ) | ( $cond << 12 ) | ( 31 << 5 ) | $did );
+                    }
+                    elsif ( $opcode eq 'sltu' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        $bytes .= pack( 'V', 0xEB00001F | ( $sid << 16 ) | ( $did << 5 ) );
+                        $bytes .= pack( 'V', CSINC | ( 31 << 16 ) | ( 2 << 12 ) | ( 31 << 5 ) | $did );
                     }
                     elsif ( $opcode eq 'fload' ) {
                         my $dst_r = $resolve->($dst);
@@ -3072,41 +3098,62 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     my $opcode = $inst->opcode;
                     if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
-                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind => 'virt_reg', value => $inst->name, type => $inst->type
-                        );
-                        my $is_float = $inst->type && $inst->type->kind eq 'float';
-                        if ($is_float) {
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'fmov',
-                                    operands => [ $dst, $self->_materialize($mbb, $lhs) ],
-                                    comment  => 'fload ' . ( $lhs->name || $lhs->value )
-                                )
-                            );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'f' . $opcode,
-                                    operands => [ $dst, $self->_materialize($mbb, $rhs) ],
-                                    comment  => 'f' . $opcode
-                                )
-                            );
+                        my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
+                        if ($is_i128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor')) {
+                            my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
+                            my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
+                            my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64());
+                            my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_hi', type => Brocken::Lindsay::IR::Type::i64());
+                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$lo_dst, $lo_lhs], comment => 'i128 load lo ' . ($lhs->name || $lhs->value)));
+                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => $opcode, operands => [$lo_dst, $lo_rhs], comment => 'i128 ' . $opcode . ' lo'));
+                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$hi_dst, $hi_lhs], comment => 'i128 load hi ' . ($lhs->name || $lhs->value)));
+                            if ($opcode eq 'add') {
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'adc', operands => [$hi_dst, $hi_rhs], comment => 'i128 adc hi'));
+                            }
+                            elsif ($opcode eq 'sub') {
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sbb', operands => [$hi_dst, $hi_rhs], comment => 'i128 sbb hi'));
+                            }
+                            else {
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => $opcode, operands => [$hi_dst, $hi_rhs], comment => 'i128 ' . $opcode . ' hi'));
+                            }
                         }
                         else {
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'mov',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                    comment  => 'load ' . ( $lhs->name || $lhs->value )
-                                )
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name, type => $inst->type
                             );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => $opcode,
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                    comment  => $opcode
-                                )
-                            );
+                            my $is_float = $inst->type && $inst->type->kind eq 'float';
+                            if ($is_float) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'fmov',
+                                        operands => [ $dst, $self->_materialize($mbb, $lhs) ],
+                                        comment  => 'fload ' . ( $lhs->name || $lhs->value )
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'f' . $opcode,
+                                        operands => [ $dst, $self->_materialize($mbb, $rhs) ],
+                                        comment  => 'f' . $opcode
+                                    )
+                                );
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => $opcode,
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => $opcode
+                                    )
+                                );
+                            }
                         }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
@@ -3241,14 +3288,36 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 );
                             }
                             else {
-                                my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ $rax, $self->_lower_opnd($val) ],
-                                        comment  => '=> rax'
-                                    )
-                                );
+                                my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128;
+                                if ($is_i128) {
+                                    my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
+                                    my $rdx = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' );
+                                    my ($lo, $hi) = $self->_split_i128($val);
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mov',
+                                            operands => [ $rax, $lo ],
+                                            comment  => '=> rax (i128 lo)'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mov',
+                                            operands => [ $rdx, $hi ],
+                                            comment  => '=> rdx (i128 hi)'
+                                        )
+                                    );
+                                }
+                                else {
+                                    my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mov',
+                                            operands => [ $rax, $self->_lower_opnd($val) ],
+                                            comment  => '=> rax'
+                                        )
+                                    );
+                                }
                             }
                         }
                         $mbb->add_instruction(
@@ -3275,46 +3344,109 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                         my $ptr       = $inst->operands->[0];
-                        my $mem       = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => 'mem',
-                            value => { base => $ptr->name, disp => 0 },
-                            type  => $inst->type
-                        );
-                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind => 'virt_reg', value => $inst->name, type => $inst->type
-                        );
-                        my $load_op = ($inst->type && $inst->type->kind eq 'float') ? 'fload' : 'load';
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => $load_op, operands => [ $dst, $mem ],
-                                comment => 'load'
-                            )
-                        );
-                    }
-                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
-                        my ( $val, $ptr ) = $inst->operands->@*;
-                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => 'mem',
-                            value => { base => $ptr->name, disp => 0 },
-                            type  => $val->type
-                        );
-                        if ($val->type && $val->type->kind eq 'float') {
+                        my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
+                        if ($is_i128) {
+                            my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name . '_hi', type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $mem_lo = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem',
+                                value => { base => $ptr->name, disp => 0 },
+                                type  => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $mem_hi = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem',
+                                value => { base => $ptr->name, disp => 8 },
+                                type  => Brocken::Lindsay::IR::Type::i64()
+                            );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'fstore',
-                                    operands => [ $mem, $self->_materialize($mbb, $val) ],
-                                    comment  => 'fstore'
+                                    opcode => 'load', operands => [ $lo_dst, $mem_lo ],
+                                    comment => 'i128 load lo'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'load', operands => [ $hi_dst, $mem_hi ],
+                                    comment => 'i128 load hi'
                                 )
                             );
                         }
                         else {
+                            my $mem       = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem',
+                                value => { base => $ptr->name, disp => 0 },
+                                type  => $inst->type
+                            );
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name, type => $inst->type
+                            );
+                            my $load_op = ($inst->type && $inst->type->kind eq 'float') ? 'fload' : 'load';
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'),
-                                    operands => [ $mem, $self->_lower_opnd($val) ],
-                                    comment  => 'store'
+                                    opcode => $load_op, operands => [ $dst, $mem ],
+                                    comment => 'load'
                                 )
                             );
+                        }
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
+                        my ( $val, $ptr ) = $inst->operands->@*;
+                        my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128;
+                        if ($is_i128) {
+                            my ($lo, $hi) = $self->_split_i128($val);
+                            my $mem_lo = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem',
+                                value => { base => $ptr->name, disp => 0 },
+                                type  => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $mem_hi = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem',
+                                value => { base => $ptr->name, disp => 8 },
+                                type  => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => ($lo->kind eq 'imm' ? 'store_imm' : 'store'),
+                                    operands => [ $mem_lo, $lo ],
+                                    comment  => 'i128 store lo'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => ($hi->kind eq 'imm' ? 'store_imm' : 'store'),
+                                    operands => [ $mem_hi, $hi ],
+                                    comment  => 'i128 store hi'
+                                )
+                            );
+                        }
+                        else {
+                            my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem',
+                                value => { base => $ptr->name, disp => 0 },
+                                type  => $val->type
+                            );
+                            if ($val->type && $val->type->kind eq 'float') {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'fstore',
+                                        operands => [ $mem, $self->_materialize($mbb, $val) ],
+                                        comment  => 'fstore'
+                                    )
+                                );
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'),
+                                        operands => [ $mem, $self->_lower_opnd($val) ],
+                                        comment  => 'store'
+                                    )
+                                );
+                            }
                         }
                     }
                     elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
@@ -3475,10 +3607,29 @@ like ELF, Mach-O, or PE (Jenny::Linker).
         method _type_tag($type) {
             return 1 if $type->kind eq 'int' && $type->bits <= 32;   # i1, i8, i16, i32
             return 2 if $type->kind eq 'int' && $type->bits == 64;
+            return 6 if $type->kind eq 'int' && $type->bits == 128;
             return 3 if $type->kind eq 'float';                     # f32, f64
             return 4 if $type->kind eq 'ptr';
             return 5 if $type->kind eq 'dynamic';
             return 0;
+        }
+
+        method _split_i128($ir_val) {
+            if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
+                my $val = $ir_val->value;
+                my $lo = $val & 0xFFFFFFFFFFFFFFFF;
+                my $hi = ($val >> 64) & 0xFFFFFFFFFFFFFFFF;
+                $hi = -(~$hi & 0xFFFFFFFFFFFFFFFF) - 1 if $hi >= 0x8000000000000000;
+                $lo = -(~$lo & 0xFFFFFFFFFFFFFFFF) - 1 if $lo >= 0x8000000000000000;
+                return (
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $lo, type => Brocken::Lindsay::IR::Type::i64() ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() ),
+                );
+            }
+            return (
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
+            );
         }
 
         method _materialize($mbb, $ir_val) {
@@ -3565,20 +3716,191 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             );
                         }
                         else {
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'mov',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                    comment  => 'load ' . ( $lhs->name || $lhs->value )
-                                )
-                            );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => $opcode,
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                    comment  => $opcode
-                                )
-                            );
+                            my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
+                            if ($is_i128) {
+                                my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $inst->name . '_hi', type => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
+                                my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
+                                if ($opcode eq 'add') {
+                                    my $temp = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind => 'virt_reg', value => $inst->name . '_t', type => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    my $carry = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind => 'virt_reg', value => $inst->name . '_c', type => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $temp, $lo_lhs ],
+                                            comment  => 'i128 save lhs_lo for carry'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $lo_dst, $lo_lhs ],
+                                            comment  => 'i128 load lo ' . ( $lhs->name || $lhs->value )
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'add',
+                                            operands => [ $lo_dst, $lo_rhs ],
+                                            comment  => 'i128 add lo'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $carry, $lo_dst ],
+                                            comment  => 'i128 carry = lo_result'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sltu',
+                                            operands => [ $carry, $temp ],
+                                            comment  => 'i128 carry = (lo_result < lhs_lo)'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $hi_dst, $hi_lhs ],
+                                            comment  => 'i128 load hi ' . ( $lhs->name || $lhs->value )
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'add',
+                                            operands => [ $hi_dst, $hi_rhs ],
+                                            comment  => 'i128 add hi'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'add',
+                                            operands => [ $hi_dst, $carry ],
+                                            comment  => 'i128 add hi + carry'
+                                        )
+                                    );
+                                }
+                                elsif ($opcode eq 'sub') {
+                                    my $temp = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind => 'virt_reg', value => $inst->name . '_t', type => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    my $borrow = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind => 'virt_reg', value => $inst->name . '_b', type => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $temp, $lo_lhs ],
+                                            comment  => 'i128 save lhs_lo for borrow'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $lo_dst, $lo_lhs ],
+                                            comment  => 'i128 load lo ' . ( $lhs->name || $lhs->value )
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sub',
+                                            operands => [ $lo_dst, $lo_rhs ],
+                                            comment  => 'i128 sub lo'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $borrow, $temp ],
+                                            comment  => 'i128 borrow = lhs_lo'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sltu',
+                                            operands => [ $borrow, $lo_rhs ],
+                                            comment  => 'i128 borrow = (lhs_lo < rhs_lo)'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $hi_dst, $hi_lhs ],
+                                            comment  => 'i128 load hi ' . ( $lhs->name || $lhs->value )
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sub',
+                                            operands => [ $hi_dst, $hi_rhs ],
+                                            comment  => 'i128 sub hi'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sub',
+                                            operands => [ $hi_dst, $borrow ],
+                                            comment  => 'i128 sub hi - borrow'
+                                        )
+                                    );
+                                }
+                                else {
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $lo_dst, $lo_lhs ],
+                                            comment  => 'i128 load lo ' . ( $lhs->name || $lhs->value )
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => $opcode,
+                                            operands => [ $lo_dst, $lo_rhs ],
+                                            comment  => 'i128 ' . $opcode . ' lo'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $hi_dst, $hi_lhs ],
+                                            comment  => 'i128 load hi ' . ( $lhs->name || $lhs->value )
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => $opcode,
+                                            operands => [ $hi_dst, $hi_rhs ],
+                                            comment  => 'i128 ' . $opcode . ' hi'
+                                        )
+                                    );
+                                }
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => $opcode,
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => $opcode
+                                    )
+                                );
+                            }
                         }
                     }
                     elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
@@ -3641,39 +3963,90 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         );
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
-                        my $ptr = $inst->operands->[0];
-                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $inst->type
-                        );
-                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind => 'virt_reg', value => $inst->name, type => $inst->type
-                        );
-                        my $lop = ($inst->type && $inst->type->kind eq 'float') ? 'fload' : 'load';
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => $lop, operands => [ $dst, $mem ], comment => $lop
-                            )
-                        );
-                    }
-                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
-                        my ($val, $ptr) = $inst->operands->@*;
-                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $val->type
-                        );
-                        if ($val->type && $val->type->kind eq 'float') {
-                            my $src = $val->isa('Brocken::Lindsay::IR::Constant') ? $self->_materialize($mbb, $val) : $self->_lower_opnd($val);
+                        my $ptr    = $inst->operands->[0];
+                        my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
+                        if ($is_i128) {
+                            my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name . '_hi', type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $mem_lo = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem', value => { base => $ptr->name, disp => 0 }, type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $mem_hi = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem', value => { base => $ptr->name, disp => 8 }, type => Brocken::Lindsay::IR::Type::i64()
+                            );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode => 'fstore', operands => [ $mem, $src ], comment => 'fstore'
+                                    opcode => 'load', operands => [ $lo_dst, $mem_lo ], comment => 'i128 load lo'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'load', operands => [ $hi_dst, $mem_hi ], comment => 'i128 load hi'
                                 )
                             );
                         }
                         else {
+                            my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $inst->type
+                            );
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name, type => $inst->type
+                            );
+                            my $lop = ($inst->type && $inst->type->kind eq 'float') ? 'fload' : 'load';
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
+                                    opcode => $lop, operands => [ $dst, $mem ], comment => $lop
                                 )
                             );
+                        }
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
+                        my ($val, $ptr) = $inst->operands->@*;
+                        my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128;
+                        if ($is_i128) {
+                            my ($lo, $hi) = $self->_split_i128($val);
+                            my $mem_lo = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem', value => { base => $ptr->name, disp => 0 }, type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $mem_hi = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'mem', value => { base => $ptr->name, disp => 8 }, type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => ($lo->kind eq 'imm' ? 'store_imm' : 'store'),
+                                    operands => [ $mem_lo, $lo ], comment => 'i128 store lo'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => ($hi->kind eq 'imm' ? 'store_imm' : 'store'),
+                                    operands => [ $mem_hi, $hi ], comment => 'i128 store hi'
+                                )
+                            );
+                        }
+                        else {
+                            my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $val->type
+                            );
+                            if ($val->type && $val->type->kind eq 'float') {
+                                my $src = $val->isa('Brocken::Lindsay::IR::Constant') ? $self->_materialize($mbb, $val) : $self->_lower_opnd($val);
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'fstore', operands => [ $mem, $src ], comment => 'fstore'
+                                    )
+                                );
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
+                                    )
+                                );
+                            }
                         }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
@@ -3715,13 +4088,13 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode => 'load', operands => [ $dst, $mem ], comment => 'unbox: load payload'
-                                )
-                            );
-                        }
-                        elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'load', operands => [ $dst, $mem ], comment => 'unbox: load payload'
+                            )
+                        );
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
                             my ($ptr, @indices) = $inst->operands->@*;
                             my $scale = $inst->base_type->bits / 8;
                             my $idx = $indices[0];
@@ -3857,14 +4230,36 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                     );
                                 }
                                 else {
-                                    my $x0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mov',
-                                            operands => [ $x0, $self->_lower_opnd($val) ],
-                                            comment  => '=> x0'
-                                        )
-                                    );
+                                    my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128;
+                                    if ($is_i128) {
+                                        my $x0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
+                                        my $x1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x1' );
+                                        my ($lo, $hi) = $self->_split_i128($val);
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $x0, $lo ],
+                                                comment  => '=> x0 (i128 lo)'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $x1, $hi ],
+                                                comment  => '=> x1 (i128 hi)'
+                                            )
+                                        );
+                                    }
+                                    else {
+                                        my $x0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $x0, $self->_lower_opnd($val) ],
+                                                comment  => '=> x0'
+                                            )
+                                        );
+                                    }
                                 }
                             }
                             $mbb->add_instruction(
@@ -3927,6 +4322,24 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             return 5 if $type->kind eq 'dynamic';
             return 0;
         }
+
+        method _split_i128($ir_val) {
+            if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
+                my $val = $ir_val->value;
+                my $lo = $val & 0xFFFFFFFFFFFFFFFF;
+                my $hi = ($val >> 64) & 0xFFFFFFFFFFFFFFFF;
+                $hi = -(~$hi & 0xFFFFFFFFFFFFFFFF) - 1 if $hi >= 0x8000000000000000;
+                $lo = -(~$lo & 0xFFFFFFFFFFFFFFFF) - 1 if $lo >= 0x8000000000000000;
+                return (
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $lo, type => Brocken::Lindsay::IR::Type::i64() ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() ),
+                );
+            }
+            return (
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
+            );
+        }
     }
 
     # ---------------------------------------------------------------------------
@@ -3973,20 +4386,109 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             );
                         }
                         else {
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'mv',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                    comment  => 'load ' . ( $lhs->name || $lhs->value )
-                                )
-                            );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => $mop,
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                    comment  => $opcode
-                                )
-                            );
+                            my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
+                            if ($is_i128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor')) {
+                                my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $inst->name . '_hi', type => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
+                                my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
+                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $inst->name . '_tmp', type => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                # lo part
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $lo_dst, $lo_lhs ],
+                                        comment  => 'i128 load lo ' . ( $lhs->name || $lhs->value )
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $tmp, $lo_dst ],
+                                        comment  => 'i128 save lo_lhs'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => $opcode,
+                                        operands => [ $lo_dst, $lo_rhs ],
+                                        comment  => 'i128 ' . $opcode . ' lo'
+                                    )
+                                );
+                                if ($opcode eq 'add') {
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sltu',
+                                            operands => [ $tmp, $lo_dst, $tmp ],
+                                            comment  => 'i128 carry'
+                                        )
+                                    );
+                                }
+                                elsif ($opcode eq 'sub') {
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sltu',
+                                            operands => [ $tmp, $tmp, $lo_dst ],
+                                            comment  => 'i128 borrow'
+                                        )
+                                    );
+                                }
+                                # hi part
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $hi_dst, $hi_lhs ],
+                                        comment  => 'i128 load hi ' . ( $lhs->name || $lhs->value )
+                                    )
+                                );
+                                if ($opcode eq 'add' || $opcode eq 'sub') {
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => $opcode,
+                                            operands => [ $hi_dst, $hi_rhs ],
+                                            comment  => 'i128 ' . $opcode . ' hi'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => $opcode,
+                                            operands => [ $hi_dst, $tmp ],
+                                            comment  => 'i128 ' . $opcode . ' carry'
+                                        )
+                                    );
+                                }
+                                else {
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => $opcode,
+                                            operands => [ $hi_dst, $hi_rhs ],
+                                            comment  => 'i128 ' . $opcode . ' hi'
+                                        )
+                                    );
+                                }
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => $opcode,
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => $opcode
+                                    )
+                                );
+                            }
                         }
                     }
                     elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' || $opcode eq 'min' || $opcode eq 'max' ) {
@@ -4071,38 +4573,85 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                         my $ptr = $inst->operands->[0];
-                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $inst->type
-                        );
-                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind => 'virt_reg', value => $inst->name, type => $inst->type
-                        );
-                        my $lop = ($inst->type && $inst->type->kind eq 'float') ? 'fload' : 'load';
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode => $lop, operands => [ $dst, $mem ], comment => $lop
-                            )
-                        );
-                    }
-                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
-                        my ($val, $ptr) = $inst->operands->@*;
-                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $val->type
-                        );
-                        if ($val->type && $val->type->kind eq 'float') {
-                            my $src = $val->isa('Brocken::Lindsay::IR::Constant') ? $self->_materialize($mbb, $val) : $self->_lower_opnd($val);
+                        if ($inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128) {
+                            my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name . '_hi', type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $lo_mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $hi_mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'mem', value => { base => $ptr->name, disp => 8 }, type => Brocken::Lindsay::IR::Type::i64()
+                            );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode => 'fstore', operands => [ $mem, $src ], comment => 'fstore'
+                                    opcode => 'load', operands => [ $lo_dst, $lo_mem ], comment => 'i128 load lo'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'load', operands => [ $hi_dst, $hi_mem ], comment => 'i128 load hi'
                                 )
                             );
                         }
                         else {
+                            my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $inst->type
+                            );
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'virt_reg', value => $inst->name, type => $inst->type
+                            );
+                            my $lop = ($inst->type && $inst->type->kind eq 'float') ? 'fload' : 'load';
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
+                                    opcode => $lop, operands => [ $dst, $mem ], comment => $lop
                                 )
                             );
+                        }
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
+                        my ($val, $ptr) = $inst->operands->@*;
+                        if ($val->type && $val->type->kind eq 'int' && $val->type->bits == 128) {
+                            my ($lo_val, $hi_val) = $self->_split_i128($val);
+                            my $lo_mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            my $hi_mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'mem', value => { base => $ptr->name, disp => 8 }, type => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => ($lo_val->kind eq 'imm' ? 'store_imm' : 'store'), operands => [ $lo_mem, $lo_val ], comment => 'i128 store lo'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => ($hi_val->kind eq 'imm' ? 'store_imm' : 'store'), operands => [ $hi_mem, $hi_val ], comment => 'i128 store hi'
+                                )
+                            );
+                        }
+                        else {
+                            my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind => 'mem', value => { base => $ptr->name, disp => 0 }, type => $val->type
+                            );
+                            if ($val->type && $val->type->kind eq 'float') {
+                                my $src = $val->isa('Brocken::Lindsay::IR::Constant') ? $self->_materialize($mbb, $val) : $self->_lower_opnd($val);
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'fstore', operands => [ $mem, $src ], comment => 'fstore'
+                                    )
+                                );
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => ($val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store'), operands => [ $mem, $self->_lower_opnd($val) ], comment => 'store'
+                                    )
+                                );
+                            }
                         }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
@@ -4337,14 +4886,35 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                         if ( $inst->type->kind ne 'void' ) {
                             my $val = $inst->operands->[0];
-                            my $a0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'mv',
-                                    operands => [ $a0, $self->_lower_opnd($val) ],
-                                    comment  => '=> a0'
-                                )
-                            );
+                            if ($val->type && $val->type->kind eq 'int' && $val->type->bits == 128) {
+                                my $a0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
+                                my $a1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a1' );
+                                my ($lo, $hi) = $self->_split_i128($val);
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $a0, $lo ],
+                                        comment  => '=> a0 (i128 lo)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $a1, $hi ],
+                                        comment  => '=> a1 (i128 hi)'
+                                    )
+                                );
+                            }
+                            else {
+                                my $a0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $a0, $self->_lower_opnd($val) ],
+                                        comment  => '=> a0'
+                                    )
+                                );
+                            }
                         }
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4356,6 +4926,24 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 $mf->add_block($mbb);
             }
             return $mf;
+        }
+
+        method _split_i128($ir_val) {
+            if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
+                my $val = $ir_val->value;
+                my $lo = $val & 0xFFFFFFFFFFFFFFFF;
+                my $hi = ($val >> 64) & 0xFFFFFFFFFFFFFFFF;
+                $hi = -(~$hi & 0xFFFFFFFFFFFFFFFF) - 1 if $hi >= 0x8000000000000000;
+                $lo = -(~$lo & 0xFFFFFFFFFFFFFFFF) - 1 if $lo >= 0x8000000000000000;
+                return (
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $lo, type => Brocken::Lindsay::IR::Type::i64() ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() ),
+                );
+            }
+            return (
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
+            );
         }
 
         method _materialize($mbb, $ir_val) {
@@ -4429,6 +5017,58 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     my $opcode = $inst->opcode;
                     if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
+                        if ($inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor')) {
+                            my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
+                            my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
+                            my ($lo_dst, $hi_dst) = $self->_split_i128($inst);
+                            if ($opcode eq 'add') {
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo_lhs, 'lo_lhs'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo_rhs, 'lo_rhs'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_add', operands => [], comment => 'lo add'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$lo_dst], comment => 'store lo'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo_lhs, 'lo_lhs'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_get', operands => [$lo_dst], comment => 'push lo_dst'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_gt_u', operands => [], comment => 'carry'));
+                                my $carry = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_carry', type => Brocken::Lindsay::IR::Type::i32());
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$carry], comment => 'save carry'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($hi_lhs, 'hi_lhs'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($hi_rhs, 'hi_rhs'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_add', operands => [], comment => 'hi add'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_get', operands => [$carry], comment => 'push carry'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_extend_i32_u', operands => [], comment => 'carry i32->i64'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_add', operands => [], comment => 'hi add carry'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$hi_dst], comment => 'store hi'));
+                            }
+                            elsif ($opcode eq 'sub') {
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo_lhs, 'lo_lhs'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo_rhs, 'lo_rhs'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_sub', operands => [], comment => 'lo sub'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$lo_dst], comment => 'store lo'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo_lhs, 'lo_lhs'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo_rhs, 'lo_rhs'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_lt_u', operands => [], comment => 'borrow'));
+                                my $borrow = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_carry', type => Brocken::Lindsay::IR::Type::i32());
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$borrow], comment => 'save borrow'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($hi_lhs, 'hi_lhs'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($hi_rhs, 'hi_rhs'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_sub', operands => [], comment => 'hi sub'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_get', operands => [$borrow], comment => 'push borrow'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_extend_i32_u', operands => [], comment => 'borrow i32->i64'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_sub', operands => [], comment => 'hi sub borrow'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$hi_dst], comment => 'store hi'));
+                            }
+                            else {
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo_lhs, 'lo_lhs'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo_rhs, 'lo_rhs'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => "i64_$opcode", operands => [], comment => "lo $opcode"));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$lo_dst], comment => 'store lo'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($hi_lhs, 'hi_lhs'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($hi_rhs, 'hi_rhs'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => "i64_$opcode", operands => [], comment => "hi $opcode"));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$hi_dst], comment => 'store hi'));
+                            }
+                        }
+                        else {
                         my $p;
                         if ($inst->type && $inst->type->kind eq 'float') {
                             $p = $inst->type->bits >= 64 ? 'f64' : 'f32';
@@ -4463,6 +5103,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name
                             )
                         );
+                        }
                     }
                     elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
                         my ($val) = $inst->operands->@*;
@@ -4537,6 +5178,38 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                         my $ptr = $inst->operands->[0];
+                        if ($inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128) {
+                            my ($lo_dst, $hi_dst) = $self->_split_i128($inst);
+                            $mbb->add_instruction( $self->_wasm_push($ptr, 'load: ptr') );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_load', operands => [], comment => 'load lo' )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'local_set', operands => [$lo_dst], comment => 'load lo'
+                                )
+                            );
+                            $mbb->add_instruction( $self->_wasm_push($ptr, 'load: ptr') );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'i32_const',
+                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8 ) ],
+                                    comment => 'offset 8'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'ptr+8' )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_load', operands => [], comment => 'load hi' )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'local_set', operands => [$hi_dst], comment => 'load hi'
+                                )
+                            );
+                        }
+                        else {
                         my $op;
                         if ($inst->type && $inst->type->kind eq 'float') {
                             $op = $inst->type->bits >= 64 ? 'f64_load' : 'f32_load';
@@ -4556,9 +5229,36 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 comment => 'load: save to ' . $inst->name
                             )
                         );
+                        }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
                         my ($val, $ptr) = $inst->operands->@*;
+                        if ($val->type && $val->type->kind eq 'int' && $val->type->bits == 128) {
+                            my ($lo_val, $hi_val) = $self->_split_i128($val);
+                            # Store lo at [ptr+0]
+                            $mbb->add_instruction( $self->_wasm_push($ptr, 'store: ptr') );
+                            $mbb->add_instruction( $self->_wasm_push_opnd($lo_val, 'store lo') );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_store', operands => [], comment => 'store lo' )
+                            );
+                            # Store hi at [ptr+8]
+                            $mbb->add_instruction( $self->_wasm_push($ptr, 'store: ptr') );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'i32_const',
+                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8 ) ],
+                                    comment => 'offset 8'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'ptr+8' )
+                            );
+                            $mbb->add_instruction( $self->_wasm_push_opnd($hi_val, 'store hi') );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_store', operands => [], comment => 'store hi' )
+                            );
+                        }
+                        else {
                         my $op;
                         if ($val->type && $val->type->kind eq 'float') {
                             $op = $val->type->bits >= 64 ? 'f64_store' : 'f32_store';
@@ -4572,6 +5272,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'store' )
                         );
+                        }
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
                         my ($ptr, @indices) = $inst->operands->@*;
@@ -4715,7 +5416,14 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                         if ( $inst->type->kind ne 'void' ) {
                             my $val = $inst->operands->[0];
-                            $mbb->add_instruction( $self->_wasm_push( $val, 'retval' ) );
+                            if ($val->type && $val->type->kind eq 'int' && $val->type->bits == 128) {
+                                my ($lo, $hi) = $self->_split_i128($val);
+                                $mbb->add_instruction($self->_wasm_push_opnd($lo, 'retval lo'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($hi, 'retval hi'));
+                            }
+                            else {
+                                $mbb->add_instruction( $self->_wasm_push( $val, 'retval' ) );
+                            }
                         }
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4768,6 +5476,19 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             );
         }
 
+        method _wasm_push_opnd( $opnd, $label ) {
+            if ($opnd->kind eq 'imm') {
+                return Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode => 'i64_const', operands => [$opnd],
+                    comment => "push $label=" . $opnd->value
+                );
+            }
+            return Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode => 'local_get', operands => [$opnd],
+                comment => "push $label=" . $opnd->value
+            );
+        }
+
         method _type_tag($type) {
             return 1 if $type->kind eq 'int' && $type->bits <= 32;
             return 2 if $type->kind eq 'int' && $type->bits == 64;
@@ -4776,6 +5497,24 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             return 4 if $type->kind eq 'ptr';
             return 5 if $type->kind eq 'dynamic';
             return 0;
+        }
+
+        method _split_i128($ir_val) {
+            if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
+                my $val = $ir_val->value;
+                my $lo = $val & 0xFFFFFFFFFFFFFFFF;
+                my $hi = ($val >> 64) & 0xFFFFFFFFFFFFFFFF;
+                $hi = -(~$hi & 0xFFFFFFFFFFFFFFFF) - 1 if $hi >= 0x8000000000000000;
+                $lo = -(~$lo & 0xFFFFFFFFFFFFFFFF) - 1 if $lo >= 0x8000000000000000;
+                return (
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $lo, type => Brocken::Lindsay::IR::Type::i64() ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() ),
+                );
+            }
+            return (
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
+            );
         }
     }
 
@@ -7352,9 +8091,16 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
 
         # Type Section (ID 1): () -> return_type
         my $ret_valtype = $codegen_output->{return_valtype} // 0x7F;
-        my $type_sec = $ret_valtype eq 'void'
-            ? pack( 'C', 0x60 ) . "\x00\x00"
-            : pack( 'C', 0x60 ) . "\x00\x01" . pack( 'C', $ret_valtype );
+        my $type_sec;
+        if (ref $ret_valtype eq 'ARRAY') {
+            $type_sec = pack('C', 0x60) . "\x00" . pack('C', scalar $ret_valtype->@*) . pack('C*', $ret_valtype->@*);
+        }
+        elsif ($ret_valtype eq 'void') {
+            $type_sec = pack( 'C', 0x60 ) . "\x00\x00";
+        }
+        else {
+            $type_sec = pack( 'C', 0x60 ) . "\x00\x01" . pack( 'C', $ret_valtype );
+        }
         $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb(1) . $type_sec;
 
         # Memory Section (ID 5): 1 page (64KB)
@@ -9785,7 +10531,436 @@ subtest Jenny => sub {
         ok grep( /^store$/, @all_ops ), 'spill-store stores inserted';
     };
 };
-#
+subtest 'Jenny::Codegen i128 Lowering' => sub {
+    my $check = sub {
+        my ($lowerer_class, $ir_name, $ir_body, %checks) = @_;
+        my $func    = Brocken::Lindsay::IR::Function->new( name => $ir_name, return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        $ir_body->($builder);
+        my $lowerer = $lowerer_class->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        for my ($opcode, $label) (%checks) {
+            ok( grep( { $_->opcode eq $opcode } @insts ), $label );
+        }
+    };
+    my $X = 'Brocken::Jenny::Lowerer::X86_64';
+    my $A = 'Brocken::Jenny::Lowerer::ARM64';
+    my $R = 'Brocken::Jenny::Lowerer::RISCV64';
+    my $W = 'Brocken::Jenny::Lowerer::Wasm';
+    $check->($X, 'i128_add', sub {
+        my $b = shift; $b->build_ret($b->build_add(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 10),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 5), '%r'));
+    }, adc => 'x86_64 i128 add: adc produced', add => 'x86_64 i128 add: add for lo');
+    $check->($X, 'i128_sub', sub {
+        my $b = shift; $b->build_ret($b->build_sub(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 10),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 5), '%r'));
+    }, sbb => 'x86_64 i128 sub: sbb produced');
+    $check->($X, 'i128_and', sub {
+        my $b = shift; $b->build_ret($b->build_and(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 0xFFFFFFFFFFFFFFFF),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 0x123456789ABCDEF0), '%r'));
+    }, and => 'x86_64 i128 and: and produced');
+    $check->($X, 'i128_or', sub {
+        my $b = shift; $b->build_ret($b->build_or(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 0xFFFFFFFFFFFFFFFF),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 0x123456789ABCDEF0), '%r'));
+    }, or => 'x86_64 i128 or: or produced');
+    $check->($X, 'i128_xor', sub {
+        my $b = shift; $b->build_ret($b->build_xor(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 0xFFFFFFFFFFFFFFFF),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 0x123456789ABCDEF0), '%r'));
+    }, xor => 'x86_64 i128 xor: xor produced');
+    $check->($A, 'i128_add', sub {
+        my $b = shift; $b->build_ret($b->build_add(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 10),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 5), '%r'));
+    }, sltu => 'ARM64 i128 add: sltu carry produced');
+    $check->($A, 'i128_sub', sub {
+        my $b = shift; $b->build_ret($b->build_sub(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 10),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 5), '%r'));
+    }, sltu => 'ARM64 i128 sub: sltu borrow produced');
+    $check->($R, 'i128_add', sub {
+        my $b = shift; $b->build_ret($b->build_add(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 10),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 5), '%r'));
+    }, sltu => 'RISCV64 i128 add: sltu carry produced');
+    $check->($R, 'i128_sub', sub {
+        my $b = shift; $b->build_ret($b->build_sub(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 10),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 5), '%r'));
+    }, sltu => 'RISCV64 i128 sub: sltu borrow produced');
+    $check->($W, 'i128_add', sub {
+        my $b = shift; $b->build_ret($b->build_add(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 10),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 5), '%r'));
+    }, i64_gt_u => 'Wasm i128 add: i64_gt_u carry produced');
+    $check->($W, 'i128_sub', sub {
+        my $b = shift; $b->build_ret($b->build_sub(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 10),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 5), '%r'));
+    }, i64_lt_u => 'Wasm i128 sub: i64_lt_u borrow produced');
+    $check->($W, 'i128_and', sub {
+        my $b = shift; $b->build_ret($b->build_and(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 0xFFFFFFFFFFFFFFFF),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 0x123456789ABCDEF0), '%r'));
+    }, i64_and => 'Wasm i128 and: i64_and produced');
+    # x86_64 i128 store/load: two stores (lo+hi) and two loads (lo+hi) with offset
+    {
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'i128_load_store', return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $ptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::i128(), '%ptr' );
+        my $val = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 0xDEADBEEFCAFEBABE );
+        $builder->build_store( $val, $ptr );
+        my $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::i128(), $ptr, '%loaded' );
+        $builder->build_ret($loaded);
+        my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        my @stores = grep { $_->opcode =~ /^store/ && $_->comment =~ /i128/ } @insts;
+        ok( scalar @stores == 2, 'x86_64 i128 store: two stores (lo+hi)' );
+        my @loads = grep { $_->opcode eq 'load' && $_->comment =~ /i128/ } @insts;
+        ok( scalar @loads == 2, 'x86_64 i128 load: two loads (lo+hi)' );
+    }
+    # x86_64 i128 ret: mov to rax and rdx
+    {
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'i128_ret', return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
+        my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        my @rax = grep { $_->opcode eq 'mov' && $_->comment =~ /rax/ } @insts;
+        ok( scalar @rax == 1, 'x86_64 i128 ret: mov to rax' );
+        my @rdx = grep { $_->opcode eq 'mov' && $_->comment =~ /rdx/ } @insts;
+        ok( scalar @rdx == 1, 'x86_64 i128 ret: mov to rdx' );
+    }
+    # ARM64 i128 store/load: two stores (lo+hi) and two loads (lo+hi) with offset
+    {
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'i128_load_store', return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $ptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::i128(), '%ptr' );
+        my $val = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 0xDEADBEEFCAFEBABE );
+        $builder->build_store( $val, $ptr );
+        my $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::i128(), $ptr, '%loaded' );
+        $builder->build_ret($loaded);
+        my $lowerer = Brocken::Jenny::Lowerer::ARM64->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        my @stores = grep { $_->opcode =~ /^store/ && $_->comment =~ /i128/ } @insts;
+        ok( scalar @stores == 2, 'ARM64 i128 store: two stores (lo+hi)' );
+        my @loads = grep { $_->opcode eq 'load' && $_->comment =~ /i128/ } @insts;
+        ok( scalar @loads == 2, 'ARM64 i128 load: two loads (lo+hi)' );
+    }
+    # ARM64 i128 ret: mov to x0 and x1
+    {
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'i128_ret', return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
+        my $lowerer = Brocken::Jenny::Lowerer::ARM64->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        my @x0 = grep { $_->opcode eq 'mov' && $_->comment =~ /x0/ } @insts;
+        ok( scalar @x0 == 1, 'ARM64 i128 ret: mov to x0' );
+        my @x1 = grep { $_->opcode eq 'mov' && $_->comment =~ /x1/ } @insts;
+        ok( scalar @x1 == 1, 'ARM64 i128 ret: mov to x1' );
+    }
+    # RISCV64 i128 store/load: two stores (lo+hi) and two loads (lo+hi) with offset
+    {
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'i128_load_store', return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $ptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::i128(), '%ptr' );
+        my $val = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 0xDEADBEEFCAFEBABE );
+        $builder->build_store( $val, $ptr );
+        my $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::i128(), $ptr, '%loaded' );
+        $builder->build_ret($loaded);
+        my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        my @stores = grep { $_->opcode =~ /^store/ && $_->comment =~ /i128 store/ } @insts;
+        ok( scalar @stores == 2, 'RISCV64 i128 store: two stores (lo+hi)' );
+        my @loads = grep { $_->opcode eq 'load' && $_->comment =~ /i128 load/ } @insts;
+        ok( scalar @loads == 2, 'RISCV64 i128 load: two loads (lo+hi)' );
+    }
+    # RISCV64 i128 ret: mv to a0 and a1
+    {
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'i128_ret', return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
+        my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        my @a0 = grep { $_->comment =~ /i128 lo/ } @insts;
+        ok( scalar @a0 == 1, 'RISCV64 i128 ret: mv to a0' );
+        my @a1 = grep { $_->comment =~ /i128 hi/ } @insts;
+        ok( scalar @a1 == 1, 'RISCV64 i128 ret: mv to a1' );
+    }
+    # Wasm i128 store: two i64_store (lo+hi) with ptr arithmetic
+    {
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'i128_store', return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $ptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::i128(), '%ptr' );
+        $builder->build_store( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ), $ptr );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 0 ) );
+        my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        my @stores = grep { $_->opcode eq 'i64_store' && $_->comment =~ /store lo/ } @insts;
+        ok( scalar @stores == 1, 'Wasm i128 store: i64_store lo' );
+        my @stores_hi = grep { $_->opcode eq 'i64_store' && $_->comment =~ /store hi/ } @insts;
+        ok( scalar @stores_hi == 1, 'Wasm i128 store: i64_store hi' );
+    }
+    # Wasm i128 load: two i64_load (lo+hi) with ptr arithmetic
+    {
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'i128_load', return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        my $ptr = $builder->build_alloca( Brocken::Lindsay::IR::Type::i128(), '%ptr' );
+        $builder->build_ret( $builder->build_load( Brocken::Lindsay::IR::Type::i128(), $ptr, '%loaded' ) );
+        my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        my @loads = grep { $_->opcode eq 'i64_load' && $_->comment =~ /load lo/ } @insts;
+        ok( scalar @loads == 1, 'Wasm i128 load: i64_load lo' );
+        my @loads_hi = grep { $_->opcode eq 'i64_load' && $_->comment =~ /load hi/ } @insts;
+        ok( scalar @loads_hi == 1, 'Wasm i128 load: i64_load hi' );
+    }
+    # Wasm i128 ret: push retval lo and retval hi
+    {
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'i128_ret', return_type => Brocken::Lindsay::IR::Type::i128() );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+        $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
+        my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
+        my $mf      = $lowerer->lower($func);
+        my @insts = $mf->blocks->[0]->instructions->@*;
+        my @ret_lo = grep { $_->comment =~ /retval lo/ } @insts;
+        ok( scalar @ret_lo == 1, 'Wasm i128 ret: push retval lo' );
+        my @ret_hi = grep { $_->comment =~ /retval hi/ } @insts;
+        ok( scalar @ret_hi == 1, 'Wasm i128 ret: push retval hi' );
+    }
+};
+subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
+    my $host = Brocken::Katsuro::Platform::parse();
+    my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+    my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
+    chomp $wasmtime_path if $wasmtime_path;
+    SKIP: {
+        skip 'wasmtime not available', 2 unless $wasmtime_path && -f $wasmtime_path;
+        # Test 1: constant i128 return (42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
+            my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+            my $res     = $codegen->emit_function($func);
+            ok( length( $res->{body} ) > 0, 'Generated Wasm i128 constant bytes' );
+            my $linker      = Brocken::Jenny::Linker::Wasm->new();
+            my $output_file = './i128_const.wasm';
+            $linker->write_executable( $output_file, $res, $platform );
+            ok( -e $output_file, 'Wasm i128 constant file exists' );
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            my @vals = split /\n/, $output;
+            is( scalar @vals, 2, 'Wasm i128 constant returns two i64 values' );
+            is( $vals[0], 42, 'Wasm i128 constant lo = 42' );
+            is( $vals[1], 0,  'Wasm i128 constant hi = 0' );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 2: i128 add (40 + 2 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_add(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 40 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 2 ),
+                '%r'
+            ) );
+            my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+            my $res     = $codegen->emit_function($func);
+            ok( length( $res->{body} ) > 0, 'Generated Wasm i128 add bytes' );
+            my $linker      = Brocken::Jenny::Linker::Wasm->new();
+            my $output_file = './i128_add.wasm';
+            $linker->write_executable( $output_file, $res, $platform );
+            ok( -e $output_file, 'Wasm i128 add file exists' );
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            my @vals = split /\n/, $output;
+            is( $vals[0], 42, 'Wasm i128 add (40+2): lo = 42' );
+            is( $vals[1], 0,  'Wasm i128 add (40+2): hi = 0' );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 3: i128 sub (100 - 58 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_sub(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 100 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 58 ),
+                '%r'
+            ) );
+            my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+            my $res     = $codegen->emit_function($func);
+            ok( length( $res->{body} ) > 0, 'Generated Wasm i128 sub bytes' );
+            my $linker      = Brocken::Jenny::Linker::Wasm->new();
+            my $output_file = './i128_sub.wasm';
+            $linker->write_executable( $output_file, $res, $platform );
+            ok( -e $output_file, 'Wasm i128 sub file exists' );
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            my @vals = split /\n/, $output;
+            is( $vals[0], 42, 'Wasm i128 sub (100-58): lo = 42' );
+            is( $vals[1], 0,  'Wasm i128 sub (100-58): hi = 0' );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 4: i128 and (63 & 42 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_and(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 63 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ),
+                '%r'
+            ) );
+            my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+            my $res     = $codegen->emit_function($func);
+            ok( length( $res->{body} ) > 0, 'Generated Wasm i128 and bytes' );
+            my $linker      = Brocken::Jenny::Linker::Wasm->new();
+            my $output_file = './i128_and.wasm';
+            $linker->write_executable( $output_file, $res, $platform );
+            ok( -e $output_file, 'Wasm i128 and file exists' );
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            my @vals = split /\n/, $output;
+            is( $vals[0], 42, 'Wasm i128 and (63&42): lo = 42' );
+            is( $vals[1], 0,  'Wasm i128 and (63&42): hi = 0' );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 5: i128 or (40 | 2 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_or(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 40 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 2 ),
+                '%r'
+            ) );
+            my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+            my $res     = $codegen->emit_function($func);
+            ok( length( $res->{body} ) > 0, 'Generated Wasm i128 or bytes' );
+            my $linker      = Brocken::Jenny::Linker::Wasm->new();
+            my $output_file = './i128_or.wasm';
+            $linker->write_executable( $output_file, $res, $platform );
+            ok( -e $output_file, 'Wasm i128 or file exists' );
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            my @vals = split /\n/, $output;
+            is( $vals[0], 42, 'Wasm i128 or (40|2): lo = 42' );
+            is( $vals[1], 0,  'Wasm i128 or (40|2): hi = 0' );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 6: i128 xor (40 ^ 2 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_xor(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 40 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 2 ),
+                '%r'
+            ) );
+            my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+            my $res     = $codegen->emit_function($func);
+            ok( length( $res->{body} ) > 0, 'Generated Wasm i128 xor bytes' );
+            my $linker      = Brocken::Jenny::Linker::Wasm->new();
+            my $output_file = './i128_xor.wasm';
+            $linker->write_executable( $output_file, $res, $platform );
+            ok( -e $output_file, 'Wasm i128 xor file exists' );
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            my @vals = split /\n/, $output;
+            is( $vals[0], 42, 'Wasm i128 xor (40^2): lo = 42' );
+            is( $vals[1], 0,  'Wasm i128 xor (40^2): hi = 0' );
+            unlink $output_file if -e $output_file;
+        }
+    };
+};
+subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
+    my $platform = Brocken::Katsuro::Platform::parse();
+    SKIP: {
+        skip 'Execution test only supported on native hosts', 6 unless $platform->is_native;
+        # Test 1: constant i128 return (42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 constant bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = './i128_const_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 constant file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'Native i128 constant returned 42 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 2: i128 add (40 + 2 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_add(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 40 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 2 ),
+                '%r'
+            ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 add bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = './i128_add_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 add file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'Native i128 add (40+2) returned 42 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+    };
+};
 done_testing;
 __DATA__
 # GitHub runner triples
