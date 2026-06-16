@@ -7876,6 +7876,7 @@ subtest Jenny => sub {
                 my $status    = $?;
                 my $exit_code = $status >> 8;
                 my $signal    = $status & 127;
+                diag "raw \$?=$status exit=$exit_code signal=$signal core=" . ( $status & 128 ? 1 : 0 ) . ' host=' . $platform->arch . " e_stub_len=$entry_stub_len";
                 is $signal,    0,  'Native wrapper ran cleanly without crash/segfault signals';
                 is $exit_code, 42, 'Native wrapper loaded library, resolved symbol via GOT table FFI, and returned 42';
                 unlink $wrapper_file;
