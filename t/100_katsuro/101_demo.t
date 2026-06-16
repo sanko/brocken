@@ -1940,8 +1940,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $pred = ( $inst->comment =~ /fcmp (\w+)/ ? $1 : 'eq' );
                         my $fmt  = $bits > 32 ? 1 : 0;
                         if ( $pred eq 'gt' || $pred eq 'ge' ) { ( $rs1, $rs2 ) = ( $rs2, $rs1 ) }
-                        my $funct5 = $pred eq 'eq' || $pred eq 'ne' ? 0x14 : ( $pred eq 'lt' || $pred eq 'gt' ? 0x01 : 0x00 );
-                        my $enc = ( $funct5 << 27 ) | ( $fmt << 25 ) | ( $rs2 << 20 ) | ( $rs1 << 15 ) | ( 2 << 12 ) | ( $rd << 7 ) | FP_OP;
+                        my $funct5 = 0x14;
+                        my $funct3 = $pred eq 'eq' || $pred eq 'ne' ? 2 : ( $pred eq 'lt' || $pred eq 'gt' ? 1 : 0 );
+                        my $enc = ( $funct5 << 27 ) | ( $fmt << 25 ) | ( $rs2 << 20 ) | ( $rs1 << 15 ) | ( $funct3 << 12 ) | ( $rd << 7 ) | FP_OP;
                         $bytes .= pack( 'V', $enc );
                         if ( $pred eq 'ne' ) { $bytes .= pack( 'V', ( 1 << 20 ) | ( $rd << 15 ) | ( 4 << 12 ) | ( $rd << 7 ) | OP_IMM ) }
                     }
