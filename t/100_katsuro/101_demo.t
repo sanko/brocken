@@ -5006,15 +5006,15 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             if ($got_sec) {
                 my $data_sec = $self->layout->get('.data');
                 my $data_rva = $data_sec ? $data_sec->{rva} : $got_sec->{rva};
-                my $got_off  = $got_sec->{rva} - $data_rva;
-                for my $name ( '_dlopen', '_dlsym', '_pthread_create' ) {
-                    $bind_info .= pack( 'C', 0x61 ) . $_uleb->( $got_off );    # SET_SEGMENT_AND_OFFSET_ULEB seg=1(__DATA)
-                    $bind_info .= pack( 'C', 0x11 );                           # SET_DYLIB_ORDINAL_IMM ordinal=1
-                    $bind_info .= pack( 'C', 0x51 );                           # SET_TYPE_IMM type=1
-                    $bind_info .= pack( 'C', 0x40 ) . "${name}\0";              # SET_SYMBOL_TRAILING_FLAGS_IMM
-                    $bind_info .= pack( 'C', 0x90 );                           # DO_BIND
-                    $got_off += 8;
-                }
+                $bind_info .= pack( 'C', 0x11 );
+                $bind_info .= pack( 'C', 0x51 );
+                $bind_info .= pack( 'C', 0x72 ) . $_uleb->( $got_sec->{rva} - $data_rva );
+                $bind_info .= pack( 'C', 0x40 ) . "_dlopen\0";
+                $bind_info .= pack( 'C', 0x90 );
+                $bind_info .= pack( 'C', 0x40 ) . "_dlsym\0";
+                $bind_info .= pack( 'C', 0x90 );
+                $bind_info .= pack( 'C', 0x40 ) . "_pthread_create\0";
+                $bind_info .= pack( 'C', 0x90 );
                 $bind_info .= pack( 'C', 0x00 );
                 $bind_info_size = length($bind_info);
                 while ( length($bind_info) % 8 != 0 ) { $bind_info .= "\0"; }
