@@ -1929,6 +1929,20 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             $bytes .= pack( 'V', FMV_D_X | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                         }
                     }
+                    elsif ( $opcode eq 'fcmp' ) {
+                        my ( $result, $lhs, $rhs ) = $inst->operands->@*;
+                        my $rd   = $reg_id->( $resolve->($result) );
+                        my $rs1  = $reg_id->( $resolve->($lhs) );
+                        my $rs2  = $reg_id->( $resolve->($rhs) );
+                        my $bits = $lhs->type ? $lhs->type->bits : 64;
+                        my $pred = ( $inst->comment =~ /fcmp (\w+)/ ? $1 : 'eq' );
+                        my $fmt  = $bits > 32 ? 1 : 0;
+                        if ( $pred eq 'gt' || $pred eq 'ge' ) { ( $rs1, $rs2 ) = ( $rs2, $rs1 ) }
+                        my $funct5 = $pred eq 'eq' || $pred eq 'ne' ? 0x14 : ( $pred eq 'lt' || $pred eq 'gt' ? 0x01 : 0x00 );
+                        my $enc = ( $funct5 << 27 ) | ( $fmt << 25 ) | ( $rs2 << 20 ) | ( $rs1 << 15 ) | ( 2 << 12 ) | ( $rd << 7 ) | FP_OP;
+                        $bytes .= pack( 'V', $enc );
+                        if ( $pred eq 'ne' ) { $bytes .= pack( 'V', ( 1 << 20 ) | ( $rd << 15 ) | ( 4 << 12 ) | ( $rd << 7 ) | OP_IMM ) }
+                    }
                     elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' ) {
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
@@ -1994,11 +2008,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 die "undefined label: $fixup->{target}" unless defined $target_pos;
                 my $rel = $target_pos - $fixup->{offset};
                 if ( $fixup->{type} eq 'jal' ) {
-                    my $imm20 = ( $rel >> 1 ) & 0x1FFFFF;
-                    my $enc = ( ( $imm20 >> 20 ) & 1 ) << 31
-                            | ( ( $imm20 & 0x7FE ) << 20 )
-                            | ( ( $imm20 >> 11 ) & 1 ) << 20
-                            | ( $imm20 & 0xFF000 )
+                    my $imm20 = ( $rel >> 1 ) & 0xFFFFF;
+                    my $enc = ( ( $imm20 >> 19 ) & 1 ) << 31
+                            | ( ( $imm20 & 0x3FF ) << 21 )
+                            | ( ( $imm20 >> 10 ) & 1 ) << 20
+                            | ( ( $imm20 >> 11 ) & 0xFF ) << 12
                             | JAL;
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
                 }
@@ -3867,7 +3881,16 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind => 'virt_reg', value => $inst->name, type => $inst->type
                         );
-                        if ( $pred eq 'eq' || $pred eq 'ne' ) {
+                        if ( $lhs->type && $lhs->type->kind eq 'float' ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'fcmp',
+                                    operands => [ $dst, $self->_materialize($mbb, $lhs), $self->_materialize($mbb, $rhs) ],
+                                    comment  => 'fcmp ' . $pred
+                                )
+                            );
+                        }
+                        elsif ( $pred eq 'eq' || $pred eq 'ne' ) {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mv',
