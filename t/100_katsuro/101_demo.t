@@ -8022,9 +8022,76 @@ subtest Jenny => sub {
             # Execute and check exit code
             # system returns exit code shifted left by 8 in Perl's $?
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            if ( $platform->is_riscv64 ) {
+                diag 'Math bytes: ' . unpack( 'H*', $bytes );
+                open my $efh, '<:raw', $output_file or die $!;
+                my $elf_data;
+                read( $efh, $elf_data, 128 ) or die $!;
+                close $efh;
+                diag 'Math ELF header + phdrs: ' . unpack( 'H*', $elf_data );
+            }
             system($cmd);
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Math binary returned 42 on ' . $platform->friendly );
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen ICmp result-only (RISC-V diagnostic)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+    SKIP: {
+            skip 'Only for RISC-V', 2 unless $platform->is_riscv64 && $platform->is_native;
+            my $func = Brocken::Lindsay::IR::Function->new( name => 'icmp_only', return_type => Brocken::Lindsay::IR::Type::i32() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            my $entry   = $func->append_block('entry');
+            $builder->position_at_end($entry);
+            my $cond = $builder->build_icmp('sgt',
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ),
+                '%cmp'
+            );
+            $builder->build_ret($cond);
+            my $codegen = Brocken::Jenny::Codegen::RISCV64->new();
+            my $bytes = $codegen->emit_function($func);
+            diag 'ICmp body (result-only): ' . unpack( 'H*', $bytes );
+            diag 'ICmp body length: ' . length($bytes);
+            my $linker = Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = './icmp_only_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            my $cmd = "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            diag "icmp_result_only raw \$?=$? exit=$exit_code";
+            is( $exit_code, 1, 'ICmp result (42 sgt 0 = 1) returned 1' );
+            unlink $output_file;
+        }
+    };
+    subtest 'Jenny::Codegen JMP only (RISC-V diagnostic)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+    SKIP: {
+            skip 'Only for RISC-V', 2 unless $platform->is_riscv64 && $platform->is_native;
+            my $func = Brocken::Lindsay::IR::Function->new( name => 'jmp_only', return_type => Brocken::Lindsay::IR::Type::i32() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            my $entry = $func->append_block('entry');
+            my $t_block = $func->append_block('if.then');
+            my $f_block = $func->append_block('if.else');
+            $builder->position_at_end($entry);
+            $builder->build_br($t_block);
+            $builder->position_at_end($t_block);
+            $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+            $builder->position_at_end($f_block);
+            $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+            my $codegen = Brocken::Jenny::Codegen::RISCV64->new();
+            my $bytes = $codegen->emit_function($func);
+            diag 'JMP body: ' . unpack( 'H*', $bytes );
+            diag 'JMP body length: ' . length($bytes);
+            my $linker = Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = './jmp_only_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            my $cmd = "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            diag "jmp_only raw \$?=$? exit=$exit_code";
+            is( $exit_code, 42, 'JMP (unconditional branch to if.then) returned 42' );
             unlink $output_file;
         }
     };
@@ -8067,6 +8134,13 @@ subtest Jenny => sub {
             ok( -e $output_file || $platform->is_windows, 'ICmp binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
             diag 'ICmp bytes: ' . unpack( 'H*', $bytes ) if $platform->is_riscv64;
+            if ( $platform->is_riscv64 ) {
+                open my $efh, '<:raw', $output_file or die $!;
+                my $elf_data;
+                read( $efh, $elf_data, 128 ) or die $!;
+                close $efh;
+                diag 'ELF header + phdrs: ' . unpack( 'H*', $elf_data );
+            }
             system($cmd);
             my $exit_code = $? >> 8;
             diag "icmp_signed raw \$?=$? exit=$exit_code" if $? & 127 || $exit_code != 42;
@@ -8108,6 +8182,14 @@ subtest Jenny => sub {
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file || $platform->is_windows, 'ICmp unsigned binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            if ( $platform->is_riscv64 ) {
+                open my $efh, '<:raw', $output_file or die $!;
+                my $elf_data;
+                read( $efh, $elf_data, 128 ) or die $!;
+                close $efh;
+                diag 'Unsigned ELF header + phdrs: ' . unpack( 'H*', $elf_data );
+                diag 'Unsigned ICmp bytes: ' . unpack( 'H*', $bytes );
+            }
             system($cmd);
             my $exit_code = $? >> 8;
             diag "icmp_unsigned raw \$?=$? exit=$exit_code" if $? & 127 || $exit_code != 42;
@@ -8735,6 +8817,14 @@ subtest Jenny => sub {
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Float icmp binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            if ( $platform->is_riscv64 ) {
+                open my $efh, '<:raw', $output_file or die $!;
+                my $elf_data;
+                read( $efh, $elf_data, 128 ) or die $!;
+                close $efh;
+                diag 'Float ICmp ELF header + phdrs: ' . unpack( 'H*', $elf_data );
+                diag 'Float ICmp bytes: ' . unpack( 'H*', $bytes );
+            }
             my $ret = system($cmd);
             SKIP: {
                 skip "system() failed to spawn ($!)", 1 if $ret == -1;
@@ -8911,6 +9001,14 @@ subtest Jenny => sub {
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Float unary/minmax binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            if ( $platform->is_riscv64 ) {
+                open my $efh, '<:raw', $output_file or die $!;
+                my $elf_data;
+                read( $efh, $elf_data, 128 ) or die $!;
+                close $efh;
+                diag 'Float Unary ELF header + phdrs: ' . unpack( 'H*', $elf_data );
+                diag 'Float Unary bytes: ' . unpack( 'H*', $bytes );
+            }
             my $ret = system($cmd);
             SKIP: {
                 skip "system() failed to spawn ($!)", 1 if $ret == -1;
