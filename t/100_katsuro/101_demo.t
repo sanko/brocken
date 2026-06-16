@@ -5241,7 +5241,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 for my $s (@data_sections) {
 
                     # DATA Sections (80 bytes each)
-                    my $sec_flags = $s->{name} eq '.got' ? 0x00000006 : 0;
+                    my $sec_flags = $s->{name} eq '.got' ? 0x00000000 : 0;
                     $d_cmd .= pack(
                         'a16 a16 Q<2 L<2 L<3 L<2 L<',
                         $sec_names{ $s->{name} },
@@ -6394,7 +6394,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $dynamic .= pack( 'Q< Q<', 3,  $base + $got_rva_actual );    # DT_PLTGOT
 
             if ($is_pie) {
-                $dynamic .= pack( 'Q< Q<', 0x6ffffffb, 8 );              # DT_FLAGS_1 with DF_1_PIE
+                $dynamic .= pack( 'Q< Q<', 0x6ffffffb, 0x08000000 );   # DT_FLAGS_1 with DF_1_PIE
             }
             $dynamic .= pack( 'Q< Q<', 0, 0 );                           # DT_NULL
             $self->layout->get('.dynamic')->{size} = length($dynamic);
