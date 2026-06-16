@@ -5980,7 +5980,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 $self->pre_layout( length($code_bytes) + 32, $extra_data, $platform );
             }
             my $l          = $self->layout;
-            my $is_pie     = $platform->is_bsd || $platform->is_haiku;
+            my $is_pie     = ($platform->is_bsd || $platform->is_haiku) && !($shared && $platform->is_freebsd);
             my $base       = $is_pie ? 0 : $self->image_base;
             my $elf_type   = $shared ? 3 : ( $is_pie ? 3 : 2 );    # ET_DYN (3) for PIE, ET_EXEC (2) for static
             my $text_rva   = $self->layout->get('.text')->{rva};
