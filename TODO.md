@@ -10,14 +10,14 @@ Currently, `Brocken::Jenny` uses hardcoded byte stubs. We need a systematic way 
 - [x] Handle "Fat Scalar" (dynamic) operations in the backend (lowering `box`/`unbox`) for all 4 targets.
 - [x] Implement memory ops (`alloca`/`load`/`store`/`store_imm`) for all 4 targets.
 - [x] Fix operand size selection in encoders (32-bit vs 64-bit load/store) for x86_64, ARM64, RISCV64.
-- [ ] Support indexed addressing modes in MIR (`[base + index * scale + disp]`).
-- [ ] Implement `mul` lowering for `X86_64`, `ARM64`, `RISCV64` (currently only Wasm has it).
-- [ ] Implement control flow lowering (conditional branches, jumps) for If/Else and Loops.
+- [x] Support indexed addressing modes in MIR (`[base + index * scale + disp]`).
+- [x] Implement `mul` lowering for `X86_64`, `ARM64`, `RISCV64` (currently only Wasm has it).
+- [x] Implement control flow lowering (conditional branches, jumps) for If/Else and Loops.
 
 ## Phase 2: Register Allocation
 SSA uses infinite virtual registers; hardware does not.
 - [x] Design Register Allocator interface (vreg_map in _encode).
-- [ ] Implement Linear Scan Register Allocator.
+- [x] Implement Linear Scan Register Allocator.
 - [ ] Handle calling conventions (spilling, move-coalescing).
 - [ ] Integrate `Katsuro::Platform::ABI`.
 - [ ] 128bit numerics
