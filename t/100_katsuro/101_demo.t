@@ -7845,7 +7845,7 @@ subtest Jenny => sub {
                     $make_x64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos );
 
                 # Patch the binary file at its physical entry offset directly
-                my $entry_stub_len = $platform->is_macos ? 17 : 20;
+                my $entry_stub_len = $platform->is_arm64 ? 20 : ( $platform->is_macos ? 17 : 20 );
                 open my $fh, '+<:raw', $wrapper_file or die $!;
                 seek( $fh, $text_off + $entry_stub_len, 0 );
                 print $fh $wrapper_bytes;
