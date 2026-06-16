@@ -5267,6 +5267,9 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             );
             push @cmds, $lc_id_dylib if $self->type eq 'shared';
 
+            # LC_BUILD_VERSION (24 bytes - required by codesign on macOS 11+)
+            push @cmds, pack( 'L<6', 0x32, 24, 1, 0x000B0000, 0x000B0000, 0 );
+
             # LC_LOAD_DYLINKER (Loads dynamic linker `/usr/lib/dyld`)
             push @cmds, pack( 'L<3', 0xE, 32, 12 ) . "/usr/lib/dyld\0\0\0\0\0\0\0";
             push @cmds, $lc_load_libsystem;
