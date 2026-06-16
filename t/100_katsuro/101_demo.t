@@ -5022,6 +5022,7 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                     for ( 0 .. $#segseq ) { $data_seg = $_ if $segseq[$_] eq '__DATA'; }
                 }
                 $bind_info .= pack( 'C', 0x70 | $data_seg ) . $_uleb->( $got_off );
+                $self->notes( bind_diagnostic => "seg=$data_seg got_off=$got_off nsec=" . scalar( keys %{ $self->layout->get_sections() } ) . " rva=" . ( $got_sec->{rva} // '?' ) . " off=" . ( $got_sec->{off} // '?' ) );
                 for my $name ( '_dlopen', '_dlsym', '_pthread_create' ) {
                     $bind_info .= pack( 'C', 0x11 );
                     $bind_info .= pack( 'C', 0x51 );
@@ -7846,6 +7847,7 @@ subtest Jenny => sub {
                 my $code_sz     = ( $is_arm64 || $is_riscv64 ) ? 128 : 96;
                 my $dummy_bytes = "\x00" x $code_sz;
                 $wrapper_linker->write_executable( $wrapper_file, $dummy_bytes, $platform );
+                diag 'bind: ' . ( $wrapper_linker->notes('bind_diagnostic') // '?' );
 
                 # Extract stabilized, correct section RVAs and text file offset
                 my $got_rva  = $wrapper_linker->layout->get('.got')->{rva};
