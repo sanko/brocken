@@ -7893,13 +7893,28 @@ subtest Jenny => sub {
                     my $libref   = DynaLoader::dl_load_file($abs_path);
                     diag 'FFI lib loadable via dlopen: ' . ( $libref ? 'yes' : 'no' );
                     if ($libref) {
-                        my $symref = DynaLoader::dl_find_symbol( $libref, '_my_func' );
-                        diag 'FFI lib _my_func resolved: ' . ( $symref ? 'yes' : 'no' );
+                        my $sym1 = DynaLoader::dl_find_symbol( $libref, 'my_func' );
+                        my $sym2 = DynaLoader::dl_find_symbol( $libref, '_my_func' );
+                        diag "dlsym 'my_func': " . ( $sym1 ? 'yes' : 'no' ) . "  dlsym '_my_func': " . ( $sym2 ? 'yes' : 'no' );
                         DynaLoader::dl_unload_file($libref);
                     }
                     else {
                         diag 'dl_error: ' . DynaLoader::dl_error();
                     }
+                }
+
+                # Diagnostic: dump wrapper binary structure and verify patching
+                if ( $platform->is_macos ) {
+                    diag 'Wrapper hex (first 64B after entry stub):';
+                    open my $fh2, '<:raw', $wrapper_file or die $!;
+                    seek( $fh2, $text_off + $entry_stub_len, 0 );
+                    my $buf;
+                    read( $fh2, $buf, 64 );
+                    close $fh2;
+                    diag join( ' ', map { sprintf '%02x', ord($_) } split //, $buf );
+                    diag `otool -l "$wrapper_file" 2>&1 | head -80`;
+                    diag `otool -tV "$wrapper_file" 2>&1 | head -40`;
+                    diag `otool -L "$wrapper_file" 2>&1`;
                 }
 
                 # Execute POSIX native executable
