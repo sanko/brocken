@@ -3770,10 +3770,24 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         );
                     }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::CondBr') ) {
+                        my $cond = $self->_lower_opnd( $inst->operands->[0] );
+                        if ( $cond->kind eq 'imm' ) {
+                            state $cond_mat_id = 0;
+                            $cond_mat_id++;
+                            my $tmp_name = '%cond_mat_' . $cond_mat_id;
+                            my $cond_type = $inst->operands->[0]->type;
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'mv', operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $tmp_name, type => $cond_type ), $cond ],
+                                    comment => 'materialize cond_br condition'
+                                )
+                            );
+                            $cond = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $tmp_name, type => $cond_type );
+                        }
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'bne',
-                                operands => [ $self->_lower_opnd( $inst->operands->[0] ), Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->true_block->name ) ],
+                                operands => [ $cond, Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->true_block->name ) ],
                                 comment  => 'cond_br: true'
                             )
                         );
@@ -8095,6 +8109,43 @@ subtest Jenny => sub {
             unlink $output_file;
         }
     };
+    subtest 'Jenny::Codegen CondBr constant condition (RISC-V diagnostic)' => sub {
+        my $platform = Brocken::Katsuro::Platform::parse();
+    SKIP: {
+            skip 'Only for RISC-V', 2 unless $platform->is_riscv64 && $platform->is_native;
+            my $func = Brocken::Lindsay::IR::Function->new( name => 'condbr_const', return_type => Brocken::Lindsay::IR::Type::i32() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            my $entry   = $func->append_block('entry');
+            my $t_block = $func->append_block('if.then');
+            my $f_block = $func->append_block('if.else');
+            $builder->position_at_end($entry);
+            $builder->build_cond_br(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 1 ),
+                $t_block, $f_block
+            );
+            $builder->position_at_end($t_block);
+            $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+            $builder->position_at_end($f_block);
+            $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
+            my $codegen = Brocken::Jenny::Codegen::RISCV64->new();
+            my $bytes = $codegen->emit_function($func);
+            diag 'CondBr constant body: ' . unpack( 'H*', $bytes );
+            diag 'CondBr constant body length: ' . length($bytes);
+            for my $i ( 0 .. ( length($bytes) / 4 ) - 1 ) {
+                my $inst_bytes = substr( $bytes, $i * 4, 4 );
+                diag sprintf( '  inst[%d] = %s', $i, unpack( 'H*', $inst_bytes ) );
+            }
+            my $linker = Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = './condbr_const_test' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            my $cmd = "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            diag "condbr_const raw \$?=$? exit=$exit_code";
+            is( $exit_code, 42, 'CondBr constant condition (1 = true) returned 42' );
+            unlink $output_file;
+        }
+    };
     subtest 'Jenny::Codegen ICmp (Cross-Platform)' => sub {
         my $platform = Brocken::Katsuro::Platform::parse();
         my $func     = Brocken::Lindsay::IR::Function->new( name => 'icmp_signed', return_type => Brocken::Lindsay::IR::Type::i32() );
@@ -8123,6 +8174,14 @@ subtest Jenny => sub {
             diag 'ARM64 ICmp bytes: ' . unpack( 'H*', $bytes );
             diag 'ARM64 ICmp length: ' . length($bytes);
         }
+        if ( $platform->is_riscv64 ) {
+            diag 'ICmp bytes: ' . unpack( 'H*', $bytes );
+            diag 'ICmp length: ' . length($bytes);
+            for my $i ( 0 .. ( length($bytes) / 4 ) - 1 ) {
+                my $inst_bytes = substr( $bytes, $i * 4, 4 );
+                diag sprintf( '  inst[%d] = %s', $i, unpack( 'H*', $inst_bytes ) );
+            }
+        }
         my $linker
             = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
             $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
@@ -8133,7 +8192,6 @@ subtest Jenny => sub {
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file || $platform->is_windows, 'ICmp binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            diag 'ICmp bytes: ' . unpack( 'H*', $bytes ) if $platform->is_riscv64;
             if ( $platform->is_riscv64 ) {
                 open my $efh, '<:raw', $output_file or die $!;
                 my $elf_data;

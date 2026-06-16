@@ -20,6 +20,7 @@ SSA uses infinite virtual registers; hardware does not.
 - [ ] Implement Linear Scan Register Allocator.
 - [ ] Handle calling conventions (spilling, move-coalescing).
 - [ ] Integrate `Katsuro::Platform::ABI`.
+- [ ] 128bit numerics
 
 ## Phase 3: The Frontend (Parser & AST)
 We shouldn't be writing IR by hand in tests forever.
@@ -36,9 +37,3 @@ We shouldn't be writing IR by hand in tests forever.
 - [ ] Constant Folding pass.
 - [ ] Dead Code Elimination (DCE).
 - [ ] Simple Inlining.
-
----
-
-- [x] Implement WebAssembly (Wasm) as a lowering target for the IR. (DONE)
-- [x] Add GitHub CI job for Wasm execution. (DONE)
-- [x] Expand `Jenny::Codegen` to handle `add` and `sub` properly using the `Katsuro` register maps, then write a test that verifies we can compile a function that does simple math and returns the result. (DONE)
