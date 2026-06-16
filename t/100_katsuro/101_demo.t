@@ -5855,7 +5855,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         }
 
         method import_rva($name) {
-            my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16, exit => 24, _exit => 24 };
+            my $imports = { dlopen => 16, dlsym => 24, pthread_create => 32, exit => 40, _exit => 40 };
             return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown ELF import: ' . $name );
         }
         method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
@@ -5891,7 +5891,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     # - ldr x8, [x8, :got_lo12:exit]
                     # - blr x8
                     # - brk #0
-                    my $got_exit  = $got_rva + 24;
+                    my $got_exit  = $self->import_rva('exit');
                     my $adrp_pc   = $text_rva + 4;
                     my $page_diff = ( $got_exit >> 12 ) - ( $adrp_pc >> 12 );
                     $page_diff &= 0x1FFFFF;
@@ -5913,7 +5913,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     # - ld t0, %pcrel_lo(auipc)(t0)
                     # - jalr ra, t0
                     # - ebreak
-                    my $got_exit   = $got_rva + 24;
+                    my $got_exit   = $self->import_rva('exit');
                     my $auipc_pc   = $text_rva + 4;
                     my $diff       = $got_exit - $auipc_pc;
                     my $hi20       = ( $diff + 0x800 ) >> 12;
@@ -5931,7 +5931,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 else {
                     # x86_64 Dynamic Exit Stub with System V RSP alignment.
                     # Reference: https://eg/ABI.md Section 1.1
-                    my $got_exit = $got_rva + 24;
+                    my $got_exit = $self->import_rva('exit');
                     my $next_ip  = $text_rva + 18;
                     my $rel32    = $got_exit - $next_ip;
                     $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );    # and rsp, -16
@@ -6265,7 +6265,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             my $rela_dyn = '';
 
             # Elf64_Rela (24 bytes) for dlopen
-            my $dlopen_slot    = $base + $got_rva + 0;
+            my $dlopen_slot    = $base + $self->import_rva('dlopen');
             my $dlopen_sym_idx = $sym_indices{'dlopen'};
             $rela_dyn .= pack(
                 'Q< Q< q<', $dlopen_slot,                 # r_offset
@@ -6274,7 +6274,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             );
 
             # Elf64_Rela (24 bytes) for dlsym
-            my $dlsym_slot    = $base + $got_rva + 8;
+            my $dlsym_slot    = $base + $self->import_rva('dlsym');
             my $dlsym_sym_idx = $sym_indices{'dlsym'};
             $rela_dyn .= pack(
                 'Q< Q< q<', $dlsym_slot,                  # r_offset
@@ -6283,7 +6283,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             );
 
             # Elf64_Rela (24 bytes) for pthread_create
-            my $pthread_slot    = $base + $got_rva + 16;
+            my $pthread_slot    = $base + $self->import_rva('pthread_create');
             my $pthread_sym_idx = $sym_indices{'pthread_create'};
             $rela_dyn .= pack(
                 'Q< Q< q<', $pthread_slot,                 # r_offset
@@ -6292,7 +6292,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             );
 
             # Elf64_Rela (24 bytes) for exit mapping
-            my $exit_slot    = $base + $got_rva + 24;
+            my $exit_slot    = $base + $self->import_rva('exit');
             my $exit_sym_idx = $sym_indices{$exit_name};
             $rela_dyn .= pack(
                 'Q< Q< q<', $exit_slot,                    # r_offset
@@ -6301,8 +6301,9 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             );
             $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
-            # Setup GOT section payload (four zeroed slots: dlopen, dlsym, pthread_create, exit)
-            my $got = pack( 'Q< Q< Q< Q<', 0, 0, 0, 0 );
+            # Setup GOT section payload (2 reserved + 4 import slots: dlopen, dlsym, pthread_create, exit)
+            # First 2 QWORDs reserved for BSD rtld (link_map + resolver); imports start at offset 16.
+            my $got = pack( 'Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0 );
             $self->layout->get('.got')->{size} = length($got);
 
             # Setup Hash Table (Standard System V Hash)
@@ -7674,7 +7675,7 @@ subtest Jenny => sub {
 
         # POSIX x86_64 Wrapper Generator with null checks and 16-byte Stack Alignment Fix
         my $make_x64_wrapper = sub {
-            my ( $ext_str, $got, $text, $macho ) = @_;
+            my ( $ext_str, $dlopen_rva, $dlsym_rva, $text, $macho ) = @_;
             my $lib_path         = "./libtest_prog$ext_str\0";
             my $func_name        = "my_func\0";
             my $lib_path_offset  = 128;
@@ -7682,9 +7683,9 @@ subtest Jenny => sub {
             my $entry_stub_len   = $macho ? 17 : 20;
             my $main_rva         = $text + $entry_stub_len;
             my $disp_libpath     = $lib_path_offset - 12;                   # RIP at offset 12
-            my $disp_dlopen      = $got - ( $main_rva + 23 );              # RIP at offset 23
+            my $disp_dlopen      = $dlopen_rva - ( $main_rva + 23 );       # RIP at offset 23
             my $disp_funcname    = $func_name_offset - 41;                 # RIP at offset 41
-            my $disp_dlsym       = ( $got + 8 ) - ( $main_rva + 47 );      # RIP at offset 47
+            my $disp_dlsym       = $dlsym_rva - ( $main_rva + 47 );        # RIP at offset 47
             my $exit_syscall     = $macho ? 0x2000001 : 60;                # macOS vs Linux exit syscall
             my $code             = pack( 'C', 0x53 );                      # push rbx
             $code .= pack( 'C4',    0x48, 0x83, 0xEC, 0x10 );              # sub rsp, 16
@@ -7719,7 +7720,7 @@ subtest Jenny => sub {
 
         # POSIX ARM64 Wrapper Generator
         my $make_arm64_wrapper = sub {
-            my ( $ext_str, $got, $text, $macho ) = @_;
+            my ( $ext_str, $dlopen_rva, $dlsym_rva, $text, $macho ) = @_;
             my $lib_path         = "./libtest_prog$ext_str\0";
             my $func_name        = "my_func\0";
             my $lib_path_offset  = 64;
@@ -7728,8 +7729,8 @@ subtest Jenny => sub {
             my $main_rva         = $text + $entry_stub_len;
             my $disp_libpath     = $lib_path_offset - 8;
             my $disp_funcname    = $func_name_offset - 32;
-            my $offset_dlopen    = $got - ( $main_rva + 16 );
-            my $offset_dlsym     = ( $got + 8 ) - ( $main_rva + 36 );
+            my $offset_dlopen    = $dlopen_rva - ( $main_rva + 16 );
+            my $offset_dlsym     = $dlsym_rva - ( $main_rva + 36 );
             my $imm19_dlopen     = ( $offset_dlopen / 4 ) & 0x7FFFF;
             my $imm19_dlsym      = ( $offset_dlsym / 4 ) & 0x7FFFF;
             my $adr_x0           = 0x10000000 | ( ( $disp_libpath & 3 ) << 29 ) | ( ( ( $disp_libpath >> 2 ) & 0x7FFFF ) << 5 ) | 0;
@@ -7760,7 +7761,7 @@ subtest Jenny => sub {
 
         # POSIX RISC-V 64-bit Wrapper Generator
         my $make_riscv64_wrapper = sub {
-            my ( $ext_str, $got, $text, $macho ) = @_;
+            my ( $ext_str, $dlopen_rva, $dlsym_rva, $text, $macho ) = @_;
             my $lib_path         = "./libtest_prog$ext_str\0";
             my $func_name        = "my_func\0";
             my $lib_path_offset  = 96;
@@ -7771,8 +7772,8 @@ subtest Jenny => sub {
             # PC-relative offsets for auipc instructions (where PC = instruction address itself)
             my $off_libpath   = $lib_path_offset - 16;    # auipc at $main_rva + 16
             my $off_funcname  = $func_name_offset - 48;   # auipc at $main_rva + 48
-            my $off_dlopen    = $got - ( $main_rva + 28 );                  # auipc at $main_rva + 28
-            my $off_dlsym     = ( $got + 8 ) - ( $main_rva + 56 );          # auipc at $main_rva + 56
+            my $off_dlopen    = $dlopen_rva - ( $main_rva + 28 );                  # auipc at $main_rva + 28
+            my $off_dlsym     = $dlsym_rva - ( $main_rva + 56 );          # auipc at $main_rva + 56
 
             # Encode auipc + addi pair for PC-relative address load: rd = PC + imm20<<12 + imm12
             my $hi_lib   = ( $off_libpath + 0x800 ) >> 12;
@@ -7861,14 +7862,16 @@ subtest Jenny => sub {
                 my $dummy_bytes = "\x00" x $code_sz;
                 $wrapper_linker->write_executable( $wrapper_file, $dummy_bytes, $platform );
                 # Extract stabilized, correct section RVAs and text file offset
-                my $got_rva  = $wrapper_linker->layout->get('.got')->{rva};
-                my $text_rva = $wrapper_linker->layout->get('.text')->{rva};
-                my $text_off = $wrapper_linker->layout->get('.text')->{off};
+                my $got_rva    = $wrapper_linker->layout->get('.got')->{rva};
+                my $dlopen_rva = $wrapper_linker->import_rva('dlopen');
+                my $dlsym_rva  = $wrapper_linker->import_rva('dlsym');
+                my $text_rva   = $wrapper_linker->layout->get('.text')->{rva};
+                my $text_off   = $wrapper_linker->layout->get('.text')->{off};
 
                 # Assemble the actual FFI machine code referencing the real RVAs
-                my $wrapper_bytes = $is_arm64   ? $make_arm64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos ) :
-                    $is_riscv64   ? $make_riscv64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos ) :
-                    $make_x64_wrapper->( $ext, $got_rva, $text_rva, $platform->is_macos );
+                my $wrapper_bytes = $is_arm64   ? $make_arm64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos ) :
+                    $is_riscv64   ? $make_riscv64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos ) :
+                    $make_x64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos );
 
                 # Patch the binary file at its physical entry offset directly
                 my $entry_stub_len = $platform->is_arm64 ? 20 : ( $platform->is_macos ? 17 : 20 );
