@@ -2298,8 +2298,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             SBFM    => 0x93400000,
             MOVZ_32 => 0x52800000,
             MOVZ_64 => 0xD2800000,
-            MOVK_32 => 0x53800000,
-            MOVK_64 => 0xD3800000,
+            MOVK_32 => 0x72800000,
+            MOVK_64 => 0xF2800000,
             MOV_X   => 0xAA0003E0,
             SUB_SP  => 0xD10003FF,
             ADD_SP  => 0x910003FF,
@@ -2320,7 +2320,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             FSQRT_32=> 0x1E21C000,
             FMOV_32 => 0x1E204000,
             FMOV_GP2F_32 => 0x1E270000,
-            FMOV_GP2F_64 => 0x9E670000,
+            FMOV_GP2F_64 => 0x9E270000,
             FCMP_32 => 0x1E202000,
             FCMP_64 => 0x1E602000,
             FP_SZ   => 0x00400000,
@@ -3324,7 +3324,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
                         my $is_float = $lhs->type && $lhs->type->kind eq 'float';
                         my $mop = $is_float ? "f$opcode" : $opcode;
@@ -3361,6 +3361,28 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                     opcode   => $opcode,
                                     operands => [ $dst, $self->_lower_opnd($rhs) ],
                                     comment  => $opcode
+                                )
+                            );
+                        }
+                    }
+                    elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
+                        my ($val) = $inst->operands->@*;
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind => 'virt_reg', value => $inst->name, type => $inst->type
+                        );
+                        if ( $inst->type && $inst->type->kind eq 'float' ) {
+                            my $src = $self->_materialize($mbb, $val);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'fmov', operands => [ $dst, $src ],
+                                    comment => 'load ' . $opcode . ' operand'
+                                )
+                            );
+                            my $mop = $opcode eq 'neg' ? 'fneg' : ($opcode eq 'abs' ? 'fabs' : 'fsqrt');
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => $mop, operands => [ $dst, $dst ],
+                                    comment => $mop
                                 )
                             );
                         }
@@ -7675,7 +7697,7 @@ subtest Jenny => sub {
             my $func_name        = "my_func\0";
             my $lib_path_offset  = 64;
             my $func_name_offset = $lib_path_offset + length($lib_path);
-            my $entry_stub_len   = $macho ? 17 : 20;
+            my $entry_stub_len   = 20;
             my $main_rva         = $text + $entry_stub_len;
             my $disp_libpath     = $lib_path_offset - 8;
             my $disp_funcname    = $func_name_offset - 32;
@@ -7716,7 +7738,7 @@ subtest Jenny => sub {
             my $func_name        = "my_func\0";
             my $lib_path_offset  = 96;
             my $func_name_offset = $lib_path_offset + length($lib_path);
-            my $entry_stub_len   = $macho ? 17 : 20;
+            my $entry_stub_len   = 20;
             my $main_rva         = $text + $entry_stub_len;
 
             # PC-relative offsets for auipc instructions (where PC = instruction address itself)
