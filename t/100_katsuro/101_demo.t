@@ -5962,7 +5962,8 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         }
 
         method import_rva($name) {
-            my $imports = { dlopen => 16, dlsym => 24, pthread_create => 32, exit => 40, _exit => 40 };
+            #my $imports = { dlopen => 16, dlsym => 24, pthread_create => 32, exit => 40, _exit => 40 };
+            my $imports = { dlopen => 24, dlsym => 32, pthread_create => 40, exit => 48, _exit => 48 };
             return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown ELF import: ' . $name );
         }
         method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
@@ -5980,7 +5981,8 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 $self->pre_layout( length($code_bytes) + 32, $extra_data, $platform );
             }
             my $l          = $self->layout;
-            my $is_pie     = ($platform->is_bsd || $platform->is_haiku) && !($shared && $platform->is_freebsd);
+            #my $is_pie     = ($platform->is_bsd || $platform->is_haiku) && !($shared && $platform->is_freebsd);
+            my $is_pie     = ($platform->is_bsd || $platform->is_haiku) && !$shared;
             my $base       = $is_pie ? 0 : $self->image_base;
             my $elf_type   = $shared ? 3 : ( $is_pie ? 3 : 2 );    # ET_DYN (3) for PIE, ET_EXEC (2) for static
             my $text_rva   = $self->layout->get('.text')->{rva};
@@ -6232,7 +6234,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
 
             # Map BSD internal symbols
             # Reference: eg/ABI.md Section 2.2
-            if ( $platform->is_bsd ) {
+            if ( $platform->is_bsd && $self->type eq 'exe' ) {
                 $str_off{'__progname'} = length($dynstr);
                 $dynstr .= '__progname' . "\0";
                 $str_off{'environ'} = length($dynstr);
@@ -6296,7 +6298,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             }
 
             # Define __progname for BSD to satisfy libc's internal reference (e.g. DragonFly)
-            if ( $platform->is_bsd ) {
+             if ( $platform->is_bsd && $self->type eq 'exe' ) {
                 my $progname_off = $str_off{'__progname'};
                 if ( defined $progname_off ) {
                     $sym_indices{'__progname'} = $sym_idx++;
@@ -6322,7 +6324,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             }
 
             # Define environ for BSD to satisfy libc's dynamic reference (e.g. DragonFly)
-            if ( $platform->is_bsd ) {
+             if ( $platform->is_bsd && $self->type eq 'exe' ) {
                 my $environ_off = $str_off{'environ'};
                 if ( defined $environ_off ) {
                     $sym_indices{'environ'} = $sym_idx++;
@@ -6409,9 +6411,9 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             );
             $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
-            # Setup GOT section payload (2 reserved + 4 import slots: dlopen, dlsym, pthread_create, exit)
-            # First 2 QWORDs reserved for BSD rtld (link_map + resolver); imports start at offset 16.
-            my $got = pack( 'Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0 );
+            # Setup GOT section payload (3 reserved + 4 import slots: dlopen, dlsym, pthread_create, exit)
+            # First 3 QWORDs reserved for BSD rtld (DYNAMIC, link_map, resolver); imports start at offset 24.
+            my $got = pack( 'Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0 );
             $self->layout->get('.got')->{size} = length($got);
 
             # Setup Hash Table (Standard System V Hash)
@@ -7782,8 +7784,7 @@ subtest Jenny => sub {
         }
 
         # POSIX x86_64 Wrapper Generator with null checks and 16-byte Stack Alignment Fix
-        my $make_x64_wrapper = sub {
-            my ( $ext_str, $dlopen_rva, $dlsym_rva, $text, $macho ) = @_;
+        my $make_x64_wrapper = sub ( $ext_str, $dlopen_rva, $dlsym_rva, $text, $macho, $exit_syscall //= $macho ? 0x2000001 : 60){
             my $lib_path         = "./libtest_prog$ext_str\0";
             my $func_name        = "my_func\0";
             my $lib_path_offset  = 128;
@@ -7794,7 +7795,6 @@ subtest Jenny => sub {
             my $disp_dlopen      = $dlopen_rva - ( $main_rva + 23 );       # RIP at offset 23
             my $disp_funcname    = $func_name_offset - 41;                 # RIP at offset 41
             my $disp_dlsym       = $dlsym_rva - ( $main_rva + 47 );        # RIP at offset 47
-            my $exit_syscall     = $macho ? 0x2000001 : 60;                # macOS vs Linux exit syscall
             my $code             = pack( 'C', 0x53 );                      # push rbx
             $code .= pack( 'C4',    0x48, 0x83, 0xEC, 0x10 );              # sub rsp, 16
             $code .= pack( 'C3 l<', 0x48, 0x8D, 0x3D, $disp_libpath );     # lea rdi, [rip + lib_path]
@@ -7979,7 +7979,7 @@ subtest Jenny => sub {
                 # Assemble the actual FFI machine code referencing the real RVAs
                 my $wrapper_bytes = $is_arm64   ? $make_arm64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos ) :
                     $is_riscv64   ? $make_riscv64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos ) :
-                    $make_x64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos );
+                    $make_x64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos, $platform->syscall('exit')  );
 
                 # Patch the binary file at its physical entry offset directly
                 my $entry_stub_len = $platform->is_arm64 ? 20 : ( $platform->is_macos ? 21 : 20 );
