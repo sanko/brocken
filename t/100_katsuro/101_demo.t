@@ -4982,13 +4982,15 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                     $entry_stub = pack( 'V5', 0x94000005, $movz, $movk, 0xD4001001, 0xD4200000 );
                 }
                 else {
-                    # x86_64 (Intel Mac) native exit stub:
-                    # - call main:      e8 0c 00 00 00 (Relative call 12 bytes ahead)
+                    # x86_64 (Intel Mac) native exit stub with 16-byte stack alignment:
+                    # - and rsp, -16:   48 83 e4 f0    (Align stack for System V ABI)
+                    # - call main:      e8 0c 00 00 00 (Relative call 12 bytes ahead to start at byte 21)
                     # - mov rdi, rax:   48 89 c7       (Copy main's return code to first argument)
                     # - mov eax, sys:   b8 ...         (0x2000001 is exit syscall with macOS offset)
                     # - syscall:        0f 05
                     # - ud2:            0f 0b
-                    $entry_stub = pack( 'C V', 0xE8, 12 );
+                    $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );
+                    $entry_stub .= pack( 'C V', 0xE8, 12 );
                     $entry_stub .= pack( 'C3',  0x48, 0x89, 0xC7 );
                     $entry_stub .= pack( 'C V', 0xB8, $exit_sys );
                     $entry_stub .= pack( 'C2',  0x0F, 0x05 );
@@ -7710,7 +7712,7 @@ subtest Jenny => sub {
             my $func_name        = "my_func\0";
             my $lib_path_offset  = 128;
             my $func_name_offset = $lib_path_offset + length($lib_path);
-            my $entry_stub_len   = $macho ? 17 : 20;
+            my $entry_stub_len   = $macho ? 21 : 20;
             my $main_rva         = $text + $entry_stub_len;
             my $disp_libpath     = $lib_path_offset - 12;                   # RIP at offset 12
             my $disp_dlopen      = $dlopen_rva - ( $main_rva + 23 );       # RIP at offset 23
@@ -7904,7 +7906,7 @@ subtest Jenny => sub {
                     $make_x64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos );
 
                 # Patch the binary file at its physical entry offset directly
-                my $entry_stub_len = $platform->is_arm64 ? 20 : ( $platform->is_macos ? 17 : 20 );
+                my $entry_stub_len = $platform->is_arm64 ? 20 : ( $platform->is_macos ? 21 : 20 );
                 open my $fh, '+<:raw', $wrapper_file or die $!;
                 seek( $fh, $text_off + $entry_stub_len, 0 );
                 print $fh $wrapper_bytes;
@@ -8063,8 +8065,10 @@ subtest Jenny => sub {
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file || $platform->is_windows, 'ICmp binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            diag 'ICmp bytes: ' . unpack( 'H*', $bytes ) if $platform->is_riscv64;
             system($cmd);
             my $exit_code = $? >> 8;
+            diag "icmp_signed raw \$?=$? exit=$exit_code" if $? & 127 || $exit_code != 42;
             is( $exit_code, 42, 'ICmp signed (42 sgt 0 = true) returned 42 on ' . $platform->friendly );
             unlink $output_file;
         }
@@ -8105,6 +8109,7 @@ subtest Jenny => sub {
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
             system($cmd);
             my $exit_code = $? >> 8;
+            diag "icmp_unsigned raw \$?=$? exit=$exit_code" if $? & 127 || $exit_code != 42;
             is( $exit_code, 42, 'ICmp unsigned (42 ugt 0 = true) returned 42 on ' . $platform->friendly );
             unlink $output_file;
         }
@@ -8733,6 +8738,7 @@ subtest Jenny => sub {
             SKIP: {
                 skip "system() failed to spawn ($!)", 1 if $ret == -1;
                 my $exit_code = $? >> 8;
+                diag "ficmp raw \$?=$? exit=$exit_code" if $? & 127 || $exit_code != 42;
                 is( $exit_code, 42, 'Float icmp returned 42 on ' . $platform->friendly );
             }
             unlink $output_file;
@@ -8908,6 +8914,7 @@ subtest Jenny => sub {
             SKIP: {
                 skip "system() failed to spawn ($!)", 1 if $ret == -1;
                 my $exit_code = $? >> 8;
+                diag "fum raw \$?=$? exit=$exit_code" if $? & 127 || $exit_code != 42;
                 is( $exit_code, 42, 'Float unary/minmax returned 42 on ' . $platform->friendly );
             }
             unlink $output_file;
