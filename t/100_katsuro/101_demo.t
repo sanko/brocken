@@ -7672,33 +7672,47 @@ subtest Jenny => sub {
             note 'nm is not available or failed; skipping symbol table extraction check';
         }
 
-        # POSIX x86_64 Wrapper Generator with 16-byte Stack Alignment Fix
+        # POSIX x86_64 Wrapper Generator with null checks and 16-byte Stack Alignment Fix
         my $make_x64_wrapper = sub {
             my ( $ext_str, $got, $text, $macho ) = @_;
             my $lib_path         = "./libtest_prog$ext_str\0";
             my $func_name        = "my_func\0";
-            my $lib_path_offset  = 50;
+            my $lib_path_offset  = 128;
             my $func_name_offset = $lib_path_offset + length($lib_path);
-            my $disp_libpath     = $lib_path_offset - 12;
-            my $disp_funcname    = $func_name_offset - 36;
             my $entry_stub_len   = $macho ? 17 : 20;
             my $main_rva         = $text + $entry_stub_len;
-            my $disp_dlopen      = $got - ( $main_rva + 23 );
-            my $disp_dlsym       = ( $got + 8 ) - ( $main_rva + 42 );
+            my $disp_libpath     = $lib_path_offset - 12;                   # RIP at offset 12
+            my $disp_dlopen      = $got - ( $main_rva + 23 );              # RIP at offset 23
+            my $disp_funcname    = $func_name_offset - 41;                 # RIP at offset 41
+            my $disp_dlsym       = ( $got + 8 ) - ( $main_rva + 47 );      # RIP at offset 47
+            my $exit_syscall     = $macho ? 0x2000001 : 60;                # macOS vs Linux exit syscall
             my $code             = pack( 'C', 0x53 );                      # push rbx
-            $code .= pack( 'C4',    0x48, 0x83, 0xEC, 0x10 );              # sub rsp, 16 (Keep stack aligned to 16-bytes)
-            $code .= pack( 'C3 l<', 0x48, 0x8D, 0x3D, $disp_libpath );     # lea rdi, [rip + disp_libpath]
+            $code .= pack( 'C4',    0x48, 0x83, 0xEC, 0x10 );              # sub rsp, 16
+            $code .= pack( 'C3 l<', 0x48, 0x8D, 0x3D, $disp_libpath );     # lea rdi, [rip + lib_path]
             $code .= pack( 'C5', 0xBE, 0x02, 0x00, 0x00, 0x00 );           # mov esi, 2 (RTLD_NOW)
-            $code .= pack( 'C2 l<', 0xFF, 0x15, $disp_dlopen );            # call [rip + disp_dlopen]
+            $code .= pack( 'C2 l<', 0xFF, 0x15, $disp_dlopen );            # call [rip + dlopen]
+            $code .= pack( 'C3',    0x48, 0x85, 0xC0 );                    # test rax, rax
+            $code .= pack( 'C2',    0x74, 0x1C );                          # jz fail_dlopen (to offset 60)
             $code .= pack( 'C3',    0x48, 0x89, 0xC3 );                    # mov rbx, rax
             $code .= pack( 'C3',    0x48, 0x89, 0xDF );                    # mov rdi, rbx
-            $code .= pack( 'C3 l<', 0x48, 0x8D, 0x35, $disp_funcname );    # lea rsi, [rip + disp_funcname]
-            $code .= pack( 'C2 l<', 0xFF, 0x15, $disp_dlsym );             # call [rip + disp_dlsym]
+            $code .= pack( 'C3 l<', 0x48, 0x8D, 0x35, $disp_funcname );    # lea rsi, [rip + func_name]
+            $code .= pack( 'C2 l<', 0xFF, 0x15, $disp_dlsym );             # call [rip + dlsym]
+            $code .= pack( 'C3',    0x48, 0x85, 0xC0 );                    # test rax, rax
+            $code .= pack( 'C2',    0x74, 0x0F );                          # jz fail_dlsym (to offset 67)
             $code .= pack( 'C2', 0xFF, 0xD0 );                             # call rax
             $code .= pack( 'C4', 0x48, 0x83, 0xC4, 0x10 );                 # add rsp, 16
             $code .= pack( 'C', 0x5B );                                    # pop rbx
             $code .= pack( 'C', 0xC3 );                                    # ret
-            $code .= "\x00" while length($code) < 50;
+            # fail_dlopen (offset 60):
+            $code .= pack( 'C5', 0xBF, 0x01, 0x00, 0x00, 0x00 );           # mov edi, 1
+            $code .= pack( 'C2', 0xEB, 0x05 );                             # jmp exit_via_syscall (to offset 72)
+            # fail_dlsym (offset 67):
+            $code .= pack( 'C5', 0xBF, 0x02, 0x00, 0x00, 0x00 );           # mov edi, 2
+            # exit_via_syscall (offset 72):
+            $code .= pack( 'C5', 0xB8, $exit_syscall & 0xFF, ( $exit_syscall >> 8 ) & 0xFF, ( $exit_syscall >> 16 ) & 0xFF, ( $exit_syscall >> 24 ) & 0xFF );    # mov eax, exit_syscall
+            $code .= pack( 'C2', 0x0F, 0x05 );                             # syscall
+            $code .= pack( 'C2', 0x0F, 0x0B );                             # ud2
+            $code .= "\x00" while length($code) < $lib_path_offset;
             $code .= $lib_path . $func_name;
             return $code;
         };
@@ -7843,7 +7857,7 @@ subtest Jenny => sub {
 
                 # Pass a dummy byte array first to allow the linker to calculate
                 # the exact metadata structures and final section tables.
-                my $code_sz     = ( $is_arm64 || $is_riscv64 ) ? 128 : 96;
+                my $code_sz     = ( $is_arm64 || $is_riscv64 ) ? 128 : 160;
                 my $dummy_bytes = "\x00" x $code_sz;
                 $wrapper_linker->write_executable( $wrapper_file, $dummy_bytes, $platform );
                 # Extract stabilized, correct section RVAs and text file offset
@@ -7867,6 +7881,23 @@ subtest Jenny => sub {
                 system("codesign -f -s - \"$wrapper_file\" 2>/dev/null") if $platform->is_macos;
                 ok -e $wrapper_file, 'POSIX wrapper compiled at ' . $wrapper_file;
                 ok -x $wrapper_file, 'POSIX wrapper has execution permissions';
+
+                # Diagnostic: verify FFI shared library is loadable via dlopen
+                if ( $platform->is_macos && $platform->is_native ) {
+                    require DynaLoader;
+                    require File::Spec;
+                    my $abs_path = File::Spec->rel2abs($lib_file);
+                    my $libref   = DynaLoader::dl_load_file($abs_path);
+                    diag 'FFI lib loadable via dlopen: ' . ( $libref ? 'yes' : 'no' );
+                    if ($libref) {
+                        my $symref = DynaLoader::dl_find_symbol( $libref, '_my_func' );
+                        diag 'FFI lib _my_func resolved: ' . ( $symref ? 'yes' : 'no' );
+                        DynaLoader::dl_unload_file($libref);
+                    }
+                    else {
+                        diag 'dl_error: ' . DynaLoader::dl_error();
+                    }
+                }
 
                 # Execute POSIX native executable
                 local $ENV{LD_LIBRARY_PATH}   = join( ':', '.', $ENV{LD_LIBRARY_PATH}   // () );
