@@ -272,6 +272,7 @@ Brocken uses a four-part "normalized" triple format: C<arch-vendor-os-env>.
         method is_haiku()        {0}
         method is_midnightbsd()  {0}
         method is_dragonflybsd() {0}
+        method is_solaris ()     {0}
         method is_wasm()         {0}
         method is_posix()        {1}
         #
@@ -2013,7 +2014,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     my $enc = ( ( $imm20 >> 19 ) & 1 ) << 31
                             | ( ( $imm20 & 0x3FF ) << 21 )
                             | ( ( $imm20 >> 10 ) & 1 ) << 20
-                            | ( ( $imm20 >> 11 ) & 0xFF ) << 12
+                            | ( $imm20 & 0xFF000 )
                             | JAL;
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
                 }
@@ -3647,7 +3648,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 return $mf;
             }
-    
+
         method _materialize($mbb, $ir_val) {
             state $fc = 0;
             if ($ir_val->isa('Brocken::Lindsay::IR::Constant') && $ir_val->type && $ir_val->type->kind eq 'float') {
@@ -5950,8 +5951,9 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     my $ld         = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
                     my $jalr       = ( 0 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 0 << 7 ) | 0x67;
                     my $jal_offset = 20;
-                    my $jal_imm = ( ( $jal_offset >> 20 ) & 1 ) << 31 | ( ( $jal_offset >> 1 ) & 0x3FF ) << 21 | ( ( $jal_offset >> 11 ) & 1 ) << 20
-                        | ( ( $jal_offset >> 12 ) & 0xFF ) << 12;
+                    my $halfword   = $jal_offset >> 1;
+                    my $jal_imm = ( ( $halfword >> 19 ) & 1 ) << 31 | ( ( $halfword & 0x3FF ) << 21 ) | ( ( $halfword >> 10 ) & 1 ) << 20
+                        | ( $halfword & 0xFF000 );
                     my $jal    = $jal_imm | ( 1 << 7 ) | 0x6F;
                     my $ebreak = 0x00100073;
                     $entry_stub = pack( 'V5', $jal, $auipc, $ld, $jalr, $ebreak );
