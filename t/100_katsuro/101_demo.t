@@ -5005,16 +5005,30 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             my $got_sec        = $self->layout->get('.got');
             if ($got_sec) {
                 my $data_sec = $self->layout->get('.data');
-                my $data_rva = $data_sec ? $data_sec->{rva} : $got_sec->{rva};
-                $bind_info .= pack( 'C', 0x11 );
-                $bind_info .= pack( 'C', 0x51 );
-                $bind_info .= pack( 'C', 0x72 ) . $_uleb->( $got_sec->{rva} - $data_rva );
-                $bind_info .= pack( 'C', 0x40 ) . "_dlopen\0";
-                $bind_info .= pack( 'C', 0x90 );
-                $bind_info .= pack( 'C', 0x40 ) . "_dlsym\0";
-                $bind_info .= pack( 'C', 0x90 );
-                $bind_info .= pack( 'C', 0x40 ) . "_pthread_create\0";
-                $bind_info .= pack( 'C', 0x90 );
+                my $d_start_rva = $data_sec ? $data_sec->{rva} : $got_sec->{rva};
+                my $got_off  = $got_sec->{rva} - $d_start_rva;
+                my $data_seg = 0;
+                {
+                    my %saw;
+                    my @segseq;
+                    push @segseq, '__PAGEZERO' if $self->type ne 'shared';
+                    for ( $self->layout->sections ) {
+                        my $sn = ( $_->{name} =~ /^\.text/ )        ? '__TEXT' :
+                                 ( $_->{name} eq '.data' || $_->{name} eq '.got' ) ? '__DATA' :
+                                 ( $_->{name} eq '.linkedit' )      ? '__LINKEDIT' :
+                                 ( $_->{name} =~ /^\.debug/ )       ? '__DWARF' : undef;
+                        push( @segseq, $sn ), $saw{$sn} = 1 if defined $sn && !$saw{$sn};
+                    }
+                    for ( 0 .. $#segseq ) { $data_seg = $_ if $segseq[$_] eq '__DATA'; }
+                }
+                for my $name ( '_dlopen', '_dlsym', '_pthread_create' ) {
+                    $bind_info .= pack( 'C', 0x60 | $data_seg ) . $_uleb->( $got_off );
+                    $bind_info .= pack( 'C', 0x11 );
+                    $bind_info .= pack( 'C', 0x51 );
+                    $bind_info .= pack( 'C', 0x40 ) . "${name}\0";
+                    $bind_info .= pack( 'C', 0x90 );
+                    $got_off += 8;
+                }
                 $bind_info .= pack( 'C', 0x00 );
                 $bind_info_size = length($bind_info);
                 while ( length($bind_info) % 8 != 0 ) { $bind_info .= "\0"; }
