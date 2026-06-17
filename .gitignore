@@ -46,3 +46,4 @@ eg/lib/*.pm
 *.session
 
 *.txt
+*.exe

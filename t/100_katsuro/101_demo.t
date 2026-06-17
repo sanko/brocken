@@ -2,6 +2,7 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', 'blib/lib', '../../blib/lib';
+use Test2::Tools::Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 $|++;
@@ -1362,7 +1363,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     my @extra = (pack('C', $sib));
                     if ( $mod == 1 ) { push @extra, pack('c', $disp) }
                     elsif ( $mod == 2 ) { push @extra, pack('V', $disp) }
-                    return ($modrm, \@extra);
+                    my $rex_x = ($iid >= 8) ? 2 : 0;
+                    my $rex_b = ($bid >= 8) ? 1 : 0;
+                    return ($modrm, \@extra, $rex_x, $rex_b);
                 }
 
                 my $rm   = $bid & 7;
@@ -1381,7 +1384,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     else                                 { $mod = 2; @extra = ( pack( 'V', $disp ) ) }
                 }
                 my $modrm = ( $mod << 6 ) | ( ( $reg_idx & 7 ) << 3 ) | $rm;
-                return ( $modrm, \@extra );
+                my $rex_b = ($bid >= 8) ? 1 : 0;
+                return ( $modrm, \@extra, 0, $rex_b );
             };
 
             for my $mbb ( $mf->blocks->@* ) {
@@ -1547,17 +1551,17 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'lea' ) {
                         my $dst_r  = $resolve->($dst);
                         my $did    = $reg_id->($dst_r);
-                        my ( $modrm, $extra ) = $mem_modrm->( $src, $did );
-                        my $rex = 0x48 | ( $did >= 8 ? 4 : 0 );
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did );
+                        my $rex = 0x48 | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
                         $bytes .= pack( 'C', $rex ) . pack( 'C', 0x8D ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
                     }
                     elsif ( $opcode eq 'load' ) {
                         my $dst_r  = $resolve->($dst);
                         my $did    = $reg_id->($dst_r);
-                        my ( $modrm, $extra ) = $mem_modrm->( $src, $did );
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did );
                         my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
-                        my $rex = ( $bits == 64 ? 0x48 : 0 ) | ( $did >= 8 ? 4 : 0 );
+                        my $rex = ( $bits == 64 ? 0x48 : 0 ) | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
                         if ( $rex ) { $bytes .= pack( 'C', $rex ) }
                         $bytes .= pack( 'C', MOV_RM_R ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
@@ -1565,18 +1569,18 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'store' ) {
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
-                        my ( $modrm, $extra ) = $mem_modrm->( $dst, $sid );
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $dst, $sid );
                         my $bits = ($src->type && $src->type->kind eq 'int') ? $src->type->bits : 64;
-                        my $rex = ( $bits == 64 ? 0x48 : 0 ) | ( $sid >= 8 ? 4 : 0 );
+                        my $rex = ( $bits == 64 ? 0x48 : 0 ) | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
                         if ( $rex ) { $bytes .= pack( 'C', $rex ) }
                         $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
                     }
                     elsif ( $opcode eq 'store_imm' ) {
                         my ( $mem, $imm ) = $inst->operands->@*;
-                        my ( $modrm, $extra ) = $mem_modrm->( $mem, 0 );    # /0 ext = mov
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $mem, 0 );    # /0 ext = mov
                         my $bits = ($imm->type && $imm->type->kind eq 'int') ? $imm->type->bits : 64;
-                        my $rex = ( $bits == 64 ? 0x48 : 0 );
+                        my $rex = ( $bits == 64 ? 0x48 : 0 ) | $rex_x | $rex_b;
                         if ( $rex ) { $bytes .= pack( 'C', $rex ) }
                         $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
@@ -1586,10 +1590,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'fload' ) {
                         my $dst_r  = $resolve->($dst);
                         my $did    = $reg_id->($dst_r);
-                        my ( $modrm, $extra ) = $mem_modrm->( $src, $did );
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did );
                         my $bits   = $dst->type ? $dst->type->bits : 32;
                         my $op     = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
-                        my $rex    = 0x40 | ( $did >= 8 ? 4 : 0 );
+                        my $rex    = 0x40 | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
                         if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
                         $bytes .= pack( 'CCC', $op->@* ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
@@ -1597,10 +1601,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'fstore' ) {
                         my $src_r  = $resolve->($src);
                         my $sid    = $reg_id->($src_r);
-                        my ( $modrm, $extra ) = $mem_modrm->( $dst, $sid );
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $dst, $sid );
                         my $bits   = $src->type ? $src->type->bits : 32;
                         my $op     = $bits >= 64 ? [ 0xF2, 0x0F, 0x11 ] : [ 0xF3, 0x0F, 0x11 ];
-                        my $rex    = 0x40 | ( $sid >= 8 ? 4 : 0 );
+                        my $rex    = 0x40 | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
                         if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
                         $bytes .= pack( 'CCC', $op->@* ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
@@ -4335,6 +4339,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                         kind => 'virt_reg', value => $inst->name . '_b', type => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
+                                    if ($lo_rhs->kind eq 'imm') {
+                                        my $r = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_rl', type => Brocken::Lindsay::IR::Type::i64());
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r, $lo_rhs], comment => 'i128 sub rhs lo'));
+                                        $lo_rhs = $r;
+                                    }
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mv',
@@ -4491,6 +4500,16 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 }
                                 else {
                                     my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
+                                    if ($lo_rhs->kind eq 'imm') {
+                                        my $r = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_rl', type => Brocken::Lindsay::IR::Type::i64());
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r, $lo_rhs], comment => 'i128 rhs lo'));
+                                        $lo_rhs = $r;
+                                    }
+                                    if ($hi_rhs->kind eq 'imm') {
+                                        my $r = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_rh', type => Brocken::Lindsay::IR::Type::i64());
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r, $hi_rhs], comment => 'i128 rhs hi'));
+                                        $hi_rhs = $r;
+                                    }
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mv',
@@ -8114,20 +8133,23 @@ We enable several modern Windows security features:
                     # Windows ARM64 Entry Stub:
                     # - stp x29, x30, [sp, #-16]!
                     # - mov x29, sp
-                    # - bl main (relative call offset +12 bytes -> 3 instructions)
+                    # - bl main (relative call offset +16 bytes -> 4 instructions)
                     # - ldp x29, x30, [sp], #16
+                    # - uxtb w0, w0  (truncate exit code to 8 bits)
                     # - ret
-                    $entry_stub = pack( 'V5', 0xA9BF7BFD, 0x910003FD, 0x94000003, 0xA8C17BFD, 0xD65F03C0 );
+                    $entry_stub = pack( 'V6', 0xA9BF7BFD, 0x910003FD, 0x94000004, 0xA8C17BFD, 0x53001C00, 0xD65F03C0 );
                 }
                 else {
                     # Windows x86_64 Entry Stub (with shadow space):
                     # - sub rsp, 40
-                    # - call main (+5 bytes ahead)
+                    # - call main (past stub + truncation)
                     # - add rsp, 40
+                    # - movzx eax, al  (truncate exit code to 8 bits)
                     # - ret
                     $entry_stub = pack( 'C4', 0x48, 0x83, 0xEC, 0x28 );
-                    $entry_stub .= pack( 'C V', 0xE8, 5 );
+                    $entry_stub .= pack( 'C V', 0xE8, 8 );
                     $entry_stub .= pack( 'C4',  0x48, 0x83, 0xC4, 0x28 );
+                    $entry_stub .= pack( 'C3',  0x0F, 0xB6, 0xC0 );
                     $entry_stub .= pack( 'C',   0xC3 );
                 }
                 $text = $entry_stub . $text_raw;
@@ -10141,7 +10163,7 @@ subtest Jenny => sub {
         my $machine_bytes = $codegen->emit_function($func_main);
 
         # Link and Write to raw PE executable file (.exe)
-        my $output_file = './test_prog.exe';
+        my $output_file = 'test_prog.exe';
         my $linker      = Brocken::Jenny::Linker::PE->new();
 
         #~ $linker->link_executable( $output_file, $machine_bytes );
@@ -10151,7 +10173,7 @@ subtest Jenny => sub {
             skip 'PE binary execution test requires x86_64 Windows', 1 unless $platform->is_windows;
 
             # Execute the binary natively and inspect its exit code!
-            system($output_file);
+            system { $output_file } $output_file;
             my $exit_code = $? >> 8;
             is $exit_code, 42, 'Standalone Windows binary executed natively and returned the correct exit code!';
             note $?;
@@ -10654,7 +10676,7 @@ subtest Jenny => sub {
         # Standalone execution test if native
     SKIP: {
             skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-            my $output_file = './math_test' . $platform->bin_ext;
+            my $output_file = 'math_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -x $output_file || $platform->is_windows, 'Math binary exists' );
 
@@ -10669,7 +10691,7 @@ subtest Jenny => sub {
                 close $efh;
                 diag 'Math ELF header + phdrs: ' . unpack( 'H*', $elf_data );
             }
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Math binary returned 42 on ' . $platform->friendly );
             unlink $output_file;
@@ -10694,10 +10716,10 @@ subtest Jenny => sub {
             diag 'ICmp body (result-only): ' . unpack( 'H*', $bytes );
             diag 'ICmp body length: ' . length($bytes);
             my $linker = Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './icmp_only_test' . $platform->bin_ext;
+            my $output_file = 'icmp_only_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             my $cmd = "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             diag "icmp_result_only raw \$?=$? exit=$exit_code";
             is( $exit_code, 1, 'ICmp result (42 sgt 0 = 1) returned 1' );
@@ -10724,10 +10746,10 @@ subtest Jenny => sub {
             diag 'JMP body: ' . unpack( 'H*', $bytes );
             diag 'JMP body length: ' . length($bytes);
             my $linker = Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './jmp_only_test' . $platform->bin_ext;
+            my $output_file = 'jmp_only_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             my $cmd = "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             diag "jmp_only raw \$?=$? exit=$exit_code";
             is( $exit_code, 42, 'JMP (unconditional branch to if.then) returned 42' );
@@ -10761,10 +10783,10 @@ subtest Jenny => sub {
                 diag sprintf( '  inst[%d] = %s', $i, unpack( 'H*', $inst_bytes ) );
             }
             my $linker = Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './condbr_const_test' . $platform->bin_ext;
+            my $output_file = 'condbr_const_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             my $cmd = "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             diag "condbr_const raw \$?=$? exit=$exit_code";
             is( $exit_code, 42, 'CondBr constant condition (1 = true) returned 42' );
@@ -10813,7 +10835,7 @@ subtest Jenny => sub {
             Brocken::Jenny::Linker::ELF64->new();
     SKIP: {
             skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-            my $output_file = './icmp_test' . $platform->bin_ext;
+            my $output_file = 'icmp_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file || $platform->is_windows, 'ICmp binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
@@ -10824,7 +10846,7 @@ subtest Jenny => sub {
                 close $efh;
                 diag 'ELF header + phdrs: ' . unpack( 'H*', $elf_data );
             }
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             diag "icmp_signed raw \$?=$? exit=$exit_code" if $? & 127 || $exit_code != 42;
             is( $exit_code, 42, 'ICmp signed (42 sgt 0 = true) returned 42 on ' . $platform->friendly );
@@ -10861,7 +10883,7 @@ subtest Jenny => sub {
             Brocken::Jenny::Linker::ELF64->new();
     SKIP: {
             skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-            my $output_file = './icmp_unsigned_test' . $platform->bin_ext;
+            my $output_file = 'icmp_unsigned_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file || $platform->is_windows, 'ICmp unsigned binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
@@ -10873,7 +10895,7 @@ subtest Jenny => sub {
                 diag 'Unsigned ELF header + phdrs: ' . unpack( 'H*', $elf_data );
                 diag 'Unsigned ICmp bytes: ' . unpack( 'H*', $bytes );
             }
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             diag "icmp_unsigned raw \$?=$? exit=$exit_code" if $? & 127 || $exit_code != 42;
             is( $exit_code, 42, 'ICmp unsigned (42 ugt 0 = true) returned 42 on ' . $platform->friendly );
@@ -10902,7 +10924,7 @@ subtest Jenny => sub {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm icmp bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './icmp_test.wasm';
+        my $output_file = 'icmp_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm icmp file exists' );
         my $wasmtime_path = `which wasmtime 2>/dev/null`;
@@ -10941,7 +10963,7 @@ subtest Jenny => sub {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm unsigned icmp bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './icmp_unsigned_test.wasm';
+        my $output_file = 'icmp_unsigned_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm unsigned icmp file exists' );
         my $wasmtime_path = `which wasmtime 2>/dev/null`;
@@ -10979,7 +11001,7 @@ subtest Jenny => sub {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm math bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './math_test.wasm';
+        my $output_file = 'math_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm math file exists' );
 
@@ -11028,7 +11050,7 @@ subtest Jenny => sub {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i64 math bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './i64_math_test.wasm';
+        my $output_file = 'i64_math_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i64 math file exists' );
         my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
@@ -11080,7 +11102,7 @@ subtest Jenny => sub {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i64 memory bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './i64_mem_test.wasm';
+        my $output_file = 'i64_mem_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i64 memory file exists' );
         my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
@@ -11129,7 +11151,7 @@ subtest Jenny => sub {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm f32 math bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './f32_math_test.wasm';
+        my $output_file = 'f32_math_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm f32 math file exists' );
         my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
@@ -11161,7 +11183,7 @@ subtest Jenny => sub {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm f64 math bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './f64_math_test.wasm';
+        my $output_file = 'f64_math_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm f64 math file exists' );
         my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
@@ -11237,7 +11259,7 @@ subtest Jenny => sub {
 
         ok( length( $res->{body} ) > 0, 'Generated Wasm float icmp bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './ficmp_test.wasm';
+        my $output_file = 'ficmp_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm float icmp file exists' );
         my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
@@ -11320,7 +11342,7 @@ subtest Jenny => sub {
         print $dbg2 "\n=== FLOAT UNARY LOCALS ===\n" . unpack('H*', $res->{locals}) . "\n===\n";
         close $dbg2;
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './fum_test.wasm';
+        my $output_file = 'fum_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm float unary/minmax file exists' );
         my $wasmtime_path = $host->is_windows ? `which wasmtime` : `which wasmtime 2>/dev/null`;
@@ -11369,12 +11391,12 @@ subtest Jenny => sub {
 
     SKIP: {
             skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-            my $output_file = './mem_test' . $platform->bin_ext;
+            my $output_file = 'mem_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -x $output_file || $platform->is_windows, 'Memory binary exists' );
 
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Memory binary returned 42 on ' . $platform->friendly );
             unlink $output_file;
@@ -11407,12 +11429,12 @@ subtest Jenny => sub {
 
     SKIP: {
             skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-            my $output_file = './box_test' . $platform->bin_ext;
+            my $output_file = 'box_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -x $output_file || $platform->is_windows, 'Box/unbox binary exists' );
 
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Box/unbox binary returned 42 on ' . $platform->friendly );
             unlink $output_file;
@@ -11449,11 +11471,11 @@ subtest Jenny => sub {
             Brocken::Jenny::Linker::ELF64->new();
     SKIP: {
             skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-            my $output_file = './float_test' . $platform->bin_ext;
+            my $output_file = 'float_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Float math binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            my $ret = system($cmd);
+            my $ret = system { $cmd } $cmd;
             SKIP: {
                 skip "system() failed to spawn ($!)", 1 if $ret == -1;
                 my $exit_code = $? >> 8;
@@ -11496,7 +11518,7 @@ subtest Jenny => sub {
             Brocken::Jenny::Linker::ELF64->new();
     SKIP: {
             skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-            my $output_file = './ficmp_test' . $platform->bin_ext;
+            my $output_file = 'ficmp_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Float icmp binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
@@ -11508,7 +11530,7 @@ subtest Jenny => sub {
                 diag 'Float ICmp ELF header + phdrs: ' . unpack( 'H*', $elf_data );
                 diag 'Float ICmp bytes: ' . unpack( 'H*', $bytes );
             }
-            my $ret = system($cmd);
+            my $ret = system { $cmd } $cmd;
             SKIP: {
                 skip "system() failed to spawn ($!)", 1 if $ret == -1;
                 my $exit_code = $? >> 8;
@@ -11579,11 +11601,11 @@ subtest Jenny => sub {
             Brocken::Jenny::Linker::ELF64->new();
     SKIP: {
             skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-            my $output_file = './fbat_test' . $platform->bin_ext;
+            my $output_file = 'fbat_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Float battery binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            my $ret = system($cmd);
+            my $ret = system { $cmd } $cmd;
             SKIP: {
                 skip "system() failed to spawn ($!)", 1 if $ret == -1;
                 my $exit_code = $? >> 8;
@@ -11680,7 +11702,7 @@ subtest Jenny => sub {
             Brocken::Jenny::Linker::ELF64->new();
     SKIP: {
             skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-            my $output_file = './fum_test' . $platform->bin_ext;
+            my $output_file = 'fum_test' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Float unary/minmax binary exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
@@ -11692,7 +11714,7 @@ subtest Jenny => sub {
                 diag 'Float Unary ELF header + phdrs: ' . unpack( 'H*', $elf_data );
                 diag 'Float Unary bytes: ' . unpack( 'H*', $bytes );
             }
-            my $ret = system($cmd);
+            my $ret = system { $cmd } $cmd;
             SKIP: {
                 skip "system() failed to spawn ($!)", 1 if $ret == -1;
                 my $exit_code = $? >> 8;
@@ -11722,7 +11744,7 @@ subtest Jenny => sub {
         ok( length( $res->{body} ) > 0, 'Generated Wasm memory bytes' );
 
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './mem_test.wasm';
+        my $output_file = 'mem_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm memory file exists' );
 
@@ -11769,7 +11791,7 @@ subtest Jenny => sub {
         ok( length( $res->{body} ) > 0, 'Generated Wasm box/unbox bytes' );
 
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = './box_test.wasm';
+        my $output_file = 'box_test.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm box/unbox file exists' );
 
@@ -12446,7 +12468,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 constant bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_const.wasm';
+            my $output_file = 'i128_const.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 constant file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12471,7 +12493,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 add bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_add.wasm';
+            my $output_file = 'i128_add.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 add file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12495,7 +12517,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 sub bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_sub.wasm';
+            my $output_file = 'i128_sub.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 sub file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12519,7 +12541,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 and bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_and.wasm';
+            my $output_file = 'i128_and.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 and file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12543,7 +12565,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 or bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_or.wasm';
+            my $output_file = 'i128_or.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 or file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12567,7 +12589,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 xor bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_xor.wasm';
+            my $output_file = 'i128_xor.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 xor file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12591,7 +12613,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 shl bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_shl.wasm';
+            my $output_file = 'i128_shl.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 shl file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12615,7 +12637,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 lshr bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_lshr.wasm';
+            my $output_file = 'i128_lshr.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 lshr file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12639,7 +12661,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 ashr bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_ashr.wasm';
+            my $output_file = 'i128_ashr.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 ashr file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12663,7 +12685,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 mul bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_mul.wasm';
+            my $output_file = 'i128_mul.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 mul file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12687,7 +12709,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 div bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_div.wasm';
+            my $output_file = 'i128_div.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 div file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12711,7 +12733,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, 'Generated Wasm i128 rem bytes' );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = './i128_rem.wasm';
+            my $output_file = 'i128_rem.wasm';
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, 'Wasm i128 rem file exists' );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -12726,7 +12748,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
 subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
     my $platform = Brocken::Katsuro::Platform::parse();
     SKIP: {
-        skip 'Execution test only supported on native hosts', 24 unless $platform->is_native;
+        skip 'Execution test only supported on native hosts', 57 unless $platform->is_native;
         # Test 1: constant i128 return (42)
         {
             my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
@@ -12743,14 +12765,10 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
                 = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
                 $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
                 Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './i128_const_native' . $platform->bin_ext;
+            my $output_file = 'i128_const_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 constant file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 constant returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 constant returned 42 on ' . $platform->friendly );
         }
         # Test 2: i128 add (40 + 2 = 42)
         {
@@ -12772,11 +12790,11 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
                 = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
                 $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
                 Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './i128_add_native' . $platform->bin_ext;
+            my $output_file = 'i128_add_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 add file exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Native i128 add (40+2) returned 42 on ' . $platform->friendly );
             unlink $output_file if -e $output_file;
@@ -12801,11 +12819,11 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
                 = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
                 $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
                 Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './i128_shl_native' . $platform->bin_ext;
+            my $output_file = 'i128_shl_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 shl file exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Native i128 shl (21<<1) returned 42 on ' . $platform->friendly );
             unlink $output_file if -e $output_file;
@@ -12830,11 +12848,11 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
                 = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
                 $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
                 Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './i128_mul_native' . $platform->bin_ext;
+            my $output_file = 'i128_mul_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 mul file exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Native i128 mul (21*2) returned 42 on ' . $platform->friendly );
             unlink $output_file if -e $output_file;
@@ -12859,11 +12877,11 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
                 = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
                 $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
                 Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './i128_lshr_native' . $platform->bin_ext;
+            my $output_file = 'i128_lshr_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 lshr file exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Native i128 lshr (84>>1) returned 42 on ' . $platform->friendly );
             unlink $output_file if -e $output_file;
@@ -12888,11 +12906,11 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
                 = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
                 $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
                 Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './i128_ashr_native' . $platform->bin_ext;
+            my $output_file = 'i128_ashr_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 ashr file exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Native i128 ashr (84>>1) returned 42 on ' . $platform->friendly );
             unlink $output_file if -e $output_file;
@@ -12917,11 +12935,11 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
                 = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
                 $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
                 Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './i128_div_native' . $platform->bin_ext;
+            my $output_file = 'i128_div_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 div file exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 21, 'Native i128 div (42/2) returned 21 on ' . $platform->friendly );
             unlink $output_file if -e $output_file;
@@ -12946,13 +12964,332 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
                 = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
                 $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
                 Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = './i128_rem_native' . $platform->bin_ext;
+            my $output_file = 'i128_rem_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 rem file exists' );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, 1, 'Native i128 rem (21%10) returned 1 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 8: i128 add with carry chain (-1 + 43 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_add(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => -1 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 43 ),
+                '%r'
+            ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 carry add bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_carry_add_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 carry add file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'Native i128 carry add (-1+43) returned 42 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 9: i128 sub with borrow (0 - 1 = -1)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_sub(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 5 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 3 ),
+                '%r'
+            ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 sub (5-3) bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_sub_5_3_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 sub (5-3) file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 2, 'Native i128 sub (5-3) returned 2 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 9b: i128 sub with borrow (0 - 1 = -1)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_sub(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 0 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 1 ),
+                '%r'
+            ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 borrow sub bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_borrow_sub_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 borrow sub file exists' );
+            my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 255, 'Native i128 borrow sub (0-1) returned 255 on ' . $platform->friendly );
+            #~ unlink $output_file if -e $output_file;
+        }
+        # Test 10: i128 mul (7 * 6 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret($builder->build_mul(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 7 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 6 ),
+                '%r'
+            ));
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 edge mul bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_edge_mul_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 edge mul file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'Native i128 edge mul (7*6) returned 42 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 11: i128 div (100 / 3 = 33)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret($builder->build_div(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 100 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 3 ),
+                '%r'
+            ));
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 edge div bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_edge_div_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 edge div file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 33, 'Native i128 edge div (100/3) returned 33 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 12: i128 rem (100 % 7 = 2)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret($builder->build_rem(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 100 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 7 ),
+                '%r'
+            ));
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 edge rem bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_edge_rem_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 edge rem file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 2, 'Native i128 edge rem (100%7) returned 2 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 13: i128 sub with negative rhs (5 - (-1) = 6)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_sub(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 5 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => -1 ),
+                '%r'
+            ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 sub negative rhs bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_sub_neg_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 sub negative rhs file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 6, 'Native i128 sub (5 - (-1)) returned 6 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 14: i128 add with carry through hi ((-1) + 2 = 1)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_add(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => -1 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 2 ),
+                '%r'
+            ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 add carry hi bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_add_carry_hi_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 add carry hi file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 1, 'Native i128 add ((-1) + 2) returned 1 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 15: i128 and ((-1) & 42 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_and(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => -1 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ),
+                '%r'
+            ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 and bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_and_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 and file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'Native i128 and (-1 & 42) returned 42 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 16: i128 or (0 | 42 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_or(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 0 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ),
+                '%r'
+            ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 or bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_or_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 or file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'Native i128 or (0 | 42) returned 42 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 17: i128 xor (42 xor 0 = 42)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret( $builder->build_xor(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 0 ),
+                '%r'
+            ) );
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 xor bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = 'i128_xor_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 xor file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system { $cmd } $cmd;
+            my $exit_code = $? >> 8;
+            is( $exit_code, 42, 'Native i128 xor (42 xor 0) returned 42 on ' . $platform->friendly );
             unlink $output_file if -e $output_file;
         }
     };
@@ -13003,7 +13340,7 @@ subtest 'Jenny::Codegen i128 ICmp (Cross-Platform)' => sub {
             my $res     = $codegen->emit_function($func);
             ok( length( $res->{body} ) > 0, "Generated Wasm i128 icmp $desc bytes" );
             my $linker      = Brocken::Jenny::Linker::Wasm->new();
-            my $output_file = "./i128_icmp_$pred.wasm";
+            my $output_file = "i128_icmp_$pred.wasm";
             $linker->write_executable( $output_file, $res, $platform );
             ok( -e $output_file, "Wasm i128 icmp $desc file exists" );
             my $output = qx["$wasmtime_path" run --invoke main $output_file];
@@ -13064,11 +13401,11 @@ subtest 'Jenny::Codegen i128 ICmp (Native)' => sub {
                 = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
                 $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
                 Brocken::Jenny::Linker::ELF64->new();
-            my $output_file = "./i128_icmp_${pred}_native" . $platform->bin_ext;
+            my $output_file = "i128_icmp_${pred}_native" . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, "Native i128 icmp $desc file exists" );
             my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system($cmd);
+            system { $cmd } $cmd;
             my $exit_code = $? >> 8;
             is( $exit_code, $expected ? 42 : 0, "Native i128 icmp $desc returned " . ($expected ? 42 : 0) . " on " . $platform->friendly );
             unlink $output_file if -e $output_file;
