@@ -19,9 +19,24 @@ Currently, `Brocken::Jenny` uses hardcoded byte stubs. We need a systematic way 
 SSA uses infinite virtual registers; hardware does not.
 - [x] Design Register Allocator interface (vreg_map in _encode).
 - [x] Implement Linear Scan Register Allocator.
-- [ ] Handle calling conventions (spilling, move-coalescing).
-- [ ] Integrate `Katsuro::Platform::ABI`.
-- [ ] 128bit numerics
+- [ ] **Calling conventions (spilling, move-coalescing, stack frame)**
+  - [ ] Move coalescing — remove redundant `mv`/`mov` where src and dst end up in same phys reg
+  - [ ] Proper stack frame layout — unified frame size (callee saves + spills + allocas + alignment), prologue allocation, epilogue deallocation, frame pointer setup (x29/rbp)
+  - [ ] Spill slot offsets relative to actual stack/frame pointer (currently from 0)
+  - [ ] Multi-block liveness analysis — CFG-aware live ranges instead of global linear index
+  - [ ] Leaf function optimization — skip callee-save save/restore for leaf functions (already detected for ARM64 x30, extend fully)
+  - [ ] Caller-save register handling — teach allocator that `call_func` clobbers caller-save regs; insert spill/reload around calls or prefer callee-save for long-lived values
+  - [ ] Floating-point callee-save on X86_64 — save/restore xmm6-xmm15 (SysV ABI); ARM64 already handles v8-v15
+  - [ ] RISCV64 prologue/epilogue integration with allocator's `used_callee` list
+- [ ] **Integrate `Katsuro::Platform::ABI`** — use ABI queries for arg/ret assignment (pair registers for wide types)
+- [ ] **128-bit numerics** (full i128 support across all targets)
+  - [ ] i128 call arguments — split i128 args into lo/hi and use two consecutive arg registers
+  - [ ] i128 entry block parameters — split i128 params into lo/hi vregs from two consecutive phys regs
+  - [ ] Signed i128 div/rem — absolute-value-and-adjust for ARM64, RISCV64, Wasm (X86_64 uses libgcc)
+  - [ ] i128 `min`/`max` — add to ARM64/RISCV64/Wasm i128 handling, or remove from X86_64 for consistency
+  - [ ] i128 ABI queries — `param_pair_registers()` or equivalent in `Platform::ABI` for wide types
+  - [ ] Endianness — document or handle big-endian targets (aarch64_be) for i128 load/store
+  - [ ] Large-value i128 tests — test values >2^64 to exercise hi-part arithmetic and carry chains
 
 ## Phase 3: The Frontend (Parser & AST)
 We shouldn't be writing IR by hand in tests forever.
