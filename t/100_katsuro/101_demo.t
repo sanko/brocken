@@ -4541,6 +4541,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 }
                             }
                             elsif ($opcode eq 'div') {
+                                my $rhs_opnd = $self->_lower_opnd($rhs);
+                                if ($rhs_opnd->kind eq 'imm') {
+                                    my $r = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_dv', type => $inst->type);
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r, $rhs_opnd], comment => 'div rhs'));
+                                    $rhs_opnd = $r;
+                                }
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mv',
@@ -4551,12 +4557,18 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'udiv',
-                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        operands => [ $dst, $rhs_opnd ],
                                         comment  => 'udiv'
                                     )
                                 );
                             }
                             elsif ($opcode eq 'rem') {
+                                my $rhs_opnd = $self->_lower_opnd($rhs);
+                                if ($rhs_opnd->kind eq 'imm') {
+                                    my $r = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_rm', type => $inst->type);
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r, $rhs_opnd], comment => 'rem rhs'));
+                                    $rhs_opnd = $r;
+                                }
                                 my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type
                                 );
@@ -4570,14 +4582,14 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'udiv',
-                                        operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                        operands => [ $tmp, $rhs_opnd ],
                                         comment  => 'udiv (rem)'
                                     )
                                 );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mul',
-                                        operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                        operands => [ $tmp, $rhs_opnd ],
                                         comment  => 'mul (rem)'
                                     )
                                 );
@@ -4597,6 +4609,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 );
                             }
                             else {
+                                my $rhs_opnd = $self->_lower_opnd($rhs);
+                                if ($rhs_opnd->kind eq 'imm' && $opcode ne 'add' && $opcode ne 'sub') {
+                                    my $r = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_r', type => $inst->type);
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r, $rhs_opnd], comment => 'rhs'));
+                                    $rhs_opnd = $r;
+                                }
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mv',
@@ -4607,7 +4625,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => $opcode,
-                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        operands => [ $dst, $rhs_opnd ],
                                         comment  => $opcode
                                     )
                                 );
