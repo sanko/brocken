@@ -1309,7 +1309,30 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* } = ();
             my @used_callee = sort keys %callee_seen;
-            return $self->_encode( $mf, \%assignment, \@used_callee );
+            my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
+            return $bytes;
+        }
+
+        # Emit multiple functions with cross-function call fixups
+        method emit_functions($ir_funcs) {
+            my @result;
+            for my $func ($ir_funcs->@*) {
+                my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+                my $mf      = $lowerer->lower($func);
+                my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
+                my $int_res = $alloc->allocate( $mf, $platform, 0 );
+                $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
+                my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+                $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
+                my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+                my %callee_seen;
+                @callee_seen{ $int_res->{used_callee}->@* } = ();
+                @callee_seen{ $fp_res->{used_callee}->@* } = ();
+                my @used_callee = sort keys %callee_seen;
+                my ($bytes, $func_fixups) = $self->_encode( $mf, \%assignment, \@used_callee );
+                push @result, { name => $func->name, bytes => $bytes, fixups => $func_fixups };
+            }
+            return \@result;
         }
 
         # Encode MIR to x86_64 machine code bytes (registers pre-allocated)
@@ -1334,6 +1357,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
             my %labels;
             my @fixups;
+            my @func_fixups;
             my $current_offset = sub { return length $bytes };
 
             my $mem_modrm = sub ($mem_op, $reg_idx) {
@@ -1716,6 +1740,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $modrm = 0xC0 | ( $did & 7 );
                         $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
                     }
+                    elsif ( $opcode eq 'call_func' ) {
+                        my $func_name = $dst->value;
+                        push @func_fixups, { offset => $current_offset->(), type => 'call_rel32', target => $func_name };
+                        $bytes .= pack( 'C', 0xE8 ) . "\x00\x00\x00\x00";
+                    }
                     elsif ( $opcode eq 'ret' ) {
                         if ( $total_frame > 0 ) {
                             $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 0 << 3 ) | 4, $total_frame );
@@ -1741,7 +1770,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     substr $bytes, $fixup->{offset} + 2, 4, pack( 'V', $rel & 0xFFFFFFFF );
                 }
             }
-            return $bytes;
+            return ( $bytes, \@func_fixups );
         }
     }
 
@@ -1789,7 +1818,29 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     print STDERR ">>> MIR: " . $inst->opcode . " " . join(', ', map { ($_->kind eq 'imm' ? $_->value : $_->kind eq 'virt_reg' ? "virt(${\$_->value})" : $_->kind eq 'label' ? "label(${\$_->value})" : $_->kind eq 'phys_reg' ? "phys(${\$_->value})" : $_->kind eq 'mem' ? 'mem(...)' : '?') } @ops) . "\n";
                 }
             }
-            return $self->_encode( $mf, \%assignment, \@used_callee );
+            my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
+            return $bytes;
+        }
+
+        method emit_functions($ir_funcs) {
+            my @result;
+            for my $func ($ir_funcs->@*) {
+                my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
+                my $mf      = $lowerer->lower($func);
+                my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
+                my $int_res = $alloc->allocate( $mf, $platform, 0 );
+                $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
+                my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+                $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
+                my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+                my %callee_seen;
+                @callee_seen{ $int_res->{used_callee}->@* } = ();
+                @callee_seen{ $fp_res->{used_callee}->@* } = ();
+                my @used_callee = sort keys %callee_seen;
+                my ($bytes, $func_fixups) = $self->_encode( $mf, \%assignment, \@used_callee );
+                push @result, { name => $func->name, bytes => $bytes, fixups => $func_fixups };
+            }
+            return \@result;
         }
 
         method _encode( $mf, $assignment, $used_callee ) {
@@ -1837,6 +1888,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
             my %labels;
             my @fixups;
+            my @func_fixups;
             my $current_offset = sub { return length $bytes };
             for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
@@ -2166,6 +2218,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         $enc |= FP_FMT if $bits > 32;
                         $bytes .= pack( 'V', $enc );
                     }
+                    elsif ( $opcode eq 'call_func' ) {
+                        my $func_name = $dst->value;
+                        push @func_fixups, { offset => $current_offset->(), type => 'call_jal', target => $func_name };
+                        $bytes .= pack( 'V', JAL | ( 1 << 7 ) | 0x6F );
+                    }
                     elsif ( $opcode eq 'ret' ) {
                         if ( $total_frame > 0 ) {
                             $bytes .= pack( 'V', ( ( $total_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
@@ -2207,7 +2264,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
                 }
             }
-            return $bytes;
+            return ( $bytes, \@func_fixups );
         }
     }
 
@@ -2230,13 +2287,55 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     }
                 }
             }
-            return $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type );
+            my ($result, $fixups) = $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type );
+            $result->{fixups} = $fixups if @$fixups;
+            return $result;
+        }
+
+        method emit_functions($ir_funcs) {
+            my @funcs;
+            for my $ir_func ( $ir_funcs->@* ) {
+                my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
+                my $mf      = $lowerer->lower($ir_func);
+                my %ir_types;
+                for my $block ( $ir_func->blocks->@* ) {
+                    for my $inst ( $block->instructions->@* ) {
+                        $ir_types{$inst->name} = $inst->type if $inst->name;
+                    }
+                }
+                for my $mbb ( $mf->blocks->@* ) {
+                    for my $mi ( $mbb->instructions->@* ) {
+                        for my $mo ( $mi->operands->@* ) {
+                            $ir_types{$mo->value} = $mo->type if $mo->kind eq 'virt_reg' && $mo->value && $mo->type;
+                        }
+                    }
+                }
+                my ($result, $fixups) = $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type );
+                my @param_valtypes;
+                for my $p ( $ir_func->params->@* ) {
+                    push @param_valtypes, $self->_wasm_valtype($p->type);
+                }
+                my $locals_size = length( $result->{locals} );
+                my @adjusted_fixups;
+                for my $fx ( $fixups->@* ) {
+                    push @adjusted_fixups, { %$fx, offset => $fx->{offset} + $locals_size };
+                }
+                push @funcs, {
+                    name           => $ir_func->name,
+                    bytes          => $result->{locals} . $result->{body},
+                    fixups         => \@adjusted_fixups,
+                    return_valtype => $result->{return_valtype},
+                    param_valtypes => \@param_valtypes,
+                };
+            }
+            return \@funcs;
         }
 
         method _encode( $mf, $ir_params, $ir_types, $return_type ) {
             my $bytes      = '';
             my %vreg_map   = ();
             my $next_local = scalar( $ir_params->@* );
+            my @func_fixups = ();
 
             # Map parameters to locals 0..N-1
             for my $i ( 0 .. ( $next_local - 1 ) ) {
@@ -2398,6 +2497,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
                         $$buf .= pack( 'C', 0x21 ) . $self->_uleb($lid);
                     }
+                    elsif ( $opcode eq 'call_func' ) {
+                        my $func_name = $ops[0]->value;
+                        my $fixup_pos = length($$buf);
+                        $$buf .= pack( 'C', 0x10 ) . "\x80\x80\x80\x80\x00";    # call + placeholder LEB128
+                        push @func_fixups, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
+                    }
                 }
             }
 
@@ -2449,7 +2554,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             else {
                 $ret_valtype = $return_type ? $self->_wasm_valtype($return_type) : 0x7F;
             }
-            return { body => $bytes . pack( 'C', 0x0B ), locals => $locals_block, num_locals => $next_local, return_valtype => $ret_valtype };
+            return ( { body => $bytes . pack( 'C', 0x0B ), locals => $locals_block, num_locals => $next_local, return_valtype => $ret_valtype }, \@func_fixups );
         }
 
         method _wasm_valtype($ir_type) {
@@ -2487,6 +2592,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             return $out;
         }
     }
+
 
     class Brocken::Jenny::Codegen::ARM64 {
         field $platform : param = Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu');
@@ -2574,7 +2680,29 @@ like ELF, Mach-O, or PE (Jenny::Linker).
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* } = ();
             my @used_callee = sort keys %callee_seen;
-            return $self->_encode( $mf, \%assignment, \@used_callee );
+            my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
+            return $bytes;
+        }
+
+        method emit_functions($ir_funcs) {
+            my @result;
+            for my $func ($ir_funcs->@*) {
+                my $lowerer = Brocken::Jenny::Lowerer::ARM64->new();
+                my $mf      = $lowerer->lower($func);
+                my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
+                my $int_res = $alloc->allocate( $mf, $platform, 0 );
+                $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
+                my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+                $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
+                my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+                my %callee_seen;
+                @callee_seen{ $int_res->{used_callee}->@* } = ();
+                @callee_seen{ $fp_res->{used_callee}->@* } = ();
+                my @used_callee = sort keys %callee_seen;
+                my ($bytes, $func_fixups) = $self->_encode( $mf, \%assignment, \@used_callee );
+                push @result, { name => $func->name, bytes => $bytes, fixups => $func_fixups };
+            }
+            return \@result;
         }
 
         method _encode( $mf, $assignment, $used_callee ) {
@@ -2607,6 +2735,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
 
             my %labels;
             my @fixups;
+            my @func_fixups;
             my $current_offset = sub { return length $bytes };
             for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
@@ -2915,6 +3044,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $base  = $bits == 32 ? FCMP_32 : FCMP_64;
                         $bytes .= pack( 'V', $base | ( $rid << 16 ) | ( $lid << 5 ) );
                     }
+                    elsif ( $opcode eq 'call_func' ) {
+                        my $func_name = $dst->value;
+                        push @func_fixups, { offset => $current_offset->(), type => 'call_bl', target => $func_name };
+                        $bytes .= pack( 'V', 0x94000000 );
+                    }
                     elsif ( $opcode eq 'ret' ) {
                         if ( $total_frame > 0 ) {
                             $bytes .= pack( 'V', ADD_SP | ( ( $total_frame & 0xFFF ) << 10 ) );
@@ -2946,7 +3080,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', $inst );
                 }
             }
-            return $bytes;
+            return ( $bytes, \@func_fixups );
         }
     }
 
@@ -3167,6 +3301,19 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             comment => 'block: ' . $block->name
                         )
                     );
+                }
+                if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
+                    my @arg_regs = qw(rdi rsi rdx rcx r8 r9);
+                    for my $i ( 0 .. $#{$ir_func->params} ) {
+                        my $param = $ir_func->params->[$i];
+                        my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'mov', operands => [$dst, $reg], comment => "param $i from " . $arg_regs[$i]
+                            )
+                        );
+                    }
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
@@ -4019,6 +4166,48 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             );
                         }
                     }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
+                        my $callee = $inst->callee;
+                        my @args = $inst->operands->@*;
+                        my @arg_regs = qw(rdi rsi rdx rcx r8 r9);
+                        for my $i (0 .. $#args) {
+                            my $reg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => $arg_regs[$i]);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'mov', operands => [$reg, $self->_lower_opnd($args[$i])],
+                                    comment => "arg $i to $arg_regs[$i]"
+                                )
+                            );
+                        }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new(kind => 'func', value => $callee->name) ],
+                                comment => "call @" . $callee->name
+                            )
+                        );
+                        if (defined $inst->name) {
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name, type => $inst->type);
+                            if ($inst->type->kind eq 'float') {
+                                my $xmm0 = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'xmm0');
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'fmov', operands => [$dst, $xmm0],
+                                        comment => "retval from xmm0"
+                                    )
+                                );
+                            }
+                            else {
+                                my $rax = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'rax');
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'mov', operands => [$dst, $rax],
+                                        comment => "retval from rax"
+                                    )
+                                );
+                            }
+                        }
+                    }
                 }
                 $mf->add_block($mbb);
             }
@@ -4109,6 +4298,19 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             comment => 'block: ' . $block->name
                         )
                     );
+                }
+                if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
+                    my @arg_regs = qw(x0 x1 x2 x3 x4 x5 x6 x7);
+                    for my $i ( 0 .. $#{$ir_func->params} ) {
+                        my $param = $ir_func->params->[$i];
+                        my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'mov', operands => [$dst, $reg], comment => "param $i from " . $arg_regs[$i]
+                            )
+                        );
+                    }
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
@@ -5013,9 +5215,93 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 );
                             }
                         }
-                        elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
-                            if ( $inst->type->kind ne 'void' ) {
-                                my $val = $inst->operands->[0];
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
+                        my $callee = $inst->callee;
+                        my @args = $inst->operands->@*;
+                        my @arg_regs = qw(x0 x1 x2 x3 x4 x5 x6 x7);
+                        for my $i (0 .. $#args) {
+                            my $reg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => $arg_regs[$i]);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'mov', operands => [$reg, $self->_lower_opnd($args[$i])],
+                                    comment => "arg $i to $arg_regs[$i]"
+                                )
+                            );
+                        }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new(kind => 'func', value => $callee->name) ],
+                                comment => "call @" . $callee->name
+                            )
+                        );
+                        if (defined $inst->name) {
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name, type => $inst->type);
+                            if ($inst->type->kind eq 'float') {
+                                my $d0 = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'd0');
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'fmov', operands => [$dst, $d0],
+                                        comment => "retval from d0"
+                                    )
+                                );
+                            }
+                            else {
+                                my $x0 = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'x0');
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'mov', operands => [$dst, $x0],
+                                        comment => "retval from x0"
+                                    )
+                                );
+                            }
+                        }
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
+                        my $callee = $inst->callee;
+                        my @args = $inst->operands->@*;
+                        my @arg_regs = qw(a0 a1 a2 a3 a4 a5 a6 a7);
+                        for my $i (0 .. $#args) {
+                            my $reg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => $arg_regs[$i]);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode => 'mv', operands => [$reg, $self->_lower_opnd($args[$i])],
+                                    comment => "arg $i to $arg_regs[$i]"
+                                )
+                            );
+                        }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new(kind => 'func', value => $callee->name) ],
+                                comment => "call @" . $callee->name
+                            )
+                        );
+                        if (defined $inst->name) {
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name, type => $inst->type);
+                            if ($inst->type->kind eq 'float') {
+                                my $fa0 = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'fa0');
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'fmov', operands => [$dst, $fa0],
+                                        comment => "retval from fa0"
+                                    )
+                                );
+                            }
+                            else {
+                                my $a0 = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'a0');
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode => 'mv', operands => [$dst, $a0],
+                                        comment => "retval from a0"
+                                    )
+                                );
+                            }
+                        }
+                    }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
+                        if ( $inst->type->kind ne 'void' ) {
+                            my $val = $inst->operands->[0];
                                 if ($inst->type->kind eq 'float') {
                                     my $v0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'v0' );
                                     $mbb->add_instruction(
@@ -5155,6 +5441,19 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             comment => 'block: ' . $block->name
                         )
                     );
+                }
+                if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
+                    my @arg_regs = qw(a0 a1 a2 a3 a4 a5 a6 a7);
+                    for my $i ( 0 .. $#{$ir_func->params} ) {
+                        my $param = $ir_func->params->[$i];
+                        my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode => 'mov', operands => [$dst, $reg], comment => "param $i from " . $arg_regs[$i]
+                            )
+                        );
+                    }
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
@@ -6984,6 +7283,28 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                             )
                         );
                     }
+                    elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
+                        my $callee = $inst->callee;
+                        for my $arg ( $inst->operands->@* ) {
+                            $mbb->add_instruction( $self->_wasm_push( $arg, 'arg' ) );
+                        }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $callee->name ) ],
+                                comment  => "call @" . $callee->name
+                            )
+                        );
+                        if ( defined $inst->name ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'local_set',
+                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type ) ],
+                                    comment  => 'retval to ' . $inst->name
+                                )
+                            );
+                        }
+                    }
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                         if ( $inst->type->kind ne 'void' ) {
                             my $val = $inst->operands->[0];
@@ -7626,7 +7947,33 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
         }
         method image_base () { return hex('100000000'); }    # 64-bit macOS default image base (4GB)
 
-        method write_executable ( $output_file, $code_bytes, $platform, $shared = false, $debug_bytes = undef ) {
+        method write_executable ( $output_file, $code_data, $platform, $shared = false, $debug_bytes = undef ) {
+
+            # Multi-function support: if $code_data is an arrayref of {name, bytes, fixups},
+            # concatenate all blobs, compute function offsets, and track external fixups.
+            my @func_fixups;
+            my %func_offsets;
+            my $code_bytes;
+            if ( ref $code_data eq 'ARRAY' ) {
+                my @blobs;
+                my $offset = 0;
+                for my $fd ( $code_data->@* ) {
+                    $func_offsets{ $fd->{name} } = $offset;
+                    push @blobs, $fd->{bytes};
+                    for my $fixup ( $fd->{fixups}->@* ) {
+                        push @func_fixups, { %$fixup, base_offset => $offset };
+                    }
+                    $offset += length( $fd->{bytes} );
+                }
+                $code_bytes = join( '', @blobs );
+                for my $name ( $self->exported_funcs->@* ) {
+                    $self->labels->{"E_$name"} //= $func_offsets{$name};
+                }
+            }
+            else {
+                $code_bytes = $code_data;
+            }
+
             my $full_code    = ref $code_bytes eq 'HASH' ? $code_bytes->{binary}                        : $code_bytes;
             my $writable_off = ref $code_bytes eq 'HASH' ? ( $code_bytes->{writable_data_offset} // 0 ) : 0;
             my $text_raw     = $writable_off             ? substr( $full_code, 0, $writable_off )       : $full_code;
@@ -7647,9 +7994,10 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                     # - movk x16, #sys_high, lsl #16
                     # - svc #0x80
                     # - brk #0 (Safety crash)
-                    my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 16;
-                    my $movk = 0xF2A00000 | ( ( ( $exit_sys >> 16 ) & 0xffff ) << 5 ) | 16;
-                    $entry_stub = pack( 'V5', 0x94000005, $movz, $movk, 0xD4001001, 0xD4200000 );
+                    my $movz  = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 16;
+                    my $movk  = 0xF2A00000 | ( ( ( $exit_sys >> 16 ) & 0xffff ) << 5 ) | 16;
+                    my $bl    = 0x94000000 | ( ( ( 20 + ( $func_offsets{main} // 0 ) ) >> 2 ) & 0x3FFFFFF );
+                    $entry_stub = pack( 'V5', $bl, $movz, $movk, 0xD4001001, 0xD4200000 );
                 }
                 else {
                     # x86_64 (Intel Mac) native exit stub with 16-byte stack alignment:
@@ -7660,13 +8008,42 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                     # - syscall:        0f 05
                     # - ud2:            0f 0b
                     $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );
-                    $entry_stub .= pack( 'C V', 0xE8, 12 );
+                    $entry_stub .= pack( 'C V', 0xE8, 12 + ( $func_offsets{main} // 0 ) );
                     $entry_stub .= pack( 'C3',  0x48, 0x89, 0xC7 );
                     $entry_stub .= pack( 'C V', 0xB8, $exit_sys );
                     $entry_stub .= pack( 'C2',  0x0F, 0x05 );
                     $entry_stub .= pack( 'C2',  0x0F, 0x0B );
                 }
                 $text = $entry_stub . $text_raw;
+
+                # Resolve cross-function call fixups at link time
+                my $entry_size = length($entry_stub);
+                for my $ff (@func_fixups) {
+                    my $target_off = $func_offsets{ $ff->{target} };
+                    die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
+                    my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
+                    if ( $ff->{type} eq 'call_rel32' ) {
+                        my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
+                        substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+                    }
+                    elsif ( $ff->{type} eq 'call_bl' ) {
+                        my $rel  = ( $entry_size + $target_off ) - $src_pos;
+                        my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                        $word    = ( $word & 0xFC000000 ) | ( ( $rel >> 2 ) & 0x3FFFFFF );
+                        substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                    }
+                    elsif ( $ff->{type} eq 'call_jal' ) {
+                        my $rel  = ( $entry_size + $target_off ) - $src_pos;
+                        my $half = $rel >> 1;
+                        my $enc  = ( ( $half >> 19 ) & 1 ) << 31
+                                 | ( ( $half & 0x3FF ) << 21 )
+                                 | ( ( $half >> 10 ) & 1 ) << 20
+                                 | ( ( $half >> 11 ) & 0xFF ) << 12;
+                        my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                        $word    = ( $word & 0x00000FFF ) | $enc;
+                        substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                    }
+                }
             }
 
             # Automatically calculate layout if it wasn't called beforehand
@@ -8135,10 +8512,36 @@ We enable several modern Windows security features:
 
 =cut
 
-        method write_executable ( $output_file, $code_bytes, $platform, $passed_argument = undef, $debug_bytes = undef ) {
+        method write_executable ( $output_file, $code_data, $platform, $passed_argument = undef, $debug_bytes = undef ) {
 
             # Ensure $platform is normalized into a platform object if a raw string is passed
             $platform = Brocken::Katsuro::Platform::parse($platform) unless ref $platform;
+
+            # Multi-function support: if $code_data is an arrayref of {name, bytes, fixups},
+            # concatenate all blobs, compute function offsets, and track external fixups.
+            my @func_fixups;
+            my %func_offsets;
+            my $code_bytes;
+            if ( ref $code_data eq 'ARRAY' ) {
+                my @blobs;
+                my $offset = 0;
+                for my $fd ( $code_data->@* ) {
+                    $func_offsets{ $fd->{name} } = $offset;
+                    push @blobs, $fd->{bytes};
+                    for my $fixup ( $fd->{fixups}->@* ) {
+                        push @func_fixups, { %$fixup, base_offset => $offset };
+                    }
+                    $offset += length( $fd->{bytes} );
+                }
+                $code_bytes = join( '', @blobs );
+                for my $name ( $self->exported_funcs->@* ) {
+                    $self->labels->{"E_$name"} //= $func_offsets{$name};
+                }
+            }
+            else {
+                $code_bytes = $code_data;
+            }
+
             my $full_code    = ref $code_bytes eq 'HASH' ? $code_bytes->{binary}                        : $code_bytes;
             my $writable_off = ref $code_bytes eq 'HASH' ? ( $code_bytes->{writable_data_offset} // 0 ) : 0;
             my $text_raw     = $writable_off             ? substr( $full_code, 0, $writable_off )       : $full_code;
@@ -8155,7 +8558,8 @@ We enable several modern Windows security features:
                     # - ldp x29, x30, [sp], #16
                     # - uxtb w0, w0  (truncate exit code to 8 bits)
                     # - ret
-                    $entry_stub = pack( 'V6', 0xA9BF7BFD, 0x910003FD, 0x94000004, 0xA8C17BFD, 0x53001C00, 0xD65F03C0 );
+                    my $bl = 0x94000000 | ( ( ( 8 + ( $func_offsets{main} // 0 ) ) >> 2 ) & 0x3FFFFFF );
+                    $entry_stub = pack( 'V6', 0xA9BF7BFD, 0x910003FD, $bl, 0xA8C17BFD, 0x53001C00, 0xD65F03C0 );
                 }
                 else {
                     # Windows x86_64 Entry Stub (with shadow space):
@@ -8165,12 +8569,41 @@ We enable several modern Windows security features:
                     # - movzx eax, al  (truncate exit code to 8 bits)
                     # - ret
                     $entry_stub = pack( 'C4', 0x48, 0x83, 0xEC, 0x28 );
-                    $entry_stub .= pack( 'C V', 0xE8, 8 );
+                    $entry_stub .= pack( 'C V', 0xE8, 8 + ( $func_offsets{main} // 0 ) );
                     $entry_stub .= pack( 'C4',  0x48, 0x83, 0xC4, 0x28 );
                     $entry_stub .= pack( 'C3',  0x0F, 0xB6, 0xC0 );
                     $entry_stub .= pack( 'C',   0xC3 );
                 }
                 $text = $entry_stub . $text_raw;
+
+                # Resolve cross-function call fixups at link time
+                my $entry_size = length($entry_stub);
+                for my $ff (@func_fixups) {
+                    my $target_off = $func_offsets{ $ff->{target} };
+                    die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
+                    my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
+                    if ( $ff->{type} eq 'call_rel32' ) {
+                        my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
+                        substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+                    }
+                    elsif ( $ff->{type} eq 'call_bl' ) {
+                        my $rel  = ( $entry_size + $target_off ) - $src_pos;
+                        my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                        $word    = ( $word & 0xFC000000 ) | ( ( $rel >> 2 ) & 0x3FFFFFF );
+                        substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                    }
+                    elsif ( $ff->{type} eq 'call_jal' ) {
+                        my $rel  = ( $entry_size + $target_off ) - $src_pos;
+                        my $half = $rel >> 1;
+                        my $enc  = ( ( $half >> 19 ) & 1 ) << 31
+                                 | ( ( $half & 0x3FF ) << 21 )
+                                 | ( ( $half >> 10 ) & 1 ) << 20
+                                 | ( ( $half >> 11 ) & 0xFF ) << 12;
+                        my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                        $word    = ( $word & 0x00000FFF ) | $enc;
+                        substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                    }
+                }
             }
             my $text_bytes = $text;
             my $has_data   = length($data_bytes) > 0;
@@ -8565,10 +8998,35 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         }
         method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
 
-        method write_executable ( $output_file, $code_bytes, $platform, $shared = false, $debug_bytes = undef ) {
+        method write_executable ( $output_file, $code_data, $platform, $shared = false, $debug_bytes = undef ) {
 
             # Ensure $platform is normalized into a platform object if a raw string is passed
             $platform = Brocken::Katsuro::Platform::parse($platform) unless ref $platform;
+
+            # Multi-function support: if $code_data is an arrayref of {name, bytes, fixups},
+            # concatenate all blobs, compute function offsets, and track external fixups.
+            my @func_fixups;
+            my %func_offsets;
+            my $code_bytes;
+            if ( ref $code_data eq 'ARRAY' ) {
+                my @blobs;
+                my $offset = 0;
+                for my $fd ( $code_data->@* ) {
+                    $func_offsets{ $fd->{name} } = $offset;
+                    push @blobs, $fd->{bytes};
+                    for my $fixup ( $fd->{fixups}->@* ) {
+                        push @func_fixups, { %$fixup, base_offset => $offset };
+                    }
+                    $offset += length( $fd->{bytes} );
+                }
+                $code_bytes = join( '', @blobs );
+                for my $name ( $self->exported_funcs->@* ) {
+                    $self->labels->{"E_$name"} //= $func_offsets{$name};
+                }
+            }
+            else {
+                $code_bytes = $code_data;
+            }
 
             # Automatically calculate layout if it wasn't called beforehand
             if ( !defined $self->layout ) {
@@ -8607,7 +9065,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     my $pimm    = ( $got_exit & 0xFFF ) >> 3;
                     my $ldr     = 0xF9400000 | ( $pimm << 10 ) | ( 8 << 5 ) | 8;
                     my $blr     = 0xD63F0100;
-                    my $bl_main = 0x94000005;
+                    my $bl_main = 0x94000000 | ( ( ( 20 + ( $func_offsets{main} // 0 ) ) >> 2 ) & 0x3FFFFFF );
                     my $brk     = 0xD4200000;
                     $entry_stub = pack( 'V5', $bl_main, $adrp, $ldr, $blr, $brk );
                 }
@@ -8627,7 +9085,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     my $auipc      = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;
                     my $ld         = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
                     my $jalr       = ( 0 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 0 << 7 ) | 0x67;
-                    my $jal_offset = 20;
+                    my $jal_offset = 20 + ( $func_offsets{main} // 0 );
                     my $halfword   = $jal_offset >> 1;
                     my $jal_imm = ( ( $halfword >> 19 ) & 1 ) << 31 | ( ( $halfword & 0x3FF ) << 21 ) | ( ( $halfword >> 10 ) & 1 ) << 20
                         | ( $halfword & 0xFF000 );
@@ -8641,13 +9099,43 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     my $got_exit = $self->import_rva('exit');
                     my $next_ip  = $text_rva + 18;
                     my $rel32    = $got_exit - $next_ip;
+                    my $main_rel = 11 + ( $func_offsets{main} // 0 );
                     $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );    # and rsp, -16
-                    $entry_stub .= pack( 'C V',   0xE8, 11 );              # call main (rel)
+                    $entry_stub .= pack( 'C V',   0xE8, $main_rel );       # call main (rel)
                     $entry_stub .= pack( 'C3',    0x48, 0x89, 0xC7 );      # mov rdi, rax
                     $entry_stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );    # call [rip + got_exit]
                     $entry_stub .= pack( 'C2',    0x0F, 0x0B );            # ud2 (Invalid instruction safety)
                 }
                 $text = $entry_stub . $code_bytes;
+
+                # Resolve cross-function call fixups at link time
+                my $entry_size = length($entry_stub);
+                for my $ff (@func_fixups) {
+                    my $target_off = $func_offsets{ $ff->{target} };
+                    die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
+                    my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
+                    if ( $ff->{type} eq 'call_rel32' ) {
+                        my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
+                        substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+                    }
+                    elsif ( $ff->{type} eq 'call_bl' ) {
+                        my $rel  = ( $entry_size + $target_off ) - $src_pos;
+                        my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                        $word    = ( $word & 0xFC000000 ) | ( ( $rel >> 2 ) & 0x3FFFFFF );
+                        substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                    }
+                    elsif ( $ff->{type} eq 'call_jal' ) {
+                        my $rel  = ( $entry_size + $target_off ) - $src_pos;
+                        my $half = $rel >> 1;
+                        my $enc  = ( ( $half >> 19 ) & 1 ) << 31
+                                 | ( ( $half & 0x3FF ) << 21 )
+                                 | ( ( $half >> 10 ) & 1 ) << 20
+                                 | ( ( $half >> 11 ) & 0xFF ) << 12;
+                        my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                        $word    = ( $word & 0x00000FFF ) | $enc;
+                        substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                    }
+                }
             }
 
             # Deterministic OSABI and ABI notes explicitly defined per platform.
@@ -9657,13 +10145,114 @@ subtest Katsuro => sub {
 class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
 
     method write_executable ( $output_file, $codegen_output, $platform ) {
+
+        if ( ref $codegen_output eq 'ARRAY' ) {
+            # Multi-function: array of {name, bytes, fixups, return_valtype}
+            my @funcs = $codegen_output->@*;
+            my %func_offsets;
+
+            # Assign function indices and record type info
+            my @func_data;
+            for my $fd (@funcs) {
+                $func_offsets{ $fd->{name} } = scalar(@func_data);
+                push @func_data, {
+                    name           => $fd->{name},
+                    bytes          => $fd->{bytes},
+                    fixups         => $fd->{fixups} // [],
+                    return_valtype => $fd->{return_valtype} // 0x7F,
+                    param_valtypes => $fd->{param_valtypes} // [],
+                };
+            }
+
+            # Resolve cross-function call fixups
+            for my $fd (@func_data) {
+                for my $fixup ( $fd->{fixups}->@* ) {
+                    next unless $fixup->{type} eq 'call_idx';
+                    my $target_idx = $func_offsets{ $fixup->{target} };
+                    die "Wasm write_executable: undefined function '$fixup->{target}'" unless defined $target_idx;
+                    my $leb = $self->_uleb($target_idx);
+                    my $pos = $fixup->{offset};
+                    # Replace the 5-byte placeholder with actual LEB128; string shrinks
+                    substr( $fd->{bytes}, $pos, 5, $leb );
+                }
+            }
+
+            # Build type types (deduplicate by param + return types)
+            my %type_map;
+            my @type_table;
+            for my $fd (@func_data) {
+                my $params = join(',', map { $_ // '0x7F' } $fd->{param_valtypes}->@*);
+                my $ret    = ref $fd->{return_valtype} eq 'ARRAY' ? join(',', @{ $fd->{return_valtype} }) : $fd->{return_valtype};
+                my $key    = "$params|$ret";
+                if ( !exists $type_map{$key} ) {
+                    $type_map{$key} = scalar @type_table;
+                    push @type_table, $fd;
+                }
+            }
+
+            # Type Section (ID 1)
+            my $type_sec = '';
+            for my $fd (@type_table) {
+                my $params = '';
+                for my $vt ( $fd->{param_valtypes}->@* ) {
+                    $params .= pack( 'C', $vt // 0x7F );
+                }
+                my $rt = $fd->{return_valtype};
+                if (ref $rt eq 'ARRAY') {
+                    $type_sec .= pack('C', 0x60) . $self->_uleb( scalar $fd->{param_valtypes}->@* ) . $params . pack('C', scalar $rt->@*) . pack('C*', $rt->@*);
+                }
+                elsif ($rt eq 'void') {
+                    $type_sec .= pack('C', 0x60) . $self->_uleb( scalar $fd->{param_valtypes}->@* ) . $params . "\x00";
+                }
+                else {
+                    $type_sec .= pack('C', 0x60) . $self->_uleb( scalar $fd->{param_valtypes}->@* ) . $params . "\x01" . pack('C', $rt);
+                }
+            }
+            $type_sec = pack('C', 1) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb( scalar @type_table ) . $type_sec;
+
+            # Memory Section (ID 5): 1 page (64KB)
+            my $mem_content = pack('C', 1) . pack('C', 0) . $self->_uleb(1);
+            my $mem_sec     = pack('C', 5) . $self->_uleb( length($mem_content) ) . $mem_content;
+
+            # Function Section (ID 3) — map each function to its type
+            my $func_sec = '';
+            for my $fd (@func_data) {
+                my $params = join(',', map { $_ // '0x7F' } $fd->{param_valtypes}->@*);
+                my $ret    = ref $fd->{return_valtype} eq 'ARRAY' ? join(',', @{ $fd->{return_valtype} }) : $fd->{return_valtype};
+                my $key    = "$params|$ret";
+                $func_sec .= $self->_uleb( $type_map{$key} );
+            }
+            $func_sec = pack('C', 3) . $self->_uleb( length($func_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $func_sec;
+
+            # Export Section (ID 7) — export all named functions
+            my $export_sec = '';
+            for my $i ( 0 .. $#func_data ) {
+                my $name = $func_data[$i]{name};
+                $export_sec .= $self->_uleb( length($name) ) . $name . pack('C', 0x00) . $self->_uleb($i);
+            }
+            $export_sec = pack('C', 7) . $self->_uleb( length($export_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $export_sec;
+
+            # Code Section (ID 10)
+            my $code_sec = '';
+            for my $fd (@func_data) {
+                $code_sec .= $self->_uleb( length($fd->{bytes}) ) . $fd->{bytes};
+            }
+            $code_sec = pack('C', 10) . $self->_uleb( length($code_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $code_sec;
+
+            open my $fh, '>:raw', $output_file or die $!;
+            print $fh "\0asm\x01\x00\x00\x00";    # Magic + Version
+            print $fh $type_sec, $func_sec, $mem_sec, $export_sec, $code_sec;
+            close $fh;
+            return;
+        }
+
+        # Single-function path (backward compat with hashref from emit_function)
         my $body     = $codegen_output->{body};
         my $locals   = $codegen_output->{locals};
-        my $name     = 'main';                      # Hardcoded for now
+        my $name     = 'main';
         my $type_idx = 0;
         my $func_idx = 0;
 
-        # Type Section (ID 1): () -> return_type
         my $ret_valtype = $codegen_output->{return_valtype} // 0x7F;
         my $type_sec;
         if (ref $ret_valtype eq 'ARRAY') {
@@ -9678,7 +10267,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb(1) . $type_sec;
 
         # Memory Section (ID 5): 1 page (64KB)
-        my $mem_content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb(1);    # count=1, flags=0(no max), initial=1
+        my $mem_content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb(1);
         my $mem_sec     = pack( 'C', 5 ) . $self->_uleb( length($mem_content) ) . $mem_content;
 
         # Function Section (ID 3)
@@ -9693,8 +10282,9 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         my $code_item = $self->_uleb( length($locals) + length($body) ) . $locals . $body;
         my $code_sec  = $self->_uleb(1) . $code_item;
         $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_sec) ) . $code_sec;
+
         open my $fh, '>:raw', $output_file or die $!;
-        print $fh "\0asm\x01\x00\x00\x00";    # Magic + Version
+        print $fh "\0asm\x01\x00\x00\x00";
         print $fh $type_sec, $func_sec, $mem_sec, $export_sec, $code_sec;
         close $fh;
     }
@@ -13350,6 +13940,175 @@ subtest 'Jenny::Codegen i128 ICmp (Native)' => sub {
         }
     };
 };
+subtest 'Jenny::Codegen Multi-Function Calls' => sub {
+    my $host = Brocken::Katsuro::Platform::parse();
+    my $b    = Brocken::Lindsay::IR::Builder->new();
+
+    my $p = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => 'x' );
+    my $helper = Brocken::Lindsay::IR::Function->new(
+        name => 'helper', return_type => Brocken::Lindsay::IR::Type::i32(), params => [$p] );
+    $b->position_at_end( $helper->append_block('entry') );
+    $b->build_ret(
+        $b->build_add( $p, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 1 ) )
+    );
+
+    my $main = Brocken::Lindsay::IR::Function->new(
+        name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+    $b->position_at_end( $main->append_block('entry') );
+    $b->build_ret(
+        $b->build_call( $helper,
+            [Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 41 )] )
+    );
+
+    # Test native (ELF/MachO/PE) backends when running on a supported platform
+    SKIP: {
+        skip 'Multi-function native test only on native hosts', 8 unless $host->is_native;
+
+        my ($codegen, $linker);
+        if ( $host->is_arm64 && $host->is_macos ) {
+            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::MachO->new();
+        }
+        elsif ( $host->is_arm64 && $host->is_windows ) {
+            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::PE->new();
+        }
+        elsif ( $host->is_riscv64 ) {
+            $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::ELF64->new();
+        }
+        elsif ( $host->is_x64 && $host->is_macos ) {
+            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::MachO->new();
+        }
+        elsif ( $host->is_x64 && $host->is_windows ) {
+            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::PE->new();
+        }
+        else {
+            # Default: ELF on x86_64
+            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::ELF64->new();
+        }
+
+        my $funcs = $codegen->emit_functions( [$main, $helper] );
+        is( ref $funcs, 'ARRAY', 'emit_functions returned array ref' );
+        is( scalar $funcs->@*, 2, 'emit_functions returned 2 entries' );
+
+        my $output_file = 'multi_func_native' . $host->bin_ext;
+        $linker->write_executable( $output_file, $funcs, $host );
+        ok( -e $output_file, 'Multi-function binary exists' );
+
+        run_exec( $output_file, expected_exit => 42, platform => $host,
+            name => 'Multi-function helper(41) returned 42 on ' . $host->friendly );
+    };
+
+    # Test Wasm backend (when wasmtime is available)
+    SKIP: {
+        my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
+        chomp $wasmtime_path if $wasmtime_path;
+        skip 'wasmtime not available', 4 unless $wasmtime_path && -f $wasmtime_path;
+
+        my $wasm_platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+        my $codegen       = Brocken::Jenny::Codegen::Wasm->new( platform => $wasm_platform );
+        my $funcs         = $codegen->emit_functions( [$main, $helper] );
+        is( ref $funcs, 'ARRAY', 'Wasm emit_functions returned array ref' );
+        is( scalar $funcs->@*, 2, 'Wasm emit_functions returned 2 entries' );
+
+        my $linker      = Brocken::Jenny::Linker::Wasm->new();
+        my $output_file = 'multi_func_wasm.wasm';
+        $linker->write_executable( $output_file, $funcs, $wasm_platform );
+        ok( -e $output_file, 'Wasm multi-function binary exists' );
+
+        my $output = qx["$wasmtime_path" run --invoke main $output_file];
+        chomp $output;
+        is( $output, 42, 'Wasm multi-function helper(41) returned 42' );
+        unlink $output_file if -e $output_file;
+    };
+};
+
+subtest 'Jenny::Codegen Multi-Function Shared Library' => sub {
+    my $host = Brocken::Katsuro::Platform::parse();
+
+    SKIP: {
+        skip 'Multi-function shared lib test only on native hosts', 6 unless $host->is_native;
+
+        my $b = Brocken::Lindsay::IR::Builder->new();
+
+        my $func_a = Brocken::Lindsay::IR::Function->new(
+            name => 'func_a', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+        $b->position_at_end( $func_a->append_block('entry') );
+        $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
+
+        my $func_b = Brocken::Lindsay::IR::Function->new(
+            name => 'func_b', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
+        $b->position_at_end( $func_b->append_block('entry') );
+        $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 100 ) );
+
+        my ($codegen, $linker, $output_file);
+        if ( $host->is_arm64 && $host->is_macos ) {
+            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::MachO->new( type => 'shared' );
+            $output_file = 'multi_func_shared.dylib';
+        }
+        elsif ( $host->is_arm64 && $host->is_windows ) {
+            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::PE->new( type => 'shared' );
+            $output_file = 'multi_func_shared.dll';
+        }
+        elsif ( $host->is_riscv64 ) {
+            $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::ELF64->new( type => 'shared' );
+            $output_file = 'multi_func_shared.so';
+        }
+        elsif ( $host->is_x64 && $host->is_macos ) {
+            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::MachO->new( type => 'shared' );
+            $output_file = 'multi_func_shared.dylib';
+        }
+        elsif ( $host->is_x64 && $host->is_windows ) {
+            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::PE->new( type => 'shared' );
+            $output_file = 'multi_func_shared.dll';
+        }
+        else {
+            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
+            $linker  = Brocken::Jenny::Linker::ELF64->new( type => 'shared' );
+            $output_file = 'multi_func_shared.so';
+        }
+
+        my $funcs = $codegen->emit_functions( [$func_a, $func_b] );
+        is( ref $funcs, 'ARRAY', 'emit_functions returned array ref' );
+        is( scalar $funcs->@*, 2, 'emit_functions returned 2 entries' );
+
+        $linker->set_exported_funcs( ['func_a', 'func_b'] );
+
+        if ( $linker->isa('Brocken::Jenny::Linker::PE') ) {
+            $linker->write_shared_library( $output_file, $funcs, $host );
+        }
+        else {
+            $linker->write_executable( $output_file, $funcs, $host, 1 );
+        }
+        ok( -e $output_file, 'Multi-function shared library exists' );
+
+        SKIP: {
+            my $dl_avail = eval { require DynaLoader; 1 };
+            skip 'DynaLoader not available', 3 unless $dl_avail;
+            require File::Spec;
+            my $abs_path = File::Spec->rel2abs($output_file);
+            my $libref   = DynaLoader::dl_load_file($abs_path);
+            ok $libref, 'Loaded shared library via DynaLoader' or skip 'dl_load_file failed', 2;
+            my $sym_a = DynaLoader::dl_find_symbol( $libref, 'func_a' );
+            ok $sym_a, 'Resolved exported symbol "func_a"';
+            my $sym_b = DynaLoader::dl_find_symbol( $libref, 'func_b' );
+            ok $sym_b, 'Resolved exported symbol "func_b"';
+            DynaLoader::dl_unload_file($libref);
+        }
+
+        unlink $output_file if -e $output_file;
+    };
+};
+
 done_testing;
 __DATA__
 # GitHub runner triples

@@ -13,6 +13,7 @@ Currently, `Brocken::Jenny` uses hardcoded byte stubs. We need a systematic way 
 - [x] Support indexed addressing modes in MIR (`[base + index * scale + disp]`).
 - [x] Implement `mul` lowering for `X86_64`, `ARM64`, `RISCV64` (currently only Wasm has it).
 - [x] Implement control flow lowering (conditional branches, jumps) for If/Else and Loops.
+- [x] Implement multi-function support (lower `call` IR to cross-function calls, link multiple functions) [all 4 backends + all 3 linkers + Wasm]
 
 ## Phase 2: Register Allocation
 SSA uses infinite virtual registers; hardware does not.
