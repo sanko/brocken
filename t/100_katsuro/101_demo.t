@@ -1450,14 +1450,14 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
                         if ( $src->kind eq 'imm' ) {
                             # imul dst, dst, imm32  => REX.W 69 /r
-                            my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                            my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $did >= 8 ? 1 : 0 );
                             my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $did & 7 );
                             $bytes .= pack( 'CCCV', $rex, IMUL_IMM, $modrm, $src->value );
                         }
                         else {
                             my $src_r = $resolve->($src);
                             my $sid   = $reg_id->($src_r);
-                            my $rex   = 0x40 | $rex_w | ( $sid >= 8 ? 4 : 0 ) | ( $did >= 8 ? 1 : 0 );
+                            my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                             # imul dst, src  => REX.W 0F AF /r
                             my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
                             $bytes .= pack( 'CCC', $rex, 0x0F, 0xAF ) . pack( 'C', $modrm );
@@ -1567,7 +1567,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $sid   = $reg_id->($src_r);
                         my ( $modrm, $extra ) = $mem_modrm->( $dst, $sid );
                         my $bits = ($src->type && $src->type->kind eq 'int') ? $src->type->bits : 64;
-                        my $rex = ( $bits == 64 ? 0x48 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                        my $rex = ( $bits == 64 ? 0x48 : 0 ) | ( $sid >= 8 ? 4 : 0 );
                         if ( $rex ) { $bytes .= pack( 'C', $rex ) }
                         $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
@@ -1600,7 +1600,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my ( $modrm, $extra ) = $mem_modrm->( $dst, $sid );
                         my $bits   = $src->type ? $src->type->bits : 32;
                         my $op     = $bits >= 64 ? [ 0xF2, 0x0F, 0x11 ] : [ 0xF3, 0x0F, 0x11 ];
-                        my $rex    = 0x40 | ( $sid >= 8 ? 1 : 0 );
+                        my $rex    = 0x40 | ( $sid >= 8 ? 4 : 0 );
                         if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
                         $bytes .= pack( 'CCC', $op->@* ) . pack( 'C', $modrm );
                         $bytes .= join '', $extra->@*;
@@ -1709,7 +1709,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         my $dst_r = $resolve->($dst);
                         my $did   = $reg_id->($dst_r);
                         my $rex   = 0x40 | ( $did >= 8 ? 1 : 0 );
-                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $did & 7 );
+                        my $modrm = 0xC0 | ( $did & 7 );
                         $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
                     }
                     elsif ( $opcode eq 'ret' ) {
