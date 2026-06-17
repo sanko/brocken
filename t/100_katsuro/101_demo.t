@@ -385,6 +385,9 @@ conventions (e.g., which registers are preserved across calls).
             method frame_reg()                          {undef}
             method stack_reg()                          {undef}
             method dwarf_reg_num($name)                 {undef}
+            method param_registers()                    { [] }
+            method return_register()                    { undef }
+            method fp_return_register()                 { undef }
         }
 
         class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::ABI) {
@@ -411,6 +414,9 @@ conventions (e.g., which registers are preserved across calls).
             }
             method frame_reg() {'rbp'}
             method stack_reg() {'rsp'}
+            method param_registers()                    { [qw(rdi rsi rdx rcx r8 r9)] }
+            method return_register()                    { 'rax' }
+            method fp_return_register()                 { 'xmm0' }
 
             # System V AMD64 DWARF register numbers (rax=0, rdx=1, etc.)
             # Reference: https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
@@ -452,6 +458,9 @@ conventions (e.g., which registers are preserved across calls).
             }
             method frame_reg() {'x29'}
             method stack_reg() {'sp'}
+            method param_registers()                    { [qw(x0 x1 x2 x3 x4 x5 x6 x7)] }
+            method return_register()                    { 'x0' }
+            method fp_return_register()                 { 'v0' }
 
             # ARM64 FP/SIMD registers (AAPCS64 calling convention)
             # Note: v0-v7 are caller-saved, v8-v15 are callee-saved (only the lower 64 bits)
@@ -488,6 +497,9 @@ conventions (e.g., which registers are preserved across calls).
             }
             method frame_reg() {'s0'}
             method stack_reg() {'sp'}
+            method param_registers()                    { [qw(a0 a1 a2 a3 a4 a5 a6 a7)] }
+            method return_register()                    { 'a0' }
+            method fp_return_register()                 { 'v0' }
 
             # RISC-V ABI register mappings to x0-x31 (zero=0, ra=1, sp=2, etc.)
             method dwarf_reg_num($name) {
@@ -3285,11 +3297,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
         }
     }
 
-    # ---------------------------------------------------------------------------
-    # Lowerer: Lindsay IR -> Machine IR (x86_64)
-    # ---------------------------------------------------------------------------
-     class Brocken::Jenny::Lowerer::X86_64 {
-        method lower($ir_func) {
+     # ---------------------------------------------------------------------------
+     # Lowerer: Lindsay IR -> Machine IR (x86_64)
+     # ---------------------------------------------------------------------------
+      class Brocken::Jenny::Lowerer::X86_64 {
+         method _abi() { state $abi = Brocken::Katsuro::Platform::ABI::X86_64->new }
+         method lower($ir_func) {
             my $mf = Brocken::Jenny::MIR::MachineFunction->new(name => $ir_func->name);
             for my $block ( $ir_func->blocks->@* ) {
                 my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new(name => $block->name);
@@ -3303,7 +3316,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     );
                 }
                 if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
-                    my @arg_regs = qw(rdi rsi rdx rcx r8 r9);
+                    my @arg_regs = $self->_abi->param_registers->@*;
                     for my $i ( 0 .. $#{$ir_func->params} ) {
                         my $param = $ir_func->params->[$i];
                         my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
@@ -3845,27 +3858,28 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                         if ( $inst->type->kind ne 'void' ) {
                             my $val = $inst->operands->[0];
+                            my $abi = $self->_abi;
                             if ($inst->type->kind eq 'float') {
-                                my $xmm0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'xmm0' );
+                                my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->fp_return_register );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'fmov',
-                                        operands => [ $xmm0, $self->_materialize($mbb, $val) ],
-                                        comment  => '=> xmm0'
+                                        operands => [ $fp_ret, $self->_materialize($mbb, $val) ],
+                                        comment  => '=> ' . $abi->fp_return_register
                                     )
                                 );
                             }
                             else {
                                 my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128;
                                 if ($is_i128) {
-                                    my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
+                                    my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
                                     my $rdx = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' );
                                     my ($lo, $hi) = $self->_split_i128($val);
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mov',
                                             operands => [ $rax, $lo ],
-                                            comment  => '=> rax (i128 lo)'
+                                            comment  => '=> ' . $abi->return_register . ' (i128 lo)'
                                         )
                                     );
                                     $mbb->add_instruction(
@@ -3877,12 +3891,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                     );
                                 }
                                 else {
-                                    my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
+                                    my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mov',
-                                            operands => [ $rax, $self->_lower_opnd($val) ],
-                                            comment  => '=> rax'
+                                            operands => [ $ret_reg, $self->_lower_opnd($val) ],
+                                            comment  => '=> ' . $abi->return_register
                                         )
                                     );
                                 }
@@ -4169,7 +4183,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
                         my $callee = $inst->callee;
                         my @args = $inst->operands->@*;
-                        my @arg_regs = qw(rdi rsi rdx rcx r8 r9);
+                        my $abi = $self->_abi;
+                        my @arg_regs = $abi->param_registers->@*;
                         for my $i (0 .. $#args) {
                             my $reg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => $arg_regs[$i]);
                             $mbb->add_instruction(
@@ -4189,20 +4204,20 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         if (defined $inst->name) {
                             my $dst = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name, type => $inst->type);
                             if ($inst->type->kind eq 'float') {
-                                my $xmm0 = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'xmm0');
+                                my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => $abi->fp_return_register);
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode => 'fmov', operands => [$dst, $xmm0],
-                                        comment => "retval from xmm0"
+                                        opcode => 'fmov', operands => [$dst, $fp_ret],
+                                        comment => "retval from " . $abi->fp_return_register
                                     )
                                 );
                             }
                             else {
-                                my $rax = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'rax');
+                                my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => $abi->return_register);
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode => 'mov', operands => [$dst, $rax],
-                                        comment => "retval from rax"
+                                        opcode => 'mov', operands => [$dst, $ret_reg],
+                                        comment => "retval from " . $abi->return_register
                                     )
                                 );
                             }
@@ -4286,6 +4301,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
     # Lowerer: Lindsay IR -> Machine IR (ARM64 / AArch64)
     # ---------------------------------------------------------------------------
         class Brocken::Jenny::Lowerer::ARM64 {
+        method _abi() { state $abi = Brocken::Katsuro::Platform::ABI::AArch64->new }
         method lower($ir_func) {
             my $mf = Brocken::Jenny::MIR::MachineFunction->new(name => $ir_func->name);
             for my $block ( $ir_func->blocks->@* ) {
@@ -4300,7 +4316,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     );
                 }
                 if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
-                    my @arg_regs = qw(x0 x1 x2 x3 x4 x5 x6 x7);
+                    my @arg_regs = $self->_abi->param_registers->@*;
                     for my $i ( 0 .. $#{$ir_func->params} ) {
                         my $param = $ir_func->params->[$i];
                         my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
@@ -5218,7 +5234,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
                         my $callee = $inst->callee;
                         my @args = $inst->operands->@*;
-                        my @arg_regs = qw(x0 x1 x2 x3 x4 x5 x6 x7);
+                        my $abi = $self->_abi;
+                        my @arg_regs = $abi->param_registers->@*;
                         for my $i (0 .. $#args) {
                             my $reg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => $arg_regs[$i]);
                             $mbb->add_instruction(
@@ -5238,20 +5255,20 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         if (defined $inst->name) {
                             my $dst = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name, type => $inst->type);
                             if ($inst->type->kind eq 'float') {
-                                my $d0 = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'd0');
+                                my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => $abi->fp_return_register);
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode => 'fmov', operands => [$dst, $d0],
-                                        comment => "retval from d0"
+                                        opcode => 'fmov', operands => [$dst, $fp_ret],
+                                        comment => "retval from " . $abi->fp_return_register
                                     )
                                 );
                             }
                             else {
-                                my $x0 = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => 'x0');
+                                my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'phys_reg', value => $abi->return_register);
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode => 'mov', operands => [$dst, $x0],
-                                        comment => "retval from x0"
+                                        opcode => 'mov', operands => [$dst, $ret_reg],
+                                        comment => "retval from " . $abi->return_register
                                     )
                                 );
                             }
@@ -5302,48 +5319,49 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                         if ( $inst->type->kind ne 'void' ) {
                             my $val = $inst->operands->[0];
-                                if ($inst->type->kind eq 'float') {
-                                    my $v0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'v0' );
+                            my $abi = $self->_abi;
+                            if ($inst->type->kind eq 'float') {
+                                my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->fp_return_register );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'fmov',
+                                        operands => [ $fp_ret, $self->_materialize($mbb, $val) ],
+                                        comment  => '=> ' . $abi->fp_return_register
+                                    )
+                                );
+                            }
+                            else {
+                                my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128;
+                                if ($is_i128) {
+                                    my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
+                                    my $x1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x1' );
+                                    my ($lo, $hi) = $self->_split_i128($val);
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'fmov',
-                                            operands => [ $v0, $self->_materialize($mbb, $val) ],
-                                            comment  => '=> v0'
+                                            opcode   => 'mov',
+                                            operands => [ $ret_reg, $lo ],
+                                            comment  => '=> ' . $abi->return_register . ' (i128 lo)'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mov',
+                                            operands => [ $x1, $hi ],
+                                            comment  => '=> x1 (i128 hi)'
                                         )
                                     );
                                 }
                                 else {
-                                    my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128;
-                                    if ($is_i128) {
-                                        my $x0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
-                                        my $x1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x1' );
-                                        my ($lo, $hi) = $self->_split_i128($val);
-                                        $mbb->add_instruction(
-                                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                                opcode   => 'mov',
-                                                operands => [ $x0, $lo ],
-                                                comment  => '=> x0 (i128 lo)'
-                                            )
-                                        );
-                                        $mbb->add_instruction(
-                                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                                opcode   => 'mov',
-                                                operands => [ $x1, $hi ],
-                                                comment  => '=> x1 (i128 hi)'
-                                            )
-                                        );
-                                    }
-                                    else {
-                                        my $x0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
-                                        $mbb->add_instruction(
-                                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                                opcode   => 'mov',
-                                                operands => [ $x0, $self->_lower_opnd($val) ],
-                                                comment  => '=> x0'
-                                            )
-                                        );
-                                    }
+                                    my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mov',
+                                            operands => [ $ret_reg, $self->_lower_opnd($val) ],
+                                            comment  => '=> ' . $abi->return_register
+                                        )
+                                    );
                                 }
+                            }
                             }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -5429,6 +5447,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
     # Lowerer: Lindsay IR -> Machine IR (RISC-V 64)
     # ---------------------------------------------------------------------------
         class Brocken::Jenny::Lowerer::RISCV64 {
+        method _abi() { state $abi = Brocken::Katsuro::Platform::ABI::RISCV64->new }
         method lower($ir_func) {
             my $mf = Brocken::Jenny::MIR::MachineFunction->new(name => $ir_func->name);
             for my $block ( $ir_func->blocks->@* ) {
@@ -5443,7 +5462,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     );
                 }
                 if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
-                    my @arg_regs = qw(a0 a1 a2 a3 a4 a5 a6 a7);
+                    my @arg_regs = $self->_abi->param_registers->@*;
                     for my $i ( 0 .. $#{$ir_func->params} ) {
                         my $param = $ir_func->params->[$i];
                         my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
@@ -6319,15 +6338,16 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                         if ( $inst->type->kind ne 'void' ) {
                             my $val = $inst->operands->[0];
+                            my $abi = $self->_abi;
                             if ($val->type && $val->type->kind eq 'int' && $val->type->bits == 128) {
-                                my $a0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
+                                my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
                                 my $a1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a1' );
                                 my ($lo, $hi) = $self->_split_i128($val);
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mv',
-                                        operands => [ $a0, $lo ],
-                                        comment  => '=> a0 (i128 lo)'
+                                        operands => [ $ret_reg, $lo ],
+                                        comment  => '=> ' . $abi->return_register . ' (i128 lo)'
                                     )
                                 );
                                 $mbb->add_instruction(
@@ -6339,12 +6359,12 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 );
                             }
                             else {
-                                my $a0  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
+                                my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mv',
-                                        operands => [ $a0, $self->_lower_opnd($val) ],
-                                        comment  => '=> a0'
+                                        operands => [ $ret_reg, $self->_lower_opnd($val) ],
+                                        comment  => '=> ' . $abi->return_register
                                     )
                                 );
                             }
