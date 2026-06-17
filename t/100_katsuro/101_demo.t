@@ -10191,11 +10191,7 @@ subtest Jenny => sub {
             skip 'PE binary execution test requires x86_64 Windows', 1 unless $platform->is_windows;
 
             # Execute the binary natively and inspect its exit code!
-            system { $output_file } $output_file;
-            my $exit_code = $? >> 8;
-            is $exit_code, 42, 'Standalone Windows binary executed natively and returned the correct exit code!';
-            note $?;
-            note $exit_code;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Standalone Windows binary executed natively and returned the correct exit code!' );
         }
 
         # Clean up
@@ -11413,11 +11409,7 @@ subtest Jenny => sub {
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -x $output_file || $platform->is_windows, 'Memory binary exists' );
 
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Memory binary returned 42 on ' . $platform->friendly );
-            unlink $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Memory binary returned 42 on  on ' . $platform->friendly );
         }
     };
     subtest 'Jenny::Codegen Box/Unbox (Cross-Platform)' => sub {
@@ -11451,11 +11443,7 @@ subtest Jenny => sub {
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -x $output_file || $platform->is_windows, 'Box/unbox binary exists' );
 
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Box/unbox binary returned 42 on ' . $platform->friendly );
-            unlink $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Box/unbox binary returned 42 on  on ' . $platform->friendly );
         }
     };
     subtest 'Jenny::Codegen Float Arithmetic (Cross-Platform)' => sub {
@@ -12811,11 +12799,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_add_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 add file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 add (40+2) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 add (40+2) returned 42 on ' . $platform->friendly );
         }
         # Test 3: i128 shl (21 << 1 = 42)
         {
@@ -12840,11 +12824,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_shl_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 shl file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 shl (21<<1) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 shl (21<<1) returned 42 on ' . $platform->friendly );
         }
         # Test 3b: i128 mul (21 * 2 = 42)
         {
@@ -12869,11 +12849,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_mul_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 mul file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 mul (21*2) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 mul (21*2) returned 42 on ' . $platform->friendly );
         }
         # Test 4: i128 lshr (84 >> 1 = 42)
         {
@@ -12898,11 +12874,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_lshr_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 lshr file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 lshr (84>>1) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 lshr (84>>1) returned 42 on ' . $platform->friendly );
         }
         # Test 5: i128 ashr (84 >> 1 = 42)
         {
@@ -12927,11 +12899,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_ashr_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 ashr file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 ashr (84>>1) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 ashr (84>>1) returned 42 on ' . $platform->friendly );
         }
         # Test 6: i128 div (42 / 2 = 21)
         {
@@ -12956,11 +12924,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_div_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 div file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 21, 'Native i128 div (42/2) returned 21 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 21, platform => $platform, name => 'Native i128 div (42/2) returned 21 on ' . $platform->friendly );
         }
         # Test 7: i128 rem (21 % 10 = 1)
         {
@@ -12985,11 +12949,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_rem_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 rem file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 1, 'Native i128 rem (21%10) returned 1 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 1, platform => $platform, name => 'Native i128 rem (21%10) returned 1 on ' . $platform->friendly );
         }
         # Test 8: i128 add with carry chain (-1 + 43 = 42)
         {
@@ -13014,11 +12974,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_carry_add_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 carry add file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 carry add (-1+43) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 carry add (-1+43) returned 42 on ' . $platform->friendly );
         }
         # Test 9: i128 sub with borrow (0 - 1 = -1)
         {
@@ -13043,11 +12999,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_sub_5_3_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 sub (5-3) file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 2, 'Native i128 sub (5-3) returned 2 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 2, platform => $platform, name => 'Native i128 sub (5-3) returned 2 on ' . $platform->friendly );
         }
         # Test 9b: i128 sub with borrow (0 - 1 = -1)
         {
@@ -13101,11 +13053,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_edge_mul_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 edge mul file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 edge mul (7*6) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 edge mul (7*6) returned 42 on ' . $platform->friendly );
         }
         # Test 11: i128 div (100 / 3 = 33)
         {
@@ -13130,11 +13078,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_edge_div_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 edge div file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 33, 'Native i128 edge div (100/3) returned 33 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 33, platform => $platform, name => 'Native i128 edge div (100/3) returned 33 on ' . $platform->friendly );
         }
         # Test 12: i128 rem (100 % 7 = 2)
         {
@@ -13159,11 +13103,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_edge_rem_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 edge rem file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 2, 'Native i128 edge rem (100%7) returned 2 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 2, platform => $platform, name => 'Native i128 edge rem (100%7) returned 2 on ' . $platform->friendly );
         }
         # Test 13: i128 sub with negative rhs (5 - (-1) = 6)
         {
@@ -13188,11 +13128,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_sub_neg_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 sub negative rhs file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 6, 'Native i128 sub (5 - (-1)) returned 6 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 6, platform => $platform, name => 'Native i128 sub (5 - (-1)) returned 6 on ' . $platform->friendly );
         }
         # Test 14: i128 add with carry through hi ((-1) + 2 = 1)
         {
@@ -13217,11 +13153,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_add_carry_hi_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 add carry hi file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 1, 'Native i128 add ((-1) + 2) returned 1 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 1, platform => $platform, name => 'Native i128 add ((-1) + 2) returned 1 on ' . $platform->friendly );
         }
         # Test 15: i128 and ((-1) & 42 = 42)
         {
@@ -13246,11 +13178,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_and_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 and file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 and (-1 & 42) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 and (-1 & 42) returned 42 on ' . $platform->friendly );
         }
         # Test 16: i128 or (0 | 42 = 42)
         {
@@ -13275,11 +13203,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_or_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 or file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 or (0 | 42) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 or (0 | 42) returned 42 on ' . $platform->friendly );
         }
         # Test 17: i128 xor (42 xor 0 = 42)
         {
@@ -13304,11 +13228,7 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             my $output_file = 'i128_xor_native' . $platform->bin_ext;
             $linker->write_executable( $output_file, $bytes, $platform );
             ok( -e $output_file, 'Native i128 xor file exists' );
-            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-            system { $cmd } $cmd;
-            my $exit_code = $? >> 8;
-            is( $exit_code, 42, 'Native i128 xor (42 xor 0) returned 42 on ' . $platform->friendly );
-            unlink $output_file if -e $output_file;
+            run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 xor (42 xor 0) returned 42 on ' . $platform->friendly );
         }
     };
 };
