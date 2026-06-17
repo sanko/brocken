@@ -1056,6 +1056,7 @@ data type (SV* equivalent). It contains a type tag and a payload.
         method build_sub( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'sub',  $lhs, $rhs, $name ) }
         method build_mul( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'mul',  $lhs, $rhs, $name ) }
         method build_div( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'div',  $lhs, $rhs, $name ) }
+        method build_rem( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'rem',  $lhs, $rhs, $name ) }
         method build_shl( $lhs, $rhs, $name  = undef ) { $self->build_binop( 'shl',  $lhs, $rhs, $name ) }
         method build_lshr( $lhs, $rhs, $name = undef ) { $self->build_binop( 'lshr', $lhs, $rhs, $name ) }
         method build_ashr( $lhs, $rhs, $name = undef ) { $self->build_binop( 'ashr', $lhs, $rhs, $name ) }
@@ -1698,7 +1699,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         else {
                             my $src_r = $resolve->($src);
                             my $sid   = $reg_id->($src_r);
-                            my $rex   = 0x40 | $rex_w | ( $sid >= 8 ? 4 : 0 ) | ( $did >= 8 ? 1 : 0 );
+                            my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                             my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
                             $bytes .= pack( 'CCC', $rex, 0x3B, $modrm );
                         }
@@ -2289,6 +2290,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'i32_add' )   { $$buf .= pack( 'C', 0x6A ) }
                     elsif ( $opcode eq 'i32_sub' )   { $$buf .= pack( 'C', 0x6B ) }
                     elsif ( $opcode eq 'i32_mul' )   { $$buf .= pack( 'C', 0x6C ) }
+                    elsif ( $opcode eq 'i32_rem_s' ) { $$buf .= pack( 'C', 0x6F ) }
+                    elsif ( $opcode eq 'i32_rem_u' ) { $$buf .= pack( 'C', 0x70 ) }
                     elsif ( $opcode eq 'i32_and' )   { $$buf .= pack( 'C', 0x71 ) }
                     elsif ( $opcode eq 'i32_or' )    { $$buf .= pack( 'C', 0x72 ) }
                     elsif ( $opcode eq 'i32_xor' )   { $$buf .= pack( 'C', 0x73 ) }
@@ -2299,6 +2302,8 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                     elsif ( $opcode eq 'i64_sub' )   { $$buf .= pack( 'C', 0x7D ) }
                     elsif ( $opcode eq 'i64_mul' )   { $$buf .= pack( 'C', 0x7E ) }
                     elsif ( $opcode eq 'i64_div_u' ) { $$buf .= pack( 'C', 0x80 ) }
+                    elsif ( $opcode eq 'i64_rem_s' ) { $$buf .= pack( 'C', 0x81 ) }
+                    elsif ( $opcode eq 'i64_rem_u' ) { $$buf .= pack( 'C', 0x82 ) }
                     elsif ( $opcode eq 'i64_and' )   { $$buf .= pack( 'C', 0x83 ) }
                     elsif ( $opcode eq 'i64_or' )    { $$buf .= pack( 'C', 0x84 ) }
                     elsif ( $opcode eq 'i64_xor' )   { $$buf .= pack( 'C', 0x85 ) }
@@ -3161,10 +3166,10 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'rem' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
                         my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
-                        if ($is_i128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'mul' || $opcode eq 'div')) {
+                        if ($is_i128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'rem')) {
                             if ($opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr') {
                                 my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
                                 my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64());
@@ -3280,6 +3285,105 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mul', operands => [$tmp2, $lo_rhs], comment => 'i128 mul tmp2 = a_hi * b_lo'));
                                 $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'add', operands => [$hi_dst, $tmp2], comment => 'i128 mul hi += tmp2'));
                             }
+                            elsif ($opcode eq 'div' || $opcode eq 'rem') {
+                                my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
+                                my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
+                                my ($lo_dst, $hi_dst) = $self->_split_i128($inst);
+                                my $q_lo = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_q_lo', type => Brocken::Lindsay::IR::Type::i64());
+                                my $q_hi = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_q_hi', type => Brocken::Lindsay::IR::Type::i64());
+                                my $r_lo = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_r_lo', type => Brocken::Lindsay::IR::Type::i64());
+                                my $r_hi = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_r_hi', type => Brocken::Lindsay::IR::Type::i64());
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$q_lo, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div q_lo=0'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$q_hi, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div q_hi=0'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$r_lo, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div r_lo=0'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$r_hi, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div r_hi=0'));
+                                for my $ii (reverse 0 .. 127) {
+                                    my $val = $ii >= 64 ? $hi_lhs : $lo_lhs;
+                                    my $shift = $ii >= 64 ? $ii - 64 : $ii;
+                                    my $bit = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_b$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    my $carry = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_c$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    my $t_hi_gt = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_hgt$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    my $t_hi_eq = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_heq$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    my $t_lo_ge = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_lge$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    my $t_cond = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_cond$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    my $t_neg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_neg$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    my $t_mdl = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_mdl$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    my $t_bor = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_bor$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    my $t_mdh = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_mdh$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        # bit = (val >> shift) & 1
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$bit, $val], comment => "i128 div bit$ii val"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'lshr', operands => [$bit, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $shift)], comment => "i128 div bit$ii shr"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$bit, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1)], comment => "i128 div bit$ii and"));
+                                        # carry = r_lo >> 63
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$carry, $r_lo], comment => "i128 div carry$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'lshr', operands => [$carry, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 63)], comment => "i128 div carry$ii shr"));
+                                        # r_lo = (r_lo << 1) | bit
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$r_lo, $r_lo], comment => "i128 div r_lo$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'shl', operands => [$r_lo, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1)], comment => "i128 div r_lo$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$r_lo, $bit], comment => "i128 div r_lo$ii or"));
+                                        # r_hi = (r_hi << 1) | carry
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$r_hi, $r_hi], comment => "i128 div r_hi$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'shl', operands => [$r_hi, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1)], comment => "i128 div r_hi$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$r_hi, $carry], comment => "i128 div r_hi$ii or"));
+                                        # cond_hi_gt = r_hi > d_hi  (unsigned greater than)
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_hi_gt, $r_hi], comment => "i128 div hgt$ii load"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cmp', operands => [$t_hi_gt, $hi_rhs], comment => "i128 div hgt$ii cmp"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_hi_gt, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => "i128 div hgt$ii zero"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'seta', operands => [$t_hi_gt], comment => "i128 div hgt$ii seta"));
+                                    # cond_hi_eq = r_hi == d_hi
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_hi_eq, $r_hi], comment => "i128 div heq$ii load"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cmp', operands => [$t_hi_eq, $hi_rhs], comment => "i128 div heq$ii cmp"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_hi_eq, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => "i128 div heq$ii zero"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sete', operands => [$t_hi_eq], comment => "i128 div heq$ii sete"));
+                                    # cond_lo_ge = !(r_lo < d_lo)  i.e., r_lo >= d_lo  (unsigned)
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_lo_ge, $r_lo], comment => "i128 div lge$ii load"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cmp', operands => [$t_lo_ge, $lo_rhs], comment => "i128 div lge$ii cmp"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_lo_ge, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => "i128 div lge$ii zero"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'setae', operands => [$t_lo_ge], comment => "i128 div lge$ii setae"));
+                                    # cond = cond_hi_gt | (cond_hi_eq & cond_lo_ge)
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$t_hi_eq, $t_lo_ge], comment => "i128 div cond$ii and"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$t_hi_gt, $t_hi_eq], comment => "i128 div cond$ii or"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_cond, $t_hi_gt], comment => "i128 div cond$ii save"));
+                                    # neg_cond = -cond  (0 -> 0, 1 -> -1 = all-ones mask)
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_neg, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => "i128 div neg$ii zero"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$t_neg, $t_cond], comment => "i128 div neg$ii sub"));
+                                    # masked_d_lo = d_lo & neg_cond
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_mdl, $lo_rhs], comment => "i128 div mdl$ii load"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$t_mdl, $t_neg], comment => "i128 div mdl$ii and"));
+                                    # borrow = r_lo < masked_d_lo  (unsigned)
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_bor, $r_lo], comment => "i128 div bor$ii load"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cmp', operands => [$t_bor, $t_mdl], comment => "i128 div bor$ii cmp"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_bor, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => "i128 div bor$ii zero"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'setb', operands => [$t_bor], comment => "i128 div bor$ii setb"));
+                                    # r_lo -= masked_d_lo
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$r_lo, $r_lo], comment => "i128 div r_lo$ii sub"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$r_lo, $t_mdl], comment => "i128 div r_lo$ii sub"));
+                                    # masked_d_hi = d_hi & neg_cond
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$t_mdh, $hi_rhs], comment => "i128 div mdh$ii load"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$t_mdh, $t_neg], comment => "i128 div mdh$ii and"));
+                                    # r_hi -= masked_d_hi + borrow
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$r_hi, $r_hi], comment => "i128 div r_hi$ii sub"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$r_hi, $t_mdh], comment => "i128 div r_hi$ii sub mdh"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$r_hi, $t_bor], comment => "i128 div r_hi$ii sub bor"));
+                                    # Q_bit = (1 << (ii % 64)) & neg_cond
+                                    my $qbit_val = 1 << ($ii % 64);
+                                    my $qbit = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_qb$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$qbit, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $qbit_val)], comment => "i128 div qb$ii val"));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$qbit, $t_neg], comment => "i128 div qb$ii and"));
+                                    if ($ii >= 64) {
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$q_hi, $q_hi], comment => "i128 div q_hi$ii or"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$q_hi, $qbit], comment => "i128 div q_hi$ii or"));
+                                    }
+                                    else {
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$q_lo, $q_lo], comment => "i128 div q_lo$ii or"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$q_lo, $qbit], comment => "i128 div q_lo$ii or"));
+                                    }
+                                }
+                                my $out_lo = $opcode eq 'div' ? $q_lo : $r_lo;
+                                my $out_hi = $opcode eq 'div' ? $q_hi : $r_hi;
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$lo_dst, $out_lo], comment => 'i128 div store lo'));
+                                $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mov', operands => [$hi_dst, $out_hi], comment => 'i128 div store hi'));
+                            }
                             else {
                                 my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
                                 my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
@@ -3317,6 +3421,62 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                         opcode   => 'f' . $opcode,
                                         operands => [ $dst, $self->_materialize($mbb, $rhs) ],
                                         comment  => 'f' . $opcode
+                                    )
+                                );
+                            }
+                            elsif ($opcode eq 'div') {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'udiv',
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => 'udiv'
+                                    )
+                                );
+                            }
+                            elsif ($opcode eq 'rem') {
+                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $tmp, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value ) . ' (rem tmp)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'udiv',
+                                        operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                        comment  => 'udiv (rem)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mul',
+                                        operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                        comment  => 'mul (rem)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value ) . ' (rem)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'sub',
+                                        operands => [ $dst, $tmp ],
+                                        comment  => 'sub (rem)'
                                     )
                                 );
                             }
@@ -3948,7 +4108,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'rem' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
                         my $is_float = $lhs->type && $lhs->type->kind eq 'float';
                         my $mop = $is_float ? "f$opcode" : $opcode;
@@ -3974,7 +4134,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         }
                         else {
                             my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
-                            if ($is_i128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'mul' || $opcode eq 'div')) {
+                            if ($is_i128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'rem')) {
                                 my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64()
                                 );
@@ -4232,6 +4392,103 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                         )
                                     );
                                 }
+                                elsif ($opcode eq 'div' || $opcode eq 'rem') {
+                                    my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
+                                    my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
+                                    my ($lo_dst, $hi_dst) = $self->_split_i128($inst);
+                                    my $q_lo = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_q_lo', type => Brocken::Lindsay::IR::Type::i64());
+                                    my $q_hi = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_q_hi', type => Brocken::Lindsay::IR::Type::i64());
+                                    my $r_lo = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_r_lo', type => Brocken::Lindsay::IR::Type::i64());
+                                    my $r_hi = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_r_hi', type => Brocken::Lindsay::IR::Type::i64());
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$q_lo, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div q_lo=0'));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$q_hi, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div q_hi=0'));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_lo, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div r_lo=0'));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_hi, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div r_hi=0'));
+                                    for my $ii (reverse 0 .. 127) {
+                                        my $val = $ii >= 64 ? $hi_lhs : $lo_lhs;
+                                        my $shift = $ii >= 64 ? $ii - 64 : $ii;
+                                        my $bit = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_b$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $carry = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_c$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_hi_gt = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_hgt$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_hi_eq = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_heq$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_lo_ge = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_lge$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_cond = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_cond$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_neg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_neg$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_mdl = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_mdl$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_bor = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_bor$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_mdh = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_mdh$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        # bit = (val >> shift) & 1
+                                        my $one = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_one$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$bit, $val], comment => "i128 div bit$ii val"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$one, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1)], comment => "i128 div bit$ii one"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'lshr', operands => [$bit, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $shift, type => Brocken::Lindsay::IR::Type::i64())], comment => "i128 div bit$ii shr"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$bit, $one], comment => "i128 div bit$ii and"));
+                                        # carry = r_lo >> 63
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$carry, $r_lo], comment => "i128 div carry$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'lshr', operands => [$carry, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 63)], comment => "i128 div carry$ii shr"));
+                                        # r_lo = (r_lo << 1) | bit
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_lo, $r_lo], comment => "i128 div r_lo$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'shl', operands => [$r_lo, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1)], comment => "i128 div r_lo$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$r_lo, $bit], comment => "i128 div r_lo$ii or"));
+                                        # r_hi = (r_hi << 1) | carry
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_hi, $r_hi], comment => "i128 div r_hi$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'shl', operands => [$r_hi, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1)], comment => "i128 div r_hi$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$r_hi, $carry], comment => "i128 div r_hi$ii or"));
+                                        # cond_hi_gt = r_hi > d_hi  (unsigned greater than)
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_hi_gt, $r_hi], comment => "i128 div hgt$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cmp', operands => [$t_hi_gt, $hi_rhs], comment => "i128 div hgt$ii cmp"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cset_hi', operands => [$t_hi_gt], comment => "i128 div hgt$ii cset_hi"));
+                                        # cond_hi_eq = r_hi == d_hi
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_hi_eq, $r_hi], comment => "i128 div heq$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cmp', operands => [$t_hi_eq, $hi_rhs], comment => "i128 div heq$ii cmp"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cset_eq', operands => [$t_hi_eq], comment => "i128 div heq$ii cset_eq"));
+                                        # cond_lo_ge = r_lo >= d_lo  (unsigned, carry set)
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_lo_ge, $r_lo], comment => "i128 div lge$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cmp', operands => [$t_lo_ge, $lo_rhs], comment => "i128 div lge$ii cmp"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cset_cs', operands => [$t_lo_ge], comment => "i128 div lge$ii cset_cs"));
+                                        # cond = cond_hi_gt | (cond_hi_eq & cond_lo_ge)
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$t_hi_eq, $t_lo_ge], comment => "i128 div cond$ii and"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$t_hi_gt, $t_hi_eq], comment => "i128 div cond$ii or"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_cond, $t_hi_gt], comment => "i128 div cond$ii save"));
+                                        # neg_cond = -cond
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_neg, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => "i128 div neg$ii zero"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$t_neg, $t_cond], comment => "i128 div neg$ii sub"));
+                                        # masked_d_lo = d_lo & neg_cond
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_mdl, $lo_rhs], comment => "i128 div mdl$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$t_mdl, $t_neg], comment => "i128 div mdl$ii and"));
+                                        # borrow = r_lo < masked_d_lo  (unsigned less than)
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_bor, $r_lo], comment => "i128 div bor$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cmp', operands => [$t_bor, $t_mdl], comment => "i128 div bor$ii cmp"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'cset_cc', operands => [$t_bor], comment => "i128 div bor$ii cset_cc"));
+                                        # r_lo -= masked_d_lo
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_lo, $r_lo], comment => "i128 div r_lo$ii sub"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$r_lo, $t_mdl], comment => "i128 div r_lo$ii sub"));
+                                        # masked_d_hi = d_hi & neg_cond
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_mdh, $hi_rhs], comment => "i128 div mdh$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$t_mdh, $t_neg], comment => "i128 div mdh$ii and"));
+                                        # r_hi -= masked_d_hi + borrow
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_hi, $r_hi], comment => "i128 div r_hi$ii sub"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$r_hi, $t_mdh], comment => "i128 div r_hi$ii sub mdh"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$r_hi, $t_bor], comment => "i128 div r_hi$ii sub bor"));
+                                        # Q_bit = (1 << (ii % 64)) & neg_cond
+                                        my $qbit_val = 1 << ($ii % 64);
+                                        my $qbit = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_qb$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$qbit, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $qbit_val)], comment => "i128 div qb$ii val"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$qbit, $t_neg], comment => "i128 div qb$ii and"));
+                                        if ($ii >= 64) {
+                                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$q_hi, $q_hi], comment => "i128 div q_hi$ii or"));
+                                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$q_hi, $qbit], comment => "i128 div q_hi$ii or"));
+                                        }
+                                        else {
+                                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$q_lo, $q_lo], comment => "i128 div q_lo$ii or"));
+                                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$q_lo, $qbit], comment => "i128 div q_lo$ii or"));
+                                        }
+                                    }
+                                    my $out_lo = $opcode eq 'div' ? $q_lo : $r_lo;
+                                    my $out_hi = $opcode eq 'div' ? $q_hi : $r_hi;
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$lo_dst, $out_lo], comment => 'i128 div store lo'));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$hi_dst, $out_hi], comment => 'i128 div store hi'));
+                                }
                                 else {
                                     my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
                                     $mbb->add_instruction(
@@ -4263,6 +4520,62 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                         )
                                     );
                                 }
+                            }
+                            elsif ($opcode eq 'div') {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'udiv',
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => 'udiv'
+                                    )
+                                );
+                            }
+                            elsif ($opcode eq 'rem') {
+                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $tmp, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value ) . ' (rem tmp)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'udiv',
+                                        operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                        comment  => 'udiv (rem)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mul',
+                                        operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                        comment  => 'mul (rem)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value ) . ' (rem)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'sub',
+                                        operands => [ $dst, $tmp ],
+                                        comment  => 'sub (rem)'
+                                    )
+                                );
                             }
                             else {
                                 $mbb->add_instruction(
@@ -4808,7 +5121,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'rem' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
                         my $is_float = $lhs->type && $lhs->type->kind eq 'float';
                         my $mop = $is_float ? "f$opcode" : $opcode;
@@ -4834,7 +5147,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         }
                         else {
                             my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
-                            if ($is_i128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'mul' || $opcode eq 'div')) {
+                            if ($is_i128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'rem')) {
                                 if ($opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr') {
                                     my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
                                     my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
@@ -4969,6 +5282,107 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                     $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mul', operands => [$tmp2, $lo_rhs], comment => 'i128 mul tmp2 = a_hi * b_lo'));
                                     $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'add', operands => [$hi_dst, $tmp2], comment => 'i128 mul hi += tmp2'));
                                 }
+                                elsif ($opcode eq 'div' || $opcode eq 'rem') {
+                                    my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
+                                    my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
+                                    my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind => 'virt_reg', value => $inst->name . '_hi', type => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    my $q_lo = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_q_lo', type => Brocken::Lindsay::IR::Type::i64());
+                                    my $q_hi = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_q_hi', type => Brocken::Lindsay::IR::Type::i64());
+                                    my $r_lo = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_r_lo', type => Brocken::Lindsay::IR::Type::i64());
+                                    my $r_hi = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . '_r_hi', type => Brocken::Lindsay::IR::Type::i64());
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$q_lo, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div q_lo=0'));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$q_hi, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div q_hi=0'));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_lo, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div r_lo=0'));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_hi, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => 'i128 div r_hi=0'));
+                                    for my $ii (reverse 0 .. 127) {
+                                        my $val = $ii >= 64 ? $hi_lhs : $lo_lhs;
+                                        my $shift = $ii >= 64 ? $ii - 64 : $ii;
+                                        my $bit = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_b$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $carry = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_c$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_hi_gt = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_hgt$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_hi_eq = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_heq$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_lo_ge = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_lge$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_cond = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_cond$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_neg = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_neg$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_mdl = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_mdl$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_bor = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_bor$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $t_mdh = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_mdh$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        my $i_one = Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1);
+                                        # bit = (val >> shift) & 1
+                                        my $one = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_one$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$bit, $val], comment => "i128 div bit$ii val"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$one, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1)], comment => "i128 div bit$ii one"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'lshr', operands => [$bit, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $shift, type => Brocken::Lindsay::IR::Type::i64())], comment => "i128 div bit$ii shr"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$bit, $one], comment => "i128 div bit$ii and"));
+                                        # carry = r_lo >> 63
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$carry, $r_lo], comment => "i128 div carry$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'lshr', operands => [$carry, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 63)], comment => "i128 div carry$ii shr"));
+                                        # r_lo = (r_lo << 1) | bit
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_lo, $r_lo], comment => "i128 div r_lo$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'shl', operands => [$r_lo, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1)], comment => "i128 div r_lo$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$r_lo, $bit], comment => "i128 div r_lo$ii or"));
+                                        # r_hi = (r_hi << 1) | carry
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_hi, $r_hi], comment => "i128 div r_hi$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'shl', operands => [$r_hi, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 1)], comment => "i128 div r_hi$ii shl"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$r_hi, $carry], comment => "i128 div r_hi$ii or"));
+                                        # cond_hi_gt = r_hi > d_hi  (unsigned = d_hi < r_hi)
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_hi_gt, $hi_rhs], comment => "i128 div hgt$ii load d_hi"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sltu', operands => [$t_hi_gt, $r_hi], comment => "i128 div hgt$ii sltu"));
+                                        # cond_hi_eq = r_hi == d_hi
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_hi_eq, $r_hi], comment => "i128 div heq$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'xor', operands => [$t_hi_eq, $hi_rhs], comment => "i128 div heq$ii xor"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sltiu', operands => [$t_hi_eq, $i_one], comment => "i128 div heq$ii seqz"));
+                                        # cond_lo_ge = r_lo >= d_lo  (i.e., !(r_lo < d_lo))
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_lo_ge, $r_lo], comment => "i128 div lge$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sltu', operands => [$t_lo_ge, $lo_rhs], comment => "i128 div lge$ii sltu"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'xor', operands => [$t_lo_ge, $i_one], comment => "i128 div lge$ii not"));
+                                        # cond = cond_hi_gt | (cond_hi_eq & cond_lo_ge)
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$t_hi_eq, $t_lo_ge], comment => "i128 div cond$ii and"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$t_hi_gt, $t_hi_eq], comment => "i128 div cond$ii or"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_cond, $t_hi_gt], comment => "i128 div cond$ii save"));
+                                        # neg_cond = -cond
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_neg, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => 0)], comment => "i128 div neg$ii zero"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$t_neg, $t_cond], comment => "i128 div neg$ii sub"));
+                                        # masked_d_lo = d_lo & neg_cond
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_mdl, $lo_rhs], comment => "i128 div mdl$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$t_mdl, $t_neg], comment => "i128 div mdl$ii and"));
+                                        # borrow = r_lo < masked_d_lo
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_bor, $r_lo], comment => "i128 div bor$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sltu', operands => [$t_bor, $t_mdl], comment => "i128 div bor$ii sltu"));
+                                        # r_lo -= masked_d_lo
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_lo, $r_lo], comment => "i128 div r_lo$ii sub"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$r_lo, $t_mdl], comment => "i128 div r_lo$ii sub"));
+                                        # masked_d_hi = d_hi & neg_cond
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$t_mdh, $hi_rhs], comment => "i128 div mdh$ii load"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$t_mdh, $t_neg], comment => "i128 div mdh$ii and"));
+                                        # r_hi -= masked_d_hi + borrow
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$r_hi, $r_hi], comment => "i128 div r_hi$ii sub"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$r_hi, $t_mdh], comment => "i128 div r_hi$ii sub mdh"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'sub', operands => [$r_hi, $t_bor], comment => "i128 div r_hi$ii sub bor"));
+                                        # Q_bit = (1 << (ii % 64)) & neg_cond
+                                        my $qbit_val = 1 << ($ii % 64);
+                                        my $qbit = Brocken::Jenny::MIR::MachineOperand->new(kind => 'virt_reg', value => $inst->name . "_qb$ii", type => Brocken::Lindsay::IR::Type::i64());
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$qbit, Brocken::Jenny::MIR::MachineOperand->new(kind => 'imm', value => $qbit_val)], comment => "i128 div qb$ii val"));
+                                        $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'and', operands => [$qbit, $t_neg], comment => "i128 div qb$ii and"));
+                                        if ($ii >= 64) {
+                                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$q_hi, $q_hi], comment => "i128 div q_hi$ii or"));
+                                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$q_hi, $qbit], comment => "i128 div q_hi$ii or"));
+                                        }
+                                        else {
+                                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$q_lo, $q_lo], comment => "i128 div q_lo$ii or"));
+                                            $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'or', operands => [$q_lo, $qbit], comment => "i128 div q_lo$ii or"));
+                                        }
+                                    }
+                                    my $out_lo = $opcode eq 'div' ? $q_lo : $r_lo;
+                                    my $out_hi = $opcode eq 'div' ? $q_hi : $r_hi;
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$lo_dst, $out_lo], comment => 'i128 div store lo'));
+                                    $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'mv', operands => [$hi_dst, $out_hi], comment => 'i128 div store hi'));
+                                }
                                 else {
                                 my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64()
@@ -5055,6 +5469,62 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                     );
                                 }
                                 }
+                            }
+                            elsif ($opcode eq 'div') {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'divu',
+                                        operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                        comment  => 'divu'
+                                    )
+                                );
+                            }
+                            elsif ($opcode eq 'rem') {
+                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $tmp, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value ) . ' (rem tmp)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'divu',
+                                        operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                        comment  => 'divu (rem)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mul',
+                                        operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                        comment  => 'mul (rem)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                        comment  => 'load ' . ( $lhs->name || $lhs->value ) . ' (rem)'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'sub',
+                                        operands => [ $dst, $tmp ],
+                                        comment  => 'sub (rem)'
+                                    )
+                                );
                             }
                             else {
                                 $mbb->add_instruction(
@@ -5642,9 +6112,9 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                 }
                 for my $inst ( $block->instructions->@* ) {
                     my $opcode = $inst->opcode;
-                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
+                    if ( $opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'rem' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'min' || $opcode eq 'max' ) {
                         my ( $lhs, $rhs ) = $inst->operands->@*;
-                        if ($inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'mul' || $opcode eq 'div')) {
+                        if ($inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128 && ($opcode eq 'add' || $opcode eq 'sub' || $opcode eq 'and' || $opcode eq 'or' || $opcode eq 'xor' || $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' || $opcode eq 'mul' || $opcode eq 'div' || $opcode eq 'rem')) {
                             if ($opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr') {
                                 my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
                                 my ($lo_dst, $hi_dst) = $self->_split_i128($inst);
@@ -5892,7 +6362,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                 $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'i64_add', operands => [], comment => 'hi += a_hi*b_lo'));
                                 $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$hi_dst], comment => 'save hi'));
                             }
-                            elsif ($opcode eq 'div') {
+                            elsif ($opcode eq 'div' || $opcode eq 'rem') {
                                 my ($lo_lhs, $hi_lhs) = $self->_split_i128($lhs);
                                 my ($lo_rhs, $hi_rhs) = $self->_split_i128($rhs);
                                 my ($lo_dst, $hi_dst) = $self->_split_i128($inst);
@@ -6026,9 +6496,11 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                                         $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$q_lo]));
                                     }
                                 }
-                                $mbb->add_instruction($self->_wasm_push_opnd($q_lo, 'q_lo'));
+                                my $out_lo = $opcode eq 'div' ? $q_lo : $r_lo;
+                                my $out_hi = $opcode eq 'div' ? $q_hi : $r_hi;
+                                $mbb->add_instruction($self->_wasm_push_opnd($out_lo, 'out_lo'));
                                 $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$lo_dst]));
-                                $mbb->add_instruction($self->_wasm_push_opnd($q_hi, 'q_hi'));
+                                $mbb->add_instruction($self->_wasm_push_opnd($out_hi, 'out_hi'));
                                 $mbb->add_instruction(Brocken::Jenny::MIR::MachineInstruction->new(opcode => 'local_set', operands => [$hi_dst]));
                             }
                             else {
@@ -6099,7 +6571,7 @@ like ELF, Mach-O, or PE (Jenny::Linker).
                         $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
                         # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
                         my %map = (
-                            add => "${p}_add", sub => "${p}_sub", mul => "${p}_mul", div => "${p}_div_u",
+                            add => "${p}_add", sub => "${p}_sub", mul => "${p}_mul", div => "${p}_div_u", rem => "${p}_rem_u",
                             and => "${p}_and", or  => "${p}_or",  xor => "${p}_xor",
                             shl => "${p}_shl", lshr => "${p}_shr_u", ashr => "${p}_shr_s",
                             min => "${p}_min", max => "${p}_max",
@@ -11908,6 +12380,54 @@ subtest 'Jenny::Codegen i128 Lowering' => sub {
             Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 42),
             Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 2), '%r'));
     }, i64_mul => 'Wasm i128 mul: i64_mul produced', i64_and => 'Wasm i128 mul: i64_and produced', i64_shr_u => 'Wasm i128 mul: i64_shr_u produced');
+    # x86_64 i128 div lowering
+    $check->($X, 'i128_div', sub {
+        my $b = shift; $b->build_ret($b->build_div(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 42),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 2), '%r'));
+    }, seta => 'x86_64 i128 div: seta produced', setae => 'x86_64 i128 div: setae produced');
+    # x86_64 i128 rem lowering
+    $check->($X, 'i128_rem', sub {
+        my $b = shift; $b->build_ret($b->build_rem(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 42),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 2), '%r'));
+    }, setb => 'x86_64 i128 rem: setb produced', seta => 'x86_64 i128 rem: seta produced');
+    # ARM64 i128 div lowering
+    $check->($A, 'i128_div', sub {
+        my $b = shift; $b->build_ret($b->build_div(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 42),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 2), '%r'));
+    }, cset_hi => 'ARM64 i128 div: cset_hi produced', cset_cs => 'ARM64 i128 div: cset_cs produced');
+    # ARM64 i128 rem lowering
+    $check->($A, 'i128_rem', sub {
+        my $b = shift; $b->build_ret($b->build_rem(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 42),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 2), '%r'));
+    }, cset_hi => 'ARM64 i128 rem: cset_hi produced', cset_cc => 'ARM64 i128 rem: cset_cc produced');
+    # RISCV64 i128 div lowering
+    $check->($R, 'i128_div', sub {
+        my $b = shift; $b->build_ret($b->build_div(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 42),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 2), '%r'));
+    }, sltu => 'RISCV64 i128 div: sltu produced');
+    # RISCV64 i128 rem lowering
+    $check->($R, 'i128_rem', sub {
+        my $b = shift; $b->build_ret($b->build_rem(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 42),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 2), '%r'));
+    }, sltu => 'RISCV64 i128 rem: sltu produced');
+    # Wasm i128 div lowering
+    $check->($W, 'i128_div', sub {
+        my $b = shift; $b->build_ret($b->build_div(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 42),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 2), '%r'));
+    }, i64_sub => 'Wasm i128 div: i64_sub produced');
+    # Wasm i128 rem lowering
+    $check->($W, 'i128_rem', sub {
+        my $b = shift; $b->build_ret($b->build_rem(
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 42),
+            Brocken::Lindsay::IR::Constant->new(type => Brocken::Lindsay::IR::Type::i128(), value => 2), '%r'));
+    }, i64_sub => 'Wasm i128 rem: i64_sub produced');
 };
 subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
     my $host = Brocken::Katsuro::Platform::parse();
@@ -12177,12 +12697,36 @@ subtest 'Jenny::Codegen i128 Arithmetic (Cross-Platform)' => sub {
             is( $vals[1] + 0, 0,  'Wasm i128 div (42/2): hi = 0' );
             unlink $output_file if -e $output_file;
         }
+        # Test 12: i128 rem (21 % 10 = 1)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret($builder->build_rem(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 21 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 10 ),
+                '%r'
+            ));
+            my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+            my $res     = $codegen->emit_function($func);
+            ok( length( $res->{body} ) > 0, 'Generated Wasm i128 rem bytes' );
+            my $linker      = Brocken::Jenny::Linker::Wasm->new();
+            my $output_file = './i128_rem.wasm';
+            $linker->write_executable( $output_file, $res, $platform );
+            ok( -e $output_file, 'Wasm i128 rem file exists' );
+            my $output = qx["$wasmtime_path" run --invoke main $output_file];
+            chomp $output;
+            my @vals = split /\n/, $output;
+            is( $vals[0] + 0, 1, 'Wasm i128 rem (21%10): lo = 1' );
+            is( $vals[1] + 0, 0,  'Wasm i128 rem (21%10): hi = 0' );
+            unlink $output_file if -e $output_file;
+        }
     };
 };
 subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
     my $platform = Brocken::Katsuro::Platform::parse();
     SKIP: {
-        skip 'Execution test only supported on native hosts', 18 unless $platform->is_native;
+        skip 'Execution test only supported on native hosts', 24 unless $platform->is_native;
         # Test 1: constant i128 return (42)
         {
             my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
@@ -12351,6 +12895,64 @@ subtest 'Jenny::Codegen i128 Arithmetic (Native)' => sub {
             system($cmd);
             my $exit_code = $? >> 8;
             is( $exit_code, 42, 'Native i128 ashr (84>>1) returned 42 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 6: i128 div (42 / 2 = 21)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret($builder->build_div(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 2 ),
+                '%r'
+            ));
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 div bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = './i128_div_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 div file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            is( $exit_code, 21, 'Native i128 div (42/2) returned 21 on ' . $platform->friendly );
+            unlink $output_file if -e $output_file;
+        }
+        # Test 7: i128 rem (21 % 10 = 1)
+        {
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            $builder->position_at_end( $func->append_block('entry') );
+            $builder->build_ret($builder->build_rem(
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 21 ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 10 ),
+                '%r'
+            ));
+            my $codegen
+                = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+                $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+                Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+            my $bytes = $codegen->emit_function($func);
+            ok( length($bytes) > 0, 'Generated native i128 rem bytes for ' . $platform->friendly );
+            my $linker
+                = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+                $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                Brocken::Jenny::Linker::ELF64->new();
+            my $output_file = './i128_rem_native' . $platform->bin_ext;
+            $linker->write_executable( $output_file, $bytes, $platform );
+            ok( -e $output_file, 'Native i128 rem file exists' );
+            my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+            system($cmd);
+            my $exit_code = $? >> 8;
+            is( $exit_code, 1, 'Native i128 rem (21%10) returned 1 on ' . $platform->friendly );
             unlink $output_file if -e $output_file;
         }
     };
