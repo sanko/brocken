@@ -1,5 +1,13 @@
 package Brocken v0.0.1 {
-    ;
+    use v5.40;
+    use Brocken::Katsuro;
+    use Brocken::Lindsay;
+    use Brocken::Jenny;
+
+    sub new_compiler( $platform_triple = undef ) {
+        my $platform = Brocken::Katsuro::Platform->parse($platform_triple);
+        return Brocken::Jenny->new( platform => $platform );
+    }
 };
 1;
 __END__

@@ -18,7 +18,7 @@ Generates ELF64 binaries for Linux, BSDs, Haiku, and Solaris.
 
 =head2 Binary Structure
 
-=over 4
+=over
 
 =item * B<Elf64_Ehdr>: Main header (64 bytes).
 
@@ -30,7 +30,7 @@ Generates ELF64 binaries for Linux, BSDs, Haiku, and Solaris.
 
 =head2 Platform-Specific Workarounds
 
-=over 4
+=over
 
 =item * B<Haiku>: Requires C<_gSharedObjectHaikuABI> and C<_gSharedObjectHaikuVersion>
 symbols in C<.dynsym> to enable modern POSIX APIs.
@@ -185,7 +185,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 my $jal_offset = 20 + ( $func_offsets{main} // 0 );
                 my $halfword   = $jal_offset >> 1;
                 my $jal_imm    = ( ( $halfword >> 19 ) & 1 ) << 31 | ( ( $halfword & 0x3FF ) << 21 ) | ( ( $halfword >> 10 ) & 1 ) << 20
-                    | ( $halfword & 0xFF000 );
+                    | ( ( $halfword >> 11 ) & 0xFF ) << 12;
                 my $jal    = $jal_imm | ( 1 << 7 ) | 0x6F;
                 my $ebreak = 0x00100073;
                 $entry_stub = pack( 'V5', $jal, $auipc, $ld, $jalr, $ebreak );
