@@ -88,6 +88,13 @@ class Brocken::Jenny::Codegen::ARM64 {
         my $fp_res = $alloc->allocate( $mf, $platform, 1 );
         $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+        my %skip;
+        @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+        my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
+        my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1 );
+        $alloc->remove_redundant_moves( $mf, \%assignment );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -107,6 +114,13 @@ class Brocken::Jenny::Codegen::ARM64 {
             my $fp_res = $alloc->allocate( $mf, $platform, 1 );
             $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
             my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+            my %skip;
+            @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+            my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
+            my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+            $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
+            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1 );
+            $alloc->remove_redundant_moves( $mf, \%assignment );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -118,10 +132,10 @@ class Brocken::Jenny::Codegen::ARM64 {
     }
 
     method _encode( $mf, $assignment, $used_callee ) {
-        my $bytes       = '';
-        my $total_frame = 0;
-        my $is_leaf     = 1;
-        my $spill_frame = $self->_compute_spill_frame( $mf, 'sp' );
+        my $bytes        = '';
+        my $alloca_frame = 0;
+        my $is_leaf      = 1;
+        my $spill_frame  = $self->_compute_spill_frame( $mf, 'sp' );
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func';
@@ -131,8 +145,10 @@ class Brocken::Jenny::Codegen::ARM64 {
         if ( !$is_leaf ) {
             push @to_save, 'x30';
         }
-        my $callee_frame = scalar(@to_save) * 8;
-        my $reg_id       = sub ($r) {
+        my $callee_size   = scalar(@to_save) * 8;
+        my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
+        my $extra_frame   = $unified_frame - $callee_size;
+        my $reg_id        = sub ($r) {
             return 31 if $r eq 'sp';
             return $1 if $r =~ /^[xw](\d+)$/;
             return $1 if $r =~ /^v(\d+)$/;
@@ -143,9 +159,8 @@ class Brocken::Jenny::Codegen::ARM64 {
             return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: ${\$op->kind}";
         };
-        if ( $callee_frame > 0 ) {
-            my $call_stk = ( ( $callee_frame + 15 ) & ~15 );
-            $bytes .= pack( 'V', SUB_SP | ( ( $call_stk & 0xFFF ) << 10 ) );
+        if ( $callee_size > 0 ) {
+            $bytes .= pack( 'V', SUB_SP | ( ( $callee_size & 0xFFF ) << 10 ) );
             for my $i ( 0 .. $#to_save ) {
                 my $reg  = $to_save[$i];
                 my $rid  = $reg_id->($reg);
@@ -153,8 +168,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                 $bytes .= pack( 'V', $base | ( $i << 10 ) | ( 31 << 5 ) | $rid );
             }
         }
-        if ( $spill_frame > 0 ) {
-            $bytes .= pack( 'V', SUB_SP | ( ( $spill_frame & 0xFFF ) << 10 ) );
+        if ( $extra_frame > 0 ) {
+            $bytes .= pack( 'V', SUB_SP | ( ( $extra_frame & 0xFFF ) << 10 ) );
         }
         my %labels;
         my @fixups;
@@ -268,7 +283,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
-                    $total_frame += $size;
+                    $alloca_frame += $size;
                     $bytes .= pack( 'V', SUB_SP | ( ( $size & 0xFFF ) << 10 ) );
                     $bytes .= pack( 'V', MOV_SP | $did );
                 }
@@ -499,19 +514,18 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $bytes .= pack( 'V', 0x94000000 );
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    my $cleanup = $total_frame + $spill_frame;
+                    my $cleanup = $alloca_frame + $extra_frame;
                     if ( $cleanup > 0 ) {
                         $bytes .= pack( 'V', ADD_SP | ( ( $cleanup & 0xFFF ) << 10 ) );
                     }
-                    if ( $callee_frame > 0 ) {
+                    if ( $callee_size > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
                             my $reg  = $to_save[$i];
                             my $rid  = $reg_id->($reg);
                             my $base = $reg =~ /^v/ ? FLDR_64 : LDR_64;
                             $bytes .= pack( 'V', $base | ( $i << 10 ) | ( 31 << 5 ) | $rid );
                         }
-                        my $call_stk = ( ( $callee_frame + 15 ) & ~15 );
-                        $bytes .= pack( 'V', ADD_SP | ( ( $call_stk & 0xFFF ) << 10 ) );
+                        $bytes .= pack( 'V', ADD_SP | ( ( $callee_size & 0xFFF ) << 10 ) );
                     }
                     $bytes .= pack( 'V', RET );
                 }
@@ -535,6 +549,7 @@ class Brocken::Jenny::Codegen::ARM64 {
 
     method _compute_spill_frame( $mf, $stack_reg ) {
         my $max_disp = 0;
+        my $found    = 0;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 for my $op ( $inst->operands->@* ) {
@@ -542,10 +557,11 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $addr = $op->value;
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
+                    $found    = 1;
                 }
             }
         }
-        return $max_disp > 0 ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+        return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
     }
 }
 1;

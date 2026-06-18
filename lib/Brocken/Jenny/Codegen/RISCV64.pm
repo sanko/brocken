@@ -39,6 +39,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my $fp_res = $alloc->allocate( $mf, $platform, 1 );
         $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+        my %skip;
+        @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+        my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
+        my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1 );
+        $alloc->remove_redundant_moves( $mf, \%assignment );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -58,6 +65,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
             my $fp_res = $alloc->allocate( $mf, $platform, 1 );
             $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
             my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+            my %skip;
+            @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+            my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
+            my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+            $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
+            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1 );
+            $alloc->remove_redundant_moves( $mf, \%assignment );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -69,10 +83,10 @@ class Brocken::Jenny::Codegen::RISCV64 {
     }
 
     method _encode( $mf, $assignment, $used_callee ) {
-        my $bytes       = '';
-        my $total_frame = 0;
-        my $is_leaf     = 1;
-        my $spill_frame = $self->_compute_spill_frame( $mf, 'sp' );
+        my $bytes        = '';
+        my $alloca_frame = 0;
+        my $is_leaf      = 1;
+        my $spill_frame  = $self->_compute_spill_frame( $mf, 'sp' );
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func';
@@ -82,8 +96,10 @@ class Brocken::Jenny::Codegen::RISCV64 {
         if ( !$is_leaf ) {
             push @to_save, 'ra';
         }
-        my $callee_frame = ( scalar(@to_save) * 8 + 15 ) & ~15;
-        my $reg_id       = sub ($r) {
+        my $callee_size   = scalar(@to_save) * 8;
+        my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
+        my $extra_frame   = $unified_frame - $callee_size;
+        my $reg_id        = sub ($r) {
             my %map = (
                 zero => 0,
                 ra   => 1,
@@ -129,8 +145,8 @@ class Brocken::Jenny::Codegen::RISCV64 {
             return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: ${\$op->kind}";
         };
-        if ( $callee_frame > 0 ) {
-            my $neg = ( -$callee_frame ) & 0xFFF;
+        if ( $unified_frame > 0 ) {
+            my $neg = ( -$unified_frame ) & 0xFFF;
             $bytes .= pack( 'V', ( $neg << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
             for my $i ( 0 .. $#to_save ) {
                 my $reg      = $to_save[$i];
@@ -141,10 +157,6 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 my $store_op = $reg =~ /^f/ ? FSTORE : STORE;
                 $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | $store_op );
             }
-        }
-        if ( $spill_frame > 0 ) {
-            my $neg_spill = ( -$spill_frame ) & 0xFFF;
-            $bytes .= pack( 'V', ( $neg_spill << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
         }
         my %labels;
         my @fixups;
@@ -279,7 +291,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
-                    $total_frame += $size;
+                    $alloca_frame += $size;
 
                     # addi sp, sp, -size
                     my $neg_size = ( -$size ) & 0xFFF;
@@ -527,11 +539,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $bytes .= pack( 'V', JAL | ( 1 << 7 ) | 0x6F );
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    my $cleanup = $total_frame + $spill_frame;
+                    my $cleanup = $alloca_frame + $extra_frame;
                     if ( $cleanup > 0 ) {
                         $bytes .= pack( 'V', ( ( $cleanup & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
                     }
-                    if ( $callee_frame > 0 ) {
+                    if ( $callee_size > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
                             my $reg     = $to_save[$i];
                             my $rid     = $reg_id->($reg);
@@ -539,7 +551,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                             my $load_op = $reg =~ /^f/ ? FLOAD : LOAD;
                             $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | $load_op );
                         }
-                        $bytes .= pack( 'V', ( ( $callee_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                        $bytes .= pack( 'V', ( ( $callee_size & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
                     }
                     $bytes .= pack( 'V', JALR );
                 }
@@ -567,6 +579,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
 
     method _compute_spill_frame( $mf, $stack_reg ) {
         my $max_disp = 0;
+        my $found    = 0;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 for my $op ( $inst->operands->@* ) {
@@ -574,10 +587,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $addr = $op->value;
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
+                    $found    = 1;
                 }
             }
         }
-        return $max_disp > 0 ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+        return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
     }
 }
 1;
