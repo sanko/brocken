@@ -2,6 +2,7 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
+use Test2::Tools::Brocken qw[run_exec];
 use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
@@ -238,10 +239,8 @@ SKIP: {
         my $output_file = 'leaf_test' . $platform->bin_ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -f $output_file, 'leaf test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
-        my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-        system {$cmd} $cmd;
-        my $exit_code = $? >> 8;
-        is( $exit_code, 105, 'leaf function returned sum of 1..14 = 105' );
+        run_exec( $output_file, expected_exit => 105, platform => $platform, keep => 1,
+            name => 'leaf function returned sum of 1..14 = 105' );
         unlink $output_file;
     }
 };
