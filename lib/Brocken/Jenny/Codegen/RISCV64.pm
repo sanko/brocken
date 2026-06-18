@@ -151,7 +151,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
             for my $i ( 0 .. $#to_save ) {
                 my $reg      = $to_save[$i];
                 my $rid      = $reg_id->($reg);
-                my $off      = $i * 8;
+                 my $off      = $extra_frame + $i * 8;
                 my $imm_lo   = $off & 0x1F;
                 my $imm_hi   = ( $off >> 5 ) & 0x7F;
                 my $store_op = $reg =~ /^f/ ? FSTORE : STORE;
