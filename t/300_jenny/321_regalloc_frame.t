@@ -214,7 +214,7 @@ subtest 'x86_64 leaf vs non-leaf prologue' => sub {
 subtest 'leaf function runtime correctness' => sub {
     my $platform = Brocken::Katsuro::Platform::parse();
 SKIP: {
-        skip 'Only for x86_64 native', 2 unless $platform->is_x64 && $platform->is_native;
+        skip 'Only for x86_64 native', 3 unless $platform->is_x64 && $platform->is_native;
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'leaf_test', return_type => Brocken::Lindsay::IR::Type::i32() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
