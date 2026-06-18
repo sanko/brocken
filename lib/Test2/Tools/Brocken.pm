@@ -33,6 +33,9 @@ package Test2::Tools::Brocken v0.0.1 {
             system {$cmd} $cmd, @$argv;
             $actual = $? >> 8;
         }
+        if ( defined $expected && $actual != $expected ) {
+            $ctx->diag("$name: expected exit code $expected, got $actual");
+        }
         $ctx->ok( $actual == $expected, $name ) if defined $expected;
         unlink $file unless $keep;
         $ctx->release;
