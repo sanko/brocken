@@ -141,7 +141,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             }
         }
         my @intervals;
-        for my $name ( sort { $first{$a} <=> $first{$b} } keys %first ) {
+        for my $name ( sort { $first{$a} <=> $first{$b} || $a cmp $b } keys %first ) {
             push @intervals, Brocken::Jenny::RegAlloc::LiveInterval->new( name => $name, start => $first{$name}, end => $last{$name} );
         }
         return @intervals;

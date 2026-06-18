@@ -35,6 +35,25 @@ package Test2::Tools::Brocken v0.0.1 {
         }
         if ( defined $expected && $actual != $expected ) {
             $ctx->diag("$name: expected exit code $expected, got $actual (raw status \$?=$?)");
+            if ( -e $file ) {
+                if ( open my $fh, '<:raw', $file ) {
+                    my $bytes = do { local $/; <$fh> };
+                    close $fh;
+                    my $len = length $bytes;
+                    for ( my $i = 0 ; $i < $len ; $i += 16 ) {
+                        my $chunk = substr( $bytes, $i, 16 );
+                        my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
+                        my $pad   = 16 - length($chunk);
+                        $hex .= '   ' x $pad if $pad;
+                        my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
+                        $ctx->diag( sprintf '%08x: %-48s %s', $i, $hex, $ascii );
+                    }
+                    $ctx->diag("(hex dump of $file, $len bytes)");
+                }
+                else {
+                    $ctx->diag("Cannot open $file for hex dump: $!");
+                }
+            }
         }
         $ctx->ok( $actual == $expected, $name ) if defined $expected;
         unlink $file unless $keep;
