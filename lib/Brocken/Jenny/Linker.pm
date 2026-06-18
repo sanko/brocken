@@ -66,17 +66,17 @@ It handles:
     # Prepares the memory and file layout for the binary.
     # This must handle different alignment requirements:
     # - x86_64 ELF: 4KB (0x1000)
-    # - ARM64 ELF: 64KB (0x10000) for compatibility with Android/modern kernels.
+    # - ARM64 ELF: 4KB (0x1000) on Linux, 64KB (0x10000) on others for Android.
     # - Mach-O (Apple Silicon): 16KB (0x4000).
     # - PE (Windows): 512B (0x200) for files, 4KB (0x1000) for memory.
     method pre_layout( $text_size, $data_size, $platform, $debug = 0 ) {
         my $page_align
             = $platform->is_macos ? ( $platform->is_arm64 ? 0x4000 : 0x1000 ) :
             $platform->is_windows ? 0x200 :
-            $platform->is_arm64 ?
-            0x10000    # 64KB alignment for ARM64 ELF
-            :
-            0x1000;
+        $platform->is_arm64 ?
+        ( $platform->is_linux ? 0x1000 : 0x10000 )    # 4KB for Linux ARM64, 64KB for others
+        :
+        0x1000;
         $_layout = Brocken::Jenny::Linker::Layout->new( file_align => $page_align, section_align => $page_align );
         $self->_setup_layout( $_layout, $text_size, $data_size, $platform, $debug );
         $_layout->calculate($page_align);
