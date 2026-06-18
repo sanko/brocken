@@ -1,9 +1,12 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[portable];
+no warnings qw[experimental::class];
 use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Lowerer::Wasm;
 use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
+
 class Brocken::Jenny::Codegen::Wasm {
     field $platform : param = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 
@@ -98,8 +101,6 @@ class Brocken::Jenny::Codegen::Wasm {
                 next if $bi > 0 && $inst->opcode eq 'label';
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
-                print STDERR ">>> ENCODE block=$bi op=$opcode ops=" .
-                    join( ',', map { ( $_->value // 'undef' ) . '(' . ( $_->kind // '?' ) . ')' } @ops ) . "\n";
                 if ( $opcode eq 'bne' ) {
                     my $depth = $num_non_entry - $label_to_block_idx{ $ops[0]->value };
                     $$buf .= pack( 'C', 0x0D ) . $self->_uleb($depth);
@@ -119,7 +120,6 @@ class Brocken::Jenny::Codegen::Wasm {
                     $$buf .= pack( 'C', 0x42 ) . $self->_sleb( $ops[0]->value );
                 }
                 elsif ( $opcode eq 'f32_const' ) {
-                    print STDERR ">>> f32_const value=" . $ops[0]->value . " hex=" . unpack( 'H*', pack( 'f', $ops[0]->value ) ) . "\n";
                     $$buf .= pack( 'C', 0x43 ) . pack( 'f', $ops[0]->value );
                 }
                 elsif ( $opcode eq 'f64_const' ) {
@@ -330,5 +330,4 @@ class Brocken::Jenny::Codegen::Wasm {
         return $out;
     }
 }
-
 1;

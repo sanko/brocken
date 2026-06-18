@@ -1,7 +1,9 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
 use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
+
 class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
 
     method write_executable ( $output_file, $codegen_output, $platform ) {

@@ -1,9 +1,12 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
+use List::Util ();
 use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Lowerer::X86_64;
 use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
+
 class Brocken::Jenny::Codegen::X86_64 {
     field $platform : param = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
     use constant {
@@ -71,15 +74,19 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $total_frame = 0;
         my %reg_id_map  = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
         for my $i ( 0 .. 15 ) { $reg_id_map{"xmm$i"} = $i }
-        my $reg_id = sub ($r) { return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
+        my $reg_id      = sub ($r) { return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
+        my $spill_frame = $self->_compute_spill_frame( $mf, 'rsp' );
         for my $reg ( $used_callee->@* ) {
             my $rid = $reg_id->($reg);
             if ( $rid < 8 ) { $bytes .= pack( 'C', PUSH_BASE + $rid ) }
             else            { $bytes .= pack( 'CC', 0x41, PUSH_BASE + ( $rid - 8 ) ) }
         }
+        if ( $spill_frame > 0 ) {
+            $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $spill_frame );
+        }
         my $resolve = sub ($op) {
-            return $assignment->{ $op->value } if $op->kind eq 'virt_reg';
-            return $op->value                  if $op->kind eq 'phys_reg';
+            return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
+            return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: ${\$op->kind}";
         };
         my %labels;
@@ -512,8 +519,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'C', 0xE8 ) . "\x00\x00\x00\x00";
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    if ( $total_frame > 0 ) {
-                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 0 << 3 ) | 4, $total_frame );
+                    my $cleanup = $total_frame + $spill_frame;
+                    if ( $cleanup > 0 ) {
+                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 0 << 3 ) | 4, $cleanup );
                     }
                     for my $reg ( reverse $used_callee->@* ) {
                         my $rid = $reg_id->($reg);
@@ -538,6 +546,20 @@ class Brocken::Jenny::Codegen::X86_64 {
         }
         return ( $bytes, \@func_fixups );
     }
-}
 
+    method _compute_spill_frame( $mf, $stack_reg ) {
+        my $max_disp = 0;
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                for my $op ( $inst->operands->@* ) {
+                    next unless $op->kind eq 'mem';
+                    my $addr = $op->value;
+                    next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
+                    $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
+                }
+            }
+        }
+        return $max_disp > 0 ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+    }
+}
 1;

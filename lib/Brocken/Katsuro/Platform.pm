@@ -1,5 +1,6 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
 use Brocken::Katsuro::Platform::ABI;
 
 class Brocken::Katsuro::Platform {
@@ -134,7 +135,7 @@ class Brocken::Katsuro::Platform {
         my $os_version;
         if ( defined $os && $os =~ /^([a-z]+?)([\d._]+)$/i ) {
             $os_version = $2;
-            $os = $1;
+            $os         = $1;
         }
         my $class = 'Brocken::Katsuro::Platform';
         if    ( $os =~ /linux/i )                                       { $class = 'Brocken::Katsuro::Platform::Linux' }
@@ -150,16 +151,24 @@ class Brocken::Katsuro::Platform {
         elsif ( $os =~ /solaris|sunos|illumos/i )                       { $class = 'Brocken::Katsuro::Platform::Solaris' }
         elsif ( $arch =~ /^wasm/ || $os =~ /wasi/i || $env =~ /wasi/i ) { $class = 'Brocken::Katsuro::Platform::Wasm' }
         my $friendly;
-        $class->new( arch => $arch, vendor => $vendor, os => $os, os_version => $os_version, env => $env, friendly => $friendly, is_native => $is_native );
+        $class->new(
+            arch       => $arch,
+            vendor     => $vendor,
+            os         => $os,
+            os_version => $os_version,
+            env        => $env,
+            friendly   => $friendly,
+            is_native  => $is_native
+        );
     }
-    field $arch      : reader : param;
-    field $vendor    : reader : param;
-    field $os        : reader : param = ();
+    field $arch       : reader : param;
+    field $vendor     : reader : param;
+    field $os         : reader : param = ();
     field $os_version : reader : param = undef;
-    field $env       : reader : param = ();
-    field $friendly  : reader : param = ();
-    field $is_native : reader : param = 0;
-    field $abi       : reader = Brocken::Katsuro::Platform::ABI->parse($arch);
+    field $env        : reader : param = ();
+    field $friendly   : reader : param = ();
+    field $is_native  : reader : param = 0;
+    field $abi        : reader = Brocken::Katsuro::Platform::ABI->parse($arch);
     ADJUST {
         # Assign friendly names for display purposes, particularly for Apple platforms.
         if ( !defined $friendly ) {

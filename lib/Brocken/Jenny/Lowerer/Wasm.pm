@@ -1,7 +1,10 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[portable];
+no warnings qw[experimental::class];
 use Brocken::Jenny::MIR;
 use List::Util qw[min max];
+
 class Brocken::Jenny::Lowerer::Wasm {
 
     method lower($ir_func) {
@@ -600,11 +603,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                             )
                                         );
                                         $mbb->add_instruction(
-                                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                                opcode   => 'i64_shr_s',
-                                                operands => [],
-                                                comment  => 'sign'
-                                            )
+                                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shr_s', operands => [], comment => 'sign' )
                                         );
                                         $mbb->add_instruction(
                                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -849,17 +848,12 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'carry0' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'local_set',
-                                    operands => [$carry],
-                                    comment  => 'save carry0'
-                                )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$carry], comment => 'save carry0' )
                             );
 
                             # carry = carry0 >> 32  (carry1)
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$carry], comment => 'carry0' )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$carry], comment => 'carry0' ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'i64_const',
@@ -870,11 +864,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shr_u', operands => [], comment => 'carry1' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'local_set',
-                                    operands => [$carry],
-                                    comment  => 'save carry1'
-                                )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$carry], comment => 'save carry1' )
                             );
 
                             # hi_dst = (p1>>32) + (p2>>32) + p3 + carry1  (= umulh(a_lo,b_lo))
@@ -907,15 +897,9 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => '+p3' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$carry], comment => 'carry1' )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$carry], comment => 'carry1' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'i64_add',
-                                    operands => [],
-                                    comment  => 'umulh(a_lo,b_lo)'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'umulh(a_lo,b_lo)' ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'local_set',
@@ -928,15 +912,9 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction( $self->_wasm_push_opnd( $lo_lhs, 'lo_lhs' ) );
                             $mbb->add_instruction( $self->_wasm_push_opnd( $lo_rhs, 'lo_rhs' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_mul', operands => [], comment => 'lo = a_lo*b_lo' )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_mul', operands => [], comment => 'lo = a_lo*b_lo' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'local_set',
-                                    operands => [$lo_dst],
-                                    comment  => 'save lo'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$lo_dst], comment => 'save lo' ) );
 
                             # hi_dst += a_lo * b_hi
                             $mbb->add_instruction( $self->_wasm_push_opnd( $lo_lhs, 'lo_lhs' ) );
@@ -946,15 +924,9 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$hi_dst], comment => 'hi' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'hi += a_lo*b_hi' )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'hi += a_lo*b_hi' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'local_set',
-                                    operands => [$hi_dst],
-                                    comment  => 'save hi'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi_dst], comment => 'save hi' ) );
 
                             # hi_dst += a_hi * b_lo
                             $mbb->add_instruction( $self->_wasm_push_opnd( $hi_lhs, 'hi_lhs' ) );
@@ -964,15 +936,9 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$hi_dst], comment => 'hi' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'hi += a_hi*b_lo' )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'hi += a_hi*b_lo' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'local_set',
-                                    operands => [$hi_dst],
-                                    comment  => 'save hi'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi_dst], comment => 'save hi' ) );
                         }
                         elsif ( $opcode eq 'div' || $opcode eq 'rem' ) {
                             my ( $lo_lhs, $hi_lhs ) = $self->_split_i128($lhs);
@@ -1054,8 +1020,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                     value => $inst->name . "_b$ii",
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$bit] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$bit] ) );
 
                                 # carry = r_lo >> 63
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $r_lo, 'r_lo' ) );
@@ -1071,8 +1036,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                     value => $inst->name . "_c$ii",
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$carry] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$carry] ) );
 
                                 # r_lo = (r_lo << 1) | bit
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $r_lo, 'r_lo' ) );
@@ -1082,12 +1046,10 @@ class Brocken::Jenny::Lowerer::Wasm {
                                         operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ]
                                     )
                                 );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shl', operands => [] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$bit] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_or', operands => [] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_lo] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shl',   operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$bit] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_or',    operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_lo] ) );
 
                                 # r_hi = (r_hi << 1) | carry
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $r_hi, 'r_hi' ) );
@@ -1097,12 +1059,10 @@ class Brocken::Jenny::Lowerer::Wasm {
                                         operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ]
                                     )
                                 );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shl', operands => [] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$carry] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_or', operands => [] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_hi] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shl',   operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$carry] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_or',    operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_hi] ) );
 
                                 # Compare R >= D
                                 # cond_hi_gt = r_hi > d_hi
@@ -1150,16 +1110,14 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_and', operands => [] ) );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$cond_hi_gt] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_or', operands => [] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_or',           operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [] ) );
                                 my $cond = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'virt_reg',
                                     value => $inst->name . "_cond$ii",
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$cond] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$cond] ) );
 
                                 # neg_cond = -cond = 0 - cond
                                 $mbb->add_instruction(
@@ -1168,9 +1126,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                                         operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ]
                                     )
                                 );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$cond] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$cond] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub',   operands => [] ) );
                                 my $neg_cond = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'virt_reg',
                                     value => $inst->name . "_neg$ii",
@@ -1202,16 +1159,14 @@ class Brocken::Jenny::Lowerer::Wasm {
                                     value => $inst->name . "_bor$ii",
                                     type  => Brocken::Lindsay::IR::Type::i32()
                                 );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$borrow] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$borrow] ) );
 
                                 # r_lo -= masked_d_lo
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $r_lo, 'r_lo' ) );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$masked_d_lo] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_lo] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub',   operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_lo] ) );
 
                                 # masked_d_hi = d_hi & neg_cond
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $hi_rhs, 'd_hi' ) );
@@ -1230,14 +1185,11 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $r_hi, 'r_hi' ) );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$masked_d_hi] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$borrow] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_hi] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$borrow] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add',          operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub',          operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_hi] ) );
 
                                 # Q_bit = (1 << ($ii % 64)) & neg_cond
                                 my $qbit_val = 1 << ( $ii % 64 );
@@ -1255,8 +1207,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                     value => $inst->name . "_qb$ii",
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$qbit] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$qbit] ) );
                                 if ( $ii >= 64 ) {
                                     $mbb->add_instruction( $self->_wasm_push_opnd( $q_hi, 'q_hi' ) );
                                     $mbb->add_instruction(
@@ -1338,12 +1289,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                     )
                                 );
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'i64_add',
-                                        operands => [],
-                                        comment  => 'hi add carry'
-                                    )
-                                );
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'hi add carry' ) );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'local_set',
@@ -1399,12 +1345,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                     )
                                 );
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'i64_sub',
-                                        operands => [],
-                                        comment  => 'hi sub borrow'
-                                    )
-                                );
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [], comment => 'hi sub borrow' ) );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'local_set',
@@ -1417,11 +1358,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $lo_lhs, 'lo_lhs' ) );
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $lo_rhs, 'lo_rhs' ) );
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => "i64_$opcode",
-                                        operands => [],
-                                        comment  => "lo $opcode"
-                                    )
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => "i64_$opcode", operands => [], comment => "lo $opcode" )
                                 );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
@@ -1433,11 +1370,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $hi_lhs, 'hi_lhs' ) );
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $hi_rhs, 'hi_rhs' ) );
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => "i64_$opcode",
-                                        operands => [],
-                                        comment  => "hi $opcode"
-                                    )
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => "i64_$opcode", operands => [], comment => "hi $opcode" )
                                 );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
@@ -1507,11 +1440,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_${opcode}", operands => [], comment => $opcode ) );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'local_set',
-                            operands => [$dst],
-                            comment  => 'store ' . $inst->name
-                        )
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
@@ -1647,8 +1576,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                         }
                         $mbb->add_instruction( $self->_wasm_push( $ptr, 'store: ptr' ) );
                         $mbb->add_instruction( $self->_wasm_push( $val, 'store: val' ) );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'store' ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'store' ) );
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
@@ -1783,21 +1711,11 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction( $self->_wasm_push_opnd( $lo_lhs, 'i128 icmp lo_lhs' ) );
                             $mbb->add_instruction( $self->_wasm_push_opnd( $lo_rhs, 'i128 icmp lo_rhs' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'i64_xor',
-                                    operands => [],
-                                    comment  => 'i128 icmp lo_xor'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [], comment => 'i128 icmp lo_xor' ) );
                             $mbb->add_instruction( $self->_wasm_push_opnd( $hi_lhs, 'i128 icmp hi_lhs' ) );
                             $mbb->add_instruction( $self->_wasm_push_opnd( $hi_rhs, 'i128 icmp hi_rhs' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'i64_xor',
-                                    operands => [],
-                                    comment  => 'i128 icmp hi_xor'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [], comment => 'i128 icmp hi_xor' ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_or', operands => [], comment => 'i128 icmp or' ) );
                             $mbb->add_instruction(
@@ -1805,12 +1723,7 @@ class Brocken::Jenny::Lowerer::Wasm {
 
                             if ( $pred eq 'ne' ) {
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'i32_eqz',
-                                        operands => [],
-                                        comment  => 'i128 icmp ne'
-                                    )
-                                );
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_eqz', operands => [], comment => 'i128 icmp ne' ) );
                             }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -1829,8 +1742,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction( $self->_wasm_push_opnd( $hi_a, 'i128 icmp hi_a' ) );
                             $mbb->add_instruction( $self->_wasm_push_opnd( $hi_b, 'i128 icmp hi_b' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => $cmp, operands => [], comment => 'i128 icmp hi_' . $cmp )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => $cmp, operands => [], comment => 'i128 icmp hi_' . $cmp ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'local_set',
@@ -1841,8 +1753,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction( $self->_wasm_push_opnd( $hi_a, 'i128 icmp hi_a' ) );
                             $mbb->add_instruction( $self->_wasm_push_opnd( $hi_b, 'i128 icmp hi_b' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_eq', operands => [], comment => 'i128 icmp hi_eq' )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_eq', operands => [], comment => 'i128 icmp hi_eq' ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'local_set',
@@ -1853,12 +1764,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction( $self->_wasm_push_opnd( $lo_a, 'i128 icmp lo_a' ) );
                             $mbb->add_instruction( $self->_wasm_push_opnd( $lo_b, 'i128 icmp lo_b' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'i64_lt_u',
-                                    operands => [],
-                                    comment  => 'i128 icmp lo_lt'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_lt_u', operands => [], comment => 'i128 icmp lo_lt' ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'local_get',
@@ -1881,8 +1787,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_or', operands => [], comment => 'i128 icmp result' )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_or', operands => [], comment => 'i128 icmp result' ) );
 
                             if ( $pred eq 'ule' || $pred eq 'uge' || $pred eq 'sle' || $pred eq 'sge' ) {
                                 $mbb->add_instruction(
@@ -1907,8 +1812,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                         my $bits = $lhs->type && $lhs->type->kind eq 'int' ? $lhs->type->bits : 32;
                         $p = $bits >= 64 ? 'i64' : 'i32';
                     }
-                    my %map
-                        = $float ? ( eq => "${p}_eq", ne => "${p}_ne", lt => "${p}_lt", gt => "${p}_gt", le => "${p}_le", ge => "${p}_ge" ) : (
+                    my %map = $float ? ( eq => "${p}_eq", ne => "${p}_ne", lt => "${p}_lt", gt => "${p}_gt", le => "${p}_le", ge => "${p}_ge" ) : (
                         eq  => "${p}_eq",
                         ne  => "${p}_ne",
                         slt => "${p}_lt_s",
@@ -1919,7 +1823,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                         ugt => "${p}_gt_u",
                         ule => "${p}_le_u",
                         uge => "${p}_ge_u"
-                        );
+                    );
                     $mbb->add_instruction( $self->_wasm_push( $lhs, 'icmp lhs' ) );
                     $mbb->add_instruction( $self->_wasm_push( $rhs, 'icmp rhs' ) );
                     $mbb->add_instruction(
@@ -1972,6 +1876,7 @@ class Brocken::Jenny::Lowerer::Wasm {
             }
             $mf->add_block($mbb);
         }
+        $mf->compute_cfg;
         return $mf;
     }
 
@@ -2016,14 +1921,10 @@ class Brocken::Jenny::Lowerer::Wasm {
 
     method _wasm_push_opnd( $opnd, $label ) {
         if ( $opnd->kind eq 'imm' ) {
-            return Brocken::Jenny::MIR::MachineInstruction->new(
-                opcode   => 'i64_const',
-                operands => [$opnd],
-                comment  => "push $label=" . $opnd->value
-            );
+            return Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_const', operands => [$opnd],
+                comment => "push $label=" . $opnd->value );
         }
-        return Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$opnd],
-            comment => "push $label=" . $opnd->value );
+        return Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$opnd], comment => "push $label=" . $opnd->value );
     }
 
     method _type_tag($type) {
@@ -2049,16 +1950,8 @@ class Brocken::Jenny::Lowerer::Wasm {
             );
         }
         return (
-            Brocken::Jenny::MIR::MachineOperand->new(
-                kind  => 'virt_reg',
-                value => $ir_val->name . '_lo',
-                type  => Brocken::Lindsay::IR::Type::i64()
-            ),
-            Brocken::Jenny::MIR::MachineOperand->new(
-                kind  => 'virt_reg',
-                value => $ir_val->name . '_hi',
-                type  => Brocken::Lindsay::IR::Type::i64()
-            ),
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
         );
     }
 }

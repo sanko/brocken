@@ -1,5 +1,6 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
 
 class Brocken::Jenny::Linker::Layout {
 
@@ -11,8 +12,7 @@ Brocken::Jenny::Linker::Layout - Binary Section Alignment and Placement
 
 =head1 DESCRIPTION
 
-This class calculates the physical file offsets and relative virtual
-addresses (RVAs) for binary sections.
+This class calculates the physical file offsets and relative virtual addresses (RVAs) for binary sections.
 
 =cut
 

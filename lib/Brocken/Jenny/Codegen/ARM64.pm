@@ -1,9 +1,12 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
+use List::Util ();
 use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Lowerer::ARM64;
 use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
+
 class Brocken::Jenny::Codegen::ARM64 {
     field $platform : param = Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu');
     use constant {
@@ -118,6 +121,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         my $bytes       = '';
         my $total_frame = 0;
         my $is_leaf     = 1;
+        my $spill_frame = $self->_compute_spill_frame( $mf, 'sp' );
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func';
@@ -135,8 +139,8 @@ class Brocken::Jenny::Codegen::ARM64 {
             return 0;
         };
         my $resolve = sub ($op) {
-            return $assignment->{ $op->value } if $op->kind eq 'virt_reg';
-            return $op->value                  if $op->kind eq 'phys_reg';
+            return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
+            return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: ${\$op->kind}";
         };
         if ( $callee_frame > 0 ) {
@@ -148,6 +152,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                 my $base = $reg =~ /^v/ ? FSTR_64 : STR_64;
                 $bytes .= pack( 'V', $base | ( $i << 10 ) | ( 31 << 5 ) | $rid );
             }
+        }
+        if ( $spill_frame > 0 ) {
+            $bytes .= pack( 'V', SUB_SP | ( ( $spill_frame & 0xFFF ) << 10 ) );
         }
         my %labels;
         my @fixups;
@@ -455,12 +462,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $base  = $bits == 32 ? FMOV_GP2F_32     : FMOV_GP2F_64;
                     $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                 }
-                elsif ( $opcode eq 'fadd' ||
-                    $opcode eq 'fsub' ||
-                    $opcode eq 'fmul' ||
-                    $opcode eq 'fdiv' ||
-                    $opcode eq 'fmin' ||
-                    $opcode eq 'fmax' ) {
+                elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' || $opcode eq 'fmin' || $opcode eq 'fmax' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $src_r = $resolve->($src);
@@ -497,8 +499,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $bytes .= pack( 'V', 0x94000000 );
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    if ( $total_frame > 0 ) {
-                        $bytes .= pack( 'V', ADD_SP | ( ( $total_frame & 0xFFF ) << 10 ) );
+                    my $cleanup = $total_frame + $spill_frame;
+                    if ( $cleanup > 0 ) {
+                        $bytes .= pack( 'V', ADD_SP | ( ( $cleanup & 0xFFF ) << 10 ) );
                     }
                     if ( $callee_frame > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
@@ -529,9 +532,20 @@ class Brocken::Jenny::Codegen::ARM64 {
         }
         return ( $bytes, \@func_fixups );
     }
-}
 
-# ---------------------------------------------------------------------------
-# Machine IR (MIR) - Target-agnostic intermediate representation
-# ---------------------------------------------------------------------------
+    method _compute_spill_frame( $mf, $stack_reg ) {
+        my $max_disp = 0;
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                for my $op ( $inst->operands->@* ) {
+                    next unless $op->kind eq 'mem';
+                    my $addr = $op->value;
+                    next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
+                    $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
+                }
+            }
+        }
+        return $max_disp > 0 ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+    }
+}
 1;

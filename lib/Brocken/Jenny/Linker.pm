@@ -1,7 +1,9 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
 use Brocken::Jenny::Linker::Layout;
 use Brocken::Katsuro::Platform;
+
 class Brocken::Jenny::Linker {
 
 =pod
@@ -12,8 +14,8 @@ Brocken::Jenny::Linker - Unified Binary Executable Generator
 
 =head1 DESCRIPTION
 
-The Linker class provides a platform-agnostic interface for taking machine code and data segments and packaging them into a final executable
-or shared library.
+The Linker class provides a platform-agnostic interface for taking machine code and data segments and packaging them
+into a final executable or shared library.
 
 It handles:
 

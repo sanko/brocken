@@ -1,5 +1,6 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
 use Brocken::Katsuro::Platform::ABI;
 
 class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform::ABI) {

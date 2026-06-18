@@ -1,7 +1,9 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class portable];
 use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
+
 class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
 =pod
@@ -157,8 +159,8 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             elsif ( $ff->{type} eq 'call_jal' ) {
                 my $rel  = ( $entry_size + $target_off ) - $src_pos;
                 my $half = $rel >> 1;
-                my $enc  = ( ( $half >> 19 ) & 1 ) << 31 | ( ( $half & 0x3FF ) << 21 ) | ( ( $half >> 10 ) & 1 ) << 20
-                    | ( ( $half >> 11 ) & 0xFF ) << 12;
+                my $enc
+                    = ( ( $half >> 19 ) & 1 ) << 31 | ( ( $half & 0x3FF ) << 21 ) | ( ( $half >> 10 ) & 1 ) << 20 | ( ( $half >> 11 ) & 0xFF ) << 12;
                 my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
                 $word = ( $word & 0x00000FFF ) | $enc;
                 substr( $text, $src_pos, 4, pack( 'V', $word ) );

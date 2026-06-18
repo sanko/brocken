@@ -1,7 +1,9 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
 use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
+
 class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
 =pod
@@ -222,8 +224,8 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             elsif ( $ff->{type} eq 'call_jal' ) {
                 my $rel  = ( $entry_size + $target_off ) - $src_pos;
                 my $half = $rel >> 1;
-                my $enc  = ( ( $half >> 19 ) & 1 ) << 31 | ( ( $half & 0x3FF ) << 21 ) | ( ( $half >> 10 ) & 1 ) << 20
-                    | ( ( $half >> 11 ) & 0xFF ) << 12;
+                my $enc
+                    = ( ( $half >> 19 ) & 1 ) << 31 | ( ( $half & 0x3FF ) << 21 ) | ( ( $half >> 10 ) & 1 ) << 20 | ( ( $half >> 11 ) & 0xFF ) << 12;
                 my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
                 $word = ( $word & 0x00000FFF ) | $enc;
                 substr( $text, $src_pos, 4, pack( 'V', $word ) );
@@ -547,8 +549,8 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         $self->layout->get('.dynsym')->{size} = length($dynsym);
 
         # Setup Relocations (.rela.dyn)
-        my $rel_type = $platform->is_arm64 ? 1025 :
-            ( $platform->is_riscv64 ? 2 : 6 );    # R_RISCV_64 (2) or R_AARCH64_GLOB_DAT (1025) or R_X86_64_GLOB_DAT (6)
+        my $rel_type
+            = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );   # R_RISCV_64 (2) or R_AARCH64_GLOB_DAT (1025) or R_X86_64_GLOB_DAT (6)
         my $rela_dyn = '';
 
         # Elf64_Rela (24 bytes) for dlopen

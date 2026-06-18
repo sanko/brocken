@@ -1,5 +1,6 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
 
 # ============================================================
 # Types
@@ -60,8 +61,7 @@ class Brocken::Lindsay::IR::Instruction : isa(Brocken::Lindsay::IR::Value) {
 
         # Binary operations in LLVM usually take the form: <op> <type> <op1>, <op2>
         if ( scalar $operands->@* == 2 && $operands->[0]->type->as_string eq $operands->[1]->type->as_string ) {
-            return sprintf "  %s%s %s %s, %s", $res, $opcode, $operands->[0]->type->as_string, $operands->[0]->as_string,
-                $operands->[1]->as_string;
+            return sprintf "  %s%s %s %s, %s", $res, $opcode, $operands->[0]->type->as_string, $operands->[0]->as_string, $operands->[1]->as_string;
         }
         my $ops = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $operands->@*;
         return "  $res$opcode $ops";
@@ -76,8 +76,7 @@ class Brocken::Lindsay::IR::Instruction::ICmp : isa(Brocken::Lindsay::IR::Instru
 
     method render() {
         my ( $lhs, $rhs ) = $self->operands->@*;
-        return sprintf '  %s = icmp %s %s %s, %s', ( $self->name // '%<anon>' ), $predicate, $lhs->type->as_string, $lhs->as_string,
-            $rhs->as_string;
+        return sprintf '  %s = icmp %s %s %s, %s', ( $self->name // '%<anon>' ), $predicate, $lhs->type->as_string, $lhs->as_string, $rhs->as_string;
     }
 }
 

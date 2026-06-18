@@ -1,7 +1,10 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[portable];
+no warnings qw[experimental::class];
 use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
+
 class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
     field $ENABLE_COFF = 0;
 
@@ -32,10 +35,9 @@ image base, and security flags.
 
 =head2 Windows ARM64 Quirk
 
-Windows on ARM64 strictly mandates the presence of a Base Relocation
-Table (C<.reloc> section) even for executables that don't technically
-need it. If omitted, the loader throws a "Corrupt Executable" error.
-We generate a dummy relocation block to satisfy this.
+Windows on ARM64 strictly mandates the presence of a Base Relocation Table (C<.reloc> section) even for executables
+that don't technically need it. If omitted, the loader throws a "Corrupt Executable" error. We generate a dummy
+relocation block to satisfy this.
 
 =head2 Security Flags
 
@@ -136,8 +138,8 @@ We enable several modern Windows security features:
             elsif ( $ff->{type} eq 'call_jal' ) {
                 my $rel  = ( $entry_size + $target_off ) - $src_pos;
                 my $half = $rel >> 1;
-                my $enc  = ( ( $half >> 19 ) & 1 ) << 31 | ( ( $half & 0x3FF ) << 21 ) | ( ( $half >> 10 ) & 1 ) << 20
-                    | ( ( $half >> 11 ) & 0xFF ) << 12;
+                my $enc
+                    = ( ( $half >> 19 ) & 1 ) << 31 | ( ( $half & 0x3FF ) << 21 ) | ( ( $half >> 10 ) & 1 ) << 20 | ( ( $half >> 11 ) & 0xFF ) << 12;
                 my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
                 $word = ( $word & 0x00000FFF ) | $enc;
                 substr( $text, $src_pos, 4, pack( 'V', $word ) );
@@ -248,8 +250,8 @@ We enable several modern Windows security features:
 
         # .text section (Code)
         my $sec_raw_code_size = ( length($text_bytes) + 511 ) & ~511;
-        $section_table .= pack( 'a8 V2 V2 V2 v2 V',
-            ".text\x00\x00\x00", length($text_bytes), $sec_rva, $sec_raw_code_size, $sec_raw_ptr, 0, 0, 0, 0, 0x60000020 );
+        $section_table .= pack( 'a8 V2 V2 V2 v2 V', ".text\x00\x00\x00", length($text_bytes), $sec_rva, $sec_raw_code_size, $sec_raw_ptr, 0, 0, 0, 0,
+            0x60000020 );
         $sec_rva     += ( length($text_bytes) + 4095 ) & ~4095;
         $sec_raw_ptr += $sec_raw_code_size;
 
@@ -276,8 +278,8 @@ We enable several modern Windows security features:
         my $reloc_bytes        = pack( 'V V v v', 0x1000, 12, 0, 0 );     # Base RVA, Block Size, TypeOffset entries (empty)
         my $reloc_rva          = $sec_rva;
         my $sec_raw_reloc_size = ( length($reloc_bytes) + 511 ) & ~511;
-        $section_table .= pack( 'a8 V2 V2 V2 v2 V',
-            ".reloc\x00\x00", length($reloc_bytes), $sec_rva, $sec_raw_reloc_size, $sec_raw_ptr, 0, 0, 0, 0, 0x42000040 );
+        $section_table .= pack( 'a8 V2 V2 V2 v2 V', ".reloc\x00\x00", length($reloc_bytes), $sec_rva, $sec_raw_reloc_size, $sec_raw_ptr, 0, 0, 0, 0,
+            0x42000040 );
         $sec_rva     += ( length($reloc_bytes) + 4095 ) & ~4095;
         $sec_raw_ptr += $sec_raw_reloc_size;
 
@@ -285,8 +287,8 @@ We enable several modern Windows security features:
         my $sec_raw_debug_size = 0;
         if ($has_debug) {
             $sec_raw_debug_size = ( length($debug_bytes) + 511 ) & ~511;
-            $section_table .= pack( 'a8 V2 V2 V2 v2 V', '.debug_l', length($debug_bytes), $sec_rva, $sec_raw_debug_size, $sec_raw_ptr, 0, 0, 0, 0,
-                0x42000040 );
+            $section_table
+                .= pack( 'a8 V2 V2 V2 v2 V', '.debug_l', length($debug_bytes), $sec_rva, $sec_raw_debug_size, $sec_raw_ptr, 0, 0, 0, 0, 0x42000040 );
             $sec_rva     += ( length($debug_bytes) + 4095 ) & ~4095;
             $sec_raw_ptr += $sec_raw_debug_size;
         }
@@ -399,12 +401,7 @@ We enable several modern Windows security features:
 
         # Pad headers to FileAlignment
         my $headers_len
-            = length($dos_header)
-            + length($dos_stub)
-            + length($pe_signature)
-            + length($file_header)
-            + length($opt_header)
-            + length($section_table);
+            = length($dos_header) + length($dos_stub) + length($pe_signature) + length($file_header) + length($opt_header) + length($section_table);
         print $fh ( "\x00" x ( $size_of_headers - $headers_len ) );
 
         # Write section payloads
