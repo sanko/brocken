@@ -836,9 +836,11 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $tmp, $mask ] ) );
                                     $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $bor, $tmp ] ) );
+                                    $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'sltu',
-                                            operands => [ $bor, $tmp, $mask ],
+                                            operands => [ $bor, $mask ],
                                             comment  => 'mask128 borrow'
                                         )
                                     );
