@@ -1,0 +1,58 @@
+use v5.42;
+use feature qw[class];
+use Brocken::Katsuro::Platform;
+
+class Brocken::Katsuro::Platform::Linux : isa(Brocken::Katsuro::Platform) {
+    method is_linux() {1}
+    method format()   {'elf'}
+
+    # Linux-specific syscall numbers. These differ significantly from BSD.
+    method syscalls() {
+        state $syscalls //= {
+            x86_64 => {
+                write     => 1,
+                read      => 0,
+                open      => 2,
+                close     => 3,
+                exit      => 60,
+                fork      => 57,
+                getpid    => 39,
+                wait4     => 61,
+                mmap      => 9,
+                nanosleep => 35,
+                futex     => 202,
+                brk       => 12
+            },
+            aarch64 => {
+                write     => 64,
+                read      => 63,
+                open      => 56,
+                close     => 57,
+                exit      => 93,
+                fork      => 220,
+                getpid    => 172,
+                wait4     => 260,
+                mmap      => 222,
+                nanosleep => 101,
+                futex     => 98,
+                brk       => 214
+            },
+            riscv64 => {
+                write     => 64,
+                read      => 63,
+                open      => 56,
+                close     => 57,
+                exit      => 93,
+                fork      => 220,
+                getpid    => 172,
+                wait4     => 260,
+                mmap      => 222,
+                nanosleep => 101,
+                futex     => 98,
+                brk       => 214
+            }
+        };
+        $syscalls;
+    }
+}
+1;

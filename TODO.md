@@ -19,6 +19,7 @@ Currently, `Brocken::Jenny` uses hardcoded byte stubs. We need a systematic way 
 SSA uses infinite virtual registers; hardware does not.
 - [x] Design Register Allocator interface (vreg_map in _encode).
 - [x] Implement Linear Scan Register Allocator.
+  - [ ] **Still needs work: spilling, multi-block liveness, proper register allocation** — allocator currently assigns all vregs to `rax` regardless of count.
 - [ ] **Calling conventions (spilling, move-coalescing, stack frame)**
   - [ ] Move coalescing — remove redundant `mv`/`mov` where src and dst end up in same phys reg
   - [ ] Proper stack frame layout — unified frame size (callee saves + spills + allocas + alignment), prologue allocation, epilogue deallocation, frame pointer setup (x29/rbp)
