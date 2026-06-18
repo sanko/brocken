@@ -248,7 +248,9 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         }
     }
 
-    method insert_caller_save_code( $mf, $caller_regs, $callee_regs, $stack_reg ) {
+    method insert_caller_save_code( $mf, $caller_regs, $stack_reg, $is_float = 0 ) {
+        my $store_op  = $is_float ? 'fstore' : 'store';
+        my $load_op   = $is_float ? 'fload'  : 'load';
         my $spill_idx = 0;
         for my $bb ( $mf->blocks->@* ) {
             my @new;
@@ -259,7 +261,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                             = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 }, );
                         push @new,
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'store',
+                            opcode   => $store_op,
                             operands => [ $mem, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r ) ],
                             comment  => 'caller-save ' . $r,
                             );
@@ -273,7 +275,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                             );
                         push @new,
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'load',
+                            opcode   => $load_op,
                             operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r ), $mem ],
                             comment  => 'caller-restore ' . $r,
                             );
@@ -302,16 +304,9 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         }
     }
 
-    method compute_stack_frame( $mf, $used_callee, $spill_slots, $is_float ) {
-        my $frame = 0;
-        $frame += scalar(@$used_callee) * 8;
-        if ($spill_slots) {
-            $frame += scalar( keys %$spill_slots ) * 8;
-        }
-
-        # Align to 16 bytes
-        $frame = ( $frame + 15 ) & ~15;
-        return $frame;
+    method compute_unified_frame( $num_callee, $spill_frame, $caller_save_size ) {
+        my $frame = $num_callee * 8 + $spill_frame + $caller_save_size;
+        return ( $frame + 15 ) & ~15;
     }
 }
 1;

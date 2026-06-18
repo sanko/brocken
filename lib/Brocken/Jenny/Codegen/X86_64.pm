@@ -38,6 +38,15 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $fp_res = $alloc->allocate( $mf, $platform, 1 );
         $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+
+        # Caller-save: save/restore caller regs around call_func (exclude return registers)
+        my %skip;
+        @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+        my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
+        my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1 );
+        $alloc->remove_redundant_moves( $mf, \%assignment );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -58,6 +67,13 @@ class Brocken::Jenny::Codegen::X86_64 {
             my $fp_res = $alloc->allocate( $mf, $platform, 1 );
             $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
             my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+            my %skip;
+            @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+            my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
+            my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+            $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
+            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1 );
+            $alloc->remove_redundant_moves( $mf, \%assignment );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -70,19 +86,43 @@ class Brocken::Jenny::Codegen::X86_64 {
 
     # Encode MIR to x86_64 machine code bytes (registers pre-allocated)
     method _encode( $mf, $assignment, $used_callee ) {
-        my $bytes       = '';
-        my $total_frame = 0;
-        my %reg_id_map  = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
+        my $bytes        = '';
+        my $alloca_frame = 0;
+        my %reg_id_map   = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
         for my $i ( 0 .. 15 ) { $reg_id_map{"xmm$i"} = $i }
-        my $reg_id      = sub ($r) { return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
-        my $spill_frame = $self->_compute_spill_frame( $mf, 'rsp' );
-        for my $reg ( $used_callee->@* ) {
-            my $rid = $reg_id->($reg);
-            if ( $rid < 8 ) { $bytes .= pack( 'C', PUSH_BASE + $rid ) }
-            else            { $bytes .= pack( 'CC', 0x41, PUSH_BASE + ( $rid - 8 ) ) }
+        my $reg_id        = sub ($r) { return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
+        my $spill_frame   = $self->_compute_spill_frame( $mf, 'rsp' );
+        my $callee_size   = scalar(@$used_callee) * 8;
+        my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
+        my $extra_frame   = $unified_frame - $callee_size;
+        my $is_leaf       = 1;
+
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                $is_leaf = 0 if $inst->opcode eq 'call_func';
+            }
         }
-        if ( $spill_frame > 0 ) {
-            $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $spill_frame );
+        if ($is_leaf) {
+            if ( $unified_frame > 0 ) {
+                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $unified_frame );
+            }
+            for my $i ( 0 .. $#$used_callee ) {
+                my $reg = $used_callee->[$i];
+                my $rid = $reg_id->($reg);
+                my $off = $spill_frame + $i * 8;
+                my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
+                $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x89, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
+            }
+        }
+        else {
+            for my $reg ( $used_callee->@* ) {
+                my $rid = $reg_id->($reg);
+                if ( $rid < 8 ) { $bytes .= pack( 'C', PUSH_BASE + $rid ) }
+                else            { $bytes .= pack( 'CC', 0x41, PUSH_BASE + ( $rid - 8 ) ) }
+            }
+            if ( $extra_frame > 0 ) {
+                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $extra_frame );
+            }
         }
         my $resolve = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
@@ -300,7 +340,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
-                    $total_frame += $size;
+                    $alloca_frame += $size;
 
                     # sub rsp, size  (48 81 EC <size32>) -- rsp is always 64-bit
                     my $rex   = 0x48;
@@ -519,14 +559,29 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'C', 0xE8 ) . "\x00\x00\x00\x00";
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    my $cleanup = $total_frame + $spill_frame;
-                    if ( $cleanup > 0 ) {
-                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 0 << 3 ) | 4, $cleanup );
+                    if ($is_leaf) {
+                        for my $i ( reverse 0 .. $#$used_callee ) {
+                            my $reg = $used_callee->[$i];
+                            my $rid = $reg_id->($reg);
+                            my $off = $spill_frame + $alloca_frame + $i * 8;
+                            my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
+                            $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x8B, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
+                        }
+                        my $cleanup = $unified_frame + $alloca_frame;
+                        if ( $cleanup > 0 ) {
+                            $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 0 << 3 ) | 4, $cleanup );
+                        }
                     }
-                    for my $reg ( reverse $used_callee->@* ) {
-                        my $rid = $reg_id->($reg);
-                        if ( $rid < 8 ) { $bytes .= pack( 'C', POP_BASE + $rid ) }
-                        else            { $bytes .= pack( 'CC', 0x41, POP_BASE + ( $rid - 8 ) ) }
+                    else {
+                        my $cleanup = $alloca_frame + $extra_frame;
+                        if ( $cleanup > 0 ) {
+                            $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 0 << 3 ) | 4, $cleanup );
+                        }
+                        for my $reg ( reverse $used_callee->@* ) {
+                            my $rid = $reg_id->($reg);
+                            if ( $rid < 8 ) { $bytes .= pack( 'C', POP_BASE + $rid ) }
+                            else            { $bytes .= pack( 'CC', 0x41, POP_BASE + ( $rid - 8 ) ) }
+                        }
                     }
                     $bytes .= pack( 'C', RET_BYTE );
                 }
@@ -549,6 +604,7 @@ class Brocken::Jenny::Codegen::X86_64 {
 
     method _compute_spill_frame( $mf, $stack_reg ) {
         my $max_disp = 0;
+        my $found    = 0;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 for my $op ( $inst->operands->@* ) {
@@ -556,10 +612,11 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $addr = $op->value;
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
+                    $found    = 1;
                 }
             }
         }
-        return $max_disp > 0 ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+        return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
     }
 }
 1;

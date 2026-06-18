@@ -324,5 +324,7 @@ class Brocken::Katsuro::Platform {
     method callee_saved()                          { $self->abi->callee_saved }
     method frame_reg()                             { $self->abi->frame_reg }
     method stack_reg()                             { $self->abi->stack_reg }
+    method return_register()                       { $self->abi->return_register }
+    method fp_return_register()                    { $self->abi->fp_return_register }
 }
 1;
