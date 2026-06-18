@@ -33,8 +33,9 @@ package Test2::Tools::Brocken v0.0.1 {
             system {$cmd} $cmd, @$argv;
             $actual = $? >> 8;
         }
-        if ( defined $expected && $actual != $expected ) {
-            $ctx->diag("$name: expected exit code $expected, got $actual (raw status \$?=$?)");
+        my $mismatch = defined $expected && $actual != $expected;
+        if ($mismatch) {
+            warn "$name: expected exit code $expected, got $actual (raw status \$?=$?)\n";
             if ( -e $file ) {
                 if ( open my $fh, '<:raw', $file ) {
                     my $bytes = do { local $/; <$fh> };
@@ -46,16 +47,16 @@ package Test2::Tools::Brocken v0.0.1 {
                         my $pad   = 16 - length($chunk);
                         $hex .= '   ' x $pad if $pad;
                         my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
-                        $ctx->diag( sprintf '%08x: %-48s %s', $i, $hex, $ascii );
+                        warn sprintf( '%08x: %-48s %s', $i, $hex, $ascii ) . "\n";
                     }
-                    $ctx->diag("(hex dump of $file, $len bytes)");
+                    warn "(hex dump of $file, $len bytes)\n";
                 }
                 else {
-                    $ctx->diag("Cannot open $file for hex dump: $!");
+                    warn "Cannot open $file for hex dump: $!\n";
                 }
             }
         }
-        $ctx->ok( $actual == $expected, $name ) if defined $expected;
+        $ctx->ok( !$mismatch, $name ) if defined $expected;
         unlink $file unless $keep;
         $ctx->release;
         return $actual;
