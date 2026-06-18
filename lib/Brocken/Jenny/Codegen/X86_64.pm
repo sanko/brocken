@@ -45,7 +45,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
         my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
         $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
-        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1 );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
@@ -72,7 +72,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
             my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
             $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
-            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1 );
+            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
