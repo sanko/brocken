@@ -248,10 +248,10 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         }
     }
 
-    method insert_caller_save_code( $mf, $caller_regs, $stack_reg, $is_float = 0 ) {
+    method insert_caller_save_code( $mf, $caller_regs, $stack_reg, $is_float = 0, $base_idx = 0 ) {
         my $store_op  = $is_float ? 'fstore' : 'store';
         my $load_op   = $is_float ? 'fload'  : 'load';
-        my $spill_idx = 0;
+        my $spill_idx = $base_idx;
         for my $bb ( $mf->blocks->@* ) {
             my @new;
             for my $inst ( $bb->instructions->@* ) {
