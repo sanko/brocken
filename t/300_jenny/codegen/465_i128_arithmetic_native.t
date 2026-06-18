@@ -645,4 +645,142 @@ SKIP: {
         );
     }
 }
+
+# Test 18: signed i128 div (-42 / 2 = -21)
+{
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+    my $builder = Brocken::Lindsay::IR::Builder->new();
+    $builder->position_at_end( $func->append_block('entry') );
+    $builder->build_ret(
+        $builder->build_div(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => -42 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value =>  2 ),
+            '%r'
+        )
+    );
+    my $codegen
+        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $bytes = $codegen->emit_function($func);
+    ok( length($bytes) > 0, 'Generated native i128 signed div bytes for ' . $platform->friendly );
+    my $linker
+        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+        Brocken::Jenny::Linker::ELF64->new();
+SKIP: {
+        skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+        my $output_file = 'i128_sdiv1_native' . $platform->bin_ext;
+        $linker->write_executable( $output_file, $bytes, $platform );
+        ok( -e $output_file, 'Native i128 signed div (-42/2) file exists' );
+        my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
+        system {$cmd} $cmd;
+        my $exit = $? >> 8;
+        is( $exit, 235, 'Native i128 signed div (-42/2) returned 235 (-21) on ' . $platform->friendly );
+    }
+}
+
+# Test 19: signed i128 div (42 / -2 = -21)
+{
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+    my $builder = Brocken::Lindsay::IR::Builder->new();
+    $builder->position_at_end( $func->append_block('entry') );
+    $builder->build_ret(
+        $builder->build_div(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => -2 ),
+            '%r'
+        )
+    );
+    my $codegen
+        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $bytes = $codegen->emit_function($func);
+    ok( length($bytes) > 0, 'Generated native i128 signed div 2 bytes for ' . $platform->friendly );
+    my $linker
+        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+        Brocken::Jenny::Linker::ELF64->new();
+SKIP: {
+        skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+        my $output_file = 'i128_sdiv2_native' . $platform->bin_ext;
+        $linker->write_executable( $output_file, $bytes, $platform );
+        ok( -e $output_file, 'Native i128 signed div (42/-2) file exists' );
+        my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
+        system {$cmd} $cmd;
+        my $exit = $? >> 8;
+        is( $exit, 235, 'Native i128 signed div (42/-2) returned 235 (-21) on ' . $platform->friendly );
+    }
+}
+
+# Test 20: signed i128 div (-42 / -2 = 21)
+{
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+    my $builder = Brocken::Lindsay::IR::Builder->new();
+    $builder->position_at_end( $func->append_block('entry') );
+    $builder->build_ret(
+        $builder->build_div(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => -42 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => -2 ),
+            '%r'
+        )
+    );
+    my $codegen
+        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $bytes = $codegen->emit_function($func);
+    ok( length($bytes) > 0, 'Generated native i128 signed div neg both bytes for ' . $platform->friendly );
+    my $linker
+        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+        Brocken::Jenny::Linker::ELF64->new();
+SKIP: {
+        skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+        my $output_file = 'i128_sdiv3_native' . $platform->bin_ext;
+        $linker->write_executable( $output_file, $bytes, $platform );
+        ok( -e $output_file, 'Native i128 signed div (-42/-2) file exists' );
+        run_exec(
+            $output_file,
+            expected_exit => 21,
+            platform      => $platform,
+            name          => 'Native i128 signed div (-42/-2) returned 21 on ' . $platform->friendly
+        );
+    }
+}
+
+# Test 21: signed i128 rem (-42 % 5 = -2, exit 254)
+{
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
+    my $builder = Brocken::Lindsay::IR::Builder->new();
+    $builder->position_at_end( $func->append_block('entry') );
+    $builder->build_ret(
+        $builder->build_rem(
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => -42 ),
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value =>  5 ),
+            '%r'
+        )
+    );
+    my $codegen
+        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $bytes = $codegen->emit_function($func);
+    ok( length($bytes) > 0, 'Generated native i128 signed rem bytes for ' . $platform->friendly );
+    my $linker
+        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
+        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
+        Brocken::Jenny::Linker::ELF64->new();
+SKIP: {
+        skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
+        my $output_file = 'i128_srem1_native' . $platform->bin_ext;
+        $linker->write_executable( $output_file, $bytes, $platform );
+        ok( -e $output_file, 'Native i128 signed rem (-42%5) file exists' );
+        my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
+        system {$cmd} $cmd;
+        my $exit = $? >> 8;
+        is( $exit, 254, 'Native i128 signed rem (-42%5) returned 254 (-2) on ' . $platform->friendly );
+    }
+}
 done_testing;

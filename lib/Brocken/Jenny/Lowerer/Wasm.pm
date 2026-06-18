@@ -995,6 +995,111 @@ class Brocken::Jenny::Lowerer::Wasm {
                             );
                             $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_hi] ) );
 
+                            my $orig_lo_lhs = $lo_lhs;
+                            my $orig_hi_lhs = $hi_lhs;
+                            my $orig_lo_rhs = $lo_rhs;
+                            my $orig_hi_rhs = $hi_rhs;
+                            # ---- signed i128 div/rem: materialize imm operands to virt_reg ----
+                            if ( $lo_lhs->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_mlo',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction( $self->_wasm_push_opnd( $lo_lhs, 'lo_lhs' ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r] ) );
+                                $lo_lhs = $r;
+                            }
+                            if ( $hi_lhs->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_mhi',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction( $self->_wasm_push_opnd( $hi_lhs, 'hi_lhs' ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r] ) );
+                                $hi_lhs = $r;
+                            }
+                            if ( $lo_rhs->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_rmlo',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction( $self->_wasm_push_opnd( $lo_rhs, 'lo_rhs' ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r] ) );
+                                $lo_rhs = $r;
+                            }
+                            if ( $hi_rhs->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_rmhi',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction( $self->_wasm_push_opnd( $hi_rhs, 'hi_rhs' ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r] ) );
+                                $hi_rhs = $r;
+                            }
+                            # ---- end materialization ----
+                            # ---- signed i128 div/rem: abs inputs via xor+sub with sign mask ----
+                            my $do_mask128 = sub ( $lo, $hi, $mask ) {
+                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_dmtmp', type => Brocken::Lindsay::IR::Type::i64() );
+                                my $bor = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_dmbor', type => Brocken::Lindsay::IR::Type::i64() );
+                                $mbb->add_instruction( $self->_wasm_push_opnd( $lo, 'lo' ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$tmp] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_lt_u', operands => [], comment => 'mask128 borrow' ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$bor] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$lo] ) );
+                                $mbb->add_instruction( $self->_wasm_push_opnd( $hi, 'hi' ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$bor] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi] ) );
+                            };
+                            my $sign_d = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_sgnd',
+                                type  => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            $mbb->add_instruction( $self->_wasm_push_opnd( $hi_lhs, 'hi_lhs' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i64_const',
+                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ]
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shr_s', operands => [], comment => 'i128 sign d' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$sign_d] ) );
+                            $do_mask128->( $lo_lhs, $hi_lhs, $sign_d );
+                            my $sign_v = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_signv',
+                                type  => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            $mbb->add_instruction( $self->_wasm_push_opnd( $hi_rhs, 'hi_rhs' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i64_const',
+                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ]
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shr_s', operands => [], comment => 'i128 sign v' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$sign_v] ) );
+                            $do_mask128->( $lo_rhs, $hi_rhs, $sign_v );
+                            # ---- end input abs ----
                             for my $ii ( reverse 0 .. 127 ) {
                                 my $val   = $ii >= 64 ? $hi_lhs  : $lo_lhs;
                                 my $shift = $ii >= 64 ? $ii - 64 : $ii;
@@ -1225,6 +1330,24 @@ class Brocken::Jenny::Lowerer::Wasm {
                                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$q_lo] ) );
                                 }
                             }
+
+                            # ---- signed i128 div/rem: apply sign to quotient and remainder ----
+                            # sign_d and sign_v are already 0/-1 masks from i64_shr_s
+                            my $sign_q = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_sgnq',
+                                type  => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$sign_d] ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$sign_v] ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [], comment => 'i128 q sign = d ^ v' )
+                            );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$sign_q] ) );
+                            $do_mask128->( $q_lo, $q_hi, $sign_q );
+                            $do_mask128->( $r_lo, $r_hi, $sign_d );
+
+                            # ---- end signed handling ----
                             my $out_lo = $opcode eq 'div' ? $q_lo : $r_lo;
                             my $out_hi = $opcode eq 'div' ? $q_hi : $r_hi;
                             $mbb->add_instruction( $self->_wasm_push_opnd( $out_lo, 'out_lo' ) );
@@ -1942,6 +2065,7 @@ class Brocken::Jenny::Lowerer::Wasm {
             my $val = $ir_val->value;
             my $lo  = $val & 0xFFFFFFFFFFFFFFFF;
             my $hi  = ( $val >> 64 ) & 0xFFFFFFFFFFFFFFFF;
+            $hi = 0xFFFFFFFFFFFFFFFF                 if $val < 0;
             $hi = -( ~$hi & 0xFFFFFFFFFFFFFFFF ) - 1 if $hi >= 0x8000000000000000;
             $lo = -( ~$lo & 0xFFFFFFFFFFFFFFFF ) - 1 if $lo >= 0x8000000000000000;
             return (
