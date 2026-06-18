@@ -159,17 +159,15 @@ class Brocken::Jenny::Codegen::ARM64 {
             return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: ${\$op->kind}";
         };
-        if ( $callee_size > 0 ) {
-            $bytes .= pack( 'V', SUB_SP | ( ( $callee_size & 0xFFF ) << 10 ) );
+        if ( $unified_frame > 0 ) {
+            $bytes .= pack( 'V', SUB_SP | ( ( $unified_frame & 0xFFF ) << 10 ) );
             for my $i ( 0 .. $#to_save ) {
                 my $reg  = $to_save[$i];
                 my $rid  = $reg_id->($reg);
                 my $base = $reg =~ /^v/ ? FSTR_64 : STR_64;
-                $bytes .= pack( 'V', $base | ( $i << 10 ) | ( 31 << 5 ) | $rid );
+                my $imm12 = ( $extra_frame + $i * 8 ) >> 3;
+                $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
             }
-        }
-        if ( $extra_frame > 0 ) {
-            $bytes .= pack( 'V', SUB_SP | ( ( $extra_frame & 0xFFF ) << 10 ) );
         }
         my %labels;
         my @fixups;
@@ -514,18 +512,20 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $bytes .= pack( 'V', 0x94000000 );
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    my $cleanup = $alloca_frame + $extra_frame;
-                    if ( $cleanup > 0 ) {
-                        $bytes .= pack( 'V', ADD_SP | ( ( $cleanup & 0xFFF ) << 10 ) );
+                    if ( $alloca_frame > 0 ) {
+                        $bytes .= pack( 'V', ADD_SP | ( ( $alloca_frame & 0xFFF ) << 10 ) );
                     }
                     if ( $callee_size > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
                             my $reg  = $to_save[$i];
                             my $rid  = $reg_id->($reg);
                             my $base = $reg =~ /^v/ ? FLDR_64 : LDR_64;
-                            $bytes .= pack( 'V', $base | ( $i << 10 ) | ( 31 << 5 ) | $rid );
+                            my $imm12 = ( $extra_frame + $i * 8 ) >> 3;
+                            $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
                         }
-                        $bytes .= pack( 'V', ADD_SP | ( ( $callee_size & 0xFFF ) << 10 ) );
+                    }
+                    if ( $unified_frame > 0 ) {
+                        $bytes .= pack( 'V', ADD_SP | ( ( $unified_frame & 0xFFF ) << 10 ) );
                     }
                     $bytes .= pack( 'V', RET );
                 }
