@@ -1,5 +1,6 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
 
 class Brocken::Katsuro::Platform::ABI {
 
@@ -27,9 +28,8 @@ Brocken::Katsuro::Platform::ABI - Low-level Architecture Binary Interface detail
 
 =head1 DESCRIPTION
 
-This class and its subclasses define the register sets and DWARF numbering
-for specific architectures. It abstracts the differences between calling
-conventions (e.g., which registers are preserved across calls).
+This class and its subclasses define the register sets and DWARF numbering for specific architectures. It abstracts the
+differences between calling conventions (e.g., which registers are preserved across calls).
 
 =cut
 

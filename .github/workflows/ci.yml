@@ -346,6 +346,16 @@ jobs:
             }
         id: matrix
         run: "jq -rn 'env.DATA | fromjson | @json \"matrix=\\(.)\"' > $GITHUB_OUTPUT\n"
+  wasm:
+    name: WebAssembly
+    needs:
+      - setup
+    uses: ./.github/workflows/unix.yml
+    with:
+      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
+      os: ubuntu-24.04
+      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
+      title: WebAssembly
   win32-arm64:
     name: Windows
     needs:
@@ -366,16 +376,6 @@ jobs:
       os: windows-2022
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       title: Intel
-  wasm:
-    name: WebAssembly
-    needs:
-      - setup
-    uses: ./.github/workflows/unix.yml
-    with:
-      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: ubuntu-24.04
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      title: WebAssembly
 name: CI Matrix
 on:
   pull_request: ~

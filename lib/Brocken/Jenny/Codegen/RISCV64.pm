@@ -1,9 +1,12 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
+use List::Util ();
 use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Lowerer::RISCV64;
 use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
+
 class Brocken::Jenny::Codegen::RISCV64 {
     field $platform : param = Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu');
     use constant {
@@ -40,24 +43,6 @@ class Brocken::Jenny::Codegen::RISCV64 {
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
         my @used_callee = sort keys %callee_seen;
-        print STDERR ">>> ASSIGN: " . join( ', ', map {"$_ => $assignment{$_}"} sort keys %assignment ) . "\n";
-
-        for my $block ( $mf->blocks->@* ) {
-            for my $inst ( $block->instructions->@* ) {
-                my @ops = $inst->operands->@*;
-                print STDERR ">>> MIR: " . $inst->opcode . " " . join(
-                    ', ',
-                    map {
-                        ( $_->kind eq 'imm' ? $_->value :
-                                $_->kind eq 'virt_reg' ? "virt(${\$_->value})" :
-                                $_->kind eq 'label'    ? "label(${\$_->value})" :
-                                $_->kind eq 'phys_reg' ? "phys(${\$_->value})" :
-                                $_->kind eq 'mem'      ? 'mem(...)' :
-                                '?' )
-                    } @ops
-                ) . "\n";
-            }
-        }
         my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
         return $bytes;
     }
@@ -87,6 +72,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my $bytes       = '';
         my $total_frame = 0;
         my $is_leaf     = 1;
+        my $spill_frame = $self->_compute_spill_frame( $mf, 'sp' );
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func';
@@ -139,14 +125,8 @@ class Brocken::Jenny::Codegen::RISCV64 {
             return 0;
         };
         my $resolve = sub ($op) {
-            print STDERR ">>> resolve(${\$op->kind}, ${\$op->value}): ";
-            if ( $op->kind eq 'virt_reg' ) {
-                my $r = $assignment->{ $op->value };
-                print STDERR "assignment lookup => " . ( defined $r ? $r : 'undef(MISSING!)' ) . "\n";
-                return $r;
-            }
-            print STDERR "phys_reg => ${\$op->value}\n";
-            return $op->value if $op->kind eq 'phys_reg';
+            return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
+            return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: ${\$op->kind}";
         };
         if ( $callee_frame > 0 ) {
@@ -162,6 +142,10 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | $store_op );
             }
         }
+        if ( $spill_frame > 0 ) {
+            my $neg_spill = ( -$spill_frame ) & 0xFFF;
+            $bytes .= pack( 'V', ( $neg_spill << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+        }
         my %labels;
         my @fixups;
         my @func_fixups;
@@ -171,17 +155,6 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
                 my ( $dst, $src ) = @ops;
-                print STDERR ">>> ENC op=$opcode off=" . length($bytes) . " ops=" . join(
-                    ',',
-                    map {
-                        ( $_->kind eq 'imm' ? "imm(${\$_->value})" :
-                                $_->kind eq 'virt_reg' ? "virt(${\$_->value})" :
-                                $_->kind eq 'label'    ? "label(${\$_->value})" :
-                                $_->kind eq 'phys_reg' ? "phys(${\$_->value})" :
-                                $_->kind eq 'mem'      ? 'mem(...)' :
-                                '?' )
-                    } @ops
-                ) . "\n";
                 if ( $opcode eq 'label' ) {
                     $labels{ $dst->value } = $current_offset->();
                 }
@@ -299,8 +272,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         my $sid   = $reg_id->($src_r);
                         my %f3    = ( shl => 1,    lshr => 5,    ashr => 5 );
                         my %f7    = ( shl => 0x00, lshr => 0x00, ashr => 0x20 );
-                        $bytes .= pack( 'V',
-                            ( $f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
+                        $bytes .= pack( 'V', ( $f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
                     }
                 }
                 elsif ( $opcode eq 'alloca' ) {
@@ -408,8 +380,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $disp   = $addr->{disp} // 0;
                     my $imm_lo = $disp & 0x1F;
                     my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                    $bytes
-                        .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $store_bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
+                    $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $store_bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                 }
                 elsif ( $opcode eq 'fload' ) {
                     my $dst_r  = $resolve->($dst);
@@ -456,15 +427,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         my $disp   = $addr->{disp} // 0;
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                        $bytes
-                            .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
                     }
                     else {
                         my $disp   = $addr->{disp} // 0;
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                        $bytes
-                            .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
                     }
                 }
                 elsif ( $opcode eq 'fmov' ) {
@@ -558,8 +527,9 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $bytes .= pack( 'V', JAL | ( 1 << 7 ) | 0x6F );
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    if ( $total_frame > 0 ) {
-                        $bytes .= pack( 'V', ( ( $total_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                    my $cleanup = $total_frame + $spill_frame;
+                    if ( $cleanup > 0 ) {
+                        $bytes .= pack( 'V', ( ( $cleanup & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
                     }
                     if ( $callee_frame > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
@@ -587,13 +557,27 @@ class Brocken::Jenny::Codegen::RISCV64 {
             }
             elsif ( $fixup->{type} eq 'bcc' ) {
                 my $imm13 = ( $rel >> 1 ) & 0x1FFF;
-                my $enc = ( ( $imm13 >> 11 ) & 1 ) << 31 | ( ( $imm13 >> 4 ) & 0x3F ) << 25 | ( $fixup->{rs1} << 15 ) | ( $fixup->{funct3} << 12 )
+                my $enc   = ( ( $imm13 >> 11 ) & 1 ) << 31 | ( ( $imm13 >> 4 ) & 0x3F ) << 25 | ( $fixup->{rs1} << 15 ) | ( $fixup->{funct3} << 12 )
                     | ( ( $imm13 & 0x0F ) << 8 ) | ( ( $imm13 >> 10 ) & 1 ) << 7 | BCC;
                 substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
             }
         }
         return ( $bytes, \@func_fixups );
     }
-}
 
+    method _compute_spill_frame( $mf, $stack_reg ) {
+        my $max_disp = 0;
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                for my $op ( $inst->operands->@* ) {
+                    next unless $op->kind eq 'mem';
+                    my $addr = $op->value;
+                    next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
+                    $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
+                }
+            }
+        }
+        return $max_disp > 0 ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+    }
+}
 1;

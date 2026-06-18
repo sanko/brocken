@@ -1,6 +1,8 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
 use Brocken::Jenny::Linker;
+
 class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
 
 =pod

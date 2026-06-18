@@ -1,6 +1,7 @@
 package Brocken::Jenny v0.0.1 {
     use v5.42;
     use feature qw[class];
+    no warnings qw[experimental::class];
     use Brocken::Jenny::Codegen::X86_64;
     use Brocken::Jenny::Codegen::ARM64;
     use Brocken::Jenny::Codegen::RISCV64;
@@ -30,9 +31,8 @@ Brocken::Jenny - Machine Code Generation and Linking Layer
 
 =head1 DESCRIPTION
 
-Jenny is responsible for lowering Lindsay IR into native machine code
-(Jenny::Codegen) and packaging those bytes into executable binary formats
-like ELF, Mach-O, or PE (Jenny::Linker).
+Jenny is responsible for lowering Lindsay IR into native machine code (Jenny::Codegen) and packaging those bytes into
+executable binary formats like ELF, Mach-O, or PE (Jenny::Linker).
 
 =head1 LICENSE
 

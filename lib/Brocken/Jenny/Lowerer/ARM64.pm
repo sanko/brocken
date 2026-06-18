@@ -1,7 +1,10 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[portable];
+no warnings qw[experimental::class];
 use Brocken::Katsuro::Platform::ABI::AArch64;
 use Brocken::Jenny::MIR;
+
 class Brocken::Jenny::Lowerer::ARM64 {
     method _abi() { state $abi = Brocken::Katsuro::Platform::ABI::AArch64->new }
 
@@ -1403,11 +1406,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         elsif ( $opcode eq 'div' ) {
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' ) {
-                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_dv',
-                                    type  => $inst->type
-                                );
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_dv',
+                                    type => $inst->type );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mv',
@@ -1425,21 +1425,14 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'udiv',
-                                    operands => [ $dst, $rhs_opnd ],
-                                    comment  => 'udiv'
-                                )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'udiv', operands => [ $dst, $rhs_opnd ], comment => 'udiv' )
                             );
                         }
                         elsif ( $opcode eq 'rem' ) {
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' ) {
-                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_rm',
-                                    type  => $inst->type
-                                );
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rm',
+                                    type => $inst->type );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mv',
@@ -1449,11 +1442,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 );
                                 $rhs_opnd = $r;
                             }
-                            my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
-                                kind  => 'virt_reg',
-                                value => $inst->name . '_rem',
-                                type  => $inst->type
-                            );
+                            my $tmp
+                                = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mv',
@@ -1483,28 +1473,15 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'sub',
-                                    operands => [ $dst, $tmp ],
-                                    comment  => 'sub (rem)'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $tmp ], comment => 'sub (rem)' ) );
                         }
                         else {
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' && $opcode ne 'add' && $opcode ne 'sub' ) {
-                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_r',
-                                    type  => $inst->type
-                                );
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_r',
+                                    type => $inst->type );
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $r, $rhs_opnd ],
-                                        comment  => 'rhs'
-                                    )
-                                );
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r, $rhs_opnd ], comment => 'rhs' ) );
                                 $rhs_opnd = $r;
                             }
                             $mbb->add_instruction(
@@ -1662,20 +1639,12 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         );
                     }
                     else {
-                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => 'mem',
-                            value => { base => $ptr->name, disp => 0 },
-                            type  => $val->type
-                        );
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $ptr->name, disp => 0 },
+                            type => $val->type );
                         if ( $val->type && $val->type->kind eq 'float' ) {
                             my $src = $val->isa('Brocken::Lindsay::IR::Constant') ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val);
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'fstore',
-                                    operands => [ $mem, $src ],
-                                    comment  => 'fstore'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fstore', operands => [ $mem, $src ], comment => 'fstore' ) );
                         }
                         else {
                             $mbb->add_instruction(
@@ -1699,11 +1668,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             comment  => 'box: alloca 16'
                         )
                     );
-                    my $payload_mem = Brocken::Jenny::MIR::MachineOperand->new(
-                        kind  => 'mem',
-                        value => { base => $inst->name, disp => 0 },
-                        type  => $val->type
-                    );
+                    my $payload_mem
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 0 }, type => $val->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
@@ -1733,11 +1699,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
                     my $dyn = $inst->operands->[0];
-                    my $mem = Brocken::Jenny::MIR::MachineOperand->new(
-                        kind  => 'mem',
-                        value => { base => $dyn->name, disp => 0 },
-                        type  => $inst->type
-                    );
+                    my $mem
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $dyn->name, disp => 0 }, type => $inst->type );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -1970,11 +1933,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'cset_eq',
-                                    operands => [$t1],
-                                    comment  => 'i128 icmp hi_eq'
-                                )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_eq', operands => [$t1], comment => 'i128 icmp hi_eq' )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -1991,11 +1950,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'cset_cc',
-                                    operands => [$t2],
-                                    comment  => 'i128 icmp lo_lt'
-                                )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_cc', operands => [$t2], comment => 'i128 icmp lo_lt' )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2043,11 +1998,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'cset_eq',
-                                    operands => [$t1],
-                                    comment  => 'i128 icmp hi_eq'
-                                )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_eq', operands => [$t1], comment => 'i128 icmp hi_eq' )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2064,11 +2015,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'cset_cc',
-                                    operands => [$t2],
-                                    comment  => 'i128 icmp lo_lt'
-                                )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_cc', operands => [$t2], comment => 'i128 icmp lo_lt' )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2115,18 +2062,9 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => $cset_hi,
-                                    operands => [$t0],
-                                    comment  => 'i128 icmp hi_lt'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => $cset_hi, operands => [$t0], comment => 'i128 icmp hi_lt' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'cset_eq',
-                                    operands => [$t1],
-                                    comment  => 'i128 icmp hi_eq'
-                                )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_eq', operands => [$t1], comment => 'i128 icmp hi_eq' )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2143,11 +2081,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'cset_cc',
-                                    operands => [$t2],
-                                    comment  => 'i128 icmp lo_lt'
-                                )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_cc', operands => [$t2], comment => 'i128 icmp lo_lt' )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2303,6 +2237,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
             }
             $mf->add_block($mbb);
         }
+        $mf->compute_cfg;
         return $mf;
     }
 
@@ -2361,16 +2296,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
             );
         }
         return (
-            Brocken::Jenny::MIR::MachineOperand->new(
-                kind  => 'virt_reg',
-                value => $ir_val->name . '_lo',
-                type  => Brocken::Lindsay::IR::Type::i64()
-            ),
-            Brocken::Jenny::MIR::MachineOperand->new(
-                kind  => 'virt_reg',
-                value => $ir_val->name . '_hi',
-                type  => Brocken::Lindsay::IR::Type::i64()
-            ),
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
         );
     }
 }

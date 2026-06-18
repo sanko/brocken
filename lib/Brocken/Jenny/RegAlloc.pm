@@ -1,5 +1,7 @@
 use v5.42;
 use feature qw[class];
+no warnings qw[experimental::class];
+use List::Util ();
 
 class Brocken::Jenny::RegAlloc::LiveInterval {
     field $name  : param : reader;
@@ -10,32 +12,132 @@ class Brocken::Jenny::RegAlloc::LiveInterval {
 class Brocken::Jenny::RegAlloc::LinearScan {
 
     method allocate( $mf, $platform, $is_float = 0 ) {
+        $mf->compute_cfg unless $mf->entry_block->successors->@*;
         my @intervals = $self->_compute_live_intervals( $mf, $is_float );
         return $self->_linear_scan( \@intervals, $platform, $is_float );
     }
 
+    method _vreg_name( $op, $is_float ) {
+        return undef unless $op->kind eq 'virt_reg';
+        my $type = $op->type;
+        my $is_f = $type ? ( $type->kind eq 'float' ) : 0;
+        return undef if $is_float != $is_f;
+        return $op->value;
+    }
+
+    method _vreg_names_from_mem_operands($inst) {
+        my @names;
+        for my $op ( $inst->operands->@* ) {
+            next unless $op->kind eq 'mem';
+            my $base = $op->value->{base} // '';
+            push @names, $base if $base =~ /^%/;
+        }
+        return @names;
+    }
+
+    method _register_operands($inst) {
+        return $inst->operands->@*;
+    }
+
     method _compute_live_intervals( $mf, $is_float ) {
-        my ( %first, %last );
-        my $idx = 0;
-        for my $bb ( $mf->blocks->@* ) {
+        my @blocks = $mf->blocks->@*;
+        my @bi_range;    # block_idx => [first_inst_idx, last_inst_idx]
+        my $total_idx = 0;
+        for my $bb (@blocks) {
+            my $first = $total_idx;
+            $total_idx += $bb->instructions->@*;
+            push @bi_range, [ $first, $total_idx - 1 ];
+        }
+
+        # DEF[b] = vregs defined (written) in b
+        # USE[b] = vregs used before any definition in b
+        my %def;
+        my %use;
+        for my $bi ( 0 .. $#blocks ) {
+            my $bb   = $blocks[$bi];
+            my %defd = ();
+            my %used = ();
             for my $inst ( $bb->instructions->@* ) {
-                for my $op ( $inst->operands->@* ) {
-                    if ( $op->kind eq 'virt_reg' ) {
-                        my $name = $op->value;
-                        my $type = $op->type;
-                        my $is_f = $type ? ( $type->kind eq 'float' ) : 0;
-                        next if $is_float != $is_f;
-                        $first{$name} //= $idx;
-                        $last{$name} = $idx;
+                my @ops = $self->_register_operands($inst);
+                for my $op (@ops) {
+                    my $name = $self->_vreg_name( $op, $is_float );
+                    next unless defined $name;
+                    if ( $op == $ops[0] && $inst->opcode ne 'store' && $inst->opcode ne 'store_imm' ) {
+                        $defd{$name} = 1 unless exists $used{$name};
                     }
-                    elsif ( $op->kind eq 'mem' ) {
-                        my $base = $op->value->{base};
-                        next if $is_float;
-                        $first{$base} //= $idx;
-                        $last{$base} = $idx;
+                    else {
+                        $used{$name} = 1 unless exists $defd{$name};
                     }
                 }
-                $idx++;
+                for my $base ( $self->_vreg_names_from_mem_operands($inst) ) {
+                    next if $is_float;
+                    $used{$base} = 1 unless exists $defd{$base};
+                }
+            }
+            $def{$bi} = \%defd;
+            $use{$bi} = \%used;
+        }
+
+        # Fixed-point liveness (backward dataflow)
+        my %live_in;
+        my %live_out;
+        my $changed = 1;
+        while ($changed) {
+            $changed = 0;
+            for my $bi ( reverse 0 .. $#blocks ) {
+                my $bb = $blocks[$bi];
+                my %new_out;
+                for my $succ ( $bb->successors->@* ) {
+                    my $si = 0;
+                    for my $b (@blocks) { last if $b == $succ; $si++ }
+                    for my $v ( keys %{ $live_in{$si} // {} } ) {
+                        $new_out{$v} = 1;
+                    }
+                }
+                if ( join( "\0", sort keys %new_out ) ne join( "\0", sort keys %{ $live_out{$bi} // {} } ) ) {
+                    $changed = 1;
+                    $live_out{$bi} = \%new_out;
+                }
+                my %new_in = ( %{ $use{$bi} } );
+                for my $v ( keys %new_out ) {
+                    $new_in{$v} = 1 unless $def{$bi}{$v};
+                }
+                if ( join( "\0", sort keys %new_in ) ne join( "\0", sort keys %{ $live_in{$bi} // {} } ) ) {
+                    $changed = 1;
+                    $live_in{$bi} = \%new_in;
+                }
+            }
+        }
+
+        # Build intervals from liveness info
+        my %first;
+        my %last;
+        for my $bi ( 0 .. $#blocks ) {
+            my $bb       = $blocks[$bi];
+            my @insts    = $bb->instructions->@*;
+            my $bi_first = $bi_range[$bi][0];
+            my $bi_last  = $bi_range[$bi][1];
+            for my $v ( keys %{ $live_in{$bi} // {} } ) {
+                $first{$v} //= $bi_first;
+                $last{$v} = max( $last{$v} // 0, $bi_last );
+            }
+            for my $inst ( $bb->instructions->@* ) {
+                for my $op ( $self->_register_operands($inst) ) {
+                    my $name = $self->_vreg_name( $op, $is_float );
+                    next unless defined $name;
+                    $first{$name} = List::Util::min( $first{$name} // $total_idx, $bi_first );
+                    $last{$name}  = List::Util::max( $last{$name}  // 0, $bi_first );
+                }
+                for my $base ( $self->_vreg_names_from_mem_operands($inst) ) {
+                    next if $is_float;
+                    $first{$base} = List::Util::min( $first{$base} // $total_idx, $bi_first );
+                    $last{$base}  = List::Util::max( $last{$base}  // 0, $bi_first );
+                }
+                $bi_first++;
+            }
+            for my $v ( keys %{ $live_out{$bi} // {} } ) {
+                $first{$v} //= $bi_range[$bi][0];
+                $last{$v} = List::Util::max( $last{$v} // 0, $bi_range[$bi][1] );
             }
         }
         my @intervals;
@@ -80,12 +182,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 push @active, $int;
             }
         }
-        return {
-            assignment  => \%assignment,
-            used_callee => [ sort keys %used_callee ],
-            spill_slots => \%spill_slots,
-            spill_temp  => $spill_temp,
-        };
+        return { assignment => \%assignment, used_callee => [ sort keys %used_callee ], spill_slots => \%spill_slots, spill_temp => $spill_temp, };
     }
 
     method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0 ) {
@@ -130,8 +227,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                             comment  => 'spill-reload',
                             );
                     }
-                    my $new_inst
-                        = Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => \@ops, comment => $inst->comment, );
+                    my $new_inst = Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => \@ops, comment => $inst->comment, );
                     push @new, $new_inst;
                     if ($spilled_dst) {
                         my $mem = Brocken::Jenny::MIR::MachineOperand->new(
@@ -150,6 +246,72 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 $bb->instructions->@* = @new;
             }
         }
+    }
+
+    method insert_caller_save_code( $mf, $caller_regs, $callee_regs, $stack_reg ) {
+        my $spill_idx = 0;
+        for my $bb ( $mf->blocks->@* ) {
+            my @new;
+            for my $inst ( $bb->instructions->@* ) {
+                if ( $inst->opcode eq 'call_func' ) {
+                    for my $r (@$caller_regs) {
+                        my $mem
+                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 }, );
+                        push @new,
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [ $mem, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r ) ],
+                            comment  => 'caller-save ' . $r,
+                            );
+                    }
+                }
+                push @new, $inst;
+                if ( $inst->opcode eq 'call_func' ) {
+                    for my $r ( reverse @$caller_regs ) {
+                        my $mem
+                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 },
+                            );
+                        push @new,
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'load',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r ), $mem ],
+                            comment  => 'caller-restore ' . $r,
+                            );
+                    }
+                }
+            }
+            $bb->instructions->@* = @new;
+        }
+    }
+
+    method remove_redundant_moves( $mf, $assignment ) {
+        for my $bb ( $mf->blocks->@* ) {
+            my @new;
+            for my $inst ( $bb->instructions->@* ) {
+                if ( $inst->opcode eq 'mov' ) {
+                    my @ops = $inst->operands->@*;
+                    next
+                        if @ops >= 2                &&
+                        $ops[0]->kind eq 'virt_reg' &&
+                        $ops[1]->kind eq 'virt_reg' &&
+                        ( $assignment->{ $ops[0]->value } // '' ) eq ( $assignment->{ $ops[1]->value } // '' );
+                }
+                push @new, $inst;
+            }
+            $bb->instructions->@* = @new;
+        }
+    }
+
+    method compute_stack_frame( $mf, $used_callee, $spill_slots, $is_float ) {
+        my $frame = 0;
+        $frame += scalar(@$used_callee) * 8;
+        if ($spill_slots) {
+            $frame += scalar( keys %$spill_slots ) * 8;
+        }
+
+        # Align to 16 bytes
+        $frame = ( $frame + 15 ) & ~15;
+        return $frame;
     }
 }
 1;

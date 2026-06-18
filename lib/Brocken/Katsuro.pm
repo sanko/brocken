@@ -1,6 +1,7 @@
 package Brocken::Katsuro v0.0.1 {
     use v5.42;
     use feature qw[class];
+    no warnings qw[experimental::class];
     use Brocken::Katsuro::Platform;
     use Brocken::Katsuro::Platform::Linux;
     use Brocken::Katsuro::Platform::MacOS;
@@ -25,9 +26,8 @@ Brocken::Katsuro - Platform and Architecture Abstraction Layer
 
 =head1 DESCRIPTION
 
-This package handles the detection, normalization, and abstraction of target
-platforms (OS and Architecture). It provides a unified interface for querying
-syscall numbers, register sets, and binary format requirements.
+This package handles the detection, normalization, and abstraction of target platforms (OS and Architecture). It
+provides a unified interface for querying syscall numbers, register sets, and binary format requirements.
 
 =head2 Target Triples
 
