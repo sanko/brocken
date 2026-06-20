@@ -85,11 +85,16 @@ class Brocken::Jenny::Codegen::RISCV64 {
     method _encode( $mf, $assignment, $used_callee ) {
         my $bytes        = '';
         my $alloca_frame = 0;
+        my $total_alloca = 0;
         my $is_leaf      = 1;
         my $spill_frame  = $self->_compute_spill_frame( $mf, 'sp' );
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func';
+                if ( $inst->opcode eq 'alloca' ) {
+                    my ( undef, $src ) = $inst->operands->@*;
+                    $total_alloca += $src->value;
+                }
             }
         }
         my @to_save = $used_callee->@*;
@@ -99,6 +104,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my $callee_size   = scalar(@to_save) * 8;
         my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
         my $extra_frame   = $unified_frame - $callee_size;
+        my $total_frame   = $unified_frame + $total_alloca;
         my $reg_id        = sub ($r) {
             my %map = (
                 zero => 0,
@@ -145,13 +151,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
             return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: ${\$op->kind}";
         };
-        if ( $unified_frame > 0 ) {
-            my $neg = ( -$unified_frame ) & 0xFFF;
+        if ( $total_frame > 0 ) {
+            my $neg = ( -$total_frame ) & 0xFFF;
             $bytes .= pack( 'V', ( $neg << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
             for my $i ( 0 .. $#to_save ) {
-                my $reg      = $to_save[$i];
-                my $rid      = $reg_id->($reg);
-                 my $off      = $extra_frame + $i * 8;
+                my $reg = $to_save[$i];
+                my $rid = $reg_id->($reg);
+                my $off      = $extra_frame + $total_alloca + $i * 8;
                 my $imm_lo   = $off & 0x1F;
                 my $imm_hi   = ( $off >> 5 ) & 0x7F;
                 my $store_op = $reg =~ /^f/ ? FSTORE : STORE;
@@ -290,15 +296,12 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 elsif ( $opcode eq 'alloca' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $size  = $src->value;
-                    $alloca_frame += $size;
 
-                    # addi sp, sp, -size
-                    my $neg_size = ( -$size ) & 0xFFF;
-                    $bytes .= pack( 'V', ( $neg_size << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                    # addi xd, sp, alloca_frame
+                    $bytes .= pack( 'V', ( ( $alloca_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
 
-                    # addi xd, sp, 0
-                    $bytes .= pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    # alloca_frame tracks where the next alloca starts (grows forward from stack top)
+                    $alloca_frame += $src->value;
                 }
                 elsif ( $opcode eq 'load' ) {
                     my $dst_r  = $resolve->($dst);
@@ -318,11 +321,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         die 'no temp register for indexed load' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = ( $addr->{disp} // 0 ) + ( $base_r eq 'sp' ? $total_alloca : 0 );
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | LOAD );
                     }
                     else {
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = ( $addr->{disp} // 0 ) + ( $base_r eq 'sp' ? $total_alloca : 0 );
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | LOAD );
                     }
                 }
@@ -344,13 +347,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         die 'no temp register for indexed store' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp   = $addr->{disp} // 0;
+                        my $disp   = ( $addr->{disp} // 0 ) + ( $base_r eq 'sp' ? $total_alloca : 0 );
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                     }
                     else {
-                        my $disp   = $addr->{disp} // 0;
+                        my $disp   = ( $addr->{disp} // 0 ) + ( $base_r eq 'sp' ? $total_alloca : 0 );
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
@@ -389,7 +392,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid2 << 7 ) | OP );
                         $store_bid = $tid2;
                     }
-                    my $disp   = $addr->{disp} // 0;
+                    my $disp   = ( $addr->{disp} // 0 ) + ( $base_r eq 'sp' ? $total_alloca : 0 );
                     my $imm_lo = $disp & 0x1F;
                     my $imm_hi = ( $disp >> 5 ) & 0x7F;
                     $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $store_bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
@@ -411,11 +414,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         die 'no temp register for indexed fload' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = ( $addr->{disp} // 0 ) + ( $base_r eq 'sp' ? $total_alloca : 0 );
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | FLOAD );
                     }
                     else {
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = ( $addr->{disp} // 0 ) + ( $base_r eq 'sp' ? $total_alloca : 0 );
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | FLOAD );
                     }
                 }
@@ -436,13 +439,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         die 'no temp register for indexed fstore' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp   = $addr->{disp} // 0;
+                        my $disp   = ( $addr->{disp} // 0 ) + ( $base_r eq 'sp' ? $total_alloca : 0 );
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
                     }
                     else {
-                        my $disp   = $addr->{disp} // 0;
+                        my $disp   = ( $addr->{disp} // 0 ) + ( $base_r eq 'sp' ? $total_alloca : 0 );
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
@@ -539,19 +542,17 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $bytes .= pack( 'V', JAL | ( 1 << 7 ) | 0x6F );
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    my $cleanup = $alloca_frame + $extra_frame;
-                    if ( $cleanup > 0 ) {
-                        $bytes .= pack( 'V', ( ( $cleanup & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
-                    }
                     if ( $callee_size > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
                             my $reg     = $to_save[$i];
                             my $rid     = $reg_id->($reg);
-                            my $off     = $i * 8;
+                            my $off     = $extra_frame + $total_alloca + $i * 8;
                             my $load_op = $reg =~ /^f/ ? FLOAD : LOAD;
                             $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | $load_op );
                         }
-                        $bytes .= pack( 'V', ( ( $callee_size & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                    }
+                    if ( $total_frame > 0 ) {
+                        $bytes .= pack( 'V', ( ( $total_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
                     }
                     $bytes .= pack( 'V', JALR );
                 }
