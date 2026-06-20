@@ -30,9 +30,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         for my $op ( $inst->operands->@* ) {
             next unless $op->kind eq 'mem';
             my $base = $op->value->{base} // '';
-            push @names, $base if $base =~ /^%/;
+           # Track all variables as long as they aren't explicit stack pointers
+            # added post-allocation by the spill routines.
+            push @names, $base if $base ne '' && $base ne 'rsp' && $base ne 'sp';
             my $index = $op->value->{index} // '';
-            push @names, $index if $index =~ /^%/;
+           push @names, $index if $index ne '';
         }
         return @names;
     }
