@@ -288,7 +288,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
-                    $bytes .= pack( 'V', ADD_SP | ( ( $alloca_frame & 0xFFF ) << 10 ) | $did );
+                    $bytes .= pack( 'V', MOV_SP | ( ( $alloca_frame & 0xFFF ) << 10 ) | $did );
                     $alloca_frame += $size;
                 }
                 elsif ( $opcode eq 'load' ) {
