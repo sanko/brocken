@@ -41,7 +41,7 @@ package Test2::Tools::Brocken v0.0.1 {
                     my $bytes = do { local $/; <$fh> };
                     close $fh;
                     my $len = length $bytes;
-                    for ( my $i = 0 ; $i < $len ; $i += 16 ) {
+                    for ( my $i = 0; $i < $len; $i += 16 ) {
                         my $chunk = substr( $bytes, $i, 16 );
                         my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
                         my $pad   = 16 - length($chunk);
@@ -62,4 +62,58 @@ package Test2::Tools::Brocken v0.0.1 {
         return $actual;
     }
 };
+
+=encoding utf-8
+
+=head1 NAME
+
+Test2::Tools::Brocken - Test Utility for Running Compiled Executables
+
+=head1 DESCRIPTION
+
+Provides the C<run_exec> function for testing compiled Brocken executables within the Test2 test framework. Handles
+running the binary, checking the exit code, and optionally debugging with GDB.
+
+=head1 FUNCTIONS
+
+=head2 run_exec
+
+    run_exec($file, %args);
+
+Runs a compiled executable and checks its exit code.
+
+=head3 Arguments
+
+=over 4
+
+=item C<file> - Path to the compiled executable
+
+=item C<expected_exit> - Expected exit code (required for assertions)
+
+=item C<name> - Test name for Test2 output
+
+=item C<platform> - L<Brocken::Katsuro::Platform> object (for path separators)
+
+=item C<gdb> - If true, run under GDB for debugging
+
+=item C<keep> - If true, do not delete the executable after the test
+
+=item C<args> - Arrayref of command-line arguments to pass
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

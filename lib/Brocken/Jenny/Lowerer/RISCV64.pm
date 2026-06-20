@@ -1811,28 +1811,27 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         )
                     );
                 }
-                                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Incref') || $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') ) {
-                   my $val = $inst->operands->[0];
-                   my $op_name = $inst->opcode;
-                   my $func_name = 'Brocken::Runtime::' . $op_name;
-                   my @arg_regs = $self->_abi->param_registers->@*;
-                   my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[0] );
-
-                   $mbb->add_instruction(
-                       Brocken::Jenny::MIR::MachineInstruction->new(
-                           opcode   => 'mov',
-                           operands => [ $reg, $self->_lower_opnd($val) ],
-                           comment  => "$op_name arg 0"
-                       )
-                   );
-                   $mbb->add_instruction(
-                       Brocken::Jenny::MIR::MachineInstruction->new(
-                           opcode   => 'call_func',
-                           operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $func_name ) ],
-                           comment  => "call \@$func_name"
-                       )
-                   );
-               }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Incref') || $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') ) {
+                    my $val       = $inst->operands->[0];
+                    my $op_name   = $inst->opcode;
+                    my $func_name = 'Brocken::Runtime::' . $op_name;
+                    my @arg_regs  = $self->_abi->param_registers->@*;
+                    my $reg       = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[0] );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $reg, $self->_lower_opnd($val) ],
+                            comment  => "$op_name arg 0"
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'call_func',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $func_name ) ],
+                            comment  => "call \@$func_name"
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
                     my ( $ptr, @indices ) = $inst->operands->@*;
                     my $scale = $inst->base_type->bits / 8;
@@ -2262,6 +2261,12 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         }
                     }
                     $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => '' ) );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FrameAddr') ) {
+                    my $dst    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $fp_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $self->_abi->frame_reg );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $dst, $fp_reg ], comment => "frame_addr" ) );
                 }
             }
             $mf->add_block($mbb);

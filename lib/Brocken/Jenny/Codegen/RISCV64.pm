@@ -98,6 +98,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
             }
         }
         my @to_save = $used_callee->@*;
+        push @to_save, 's0';    # Always save frame pointer for backtrace support
         if ( !$is_leaf ) {
             push @to_save, 'ra';
         }
@@ -106,7 +107,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my $extra_frame    = $unified_frame - $callee_size;
         my $aligned_alloca = ( $total_alloca + 15 ) & ~15;
         my $total_frame    = $unified_frame + $aligned_alloca;
-        my $reg_id        = sub ($r) {
+        my $reg_id         = sub ($r) {
             my %map = (
                 zero => 0,
                 ra   => 1,
@@ -156,14 +157,21 @@ class Brocken::Jenny::Codegen::RISCV64 {
             my $neg = ( -$total_frame ) & 0xFFF;
             $bytes .= pack( 'V', ( $neg << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
             for my $i ( 0 .. $#to_save ) {
-                my $reg = $to_save[$i];
-                my $rid = $reg_id->($reg);
+                my $reg      = $to_save[$i];
+                my $rid      = $reg_id->($reg);
                 my $off      = $extra_frame + $aligned_alloca + $i * 8;
                 my $imm_lo   = $off & 0x1F;
                 my $imm_hi   = ( $off >> 5 ) & 0x7F;
                 my $store_op = $reg =~ /^f/ ? FSTORE : STORE;
                 $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | $store_op );
             }
+            # Set s0 to point to saved s0 (frame pointer for backtrace)
+            my $fp_idx = 0;
+            for my $i ( 0 .. $#to_save ) {
+                $fp_idx = $i if $to_save[$i] eq 's0';
+            }
+            my $fp_off = $extra_frame + $aligned_alloca + $fp_idx * 8;
+            $bytes .= pack( 'V', ( ( $fp_off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 8 << 7 ) | OP_IMM );
         }
         my %labels;
         my @fixups;
@@ -596,4 +604,57 @@ class Brocken::Jenny::Codegen::RISCV64 {
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Codegen::RISCV64 - RISC-V 64-bit Machine Code Generator
+
+=head1 DESCRIPTION
+
+Generates RISC-V 64-bit machine code from MIR. Implements full instruction encoding for the RV64IMAFD (LP64D) calling
+convention.
+
+=head2 Supported Instructions
+
+=over 4
+
+=item B<Data movement>: mv (ADDI), li (LUI+ADDI), la (AUIPC+ADDI for LEA), ld, sd, lw, sw, lbu, sb
+
+=item B<Arithmetic>: add, sub, and, or, xor, slli, srli, srai, addi, andi, ori, xori, slti, sltiu, slt, sltu
+
+=item B<Multiply/Divide>: mul, mulhu, div, divu
+
+=item B<Comparison/Select>: seqz, snez, sltz, blez, bgtz, min, max (branches)
+
+=item B<Floating point>: fmv.s, fmv.d, fcvt.s.l, fcvt.l.s, fcvt.d.l, fcvt.l.d, fadd.s/d, fsub.s/d, fmul.s/d, fdiv.s/d, fsqrt.s/d, fle.s/d, flt.s/d, feq.s/d, fmin.s/d, fmax.s/d, fneg.s/d, fabs.s/d
+
+=item B<Control flow>: j (jal), jal (call), jalr (ret/call), beq, bne, blt, bge, bltu, bgeu
+
+=item B<Stack>: alloca (ADDI pre-scanned, prologue-only), sd/ld for callee save/restore
+
+=back
+
+=head2 Frame Layout
+
+    SP -> [alloca area] [spill/caller-save slots] [callee saves] <- FP (s0)
+
+Mirrors ARM64 layout: pre-scanned alloca area, then spill/caller-save slots. Follows the same 16-byte aligned
+total_alloca rounding.
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

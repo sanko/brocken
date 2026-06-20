@@ -18,41 +18,6 @@ Brocken::Jenny::Linker::PE - 64-bit Portable Executable (PE32+) Generator
 
 Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
 
-=head2 Binary Structure
-
-=over 4
-
-=item * B<DOS MZ Header>: Legacy 64-byte header for compatibility.
-
-=item * B<PE Signature>: "PE\0\0" magic.
-
-=item * B<COFF File Header>: Specifies machine type and section count.
-
-=item * B<Optional Header>: The real PE32+ header containing entry point,
-image base, and security flags.
-
-=back
-
-=head2 Windows ARM64 Quirk
-
-Windows on ARM64 strictly mandates the presence of a Base Relocation Table (C<.reloc> section) even for executables
-that don't technically need it. If omitted, the loader throws a "Corrupt Executable" error. We generate a dummy
-relocation block to satisfy this.
-
-=head2 Security Flags
-
-We enable several modern Windows security features:
-
-=over 4
-
-=item * B<NX_COMPAT>: No-Execute/Data Execution Prevention (DEP).
-
-=item * B<DYNAMIC_BASE>: ASLR support.
-
-=item * B<HIGH_ENTROPY_VA>: 64-bit ASLR (high entropy).
-
-=back
-
 =cut
 
     method write_executable ( $output_file, $code_data, $platform, $passed_argument = undef, $debug_bytes = undef ) {
@@ -198,6 +163,9 @@ We enable several modern Windows security features:
             $edata_bytes .= "\x00" x 4;
 
             # Overwrite the first 40 bytes with the actual Export Directory Table
+            # Structure: V[ExportFlags, Timestamp, MajorVer, MinorVer, NameRVA,
+            #               OrdinalBase, AddressTableEntries, NamePointerEntries,
+            #               ExportAddressTableRVA, NamePointerRVA, OrdinalTableRVA]
             my $timestamp        = $ENV{SOURCE_DATE_EPOCH} || time();
             my $export_dir_table = pack( 'V2 v2 V7',
                 0, $timestamp, 0, 0, $edata_rva + $dll_name_off,
@@ -207,53 +175,52 @@ We enable several modern Windows security features:
                 $edata_rva + $eot_off );
             substr( $edata_bytes, 0, 40, $export_dir_table );
         }
-        my $num_sections = 1 + ( $has_data ? 1 : 0 ) + ( $has_exports ? 1 : 0 ) + $has_reloc + ( $has_debug ? 1 : 0 );
+
+        # Layout sections
+        my $brk_sym_size = $self->brk_sym_size();
+        my $has_brk_sym  = $brk_sym_size > 0;
+        my $num_sections = 1 + ( $has_brk_sym ? 1 : 0 ) + ( $has_data ? 1 : 0 ) + ( $has_exports ? 1 : 0 ) + $has_reloc + ( $has_debug ? 1 : 0 );
         open my $fh, '>', $output_file or die "Cannot open $output_file for writing: $!";
         binmode $fh;
 
         # DOS MZ Header (Exactly 64 bytes: a2=magic, v29=29 WORDS, V=e_lfanew)
         # We explicitly use v29 and count-matched repetition to avoid pack argument shifts.
-        my $dos_header = pack(
-            'a2 v29 V', 'MZ',    # e_magic: DOS Magic Signature
-            0x0090,              # e_cblp: Bytes on last page of file (144)
-            0x0003,              # e_cp: Pages in file (3)
-            0x0000,              # e_crlc: Relocations (0)
-            0x0004,              # e_cparhdr: Size of header in paragraphs (4)
-            0x0000,              # e_minalloc: Minimum extra paragraphs needed (0)
-            0xffff,              # e_maxalloc: Maximum extra paragraphs needed (65535)
-            0x0000,              # e_ss: Initial (relative) SS value (0)
-            0x0100,              # e_sp: Initial SP value (256)
-            0x0000,              # e_csum: Checksum (0)
-            0x0000,              # e_ip: Initial IP value (0)
-            0x0000,              # e_cs: Initial (relative) CS value (0)
-            0x0040,              # e_lfarlc: File address of relocation table (64)
-            0x0000,              # e_ovno: Overlay number (0)
-            (0) x 4,             # e_res: Reserved words (4 WORDS)
-            0,                   # e_oemid: OEM identifier (0)
-            0,                   # e_oeminfo: OEM information (0)
-            (0) x 10,            # e_res2: Reserved words (10 WORDS)
-            0x00000080           # e_lfanew: File address of new exe header (Offset 128 / 0x80)
-        );
-        my $dos_stub     = ( "\x00" x 64 );    # 64 bytes padding to align PE header at offset 128 (0x80)
+        my $dos_header = pack( 'a2 v29 V',
+            'MZ',   0x0090, 0x0003, 0x0000,          0x0004, 0x0000,      0xffff, 0x0000, 0x0100, 0x0000,
+            0x0000, 0x0000, 0x0040, 0x0000, (0) x 4, 0,      0, (0) x 10, 0x00000080 );
+        my $dos_stub     = ( "\x00" x 64 );
         my $pe_signature = "PE\x00\x00";
 
         # COFF File Header (Exactly 20 bytes)
-        # Reference: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#coff-file-header-object-and-image
-        my $machine   = $platform->is_arm64 ? 0xAA64 : 0x8664;    # IMAGE_FILE_MACHINE_ARM64 or AMD64
-        my $timestamp = $ENV{SOURCE_DATE_EPOCH} || time();
-
-        # Layout sections
+        # Machine types: IMAGE_FILE_MACHINE_AMD64=0x8664, IMAGE_FILE_MACHINE_ARM64=0xAA64
+        my $machine         = $platform->is_arm64 ? 0xAA64 : 0x8664;
+        my $timestamp       = $ENV{SOURCE_DATE_EPOCH} || time();
         my $section_table   = '';
         my $size_of_headers = ( 392 + ( $num_sections * 40 ) + 511 ) & ~511;
         my $sec_raw_ptr     = $size_of_headers;
         my $sec_rva         = 0x1000;
 
+        # Section characteristics flags:
+        #   0x60000020 = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ
+        #   0x40000040 = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ
+        #   0xC0000040 = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE
+        #   0x42000040 = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_DISCARDABLE | IMAGE_SCN_MEM_READ
         # .text section (Code)
         my $sec_raw_code_size = ( length($text_bytes) + 511 ) & ~511;
         $section_table .= pack( 'a8 V2 V2 V2 v2 V', ".text\x00\x00\x00", length($text_bytes), $sec_rva, $sec_raw_code_size, $sec_raw_ptr, 0, 0, 0, 0,
             0x60000020 );
         $sec_rva     += ( length($text_bytes) + 4095 ) & ~4095;
         $sec_raw_ptr += $sec_raw_code_size;
+
+        # .brk_sym section (Native Backtrace Info)
+        my $sec_raw_brk_sym_size = 0;
+        if ($has_brk_sym) {
+            $sec_raw_brk_sym_size = ( $brk_sym_size + 511 ) & ~511;
+            $section_table
+                .= pack( 'a8 V2 V2 V2 v2 V', ".brk_sym", $brk_sym_size, $sec_rva, $sec_raw_brk_sym_size, $sec_raw_ptr, 0, 0, 0, 0, 0x40000040 );
+            $sec_rva     += ( $brk_sym_size + 4095 ) & ~4095;
+            $sec_raw_ptr += $sec_raw_brk_sym_size;
+        }
 
         # .data section (Initialized Data)
         my $sec_raw_data_size = 0;
@@ -274,8 +241,8 @@ We enable several modern Windows security features:
             $sec_raw_ptr += $sec_raw_edata_size;
         }
 
-        # .reloc section (Mandatory for ARM64)
-        my $reloc_bytes        = pack( 'V V v v', 0x1000, 12, 0, 0 );     # Base RVA, Block Size, TypeOffset entries (empty)
+        # .reloc section (Base Relocations, required for ASLR)
+        my $reloc_bytes        = pack( 'V V v v', 0x1000, 12, 0, 0 );
         my $reloc_rva          = $sec_rva;
         my $sec_raw_reloc_size = ( length($reloc_bytes) + 511 ) & ~511;
         $section_table .= pack( 'a8 V2 V2 V2 v2 V', ".reloc\x00\x00", length($reloc_bytes), $sec_rva, $sec_raw_reloc_size, $sec_raw_ptr, 0, 0, 0, 0,
@@ -292,13 +259,9 @@ We enable several modern Windows security features:
             $sec_rva     += ( length($debug_bytes) + 4095 ) & ~4095;
             $sec_raw_ptr += $sec_raw_debug_size;
         }
-
-        # Build the COFF Symbol Table (18 bytes per symbol) and String Table
-        my $coff_symtab      = '';
-        my $coff_strtab      = '';
-        my $num_coff_symbols = 0;
-
-        # Keeping legacy COFF Symbol Table fields zeroed out for pristine executables/libraries
+        my $coff_symtab             = '';
+        my $coff_strtab             = '';
+        my $num_coff_symbols        = 0;
         my $pointer_to_symbol_table = 0;
         if ( $ENABLE_COFF && $has_exports && scalar(@sorted_exports) > 0 ) {
             my $str_payload = '';
@@ -309,7 +272,7 @@ We enable several modern Windows security features:
             }
             for my $name (@sorted_exports) {
                 my $label_val = $self->labels->{"E_$name"} // $self->labels->{$name} // 0;
-                my $func_rva  = 0x1000 + $label_val;                                         # .text section RVA starts at 0x1000
+                my $func_rva  = 0x1000 + $label_val;
                 my $entry_name_field;
                 if ( length($name) <= 8 ) {
                     $entry_name_field = pack( 'a8', $name );
@@ -317,89 +280,49 @@ We enable several modern Windows security features:
                 else {
                     $entry_name_field = pack( 'V2', 0, $coff_str_offsets{$name} );
                 }
-
-                # IMAGE_SYMBOL struct size is 18 bytes
-                $coff_symtab .= pack(
-                    'a8 V v v C2', $entry_name_field,    # union: ShortName / Offset
-                    $func_rva,                           # Value (Address relative to ImageBase)
-                    1,                                   # SectionNumber (1-based index, .text is 1)
-                    0x20,                                # Type (0x0020 = Function)
-                    2,                                   # StorageClass (2 = External/Global)
-                    0                                    # NumberOfAuxSymbols
-                );
+                $coff_symtab .= pack( 'a8 V v v C2', $entry_name_field, $func_rva, 1, 0x20, 2, 0 );
                 $num_coff_symbols++;
             }
             if ( length($str_payload) > 0 ) {
                 $coff_strtab = pack( 'V', 4 + length($str_payload) ) . $str_payload;
             }
-
-            # Position table offset directly after raw section data on disk
             $pointer_to_symbol_table = $sec_raw_ptr;
         }
-        my $file_header = pack(
-            'v2 V3 v2', $machine,        # Machine Architecture
-            $num_sections,               # Number of Sections
-            $timestamp,                  # TimeDateStamp
-            $pointer_to_symbol_table,    # PointerToSymbolTable (zeroed for clean images)
-            $num_coff_symbols,           # NumberOfSymbols (zeroed for clean images)
-            240,                         # SizeOfOptionalHeader (240 bytes for PE32+)
-            0x0022                       # Characteristics (EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE)
-        );
-        #
+
+        # COFF characteristics: 0x0022 = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE
+        my $file_header = pack( 'v2 V3 v2', $machine, $num_sections, $timestamp, $pointer_to_symbol_table, $num_coff_symbols, 240, 0x0022 );
+
+        # PE32+ Optional Header (Magic=0x020b): fields include entry, image base 0x140000000, section alignment 0x1000, file alignment 0x200,
+        # subsystem=3 (CONSOLE), DLL characteristics=0x8160 (NX compatible + TSA aware + DYNAMIC_BASE),
+        # stack reserve 0x100000, stack commit 0x1000, heap reserve 0x100000, heap commit 0x1000
         my $size_of_image  = $sec_rva;
         my $size_of_code   = $sec_raw_code_size;
-        my $init_data_size = $sec_raw_data_size + $sec_raw_reloc_size + $sec_raw_debug_size;
-        my $os_ver         = 6;                                                                # Target Windows Vista/7+ compatibility
+        my $init_data_size = $sec_raw_data_size + $sec_raw_reloc_size + $sec_raw_debug_size + $sec_raw_brk_sym_size;
+        my $os_ver         = 6;
+        my $opt_header     = pack( 'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2',
+            0x020b,         14, 10, $size_of_code, $init_data_size, 0, 0x1000, 0x1000, 0x140000000, 4096, 512, $os_ver, 0, 0, 0, $os_ver, 0, 0,
+            $size_of_image, $size_of_headers, 0, 3, 0x8160, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16 );
 
-        # PE32+ Optional Header (Exactly 240 bytes)
-        # Reference: https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#optional-header-image-only
-        my $opt_header = pack(
-            'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2', 0x020b,                        # Magic Number (PE32+ 64-bit)
-            14,                                         10,                            # Major/Minor LinkerVersion
-            $size_of_code,                              $init_data_size, 0, 0x1000,    # AddressOfEntryPoint (RVA 0x1000)
-            0x1000,                                                                    # BaseOfCode
-            0x140000000,                                                               # ImageBase (Modern default 5GB base)
-            4096,                                                                      # SectionAlignment
-            512,                                                                       # FileAlignment
-            $os_ver, 0,                                                                # Major/Minor OS
-            0,       0,                                                                # Major/Minor Image
-            $os_ver, 0,                                                                # Major/Minor Subsystem
-            0,                                                                         # Win32VersionValue
-            $size_of_image, $size_of_headers, 0,                                       # CheckSum (Optional for non-drivers)
-            3,         # Subsystem (Windows Console)
-            0x8160,    # DllCharacteristics (DYNAMIC_BASE | NX_COMPAT | TS_AWARE | HIGH_ENTROPY_VA)
-            0x100000, 0x1000, 0x100000, 0x1000,    # Stack/Heap Reserve/Commit
-            0,                                     # LoaderFlags
-            16                                     # NumberOfRvaAndSizes (Data Directories)
-        );
-
-        # Data Directories (16 entries, 8 bytes each)
+        # Data directories (128 bytes = 16 entries x 8 bytes each):
+        #   [0]=export, [1]=import, [5]=reloc
         my $data_dirs = "\x00" x 128;
         if ( ref $code_bytes eq 'HASH' ) {
             my $import_rva  = $code_bytes->{import_descriptor_rva}  // 0;
             my $import_size = $code_bytes->{import_descriptor_size} // 0;
             if ($import_rva) {
-
-                # Import Directory (Index 1)
                 substr $data_dirs, 8,  4, pack( 'V', $import_rva );
                 substr $data_dirs, 12, 4, pack( 'V', $import_size );
             }
         }
         #
         if ($has_exports) {
-
-            # VirtualAddress points to standard RVA 0x2000; Size spans the entire export payload block
             substr $data_dirs, 0, 4, pack( 'V', $edata_rva );
             substr $data_dirs, 4, 4, pack( 'V', length($edata_bytes) );
         }
-
-        # Insert Base Relocation Data Directory (Index 5 = Offset 40)
         substr $data_dirs, 40, 4, pack( 'V', $reloc_rva );
         substr $data_dirs, 44, 4, pack( 'V', length($reloc_bytes) );
         $opt_header .= $data_dirs;
         print $fh $dos_header, $dos_stub, $pe_signature, $file_header, $opt_header, $section_table;
-
-        # Pad headers to FileAlignment
         my $headers_len
             = length($dos_header) + length($dos_stub) + length($pe_signature) + length($file_header) + length($opt_header) + length($section_table);
         print $fh ( "\x00" x ( $size_of_headers - $headers_len ) );
@@ -407,6 +330,11 @@ We enable several modern Windows security features:
         # Write section payloads
         print $fh $text_bytes;
         print $fh ( "\x00" x ( $sec_raw_code_size - length($text_bytes) ) );
+        if ($has_brk_sym) {
+            my $brk_sym_bytes = $self->build_brk_sym();
+            print $fh $brk_sym_bytes;
+            print $fh ( "\x00" x ( $sec_raw_brk_sym_size - length($brk_sym_bytes) ) );
+        }
         if ($has_data) {
             print $fh $data_bytes;
             print $fh ( "\x00" x ( $sec_raw_data_size - length($data_bytes) ) );
@@ -423,8 +351,6 @@ We enable several modern Windows security features:
             print $fh $debug_bytes;
             print $fh ( "\x00" x ( $sec_raw_debug_size - length($debug_bytes) ) );
         }
-
-        # Append the dynamic COFF symbol table block at the calculated file offset
         if ( $pointer_to_symbol_table > 0 ) {
             print $fh $coff_symtab;
             print $fh $coff_strtab;

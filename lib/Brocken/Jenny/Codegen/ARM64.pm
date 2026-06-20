@@ -147,6 +147,7 @@ class Brocken::Jenny::Codegen::ARM64 {
             }
         }
         my @to_save = $used_callee->@*;
+        push @to_save, 'x29';    # Always save frame pointer for backtrace support
         if ( !$is_leaf ) {
             push @to_save, 'x30';
         }
@@ -155,7 +156,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         my $extra_frame    = $unified_frame - $callee_size;
         my $aligned_alloca = ( $total_alloca + 15 ) & ~15;
         my $total_frame    = $unified_frame + $aligned_alloca;
-        my $reg_id        = sub ($r) {
+        my $reg_id         = sub ($r) {
             return 31 if $r eq 'sp';
             return $1 if $r =~ /^[xw](\d+)$/;
             return $1 if $r =~ /^v(\d+)$/;
@@ -169,12 +170,19 @@ class Brocken::Jenny::Codegen::ARM64 {
         if ( $total_frame > 0 ) {
             $bytes .= pack( 'V', SUB_SP | ( ( $total_frame & 0xFFF ) << 10 ) );
             for my $i ( 0 .. $#to_save ) {
-                my $reg  = $to_save[$i];
-                my $rid  = $reg_id->($reg);
-                my $base = $reg =~ /^v/ ? FSTR_64 : STR_64;
+                my $reg   = $to_save[$i];
+                my $rid   = $reg_id->($reg);
+                my $base  = $reg =~ /^v/ ? FSTR_64 : STR_64;
                 my $imm12 = ( $extra_frame + $aligned_alloca + $i * 8 ) >> 3;
                 $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
             }
+            # Set x29 to point to saved x29 (frame pointer for backtrace)
+            my $fp_idx = 0;
+            for my $i ( 0 .. $#to_save ) {
+                $fp_idx = $i if $to_save[$i] eq 'x29';
+            }
+            my $fp_off = $extra_frame + $aligned_alloca + $fp_idx * 8;
+            $bytes .= pack( 'V', 0x910003FD | ( $fp_off << 10 ) );
         }
         my %labels;
         my @fixups;
@@ -305,7 +313,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $did );
                     }
                     else {
-                        my $disp  = $addr->{disp} // 0;
+                        my $disp = $addr->{disp} // 0;
                         $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? LDR_32 : LDR_64;
@@ -326,7 +334,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $sid );
                     }
                     else {
-                        my $disp  = $addr->{disp} // 0;
+                        my $disp = $addr->{disp} // 0;
                         $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? STR_32 : STR_64;
@@ -364,7 +372,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $str_base | ( $iid << 16 ) | ( $bid << 5 ) | $tid );
                     }
                     else {
-                        my $disp     = $addr->{disp} // 0;
+                        my $disp = $addr->{disp} // 0;
                         $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12    = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $str_base = $bits >= 64 ? STR_64 : STR_32;
@@ -439,7 +447,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $did );
                     }
                     else {
-                        my $disp  = $addr->{disp} // 0;
+                        my $disp = $addr->{disp} // 0;
                         $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FLDR_32 : FLDR_64;
@@ -461,7 +469,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $sid );
                     }
                     else {
-                        my $disp  = $addr->{disp} // 0;
+                        my $disp = $addr->{disp} // 0;
                         $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FSTR_32 : FSTR_64;
@@ -525,9 +533,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                 elsif ( $opcode eq 'ret' ) {
                     if ( $callee_size > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
-                            my $reg  = $to_save[$i];
-                            my $rid  = $reg_id->($reg);
-                            my $base = $reg =~ /^v/ ? FLDR_64 : LDR_64;
+                            my $reg   = $to_save[$i];
+                            my $rid   = $reg_id->($reg);
+                            my $base  = $reg =~ /^v/ ? FLDR_64 : LDR_64;
                             my $imm12 = ( $extra_frame + $aligned_alloca + $i * 8 ) >> 3;
                             $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
                         }
@@ -572,4 +580,74 @@ class Brocken::Jenny::Codegen::ARM64 {
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Codegen::ARM64 - ARM64 (AArch64) Machine Code Generator
+
+=head1 DESCRIPTION
+
+Generates ARM64 machine code from MIR. Implements full instruction encoding for the AAPCS64 calling convention.
+
+=head2 Supported Instructions
+
+=over 4
+
+=item B<Data movement>: mov (reg/imm), movk, adrp (for LEA), ldr, str, ldrsw, ldrb, strb, ldp, stp
+
+=item B<Arithmetic>: add, sub, adds, subs, and, orr, eor, mul, neg, sxtw
+
+=item B<Comparison>: cmp, cset (for setcc), sltu (for unsigned setcc)
+
+=item B<Shift>: lsl, lsr, asr
+
+=item B<Floating point>: fmov (gp2f and f2gp), fadd, fsub, fmul, fdiv, fcmp, fcsel, fabs, fneg, fmin, fmax, fsqrt, fcvt (single/double), scvtf (int->float)
+
+=item B<Control flow>: b (unconditional/cond), cbz, cbnz, bl (call), ret
+
+=item B<Stack>: alloca (pre-scanned, prologue-only SUB), stp/ldp for callee save/restore
+
+=back
+
+=head2 Frame Layout
+
+    SP -> [alloca area] [spill/caller-save slots] [callee saves] <- FP (x29)
+
+The alloca area is pre-scanned and allocated as a single SUB SP instruction in the prologue. All SP-relative memory
+accesses use the disp+aligned_alloca offset to skip past the alloca area.
+
+=head2 Key Constants
+
+=over 4
+
+=item ADD_IMM = 0x91000000 (add register, immediate, 12-bit shifted)
+
+=item MOV_IMM = 0xD2800000 (mov register, immediate, using ORR)
+
+=item LDR_IMM = 0xF9400000 (ldr register, unsigned offset, scaled)
+
+=item STR_IMM = 0xF9000000 (str register, unsigned offset, scaled)
+
+=item B_IMM   = 0x14000000 (unconditional branch, 28-bit offset)
+
+=item BL_IMM  = 0x94000000 (branch-and-link, 28-bit offset)
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

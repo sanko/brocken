@@ -56,4 +56,45 @@ class Brocken::Katsuro::Platform::Linux : isa(Brocken::Katsuro::Platform) {
         $syscalls;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Platform::Linux - Linux Platform Abstraction
+
+=head1 DESCRIPTION
+
+Concrete platform class for Linux. Provides Linux-specific syscall numbers for x86_64, aarch64, and riscv64
+architectures. Linux uses ELF binary format.
+
+=head1 METHODS
+
+=head2 is_linux
+
+Returns true (1).
+
+=head2 format
+
+Returns 'elf'.
+
+=head2 syscalls
+
+Returns a hashref architecture-specific syscall number tables (write, read, open, close, exit, fork, getpid, wait4,
+mmap, nanosleep, futex, brk).
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

@@ -13,7 +13,7 @@ Brocken::Jenny::Linker::DWARF - Debug Information Generator
 
 =head1 DESCRIPTION
 
-Generates DWARF v2/v3 compliant debug sections.
+Generates DWARF v5 compliant debug sections.
 
 =head2 Sections Generated:
 
@@ -28,6 +28,10 @@ Generates DWARF v2/v3 compliant debug sections.
 =item * B<.debug_frame>: Stack unwinding and frame pointer recovery data.
 
 =item * B<.debug_aranges>: Rapid lookup table for address ranges.
+
+=item * B<.debug_names>: Fast, hashed symbol lookup table (new in DWARF 5).
+
+=item * B<.debug_str>: String table for DWARF 5 symbol references.
 
 =item * B<.eh_frame>: Exception handling frame data (LSDA compatible).
 
@@ -60,13 +64,17 @@ Generates DWARF v2/v3 compliant debug sections.
     }
 
     method build_all () {
-        my $info     = $self->build_debug_info;
+        my $info = $self->build_debug_info;
+        my ( $names, $str ) = $self->build_debug_names;
         my $sections = { '.debug_line' => $self->build_debug_line, '.debug_info' => $info, '.debug_abbrev' => $self->build_debug_abbrev, };
+        if ($names) {
+            $sections->{'.debug_names'} = $names;
+            $sections->{'.debug_str'}   = $str;
+        }
         if (@$func_ranges) {
-            $sections->{'.debug_frame'}    = $self->build_debug_frame;
-            $sections->{'.debug_aranges'}  = $self->build_debug_aranges;
-            $sections->{'.debug_pubnames'} = $self->build_debug_pubnames( length($info) );
-            $sections->{'.eh_frame'}       = $self->build_eh_frame if $self->eh_frame_base;
+            $sections->{'.debug_frame'}   = $self->build_debug_frame;
+            $sections->{'.debug_aranges'} = $self->build_debug_aranges;
+            $sections->{'.eh_frame'}      = $self->build_eh_frame if $self->eh_frame_base;
         }
         return $sections;
     }
@@ -102,17 +110,23 @@ Generates DWARF v2/v3 compliant debug sections.
         $program .= "\x00" . $self->_uleb(9) . "\x02" . pack( 'Q<', $text_base + $max_offset );
         $program .= "\x00" . $self->_uleb(1) . "\x01";
 
-        # Line Number Program Prologue
-        my $prologue = pack( 'C', 1 ) . pack( 'C', 1 ) . pack( 'c', -5 ) . pack( 'C', 14 ) . pack( 'C', 13 );
+        # DWARF 5 Line Number Program Header
+        my $header   = pack( 'C', 8 ) . pack( 'C', 0 );    # address_size=8, segment_selector_size=0
+        my $prologue = pack( 'C', 1 ) . pack( 'C', 1 ) . pack( 'C', 1 ) . pack( 'c', -5 ) . pack( 'C', 14 ) . pack( 'C', 13 );
         $prologue .= pack( 'C*', 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 );
-        $prologue .= "\x00";                                                                     # Directory table
-        $prologue .= "$source_file\x00" . $self->_uleb(0) . $self->_uleb(0) . $self->_uleb(0);
-        $prologue .= "\x00";
-        my $full_len = 2 + 4 + length($prologue) + length($program);
-        my $header   = pack( 'L<', $full_len );
-        $header .= pack( 'S<', 2 );
-        $header .= pack( 'L<', length($prologue) );
-        return $header . $prologue . $program;
+
+        # Directory entry format count = 1 (DW_LNCT_path = 1, DW_FORM_string = 0x08)
+        $prologue .= pack( 'C', 1 ) . $self->_uleb(1) . $self->_uleb(0x08);
+        $prologue .= $self->_uleb(1) . ".\0";                                 # 1 directory: "."
+
+        # File entry format count = 2 (DW_LNCT_path=1/string, DW_LNCT_directory_index=2/udata)
+        $prologue .= pack( 'C', 2 );
+        $prologue .= $self->_uleb(1) . $self->_uleb(0x08);
+        $prologue .= $self->_uleb(2) . $self->_uleb(0x0F);
+        $prologue .= $self->_uleb(1) . "$source_file\0" . pack( 'C', 0 );
+        $prologue = pack( 'L<', length($prologue) ) . $prologue;
+        my $total_len = length($header) + length($prologue) + length($program);
+        return pack( 'L<', $total_len + 2 ) . pack( 'S<', 5 ) . $header . $prologue . $program;    # Version 5
     }
 
     # Defines abbreviations used in .debug_info to reduce redundant tags.
@@ -121,33 +135,33 @@ Generates DWARF v2/v3 compliant debug sections.
 
         # Abbrev 1: DW_TAG_compile_unit (0x11)
         $abbrev .= $self->_uleb(1) . $self->_uleb(0x11) . $self->_uleb(1);
-        $abbrev .= $self->_uleb(0x10) . $self->_uleb(0x06);                  # DW_AT_stmt_list -> data4
-        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name -> string
-        $abbrev .= $self->_uleb(0x13) . $self->_uleb(0x0B);                  # DW_AT_language -> data1
-        $abbrev .= $self->_uleb(0x11) . $self->_uleb(0x01);                  # DW_AT_low_pc -> addr
-        $abbrev .= $self->_uleb(0x12) . $self->_uleb(0x01);                  # DW_AT_high_pc -> addr
+        $abbrev .= $self->_uleb(0x10) . $self->_uleb(0x17);                                        # DW_AT_stmt_list -> sec_offset
+        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                        # DW_AT_name -> string
+        $abbrev .= $self->_uleb(0x13) . $self->_uleb(0x0B);                                        # DW_AT_language -> data1
+        $abbrev .= $self->_uleb(0x11) . $self->_uleb(0x01);                                        # DW_AT_low_pc -> addr
+        $abbrev .= $self->_uleb(0x12) . $self->_uleb(0x01);                                        # DW_AT_high_pc -> addr
         $abbrev .= pack( 'CC', 0, 0 );
 
         # Abbrev 2: DW_TAG_base_type (0x24)
         $abbrev .= $self->_uleb(2) . $self->_uleb(0x24) . $self->_uleb(0);
-        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name -> string
-        $abbrev .= $self->_uleb(0x0B) . $self->_uleb(0x0B);                  # DW_AT_byte_size -> data1
-        $abbrev .= $self->_uleb(0x3E) . $self->_uleb(0x0B);                  # DW_AT_encoding -> data1
+        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                        # DW_AT_name -> string
+        $abbrev .= $self->_uleb(0x0B) . $self->_uleb(0x0B);                                        # DW_AT_byte_size -> data1
+        $abbrev .= $self->_uleb(0x3E) . $self->_uleb(0x0B);                                        # DW_AT_encoding -> data1
         $abbrev .= pack( 'CC', 0, 0 );
 
         # Abbrev 3: DW_TAG_subprogram (0x2E)
-        $abbrev .= $self->_uleb(3) . $self->_uleb(0x2E) . $self->_uleb(1);
-        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name
-        $abbrev .= $self->_uleb(0x11) . $self->_uleb(0x01);                  # low_pc
-        $abbrev .= $self->_uleb(0x12) . $self->_uleb(0x01);                  # high_pc
-        $abbrev .= $self->_uleb(0x40) . $self->_uleb(0x18);                  # frame_base -> exprloc
+        $abbrev .= $self->_uleb(3) . $self->_uleb(0x2E) . $self->_uleb(1);                         # has_children = 1
+        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                        # DW_AT_name
+        $abbrev .= $self->_uleb(0x11) . $self->_uleb(0x01);                                        # low_pc
+        $abbrev .= $self->_uleb(0x12) . $self->_uleb(0x01);                                        # high_pc
+        $abbrev .= $self->_uleb(0x40) . $self->_uleb(0x18);                                        # DW_AT_frame_base -> exprloc
         $abbrev .= pack( 'CC', 0, 0 );
 
         # Abbrev 4: DW_TAG_formal_parameter (0x05) / Abbrev 5: DW_TAG_variable (0x34)
         for ( 4 .. 5 ) {
             $abbrev .= $self->_uleb($_) . $self->_uleb( $_ == 4 ? 0x05 : 0x34 ) . $self->_uleb(0);
-            $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                      # name
-            $abbrev .= $self->_uleb(0x02) . $self->_uleb(0x18);                                      # location
+            $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                      # name -> string
+            $abbrev .= $self->_uleb(0x02) . $self->_uleb(0x18);                                      # location -> exprloc
             $abbrev .= $self->_uleb(0x49) . $self->_uleb(0x13);                                      # type -> ref4
             $abbrev .= pack( 'CC', 0, 0 );
         }
@@ -155,37 +169,28 @@ Generates DWARF v2/v3 compliant debug sections.
         return $abbrev;
     }
 
-    # Generates the main DIE tree describing functions, parameters, and types.
     method build_debug_info () {
         my $max_pc = 0;
         for my $fn (@$func_ranges) { $max_pc = $fn->{end} if ( $fn->{end} // 0 ) > $max_pc; }
         my $cu_body = '';
-        $cu_body .= $self->_uleb(1);                       # DW_TAG_compile_unit
-        $cu_body .= pack( 'L<', 0 );                       # stmt_list (offset into .debug_line)
-        $cu_body .= "$source_file\0";
-        $cu_body .= pack( 'C',  12 );                      # language (C99 - DW_LANG_C99)
-        $cu_body .= pack( 'Q<', $text_base );              # low_pc
-        $cu_body .= pack( 'Q<', $text_base + $max_pc );    # high_pc
-        my $CU_HEADER_SIZE = 11;
+        $cu_body
+            .= $self->_uleb(1) . pack( 'L<', 0 ) . "$source_file\0" . pack( 'C', 12 ) . pack( 'Q<', $text_base ) . pack( 'Q<', $text_base + $max_pc );
+        my $CU_HEADER_SIZE = 12;
         my $type_off       = {};
-
-        # Built-in types
         for my $t ( [ 'Int', 5 ], [ 'Bool', 2 ], [ 'String', 1 ], [ 'Any', 1 ], [ 'ptr', 1 ], [ 'Array', 1 ] ) {
             $type_off->{ $t->[0] } = $CU_HEADER_SIZE + length($cu_body);
             $cu_body .= $self->_uleb(2) . "$t->[0]\0" . pack( 'CC', 8, $t->[1] );
         }
-
-        # Function DIEs
         for my $fn ( sort { $a->{start} <=> $b->{start} } @$func_ranges ) {
             my $die_off = $CU_HEADER_SIZE + length($cu_body);
             push @pubnames, { offset => $die_off, name => ( $fn->{name} =~ s/^M_//r ) };
-            $cu_body .= $self->_uleb(3);    # DW_TAG_subprogram
+            $cu_body .= $self->_uleb(3);
             $cu_body .= "$fn->{name}\0";
             $cu_body .= pack( 'Q<', $text_base + $fn->{start} );
             $cu_body .= pack( 'Q<', $text_base + ( $fn->{end} // $fn->{start} ) );
 
-            # frame_base (DW_AT_frame_base: typically RBP relative on x64, X29 on ARM64)
-            my $fb = pack( 'C', 0x70 + ( $arch =~ /aarch64|arm64/i ? 29 : 6 ) ) . "\x00";
+            # frame_base (DW_AT_frame_base: RBP on x64, X29 on ARM64, S0/FP on RISCV64)
+            my $fb = pack( 'C', 0x70 + ( $arch =~ /aarch64|arm64/i ? 29 : ( $arch =~ /riscv/i ? 8 : 6 ) ) ) . "\x00";
             $cu_body .= $self->_uleb( length($fb) ) . $fb;
 
             # Parameter and Local Variable DIEs
@@ -201,8 +206,97 @@ Generates DWARF v2/v3 compliant debug sections.
             }
             $cu_body .= "\x00";    # end subprogram
         }
-        $cu_body .= "\x00";        # end CU
-        return pack( 'L< S< L< C', length($cu_body) + 7, 2, 0, 8 ) . $cu_body;
+        $cu_body .= "\x00";
+
+        # DWARF 5 Info Header: length(4), version=5(2), unit_type=1(1), addr_size=8(1), abbrev_offset=0(4)
+        return pack( 'L< S< C C L<', length($cu_body) + 8, 5, 1, 8, 0 ) . $cu_body;
+    }
+
+    # DWARF v5 Case-Folding DJB Hash Function
+    method _djb_hash($name) {
+        my $hash = 5381;
+        for my $char ( split //, lc($name) ) {
+            my $code = ord($char);
+            $hash = ( ( $hash << 5 ) + $hash ) + $code;
+            $hash &= 0xFFFFFFFF;    # Clamp to 32-bit unsigned
+        }
+        return $hash;
+    }
+
+    method build_debug_names() {
+        return () unless @pubnames;
+
+        # 1. Build dedicated .debug_str table
+        my $debug_str = "\x00";
+        my %str_offsets;
+        for my $pn (@pubnames) {
+            next if exists $str_offsets{ $pn->{name} };
+            $str_offsets{ $pn->{name} } = length($debug_str);
+            $debug_str .= $pn->{name} . "\x00";
+        }
+        while ( length($debug_str) % 4 != 0 ) { $debug_str .= "\x00"; }
+
+        # 2. Hash and sort name targets
+        my @sorted;
+        my $bucket_count = scalar @pubnames;
+        for my $pn (@pubnames) {
+            my $name   = $pn->{name};
+            my $hash   = $self->_djb_hash($name);
+            my $bucket = $hash % $bucket_count;
+            push @sorted, { name => $name, offset => $pn->{offset}, hash => $hash, bucket => $bucket, };
+        }
+        @sorted = sort { $a->{bucket} <=> $b->{bucket} || $a->{name} cmp $b->{name} } @sorted;
+
+        # 3. Build Bucket and Hash Tables
+        my @buckets    = (0) x $bucket_count;
+        my $hashes_bin = "";
+        for my $i ( 0 .. $#sorted ) {
+            my $s = $sorted[$i];
+            if ( $buckets[ $s->{bucket} ] == 0 ) {
+                $buckets[ $s->{bucket} ] = $i + 1;    # 1-based index
+            }
+            $hashes_bin .= pack( 'V', $s->{hash} );
+        }
+        my $buckets_bin = pack( 'V*', @buckets );
+
+        # 4. Build Abbreviation Table
+        my $abbrev_data = "";
+        $abbrev_data .= $self->_uleb(1);       # abbrev code
+        $abbrev_data .= $self->_uleb(0x2E);    # DW_TAG_subprogram
+        $abbrev_data .= $self->_uleb(1);       # DW_IDX_compile_unit
+        $abbrev_data .= $self->_uleb(0x0B);    # DW_FORM_data1 (1-byte index)
+        $abbrev_data .= $self->_uleb(3);       # DW_IDX_die_offset
+        $abbrev_data .= $self->_uleb(0x13);    # DW_FORM_ref4 (4-byte offset into .debug_info)
+        $abbrev_data .= pack( 'CC', 0, 0 );    # terminate attributes
+        $abbrev_data .= "\x00";                # terminate abbrevs
+
+        # 5. Build Entry Pool and collect offsets
+        my $entry_pool = "";
+        my @entry_offsets;
+        for my $s (@sorted) {
+            push @entry_offsets, length($entry_pool);
+            $entry_pool .= pack( 'C C L< C', 1, 0, $s->{offset}, 0 );    # [code=1, cu=0, offset, terminator=0]
+        }
+
+        # 6. Build Name Table
+        my $string_offsets_bin = "";
+        my $entry_offsets_bin  = "";
+        for my $i ( 0 .. $#sorted ) {
+            my $s = $sorted[$i];
+            $string_offsets_bin .= pack( 'V', $str_offsets{ $s->{name} } );
+            $entry_offsets_bin  .= pack( 'V', $entry_offsets[$i] );
+        }
+
+        # 7. Compilation Unit List
+        my $cu_list_bin = pack( 'V', 0 );    # 1 CU at offset 0
+
+        # 8. Assemble Header & Body
+        my $aug_str      = "BRK\x00";
+        my $header_fixed = pack( 'S< S< V4', 5, 0, 1, 0, 0, $bucket_count );
+        my $header_var   = pack( 'V3', scalar(@sorted), length($abbrev_data), length($aug_str) ) . $aug_str;
+        my $body         = $cu_list_bin . $buckets_bin . $hashes_bin . $string_offsets_bin . $entry_offsets_bin . $abbrev_data . $entry_pool;
+        my $total_len    = length($header_fixed) + length($header_var) + length($body);
+        return ( pack( 'L<', $total_len ) . $header_fixed . $header_var . $body, $debug_str );
     }
 
     method build_debug_aranges () {

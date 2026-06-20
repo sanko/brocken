@@ -88,4 +88,50 @@ class Brocken::Jenny::MIR::MachineFunction {
         return undef;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::MIR - Machine Intermediate Representation
+
+=head1 DESCRIPTION
+
+Defines the data structures for Brocken's Machine Intermediate Representation (MIR). The MIR is a low-level,
+target-independent representation used between the Lowerer (Lindsay IR -> MIR) and the Codegen (MIR -> machine code).
+
+=head2 Class Hierarchy
+
+=over 4
+
+=item L<Brocken::Jenny::MIR::MachineOperand> - A single operand (virtual reg,
+physical reg, immediate value, or memory address). Memory operands use a
+hashref with C<base>, C<index>, C<scale>, and C<disp> keys.
+
+=item L<Brocken::Jenny::MIR::MachineInstruction> - A single instruction with an
+opcode string, an array of operands, and an optional comment.
+
+=item L<Brocken::Jenny::MIR::MachineBasicBlock> - A basic block of MIR
+instructions with control-flow successor/predecessor tracking.
+
+=item L<Brocken::Jenny::MIR::MachineFunction> - A function containing an array
+of basic blocks and a frame size. Provides CFG computation (compute_cfg) and
+block lookup (find_block).
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

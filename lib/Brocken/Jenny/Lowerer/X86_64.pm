@@ -25,10 +25,10 @@ class Brocken::Jenny::Lowerer::X86_64 {
             if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
                 my @arg_regs = $self->_abi->param_registers->@*;
                 for my $i ( 0 .. $#{ $ir_func->params } ) {
-                    my $param   = $ir_func->params->[$i];
+                    my $param    = $ir_func->params->[$i];
                     my $tmp_name = $param->name . '.entry';
-                    my $reg     = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
-                    my $tmp     = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $tmp_name, type => $param->type );
+                    my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
+                    my $tmp      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $tmp_name, type => $param->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
@@ -39,15 +39,10 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 }
                 for my $i ( 0 .. $#{ $ir_func->params } ) {
                     my $param = $ir_func->params->[$i];
-                    my $dst   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
-                    my $tmp   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name . '.entry', type => $param->type );
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name,            type => $param->type );
+                    my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name . '.entry', type => $param->type );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'mov',
-                            operands => [ $dst, $tmp ],
-                            comment  => "init param $i"
-                        )
-                    );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $dst, $tmp ], comment => "init param $i" ) );
                 }
             }
             for my $inst ( $block->instructions->@* ) {
@@ -2001,16 +1996,14 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                     else {
-                        my $lhs_op = $self->_lower_opnd($lhs);
-                        my $rhs_op = $self->_lower_opnd($rhs);
-                        my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        my $lhs_op  = $self->_lower_opnd($lhs);
+                        my $rhs_op  = $self->_lower_opnd($rhs);
+                        my $result  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         my $cmp_lhs = $lhs_op;
                         if ( $lhs_op->kind eq 'imm' ) {
-                            my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
-                                kind  => 'virt_reg',
-                                value => $inst->name . '_lhs',
-                                type  => $lhs_op->type,
-                            );
+                            my $tmp
+                                = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_lhs', type => $lhs_op->type,
+                                );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -2306,28 +2299,27 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
                 }
-                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Incref') || $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') ) {
-                   my $val = $inst->operands->[0];
-                   my $op_name = $inst->opcode;
-                   my $func_name = 'Brocken::Runtime::' . $op_name;
-                   my @arg_regs = $self->_abi->param_registers->@*;
-                   my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[0] );
-
-                   $mbb->add_instruction(
-                       Brocken::Jenny::MIR::MachineInstruction->new(
-                           opcode   => 'mov',
-                           operands => [ $reg, $self->_lower_opnd($val) ],
-                           comment  => "$op_name arg 0"
-                       )
-                   );
-                   $mbb->add_instruction(
-                       Brocken::Jenny::MIR::MachineInstruction->new(
-                           opcode   => 'call_func',
-                           operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $func_name ) ],
-                           comment  => "call \@$func_name"
-                       )
-                   );
-               }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Incref') || $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') ) {
+                    my $val       = $inst->operands->[0];
+                    my $op_name   = $inst->opcode;
+                    my $func_name = 'Brocken::Runtime::' . $op_name;
+                    my @arg_regs  = $self->_abi->param_registers->@*;
+                    my $reg       = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[0] );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $reg, $self->_lower_opnd($val) ],
+                            comment  => "$op_name arg 0"
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'call_func',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $func_name ) ],
+                            comment  => "call \@$func_name"
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
                     my ( $ptr, @indices ) = $inst->operands->@*;
                     my $scale = $inst->base_type->bits / 8;
@@ -2413,6 +2405,12 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FrameAddr') ) {
+                    my $dst    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $fp_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $self->_abi->frame_reg );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $dst, $fp_reg ], comment => "frame_addr" ) );
+                }
             }
             $mf->add_block($mbb);
         }
@@ -2481,6 +2479,60 @@ class Brocken::Jenny::Lowerer::X86_64 {
         return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type );
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Lowerer::X86_64 - x86_64 Lowerer (Lindsay IR to MIR)
+
+=head1 DESCRIPTION
+
+Lowers Lindsay IR to machine-level MIR for the x86_64 architecture. Translates SSA instructions to register-based
+machine operations while following the System V AMD64 calling convention.
+
+=head2 Lowering Strategy
+
+=over 4
+
+=item B<Parameters> are mapped to their ABI register positions (rdi, rsi, rdx, rcx, r8, r9) with argument-area spill slots for stack-passed args
+
+=item B<Calls> set up arguments in the correct ABI registers/stack slots, generate explicit C<call_func> MIR instructions, avoid clobbering argument registers by emitting them in reverse order
+
+=item B<Boxing> serializes type-tagged values (int32->1, int64->2, i128->6, float->3, ptr->4, dynamic->5) into a 16-byte structure using the bump allocator
+
+=item B<Unboxing> reads the type tag from the dynamic value and extracts the payload, with optional type checking
+
+=item B<Refcounting> inserts C<incref> with atomic add and C<decref> with conditional free via the allocator's free-list
+
+=item B<Alloca> translates to MIR C<alloca> instructions with pre-scanned prologue frame adjustment
+
+=back
+
+=head2 Floating-Point Materialization
+
+The L<_materialize> method loads floating-point constants into XMM registers by first loading the bit pattern as an
+integer GP register, then transferring to XMM via C<fmov_gp2f> (MOVQ/MOVD).
+
+=head2 ABI Handling
+
+Uses B<rdi> (arg 1), B<rsi> (arg 2), B<rdx> (arg 3), B<rcx> (arg 4), B<r8> (arg 5), B<r9> (arg 6). The C<caller_regs>
+list in the ABI module must be ordered so non-parameter registers come first to avoid register allocator clashes with
+argument-setup MOVs.
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
 
 # ---------------------------------------------------------------------------
 # Lowerer: Lindsay IR -> Machine IR (ARM64 / AArch64)

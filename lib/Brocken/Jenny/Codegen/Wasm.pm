@@ -330,4 +330,68 @@ class Brocken::Jenny::Codegen::Wasm {
         return $out;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Codegen::Wasm - WebAssembly Binary Code Generator
+
+=head1 DESCRIPTION
+
+Generates WebAssembly binary code from MIR. Produces standard WASM bytecode suitable for embedding in a .wasm module.
+
+=head2 WebAssembly Features
+
+=over 4
+
+=item B<Locals>: Declares MIR virtual registers as WASM local variables
+
+=item B<Constants>: i32.const, i64.const for immediate values
+
+=item B<Arithmetic>: i32.add/sub/mul/div_s/rem_s, i64 variants, i32.and/or/xor/shl/shr_s/shr_u
+
+=item B<Comparison>: i32.eq/ne/lt_s/le_s/gt_s/ge_s, i64 variants
+
+=item B<Memory>: i32.load/store (with 4-byte alignment), i64.load/store (with 8-byte alignment)
+
+=item B<Control flow>: block, end, br (by depth), br_if, br_table, return
+
+=item B<Calls>: call (by function index)
+
+=item B<Local access>: local.get, local.set (by index)
+
+=back
+
+=head2 Structured Control Flow
+
+WebAssembly requires structured control flow (no arbitrary jumps). The codegen uses nested B<block> and B<end> pairs
+with L<br> targeting by block depth to implement conditional branches and loops.
+
+=head2 Limitations
+
+=over 4
+
+=item * No floating-point support yet (WASM supports f32/f64 natively)
+
+=item * No alloca support (WASM has linear memory but no dynamic stack allocation)
+
+=item * Limited to a single function and linear memory
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

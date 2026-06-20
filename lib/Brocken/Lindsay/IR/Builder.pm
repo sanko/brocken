@@ -47,6 +47,16 @@ class Brocken::Lindsay::IR::Builder {
     method build_abs( $operand, $name  = undef ) { $self->build_unop( 'abs',  $operand, $name ) }
     method build_sqrt( $operand, $name = undef ) { $self->build_unop( 'sqrt', $operand, $name ) }
 
+    method build_frame_addr( $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::FrameAddr->new(
+            name   => $name // $self->_next_id(),
+            type   => Brocken::Lindsay::IR::Type::ptr(),
+            opcode => 'frame_addr',
+            parent => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
     method build_phi( $type, $name = undef ) {
         my $inst = Brocken::Lindsay::IR::Instruction::Phi->new(
             name   => $name // $self->_next_id(),
@@ -218,4 +228,84 @@ class Brocken::Lindsay::IR::Builder {
         return $insert_block->append_inst($inst);
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Lindsay::IR::Builder - Incremental IR Construction API
+
+=head1 DESCRIPTION
+
+Provides a convenient imperative API for constructing Lindsay IR incrementally. Instructions are appended to the
+current insertion block, which is set via L</position_at_end>.
+
+=head1 METHODS
+
+=head2 position_at_end
+
+    $builder->position_at_end($block);
+
+Sets the block where subsequent build_* methods will insert instructions.
+
+=head2 Arithmetic Builders
+
+    $builder->build_add($lhs, $rhs, $name?)
+    $builder->build_sub($lhs, $rhs, $name?)
+    $builder->build_mul($lhs, $rhs, $name?)
+    $builder->build_div($lhs, $rhs, $name?)
+    $builder->build_rem($lhs, $rhs, $name?)
+    $builder->build_shl($lhs, $rhs, $name?)
+    $builder->build_lshr($lhs, $rhs, $name?)
+    $builder->build_ashr($lhs, $rhs, $name?)
+    $builder->build_and($lhs, $rhs, $name?)
+    $builder->build_or($lhs, $rhs, $name?)
+    $builder->build_xor($lhs, $rhs, $name?)
+    $builder->build_min($lhs, $rhs, $name?)
+    $builder->build_max($lhs, $rhs, $name?)
+
+=head2 Unary Builders
+
+    $builder->build_neg($operand, $name?)
+    $builder->build_abs($operand, $name?)
+    $builder->build_sqrt($operand, $name?)
+
+=head2 Memory Builders
+
+    $builder->build_alloca($type, $name?)
+    $builder->build_load($type, $ptr, $name?)
+    $builder->build_store($val, $ptr)
+    $builder->build_gep($base_type, $ptr, \@indices, $name?)
+
+=head2 Control Flow Builders
+
+    $builder->build_br($dest_block)
+    $builder->build_cond_br($cond_val, $true_block, $false_block)
+    $builder->build_ret($val?)
+    $builder->build_call($callee_func, \@args, $name?)
+    $builder->build_phi($type, $name?)
+    $builder->build_select($cond, $true_val, $false_val, $name?)
+    $builder->build_icmp($predicate, $lhs, $rhs, $name?)
+
+=head2 Runtime Builders
+
+    $builder->build_box($val, $name?)
+    $builder->build_unbox($dynamic_val, $dest_type, $name?)
+    $builder->build_incref($val)
+    $builder->build_decref($val)
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

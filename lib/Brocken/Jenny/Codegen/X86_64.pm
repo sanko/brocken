@@ -97,41 +97,33 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $callee_size   = scalar(@$used_callee) * 8;
         my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
         my $is_leaf       = 1;
+        my $total_alloca  = 0;
 
-        my $total_alloca = 0;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
-                $is_leaf = 0 if $inst->opcode eq 'call_func';
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
                 }
             }
-        }  my $shadow_space = $platform->is_windows ? 32 : 0;
-        my $extra_frame  = $unified_frame - $callee_size + $shadow_space;
-        if ($is_leaf) {
-            my $leaf_frame = $unified_frame + $total_alloca + $shadow_space;
-            if ( $leaf_frame > 0 ) {
-                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $leaf_frame );
-            }
-            for my $i ( 0 .. $#$used_callee ) {
-                my $reg = $used_callee->[$i];
-                my $rid = $reg_id->($reg);
-                my $off = $spill_frame + $total_alloca + $shadow_space + $i * 8;
-                my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
-                $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x89, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
-            }
         }
-        else {
-            for my $reg ( $used_callee->@* ) {
-                my $rid = $reg_id->($reg);
-                if ( $rid < 8 ) { $bytes .= pack( 'C', PUSH_BASE + $rid ) }
-                else            { $bytes .= pack( 'CC', 0x41, PUSH_BASE + ( $rid - 8 ) ) }
-            }
-            my $nonleaf_frame = $extra_frame + $total_alloca;
-            if ( $nonleaf_frame > 0 ) {
-                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $nonleaf_frame );
-            }
+
+        # X86_64 Standard Frame Pointer Prologue
+        $bytes .= pack( 'C', PUSH_BASE + 5 );         # push rbp
+        $bytes .= pack( 'CCC', 0x48, 0x89, 0xE5 );    # mov rbp, rsp
+
+        #
+        my $shadow_space = $platform->is_windows ? 32 : 0;
+        my $total_frame  = ( $callee_size + $spill_frame + $shadow_space + $total_alloca + 15 ) & ~15;
+        if ( $total_frame > 0 ) {
+            $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $total_frame );    # sub rsp, total_frame
+        }
+        for my $i ( 0 .. $#$used_callee ) {
+            my $reg = $used_callee->[$i];
+            my $rid = $reg_id->($reg);
+            my $off = $total_frame - $shadow_space - ( $i * 8 ) - 8;
+            my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
+            $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x89, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
         }
         my $resolve = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
@@ -147,7 +139,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
             my $bid    = $reg_id->($base_r);
             my $disp   = $addr->{disp} // 0;
-             $disp += $total_alloca + $shadow_space if $base_r eq 'rsp';
+            $disp += $total_alloca + $shadow_space if $base_r eq 'rsp';
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                 my $iid     = $reg_id->($index_r);
@@ -187,7 +179,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             my $rex_b = ( $bid >= 8 ) ? 1 : 0;
             return ( $modrm, \@extra, 0, $rex_b );
         };
-       my $alloca_top = $shadow_space;
+        my $alloca_top = $shadow_space;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 my $opcode = $inst->opcode;
@@ -195,7 +187,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                 if ( $opcode eq 'mov' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $bits  = $dst->type      ? $dst->type->bits : 64;
+                    my $bits  = $dst->type ? $dst->type->bits : 64;
                     if ( $src->kind eq 'imm' ) {
                         my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
                         my $rex_b = $did >= 8       ? REX_B : 0;
@@ -231,7 +223,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $opcode eq 'sbb' ) {
                     my $dst_r   = $resolve->($dst);
                     my $did     = $reg_id->($dst_r);
-                    my $bits  = $dst->type      ? $dst->type->bits : 64;
+                    my $bits    = $dst->type ? $dst->type->bits : 64;
                     my %imm_ext = ( add => 0,    sub => 5,    and => 4,    or => 1,    xor => 6,    adc => 2,    sbb => 3 );
                     my %reg_op  = ( add => 0x01, sub => 0x29, and => 0x21, or => 0x09, xor => 0x31, adc => 0x11, sbb => 0x19 );
                     my $rex_w   = ( $bits >= 64 ) ? REX_W : 0;
@@ -352,7 +344,6 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
                     $alloca_frame += $size;
-
                     my $rex   = 0x48 | ( $did >= 8 ? 4 : 0 );
                     my $mod   = ( $alloca_top == 0 ) ? 0 : ( $alloca_top >= -128 && $alloca_top <= 127 ) ? 1 : 2;
                     my $modrm = ( $mod << 6 ) | ( ( $did & 7 ) << 3 ) | 4;
@@ -559,12 +550,13 @@ class Brocken::Jenny::Codegen::X86_64 {
                     );
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
+
                     # Zero register first (32-bit mov reg,0 clears upper 32 on x86_64, doesn't clobber flags)
                     my $zx_rex = 0x40 | ( $did >= 8 ? 1 : 0 );
                     $bytes .= pack( 'C', $zx_rex ) if $zx_rex != 0x40;
                     $bytes .= pack( 'C', 0xB8 + ( $did & 7 ) ) . pack( 'V', 0 );
-                    my $rex     = 0x40 | ( $did >= 8 ? 1 : 0 );
-                    my $modrm   = 0xC0 | ( $did & 7 );
+                    my $rex   = 0x40 | ( $did >= 8 ? 1 : 0 );
+                    my $modrm = 0xC0 | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'call_func' ) {
@@ -573,31 +565,16 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'C', 0xE8 ) . "\x00\x00\x00\x00";
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    if ($is_leaf) {
-                        for my $i ( reverse 0 .. $#$used_callee ) {
-                            my $reg = $used_callee->[$i];
-                            my $rid = $reg_id->($reg);
-                            my $off = $spill_frame + $alloca_frame + $shadow_space + $i * 8;
-                            my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
-                            $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x8B, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
-                        }
-                       my $cleanup = $unified_frame + $alloca_frame + $shadow_space;
-                        if ( $cleanup > 0 ) {
-                            $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 0 << 3 ) | 4, $cleanup );
-                        }
+                    for my $i ( reverse 0 .. $#$used_callee ) {
+                        my $reg = $used_callee->[$i];
+                        my $rid = $reg_id->($reg);
+                        my $off = $total_frame - $shadow_space - ( $i * 8 ) - 8;
+                        my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
+                        $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x8B, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
                     }
-                    else {
-                        my $cleanup = $alloca_frame + $extra_frame;
-                        if ( $cleanup > 0 ) {
-                            $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 0 << 3 ) | 4, $cleanup );
-                        }
-                        for my $reg ( reverse $used_callee->@* ) {
-                            my $rid = $reg_id->($reg);
-                            if ( $rid < 8 ) { $bytes .= pack( 'C', POP_BASE + $rid ) }
-                            else            { $bytes .= pack( 'CC', 0x41, POP_BASE + ( $rid - 8 ) ) }
-                        }
-                    }
-                    $bytes .= pack( 'C', RET_BYTE );
+                    $bytes .= pack( 'CCC', 0x48, 0x89, 0xEC );    # mov rsp, rbp
+                    $bytes .= pack( 'C',   POP_BASE + 5 );        # pop rbp
+                    $bytes .= pack( 'C',   RET_BYTE );
                 }
             }
         }
@@ -633,4 +610,61 @@ class Brocken::Jenny::Codegen::X86_64 {
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Codegen::X86_64 - x86_64 Machine Code Generator
+
+=head1 DESCRIPTION
+
+Generates x86_64 machine code from MIR (Machine Intermediate Representation). Implements full instruction encoding for
+the System V AMD64 ABI.
+
+=head2 Supported Instructions
+
+=over 4
+
+=item B<Data movement>: mov (reg/imm/mem), movzx, movsxd, lea, push, pop
+
+=item B<Arithmetic>: add, sub, adc, sbb, and, or, xor, mul, imul (umulh), div (udiv), inc, dec, neg, shl, shr, sar
+
+=item B<Comparison>: cmp, test, setcc (with FLAGS-safe xor-zeroing)
+
+=item B<Floating point (SSE/SSE2)>: movsd, addsd, subsd, mulsd, divsd, cvtsi2sd, cvttsd2si, ucomisd, sqrtsd, cmpsd, maxsd, minsd, xorsd
+
+=item B<Control flow>: jmp (near/8-bit), je, jne, jl, jle, jg, jge, jb, jae, call, ret
+
+=item B<Stack>: alloca (with frame register management)
+
+=back
+
+=head2 Encoding Scheme
+
+Instructions are encoded using a compact MIR encoding where each instruction opcode maps to a pre-defined byte sequence
+with template markers for operands. Templates include placeholders for ModRM bytes, SIB bytes, displacement fields, and
+immediate values.
+
+=head2 Frame Layout
+
+    [callee saves] [caller saves] [alloca area]  <- SP after prologue
+
+The L<_compute_spill_frame> method scans all SP-relative memory operands to determine the required spill/caller-save
+frame size.
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

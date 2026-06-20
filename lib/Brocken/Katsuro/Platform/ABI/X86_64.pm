@@ -56,4 +56,48 @@ class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::
         return $map{$name};
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Platform::ABI::X86_64 - x86_64 ABI Register Definitions
+
+=head1 DESCRIPTION
+
+Defines the System V AMD64 calling convention register sets: scratch (caller-saved), preserved (callee-saved),
+parameter passing, and DWARF register numbering.
+
+=head2 Register Sets
+
+=over 4
+
+=item * B<Caller-saved>: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11
+
+=item * B<Callee-saved>: rbx, r12, r13, r14, r15
+
+=item * B<Parameters>: rdi, rsi, rdx, rcx, r8, r9
+
+=item * B<Return>: rax
+
+=item * B<FP return>: xmm0
+
+=item * B<FP caller-saved>: xmm0-xmm15 (all)
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;
