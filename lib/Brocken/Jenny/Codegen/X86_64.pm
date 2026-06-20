@@ -47,6 +47,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
+        $alloc->fix_entry_shuffle( $mf, \%assignment );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -74,6 +75,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
             $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
+            $alloc->fix_entry_shuffle( $mf, \%assignment );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -97,14 +99,20 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $extra_frame   = $unified_frame - $callee_size;
         my $is_leaf       = 1;
 
+        my $total_alloca = 0;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func';
+                if ( $inst->opcode eq 'alloca' ) {
+                    my ( undef, $src ) = $inst->operands->@*;
+                    $total_alloca += $src->value;
+                }
             }
         }
         if ($is_leaf) {
-            if ( $unified_frame > 0 ) {
-                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $unified_frame );
+            my $leaf_frame = $unified_frame + $total_alloca;
+            if ( $leaf_frame > 0 ) {
+                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $leaf_frame );
             }
             for my $i ( 0 .. $#$used_callee ) {
                 my $reg = $used_callee->[$i];
@@ -120,8 +128,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                 if ( $rid < 8 ) { $bytes .= pack( 'C', PUSH_BASE + $rid ) }
                 else            { $bytes .= pack( 'CC', 0x41, PUSH_BASE + ( $rid - 8 ) ) }
             }
-            if ( $extra_frame > 0 ) {
-                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $extra_frame );
+            my $nonleaf_frame = $extra_frame + $total_alloca;
+            if ( $nonleaf_frame > 0 ) {
+                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xC0 | ( 5 << 3 ) | 4, $nonleaf_frame );
             }
         }
         my $resolve = sub ($op) {
@@ -138,6 +147,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
             my $bid    = $reg_id->($base_r);
             my $disp   = $addr->{disp} // 0;
+            $disp += $total_alloca if $base_r eq 'rsp';
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                 my $iid     = $reg_id->($index_r);
@@ -177,6 +187,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             my $rex_b = ( $bid >= 8 ) ? 1 : 0;
             return ( $modrm, \@extra, 0, $rex_b );
         };
+        my $alloca_top = 0;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 my $opcode = $inst->opcode;
@@ -184,7 +195,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                 if ( $opcode eq 'mov' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $bits  = $dst->type ? $dst->type->bits : 64;
+                    my $bits  = $dst->type      ? $dst->type->bits : 64;
                     if ( $src->kind eq 'imm' ) {
                         my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
                         my $rex_b = $did >= 8       ? REX_B : 0;
@@ -220,7 +231,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $opcode eq 'sbb' ) {
                     my $dst_r   = $resolve->($dst);
                     my $did     = $reg_id->($dst_r);
-                    my $bits    = $dst->type ? $dst->type->bits : 64;
+                    my $bits  = $dst->type      ? $dst->type->bits : 64;
                     my %imm_ext = ( add => 0,    sub => 5,    and => 4,    or => 1,    xor => 6,    adc => 2,    sbb => 3 );
                     my %reg_op  = ( add => 0x01, sub => 0x29, and => 0x21, or => 0x09, xor => 0x31, adc => 0x11, sbb => 0x19 );
                     my $rex_w   = ( $bits >= 64 ) ? REX_W : 0;
@@ -342,15 +353,14 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $size  = $src->value;
                     $alloca_frame += $size;
 
-                    # sub rsp, size  (48 81 EC <size32>) -- rsp is always 64-bit
-                    my $rex   = 0x48;
-                    my $modrm = 0xC0 | ( 5 << 3 ) | 4;    # /5 = sub, r/m = rsp
-                    $bytes .= pack( 'CCCV', $rex, ARITH_IMM, $modrm, $size );
-
-                    # mov dst, rsp  (48 8B <modrm>) -- rsp is always 64-bit
-                    my $rex2 = 0x48 | ( $did >= 8 ? 4 : 0 );
-                    my $mr2  = 0xC0 | ( ( $did & 7 ) << 3 ) | 4;
-                    $bytes .= pack( 'CCC', $rex2, MOV_RM_R, $mr2 );
+                    my $rex   = 0x48 | ( $did >= 8 ? 4 : 0 );
+                    my $mod   = ( $alloca_top == 0 ) ? 0 : ( $alloca_top >= -128 && $alloca_top <= 127 ) ? 1 : 2;
+                    my $modrm = ( $mod << 6 ) | ( ( $did & 7 ) << 3 ) | 4;
+                    my $sib   = 0x24;
+                    $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm ) . pack( 'C', $sib );
+                    $bytes .= pack( 'c', $alloca_top ) if $mod == 1;
+                    $bytes .= pack( 'V', $alloca_top ) if $mod == 2;
+                    $alloca_top += $size;
                 }
                 elsif ( $opcode eq 'lea' ) {
                     my $dst_r = $resolve->($dst);
@@ -506,7 +516,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                 elsif ( $opcode eq 'cmp' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $bits  = $dst->type      ? $dst->type->bits : 64;
+                    my $bits  = $src->type      ? $src->type->bits : 64;
                     my $rex_w = ( $bits >= 64 ) ? REX_W            : 0;
                     if ( $src->kind eq 'imm' ) {
                         my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
@@ -549,8 +559,12 @@ class Brocken::Jenny::Codegen::X86_64 {
                     );
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $rex   = 0x40 | ( $did >= 8 ? 1 : 0 );
-                    my $modrm = 0xC0 | ( $did & 7 );
+                    # Zero register first (32-bit mov reg,0 clears upper 32 on x86_64, doesn't clobber flags)
+                    my $zx_rex = 0x40 | ( $did >= 8 ? 1 : 0 );
+                    $bytes .= pack( 'C', $zx_rex ) if $zx_rex != 0x40;
+                    $bytes .= pack( 'C', 0xB8 + ( $did & 7 ) ) . pack( 'V', 0 );
+                    my $rex     = 0x40 | ( $did >= 8 ? 1 : 0 );
+                    my $modrm   = 0xC0 | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'call_func' ) {

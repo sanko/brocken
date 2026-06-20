@@ -25,14 +25,27 @@ class Brocken::Jenny::Lowerer::X86_64 {
             if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
                 my @arg_regs = $self->_abi->param_registers->@*;
                 for my $i ( 0 .. $#{ $ir_func->params } ) {
-                    my $param = $ir_func->params->[$i];
-                    my $reg   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
-                    my $dst   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
+                    my $param   = $ir_func->params->[$i];
+                    my $tmp_name = $param->name . '.entry';
+                    my $reg     = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
+                    my $tmp     = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $tmp_name, type => $param->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
-                            operands => [ $dst, $reg ],
-                            comment  => "param $i from " . $arg_regs[$i]
+                            operands => [ $tmp, $reg ],
+                            comment  => "save param $i from " . $arg_regs[$i]
+                        )
+                    );
+                }
+                for my $i ( 0 .. $#{ $ir_func->params } ) {
+                    my $param = $ir_func->params->[$i];
+                    my $dst   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
+                    my $tmp   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name . '.entry', type => $param->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, $tmp ],
+                            comment  => "init param $i"
                         )
                     );
                 }
@@ -1988,24 +2001,36 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                     else {
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mov',
-                                operands => [ $dst, $self->_lower_opnd($lhs) ],
-                                comment  => 'load lhs'
-                            )
-                        );
+                        my $lhs_op = $self->_lower_opnd($lhs);
+                        my $rhs_op = $self->_lower_opnd($rhs);
+                        my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        my $cmp_lhs = $lhs_op;
+                        if ( $lhs_op->kind eq 'imm' ) {
+                            my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_lhs',
+                                type  => $lhs_op->type,
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $tmp, $lhs_op ],
+                                    comment  => 'icmp materialize lhs'
+                                )
+                            );
+                            $cmp_lhs = $tmp;
+                        }
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'cmp',
-                                operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                operands => [ $cmp_lhs, $rhs_op ],
                                 comment  => 'icmp ' . $pred
                             )
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'set' . $cond{$pred},
-                                operands => [$dst],
+                                operands => [$result],
                                 comment  => 'set' . $cond{$pred}
                             )
                         );

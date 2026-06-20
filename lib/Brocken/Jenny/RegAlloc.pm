@@ -31,6 +31,8 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             next unless $op->kind eq 'mem';
             my $base = $op->value->{base} // '';
             push @names, $base if $base =~ /^%/;
+            my $index = $op->value->{index} // '';
+            push @names, $index if $index =~ /^%/;
         }
         return @names;
     }
@@ -119,7 +121,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             my $bi_last  = $bi_range[$bi][1];
             for my $v ( keys %{ $live_in{$bi} // {} } ) {
                 $first{$v} //= $bi_first;
-                $last{$v} = max( $last{$v} // 0, $bi_last );
+                $last{$v} = List::Util::max( $last{$v} // 0, $bi_last );
             }
             for my $inst ( $bb->instructions->@* ) {
                 for my $op ( $self->_register_operands($inst) ) {
@@ -150,6 +152,9 @@ class Brocken::Jenny::RegAlloc::LinearScan {
     method _linear_scan( $intervals, $platform, $is_float ) {
         my @caller_regs = $is_float ? $platform->fp_registers('caller')->@* : $platform->registers('caller')->@*;
         my @callee_regs = $is_float ? $platform->fp_registers('callee')->@* : $platform->registers('callee')->@*;
+        my $skip_reg    = $is_float ? $platform->fp_return_register          : $platform->return_register;
+        @caller_regs    = grep { $_ ne $skip_reg } @caller_regs;
+        @callee_regs    = grep { $_ ne $skip_reg } @callee_regs;
         my $spill_temp  = pop @caller_regs;
         my @regs        = ( @caller_regs, @callee_regs );
         my %assignment;
@@ -301,6 +306,73 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 push @new, $inst;
             }
             $bb->instructions->@* = @new;
+        }
+    }
+
+    method fix_entry_shuffle( $mf, $assignment ) {
+        my $entry = $mf->entry_block;
+        return unless $entry;
+
+        # Collect save-phase MOVs: mov <virt_reg>, <phys_reg>  (capturing
+        # a parameter from its calling-convention register).  These are the
+        # only instructions that can create register hazards because they
+        # read the caller's register values before they are overwritten.
+        my @saves;
+        my @insts = $entry->instructions->@*;
+        for my $i ( 0 .. $#insts ) {
+            my $inst = $insts[$i];
+            next unless $inst->opcode eq 'mov';
+            my ( $dst, $src ) = $inst->operands->@*;
+            next unless $src->kind eq 'phys_reg';
+            my $dst_reg;
+            if ( $dst->kind eq 'phys_reg' ) {
+                $dst_reg = $dst->value;
+            }
+            elsif ( $dst->kind eq 'virt_reg' ) {
+                $dst_reg = $assignment->{ $dst->value };
+            }
+            next unless $dst_reg && $dst_reg !~ /^spill\(/;
+            push @saves, { idx => $i, dst => $dst_reg, src => $src->value };
+        }
+
+        # Detect hazard: dst_i == src_j for i < j  (save MOV i overwrites
+        # a register whose original value save MOV j still needs to read).
+        # Break cycles using the spill-temp register r11.
+        my $temp_reg = 'r11';
+        for my $i ( 0 .. $#saves ) {
+            for my $j ( $i + 1 .. $#saves ) {
+                if ( $saves[$i]{dst} eq $saves[$j]{src} ) {
+                    # MOV i writes to a register that MOV j subsequently reads
+                    # as its original caller-set value.  Insert a save before
+                    # MOV i and redirect MOV j to read from the temp register.
+                    my $hazard_reg = $saves[$i]{dst};
+                    my $save_inst = Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode   => 'mov',
+                        operands => [
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_reg ),
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hazard_reg ),
+                        ],
+                        comment => 'entry-shuffle save ' . $hazard_reg,
+                    );
+
+                    # Insert before MOV i
+                    splice $entry->instructions->@*, $saves[$i]{idx}, 0, $save_inst;
+
+                    # Shift indices after insertion point
+                    for my $k ( $i .. $#saves ) {
+                        $saves[$k]{idx}++;
+                    }
+
+                    # Patch MOV j's source to r11
+                    my $j_inst = $entry->instructions->[ $saves[$j]{idx} ];
+                    $j_inst->operands->[1] = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind => 'phys_reg', value => $temp_reg, type => $j_inst->operands->[1]->type,
+                    );
+
+                    # Mark this hazard as resolved so we don't re-process it
+                    $saves[$j]{src} = $temp_reg;
+                }
+            }
         }
     }
 
