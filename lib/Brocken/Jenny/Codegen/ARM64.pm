@@ -134,11 +134,16 @@ class Brocken::Jenny::Codegen::ARM64 {
     method _encode( $mf, $assignment, $used_callee ) {
         my $bytes        = '';
         my $alloca_frame = 0;
+        my $total_alloca = 0;
         my $is_leaf      = 1;
         my $spill_frame  = $self->_compute_spill_frame( $mf, 'sp' );
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func';
+                if ( $inst->opcode eq 'alloca' ) {
+                    my ( undef, $src ) = $inst->operands->@*;
+                    $total_alloca += $src->value;
+                }
             }
         }
         my @to_save = $used_callee->@*;
@@ -148,6 +153,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         my $callee_size   = scalar(@to_save) * 8;
         my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
         my $extra_frame   = $unified_frame - $callee_size;
+        my $total_frame   = $unified_frame + $total_alloca;
         my $reg_id        = sub ($r) {
             return 31 if $r eq 'sp';
             return $1 if $r =~ /^[xw](\d+)$/;
@@ -159,13 +165,13 @@ class Brocken::Jenny::Codegen::ARM64 {
             return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: ${\$op->kind}";
         };
-        if ( $unified_frame > 0 ) {
-            $bytes .= pack( 'V', SUB_SP | ( ( $unified_frame & 0xFFF ) << 10 ) );
+        if ( $total_frame > 0 ) {
+            $bytes .= pack( 'V', SUB_SP | ( ( $total_frame & 0xFFF ) << 10 ) );
             for my $i ( 0 .. $#to_save ) {
                 my $reg  = $to_save[$i];
                 my $rid  = $reg_id->($reg);
                 my $base = $reg =~ /^v/ ? FSTR_64 : STR_64;
-                my $imm12 = ( $extra_frame + $i * 8 ) >> 3;
+                my $imm12 = ( $extra_frame + $total_alloca + $i * 8 ) >> 3;
                 $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
             }
         }
@@ -281,9 +287,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
+                    $bytes .= pack( 'V', ADD_SP | ( ( $alloca_frame & 0xFFF ) << 10 ) | $did );
                     $alloca_frame += $size;
-                    $bytes .= pack( 'V', SUB_SP | ( ( $size & 0xFFF ) << 10 ) );
-                    $bytes .= pack( 'V', MOV_SP | $did );
                 }
                 elsif ( $opcode eq 'load' ) {
                     my $dst_r  = $resolve->($dst);
@@ -300,6 +305,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
+                        $disp += $total_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? LDR_32 : LDR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
@@ -320,6 +326,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
+                        $disp += $total_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? STR_32 : STR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
@@ -357,6 +364,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp     = $addr->{disp} // 0;
+                        $disp += $total_alloca if $base_r eq 'sp';
                         my $imm12    = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $str_base = $bits >= 64 ? STR_64 : STR_32;
                         $bytes .= pack( 'V', $str_base | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
@@ -431,6 +439,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
+                        $disp += $total_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FLDR_32 : FLDR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
@@ -452,6 +461,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
+                        $disp += $total_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FSTR_32 : FSTR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
@@ -512,20 +522,17 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $bytes .= pack( 'V', 0x94000000 );
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    if ( $alloca_frame > 0 ) {
-                        $bytes .= pack( 'V', ADD_SP | ( ( $alloca_frame & 0xFFF ) << 10 ) );
-                    }
                     if ( $callee_size > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
                             my $reg  = $to_save[$i];
                             my $rid  = $reg_id->($reg);
                             my $base = $reg =~ /^v/ ? FLDR_64 : LDR_64;
-                            my $imm12 = ( $extra_frame + $i * 8 ) >> 3;
+                            my $imm12 = ( $extra_frame + $total_alloca + $i * 8 ) >> 3;
                             $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
                         }
                     }
-                    if ( $unified_frame > 0 ) {
-                        $bytes .= pack( 'V', ADD_SP | ( ( $unified_frame & 0xFFF ) << 10 ) );
+                    if ( $total_frame > 0 ) {
+                        $bytes .= pack( 'V', ADD_SP | ( ( $total_frame & 0xFFF ) << 10 ) );
                     }
                     $bytes .= pack( 'V', RET );
                 }
