@@ -150,10 +150,11 @@ class Brocken::Jenny::Codegen::ARM64 {
         if ( !$is_leaf ) {
             push @to_save, 'x30';
         }
-        my $callee_size   = scalar(@to_save) * 8;
-        my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
-        my $extra_frame   = $unified_frame - $callee_size;
-        my $total_frame   = $unified_frame + $total_alloca;
+        my $callee_size    = scalar(@to_save) * 8;
+        my $unified_frame  = ( $callee_size + $spill_frame + 15 ) & ~15;
+        my $extra_frame    = $unified_frame - $callee_size;
+        my $aligned_alloca = ( $total_alloca + 15 ) & ~15;
+        my $total_frame    = $unified_frame + $aligned_alloca;
         my $reg_id        = sub ($r) {
             return 31 if $r eq 'sp';
             return $1 if $r =~ /^[xw](\d+)$/;
@@ -171,7 +172,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                 my $reg  = $to_save[$i];
                 my $rid  = $reg_id->($reg);
                 my $base = $reg =~ /^v/ ? FSTR_64 : STR_64;
-                my $imm12 = ( $extra_frame + $total_alloca + $i * 8 ) >> 3;
+                my $imm12 = ( $extra_frame + $aligned_alloca + $i * 8 ) >> 3;
                 $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
             }
         }
@@ -305,7 +306,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
-                        $disp += $total_alloca if $base_r eq 'sp';
+                        $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? LDR_32 : LDR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
@@ -326,7 +327,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
-                        $disp += $total_alloca if $base_r eq 'sp';
+                        $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? STR_32 : STR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
@@ -364,7 +365,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp     = $addr->{disp} // 0;
-                        $disp += $total_alloca if $base_r eq 'sp';
+                        $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12    = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $str_base = $bits >= 64 ? STR_64 : STR_32;
                         $bytes .= pack( 'V', $str_base | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
@@ -439,7 +440,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
-                        $disp += $total_alloca if $base_r eq 'sp';
+                        $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FLDR_32 : FLDR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
@@ -461,7 +462,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
-                        $disp += $total_alloca if $base_r eq 'sp';
+                        $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FSTR_32 : FSTR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
@@ -527,7 +528,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                             my $reg  = $to_save[$i];
                             my $rid  = $reg_id->($reg);
                             my $base = $reg =~ /^v/ ? FLDR_64 : LDR_64;
-                            my $imm12 = ( $extra_frame + $total_alloca + $i * 8 ) >> 3;
+                            my $imm12 = ( $extra_frame + $aligned_alloca + $i * 8 ) >> 3;
                             $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
                         }
                     }
