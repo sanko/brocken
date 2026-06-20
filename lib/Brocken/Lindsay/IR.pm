@@ -29,9 +29,6 @@ class Brocken::Lindsay::IR::Type {
     }
 }
 
-# ============================================================
-# Value
-# ============================================================
 class Brocken::Lindsay::IR::Value {
     field $type : reader : param;
     field $name : reader : param = undef;
@@ -40,17 +37,11 @@ class Brocken::Lindsay::IR::Value {
     method as_string() { $name // '%<anon>' }
 }
 
-# ============================================================
-# Constant
-# ============================================================
 class Brocken::Lindsay::IR::Constant : isa(Brocken::Lindsay::IR::Value) {
     field $value : reader : param;
     method as_string() {$value}
 }
 
-# ============================================================
-# Instruction (base)
-# ============================================================
 class Brocken::Lindsay::IR::Instruction : isa(Brocken::Lindsay::IR::Value) {
     field $opcode   : reader : param;
     field $operands : reader : param = [];
@@ -68,9 +59,6 @@ class Brocken::Lindsay::IR::Instruction : isa(Brocken::Lindsay::IR::Value) {
     }
 }
 
-# ============================================================
-# Instruction subclasses
-# ============================================================
 class Brocken::Lindsay::IR::Instruction::ICmp : isa(Brocken::Lindsay::IR::Instruction) {
     field $predicate : reader : param;    # 'eq', 'ne', 'sgt' (signed greater than), 'slt', etc.
 
@@ -133,6 +121,22 @@ class Brocken::Lindsay::IR::Instruction::Unbox : isa(Brocken::Lindsay::IR::Instr
     }
 }
 
+class Brocken::Lindsay::IR::Instruction::Incref : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $val = $self->operands->[0];
+        return sprintf '  incref %s %s', $val->type->as_string, $val->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::Decref : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $val = $self->operands->[0];
+        return sprintf '  decref %s %s', $val->type->as_string, $val->as_string;
+    }
+}
+
 class Brocken::Lindsay::IR::Instruction::Phi : isa(Brocken::Lindsay::IR::Instruction) {
     field $incoming : reader : param = [];    # Array of [Value, Block]
 
@@ -190,9 +194,6 @@ class Brocken::Lindsay::IR::Instruction::Store : isa(Brocken::Lindsay::IR::Instr
     }
 }
 
-# ============================================================
-# Block
-# ============================================================
 class Brocken::Lindsay::IR::Block {
     field $name         : reader : param;
     field $parent       : reader : param = undef;    # The function
@@ -210,9 +211,6 @@ class Brocken::Lindsay::IR::Block {
     }
 }
 
-# ============================================================
-# Function
-# ============================================================
 class Brocken::Lindsay::IR::Function {
     field $name        : reader : param;
     field $return_type : reader : param;
@@ -238,9 +236,6 @@ class Brocken::Lindsay::IR::Function {
     }
 }
 
-# ============================================================
-# Module
-# ============================================================
 class Brocken::Lindsay::IR::Module {
     field $name : reader : param = 'main';
     field $functions : reader = [];

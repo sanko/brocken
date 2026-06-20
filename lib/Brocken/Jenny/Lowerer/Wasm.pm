@@ -1808,6 +1808,20 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                 }
+                  elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Incref') || $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') ) {
+                   my $val = $inst->operands->[0];
+                   my $op_name = $inst->opcode;
+                   my $func_name = 'Brocken::Runtime::' . $op_name;
+
+                   $mbb->add_instruction( $self->_wasm_push( $val, "$op_name arg 0" ) );
+                   $mbb->add_instruction(
+                       Brocken::Jenny::MIR::MachineInstruction->new(
+                           opcode   => 'call_func',
+                           operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $func_name ) ],
+                           comment  => "call \@$func_name"
+                       )
+                   );
+               }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ICmp') ) {
                     my ( $lhs, $rhs ) = $inst->operands->@*;
                     my $pred = $inst->predicate;
