@@ -18,7 +18,7 @@ class Brocken::Lindsay::IR::Type {
     sub i128    { state $t //= __PACKAGE__->new( kind => 'int',   bits => 128 ); $t }      # __int128
     sub f32     { state $t //= __PACKAGE__->new( kind => 'float', bits => 32 );  $t }      # float
     sub f64     { state $t //= __PACKAGE__->new( kind => 'float', bits => 64 );  $t }      # double
-    sub ptr     { state $t //= __PACKAGE__->new( kind => 'ptr' );                  $t }    # opaque pointer
+    sub ptr     { state $t //= __PACKAGE__->new( kind => 'ptr', bits => 64 );       $t }    # opaque pointer (64-bit on this arch)
     sub void    { state $t //= __PACKAGE__->new( kind => 'void' );                 $t }
     sub dynamic { state $t //= __PACKAGE__->new( kind => 'dynamic', bits => 128 ); $t }    # 16-byte Fat Scalar (Tag + Payload), our SV*
 
