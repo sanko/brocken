@@ -1,6 +1,6 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[experimental::class];
+no warnings qw[experimental::class experimental::builtin];
 use Brocken::Katsuro::Platform::ABI;
 
 class Brocken::Katsuro::Platform {
@@ -151,6 +151,7 @@ class Brocken::Katsuro::Platform {
         elsif ( $os =~ /solaris|sunos|illumos/i )                       { $class = 'Brocken::Katsuro::Platform::Solaris' }
         elsif ( $arch =~ /^wasm/ || $os =~ /wasi/i || $env =~ /wasi/i ) { $class = 'Brocken::Katsuro::Platform::Wasm' }
         my $friendly;
+        builtin::load_module $class;
         $class->new(
             arch       => $arch,
             vendor     => $vendor,

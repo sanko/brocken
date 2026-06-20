@@ -1,13 +1,14 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[experimental::class];
+no warnings qw[experimental::class experimental::builtin];
 
 class Brocken::Katsuro::Platform::ABI {
 
     sub parse ( $class, $arch ) {
-        if    ( $arch =~ /x86_64|x64|amd64/i ) { return Brocken::Katsuro::Platform::ABI::X86_64->new }
-        elsif ( $arch =~ /aarch64|arm64/i )    { return Brocken::Katsuro::Platform::ABI::AArch64->new }
-        elsif ( $arch =~ /riscv64/i )          { return Brocken::Katsuro::Platform::ABI::RISCV64->new }
+        if    ( $arch =~ /x86_64|x64|amd64/i ) { $class = 'Brocken::Katsuro::Platform::ABI::X86_64' }
+        elsif ( $arch =~ /aarch64|arm64/i )    { $class = 'Brocken::Katsuro::Platform::ABI::AArch64' }
+        elsif ( $arch =~ /riscv64/i )          { $class = 'Brocken::Katsuro::Platform::ABI::RISCV64' }
+        builtin::load_module $class;
         return $class->new;
     }
     method registers( $category = 'available' )    { [] }

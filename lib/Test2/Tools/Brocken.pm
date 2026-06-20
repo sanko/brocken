@@ -14,7 +14,7 @@ package Test2::Tools::Brocken v0.0.1 {
         my $keep     = $args{keep} // 0;
         my $argv     = $args{args} // [];
         my $ctx      = context();
-        my $cmd      = ( defined $platform && $platform->is_windows ) ? $file : "./$file";
+        my $cmd      = ( defined $platform && $platform->is_windows ) ? ".\\$file" : "./$file";
         my $actual;
 
         if ($do_gdb) {
@@ -30,7 +30,7 @@ package Test2::Tools::Brocken v0.0.1 {
             $ctx->diag("GDB output for $name:\n$gdb_out") if length $gdb_out;
         }
         else {
-            system {$cmd} $cmd, @$argv;
+            system( $cmd, @$argv );
             $actual = $? >> 8;
         }
         my $mismatch = defined $expected && $actual != $expected;
