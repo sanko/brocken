@@ -10,8 +10,11 @@ class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform:
     # PRESERVED: x19-x28, sp, x29 (fp), x30 (lr)
     method registers( $category = 'available' ) {
         my %data = (
-            available => [qw[x0 x1 x2 x3 x4 x5 x6 x7 x9 x10 x11 x12 x13 x14 x15 x20 x21 x22 x23 x24 x25 x26 x27 x28]],
-            caller    => [qw[x0 x1 x2 x3 x4 x5 x6 x7 x9 x10 x11 x12 x13 x14 x15]],
+            # Order matters: x9-x15 (non-param caller regs) come before x1-x7 (param caller regs)
+            # to avoid register allocator assigning vregs to param regs that get clobbered
+            # by argument-setup mov instructions in the Lowerer.
+            available => [qw[x0 x9 x10 x11 x12 x13 x14 x15 x1 x2 x3 x4 x5 x6 x7 x20 x21 x22 x23 x24 x25 x26 x27 x28]],
+            caller    => [qw[x0 x9 x10 x11 x12 x13 x14 x15 x1 x2 x3 x4 x5 x6 x7]],
             callee    => [qw[x20 x21 x22 x23 x24 x25 x26 x27 x28]]
         );
         return $data{$category} // [];
