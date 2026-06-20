@@ -195,5 +195,27 @@ class Brocken::Lindsay::IR::Builder {
         );
         return $insert_block->append_inst($inst);
     }
+
+    method build_incref($val) {
+        my $inst = Brocken::Lindsay::IR::Instruction::Incref->new(
+            name     => undef,
+            type     => Brocken::Lindsay::IR::Type::void(),
+            opcode   => 'incref',
+            operands => [$val],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_decref($val) {
+        my $inst = Brocken::Lindsay::IR::Instruction::Decref->new(
+            name     => undef,
+            type     => Brocken::Lindsay::IR::Type::void(),
+            opcode   => 'decref',
+            operands => [$val],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
 }
 1;

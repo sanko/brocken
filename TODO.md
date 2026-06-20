@@ -20,46 +20,62 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] Linear scan register allocator implemented in `RegAlloc::LinearScan`.
 - [x] Uses all available caller + callee registers from platform (not just `rax`).
 - [x] Fixed-point dataflow liveness analysis (backward, CFG-aware via block successors/predecessors).
-- [x] Spill code insertion integrated into all 3 native codegens (X86_64, ARM64, RISCV64) — handles reload-before-use, spill-after-def, and `mem` operand base vregs.
+- [x] Spill code insertion integrated into all 3 native codegens (X86_64, ARM64, RISCV64)  handles reload-before-use, spill-after-def, and `mem` operand base vregs.
 - [x] `mem` operand bases tracked in liveness analysis (fixed the float crash bug).
 - [x] `_vreg_names_from_mem_operands` extracts vreg names from `mem(base="%vreg")`.
 
 ### Calling Conventions
-- [x] **Proper unified stack frame** — single-frame allocation combining callee-saves + spill slots, aligned to 16 bytes.
-- [x] **Spill slot offsets** — relative to `$stack_reg` (RSP/SP), correct.
-- [x] **RISCV64 prologue/epilogue** — integrates allocator's `used_callee` list; saves/restores int + FP registers.
-- [x] **ARM64 leaf detection** — skips `x30` save/restore for leaf funcs.
-- [ ] **Leaf function optimization** — partial on ARM64/RISCV64 (only link reg), missing on X86_64. Should skip all callee-save save/restore for leaf functions.
-- [x] **Caller-save register handling** — `insert_caller_save_code` called in all 3 native codegen pipelines, skipping return registers (`rax`/`xmm0`, `x0`/`v0`, `a0`/`fa0`).
-- [x] **Move coalescing** — `remove_redundant_moves` called in all 3 native codegen pipelines, eliminates `mov` where src/dst map to the same physical register.
-- [ ] **Floating-point callee-save on X86_64** — SysV ABI marks all XMM as caller-saved; codegen only uses `PUSH` (GP-only). Would need `MOVUPS`/`MOVDQA` stack save/restore for non-SysV ABI variants.
+- [x] **Proper unified stack frame**  single-frame allocation combining callee-saves + spill slots, aligned to 16 bytes.
+- [x] **Spill slot offsets**  relative to `$stack_reg` (RSP/SP), correct.
+- [x] **RISCV64 prologue/epilogue**  integrates allocator's `used_callee` list; saves/restores int + FP registers.
+- [x] **ARM64 leaf detection**  skips `x30` save/restore for leaf funcs.
+- [ ] **Leaf function optimization**  partial on ARM64/RISCV64 (only link reg), missing on X86_64. Should skip all callee-save save/restore for leaf functions.
+- [x] **Caller-save register handling**  `insert_caller_save_code` called in all 3 native codegen pipelines, skipping return registers (`rax`/`xmm0`, `x0`/`v0`, `a0`/`fa0`).
+- [x] **Move coalescing**  `remove_redundant_moves` called in all 3 native codegen pipelines, eliminates `mov` where src/dst map to the same physical register.
+- [ ] **Floating-point callee-save on X86_64**  SysV ABI marks all XMM as caller-saved; codegen only uses `PUSH` (GP-only). Would need `MOVUPS`/`MOVDQA` stack save/restore for non-SysV ABI variants.
 
 ### ABI Integration
 - [x] All 4 Lowerers query `param_registers()`, `return_register()`, `fp_return_register()` from `Platform::ABI`.
-- [ ] **Wide-type register pairs** — no `param_pair_registers()` or equivalent exists. i128 returns hard-code the second register (`rdx`/`x1`/`a1`) instead of querying the ABI.
+- [ ] **Wide-type register pairs**  no `param_pair_registers()` or equivalent exists. i128 returns hard-code the second register (`rdx`/`x1`/`a1`) instead of querying the ABI.
 
 ### 128-bit Numerics (i128)
-- [x] i128 binops (add/sub/and/or/xor/shl/lshr/ashr/mul) — all 4 targets.
-- [x] i128 return values — correctly split into lo/hi across two registers on native targets.
-- [x] i128 load/store — all 4 targets, via `_split_i128`.
-- [ ] **i128 call arguments** — not split; passes single i128 values through registers designed for 64-bit scalars.
-- [ ] **i128 entry block parameters** — not split; same issue as call arguments.
-- [ ] **Signed i128 div/rem** — all targets use unsigned algorithm; no sign-extension or absolute-value handling.
-- [ ] **i128 `min`/`max`** — not implemented on any target for i128 width.
-- [ ] **Large-value i128 tests** — all test values fit in 64 bits; no hi-part carry/borrow exercised.
-- [ ] **Endianness** — no handling for big-endian targets.
+- [x] i128 binops (add/sub/and/or/xor/shl/lshr/ashr/mul)  all 4 targets.
+- [x] i128 return values are correctly split into lo/hi across two registers on native targets.
+- [x] i128 load/store on all 4 targets, via `_split_i128`.
+- [ ] **i128 call arguments**  not split; passes single i128 values through registers designed for 64-bit scalars.
+- [ ] **i128 entry block parameters**  not split; same issue as call arguments.
+- [ ] **Signed i128 div/rem**  all targets use unsigned algorithm; no sign-extension or absolute-value handling.
+- [ ] **i128 `min`/`max`**  not implemented on any target for i128 width.
+- [ ] **Large-value i128 tests**  all test values fit in 64 bits; no hi-part carry/borrow exercised.
+- [ ] **Endianness**  no handling for big-endian targets.
 
 ## Phase 3: The Frontend (Parser & AST)
-- [ ] Implement a lexer and parser for a subset of Perl syntax (`for`, `if`, `sub`, `my`).
-- [ ] Create an AST (Abstract Syntax Tree).
-- [ ] Implement a `Codegen` visitor that traverses the AST and uses `Lindsay::IR::Builder` to emit IR.
+- [ ] Define the "Brocken Subset" of Perl for self-hosting (variables, subs, basic control flow).
+- [ ] Implement Lexer and Parser.
+- [ ] **Gradual Typing & Native Builtins:** Introduce syntax for raw machine types (`my ptr $x`, `my i64 $y`) to bypass Fat Scalar overhead.
+- [ ] **Pseudo-Namespace Intrinsics:** Recognize calls like `Brocken::load_i64($ptr)` or `Brocken::ptr_add($p, $offset)` in the parser and lower them directly to single MIR instructions, enabling us to write the runtime in Perl.
+- [ ] Implement AST to Lindsay IR Codegen pass.
 
-## Phase 4: Runtime & Builtins
-- [ ] Create a minimal `libbrocken` (likely in C or Assembly) for basic I/O (printing scalars).
-- [ ] Implement the "Fat Scalar" memory layout (Type Tag + Payload).
-- [ ] Basic memory management (a simple bump allocator or integrating `malloc`).
+## Phase 3: The Frontend (Katsuro)
+- [ ] Define the "Brocken Subset" of Perl for self-hosting (variables, subs, basic control flow).
+- [ ] Implement Lexer and Pratt Parser.
+- [ ] **Gradual Typing & Native Builtins:** Introduce syntax for raw machine types (`my ptr $x`, `my i64 $y`) to bypass Fat Scalar overhead.
+- [ ] **Pseudo-Namespace Intrinsics:** Recognize calls like `Brocken::load_i64($ptr)` or `Brocken::ptr_add($p, $offset)` in the parser and lower them directly to single MIR instructions, enabling us to write the runtime in Perl.
+- [ ] Implement AST to Lindsay IR Codegen pass.
 
-## Phase 5: Optimization (The "Lindsay" Middle-end)
-- [ ] Constant Folding pass.
-- [ ] Dead Code Elimination (DCE).
-- [ ] Simple Inlining.
+## Phase 4: Self-Hosted Runtime & Memory Management (`core.brocken`)
+*Architecture Note: Brocken uses "Isolates" (share-nothing OS threads) and cooperative fibers. Because heaps are entirely thread-local, Garbage Collection and Reference Counting require **zero atomic locks**.*
+
+- [ ] **Fat Scalar Layout:** Define the universal value struct using the native subset (Type Tag, RC, Cycle-Detector Mark, Payload).
+- [ ] **Immediate RC:** Implement `incref` and `decref` builtins. Guarantee deterministic `DESTROY` blocks.
+- [ ] **Bacon & Rajan Trial Deletion:** Implement the cycle collector to reap uncollectable circular references via the Isolate's Suspect Buffer.
+- [ ] **RC Immix Allocator:** Implement 32KB block / 256-byte line bump-pointer allocation in the Perl subset.
+- [ ] **Fiber Stack Scanning:** Implement logic to walk the stacks of suspended fibers to find live GC roots.
+- [ ] **UTF-8 Everywhere Strings:** Implement native string operations assuming pure UTF-8 payloads.
+- [ ] **Self-Hosted PerlIO:** Implement a vtable-based layered I/O system (e.g., `:unix` raw bytes -> `:utf8` validation).
+
+## Phase 5: Optimization & GC Lowering (Lindsay Middle-end)
+- [ ] **RC Insertion Pass:** Automatically insert `incref` and `decref` IR instructions around variable assignments. Utilize the Defer Stack to emit `decref` operations at scope exits.
+- [ ] **RC Elision & Reuse (Perceus-lite):** Optimize away redundant `incref`/`decref` pairs. If an object is uniquely owned (RC==1), mutate it in place rather than allocating a copy.
+- [ ] Constant Folding & Dead Code Elimination (DCE).
+- [ ] **Stack Map Generation:** Update `Jenny::Linker` to emit a `.brocken_stackmaps` section so the GC knows exactly which physical registers and stack slots hold pointers during a fiber yield.
