@@ -10,6 +10,7 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform:
     # PRESERVED: s0-s11, sp, gp, tp, ra
     method registers( $category = 'available' ) {
         my %data = (
+
             # Order matters: t0-t6 (non-param caller regs) come before a1-a7 (param caller regs)
             # to avoid register allocator assigning vregs to param regs that get clobbered
             # by argument-setup mov instructions in the Lowerer.
@@ -75,4 +76,60 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform:
         return $data{$category} // [];
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Platform::ABI::RISCV64 - RISC-V 64-bit ABI Register Definitions
+
+=head1 DESCRIPTION
+
+Defines the RISC-V LP64/LP64D calling convention register sets: scratch (caller-saved), preserved (callee-saved),
+parameter passing, and DWARF register numbering.
+
+=head2 Register Ordering
+
+The caller register list is intentionally ordered with non-parameter registers (t0-t6) before parameter registers
+(a1-a7). This mirrors the same fix applied to the ARM64 ABI: it prevents the register allocator from assigning virtual
+registers to a1-a7, which would be clobbered by argument-setup MOV instructions in the Lowerer.
+
+=head2 Register Sets
+
+=over 4
+
+=item * B<Caller-saved>: a0, t0-t6, a1-a7
+
+=item * B<Callee-saved>: s1-s11
+
+=item * B<FP frame>: s0
+
+=item * B<Stack>: sp
+
+=item * B<Parameters>: a0-a7
+
+=item * B<Return>: a0
+
+=item * B<FP return>: v0
+
+=item * B<FP caller-saved>: f0-f7, f10-f17, f28-f31
+
+=item * B<FP callee-saved>: f8-f9, f18-f27
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

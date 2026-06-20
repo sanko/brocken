@@ -7,7 +7,6 @@ use Test2::Tools::Brocken qw[run_exec];
 use Brocken::Katsuro::Platform;
 use Brocken::Lindsay::IR;
 use Brocken::Lindsay::IR::Builder;
-
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 #

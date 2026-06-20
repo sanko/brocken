@@ -88,4 +88,43 @@ class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
         return $num;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Platform::Haiku - Haiku Platform Abstraction
+
+=head1 DESCRIPTION
+
+Concrete platform class for Haiku. Haiku has unstable syscall numbers that are not officially documented. This module
+implements runtime syscall detection by disassembling libroot.so functions, with fallback numbers for R1/beta4.
+
+=head1 METHODS
+
+=head2 is_haiku
+
+Returns true (1).
+
+=head2 syscall
+
+    $platform->syscall($name);
+
+Returns the syscall number for the given name by first attempting to detect it from the running system's libroot.so,
+then falling back to hardcoded tables.
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

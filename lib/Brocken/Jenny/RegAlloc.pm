@@ -30,11 +30,12 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         for my $op ( $inst->operands->@* ) {
             next unless $op->kind eq 'mem';
             my $base = $op->value->{base} // '';
-           # Track all variables as long as they aren't explicit stack pointers
+
+            # Track all variables as long as they aren't explicit stack pointers
             # added post-allocation by the spill routines.
             push @names, $base if $base ne '' && $base ne 'rsp' && $base ne 'sp';
             my $index = $op->value->{index} // '';
-           push @names, $index if $index ne '';
+            push @names, $index if $index ne '';
         }
         return @names;
     }
@@ -154,11 +155,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
     method _linear_scan( $intervals, $platform, $is_float ) {
         my @caller_regs = $is_float ? $platform->fp_registers('caller')->@* : $platform->registers('caller')->@*;
         my @callee_regs = $is_float ? $platform->fp_registers('callee')->@* : $platform->registers('callee')->@*;
-        my $skip_reg    = $is_float ? $platform->fp_return_register          : $platform->return_register;
-        @caller_regs    = grep { $_ ne $skip_reg } @caller_regs;
-        @callee_regs    = grep { $_ ne $skip_reg } @callee_regs;
-        my $spill_temp  = pop @caller_regs;
-        my @regs        = ( @caller_regs, @callee_regs );
+        my $skip_reg    = $is_float ? $platform->fp_return_register         : $platform->return_register;
+        @caller_regs = grep { $_ ne $skip_reg } @caller_regs;
+        @callee_regs = grep { $_ ne $skip_reg } @callee_regs;
+        my $spill_temp = pop @caller_regs;
+        my @regs       = ( @caller_regs, @callee_regs );
         my %assignment;
         my %used_callee;
         my %spill_slots;
@@ -343,11 +344,12 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         for my $i ( 0 .. $#saves ) {
             for my $j ( $i + 1 .. $#saves ) {
                 if ( $saves[$i]{dst} eq $saves[$j]{src} ) {
+
                     # MOV i writes to a register that MOV j subsequently reads
                     # as its original caller-set value.  Insert a save before
                     # MOV i and redirect MOV j to read from the temp register.
                     my $hazard_reg = $saves[$i]{dst};
-                    my $save_inst = Brocken::Jenny::MIR::MachineInstruction->new(
+                    my $save_inst  = Brocken::Jenny::MIR::MachineInstruction->new(
                         opcode   => 'mov',
                         operands => [
                             Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_reg ),
@@ -366,9 +368,8 @@ class Brocken::Jenny::RegAlloc::LinearScan {
 
                     # Patch MOV j's source to r11
                     my $j_inst = $entry->instructions->[ $saves[$j]{idx} ];
-                    $j_inst->operands->[1] = Brocken::Jenny::MIR::MachineOperand->new(
-                        kind => 'phys_reg', value => $temp_reg, type => $j_inst->operands->[1]->type,
-                    );
+                    $j_inst->operands->[1]
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_reg, type => $j_inst->operands->[1]->type, );
 
                     # Mark this hazard as resolved so we don't re-process it
                     $saves[$j]{src} = $temp_reg;
@@ -382,4 +383,101 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return ( $frame + 15 ) & ~15;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::RegAlloc - Linear Scan Register Allocator
+
+=head1 DESCRIPTION
+
+Implements a linear-scan register allocator for MIR functions. Handles allocation of both general-purpose and
+floating-point registers, spill code insertion, caller-save/restore code, redundant-move elimination, and entry-block
+shuffle hazard detection.
+
+=head2 Algorithm
+
+The allocator uses a standard linear-scan approach:
+
+=over 4
+
+=item 1. Compute live intervals via global dataflow analysis (backward fixed-point)
+
+=item 2. Sort intervals by start position
+
+=item 3. Linear scan: allocate registers greedily with furthest-next-use spill heuristic
+
+=item 4. Insert spill code for spilled virtual registers
+
+=item 5. Insert caller-save/restore code around call instructions
+
+=item 6. Remove redundant register-to-register moves
+
+=item 7. Fix entry-block parameter shuffle hazards
+
+=back
+
+=head2 Classes
+
+=over 4
+
+=item L<Brocken::Jenny::RegAlloc::LiveInterval> - Represents a vreg's live range
+
+=item L<Brocken::Jenny::RegAlloc::LinearScan> - The allocator implementation
+
+=back
+
+=head1 METHODS
+
+=head2 allocate
+
+    $allocator->allocate($mf, $platform, $is_float?)
+
+Performs full register allocation on the MIR function.
+
+=head2 insert_spill_code
+
+    $allocator->insert_spill_code($mf, $spill_slots, $spill_temp, $stack_reg, $is_float?)
+
+Inserts load/store instructions for each spilled virtual register.
+
+=head2 insert_caller_save_code
+
+    $allocator->insert_caller_save_code($mf, $caller_regs, $stack_reg, $is_float?, $base_idx?)
+
+Saves all caller-saved registers before each call and restores them after.
+
+=head2 remove_redundant_moves
+
+    $allocator->remove_redundant_moves($mf, $assignment)
+
+Elides MOV instructions where source and destination map to the same physical register.
+
+=head2 fix_entry_shuffle
+
+    $allocator->fix_entry_shuffle($mf, $assignment, $temp_reg)
+
+Detects and fixes register hazards in entry-block parameter shuffles by inserting spill-temp save/restore sequences.
+
+=head2 compute_unified_frame
+
+    $allocator->compute_unified_frame($num_callee, $spill_frame, $caller_save_size)
+
+Computes the total stack frame size, aligned to 16 bytes.
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

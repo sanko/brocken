@@ -21,4 +21,60 @@ class Brocken::Katsuro::Platform::Windows : isa(Brocken::Katsuro::Platform) {
         return $name . '-' . $version . $self->lib_ext;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Platform::Windows - Windows Platform
+
+=head1 DESCRIPTION
+
+Concrete platform class for Windows. Uses PE (Portable Executable) format, .exe binaries, .dll shared libraries, and
+.lib static libraries. Not POSIX-compliant. Library prefix is empty (e.g., "kernel32.dll").
+
+=head1 METHODS
+
+=head2 is_windows
+
+Returns true (1).
+
+=head2 is_posix
+
+Returns false (0).
+
+=head2 bin_ext
+
+Returns '.exe'.
+
+=head2 lib_ext
+
+Returns '.dll'.
+
+=head2 format
+
+Returns 'pe'.
+
+=head2 lib_prefix
+
+Returns an empty string.
+
+=head2 static_lib_ext
+
+Returns '.a' for GNU environments, '.lib' otherwise.
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

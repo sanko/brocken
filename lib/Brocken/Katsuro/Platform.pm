@@ -328,4 +328,60 @@ class Brocken::Katsuro::Platform {
     method return_register()                       { $self->abi->return_register }
     method fp_return_register()                    { $self->abi->fp_return_register }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Platform - Platform and Architecture Detection
+
+=head1 DESCRIPTION
+
+Central platform abstraction layer that detects, normalizes, and describes target platforms. Handles target triple
+parsing, host detection, syscall numbering, binary format selection, and register set queries.
+
+=head2 Target Triples
+
+Platforms are identified by 4-part normalized triples: C<arch-vendor-os-env>. Examples:
+
+=over 4
+
+=item C<x86_64-pc-linux-gnu> - Standard Linux on x64
+
+=item C<aarch64-apple-darwin-macho> - macOS on Apple Silicon
+
+=item C<x86_64-pc-windows-gnu> - Windows with MinGW
+
+=back
+
+=head2 Key Methods
+
+=over 4
+
+=item C<parse> - Parse a triple string into a platform object
+
+=item C<gen_triple> - Detect the host platform
+
+=item C<syscall> - Look up syscall numbers
+
+=item C<registers> - Query register sets (via ABI subclass)
+
+=item Identity methods (C<is_linux>, C<is_macos>, C<is_windows>, etc.)
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

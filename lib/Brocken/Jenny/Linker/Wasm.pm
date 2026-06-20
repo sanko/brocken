@@ -54,6 +54,9 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
                 }
             }
 
+            # WASM section IDs: 1=Type, 2=Import, 3=Function, 4=Table, 5=Memory, 6=Global, 7=Export, 8=Start, 9=Element, 10=Code, 11=Data
+            # Value types: 0x7F=i32, 0x7E=i64, 0x7D=f32, 0x7C=f64
+            # Functype opcode: 0x60
             # Type Section (ID 1)
             my $type_sec = '';
             for my $fd (@type_table) {
@@ -108,7 +111,9 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             }
             $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $code_sec;
             open my $fh, '>:raw', $output_file or die $!;
-            print $fh "\0asm\x01\x00\x00\x00";    # Magic + Version
+
+            # WASM magic number \0asm + version 1 (MVP)
+            print $fh "\0asm\x01\x00\x00\x00";
             print $fh $type_sec, $func_sec, $mem_sec, $export_sec, $code_sec;
             close $fh;
             return;
@@ -156,6 +161,8 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         close $fh;
     }
 
+    # Unsigned LEB128 encoding: emit 7-bit chunks with continuation bit 0x80,
+    # MSB last. Used for WASM section sizes, function indices, and memory limits.
     method _uleb ($v) {
         my $out = '';
         do {
@@ -167,4 +174,47 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         return $out;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker::Wasm - WebAssembly Binary Generator
+
+=head1 DESCRIPTION
+
+Generates WebAssembly (WASM) binaries in the standard .wasm format. Produces a minimal executable with type section,
+function section, memory section (single page), export section (exporting _start), and code section.
+
+Currently supports a single linear memory of 1 page (64KB). The _start function is exported and executed by WASM
+runtimes.
+
+=head1 METHODS
+
+=head2 write_executable
+
+    $linker->write_executable($output_file, $code_bytes, $platform)
+
+Writes a .wasm binary with the compiled code as the body of _start.
+
+=head2 write_shared_library
+
+    $linker->write_shared_library($output_file, $code_bytes, $platform, $debug_bytes?)
+
+Not yet implemented for WASM.
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

@@ -994,11 +994,11 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 )
                             );
                             $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r_hi] ) );
-
                             my $orig_lo_lhs = $lo_lhs;
                             my $orig_hi_lhs = $hi_lhs;
                             my $orig_lo_rhs = $lo_rhs;
                             my $orig_hi_rhs = $hi_rhs;
+
                             # ---- signed i128 div/rem: materialize imm operands to virt_reg ----
                             if ( $lo_lhs->kind eq 'imm' ) {
                                 my $r = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1040,31 +1040,42 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$r] ) );
                                 $hi_rhs = $r;
                             }
+
                             # ---- end materialization ----
                             # ---- signed i128 div/rem: abs inputs via xor+sub with sign mask ----
                             my $do_mask128 = sub ( $lo, $hi, $mask ) {
-                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_dmtmp', type => Brocken::Lindsay::IR::Type::i64() );
-                                my $bor = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_dmbor', type => Brocken::Lindsay::IR::Type::i64() );
+                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_dmtmp',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                my $bor = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_dmbor',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $lo, 'lo' ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor',   operands => [] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$tmp] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_lt_u', operands => [], comment => 'mask128 borrow' ) );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_lt_u', operands => [], comment => 'mask128 borrow' )
+                                );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$bor] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub',   operands => [] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$lo] ) );
                                 $mbb->add_instruction( $self->_wasm_push_opnd( $hi, 'hi' ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor',   operands => [] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub',   operands => [] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$bor] ) );
-                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub', operands => [] ) );
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_sub',   operands => [] ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi] ) );
                             };
                             my $sign_d = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1099,6 +1110,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shr_s', operands => [], comment => 'i128 sign v' ) );
                             $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$sign_v] ) );
                             $do_mask128->( $lo_rhs, $hi_rhs, $sign_v );
+
                             # ---- end input abs ----
                             for my $ii ( reverse 0 .. 127 ) {
                                 my $val   = $ii >= 64 ? $hi_lhs  : $lo_lhs;
@@ -1808,20 +1820,19 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                 }
-                  elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Incref') || $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') ) {
-                   my $val = $inst->operands->[0];
-                   my $op_name = $inst->opcode;
-                   my $func_name = 'Brocken::Runtime::' . $op_name;
-
-                   $mbb->add_instruction( $self->_wasm_push( $val, "$op_name arg 0" ) );
-                   $mbb->add_instruction(
-                       Brocken::Jenny::MIR::MachineInstruction->new(
-                           opcode   => 'call_func',
-                           operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $func_name ) ],
-                           comment  => "call \@$func_name"
-                       )
-                   );
-               }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Incref') || $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') ) {
+                    my $val       = $inst->operands->[0];
+                    my $op_name   = $inst->opcode;
+                    my $func_name = 'Brocken::Runtime::' . $op_name;
+                    $mbb->add_instruction( $self->_wasm_push( $val, "$op_name arg 0" ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'call_func',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $func_name ) ],
+                            comment  => "call \@$func_name"
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ICmp') ) {
                     my ( $lhs, $rhs ) = $inst->operands->@*;
                     my $pred = $inst->predicate;
@@ -2093,4 +2104,58 @@ class Brocken::Jenny::Lowerer::Wasm {
         );
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Lowerer::Wasm - WebAssembly Lowerer (Lindsay IR to MIR)
+
+=head1 DESCRIPTION
+
+Lowers Lindsay IR to machine-level MIR for WebAssembly. Translates SSA instructions to WASM-compatible operations.
+
+=head2 Lowering Strategy
+
+=over 4
+
+=item B<Parameters> mapped to C<local.get> / C<local.set> by index (no physical registers)
+
+=item B<Arithmetic> lowered to WASM i32/i64 opcodes directly
+
+=item B<Boxing/Unboxing> packed into linear memory via C<i64.store> / C<i64.load>
+
+=item B<Refcounting> uses C<i64.atomic.rmw> for atomic increment and
+C<i64.atomic.rmw> + conditional free for decrement
+
+=item B<Memory> uses WASM linear memory with explicit alignment (4 for i32, 8 for i64)
+
+=back
+
+=head2 Limitations
+
+=over 4
+
+=item * No floating-point arithmetic support (WASM target missing float operations)
+
+=item * No alloca support (WASM has no dynamic stack allocation)
+
+=item * Control flow uses structured blocks with depth-based branch targeting
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

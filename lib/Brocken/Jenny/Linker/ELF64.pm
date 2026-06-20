@@ -12,52 +12,16 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
 
 Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
-=head1 DESCRIPTION
-
-Generates ELF64 binaries for Linux, BSDs, Haiku, and Solaris.
-
-=head2 Binary Structure
-
-=over
-
-=item * B<Elf64_Ehdr>: Main header (64 bytes).
-
-=item * B<Elf64_Phdr>: Program Headers defining memory segments (PT_LOAD, PT_DYNAMIC, etc.).
-
-=item * B<Elf64_Shdr>: Section Headers describing the file's logical sections.
-
-=back
-
-=head2 Platform-Specific Workarounds
-
-=over
-
-=item * B<Haiku>: Requires C<_gSharedObjectHaikuABI> and C<_gSharedObjectHaikuVersion>
-symbols in C<.dynsym> to enable modern POSIX APIs.
-
-=item * B<BSDs>: FreeBSD, NetBSD, and DragonFly require C<environ> and
-C<__progname> symbols to be mapped to writable memory to avoid early
-crashes in C<libc> initialization.
-
-=item * B<NetBSD>: Requires a C<PT_NOTE> containing C<NT_NETBSD_IDENT>
-to be recognized as a native binary, plus PaX relaxation notes.
-
-=item * B<OpenBSD>: Requires a C<PT_OPENBSD_PINTABLE> segment listing
-allowed syscall entry points for its "syscall pinning" security feature.
-
-=item * B<DragonFly BSD>: Requires a smaller C<PT_GNU_RELRO> segment
-that doesn't overlap the GOT, or the dynamic linker will crash.
-
-=back
-
 =cut
 
     # Structurally compliant segment layout grouping all read-only sections
     # in the RX segment, and keeping only writable sections in the RW segment.
     method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
 
-        #method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 ) {
-        $layout->add_section( '.text', $text_size, 5 );    # RX (Read + Execute)
+        # Flags: 1=alloc, 2=write, 4=execute
+        $layout->add_section( '.text', $text_size, 5 );    # RX (Alloc + Execute)
+        my $brk_sym_size = $self->brk_sym_size();
+        $layout->add_section( '.brk_sym', $brk_sym_size, 2 ) if $brk_sym_size > 0;
 
         # Read-only metadata sections (strictly mapped to RX segment)
         $layout->add_section( '.interp',   512,  2 ) if $self->type eq 'exe';
@@ -67,8 +31,8 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         $layout->add_section( '.hash',     4096, 2 );
 
         # Writable data and dynamic linking tables (mapped to RW segment)
-        $layout->add_section( '.dynamic', 4096,       3 );    # RW (Read + Write)
-        $layout->add_section( '.data',    $data_size, 6 );    # RW
+        $layout->add_section( '.dynamic', 4096,       3 );    # RW (Alloc + Write)
+        $layout->add_section( '.data',    $data_size, 6 );    # RW (Alloc + Write + Unknown flag 4)
         $layout->add_section( '.got',     512,        6 );    # RW
 
         # Non-alloc symbol and string tables for static linking/debugging (nm)
@@ -79,28 +43,31 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $layout->add_section( '.debug_line',     4096, 0 );
             $layout->add_section( '.debug_info',     4096, 0 );
             $layout->add_section( '.debug_abbrev',   4096, 0 );
-            $layout->add_section( '.debug_frame',    4096, 0 );
             $layout->add_section( '.debug_aranges',  4096, 0 );
             $layout->add_section( '.debug_pubnames', 4096, 0 );
+            $layout->add_section( '.debug_names',    4096, 0 );
+            $layout->add_section( '.debug_str',      4096, 0 );
             $layout->add_section( '.eh_frame',       4096, 0 );
         }
     }
 
     method import_rva($name) {
 
-        #my $imports = { dlopen => 16, dlsym => 24, pthread_create => 32, exit => 40, _exit => 40 };
+        # GOT slot offsets for dynamic linker imports:
+        #   dlopen         = +24  (offset 3, index 3)
+        #   dlsym          = +32  (offset 4, index 4)
+        #   pthread_create = +40  (offset 5, index 5)
+        #   exit / _exit   = +48  (offset 6, index 6)
+        # Slot 0-2 reserved (0, DYNAMIC, LINK_MAP).
         my $imports = { dlopen => 24, dlsym => 32, pthread_create => 40, exit => 48, _exit => 48 };
         return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown ELF import: ' . $name );
     }
+
+    # Standard Linux x86_64 static image base; PIE/BSD use base 0 for ASLR.
     method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
 
     method write_executable ( $output_file, $code_data, $platform, $shared = false, $debug_bytes = undef ) {
-
-        # Ensure $platform is normalized into a platform object if a raw string is passed
         $platform = Brocken::Katsuro::Platform::parse($platform) unless ref $platform;
-
-        # Multi-function support: if $code_data is an arrayref of {name, bytes, fixups},
-        # concatenate all blobs, compute function offsets, and track external fixups.
         my @func_fixups;
         my %func_offsets;
         my $code_bytes;
@@ -123,17 +90,11 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         else {
             $code_bytes = $code_data;
         }
-
-        # Automatically calculate layout if it wasn't called beforehand
         if ( !defined $self->layout ) {
-
-            # Allocate extra data space for platform-specific control variables
             my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
             $self->pre_layout( length($code_bytes) + 32, $extra_data, $platform );
         }
-        my $l = $self->layout;
-
-        #my $is_pie     = ($platform->is_bsd || $platform->is_haiku) && !($shared && $platform->is_freebsd);
+        my $l          = $self->layout;
         my $is_pie     = ( $platform->is_bsd || $platform->is_haiku ) && !$shared;
         my $base       = $is_pie ? 0 : $self->image_base;
         my $elf_type   = $shared ? 3 : ( $is_pie ? 3 : 2 );    # ET_DYN (3) for PIE, ET_EXEC (2) for static
@@ -146,12 +107,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         if ( $self->type eq 'exe' ) {
             if ( $platform->is_arm64 ) {
 
-                # ARM64 Dynamic Exit Stub:
-                # - bl main
-                # - adrp x8, :got:exit
-                # - ldr x8, [x8, :got_lo12:exit]
-                # - blr x8
-                # - brk #0
+                # ARM64 entry: bl main -> adrp x8, exit-GOT-page -> ldr x8, [x8, exit-GOT-off] -> blr x8 -> brk #0
                 my $got_exit  = $self->import_rva('exit');
                 my $adrp_pc   = $text_rva + 4;
                 my $page_diff = ( $got_exit >> 12 ) - ( $adrp_pc >> 12 );
@@ -164,16 +120,11 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 my $blr     = 0xD63F0100;
                 my $bl_main = 0x94000000 | ( ( ( 20 + ( $func_offsets{main} // 0 ) ) >> 2 ) & 0x3FFFFFF );
                 my $brk     = 0xD4200000;
-                $entry_stub = pack( 'V5', $bl_main, $adrp, $ldr, $blr, $brk );
+                $entry_stub = pack 'V5', $bl_main, $adrp, $ldr, $blr, $brk;
             }
             elsif ( $platform->is_riscv64 ) {
 
-                # RISC-V 64-bit Entry Stub:
-                # - jal ra, main
-                # - auipc t0, %pcrel_hi(exit)
-                # - ld t0, %pcrel_lo(auipc)(t0)
-                # - jalr ra, t0
-                # - ebreak
+                # RISC-V entry: jal main -> auipc t0, exit-GOT-hi -> ld t0, [t0, exit-GOT-lo] -> jalr zero, t0, 0 -> ebreak
                 my $got_exit   = $self->import_rva('exit');
                 my $auipc_pc   = $text_rva + 4;
                 my $diff       = $got_exit - $auipc_pc;
@@ -197,10 +148,10 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 my $rel32    = $got_exit - $next_ip;
                 my $main_rel = 11 + ( $func_offsets{main} // 0 );
                 $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );    # and rsp, -16
-                $entry_stub .= pack( 'C V',   0xE8, $main_rel );       # call main (rel)
-                $entry_stub .= pack( 'C3',    0x48, 0x89, 0xC7 );      # mov rdi, rax
-                $entry_stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );    # call [rip + got_exit]
-                $entry_stub .= pack( 'C2',    0x0F, 0x0B );            # ud2 (Invalid instruction safety)
+                $entry_stub .= pack( 'C V',   0xE8, $main_rel );       # call main (rel32)
+                $entry_stub .= pack( 'C3',    0x48, 0x89, 0xC7 );      # mov rdi, rax (return value -> exit arg1)
+                $entry_stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );    # call [rip + got_exit] (indirect)
+                $entry_stub .= pack( 'C2',    0x0F, 0x0B );            # ud2 (safety barrier)
             }
             $text = $entry_stub . $code_bytes;
         }
@@ -233,11 +184,13 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         }
 
         # Deterministic OSABI and ABI notes explicitly defined per platform.
+        # OSABI constants: 0=ELFOSABI_NONE, 2=ELFOSABI_NETBSD, 9=ELFOSABI_FREEBSD
+        # Note format: namesz, descsz, type=NT_VERSION(1), name, desc (OS version integer)
         my $osabi        = 0;
         my $note_data    = '';
         my $has_pintable = 0;
         if ( $platform->is_freebsd ) {
-            $osabi     = 9;                                                    # ELFOSABI_FREEBSD
+            $osabi     = 9;
             $note_data = pack( 'L<3 a8 L<', 8, 4, 1, "FreeBSD\0", 1400097 );
         }
         elsif ( $platform->is_midnightbsd ) {
@@ -245,9 +198,9 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $note_data = pack( 'L<3 a12 L<', 12, 4, 1, "MidnightBSD\0", 300000 );
         }
         elsif ( $platform->is_netbsd ) {
-            $osabi     = 2;                                                        # ELFOSABI_NETBSD
+            $osabi     = 2;
             $note_data = pack( 'L<3 a8 L<', 7, 4, 1, "NetBSD\0\0", 1099000000 );
-            $note_data .= pack( 'L<3 a4 L<', 4, 4, 3, "PaX\0", 0x0a );             # Flag 0x0a relaxes PaX W^X
+            $note_data .= pack( 'L<3 a4 L<', 4, 4, 3, "PaX\0", 0x0a );
         }
         elsif ( $platform->is_openbsd ) {
             $osabi        = 0;
@@ -258,8 +211,6 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $osabi     = 9;
             $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600400 );
         }
-
-        # Per-OS interpreter path for dynamic executables
         my %interp_map = (
             linux        => '/lib64/ld-linux-x86-64.so.2',
             linux_arm    => '/lib/ld-linux-aarch64.so.1',
@@ -273,8 +224,6 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             midnightbsd  => '/libexec/ld-elf.so.1',
             haiku        => '/boot/system/runtime_loader'
         );
-
-        # Per-OS libc name fallback for DT_NEEDED
         my %libc_map = (
             linux        => 'libc.so.6',
             linux_arm    => 'libc.so.6',
@@ -288,8 +237,6 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             midnightbsd  => 'libc.so.7',
             haiku        => 'libroot.so'
         );
-
-        # Generate pintable data for OpenBSD (syscall allowlisting)
         my $pintable_data = '';
         if ( $has_pintable && $platform->is_openbsd ) {
             my $pos             = 0;
@@ -298,8 +245,6 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             if ( $platform->is_x64 ) {
                 while ( ( my $idx = index( $text, "\x0F\x05", $pos ) ) != -1 ) {
                     my $vaddr = $base + $text_rva_actual + $idx;
-
-                    # OpenBSD ELF64 pintable entries are 16 bytes: uint64_t addr, uint32_t syscall, uint32_t pad
                     $pintable_data .= pack( 'Q< L< x4', $vaddr, $exit_sys );
                     $pos = $idx + 2;
                 }
@@ -312,8 +257,6 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 }
             }
         }
-
-        # Setup Interp path for executable
         my $interp     = '';
         my $has_interp = 0;
         my $os_base    = ( $platform->os =~ /^([A-Za-z]+)/ )[0] // $platform->os;
@@ -329,10 +272,8 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 $has_interp                           = 1;
             }
         }
-
-        # Setup Dynamic Strings Table
         my @exports   = @{ $self->exported_funcs // [] };
-        my $exit_name = $platform->is_haiku ? 'exit' : '_exit';                # Reference: eg/ABI.md Section 2.3
+        my $exit_name = $platform->is_haiku ? 'exit' : '_exit';
         my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', $exit_name );
         my $libc      = $libc_map{$os_base} // 'libc.so';
 
@@ -365,8 +306,6 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 }
             }
         }
-
-        # Dynamic libraries loaded by DT_NEEDED
         my @libs = ($libc);
         if ( !$platform->is_haiku && !$platform->is_solaris ) {
             my $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
@@ -411,16 +350,12 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         }
 
         # Map BSD internal symbols
-        # Reference: eg/ABI.md Section 2.2
         if ( $platform->is_bsd && $self->type eq 'exe' ) {
             $str_off{'__progname'} = length($dynstr);
             $dynstr .= '__progname' . "\0";
             $str_off{'environ'} = length($dynstr);
             $dynstr .= 'environ' . "\0";
         }
-
-        # Map Haiku ABI version symbols
-        # Reference: eg/ABI.md Section 2.1
         if ( $platform->is_haiku ) {
             $str_off{'_gSharedObjectHaikuABI'} = length($dynstr);
             $dynstr .= "_gSharedObjectHaikuABI\0";
@@ -428,54 +363,20 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $dynstr .= "_gSharedObjectHaikuVersion\0";
         }
         $self->layout->get('.dynstr')->{size} = length($dynstr);
-
-        # Setup Dynamic Symbol Table
-        # Elf64_Sym (24 bytes): Null symbol
-        my $dynsym = pack(
-            'L< C C S< Q< Q<', 0,    # st_name (String table offset)
-            0,                       # st_info (Bind/Type)
-            0,                       # st_other (Visibility)
-            0,                       # st_shndx (Section index)
-            0,                       # st_value (Value/Address)
-            0                        # st_size (Symbol size)
-        );
+        my $dynsym  = pack( 'L< C C S< Q< Q<', 0, 0, 0, 0, 0, 0 );
         my $sym_idx = 1;
         my %sym_indices;
-
-        # Undefined dynamic imports
         for my $name (@imports) {
             $sym_indices{$name} = $sym_idx++;
-
-            # Elf64_Sym (24 bytes) for undefined global functions
-            $dynsym .= pack(
-                'L< C C S< Q< Q<', $str_off{$name},    # st_name
-                0x12,                                  # st_info (STB_GLOBAL | STT_FUNC)
-                0,                                     # st_other (STV_DEFAULT)
-                0,                                     # st_shndx (SHN_UNDEF)
-                0,                                     # st_value
-                0                                      # st_size
-            );
+            $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 0, 0, 0 );
         }
-
-        # Exports if shared library
         if ( $self->type eq 'shared' ) {
             for my $name (@exports) {
                 my $rva = $self->layout->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
                 $sym_indices{$name} = $sym_idx++;
-
-                # Elf64_Sym (24 bytes) for defined exported functions
-                $dynsym .= pack(
-                    'L< C C S< Q< Q<', $str_off{$name},    # st_name
-                    0x12,                                  # st_info (STB_GLOBAL | STT_FUNC)
-                    0,                                     # st_other (STV_DEFAULT)
-                    1,                                     # st_shndx (.text section index)
-                    $base + $rva,                          # st_value
-                    0                                      # st_size
-                );
+                $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 1, $base + $rva, 0 );
             }
         }
-
-        # Define __progname for BSD to satisfy libc's internal reference (e.g. DragonFly)
         if ( $platform->is_bsd && $self->type eq 'exe' ) {
             my $progname_off = $str_off{'__progname'};
             if ( defined $progname_off ) {
@@ -490,18 +391,9 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     $sec_i++;
                 }
                 my $data_sec = $self->layout->get('.data');
-                $dynsym .= pack(
-                    'L< C C S< Q< Q<', $progname_off,    # st_name
-                    0x11,                                # st_info (STB_GLOBAL | STT_OBJECT)
-                    0,                                   # st_other (STV_DEFAULT)
-                    $data_sec_idx // 0,                  # st_shndx
-                    $base + $data_sec->{rva} + 16,       # st_value (points to Offset 16 in .data)
-                    8                                    # st_size (pointer size)
-                );
+                $dynsym .= pack( 'L< C C S< Q< Q<', $progname_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 16, 8 );
             }
         }
-
-        # Define environ for BSD to satisfy libc's dynamic reference (e.g. DragonFly)
         if ( $platform->is_bsd && $self->type eq 'exe' ) {
             my $environ_off = $str_off{'environ'};
             if ( defined $environ_off ) {
@@ -516,18 +408,9 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                     $sec_i++;
                 }
                 my $data_sec = $self->layout->get('.data');
-                $dynsym .= pack(
-                    'L< C C S< Q< Q<', $environ_off,    # st_name
-                    0x11,                               # st_info (STB_GLOBAL | STT_OBJECT)
-                    0,                                  # st_other (STV_DEFAULT)
-                    $data_sec_idx // 0,                 # st_shndx
-                    $base + $data_sec->{rva} + 8,       # st_value (points to Offset 8 in .data)
-                    8                                   # st_size (pointer size)
-                );
+                $dynsym .= pack( 'L< C C S< Q< Q<', $environ_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 8, 8 );
             }
         }
-
-        # Define Haiku ABI variables
         if ( $platform->is_haiku ) {
             my $abi_off = $str_off{'_gSharedObjectHaikuABI'};
             my $ver_off = $str_off{'_gSharedObjectHaikuVersion'};
@@ -541,61 +424,35 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
                 $sec_i++;
             }
             my $data_sec = $self->layout->get('.data');
-            $sym_indices{'_gSharedObjectHaikuABI'} = $sym_idx++;
             $dynsym .= pack( 'L< C C S< Q< Q<', $abi_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva}, 4 );
-            $sym_indices{'_gSharedObjectHaikuVersion'} = $sym_idx++;
+            $sym_indices{'_gSharedObjectHaikuABI'} = $sym_idx++;
             $dynsym .= pack( 'L< C C S< Q< Q<', $ver_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 4, 4 );
         }
         $self->layout->get('.dynsym')->{size} = length($dynsym);
 
-        # Setup Relocations (.rela.dyn)
-        my $rel_type
-            = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );   # R_RISCV_64 (2) or R_AARCH64_GLOB_DAT (1025) or R_X86_64_GLOB_DAT (6)
-        my $rela_dyn = '';
-
-        # Elf64_Rela (24 bytes) for dlopen
+        # Relocation type per architecture:
+        #   ARM64:   R_AARCH64_GLOB_DAT   = 1025
+        #   RISC-V:  R_RISCV_64           = 2
+        #   x86_64:  R_X86_64_GLOB_DAT    = 6
+        my $rel_type       = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );
+        my $rela_dyn       = '';
         my $dlopen_slot    = $base + $self->import_rva('dlopen');
         my $dlopen_sym_idx = $sym_indices{'dlopen'};
-        $rela_dyn .= pack(
-            'Q< Q< q<', $dlopen_slot,                 # r_offset
-            ( $dlopen_sym_idx << 32 ) | $rel_type,    # r_info
-            0                                         # r_addend
-        );
-
-        # Elf64_Rela (24 bytes) for dlsym
+        $rela_dyn .= pack( 'Q< Q< q<', $dlopen_slot, ( $dlopen_sym_idx << 32 ) | $rel_type, 0 );
         my $dlsym_slot    = $base + $self->import_rva('dlsym');
         my $dlsym_sym_idx = $sym_indices{'dlsym'};
-        $rela_dyn .= pack(
-            'Q< Q< q<', $dlsym_slot,                  # r_offset
-            ( $dlsym_sym_idx << 32 ) | $rel_type,     # r_info
-            0                                         # r_addend
-        );
-
-        # Elf64_Rela (24 bytes) for pthread_create
+        $rela_dyn .= pack( 'Q< Q< q<', $dlsym_slot, ( $dlsym_sym_idx << 32 ) | $rel_type, 0 );
         my $pthread_slot    = $base + $self->import_rva('pthread_create');
         my $pthread_sym_idx = $sym_indices{'pthread_create'};
-        $rela_dyn .= pack(
-            'Q< Q< q<', $pthread_slot,                 # r_offset
-            ( $pthread_sym_idx << 32 ) | $rel_type,    # r_info
-            0                                          # r_addend
-        );
-
-        # Elf64_Rela (24 bytes) for exit mapping
+        $rela_dyn .= pack( 'Q< Q< q<', $pthread_slot, ( $pthread_sym_idx << 32 ) | $rel_type, 0 );
         my $exit_slot    = $base + $self->import_rva('exit');
         my $exit_sym_idx = $sym_indices{$exit_name};
-        $rela_dyn .= pack(
-            'Q< Q< q<', $exit_slot,                    # r_offset
-            ( $exit_sym_idx << 32 ) | $rel_type,       # r_info
-            0                                          # r_addend
-        );
+        $rela_dyn .= pack( 'Q< Q< q<', $exit_slot, ( $exit_sym_idx << 32 ) | $rel_type, 0 );
         $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
-        # Setup GOT section payload (3 reserved + 4 import slots: dlopen, dlsym, pthread_create, exit)
-        # First 3 QWORDs reserved for BSD rtld (DYNAMIC, link_map, resolver); imports start at offset 24.
+        # GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit
         my $got = pack( 'Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0 );
         $self->layout->get('.got')->{size} = length($got);
-
-        # Setup Hash Table (Standard System V Hash)
         my $elf_hash = sub {
             my $name = shift;
             my $h    = 0;
@@ -620,16 +477,10 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             $buckets[$b]  = $idx;
         }
         my $hash = pack( 'L<*', $nbucket, $nchain, @buckets, @chains );
-        $self->layout->get('.hash')->{size} = length($hash);
-
-        # Size the static .symtab and .strtab sections before final layout calculations
+        $self->layout->get('.hash')->{size}   = length($hash);
         $self->layout->get('.symtab')->{size} = length($dynsym);
         $self->layout->get('.strtab')->{size} = length($dynstr);
-
-        # Calculate to stabilize RVAs before building .dynamic
         $self->layout->calculate($page_align);
-
-        # Setup .dynamic payload
         my $dyn_rva        = $self->layout->get('.dynamic')->{rva};
         my $str_rva        = $self->layout->get('.dynstr')->{rva};
         my $sym_rva        = $self->layout->get('.dynsym')->{rva};
@@ -638,30 +489,30 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         my $got_rva_actual = $self->layout->get('.got')->{rva};
         my $dynamic        = '';
 
-        # Elf64_Dyn (16 bytes each) entries
+        # Dynamic section entries (d_tag, d_val/d_ptr):
+        #   DT_NEEDED=1, DT_PLTGOT=3, DT_HASH=4, DT_STRTAB=5, DT_SYMTAB=6,
+        #   DT_RELA=7, DT_RELASZ=8, DT_RELAENT=9, DT_STRSZ=10, DT_SYMENT=11
         for my $lib (@libs) {
-            $dynamic .= pack( 'Q< Q<', 1, $str_off{$lib} );    # DT_NEEDED (string offset)
+            $dynamic .= pack( 'Q< Q<', 1, $str_off{$lib} );    # DT_NEEDED
         }
         $dynamic .= pack( 'Q< Q<', 4,  $base + $hash_rva );          # DT_HASH
         $dynamic .= pack( 'Q< Q<', 5,  $base + $str_rva );           # DT_STRTAB
         $dynamic .= pack( 'Q< Q<', 6,  $base + $sym_rva );           # DT_SYMTAB
         $dynamic .= pack( 'Q< Q<', 10, length($dynstr) );            # DT_STRSZ
-        $dynamic .= pack( 'Q< Q<', 11, 24 );                         # DT_SYMENT (sizeof Elf64_Sym)
+        $dynamic .= pack( 'Q< Q<', 11, 24 );                         # DT_SYMENT (sizeof(Elf64_Sym))
         $dynamic .= pack( 'Q< Q<', 7,  $base + $rela_rva );          # DT_RELA
         $dynamic .= pack( 'Q< Q<', 8,  length($rela_dyn) );          # DT_RELASZ
-        $dynamic .= pack( 'Q< Q<', 9,  24 );                         # DT_RELAENT (sizeof Elf64_Rela)
+        $dynamic .= pack( 'Q< Q<', 9,  24 );                         # DT_RELAENT (sizeof(Elf64_Rela))
         $dynamic .= pack( 'Q< Q<', 3,  $base + $got_rva_actual );    # DT_PLTGOT
 
         if ($is_pie) {
-            $dynamic .= pack( 'Q< Q<', 0x6ffffffb, 0x08000000 );     # DT_FLAGS_1 with DF_1_PIE
+
+            # DT_GNU_PRELINKED=0x6ffffffb: flags=0x08000000 (DF_1_PIE)
+            $dynamic .= pack( 'Q< Q<', 0x6ffffffb, 0x08000000 );
         }
-        $dynamic .= pack( 'Q< Q<', 0, 0 );                           # DT_NULL
+        $dynamic .= pack( 'Q< Q<', 0, 0 );
         $self->layout->get('.dynamic')->{size} = length($dynamic);
-
-        # Final layout calculation
         $self->layout->calculate($page_align);
-
-        # Build Section Names String Table (.shstrtab)
         my $shstrtab = "\0";
         my %sh_name_off;
         for my $s ( $self->layout->sections ) {
@@ -675,14 +526,16 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
         my $sec_idx = 1;
         my %sec_indices;
         for my $s ( $self->layout->sections ) { $sec_indices{ $s->{name} } = $sec_idx++; }
-
-        # Open file and write payloads based on layout
         open my $fh, '>', $output_file or die $!;
         binmode $fh;
+
         for my $s ( $self->layout->sections ) {
             my $payload = "\0" x $s->{size};
             if ( $s->{name} eq '.text' ) {
                 $payload = $text;
+            }
+            elsif ( $s->{name} eq '.brk_sym' ) {
+                $payload = $self->build_brk_sym();
             }
             elsif ( $s->{name} eq '.interp' ) {
                 $payload = $interp;
@@ -690,10 +543,7 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             elsif ( $s->{name} eq '.dynstr' ) {
                 $payload = $dynstr;
             }
-            elsif ( $s->{name} eq '.dynsym' ) {
-                $payload = $dynsym;
-            }
-            elsif ( $s->{name} eq '.symtab' ) {
+            elsif ( $s->{name} eq '.dynsym' || $s->{name} eq '.symtab' ) {
                 $payload = $dynsym;
             }
             elsif ( $s->{name} eq '.strtab' ) {
@@ -713,17 +563,12 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             }
             elsif ( $s->{name} eq '.data' ) {
                 if ( $platform->is_bsd && $s->{size} >= 32 ) {
-
-                    # Satisfy __progname and environ expectations
                     my $empty_env_addr = $base + $s->{rva};
                     my $empty_str_addr = $base + $s->{rva} + 24;
                     $payload = pack( 'Q< Q< Q<', 0, $empty_env_addr, $empty_str_addr );
                 }
                 elsif ( $platform->is_haiku && $s->{size} >= 8 ) {
-                    $payload = pack( 'L< L<', 4, 0 );    # Haiku ABI Version 4
-                }
-                else {
-                    $payload = "\0" x $s->{size};
+                    $payload = pack( 'L< L<', 4, 0 );
                 }
             }
             elsif ( $s->{name} =~ /^\.(debug|eh_frame)/ ) {
@@ -733,288 +578,187 @@ that doesn't overlap the GOT, or the dynamic linker will crash.
             seek( $fh, $s->{off}, 0 );
             print $fh $payload;
         }
-
-        # Write Section Header String Table and Section Headers at the end
         my $shstrtab_off = tell($fh);
         print $fh $shstrtab;
         my $shoff = tell($fh);
         my @shdrs = ();
-
-        # NULL Section (index 0) -- Elf64_Shdr (64 bytes)
-        push @shdrs, pack(
-            'L< L< Q< Q< Q< Q< L< L< Q< Q<', 0,    # sh_name
-            0,                                     # sh_type
-            0,                                     # sh_flags
-            0,                                     # sh_addr
-            0,                                     # sh_offset
-            0,                                     # sh_size
-            0,                                     # sh_link
-            0,                                     # sh_info
-            0,                                     # sh_addralign
-            0                                      # sh_entsize
-        );
-
-        # Real sections from layout -- Elf64_Shdr (64 bytes each)
+        push @shdrs, pack( 'L< L< Q< Q< Q< Q< L< L< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
         for my $s ( $self->layout->sections ) {
-            my $type       = 1;                    # SHT_PROGBITS
+            my $type       = 1;
             my $flags      = 0;
             my $sh_link    = 0;
             my $sh_info    = 0;
             my $sh_entsize = 0;
             if ( $s->{name} eq '.text' ) {
-                $flags = 6;                        # SHF_ALLOC | SHF_EXECINSTR
+                $flags = 6;
+            }
+            elsif ( $s->{name} eq '.brk_sym' ) {
+                $type  = 1;
+                $flags = 2;
             }
             elsif ( $s->{name} eq '.data' ) {
-                $flags = 3;                        # SHF_ALLOC | SHF_WRITE
+                $flags = 3;
             }
             elsif ( $s->{name} eq '.interp' ) {
-                $type  = 1;                        # SHT_PROGBITS
-                $flags = 2;                        # SHF_ALLOC
+                $type  = 1;
+                $flags = 2;
             }
             elsif ( $s->{name} eq '.dynstr' ) {
-                $type  = 3;                        # SHT_STRTAB
-                $flags = 2;                        # SHF_ALLOC
+                $type  = 3;
+                $flags = 2;
             }
             elsif ( $s->{name} eq '.dynsym' ) {
-                $type       = 11;                             # SHT_DYNSYM
-                $flags      = 2;                              # SHF_ALLOC
+                $type       = 11;
+                $flags      = 2;
                 $sh_link    = $sec_indices{'.dynstr'} // 0;
-                $sh_info    = 1;                              # One local symbol (the null symbol)
+                $sh_info    = 1;
                 $sh_entsize = 24;
             }
             elsif ( $s->{name} eq '.symtab' ) {
-                $type       = 2;                              # SHT_SYMTAB
-                $flags      = 0;                              # Not SHF_ALLOC
+                $type       = 2;
+                $flags      = 0;
                 $sh_link    = $sec_indices{'.strtab'} // 0;
                 $sh_info    = 1;
                 $sh_entsize = 24;
             }
             elsif ( $s->{name} eq '.strtab' ) {
-                $type  = 3;                                   # SHT_STRTAB
-                $flags = 0;                                   # Not SHF_ALLOC
+                $type  = 3;
+                $flags = 0;
             }
             elsif ( $s->{name} eq '.rela.dyn' ) {
-                $type       = 4;                              # SHT_RELA
-                $flags      = 2;                              # SHF_ALLOC
+                $type       = 4;
+                $flags      = 2;
                 $sh_link    = $sec_indices{'.dynsym'} // 0;
                 $sh_entsize = 24;
             }
             elsif ( $s->{name} eq '.hash' ) {
-                $type       = 5;                              # SHT_HASH
-                $flags      = 2;                              # SHF_ALLOC
+                $type       = 5;
+                $flags      = 2;
                 $sh_link    = $sec_indices{'.dynsym'} // 0;
                 $sh_entsize = 4;
             }
             elsif ( $s->{name} eq '.dynamic' ) {
-                $type       = 6;                                         # SHT_DYNAMIC
-                $flags      = ( $platform->is_dragonflybsd ) ? 2 : 3;    # Read-only on DFly to avoid RELRO crash
+                $type       = 6;
+                $flags      = ( $platform->is_dragonflybsd ) ? 2 : 3;
                 $sh_link    = $sec_indices{'.dynstr'} // 0;
                 $sh_entsize = 16;
             }
             elsif ( $s->{name} eq '.got' ) {
-                $type       = 1;                                         # SHT_PROGBITS
-                $flags      = 3;                                         # SHF_ALLOC | SHF_WRITE
+                $type       = 1;
+                $flags      = 3;
                 $sh_entsize = 8;
             }
             elsif ( $s->{name} =~ /^\.(debug|eh_frame)/ ) {
-                $flags = 0;                                              # Debug sections are not loaded
+                $flags = 0;
             }
-            push @shdrs, pack(
-                'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{ $s->{name} },    # sh_name
-                $type,                                                          # sh_type
-                $flags,                                                         # sh_flags
-                ( $flags & 2 ? $base + $s->{rva} : 0 ),                         # sh_addr
-                $s->{off},                                                      # sh_offset
-                $s->{size},                                                     # sh_size
-                $sh_link,                                                       # sh_link
-                $sh_info,                                                       # sh_info
-                1,                                                              # sh_addralign
-                $sh_entsize                                                     # sh_entsize
-            );
+            push @shdrs,
+                pack(
+                'L< L< Q< Q< Q< Q< L< L< Q< Q<',
+                $sh_name_off{ $s->{name} },
+                $type,     $flags, ( $flags & 2 ? $base + $s->{rva} : 0 ),
+                $s->{off}, $s->{size}, $sh_link, $sh_info, 1, $sh_entsize
+                );
         }
         my $shstrtab_idx = scalar(@shdrs);
-
-        # .shstrtab section header -- Elf64_Shdr (64 bytes)
-        push @shdrs, pack(
-            'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{'.shstrtab'},    # sh_name
-            3,                                                             # sh_type (SHT_STRTAB)
-            0,                                                             # sh_flags
-            0,                                                             # sh_addr
-            $shstrtab_off,                                                 # sh_offset
-            length($shstrtab),                                             # sh_size
-            0, 0, 1, 0                                                     # sh_link, sh_info, sh_addralign, sh_entsize
-        );
-
-        # .note.GNU-stack section header -- Elf64_Shdr (64 bytes)
-        push @shdrs, pack(
-            'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{'.note.GNU-stack'},    # sh_name
-            1,                                                                   # sh_type (SHT_PROGBITS)
-            0,                                                                   # sh_flags
-            0, 0, 0, 0, 0, 1, 0                                                  # sh_addr, sh_offset, sh_size, l, i, a, e
-        );
+        push @shdrs, pack( 'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{'.shstrtab'}, 3, 0, 0, $shstrtab_off, length($shstrtab), 0, 0, 1, 0 );
+        push @shdrs, pack( 'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{'.note.GNU-stack'}, 1, 0, 0, 0, 0, 0, 1, 0 );
         seek( $fh, $shoff, 0 );
         print $fh $_ for @shdrs;
-
-        # Program Headers -- Elf64_Phdr (56 bytes each)
-        my $num_ph = 5;                       # PT_PHDR, PT_LOAD (RX), PT_LOAD (RW), PT_DYNAMIC, PT_GNU_STACK
-        if ($has_interp)    { $num_ph++; }    # PT_INTERP
-        if ($note_data)     { $num_ph++; }    # PT_NOTE
-        if ($pintable_data) { $num_ph++; }    # PT_OPENBSD_PINTABLE
-        if ($is_pie)        { $num_ph++; }    # PT_GNU_RELRO
+        my $num_ph = 5;
+        $num_ph++ if $has_interp;
+        $num_ph++ if $note_data;
+        $num_ph++ if $pintable_data;
+        $num_ph++ if $is_pie;
         my @phdrs     = ();
         my $extra_off = 64 + ( $num_ph * 56 );
 
-        # PT_PHDR (type 6) -- Elf64_Phdr (56 bytes)
-        push @phdrs, pack(
-            'L< L< Q< Q< Q< Q< Q< Q<', 6,    # p_type (PT_PHDR)
-            4,                               # p_flags (PF_R)
-            64,                              # p_offset (offset immediately following ELF header)
-            $base + 64,                      # p_vaddr
-            $base + 64,                      # p_paddr
-            $num_ph * 56,                    # p_filesz
-            $num_ph * 56,                    # p_memsz
-            8                                # p_align
-        );
-
-        # PT_INTERP (type 3) -- Elf64_Phdr (56 bytes)
+        # PT_PHDR=6: program header table self-reference
+        push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 6, 4, 64, $base + 64, $base + 64, $num_ph * 56, $num_ph * 56, 8 );
         if ($has_interp) {
             my $interp_sec = $self->layout->get('.interp');
-            push @phdrs, pack(
-                'L< L< Q< Q< Q< Q< Q< Q<', 3,    # p_type (PT_INTERP)
-                4,                               # p_flags (PF_R)
-                $interp_sec->{off},              # p_offset
-                $base + $interp_sec->{rva},      # p_vaddr
-                $base + $interp_sec->{rva},      # p_paddr
-                $interp_sec->{size},             # p_filesz
-                $interp_sec->{size},             # p_memsz
-                1                                # p_align
-            );
-        }
 
-        # PT_LOAD RX segment (Headers + .text through .hash) -- Elf64_Phdr (56 bytes)
+            # PT_INTERP=3
+            push @phdrs,
+                pack(
+                'L< L< Q< Q< Q< Q< Q< Q<',
+                3, 4, $interp_sec->{off},
+                $base + $interp_sec->{rva},
+                $base + $interp_sec->{rva},
+                $interp_sec->{size}, $interp_sec->{size}, 1
+                );
+        }
         my $hash_sec  = $self->layout->get('.hash');
         my $rx_p_off  = 0;
         my $rx_p_size = $hash_sec->{off} + $hash_sec->{size};
-        push @phdrs, pack(
-            'L< L< Q< Q< Q< Q< Q< Q<', 1,    # p_type (PT_LOAD)
-            5,                               # p_flags (PF_R | PF_X)
-            $rx_p_off,                       # p_offset
-            $base,                           # p_vaddr
-            $base,                           # p_paddr
-            $rx_p_size,                      # p_filesz
-            $rx_p_size,                      # p_memsz
-            $page_align                      # p_align
-        );
 
-        # PT_LOAD RW segment (Covers .dynamic through .got) -- Elf64_Phdr (56 bytes)
+        # PT_LOAD=1, flags=RX(5): maps .text through .hash
+        push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 1, 5, $rx_p_off, $base, $base, $rx_p_size, $rx_p_size, $page_align );
         my $dyn_sec  = $self->layout->get('.dynamic');
         my $got_sec  = $self->layout->get('.got');
         my $rw_p_off = $dyn_sec->{off} & ~( $page_align - 1 );
         my $rw_size  = ( $got_sec->{off} + $got_sec->{size} ) - $rw_p_off;
-        push @phdrs, pack(
-            'L< L< Q< Q< Q< Q< Q< Q<', 1,    # p_type (PT_LOAD)
-            6,                               # p_flags (PF_R | PF_W)
-            $rw_p_off,                       # p_offset (page-aligned down)
-            $base + $dyn_sec->{rva},         # p_vaddr
-            $base + $dyn_sec->{rva},         # p_paddr
-            $rw_size,                        # p_filesz
-            $rw_size,                        # p_memsz
-            $page_align                      # p_align
-        );
 
-        # PT_DYNAMIC (type 2) -- Elf64_Phdr (56 bytes)
-        push @phdrs, pack(
-            'L< L< Q< Q< Q< Q< Q< Q<', 2,    # p_type (PT_DYNAMIC)
-            6,                               # p_flags (PF_R | PF_W)
-            $dyn_sec->{off},                 # p_offset
-            $base + $dyn_sec->{rva},         # p_vaddr
-            $base + $dyn_sec->{rva},         # p_paddr
-            $dyn_sec->{size},                # p_filesz
-            $dyn_sec->{size},                # p_memsz
-            8                                # p_align
-        );
+        # PT_LOAD=1, flags=RW(6): maps .dynamic through .got (page-aligned to cover zero-fill gap)
+        push @phdrs,
+            pack( 'L< L< Q< Q< Q< Q< Q< Q<', 1, 6, $rw_p_off, $base + $dyn_sec->{rva}, $base + $dyn_sec->{rva}, $rw_size, $rw_size, $page_align );
 
-        # PT_GNU_RELRO (type 0x6474e552) -- Elf64_Phdr (56 bytes)
-        # Covers ONLY .dynamic to ensure .data and .got remain fully writable.
-        # Reference: eg/ABI.md Section 2.4
+        # PT_DYNAMIC=2: points to .dynamic section
+        push @phdrs,
+            pack(
+            'L< L< Q< Q< Q< Q< Q< Q<',
+            2, 6, $dyn_sec->{off},
+            $base + $dyn_sec->{rva},
+            $base + $dyn_sec->{rva},
+            $dyn_sec->{size}, $dyn_sec->{size}, 8
+            );
         if ($is_pie) {
+
+            # PT_GNU_RELRO=0x6474e552: make .dynamic read-only after relocation
             my $relro_start = $dyn_sec->{off} & ~( $page_align - 1 );
             my $relro_size  = ( $dyn_sec->{off} + $dyn_sec->{size} - $relro_start + $page_align - 1 ) & ~( $page_align - 1 );
-            push @phdrs, pack(
-                'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e552,                 # p_type (PT_GNU_RELRO)
-                4,                                                     # p_flags (PF_R)
-                $relro_start,                                          # p_offset
-                $base + ( $dyn_sec->{rva} & ~( $page_align - 1 ) ),    # p_vaddr
-                $base + ( $dyn_sec->{rva} & ~( $page_align - 1 ) ),    # p_paddr
-                $relro_size,                                           # p_filesz
-                $relro_size,                                           # p_memsz
-                1                                                      # p_align
-            );
+            push @phdrs,
+                pack(
+                'L< L< Q< Q< Q< Q< Q< Q<',
+                0x6474e552, 4, $relro_start,
+                $base + ( $dyn_sec->{rva} & ~( $page_align - 1 ) ),
+                $base + ( $dyn_sec->{rva} & ~( $page_align - 1 ) ),
+                $relro_size, $relro_size, 1
+                );
         }
-
-        # PT_NOTE -- Elf64_Phdr (56 bytes)
         if ($note_data) {
-            push @phdrs, pack(
-                'L< L< Q< Q< Q< Q< Q< Q<', 4,                          # p_type (PT_NOTE)
-                4,                                                     # p_flags (PF_R)
-                $extra_off,                                            # p_offset
-                $base + $extra_off,                                    # p_vaddr
-                $base + $extra_off,                                    # p_paddr
-                length($note_data),                                    # p_filesz
-                length($note_data),                                    # p_memsz
-                4                                                      # p_align
-            );
+
+            # PT_NOTE=4: ABI note
+            push @phdrs,
+                pack( 'L< L< Q< Q< Q< Q< Q< Q<', 4, 4, $extra_off, $base + $extra_off, $base + $extra_off, length($note_data), length($note_data),
+                4 );
             $extra_off += length($note_data);
         }
-
-        # PT_OPENBSD_PINTABLE -- Elf64_Phdr (56 bytes)
         if ($pintable_data) {
-            push @phdrs, pack(
-                'L< L< Q< Q< Q< Q< Q< Q<', 0x65a3dbe9,                 # p_type (PT_OPENBSD_PINTABLE)
-                4,                                                     # p_flags (PF_R)
-                $extra_off,                                            # p_offset
-                $base + $extra_off,                                    # p_vaddr
-                $base + $extra_off,                                    # p_paddr
-                length($pintable_data),                                # p_filesz
-                length($pintable_data),                                # p_memsz
-                4                                                      # p_align
-            );
+
+            # PT_OPENBSD_PINTABLE=0x65a3dbe9: system call pinning table
+            push @phdrs,
+                pack(
+                'L< L< Q< Q< Q< Q< Q< Q<',
+                0x65a3dbe9, 4, $extra_off,
+                $base + $extra_off,
+                $base + $extra_off,
+                length($pintable_data), length($pintable_data), 4
+                );
             $extra_off += length($pintable_data);
         }
 
-        # PT_GNU_STACK (type 0x6474e551) -- Elf64_Phdr (56 bytes)
-        # p_flags = 6 (PF_R|PF_W) for non-executable stack. Some BSD kernels
-        # reject binaries with p_flags=0 on PT_GNU_STACK.
-        push @phdrs, pack(
-            'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e551,    # p_type (PT_GNU_STACK)
-            6, 0, 0, 0, 0, 0, 0x10                    # p_flags=6(PF_R|PF_W), p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align
-        );
+        # PT_GNU_STACK=0x6474e551: flags=6 (RW, no exec) for non-executable stack
+        push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e551, 6, 0, 0, 0, 0, 0, 0x10 );
         my $entry_point = $self->type eq 'shared' ? 0 : $base + $self->layout->get('.text')->{rva};
 
-        # Finalize ELF Header (Elf64_Ehdr - Exactly 64 bytes) and write program headers/extra data
-        # Reference: https://refspecs.linuxbase.org/elf/gabi4+/ch4.eheader.html
+# ELF64 header (e_ident + e_type/e_machine/e_version + e_entry/e_phoff/e_shoff + e_flags + e_ehsize/e_phentsize/e_phnum/e_shentsize/e_shnum/e_shstrndx)
+# e_machine: EM_AARCH64=183, EM_RISCV=243, EM_X86_64=62
+# e_flags: RISC-V EF_RISCV_RVC=0x0004 (compressed insns), else 0
         my $ehdr = pack(
-            'A4 C C C C C x7 S< S< L< Q< Q< Q< L< S< S< S< S< S< S<', "\x7fELF",    # e_ident[0..3] (Magic)
-            2,                                                                      # e_ident[4] (Class: 64-bit)
-            1,                                                                      # e_ident[5] (Data: Little Endian)
-            1,                                                                      # e_ident[6] (Version: 1)
-            $osabi,                                                                 # e_ident[7] (OS/ABI)
-            0,                                                                      # e_ident[8] (ABI Version)
-
-            # e_ident[9..15] (Padding, implicitly added by x7)
-            $elf_type,                                                               # e_type (ET_EXEC = 2 or ET_DYN = 3)
-            ( $platform->is_arm64 ? 183 : ( $platform->is_riscv64 ? 243 : 62 ) ),    # e_machine (EM_AARCH64 = 183 or EM_X86_64 = 62)
-            1,                                                                       # e_version
-            $entry_point,                                                            # e_entry (Starting Virtual Address)
-            64,                                                                      # e_phoff (Program Header Table offset)
-            $shoff,                                                                  # e_shoff (Section Header Table offset)
-            ( $platform->is_riscv64 ? 0x0004 : 0 ),                                  # e_flags (EF_RISCV_FLOAT_ABI_DOUBLE for RISC-V lp64d)
-            64,                                                                      # e_ehsize (ELF Header Size)
-            56,                                                                      # e_phentsize (Program Header Entry Size)
-            $num_ph,                                                                 # e_phnum (Number of Program Header Entries)
-            64,                                                                      # e_shentsize (Section Header Entry Size)
-            scalar(@shdrs),                                                          # e_shnum (Number of Section Header Entries)
-            $shstrtab_idx                                                            # e_shstrndx (Section index of .shstrtab)
+            'A4 C C C C C x7 S< S< L< Q< Q< Q< L< S< S< S< S< S< S<',
+            "\x7fELF", 2, 1, 1, $osabi, 0, $elf_type, ( $platform->is_arm64 ? 183 : ( $platform->is_riscv64 ? 243 : 62 ) ),
+            1,         $entry_point, 64, $shoff, ( $platform->is_riscv64 ? 0x0004 : 0 ),
+            64,        56, $num_ph, 64, scalar(@shdrs), $shstrtab_idx
         );
         seek( $fh, 0, 0 );
         print $fh $ehdr, @phdrs, $note_data, $pintable_data;

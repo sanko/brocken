@@ -5,56 +5,16 @@ use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
 
 class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
-
-=pod
-
-=head1 NAME
-
-Brocken::Jenny::Linker::MachO - 64-bit Mach-O Executable Generator
-
-=head1 DESCRIPTION
-
-Generates Mach-O binaries compliant with macOS (Darwin) kernels.
-
-=head2 Load Commands
-
-Mach-O files use "Load Commands" to guide the dynamic linker (dyld).
-
-=over 4
-
-=item * B<LC_SEGMENT_64>: Maps file regions into virtual memory.
-
-=item * B<LC_LOAD_DYLINKER>: Points to C</usr/lib/dyld>.
-
-=item * B<LC_LOAD_DYLIB>: Links against C<libSystem.B.dylib>.
-
-=item * B<LC_MAIN>: Specifies the C<_start> entry point offset.
-
-=item * B<LC_DYLD_INFO_ONLY>: Describes exports and binding opcodes.
-
-=back
-
-=head2 Apple Silicon (ARM64) Quirks
-
-=over 4
-
-=item * B<Page Size>: Must be 16KB (0x4000).
-
-=item * B<Code Signing>: ARM64 macOS strictly forbids execution of
-unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
-
-=back
-
-=cut
-
     field $has_ffi : reader = false;
     method set_has_ffi($v) { $has_ffi = $v; }
 
     method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
-        $layout->add_section( '.text',     $text_size,           5 );                      # Read + Execute
-        $layout->add_section( '.data',     $data_size,           3 ) if $data_size > 0;    # Read + Write
-        $layout->add_section( '.got',      512,                  3 ) if $has_ffi;          # Global Offset Table
-        $layout->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );                      # Symbols, Strings, Dynamic linking info
+        $layout->add_section( '.text', $text_size, 5 );                                      # Read + Execute
+        my $brk_sym_size = $self->brk_sym_size();
+        $layout->add_section( '.brk_sym',  $brk_sym_size,        5 ) if $brk_sym_size > 0;
+        $layout->add_section( '.data',     $data_size,           3 ) if $data_size > 0;      # Read + Write
+        $layout->add_section( '.got',      512,                  3 ) if $has_ffi;            # Global Offset Table
+        $layout->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );                        # Symbols, Strings, Dynamic linking info
         if ( $dbg >= 1 ) {
             $layout->add_section( '.debug_line',     4096, 0 );
             $layout->add_section( '.debug_info',     8192, 0 );
@@ -62,6 +22,8 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             $layout->add_section( '.debug_frame',    8192, 0 );
             $layout->add_section( '.debug_aranges',  4096, 0 );
             $layout->add_section( '.debug_pubnames', 4096, 0 );
+            $layout->add_section( '.debug_names',    4096, 0 );
+            $layout->add_section( '.debug_str',      4096, 0 );
         }
     }
 
@@ -171,11 +133,13 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
         if ( !defined $self->layout ) {
             $self->pre_layout( length($text), length($data_bytes), $platform );
         }
-        my $base           = $self->image_base;
-        my $page_size      = $platform->page_size;                                       # 16KB for Apple Silicon, 4KB for Intel
-        my $cputype        = ( $arch =~ /aarch64|arm64/i ) ? 0x0100000c : 0x01000007;    # CPU_TYPE_ARM64 or CPU_TYPE_X86_64
-        my $cpusubtype     = ( $arch =~ /aarch64|arm64/i ) ? 0          : 3;             # CPU_SUBTYPE_ARM64_ALL or CPU_SUBTYPE_I386_ALL
-        my $filetype       = ( $self->type eq 'shared' ) ? 6 : 2;                        # MH_DYLIB or MH_EXECUTE
+        my $base      = $self->image_base;
+        my $page_size = $platform->page_size;    # 16KB for Apple Silicon, 4KB for Intel
+
+        # Mach-O CPU types: CPU_TYPE_X86_64=0x01000007, CPU_TYPE_ARM64=0x0100000c
+        my $cputype        = ( $arch =~ /aarch64|arm64/i ) ? 0x0100000c : 0x01000007;
+        my $cpusubtype     = ( $arch =~ /aarch64|arm64/i ) ? 0          : 3;            # CPU_SUBTYPE_ARM64_ALL / CPU_SUBTYPE_I386_ALL
+        my $filetype       = ( $self->type eq 'shared' ) ? 6 : 2;                       # MH_DYLIB or MH_EXECUTE
         my @debug_sections = grep { $_->{name} =~ /^\.debug/ } $self->layout->sections;
         my $_uleb          = sub {
             my $v   = shift;
@@ -218,6 +182,13 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 }
                 for ( 0 .. $#segseq ) { $data_seg = $_ if $segseq[$_] eq '__DATA'; }
             }
+
+            # LC_DYLD_INFO_ONLY bind opcodes:
+            #   0x70 | seg = BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB
+            #   0x10 | ord = BIND_OPCODE_SET_DYLIB_ORDINAL_IMM (ordinal 1 = libSystem)
+            #   0x50 | flag = BIND_OPCODE_SET_DYLIB_ORDINAL_IMM (ordinal 2 = special ordinal)
+            #   0x40 | trailing = BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM
+            #   0x90 = BIND_OPCODE_DO_BIND
             $bind_info .= pack( 'C', 0x70 | $data_seg ) . $_uleb->($got_off);
             for my $name ( '_dlopen', '_dlsym', '_pthread_create' ) {
                 $bind_info .= pack( 'C', 0x11 );
@@ -325,8 +296,8 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
         $self->layout->get('.linkedit')->{size} = $le_payload_size > 64 ? $le_payload_size : 64;
         $self->layout->calculate($page_size);
         $le_off = $self->layout->get('.linkedit')->{off};
-        my %seg_names = ( '.text' => '__TEXT', '.data' => '__DATA', '.got' => '__DATA' );
-        my %sec_names = ( '.text' => '__text', '.data' => '__data', '.got' => '__got' );
+        my %seg_names = ( '.text' => '__TEXT', '.data' => '__DATA', '.got' => '__DATA', '.brk_sym' => '__TEXT' );
+        my %sec_names = ( '.text' => '__text', '.data' => '__data', '.got' => '__got',  '.brk_sym' => '__brk_sym' );
         for my $s ( $self->layout->sections ) {
             if ( $s->{name} =~ /^\.debug_/ ) {
                 $seg_names{ $s->{name} } = '__DWARF';
@@ -334,12 +305,14 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
                 $sec_names{ $s->{name} } = $macho_name;
             }
         }
-        my @text_sections = grep { $_->{name} eq '.text' } $self->layout->sections;
-        my $t_sec         = $text_sections[0];
+        my @text_sections = grep { $_->{name} eq '.text' || $_->{name} eq '.brk_sym' } $self->layout->sections;
+        my $t_sec         = $self->layout->get('.text');
         my @data_sections = grep { $_->{name} eq '.data' || $_->{name} eq '.got' } $self->layout->sections;
-        my $t_vmsize      = $t_sec->{off} + $t_sec->{size};
-        my $t_seg_size    = ( $t_vmsize + $page_size - 1 ) & ~( $page_size - 1 );
+        my $t_vmsize      = 0;
+        for my $s (@text_sections) { $t_vmsize += $s->{size}; }
+        my $t_seg_size = ( $t_vmsize + $page_size - 1 ) & ~( $page_size - 1 );
         my ( $d_start_rva, $d_start_off, $d_size, $d_seg_size );
+
         if (@data_sections) {
             $d_start_rva = $data_sections[0]->{rva};
             $d_start_off = $data_sections[0]->{off};
@@ -347,44 +320,28 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             for (@data_sections) { $d_size += $_->{size}; }
             $d_seg_size = ( $d_size + $page_size - 1 ) & ~( $page_size - 1 );
         }
+
+        # Load command constants:
+        #   0x19            = LC_SEGMENT_64
+        #   0x32            = LC_BUILD_VERSION
+        #   0xE             = LC_LOAD_DYLINKER
+        #   0xC             = LC_LOAD_DYLIB
+        #   0x80000022      = LC_DYLD_INFO_ONLY
+        #   0x2             = LC_SYMTAB
+        #   0xB             = LC_DYSYMTAB
+        #   0x80000028      = LC_MAIN
+        # Section flags: 0x80000400 = S_ATTR_SOME_INSTRUCTIONS | S_REGULAR
         my @cmds = ();
 
-        # PageZero Segment Header
-        # Reference: https://opensource.apple.com/source/xnu/xnu-4570.1.46/EXTERNAL_HEADERS/mach-o/loader.h
+        # LC_SEGMENT_64: PageZero Segment (covers [0, base) to trap NULL deref)
         if ( $self->type ne 'shared' ) {
-            push @cmds, pack(
-                'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
-                72,                         # cmdsize
-                '__PAGEZERO',               # segname
-                0,                          # vmaddr
-                $base,                      # vmsize
-                0,                          # fileoff
-                0,                          # filesize
-                0,                          # maxprot (none)
-                0,                          # initprot (none)
-                0,                          # nsects
-                0                           # flags
-            );
+            push @cmds, pack( 'L<2 a16 Q<4 L<4', 0x19, 72, '__PAGEZERO', 0, $base, 0, 0, 0, 0, 0, 0 );
         }
 
-        # TEXT Segment Header
+        # LC_SEGMENT_64: TEXT Segment
         my $t_cmd_size = 72 + 80 * scalar(@text_sections);
-        my $t_cmd      = pack(
-            'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
-            $t_cmd_size,                # cmdsize
-            '__TEXT',                   # segname
-            $base,                      # vmaddr
-            $t_seg_size,                # vmsize
-            0,                          # fileoff
-            $t_seg_size,                # filesize
-            5,                          # maxprot (VM_PROT_READ | VM_PROT_EXECUTE)
-            5,                          # initprot (VM_PROT_READ | VM_PROT_EXECUTE)
-            scalar(@text_sections),     # nsects
-            0                           # flags
-        );
+        my $t_cmd      = pack( 'L<2 a16 Q<4 L<4', 0x19, $t_cmd_size, '__TEXT', $base, $t_seg_size, 0, $t_seg_size, 5, 5, scalar(@text_sections), 0 );
         for my $s (@text_sections) {
-
-            # TEXT Sections (80 bytes each)
             $t_cmd .= pack(
                 'a16 a16 Q<2 L<2 L<3 L<2 L<',
                 $sec_names{ $s->{name} },
@@ -393,26 +350,12 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             );
         }
         push @cmds, $t_cmd;
-
-        # DATA Segment Header (only if we have data or GOT sections)
         if (@data_sections) {
             my $d_cmd_size = 72 + 80 * scalar(@data_sections);
-            my $d_cmd      = pack(
-                'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
-                $d_cmd_size,                # cmdsize
-                '__DATA',                   # segname
-                $base + $d_start_rva,       # vmaddr
-                $d_seg_size,                # vmsize
-                $d_start_off,               # fileoff
-                $d_size,                    # filesize
-                3,                          # maxprot (VM_PROT_READ | VM_PROT_WRITE)
-                3,                          # initprot (VM_PROT_READ | VM_PROT_WRITE)
-                scalar(@data_sections),     # nsects
-                0                           # flags
-            );
+            my $d_cmd      = pack( 'L<2 a16 Q<4 L<4',
+                0x19, $d_cmd_size, '__DATA', $base + $d_start_rva,
+                $d_seg_size, $d_start_off, $d_size, 3, 3, scalar(@data_sections), 0 );
             for my $s (@data_sections) {
-
-                # DATA Sections (80 bytes each)
                 my $sec_flags = $s->{name} eq '.got' ? 0x00000000 : 0;
                 $d_cmd .= pack(
                     'a16 a16 Q<2 L<2 L<3 L<2 L<',
@@ -424,76 +367,38 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
             push @cmds, $d_cmd;
         }
 
-        # LINKEDIT Segment Header
+        # LC_SEGMENT_64: LINKEDIT Segment (symbols, strings, bind info)
         my $le_sec      = $self->layout->get('.linkedit');
         my $le_seg_size = ( $le_sec->{size} + $page_size - 1 ) & ~( $page_size - 1 );
-        push @cmds, pack(
-            'L<2 a16 Q<4 L<4', 0x19,    # cmd (LC_SEGMENT_64)
-            72,                         # cmdsize
-            '__LINKEDIT',               # segname
-            $base + $le_sec->{rva},     # vmaddr
-            $le_seg_size,               # vmsize
-            $le_sec->{off},             # fileoff
-            $le_sec->{size},            # filesize
-            1,                          # maxprot (VM_PROT_READ)
-            1,                          # initprot (VM_PROT_READ)
-            0,                          # nsects
-            0                           # flags
-        );
+        push @cmds,
+            pack( 'L<2 a16 Q<4 L<4', 0x19, 72, '__LINKEDIT', $base + $le_sec->{rva}, $le_seg_size, $le_sec->{off}, $le_sec->{size}, 1, 1, 0, 0 );
         push @cmds, $lc_id_dylib if $self->type eq 'shared';
 
-        # LC_BUILD_VERSION (24 bytes - required by codesign on macOS 11+)
+        # LC_BUILD_VERSION (required by codesign on macOS 11+):
+        #   platform=1 (macOS), minos=11.0, sdk=11.0
         push @cmds, pack( 'L<6', 0x32, 24, 1, 0x000B0000, 0x000B0000, 0 );
 
-        # LC_LOAD_DYLINKER (Loads dynamic linker `/usr/lib/dyld`)
+        # LC_LOAD_DYLINKER: points to `/usr/lib/dyld`
         push @cmds, pack( 'L<3', 0xE, 32, 12 ) . "/usr/lib/dyld\0\0\0\0\0\0\0";
         push @cmds, $lc_load_libsystem;
 
-        # LC_DYLD_INFO_ONLY (48 bytes)
+        # LC_DYLD_INFO_ONLY: rebase/bind/lazy/export offsets (48 bytes)
         my $export_off = ( $self->type eq 'shared' && $nextdefsym > 0 ) ? $le_off + length($bind_info) : 0;
         my $export_sz  = ( $self->type eq 'shared' && $nextdefsym > 0 ) ? $trie_size                   : 0;
-        push @cmds, pack(
-            'L<12', 0x80000022,    # cmd
-            48,                    # cmdsize
-            0, 0,                  # rebase_off, rebase_size
-            $le_off,               # bind_off
-            $bind_info_size,       # bind_size
-            0, 0,                  # weak_bind_off, weak_bind_size
-            0, 0,                  # lazy_bind_off, lazy_bind_size
-            $export_off,           # export_off
-            $export_sz             # export_size
-        );
+        push @cmds, pack( 'L<12', 0x80000022, 48, 0, 0, $le_off, $bind_info_size, 0, 0, 0, 0, $export_off, $export_sz );
 
-        # LC_SYMTAB (24 bytes)
+        # LC_SYMTAB: symbol table offset, count, string table offset, size
         my $symtab_off = $le_off + length($bind_info) + $trie_size;
-        push @cmds, pack(
-            'L<6', 0x2,                    # cmd
-            24,                            # cmdsize
-            $symtab_off,                   # symoff
-            $num_syms,                     # nsyms
-            $symtab_off + $symtab_size,    # stroff
-            $strtab_size                   # strsize
-        );
+        push @cmds, pack( 'L<6', 0x2, 24, $symtab_off, $num_syms, $symtab_off + $symtab_size, $strtab_size );
 
-        # LC_DYSYMTAB (80 bytes)
+        # LC_DYSYMTAB: local/extdef/undefsym indices (80 bytes)
+        #   iextdefsym=0, nextdefsym, iundefsym, nundefsym
         my $iextdefsym = 0;
         my $iundefsym  = $nextdefsym;
-        push @cmds, pack(
-            'L<20', 0xB,                   # cmd
-            80,                            # cmdsize
-            0,           0,                # ilocalsym, nlocalsym
-            $iextdefsym, $nextdefsym,      # iextdefsym, nextdefsym
-            $iundefsym,  $nundefsym,       # iundefsym, nundefsym
-            (0) x 14                       # reserved / empty
-        );
+        push @cmds, pack( 'L<20', 0xB, 80, 0, 0, $iextdefsym, $nextdefsym, $iundefsym, $nundefsym, (0) x 14 );
 
-        # LC_MAIN (24 bytes - Points directly to our TEXT segment start off)
-        push @cmds, pack(
-            'L<2 Q<2', 0x80000028,         # cmd (LC_MAIN)
-            24,                            # cmdsize
-            $t_sec->{off},                 # entryoff (physical offset of _start)
-            0                              # stacksize
-        ) if $self->type eq 'exe';
+        # LC_MAIN: entry point file offset, stack size=0 (use default)
+        push @cmds, pack( 'L<2 Q<2', 0x80000028, 24, $t_sec->{off}, 0 ) if $self->type eq 'exe';
         if (@debug_sections) {
             my $cmdsize      = 72 + 80 * scalar(@debug_sections);
             my $dw_start_rva = $debug_sections[0]->{rva};
@@ -521,55 +426,37 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
         binmode $fh;
 
         # mach_header_64 (Exactly 32 bytes)
+        # Flags: 0x200085 = MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE
+        #        0x00200000 = MH_HAS_LOAD_DYLIB | MH_NO_HEAP_EXECUTION
+        # For dylib: 0x100085 = MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_NO_REEXPORTED_DYLIBS
         my $flags = 0x200085 | 0x00200000;
         $flags = 0x100085 if $self->type eq 'shared';
-        print $fh pack(
-            'L<7 L<', 0xfeedfacf,    # magic (MH_MAGIC_64)
-            $cputype,                # cputype
-            $cpusubtype,             # cpusubtype
-            $filetype,               # filetype
-            $ncmds,                  # ncmds
-            $sizeofcmds,             # sizeofcmds
-            $flags,                  # flags
-            0                        # reserved
-        );
+        print $fh pack( 'L<7 L<', 0xfeedfacf, $cputype, $cpusubtype, $filetype, $ncmds, $sizeofcmds, $flags, 0 );
         print $fh $_ for @cmds;
-
-        # Write __TEXT,__text segment (padded to layout size)
-        seek( $fh, $t_sec->{off}, 0 );
-        my $text_payload = $text;
-        $text_payload .= ( "\0" x ( $t_sec->{size} - length($text_payload) ) ) if length($text_payload) < $t_sec->{size};
-        print $fh $text_payload;
-
-        # Write __DATA,__data segment (padded to layout size) if section exists
-        my $d_sec_actual = $self->layout->get('.data');
-        if ($d_sec_actual) {
-            seek( $fh, $d_sec_actual->{off}, 0 );
-            my $data_payload = $data_bytes // '';
-            $data_payload .= ( "\0" x ( $d_sec_actual->{size} - length($data_payload) ) ) if length($data_payload) < $d_sec_actual->{size};
-            print $fh $data_payload;
-        }
-
-        # Write __DATA,__got segment (padded to layout size) if section exists
-        if ($got_sec) {
-            seek( $fh, $got_sec->{off}, 0 );
-            my $got_payload = pack( 'Q< Q< Q<', 0, 0, 0 );
-            $got_payload .= ( "\0" x ( $got_sec->{size} - length($got_payload) ) ) if length($got_payload) < $got_sec->{size};
-            print $fh $got_payload;
-        }
-
-        # Write LINKEDIT segment (padded to layout size)
-        seek( $fh, $le_sec->{off}, 0 );
-        my $le_payload = $bind_info . $trie . $symtab . $strtab;
-        $le_payload .= ( "\0" x ( $le_sec->{size} - length($le_payload) ) ) if length($le_payload) < $le_sec->{size};
-        print $fh $le_payload;
-        if (@debug_sections) {
-            for my $s (@debug_sections) {
-                seek( $fh, $s->{off}, 0 );
-                my $dw_payload = $self->debug_section( $s->{name} ) || '';
-                $dw_payload .= ( "\0" x ( $s->{size} - length($dw_payload) ) ) if length($dw_payload) < $s->{size};
-                print $fh $dw_payload;
+        for my $s ( $self->layout->sections ) {
+            my $payload = '';
+            if ( $s->{name} eq '.text' ) {
+                $payload = $text;
             }
+            elsif ( $s->{name} eq '.brk_sym' ) {
+                $payload = $self->build_brk_sym();
+            }
+            elsif ( $s->{name} eq '.data' ) {
+                $payload = $data_bytes // '';
+            }
+            elsif ( $s->{name} eq '.got' ) {
+                $payload = pack( 'Q< Q< Q<', 0, 0, 0 );
+            }
+            elsif ( $s->{name} eq '.linkedit' ) {
+                $payload = $bind_info . $trie . $symtab . $strtab;
+            }
+            elsif ( $s->{name} =~ /^\.debug_/ ) {
+                $payload = $self->debug_section( $s->{name} ) || '';
+            }
+            next unless length($payload) > 0 || $s->{size} > 0;
+            seek( $fh, $s->{off}, 0 );
+            $payload .= ( "\0" x ( $s->{size} - length($payload) ) ) if length($payload) < $s->{size};
+            print $fh $payload;
         }
         close $fh;
         chmod 0755, $output_file;
@@ -583,4 +470,58 @@ unsigned binaries. We apply an ad-hoc signature using C<codesign -s ->.
         return $output_file;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker::MachO - macOS Mach-O Binary Generator
+
+=head1 DESCRIPTION
+
+Generates macOS Mach-O executables for x86_64 and ARM64 architectures. Produces a minimal Mach-O with header, load
+commands (segment __TEXT, segment __DATA, entry point, optionally debug sections), and section data.
+
+On ARM64 macOS, automatically runs C<codesign> for ad-hoc signing after writing the binary.
+
+=head2 Structure
+
+=over 4
+
+=item B<Header> - Magic (MH_MAGIC_64), CPU type/subtype, file type (EXECUTE)
+
+=item B<Load Commands> - LC_SEGMENT_64 for __TEXT and __DATA, LC_MAIN for entry point, LC_SYMTAB/Symtab, LC_DYSYMTAB, LC_BUILD_VERSION
+
+=item B<Sections> - __TEXT,__text (code), __DATA,__data (data), optional debug sections
+
+=back
+
+=head1 METHODS
+
+=head2 write_executable
+
+    $linker->write_executable($output_file, $code_bytes, $platform, $type?, $debug_bytes?)
+
+Writes a Mach-O executable with proper section alignment and page size (16KB for ARM64, 4KB for x86_64).
+
+=head2 write_shared_library
+
+    $linker->write_shared_library($output_file, $code_bytes, $platform, $debug_bytes?)
+
+Not yet implemented for Mach-O.
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;

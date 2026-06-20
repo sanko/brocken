@@ -18,7 +18,7 @@ class Brocken::Lindsay::IR::Type {
     sub i128    { state $t //= __PACKAGE__->new( kind => 'int',   bits => 128 ); $t }      # __int128
     sub f32     { state $t //= __PACKAGE__->new( kind => 'float', bits => 32 );  $t }      # float
     sub f64     { state $t //= __PACKAGE__->new( kind => 'float', bits => 64 );  $t }      # double
-    sub ptr     { state $t //= __PACKAGE__->new( kind => 'ptr', bits => 64 );       $t }    # opaque pointer (64-bit on this arch)
+    sub ptr     { state $t //= __PACKAGE__->new( kind => 'ptr',   bits => 64 );  $t }      # opaque pointer (64-bit on this arch)
     sub void    { state $t //= __PACKAGE__->new( kind => 'void' );                 $t }
     sub dynamic { state $t //= __PACKAGE__->new( kind => 'dynamic', bits => 128 ); $t }    # 16-byte Fat Scalar (Tag + Payload), our SV*
 
@@ -137,6 +137,13 @@ class Brocken::Lindsay::IR::Instruction::Decref : isa(Brocken::Lindsay::IR::Inst
     }
 }
 
+class Brocken::Lindsay::IR::Instruction::FrameAddr : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        return sprintf '  %s = frame_addr %s', ( $self->name // '%<anon>' ), $self->type->as_string;
+    }
+}
+
 class Brocken::Lindsay::IR::Instruction::Phi : isa(Brocken::Lindsay::IR::Instruction) {
     field $incoming : reader : param = [];    # Array of [Value, Block]
 
@@ -251,4 +258,75 @@ class Brocken::Lindsay::IR::Module {
         return $out;
     }
 }
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Lindsay::IR - High-Level Intermediate Representation Types
+
+=head1 DESCRIPTION
+
+Defines the core data structures for Brocken's SSA-form intermediate representation. The IR is LLVM-inspired and uses
+an SSA representation with typed values, instructions, basic blocks, functions, and modules.
+
+=head2 Type System
+
+Types are represented as singleton objects via the L<Brocken::Lindsay::IR::Type> class. Common types (i1, i8, i32, i64,
+f32, f64, ptr, void, dynamic) are created once and cached.
+
+=head2 Value Hierarchy
+
+=over 4
+
+=item L<Brocken::Lindsay::IR::Value> - Base class for all IR values
+
+=item L<Brocken::Lindsay::IR::Constant> - Constant values (literals)
+
+=item L<Brocken::Lindsay::IR::Instruction> - Base instruction class
+
+=back
+
+=head2 Instruction Types
+
+=over 4
+
+=item B<Arithmetic>: add, sub, mul, div, rem, neg, abs, sqrt, shl, lshr, ashr, and, or, xor, min, max
+
+=item B<Comparison>: icmp (eq, ne, sgt, slt, etc.)
+
+=item B<Memory>: alloca, load, store, getelementptr
+
+=item B<Control flow>: br, cond_br, ret, call, select, phi
+
+=item B<Runtime>: box, unbox, incref, decref
+
+=back
+
+=head2 Program Structure
+
+=over 4
+
+=item L<Brocken::Lindsay::IR::Module> - Top-level container of functions
+
+=item L<Brocken::Lindsay::IR::Function> - Function with params, return type, and blocks
+
+=item L<Brocken::Lindsay::IR::Block> - Basic block containing a sequence of instructions
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut
+
 1;
