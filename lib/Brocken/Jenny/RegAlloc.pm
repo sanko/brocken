@@ -309,7 +309,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         }
     }
 
-    method fix_entry_shuffle( $mf, $assignment ) {
+    method fix_entry_shuffle( $mf, $assignment, $temp_reg ) {
         my $entry = $mf->entry_block;
         return unless $entry;
 
@@ -337,8 +337,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
 
         # Detect hazard: dst_i == src_j for i < j  (save MOV i overwrites
         # a register whose original value save MOV j still needs to read).
-        # Break cycles using the spill-temp register r11.
-        my $temp_reg = 'r11';
+        # Break cycles using the platform-specific spill-temp register.
         for my $i ( 0 .. $#saves ) {
             for my $j ( $i + 1 .. $#saves ) {
                 if ( $saves[$i]{dst} eq $saves[$j]{src} ) {
