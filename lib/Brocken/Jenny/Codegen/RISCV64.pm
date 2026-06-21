@@ -208,7 +208,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my $alloca_frame = 0;
         my $total_alloca = 0;
         my $is_leaf      = 1;
-        my $spill_frame  = $self->_compute_spill_frame( $mf, 'sp' );
+        my $spill_frame  = $self->_compute_spill_frame( $mf, $platform->stack_reg );
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func';
@@ -227,6 +227,10 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my $unified_frame  = ( $callee_size + $spill_frame + 15 ) & ~15;
         my $extra_frame    = $unified_frame - $callee_size;
         my $aligned_alloca = ( $total_alloca + 15 ) & ~15;
+        if ( $aligned_alloca > 0 && $extra_frame < 8 ) {
+            $unified_frame += 16;
+            $extra_frame    = $unified_frame - $callee_size;
+        }
         my $total_frame    = $unified_frame + $aligned_alloca;
         my $reg_id         = sub ($r) {
             my %map = (
