@@ -96,6 +96,10 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
                 my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
                 substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
             }
+            elsif ( $ff->{type} eq 'lea_rel32' ) {
+                my $rel = ( $entry_size + $target_off ) - ( $src_pos + 4 );
+                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+            }
             elsif ( $ff->{type} eq 'call_bl' ) {
                 my $rel  = ( $entry_size + $target_off ) - $src_pos;
                 my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );

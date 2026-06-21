@@ -227,6 +227,62 @@ class Brocken::Lindsay::IR::Builder {
         );
         return $insert_block->append_inst($inst);
     }
+
+    method build_fiber_create( $callee, $args, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::FiberCreate->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::ptr(),
+            opcode   => 'fiber_create',
+            callee   => $callee,
+            operands => $args,
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_fiber_transfer( $fiber, $val, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::FiberTransfer->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::dynamic(),
+            opcode   => 'fiber_transfer',
+            operands => [ $fiber, $val ],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_fiber_yield( $val, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::FiberYield->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::dynamic(),
+            opcode   => 'fiber_yield',
+            operands => [$val],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_fiber_id( $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::FiberId->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::i64(),
+            opcode   => 'fiber_id',
+            operands => [],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_fiber_pin( $fiber, $tid ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::FiberPin->new(
+            name     => undef,
+            type     => Brocken::Lindsay::IR::Type::void(),
+            opcode   => 'fiber_pin',
+            operands => [ $fiber, $tid ],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
 }
 
 =encoding utf-8
