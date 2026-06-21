@@ -35,13 +35,13 @@ class Brocken::Jenny::MIR::MachineBasicBlock {
     method is_terminated() {
         return 0 if $self->instructions->@* == 0;
         my $last = $self->instructions->[-1];
-        return $last->opcode =~ /^(jmp|beq|bne|br|ret|ctx_restore)$/;
+        return $last->opcode =~ /^(jmp|beq|bne|br|ret|ctx_restore|ctx_swap)$/;
     }
 
     method terminator() {
         return undef if $self->instructions->@* == 0;
         my $last = $self->instructions->[-1];
-        return $last->opcode =~ /^(jmp|beq|bne|br|ret|ctx_restore)$/ ? $last : undef;
+        return $last->opcode =~ /^(jmp|beq|bne|br|ret|ctx_restore|ctx_swap)$/ ? $last : undef;
     }
 }
 

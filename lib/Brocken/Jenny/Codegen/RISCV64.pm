@@ -139,7 +139,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
     method _has_fiber_ops_mf($mf) {
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
-                return 1 if $inst->opcode eq 'ctx_save' || $inst->opcode eq 'ctx_restore';
+                return 1 if $inst->opcode eq 'ctx_swap';
             }
         }
         return 0;
@@ -155,7 +155,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'alloca',
-                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 120, type => $i64 ) ],
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 128, type => $i64 ) ],
                 comment  => 'main fiber FCB'
             )
         );
@@ -690,22 +690,18 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $enc |= FP_FMT if $bits > 32;
                     $bytes .= pack( 'V', $enc );
                 }
-                elsif ( $opcode eq 'ctx_save' ) {
-                    my $ctx_r  = $resolve->($dst);
+                elsif ( $opcode eq 'ctx_swap' ) {
+                    my $ctx_r  = $resolve->($dst);      # fiber register (s11)
                     my $cid    = $reg_id->($ctx_r);
+                    my $target_r = $resolve->($src);    # target FCB pointer
+                    my $tid    = $reg_id->($target_r);
                     my $adj_tmp = 28;  # t3
                     my @callee = qw(s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 ra sp);
-                    my $tf = $total_frame;
-                    if ( $tf <= 2047 ) {
-                        $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $adj_tmp << 7 ) | OP_IMM );
-                    }
-                    else {
-                        my $hi = ( $tf + 0x800 ) >> 12;
-                        my $lo = $tf & 0xFFF;
-                        $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( $adj_tmp << 7 ) | LUI );
-                        $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( $adj_tmp << 15 ) | ( 0 << 12 ) | ( $adj_tmp << 7 ) | OP_IMM ) if $lo;
-                        $bytes .= pack( 'V', ( $adj_tmp << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $adj_tmp << 7 ) | OP );
-                    }
+
+                    # 1. mv t3, sp -- save current SP
+                    $bytes .= pack( 'V', 0x00010E13 );
+
+                    # 2. Save callee regs to current FCB (sp stored via t3)
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg    = $callee[$off_idx];
                         my $rid    = $reg_id->($reg);
@@ -715,18 +711,42 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         my $imm_hi = ( $off >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $srid << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                     }
-                }
-                elsif ( $opcode eq 'ctx_restore' ) {
-                    my $ctx_r  = $resolve->($dst);
-                    my $cid    = $reg_id->($ctx_r);
-                    my @callee = qw(s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 ra sp);
+
+                    # 3. Compute resume_pc -- AUIPC + ADDI placeholder, patched after JALR
+                    my $auipc_off = $current_offset->();
+                    $bytes .= pack( 'V', ( 28 << 7 ) | 0x17 );    # AUIPC t3, 0
+                    $bytes .= pack( 'V', 0x000EE013 );            # ADDI t3, t3, 0
+
+                    # 4. Store resume_pc at FCB[120]
+                    $bytes .= pack( 'V', 0x7CDBC23 );             # SD t3, 120(s11)
+
+                    # 5. Switch fiber register to target FCB
+                    $bytes .= pack( 'V', ( $tid << 15 ) | 0xD93 ); # ADDI s11, target, 0 = mv s11, target
+
+                    # 6. Load target resume_pc FIRST (before restoring s11)
+                    $bytes .= pack( 'V', 0x78DBE03 );             # LD t3, 120(s11)
+
+                    # 7. Restore callee regs from target FCB (includes sp)
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg = $callee[$off_idx];
                         my $rid = $reg_id->($reg);
                         my $off = $off_idx * 8;
                         $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | LOAD );
                     }
-                    $bytes .= pack( 'V', JALR );
+
+                    # 8. JALR zero, t3, 0 -- jump to target's resume_pc
+                    $bytes .= pack( 'V', 0x000E0067 );
+
+                    # 9. Patch AUIPC+ADDI to point after JALR
+                    my $end = $current_offset->();
+                    my $rel = $end - $auipc_off;
+                    my $upper = $rel >> 12;
+                    my $lower = $rel & 0xFFF;
+                    if ( $lower >= 0x800 ) {
+                        $upper = ( $upper + 1 ) & 0xFFFFF;
+                    }
+                    substr $bytes, $auipc_off, 4, pack( 'V', ( $upper << 12 ) | ( 28 << 7 ) | 0x17 );
+                    substr $bytes, $auipc_off + 4, 4, pack( 'V', ( ( $lower & 0xFFF ) << 20 ) | ( 28 << 15 ) | ( 0 << 12 ) | ( 28 << 7 ) | OP_IMM );
                 }
                 elsif ( $opcode eq 'lea_func' ) {
                     my $dst_r     = $resolve->($dst);

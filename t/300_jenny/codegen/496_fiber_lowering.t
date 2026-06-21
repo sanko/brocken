@@ -101,8 +101,8 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
             $opcodes{ $inst->opcode }++;
         }
     }
-    ok $opcodes{ctx_save},    'fiber_transfer produces ctx_save';
-    ok $opcodes{ctx_restore}, 'fiber_transfer produces ctx_restore';
+    ok $opcodes{ctx_swap},    'fiber_transfer produces ctx_swap';
+    ok !$opcodes{ctx_save} && !$opcodes{ctx_restore}, 'fiber_transfer no longer emits ctx_save/ctx_restore';
 }
 
 # 6. fiber_yield lowered produces ctx_save + ctx_restore
@@ -121,8 +121,8 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
             $opcodes{ $inst->opcode }++;
         }
     }
-    ok $opcodes{ctx_save},    'fiber_yield produces ctx_save';
-    ok $opcodes{ctx_restore}, 'fiber_yield produces ctx_restore';
+    ok $opcodes{ctx_swap},    'fiber_yield produces ctx_swap';
+    ok !$opcodes{ctx_save} && !$opcodes{ctx_restore}, 'fiber_yield no longer emits ctx_save/ctx_restore';
 }
 
 # 7. fiber_id lowered to mov 0

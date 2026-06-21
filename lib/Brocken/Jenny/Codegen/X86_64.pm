@@ -150,7 +150,7 @@ class Brocken::Jenny::Codegen::X86_64 {
     method _has_fiber_ops_mf($mf) {
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
-                return 1 if $inst->opcode eq 'ctx_save' || $inst->opcode eq 'ctx_restore';
+                return 1 if $inst->opcode eq 'ctx_swap';
             }
         }
         return 0;
@@ -158,7 +158,7 @@ class Brocken::Jenny::Codegen::X86_64 {
 
     # Build the fiber init wrapper MIR function that sets up the main fiber's FCB.
     # Calls _real_main normally; the standard epilogue (mov rsp,rbp; pop rbp; ret)
-    # correctly unwinds the frame after ctx_restore returns to this function.
+    # correctly unwinds the frame.
     method _build_fiber_init_mf() {
         my $i64 = Brocken::Lindsay::IR::Type::i64();
         my $ptr = Brocken::Lindsay::IR::Type::ptr();
@@ -169,7 +169,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'alloca',
-                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 64, type => $i64 ) ],
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 72, type => $i64 ) ],
                 comment  => 'main fiber FCB'
             )
         );
@@ -700,29 +700,17 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $modrm = 0xC0 | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
                 }
-                elsif ( $opcode eq 'ctx_save' ) {
-                    my $ctx_r  = $resolve->($dst);
+                elsif ( $opcode eq 'ctx_swap' ) {
+                    my $ctx_r  = $resolve->($dst);      # fiber register (r12)
                     my $cid    = $reg_id->($ctx_r);
+                    my $target_r = $resolve->($src);    # target FCB pointer
+                    my $tid    = $reg_id->($target_r);
+
+                    # 1. mov r11, rsp -- save current SP
+                    $bytes .= pack( 'CCC', 0x4C, 0x8B, 0xDC );
+
+                    # 2. Save callee regs to current FCB
                     my @callee = qw(rbx rbp r12 r13 r14 r15);
-                    my $rsp_t  = 11;  # r11 as temp for adjusted rsp
-                    # Compute adjusted RSP = current RSP + total_frame + 8.
-                    # After prologue: push rbp (8 bytes) + sub rsp, total_frame,
-                    # so return address is at rsp + total_frame + 8.
-                    my $adj = $total_frame + 8;
-                    if ($adj) {
-                        # lea r11, [rsp + adj]
-                        my $rex_l = 0x48 | 4;  # REX.W + REX.B for r11
-                        my $mod   = ( $adj >= -128 && $adj <= 127 ) ? 1 : 2;
-                        $mod = 1 if $adj == 0;
-                        my $modrm = ( $mod << 6 ) | ( ( $rsp_t & 7 ) << 3 ) | 4;
-                        $bytes .= pack( 'C', $rex_l ) . pack( 'CC', 0x8D, $modrm ) . pack( 'C', 0x24 );
-                        if ( $mod == 2 ) { $bytes .= pack( 'V', $adj ) }
-                        elsif ( $mod == 1 && $adj != 0 ) { $bytes .= pack( 'c', $adj ) }
-                    }
-                    else {
-                        # mov r11, rsp (for leaf functions with no frame)
-                        $bytes .= pack( 'CCC', 0x49, 0x89, 0xE3 );
-                    }
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg  = $callee[$off_idx];
                         my $rid  = $reg_id->($reg);
@@ -733,7 +721,6 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $mod = 1 if $mod == 0 && $rm == 5;
                         my $modrm = ( $mod << 6 ) | ( ( $rid & 7 ) << 3 ) | $rm;
                         $bytes .= pack( 'C', $rex ) . pack( 'C', 0x89 );
-
                         if ( $rm == 4 ) {
                             $bytes .= pack( 'CC', $modrm, 0x24 );
                         }
@@ -743,25 +730,39 @@ class Brocken::Jenny::Codegen::X86_64 {
                         if    ( $mod == 2 ) { $bytes .= pack( 'V', $disp ) }
                         elsif ( $mod == 1 ) { $bytes .= "\x00" }
                     }
-                    # Save adjusted RSP (r11) at FCB[rsp_offset]
+
+                    # 3. Save SP (r11) at FCB[48]
                     my $rsp_off = 48;
-                    my $rex_s   = 0x48 | ( $rsp_t >= 8 ? 0x04 : 0 ) | ( $cid >= 8 ? 0x01 : 0 );
+                    my $rex_s   = 0x48 | 0x04 | ( $cid >= 8 ? 0x01 : 0 );
                     my $rm_s    = $cid & 7;
                     my $mod_s   = $rsp_off ? 2 : 0;
                     $mod_s = 1 if $mod_s == 0 && $rm_s == 5;
-                    my $modrm_s = ( $mod_s << 6 ) | ( ( $rsp_t & 7 ) << 3 ) | $rm_s;
+                    my $modrm_s = ( $mod_s << 6 ) | ( ( 0xB & 7 ) << 3 ) | $rm_s;
                     $bytes .= pack( 'C', $rex_s ) . pack( 'C', 0x89 );
                     if ( $rm_s == 4 ) { $bytes .= pack( 'CC', $modrm_s, 0x24 ) }
                     else { $bytes .= pack( 'C', $modrm_s ) }
                     if    ( $mod_s == 2 ) { $bytes .= pack( 'V', $rsp_off ) }
                     elsif ( $mod_s == 1 ) { $bytes .= "\x00" }
-                }
-                elsif ( $opcode eq 'ctx_restore' ) {
-                    my $ctx_r  = $resolve->($dst);
-                    my $cid    = $reg_id->($ctx_r);
-                    my @callee = qw(rbx rbp r12 r13 r14 r15 rsp);
-                    for my $off_idx ( 0 .. $#callee ) {
-                        my $reg  = $callee[$off_idx];
+
+                    # 4. Compute resume_pc -- LEA r10, [rip + rel] placeholder
+                    my $lea_off = $current_offset->();
+                    $bytes .= pack( 'C*', 0x4C, 0x8D, 0x15, 0x00, 0x00, 0x00, 0x00 );
+
+                    # 5. Store resume_pc at FCB[64]
+                    $bytes .= pack( 'C*', 0x4D, 0x89, 0x54, 0x24, 0x40 );
+
+                    # 6. Switch fiber register to target FCB
+                    my $rex_m = 0x48 | ( $cid >= 8 ? 1 : 0 ) | ( $tid >= 8 ? 4 : 0 );
+                    my $modrm_m = 0xC0 | ( ( $tid & 7 ) << 3 ) | ( $cid & 7 );
+                    $bytes .= pack( 'C', $rex_m ) . pack( 'CC', 0x89, $modrm_m );
+
+                    # 7. Load target resume_pc FIRST (before restoring r12)
+                    $bytes .= pack( 'C*', 0x4D, 0x8B, 0x54, 0x24, 0x40 );
+
+                    # 8. Restore callee regs from target FCB (rsp last -- overwrites r12 & rsp)
+                    my @cregs = qw(rbx rbp r12 r13 r14 r15 rsp);
+                    for my $off_idx ( 0 .. $#cregs ) {
+                        my $reg  = $cregs[$off_idx];
                         my $rid  = $reg_id->($reg);
                         my $disp = $off_idx * 8;
                         my $rex  = 0x48 | ( $rid >= 8 ? 4 : 0 ) | ( $cid >= 8 ? 1 : 0 );
@@ -770,7 +771,6 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $mod = 1 if $mod == 0 && $rm == 5;
                         my $modrm = ( $mod << 6 ) | ( ( $rid & 7 ) << 3 ) | $rm;
                         $bytes .= pack( 'C', $rex ) . pack( 'C', 0x8B );
-
                         if ( $rm == 4 ) {
                             $bytes .= pack( 'CC', $modrm, 0x24 );
                         }
@@ -780,7 +780,14 @@ class Brocken::Jenny::Codegen::X86_64 {
                         if    ( $mod == 2 ) { $bytes .= pack( 'V', $disp ) }
                         elsif ( $mod == 1 ) { $bytes .= "\x00" }
                     }
-                    $bytes .= pack( 'C', RET_BYTE );
+
+                    # 9. jmp r10 -- jump to target's resume_pc
+                    $bytes .= pack( 'C*', 0x41, 0xFF, 0xE2 );
+
+                    # 10. Patch LEA to point after jmp r10
+                    my $after = $current_offset->();
+                    my $rel = $after - $lea_off - 7;
+                    substr $bytes, $lea_off + 3, 4, pack( 'V', $rel );
                 }
                 elsif ( $opcode eq 'lea_func' ) {
                     my $dst_r     = $resolve->($dst);

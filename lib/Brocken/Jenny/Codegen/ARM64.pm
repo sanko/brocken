@@ -188,7 +188,7 @@ class Brocken::Jenny::Codegen::ARM64 {
     method _has_fiber_ops_mf($mf) {
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
-                return 1 if $inst->opcode eq 'ctx_save' || $inst->opcode eq 'ctx_restore';
+                return 1 if $inst->opcode eq 'ctx_swap';
             }
         }
         return 0;
@@ -204,7 +204,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'alloca',
-                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 112, type => $i64 ) ],
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 120, type => $i64 ) ],
                 comment  => 'main fiber FCB'
             )
         );
@@ -676,21 +676,18 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $base  = $bits == 32 ? FCMP_32          : FCMP_64;
                     $bytes .= pack( 'V', $base | ( $rid << 16 ) | ( $lid << 5 ) );
                 }
-                elsif ( $opcode eq 'ctx_save' ) {
-                    my $ctx_r  = $resolve->($dst);
+                elsif ( $opcode eq 'ctx_swap' ) {
+                    my $ctx_r  = $resolve->($dst);      # fiber register (x28)
                     my $cid    = $reg_id->($ctx_r);
+                    my $target_r = $resolve->($src);    # target FCB pointer
+                    my $tid    = $reg_id->($target_r);
                     my @callee = map {"x$_"} ( 19 .. 28 );
                     push @callee, 'x29', 'x30', 'sp';
-                    my $frame = $total_frame;
-                    if ( $frame <= 0xFFF ) {
-                        $bytes .= pack( 'V', 0x910003F1 | ( $frame << 10 ) );    # ADD X17, SP, #frame
-                    }
-                    else {
-                        my $hi = $frame >> 12;
-                        my $lo = $frame & 0xFFF;
-                        $bytes .= pack( 'V', 0x914003F1 | ( $hi << 10 ) );       # ADD X17, SP, #hi, LSL #12
-                        $bytes .= pack( 'V', 0x91000231 | ( $lo << 10 ) ) if $lo; # ADD X17, X17, #lo
-                    }
+
+                    # 1. MOV X17, SP -- save current SP
+                    $bytes .= pack( 'V', 0x910003F1 );
+
+                    # 2. Save callee regs to current FCB
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg   = $callee[$off_idx];
                         my $rid   = $reg_id->($reg);
@@ -698,12 +695,21 @@ class Brocken::Jenny::Codegen::ARM64 {
                         my $imm12 = ( $off_idx * 8 ) >> 3;
                         $bytes .= pack( 'V', STR_64 | ( $imm12 << 10 ) | ( $cid << 5 ) | $rid );
                     }
-                }
-                elsif ( $opcode eq 'ctx_restore' ) {
-                    my $ctx_r  = $resolve->($dst);
-                    my $cid    = $reg_id->($ctx_r);
-                    my @callee = map {"x$_"} ( 19 .. 28 );
-                    push @callee, 'x29', 'x30', 'sp';
+
+                    # 3. Compute resume_pc -- ADR x16, #0 placeholder, patched after BR
+                    my $adr_off = $current_offset->();
+                    $bytes .= pack( 'V', 0x10000010 );    # ADR x16, #0
+
+                    # 4. Store resume_pc at FCB[112]
+                    $bytes .= pack( 'V', 0xF9003B90 );    # STR x16, [x28, #112]
+
+                    # 5. Switch fiber register to target FCB
+                    $bytes .= pack( 'V', 0x9100001C | ( $tid << 5 ) );    # ADD x28, Xtarget, #0
+
+                    # 6. Load target resume_pc FIRST (before restoring x28)
+                    $bytes .= pack( 'V', 0xF9403B90 );    # LDR x16, [x28, #112]
+
+                    # 7. Restore callee regs from target FCB
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg   = $callee[$off_idx];
                         my $rid   = $reg_id->($reg);
@@ -711,8 +717,18 @@ class Brocken::Jenny::Codegen::ARM64 {
                         my $imm12 = ( $off_idx * 8 ) >> 3;
                         $bytes .= pack( 'V', LDR_64 | ( $imm12 << 10 ) | ( $cid << 5 ) | $rid );
                     }
-                    $bytes .= pack( 'V', 0x9100023F );    # MOV SP, X17 (ADD SP, X17, #0)
-                    $bytes .= pack( 'V', RET );
+
+                    # 8. MOV SP, X17 -- restore SP from target
+                    $bytes .= pack( 'V', 0x9100023F );
+
+                    # 9. BR x16 -- jump to target's resume_pc
+                    $bytes .= pack( 'V', 0xD61F0200 );
+
+                    # 10. Patch ADR to point after BR x16
+                    my $after = $current_offset->();
+                    my $rel = $after - $adr_off;
+                    my $adr_enc = 0x10000010 | ( ( ( $rel >> 2 ) & 0x7FFFF ) << 5 ) | ( ( $rel & 3 ) << 29 );
+                    substr $bytes, $adr_off, 4, pack( 'V', $adr_enc );
                 }
                 elsif ( $opcode eq 'lea_func' ) {
                     my $dst_r     = $resolve->($dst);

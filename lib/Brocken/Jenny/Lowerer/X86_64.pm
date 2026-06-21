@@ -2408,7 +2408,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
                     my $callee   = $inst->callee;
                     my $stack_sz = 64 * 1024;
-                    my $fcb_sz   = 64;
+                    my $fcb_sz   = 72;      # +8 for resume_pc at offset 64
                     my $stack    = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'virt_reg',
                         value => $inst->name . '.stk',
@@ -2438,18 +2438,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             opcode   => 'lea_func',
                             operands => [ $fptr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $callee->name ) ],
                             comment  => 'load fiber entry addr'
-                        )
-                    );
-                    my $stack_top = Brocken::Jenny::MIR::MachineOperand->new(
-                        kind  => 'mem',
-                        value => { base => $inst->name . '.stk', disp => $stack_sz - 8 },
-                        type  => Brocken::Lindsay::IR::Type::i64()
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'store',
-                            operands => [ $stack_top, $fptr ],
-                            comment  => 'store entry on stack'
                         )
                     );
                     my $fcb = Brocken::Jenny::MIR::MachineOperand->new(
@@ -2486,15 +2474,12 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'add',
-                            operands => [
-                                $saved_rsp,
-                                Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'imm',
-                                    value => $stack_sz - 8,
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                )
-                            ],
-                            comment => 'saved_rsp += stack_sz - 8'
+                            operands => [ $saved_rsp, Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'imm',
+                                value => $stack_sz,
+                                type  => Brocken::Lindsay::IR::Type::i64()
+                            ) ],
+                            comment => 'saved_rsp += stack_sz'
                         )
                     );
                     my $fcb_rsp_field = Brocken::Jenny::MIR::MachineOperand->new(
@@ -2510,7 +2495,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
 
-                    # Store self-pointer in FCB.r12 slot (offset 16) - loaded by ctx_restore
+                    # Store self-pointer in FCB.r12 slot (offset 16)
                     my $fcb_self_field = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
                         value => { base => $inst->name . '.fcb', disp => 16 },
@@ -2538,6 +2523,20 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             comment  => 'FCB.parent = current fiber'
                         )
                     );
+
+                    # Store entry function address in FCB.resume_pc (offset 64)
+                    my $fcb_resume_field = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'mem',
+                        value => { base => $inst->name . '.fcb', disp => 64 },
+                        type  => Brocken::Lindsay::IR::Type::i64()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [ $fcb_resume_field, $fptr ],
+                            comment  => 'FCB.resume_pc = entry addr'
+                        )
+                    );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2551,11 +2550,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     my ( $fiber, $val ) = $inst->operands->@*;
                     my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r12' );
 
-                    # Save current registers to current fiber's FCB (pointed to by r12)
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_save', operands => [$fiber_reg],
-                            comment => 'save to current FCB via r12' )
-                    );
                     my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2565,17 +2559,13 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
 
-                    # Switch fiber register to target, then restore
+                    # Atomic context switch: save current FCB, restore target FCB, jump
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'mov',
+                            opcode   => 'ctx_swap',
                             operands => [ $fiber_reg, $self->_lower_opnd($fiber) ],
-                            comment  => 'r12 = target FCB'
+                            comment  => 'swap to target FCB'
                         )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_restore', operands => [$fiber_reg],
-                            comment => 'restore target ctx' )
                     );
                     if ( defined $inst->name ) {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
@@ -2593,11 +2583,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r12' );
                     my $ptr       = Brocken::Lindsay::IR::Type::ptr();
 
-                    # Save current registers to current fiber's FCB
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_save', operands => [$fiber_reg],
-                            comment => 'save to current FCB via r12' )
-                    );
                     my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2607,7 +2592,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
 
-                    # Load parent FCB from [r12 + 56] into r12, then restore
+                    # Load parent FCB from [r12 + 56]
                     my $parent_tmp = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'virt_reg',
                         value => $inst->name . '.parent',
@@ -2627,16 +2612,14 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             comment => 'load parent FCB from current FCB'
                         )
                     );
+
+                    # Atomic context switch: save current FCB, restore parent FCB, jump
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'mov',
+                            opcode   => 'ctx_swap',
                             operands => [ $fiber_reg, $parent_tmp ],
-                            comment  => 'r12 = parent FCB'
+                            comment  => 'swap to parent FCB'
                         )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_restore', operands => [$fiber_reg],
-                            comment => 'restore parent ctx' )
                     );
 
                     if ( defined $inst->name ) {
