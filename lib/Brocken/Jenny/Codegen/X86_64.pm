@@ -559,6 +559,64 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $modrm = 0xC0 | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
                 }
+                elsif ( $opcode eq 'ctx_save' ) {
+                    my $ctx_r = $resolve->($dst);
+                    my $cid   = $reg_id->($ctx_r);
+                    my @callee = qw(rbx rbp r12 r13 r14 r15 rsp);
+                    for my $off_idx (0..$#callee) {
+                        my $reg  = $callee[$off_idx];
+                        my $rid  = $reg_id->($reg);
+                        my $disp = $off_idx * 8;
+                        my $rex  = 0x48 | ( $rid >= 8 ? 4 : 0 ) | ( $cid >= 8 ? 1 : 0 );
+                        my $rm   = $cid & 7;
+                        my $mod  = $disp ? 2 : 0;
+                        $mod = 1 if $mod == 0 && $rm == 5;
+                        my $modrm = ( $mod << 6 ) | ( ( $rid & 7 ) << 3 ) | $rm;
+                        $bytes .= pack( 'C', $rex ) . pack( 'C', 0x89 );
+                        if ( $rm == 4 ) {
+                            $bytes .= pack( 'CC', $modrm, 0x24 );
+                        }
+                        else {
+                            $bytes .= pack( 'C', $modrm );
+                        }
+                        if    ( $mod == 2 ) { $bytes .= pack( 'V', $disp ) }
+                        elsif ( $mod == 1 ) { $bytes .= "\x00" }
+                    }
+                }
+                elsif ( $opcode eq 'ctx_restore' ) {
+                    my $ctx_r = $resolve->($dst);
+                    my $cid   = $reg_id->($ctx_r);
+                    my @callee = qw(rbx rbp r12 r13 r14 r15 rsp);
+                    for my $off_idx (0..$#callee) {
+                        my $reg  = $callee[$off_idx];
+                        my $rid  = $reg_id->($reg);
+                        my $disp = $off_idx * 8;
+                        my $rex  = 0x48 | ( $rid >= 8 ? 4 : 0 ) | ( $cid >= 8 ? 1 : 0 );
+                        my $rm   = $cid & 7;
+                        my $mod  = $disp ? 2 : 0;
+                        $mod = 1 if $mod == 0 && $rm == 5;
+                        my $modrm = ( $mod << 6 ) | ( ( $rid & 7 ) << 3 ) | $rm;
+                        $bytes .= pack( 'C', $rex ) . pack( 'C', 0x8B );
+                        if ( $rm == 4 ) {
+                            $bytes .= pack( 'CC', $modrm, 0x24 );
+                        }
+                        else {
+                            $bytes .= pack( 'C', $modrm );
+                        }
+                        if    ( $mod == 2 ) { $bytes .= pack( 'V', $disp ) }
+                        elsif ( $mod == 1 ) { $bytes .= "\x00" }
+                    }
+                    $bytes .= pack( 'C', RET_BYTE );
+                }
+                elsif ( $opcode eq 'lea_func' ) {
+                    my $dst_r     = $resolve->($dst);
+                    my $did       = $reg_id->($dst_r);
+                    my $func_name = $src->value;
+                    my $rex       = 0x48 | ( $did >= 8 ? 4 : 0 );
+                    my $modrm     = 0x05 | ( ( $did & 7 ) << 3 );
+                    push @func_fixups, { offset => $current_offset->() + 3, type => 'lea_rel32', target => $func_name };
+                    $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm ) . "\x00\x00\x00\x00";
+                }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $dst->value;
                     push @func_fixups, { offset => $current_offset->(), type => 'call_rel32', target => $func_name };

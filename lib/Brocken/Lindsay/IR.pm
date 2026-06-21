@@ -137,6 +137,47 @@ class Brocken::Lindsay::IR::Instruction::Decref : isa(Brocken::Lindsay::IR::Inst
     }
 }
 
+class Brocken::Lindsay::IR::Instruction::FiberCreate : isa(Brocken::Lindsay::IR::Instruction) {
+    field $callee : reader : param;    # Brocken::Lindsay::IR::Function
+
+    method render() {
+        my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
+        return sprintf '  %s = fiber_create @%s(%s)', ( $self->name // '%<anon>' ), $callee->name, $args;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::FiberTransfer : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my ( $fiber, $val ) = $self->operands->@*;
+        return sprintf '  %s = fiber_transfer %s %s, %s %s', ( $self->name // '%<anon>' ), $fiber->type->as_string, $fiber->as_string,
+            $val->type->as_string, $val->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::FiberYield : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $val = $self->operands->[0];
+        return sprintf '  %s = fiber_yield %s %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::FiberId : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        return sprintf '  %s = fiber_id', ( $self->name // '%<anon>' );
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::FiberPin : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my ( $fiber, $tid ) = $self->operands->@*;
+        return sprintf '  fiber_pin %s %s, %s %s', $fiber->type->as_string, $fiber->as_string, $tid->type->as_string, $tid->as_string;
+    }
+}
+
 class Brocken::Lindsay::IR::Instruction::FrameAddr : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
@@ -211,6 +252,35 @@ class Brocken::Lindsay::IR::Block {
         return $inst;
     }
 
+    method insert_before( $target, $new_inst ) {
+        my $idx = 0;
+        for my $inst ( $instructions->@* ) {
+            last if $inst == $target;
+            $idx++;
+        }
+        splice $instructions->@*, $idx, 0, $new_inst;
+        return $new_inst;
+    }
+
+    method remove_inst($inst) {
+        $instructions->@* = grep { $_ != $inst } $instructions->@*;
+    }
+
+    method replace_inst( $old, $new ) {
+        for my $i ( 0 .. $#{$instructions} ) {
+            if ( $instructions->[$i] == $old ) {
+                $instructions->[$i] = $new;
+                return $new;
+            }
+        }
+        return undef;
+    }
+
+    method terminator() {
+        return $instructions->[-1] if $instructions->@*;
+        return undef;
+    }
+
     method as_string() {
         my $out = "$name:\n";
         $out .= $_->render . "\n" for $instructions->@*;
@@ -223,10 +293,18 @@ class Brocken::Lindsay::IR::Function {
     field $return_type : reader : param;
     field $params      : reader : param = [];    # Array of Brocken::Lindsay::IR::Value
     field $blocks      : reader = [];
+    method set_return_type($t) { $return_type = $t }
+    method set_blocks($b)      { $blocks      = $b }
 
     method append_block($name) {
         my $bb = Brocken::Lindsay::IR::Block->new( name => $name, parent => $self );
         push $blocks->@*, $bb;
+        return $bb;
+    }
+
+    method prepend_block($name) {
+        my $bb = Brocken::Lindsay::IR::Block->new( name => $name, parent => $self );
+        unshift $blocks->@*, $bb;
         return $bb;
     }
 
