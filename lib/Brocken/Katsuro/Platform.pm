@@ -332,6 +332,7 @@ class Brocken::Katsuro::Platform {
     method stack_reg()                             { $self->abi->stack_reg }
     method return_register()                       { $self->abi->return_register }
     method fp_return_register()                    { $self->abi->fp_return_register }
+    method fiber_reg()                             { $self->abi->fiber_reg }
 }
 
 =encoding utf-8

@@ -31,6 +31,7 @@ class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::
     method param_registers()    { [qw(rdi rsi rdx rcx r8 r9)] }
     method return_register()    {'rax'}
     method fp_return_register() {'xmm0'}
+    method fiber_reg()          {'r12'}
 
     # System V AMD64 DWARF register numbers (rax=0, rdx=1, etc.)
     # Reference: https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf

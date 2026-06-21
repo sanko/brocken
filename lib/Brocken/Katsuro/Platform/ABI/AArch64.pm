@@ -25,6 +25,7 @@ class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform:
     method param_registers()    { [qw(x0 x1 x2 x3 x4 x5 x6 x7)] }
     method return_register()    {'x0'}
     method fp_return_register() {'v0'}
+    method fiber_reg()          {'x28'}
 
     # ARM64 FP/SIMD registers (AAPCS64 calling convention)
     # Note: v0-v7 are caller-saved, v8-v15 are callee-saved (only the lower 64 bits)

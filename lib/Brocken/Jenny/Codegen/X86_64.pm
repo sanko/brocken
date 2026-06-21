@@ -51,6 +51,9 @@ class Brocken::Jenny::Codegen::X86_64 {
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+        if ( $self->_has_fiber_ops_mf($mf) ) {
+            $callee_seen{ $platform->fiber_reg } = 1;
+        }
         my @used_callee = sort keys %callee_seen;
         my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
         return $bytes;
@@ -58,10 +61,30 @@ class Brocken::Jenny::Codegen::X86_64 {
 
     # Emit multiple functions with cross-function call fixups
     method emit_functions($ir_funcs) {
-        my @result;
-        for my $func ( $ir_funcs->@* ) {
+        my @mfs;
+        my $has_fiber  = 0;
+        my $main_index = -1;
+        for my $i ( 0 .. $#$ir_funcs ) {
+            my $func = $ir_funcs->[$i];
             my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
             my $mf      = $lowerer->lower($func);
+            $has_fiber  ||= $self->_has_fiber_ops_mf($mf);
+            $main_index = $i if $func->name eq 'main';
+            push @mfs, $mf;
+        }
+
+        # If fiber ops exist and there's a main function, emit an init wrapper
+        # that allocates the main FCB, initializes r12, and calls the original
+        # main (emitted as _real_main).
+        my $emit_init = $has_fiber && $main_index >= 0;
+
+        my @result;
+        for my $i ( 0 .. $#mfs ) {
+            my $mf    = $mfs[$i];
+            my $fname = $ir_funcs->[$i]->name;
+            if ( $emit_init && $i == $main_index ) {
+                $fname = '_real_main';
+            }
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
             my $int_res = $alloc->allocate( $mf, $platform, 0 );
             $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
@@ -79,11 +102,123 @@ class Brocken::Jenny::Codegen::X86_64 {
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+            if ( $self->_has_fiber_ops_mf($mf) ) {
+                $callee_seen{ $platform->fiber_reg } = 1;
+            }
             my @used_callee = sort keys %callee_seen;
             my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
-            push @result, { name => $func->name, bytes => $bytes, fixups => $func_fixups };
+            push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups };
         }
+
+        # Prepend the init wrapper
+        if ($emit_init) {
+            my $init_mf = $self->_build_fiber_init_mf;
+            unshift @result, $self->_emit_single_mf($init_mf);
+        }
+
         return \@result;
+    }
+
+    # Encode a single MachineFunction through allocation and encoding
+    method _emit_single_mf($mf) {
+        my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
+        my $int_res = $alloc->allocate( $mf, $platform, 0 );
+        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
+        my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
+        my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+        my %skip;
+        @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+        my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
+        my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
+        $alloc->remove_redundant_moves( $mf, \%assignment );
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
+        my %callee_seen;
+        @callee_seen{ $int_res->{used_callee}->@* } = ();
+        @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+        if ( $self->_has_fiber_ops_mf($mf) ) {
+            $callee_seen{ $platform->fiber_reg } = 1;
+        }
+        my @used_callee = sort keys %callee_seen;
+        my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        return { name => $mf->name, bytes => $bytes, fixups => $func_fixups };
+    }
+
+    # Check if a MachineFunction contains ctx_save or ctx_restore instructions
+    method _has_fiber_ops_mf($mf) {
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                return 1 if $inst->opcode eq 'ctx_save' || $inst->opcode eq 'ctx_restore';
+            }
+        }
+        return 0;
+    }
+
+    # Build the fiber init wrapper MIR function that sets up the main fiber's FCB.
+    # Calls _real_main normally; the standard epilogue (mov rsp,rbp; pop rbp; ret)
+    # correctly unwinds the frame after ctx_restore returns to this function.
+    method _build_fiber_init_mf() {
+        my $i64 = Brocken::Lindsay::IR::Type::i64();
+        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => 'main' );
+        my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
+
+        my $fcb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%init.fcb', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'alloca',
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 64, type => $i64 ) ],
+                comment  => 'main fiber FCB'
+            )
+        );
+
+        # Store self-pointer at FCB[16] (r12 slot)
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'store',
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 16 }, type => $i64 ),
+                    $fcb
+                ],
+                comment => 'FCB.self = FCB addr'
+            )
+        );
+
+        # mov r12, fcb
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r12' ),
+                    $fcb
+                ],
+                comment => 'init fiber register r12'
+            )
+        );
+
+        # call _real_main
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'call_func',
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => '_real_main' ) ],
+                comment  => 'call original main'
+            )
+        );
+
+        # ret - standard epilogue does mov rsp,rbp; pop rbp; ret
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'ret',
+                operands => [],
+                comment  => 'return to _start'
+            )
+        );
+
+        $mf->add_block($mbb);
+        $mf->compute_cfg;
+        return $mf;
     }
 
     # Encode MIR to x86_64 machine code bytes (registers pre-allocated)
@@ -562,7 +697,26 @@ class Brocken::Jenny::Codegen::X86_64 {
                 elsif ( $opcode eq 'ctx_save' ) {
                     my $ctx_r  = $resolve->($dst);
                     my $cid    = $reg_id->($ctx_r);
-                    my @callee = qw(rbx rbp r12 r13 r14 r15 rsp);
+                    my @callee = qw(rbx rbp r12 r13 r14 r15);
+                    my $rsp_t  = 11;  # r11 as temp for adjusted rsp
+                    # Compute adjusted RSP = current RSP + total_frame + 8.
+                    # After prologue: push rbp (8 bytes) + sub rsp, total_frame,
+                    # so return address is at rsp + total_frame + 8.
+                    my $adj = $total_frame + 8;
+                    if ($adj) {
+                        # lea r11, [rsp + adj]
+                        my $rex_l = 0x48 | 4;  # REX.W + REX.B for r11
+                        my $mod   = ( $adj >= -128 && $adj <= 127 ) ? 1 : 2;
+                        $mod = 1 if $adj == 0;
+                        my $modrm = ( $mod << 6 ) | ( ( $rsp_t & 7 ) << 3 ) | 4;
+                        $bytes .= pack( 'C', $rex_l ) . pack( 'CC', 0x8D, $modrm ) . pack( 'C', 0x24 );
+                        if ( $mod == 2 ) { $bytes .= pack( 'V', $adj ) }
+                        elsif ( $mod == 1 && $adj != 0 ) { $bytes .= pack( 'c', $adj ) }
+                    }
+                    else {
+                        # mov r11, rsp (for leaf functions with no frame)
+                        $bytes .= pack( 'CCC', 0x49, 0x89, 0xE3 );
+                    }
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg  = $callee[$off_idx];
                         my $rid  = $reg_id->($reg);
@@ -583,6 +737,18 @@ class Brocken::Jenny::Codegen::X86_64 {
                         if    ( $mod == 2 ) { $bytes .= pack( 'V', $disp ) }
                         elsif ( $mod == 1 ) { $bytes .= "\x00" }
                     }
+                    # Save adjusted RSP (r11) at FCB[rsp_offset]
+                    my $rsp_off = 48;
+                    my $rex_s   = 0x48 | ( $rsp_t >= 8 ? 0x04 : 0 ) | ( $cid >= 8 ? 0x01 : 0 );
+                    my $rm_s    = $cid & 7;
+                    my $mod_s   = $rsp_off ? 2 : 0;
+                    $mod_s = 1 if $mod_s == 0 && $rm_s == 5;
+                    my $modrm_s = ( $mod_s << 6 ) | ( ( $rsp_t & 7 ) << 3 ) | $rm_s;
+                    $bytes .= pack( 'C', $rex_s ) . pack( 'C', 0x89 );
+                    if ( $rm_s == 4 ) { $bytes .= pack( 'CC', $modrm_s, 0x24 ) }
+                    else { $bytes .= pack( 'C', $modrm_s ) }
+                    if    ( $mod_s == 2 ) { $bytes .= pack( 'V', $rsp_off ) }
+                    elsif ( $mod_s == 1 ) { $bytes .= "\x00" }
                 }
                 elsif ( $opcode eq 'ctx_restore' ) {
                     my $ctx_r  = $resolve->($dst);
@@ -623,6 +789,11 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $func_name = $dst->value;
                     push @func_fixups, { offset => $current_offset->(), type => 'call_rel32', target => $func_name };
                     $bytes .= pack( 'C', 0xE8 ) . "\x00\x00\x00\x00";
+                }
+                elsif ( $opcode eq 'jmp_func' ) {
+                    my $func_name = $dst->value;
+                    push @func_fixups, { offset => $current_offset->(), type => 'jmp_func_rel32', target => $func_name };
+                    $bytes .= pack( 'C', 0xE9 ) . "\x00\x00\x00\x00";
                 }
                 elsif ( $opcode eq 'ret' ) {
                     for my $i ( reverse 0 .. $#$used_callee ) {

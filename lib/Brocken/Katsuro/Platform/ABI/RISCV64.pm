@@ -25,6 +25,7 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform:
     method param_registers()    { [qw(a0 a1 a2 a3 a4 a5 a6 a7)] }
     method return_register()    {'a0'}
     method fp_return_register() {'v0'}
+    method fiber_reg()          {'s11'}
 
     # RISC-V ABI register mappings to x0-x31 (zero=0, ra=1, sp=2, etc.)
     method dwarf_reg_num($name) {

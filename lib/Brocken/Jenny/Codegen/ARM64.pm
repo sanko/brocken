@@ -98,16 +98,36 @@ class Brocken::Jenny::Codegen::ARM64 {
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+        if ( $self->_has_fiber_ops_mf($mf) ) {
+            $callee_seen{ $platform->fiber_reg } = 1;
+        }
         my @used_callee = sort keys %callee_seen;
         my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
         return $bytes;
     }
 
     method emit_functions($ir_funcs) {
-        my @result;
-        for my $func ( $ir_funcs->@* ) {
+        my @mfs;
+        my $has_fiber  = 0;
+        my $main_index = -1;
+        for my $i ( 0 .. $#$ir_funcs ) {
+            my $func = $ir_funcs->[$i];
             my $lowerer = Brocken::Jenny::Lowerer::ARM64->new();
             my $mf      = $lowerer->lower($func);
+            $has_fiber  ||= $self->_has_fiber_ops_mf($mf);
+            $main_index = $i if $func->name eq 'main';
+            push @mfs, $mf;
+        }
+
+        my $emit_init = $has_fiber && $main_index >= 0;
+
+        my @result;
+        for my $i ( 0 .. $#mfs ) {
+            my $mf    = $mfs[$i];
+            my $fname = $ir_funcs->[$i]->name;
+            if ( $emit_init && $i == $main_index ) {
+                $fname = '_real_main';
+            }
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
             my $int_res = $alloc->allocate( $mf, $platform, 0 );
             $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
@@ -124,11 +144,112 @@ class Brocken::Jenny::Codegen::ARM64 {
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+            if ( $self->_has_fiber_ops_mf($mf) ) {
+                $callee_seen{ $platform->fiber_reg } = 1;
+            }
             my @used_callee = sort keys %callee_seen;
             my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
-            push @result, { name => $func->name, bytes => $bytes, fixups => $func_fixups };
+            push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups };
         }
+
+        if ($emit_init) {
+            my $init_mf = $self->_build_fiber_init_mf;
+            unshift @result, $self->_emit_single_mf($init_mf);
+        }
+
         return \@result;
+    }
+
+    method _emit_single_mf($mf) {
+        my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
+        my $int_res = $alloc->allocate( $mf, $platform, 0 );
+        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
+        my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
+        my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+        my %skip;
+        @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+        my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
+        my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
+        $alloc->remove_redundant_moves( $mf, \%assignment );
+        my %callee_seen;
+        @callee_seen{ $int_res->{used_callee}->@* } = ();
+        @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+        if ( $self->_has_fiber_ops_mf($mf) ) {
+            $callee_seen{ $platform->fiber_reg } = 1;
+        }
+        my @used_callee = sort keys %callee_seen;
+        my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        return { name => $mf->name, bytes => $bytes, fixups => $func_fixups };
+    }
+
+    method _has_fiber_ops_mf($mf) {
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                return 1 if $inst->opcode eq 'ctx_save' || $inst->opcode eq 'ctx_restore';
+            }
+        }
+        return 0;
+    }
+
+    method _build_fiber_init_mf() {
+        my $i64 = Brocken::Lindsay::IR::Type::i64();
+        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => 'main' );
+        my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
+
+        my $fcb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%init.fcb', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'alloca',
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 112, type => $i64 ) ],
+                comment  => 'main fiber FCB'
+            )
+        );
+
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'store',
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 72 }, type => $i64 ),
+                    $fcb
+                ],
+                comment => 'FCB.self = FCB addr'
+            )
+        );
+
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x28' ),
+                    $fcb
+                ],
+                comment => 'init fiber register x28'
+            )
+        );
+
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'call_func',
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => '_real_main' ) ],
+                comment  => 'call original main'
+            )
+        );
+
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'ret',
+                operands => [],
+                comment  => 'return to _start'
+            )
+        );
+
+        $mf->add_block($mbb);
+        $mf->compute_cfg;
+        return $mf;
     }
 
     method _encode( $mf, $assignment, $used_callee ) {
@@ -167,8 +288,17 @@ class Brocken::Jenny::Codegen::ARM64 {
             return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: ${\$op->kind}";
         };
-        if ( $total_frame > 0 ) {
-            $bytes .= pack( 'V', SUB_SP | ( ( $total_frame & 0xFFF ) << 10 ) );
+                if ( $total_frame > 0 ) {
+            my $frame = $total_frame;
+            if ( $frame <= 0xFFF ) {
+                $bytes .= pack( 'V', SUB_SP | ( $frame << 10 ) );
+            }
+            else {
+                my $hi = $frame >> 12;
+                my $lo = $frame & 0xFFF;
+                $bytes .= pack( 'V', SUB_SP | ( $hi << 10 ) | ( 1 << 22 ) );
+                $bytes .= pack( 'V', SUB_SP | ( $lo << 10 ) ) if $lo;
+            }
             for my $i ( 0 .. $#to_save ) {
                 my $reg   = $to_save[$i];
                 my $rid   = $reg_id->($reg);
@@ -297,7 +427,23 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
-                    $bytes .= pack( 'V', MOV_SP | ( ( $alloca_frame & 0xFFF ) << 10 ) | $did );
+                    my $off   = $alloca_frame;
+                    if ( $off <= 0xFFF ) {
+                        $bytes .= pack( 'V', MOV_SP | ( $off << 10 ) | $did );
+                    }
+                    else {
+                        my $value  = $off;
+                        my $emitted = 0;
+                        for my $hw ( 0 .. 3 ) {
+                            my $chunk = ( $value >> ( $hw * 16 ) ) & 0xFFFF;
+                            if ( $chunk || !$emitted ) {
+                                my $base = $emitted ? MOVK_64 : MOVZ_64;
+                                $bytes .= pack( 'V', SF | $base | ( $chunk << 5 ) | ( $hw << 21 ) | $did );
+                                $emitted = 1;
+                            }
+                        }
+                        $bytes .= pack( 'V', ADD_X | ( $did << 16 ) | ( 31 << 5 ) | $did );
+                    }
                     $alloca_frame += $size;
                 }
                 elsif ( $opcode eq 'load' ) {
@@ -531,9 +677,20 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $cid    = $reg_id->($ctx_r);
                     my @callee = map {"x$_"} ( 19 .. 28 );
                     push @callee, 'x29', 'x30', 'sp';
+                    my $frame = $total_frame;
+                    if ( $frame <= 0xFFF ) {
+                        $bytes .= pack( 'V', 0x910003F1 | ( $frame << 10 ) );    # ADD X17, SP, #frame
+                    }
+                    else {
+                        my $hi = $frame >> 12;
+                        my $lo = $frame & 0xFFF;
+                        $bytes .= pack( 'V', 0x914003F1 | ( $hi << 10 ) );       # ADD X17, SP, #hi, LSL #12
+                        $bytes .= pack( 'V', 0x91000231 | ( $lo << 10 ) ) if $lo; # ADD X17, X17, #lo
+                    }
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg   = $callee[$off_idx];
                         my $rid   = $reg_id->($reg);
+                        $rid = 17 if $reg eq 'sp';        # use x17 (SP value) not XZR
                         my $imm12 = ( $off_idx * 8 ) >> 3;
                         $bytes .= pack( 'V', STR_64 | ( $imm12 << 10 ) | ( $cid << 5 ) | $rid );
                     }
@@ -546,9 +703,11 @@ class Brocken::Jenny::Codegen::ARM64 {
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg   = $callee[$off_idx];
                         my $rid   = $reg_id->($reg);
+                        $rid = 17 if $reg eq 'sp';        # load into x17, not XZR
                         my $imm12 = ( $off_idx * 8 ) >> 3;
                         $bytes .= pack( 'V', LDR_64 | ( $imm12 << 10 ) | ( $cid << 5 ) | $rid );
                     }
+                    $bytes .= pack( 'V', 0x9100023F );    # MOV SP, X17 (ADD SP, X17, #0)
                     $bytes .= pack( 'V', RET );
                 }
                 elsif ( $opcode eq 'lea_func' ) {
@@ -574,7 +733,16 @@ class Brocken::Jenny::Codegen::ARM64 {
                         }
                     }
                     if ( $total_frame > 0 ) {
-                        $bytes .= pack( 'V', ADD_SP | ( ( $total_frame & 0xFFF ) << 10 ) );
+                        my $frame = $total_frame;
+                        if ( $frame <= 0xFFF ) {
+                            $bytes .= pack( 'V', ADD_SP | ( $frame << 10 ) );
+                        }
+                        else {
+                            my $lo = $frame & 0xFFF;
+                            my $hi = $frame >> 12;
+                            $bytes .= pack( 'V', ADD_SP | ( $lo << 10 ) ) if $lo;
+                            $bytes .= pack( 'V', ADD_SP | ( $hi << 10 ) | ( 1 << 22 ) );
+                        }
                     }
                     $bytes .= pack( 'V', RET );
                 }
