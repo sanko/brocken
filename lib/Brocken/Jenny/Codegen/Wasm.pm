@@ -238,6 +238,20 @@ class Brocken::Jenny::Codegen::Wasm {
                     $$buf .= pack( 'C', 0x10 ) . "\x80\x80\x80\x80\x00";    # call + placeholder LEB128
                     push @func_fixups, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
                 }
+                elsif ( $opcode eq 'ctx_save' ) {
+
+                    # Wasm has no native register context; no-op
+                }
+                elsif ( $opcode eq 'ctx_restore' ) {
+
+                    # Wasm has no native register context; no-op
+                }
+                elsif ( $opcode eq 'lea_func' ) {
+                    my $func_name = $ops[1]->value;
+                    my $fixup_pos = length($$buf);
+                    $$buf .= pack( 'C', 0x10 ) . "\x80\x80\x80\x80\x00";    # call + placeholder LEB128
+                    push @func_fixups, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
+                }
             }
         }
 

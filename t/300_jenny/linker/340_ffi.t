@@ -5,6 +5,7 @@ use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
+use Brocken::Jenny::Codegen::ARM64::Inst;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 use Config;
@@ -65,8 +66,8 @@ else {
     }
 }
 if ( $? == 0 && defined $nm_out && $nm_out ne '' ) {
-    my $expected_sym = $platform->is_macos ? '_my_func' : 'my_func';
-    like $nm_out, qr/\b$expected_sym\b/, "Verified via 'nm' that '$expected_sym' is present in $lib_file";
+    my $expected_sym = 'my_func';
+    like $nm_out, qr/\b_?$expected_sym\b/, "Verified via 'nm' that '$expected_sym' is present in $lib_file";
 }
 else {
     note 'nm is not available or failed; skipping symbol table extraction check';
@@ -127,13 +128,23 @@ my $make_arm64_wrapper = sub {
     my $offset_dlsym     = $dlsym_rva - ( $main_rva + 36 );
     my $imm19_dlopen     = ( $offset_dlopen / 4 ) & 0x7FFFF;
     my $imm19_dlsym      = ( $offset_dlsym / 4 ) & 0x7FFFF;
-    my $adr_x0           = 0x10000000 | ( ( $disp_libpath & 3 ) << 29 ) | ( ( ( $disp_libpath >> 2 ) & 0x7FFFF ) << 5 ) | 0;
-    my $adr_x1           = 0x10000000 | ( ( $disp_funcname & 3 ) << 29 ) | ( ( ( $disp_funcname >> 2 ) & 0x7FFFF ) << 5 ) | 1;
-    my $ldr_dlopen       = 0x58000008 | ( $imm19_dlopen << 5 );
-    my $ldr_dlsym        = 0x58000008 | ( $imm19_dlsym << 5 );
-    my $code             = pack( 'V*',
-        0xA9BF7BFD, 0xF9000BE3, $adr_x0,    0xD2800041, $ldr_dlopen, 0xD63F0100, 0xAA0003F3, 0xAA1303E0,
-        $adr_x1,    $ldr_dlsym, 0xD63F0100, 0xD63F0000, 0xF9400BE3,  0xA8C27BFD, 0xD65F03C0, );
+    my $code             = pack(
+        'V*', stp_pre( X29, X30, SP, -16 ),    # save FP, LR
+        str_64( X3, SP, 16 ),                  # save X3
+        adr( X0, $disp_libpath ),              # X0 = lib path addr
+        movz_64( X1, 2 ),                      # X1 = RTLD_LAZY
+        ldr_lit_64( X8, $offset_dlopen ),      # X8 = dlopen function
+        blr(X8),                               # call dlopen
+        mov_64( X19, X0 ),                     # save handle in X19
+        mov_64( X0,  X19 ),                    # restore handle for dlsym
+        adr( X1, $disp_funcname ),             # X1 = func name addr
+        ldr_lit_64( X8, $offset_dlsym ),       # X8 = dlsym function
+        blr(X8),                               # call dlsym
+        blr(X0),                               # call resolved function
+        ldr_64( X3, SP, 16 ),                  # restore X3
+        ldp_post( X29, X30, SP, 16 ),          # restore FP, LR
+        ret(),                                 # return
+    );
     $code .= "\x00" while length($code) < 64;
     $code .= $lib_path . $func_name;
     return $code;

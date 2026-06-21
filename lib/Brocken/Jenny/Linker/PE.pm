@@ -6,6 +6,7 @@ use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
 
 class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
+    use Brocken::Jenny::Codegen::ARM64::Inst;
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
     field $ENABLE_COFF = 0;
 
@@ -66,8 +67,8 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
                 # - ldp x29, x30, [sp], #16
                 # - uxtb w0, w0  (truncate exit code to 8 bits)
                 # - ret
-                my $bl = 0x94000000 | ( ( ( 16 + ( $func_offsets{main} // 0 ) ) >> 2 ) & 0x3FFFFFF );
-                $entry_stub = pack( 'V6', 0xA9BF7BFD, 0x910003FD, $bl, 0xA8C17BFD, 0x53001C00, 0xD65F03C0 );
+                my $bl = bl( 16 + ( $func_offsets{main} // 0 ) );
+                $entry_stub = pack( 'V6', stp_pre( 29, 30, 31, -16 ), add_imm( 29, 31, 0 ), $bl, ldp_post( 29, 30, 31, 16 ), uxtb( 0, 0 ), ret(), );
             }
             else {
                 # Windows x86_64 Entry Stub (with shadow space):
@@ -114,6 +115,26 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
                 my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
                 $word = ( $word & 0x00000FFF ) | $enc;
                 substr( $text, $src_pos, 4, pack( 'V', $word ) );
+            }
+            elsif ( $ff->{type} eq 'adr' ) {
+                my $rel  = ( $entry_size + $target_off ) - $src_pos;
+                my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                my $rd   = $word & 0x1F;
+                my $lo   = $rel & 3;
+                my $hi   = ( $rel >> 2 ) & 0x7FFFF;
+                $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
+                substr( $text, $src_pos, 4, pack( 'V', $word ) );
+            }
+            elsif ( $ff->{type} eq 'auipc_pcrel' ) {
+                my $rel   = ( $entry_size + $target_off ) - $src_pos;
+                my $auipc = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                my $rd    = ( $auipc >> 7 ) & 0x1F;
+                my $hi    = ( ( $rel + 0x800 ) >> 12 ) & 0xFFFFF;
+                $auipc = ( $hi << 12 ) | ( $rd << 7 ) | 0x17;
+                substr( $text, $src_pos, 4, pack( 'V', $auipc ) );
+                my $lo   = $rel & 0xFFF;
+                my $addi = ( $lo << 20 ) | ( $rd << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13;
+                substr( $text, $src_pos + 4, 4, pack( 'V', $addi ) );
             }
         }
         my $text_bytes = $text;

@@ -2419,7 +2419,11 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             opcode   => 'alloca',
                             operands => [
                                 $stack,
-                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz, type => Brocken::Lindsay::IR::Type::i64() )
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $stack_sz,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
                             ],
                             comment => 'fiber stack'
                         )
@@ -2432,11 +2436,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'lea_func',
-                            operands => [
-                                $fptr,
-                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $callee->name )
-                            ],
-                            comment => 'load fiber entry addr'
+                            operands => [ $fptr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $callee->name ) ],
+                            comment  => 'load fiber entry addr'
                         )
                     );
                     my $stack_top = Brocken::Jenny::MIR::MachineOperand->new(
@@ -2448,7 +2449,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'store',
                             operands => [ $stack_top, $fptr ],
-                            comment => 'store entry on stack'
+                            comment  => 'store entry on stack'
                         )
                     );
                     my $ctx = Brocken::Jenny::MIR::MachineOperand->new(
@@ -2461,7 +2462,11 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             opcode   => 'alloca',
                             operands => [
                                 $ctx,
-                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ctx_sz, type => Brocken::Lindsay::IR::Type::i64() )
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $ctx_sz,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
                             ],
                             comment => 'fiber context'
                         )
@@ -2475,7 +2480,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
                             operands => [ $saved_rsp, $stack ],
-                            comment => 'saved_rsp = stack'
+                            comment  => 'saved_rsp = stack'
                         )
                     );
                     $mbb->add_instruction(
@@ -2483,7 +2488,11 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             opcode   => 'add',
                             operands => [
                                 $saved_rsp,
-                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz - 8, type => Brocken::Lindsay::IR::Type::i64() )
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $stack_sz - 8,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
                             ],
                             comment => 'saved_rsp += stack_sz - 8'
                         )
@@ -2497,7 +2506,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'store',
                             operands => [ $ctx_rsp_field, $saved_rsp ],
-                            comment => 'ctx.saved_rsp'
+                            comment  => 'ctx.saved_rsp'
                         )
                     );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
@@ -2505,7 +2514,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
                             operands => [ $dst, $ctx ],
-                            comment => 'fiber_create result = ctx'
+                            comment  => 'fiber_create result = ctx'
                         )
                     );
                 }
@@ -2527,25 +2536,21 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'ctx_save',
-                            operands => [$save_ctx],
-                            comment => 'save current ctx'
-                        )
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_save', operands => [$save_ctx], comment => 'save current ctx' )
                     );
                     my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
                             operands => [ $ret_reg, $self->_lower_opnd($val) ],
-                            comment => 'transfer value'
+                            comment  => 'transfer value'
                         )
                     );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'ctx_restore',
                             operands => [ $self->_lower_opnd($fiber) ],
-                            comment => 'restore target ctx'
+                            comment  => 'restore target ctx'
                         )
                     );
                     if ( defined $inst->name ) {
@@ -2554,13 +2559,13 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'mov',
                                 operands => [ $dst, $ret_reg ],
-                                comment => 'transfer result'
+                                comment  => 'transfer result'
                             )
                         );
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberYield') ) {
-                    my ($val)    = $inst->operands->@*;
+                    my ($val) = $inst->operands->@*;
                     my $save_ctx = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'virt_reg',
                         value => $inst->name . '.save',
@@ -2577,18 +2582,14 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'ctx_save',
-                            operands => [$save_ctx],
-                            comment => 'save current ctx'
-                        )
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_save', operands => [$save_ctx], comment => 'save current ctx' )
                     );
                     my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
                             operands => [ $ret_reg, $self->_lower_opnd($val) ],
-                            comment => 'yield value'
+                            comment  => 'yield value'
                         )
                     );
                     my $restore_ctx = Brocken::Jenny::MIR::MachineOperand->new(
@@ -2610,16 +2611,17 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'ctx_restore',
                             operands => [$restore_ctx],
-                            comment => 'restore parent ctx'
+                            comment  => 'restore parent ctx'
                         )
                     );
+
                     if ( defined $inst->name ) {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'mov',
                                 operands => [ $dst, $ret_reg ],
-                                comment => 'yield result'
+                                comment  => 'yield result'
                             )
                         );
                     }
@@ -2630,7 +2632,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
                             operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $inst->type ) ],
-                            comment => 'fiber_id = 0'
+                            comment  => 'fiber_id = 0'
                         )
                     );
                 }

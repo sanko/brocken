@@ -526,6 +526,38 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $base  = $bits == 32 ? FCMP_32          : FCMP_64;
                     $bytes .= pack( 'V', $base | ( $rid << 16 ) | ( $lid << 5 ) );
                 }
+                elsif ( $opcode eq 'ctx_save' ) {
+                    my $ctx_r  = $resolve->($dst);
+                    my $cid    = $reg_id->($ctx_r);
+                    my @callee = map {"x$_"} ( 19 .. 28 );
+                    push @callee, 'x29', 'x30', 'sp';
+                    for my $off_idx ( 0 .. $#callee ) {
+                        my $reg   = $callee[$off_idx];
+                        my $rid   = $reg_id->($reg);
+                        my $imm12 = ( $off_idx * 8 ) >> 3;
+                        $bytes .= pack( 'V', STR_64 | ( $imm12 << 10 ) | ( $cid << 5 ) | $rid );
+                    }
+                }
+                elsif ( $opcode eq 'ctx_restore' ) {
+                    my $ctx_r  = $resolve->($dst);
+                    my $cid    = $reg_id->($ctx_r);
+                    my @callee = map {"x$_"} ( 19 .. 28 );
+                    push @callee, 'x29', 'x30', 'sp';
+                    for my $off_idx ( 0 .. $#callee ) {
+                        my $reg   = $callee[$off_idx];
+                        my $rid   = $reg_id->($reg);
+                        my $imm12 = ( $off_idx * 8 ) >> 3;
+                        $bytes .= pack( 'V', LDR_64 | ( $imm12 << 10 ) | ( $cid << 5 ) | $rid );
+                    }
+                    $bytes .= pack( 'V', RET );
+                }
+                elsif ( $opcode eq 'lea_func' ) {
+                    my $dst_r     = $resolve->($dst);
+                    my $did       = $reg_id->($dst_r);
+                    my $func_name = $src->value;
+                    push @func_fixups, { offset => $current_offset->(), type => 'adr', target => $func_name, rd => $did };
+                    $bytes .= pack( 'V', 0x10000000 | $did );
+                }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $dst->value;
                     push @func_fixups, { offset => $current_offset->(), type => 'call_bl', target => $func_name };

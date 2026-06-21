@@ -2262,6 +2262,235 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     }
                     $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => '' ) );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
+                    my $callee   = $inst->callee;
+                    my $stack_sz = 64 * 1024;
+                    my $ctx_sz   = 112;
+                    my $stack    = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'virt_reg',
+                        value => $inst->name . '.stk',
+                        type  => Brocken::Lindsay::IR::Type::ptr()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [
+                                $stack,
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $stack_sz,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
+                            ],
+                            comment => 'fiber stack'
+                        )
+                    );
+                    my $fptr = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'virt_reg',
+                        value => $inst->name . '.fptr',
+                        type  => Brocken::Lindsay::IR::Type::ptr()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'lea_func',
+                            operands => [ $fptr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $callee->name ) ],
+                            comment  => 'load fiber entry addr'
+                        )
+                    );
+                    my $stack_top = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'mem',
+                        value => { base => $inst->name . '.stk', disp => $stack_sz - 8 },
+                        type  => Brocken::Lindsay::IR::Type::i64()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [ $stack_top, $fptr ],
+                            comment  => 'store entry on stack'
+                        )
+                    );
+                    my $ctx = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'virt_reg',
+                        value => $inst->name . '.ctx',
+                        type  => Brocken::Lindsay::IR::Type::ptr()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [
+                                $ctx,
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $ctx_sz,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
+                            ],
+                            comment => 'fiber context'
+                        )
+                    );
+                    my $saved_sp = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'virt_reg',
+                        value => $inst->name . '.sp',
+                        type  => Brocken::Lindsay::IR::Type::i64()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $saved_sp, $stack ],
+                            comment  => 'saved_sp = stack'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'add',
+                            operands => [
+                                $saved_sp,
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $stack_sz - 8,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
+                            ],
+                            comment => 'saved_sp += stack_sz - 8'
+                        )
+                    );
+                    my $ctx_sp_field = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'mem',
+                        value => { base => $inst->name . '.ctx', disp => 104 },
+                        type  => Brocken::Lindsay::IR::Type::i64()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [ $ctx_sp_field, $saved_sp ],
+                            comment  => 'ctx.saved_sp'
+                        )
+                    );
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, $ctx ],
+                            comment  => 'fiber_create result = ctx'
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberTransfer') ) {
+                    my ( $fiber, $val ) = $inst->operands->@*;
+                    my $save_ctx = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'virt_reg',
+                        value => $inst->name . '.save',
+                        type  => Brocken::Lindsay::IR::Type::ptr()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [
+                                $save_ctx,
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 112, type => Brocken::Lindsay::IR::Type::i64() )
+                            ],
+                            comment => 'transfer save ctx'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_save', operands => [$save_ctx], comment => 'save current ctx' )
+                    );
+                    my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mv',
+                            operands => [ $ret_reg, $self->_lower_opnd($val) ],
+                            comment  => 'transfer value'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'ctx_restore',
+                            operands => [ $self->_lower_opnd($fiber) ],
+                            comment  => 'restore target ctx'
+                        )
+                    );
+                    if ( defined $inst->name ) {
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mv',
+                                operands => [ $dst, $ret_reg ],
+                                comment  => 'transfer result'
+                            )
+                        );
+                    }
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberYield') ) {
+                    my ($val) = $inst->operands->@*;
+                    my $save_ctx = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'virt_reg',
+                        value => $inst->name . '.save',
+                        type  => Brocken::Lindsay::IR::Type::ptr()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [
+                                $save_ctx,
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 112, type => Brocken::Lindsay::IR::Type::i64() )
+                            ],
+                            comment => 'yield save ctx'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_save', operands => [$save_ctx], comment => 'save current ctx' )
+                    );
+                    my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mv',
+                            operands => [ $ret_reg, $self->_lower_opnd($val) ],
+                            comment  => 'yield value'
+                        )
+                    );
+                    my $restore_ctx = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'virt_reg',
+                        value => $inst->name . '.rest',
+                        type  => Brocken::Lindsay::IR::Type::ptr()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [
+                                $restore_ctx,
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 112, type => Brocken::Lindsay::IR::Type::i64() )
+                            ],
+                            comment => 'yield restore ctx'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'ctx_restore',
+                            operands => [$restore_ctx],
+                            comment  => 'restore parent ctx'
+                        )
+                    );
+
+                    if ( defined $inst->name ) {
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $dst, $ret_reg ], comment => 'yield result' )
+                        );
+                    }
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberId') ) {
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mv',
+                            operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $inst->type ) ],
+                            comment  => 'fiber_id = 0'
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberPin') ) {
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FrameAddr') ) {
                     my $dst    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     my $fp_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $self->_abi->frame_reg );
