@@ -7,6 +7,7 @@ package Test2::Tools::Brocken v0.0.1 {
 
     sub run_exec ( $file, %args ) {
         croak "run_exec: file '$file' not found" unless -e $file;
+        my $TIMEOUT  = 30;
         my $expected = $args{expected_exit};
         my $name     = $args{name} // "Run $file";
         my $platform = $args{platform};
@@ -19,7 +20,11 @@ package Test2::Tools::Brocken v0.0.1 {
 
         if ($do_gdb) {
             my @gdb_cmd = ( 'gdb', '-batch', '-nx', '-ex', 'run', '-ex', 'quit', '--args', $cmd, @$argv );
-            my $gdb_out = `@gdb_cmd 2>&1`;
+            my $gdb_out;
+            if ( open my $fh, '-|', @gdb_cmd ) {
+                $gdb_out = do { local $/; <$fh> };
+                close $fh;
+            }
             $actual = $? >> 8;
             if ( $gdb_out =~ /Inferior.*exited with code (\d+)\]/ ) {
                 $actual = oct($1);
@@ -30,8 +35,19 @@ package Test2::Tools::Brocken v0.0.1 {
             $ctx->diag("GDB output for $name:\n$gdb_out") if length $gdb_out;
         }
         else {
-            system( $cmd, @$argv );
-            $actual = $? >> 8;
+            eval {
+                local $SIG{ALRM} = sub { die "timeout\n" };
+                alarm $TIMEOUT;
+                system( $cmd, @$argv );
+                alarm 0;
+            };
+            if ( $@ && $@ eq "timeout\n" ) {
+                $ctx->diag("run_exec timed out for $name");
+                $actual = -1;
+            }
+            else {
+                $actual = $? >> 8;
+            }
         }
         my $mismatch = defined $expected && $actual != $expected;
         if ($mismatch) {

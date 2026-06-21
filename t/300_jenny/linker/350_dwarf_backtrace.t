@@ -63,11 +63,7 @@ subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
         $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
         $linker  = Brocken::Jenny::Linker::PE->new();
     }
-    elsif ( $host->is_arm64 && $host->is_linux ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-    }
-    elsif ( $host->is_arm64 && ( $host->is_freebsd || $host->is_netbsd || $host->is_openbsd ) ) {
+    elsif ( $host->is_arm64 && ( $host->is_bsd || $host->is_linux ) ) {
         $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
         $linker  = Brocken::Jenny::Linker::ELF64->new();
     }

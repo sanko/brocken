@@ -51,7 +51,19 @@ else {
 ok -e $lib_file, 'Shared library compiled at ' . $lib_file;
 
 # nm check
-my $nm_out = $^O eq 'MSWin32' ? `objdump -p $lib_file` : `nm "$lib_file"`;
+my $nm_out;
+if ( $^O eq 'MSWin32' ) {
+    if ( open my $fh, '-|', 'objdump', '-p', $lib_file ) {
+        $nm_out = do { local $/; <$fh> };
+        close $fh;
+    }
+}
+else {
+    if ( open my $fh, '-|', 'nm', $lib_file ) {
+        $nm_out = do { local $/; <$fh> };
+        close $fh;
+    }
+}
 if ( $? == 0 && defined $nm_out && $nm_out ne '' ) {
     my $expected_sym = $platform->is_macos ? '_my_func' : 'my_func';
     like $nm_out, qr/\b$expected_sym\b/, "Verified via 'nm' that '$expected_sym' is present in $lib_file";
@@ -204,7 +216,7 @@ SKIP: {
         seek( $fh, $text_off + $entry_stub_len, 0 );
         print $fh $wrapper_bytes;
         close $fh;
-        system("codesign -f -s - \"$wrapper_file\" 2>/dev/null") if $platform->is_macos;
+        system( 'codesign', '-f', '-s', '-', $wrapper_file ) if $platform->is_macos;
         ok -e $wrapper_file, 'POSIX wrapper compiled at ' . $wrapper_file;
         ok -x $wrapper_file, 'POSIX wrapper has execution permissions';
         local $ENV{LD_LIBRARY_PATH}   = join( ':', '.', $ENV{LD_LIBRARY_PATH}   // () );

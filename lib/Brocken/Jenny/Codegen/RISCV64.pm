@@ -165,6 +165,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 my $store_op = $reg =~ /^f/ ? FSTORE : STORE;
                 $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | $store_op );
             }
+
             # Set s0 to point to saved s0 (frame pointer for backtrace)
             my $fp_idx = 0;
             for my $i ( 0 .. $#to_save ) {

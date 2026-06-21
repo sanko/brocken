@@ -22,11 +22,12 @@ class Brocken::Katsuro::Platform {
 
     # Hide stderr appropriately for the host OS shell.
     # This is critical for feature detection where commands might fail.
-    sub get_cmd_output($cmd) {
-        my $redirect = ( $^O =~ /MSWin32/i ) ? '2> NUL' : '2> /dev/null';
-        my $output   = `$cmd $redirect`;
-
-        # If the command succeeded and returned text
+    sub get_cmd_output(@cmd) {
+        my $output;
+        if ( open my $fh, '-|', @cmd ) {
+            $output = do { local $/; <$fh> };
+            close $fh;
+        }
         if ( $? == 0 && defined $output && $output !~ /^\s*$/ ) {
             chomp $output;
             return $output;
@@ -76,14 +77,14 @@ class Brocken::Katsuro::Platform {
         return $cached_host_triple if defined $cached_host_triple;
 
         # Try clang first as it provides the most modern triple format
-        my $clang_out = get_cmd_output('clang --print-target-triple');
+        my $clang_out = get_cmd_output( 'clang', '--print-target-triple' );
         if ($clang_out) {
             if ( $^O eq 'midnightbsd' ) { $clang_out =~ s/\bfreebsd[^-]*/midnightbsd/gi }
             return $cached_host_triple = normalize_triple($clang_out);
         }
 
         # Fallback to gcc machine dump
-        my $gcc_out = get_cmd_output('gcc -dumpmachine');
+        my $gcc_out = get_cmd_output( 'gcc', '-dumpmachine' );
         if ($gcc_out) {
             if ( $^O eq 'midnightbsd' ) { $gcc_out =~ s/\bfreebsd[^-]*/midnightbsd/gi }
             return $cached_host_triple = normalize_triple($gcc_out);
@@ -113,9 +114,13 @@ class Brocken::Katsuro::Platform {
                 $vendor = 'pc';
                 $os     = 'linux';
                 $env    = 'gnu';
-                my $ldd_output = `ldd --version 2>/dev/null` || '';
+                my $ldd_output = '';
+                if ( open my $fh, '-|', 'ldd', '--version' ) {
+                    $ldd_output = do { local $/; <$fh> };
+                    close $fh;
+                }
                 $env = 'musl'      if -f '/etc/alpine-release' || $ldd_output =~ /musl/i;
-                $env = 'gnueabihf' if $arch =~ /^arm/;
+                $env = 'gnueabihf' if $arch                                   =~ /^arm/;
             }
             elsif ( $^O eq 'darwin' )                 { $vendor = 'apple';   $os = 'darwin';      $env = 'macho' }
             elsif ( $^O eq 'haiku' )                  { $vendor = 'pc';      $os = 'haiku';       $env = 'elf' }
