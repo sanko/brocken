@@ -2265,7 +2265,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
                     my $callee   = $inst->callee;
                     my $stack_sz = 64 * 1024;
-                    my $fcb_sz   = 120;
+                    my $fcb_sz   = 128;     # +8 for resume_pc at offset 120
                     my $stack    = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'virt_reg',
                         value => $inst->name . '.stk',
@@ -2366,6 +2366,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             comment  => 'FCB.saved_sp'
                         )
                     );
+                    # Zero out ra so entry fn crashes cleanly instead of infinite loop
                     my $fcb_ra_field = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
                         value => { base => $inst->name . '.fcb', disp => 96 },
@@ -2373,9 +2374,23 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store_imm',
+                            operands => [ $fcb_ra_field, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => Brocken::Lindsay::IR::Type::i64() ) ],
+                            comment  => 'FCB.ra = 0 (crash on ret)'
+                        )
+                    );
+
+                    # Store entry function address in FCB.resume_pc (offset 120)
+                    my $fcb_resume_field = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'mem',
+                        value => { base => $inst->name . '.fcb', disp => 120 },
+                        type  => Brocken::Lindsay::IR::Type::i64()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'store',
-                            operands => [ $fcb_ra_field, $fptr ],
-                            comment  => 'FCB.ra = entry addr'
+                            operands => [ $fcb_resume_field, $fptr ],
+                            comment  => 'FCB.resume_pc = entry addr'
                         )
                     );
                     my $fcb_self_field = Brocken::Jenny::MIR::MachineOperand->new(
@@ -2415,10 +2430,6 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberTransfer') ) {
                     my ( $fiber, $val ) = $inst->operands->@*;
                     my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 's11' );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_save', operands => [$fiber_reg],
-                            comment => 'save to current FCB via s11' )
-                    );
                     my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2427,16 +2438,13 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             comment  => 'transfer value'
                         )
                     );
+
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'mv',
+                            opcode   => 'ctx_swap',
                             operands => [ $fiber_reg, $self->_lower_opnd($fiber) ],
-                            comment  => 's11 = target FCB'
+                            comment  => 'swap to target FCB'
                         )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_restore', operands => [$fiber_reg],
-                            comment => 'restore target ctx' )
                     );
                     if ( defined $inst->name ) {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
@@ -2453,10 +2461,6 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     my ($val) = $inst->operands->@*;
                     my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 's11' );
                     my $ptr       = Brocken::Lindsay::IR::Type::ptr();
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_save', operands => [$fiber_reg],
-                            comment => 'save to current FCB via s11' )
-                    );
                     my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a0' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2484,16 +2488,13 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             comment => 'load parent FCB from current FCB'
                         )
                     );
+
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'mv',
+                            opcode   => 'ctx_swap',
                             operands => [ $fiber_reg, $parent_tmp ],
-                            comment  => 's11 = parent FCB'
+                            comment  => 'swap to parent FCB'
                         )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ctx_restore', operands => [$fiber_reg],
-                            comment => 'restore parent ctx' )
                     );
 
                     if ( defined $inst->name ) {

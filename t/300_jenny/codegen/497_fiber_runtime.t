@@ -31,8 +31,8 @@ subtest 'fiber yield passes value to main exit code' => sub {
         $mb->position_at_end( $main->append_block('entry') );
         my $fcb     = $mb->build_fiber_create( $worker, [], '%fcb' );
         my $send    = Brocken::Lindsay::IR::Constant->new( type => $i64, value => 42 );
-        $mb->build_fiber_transfer( $fcb, $send, '%recv' );
-        $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
+        my $recv    = $mb->build_fiber_transfer( $fcb, $send, '%recv' );
+        $mb->build_ret($recv);
 
         # Compile with fiber init wrapper support
         my $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
@@ -53,7 +53,7 @@ subtest 'fiber yield passes value to main exit code' => sub {
         my $cmd = $platform->is_windows ? $output_file : "./$output_file";
         system {$cmd} $cmd;
         my $exit_code = $? >> 8;
-        is( $exit_code, 99, 'Fiber test exited with 99' );
+        is( $exit_code, 99, 'Fiber test exited with 99 (yield value propagated)' );
 
         unlink $output_file;
     }
