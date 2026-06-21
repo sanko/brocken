@@ -309,16 +309,15 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my $t_sec         = $self->layout->get('.text');
         my @data_sections = grep { $_->{name} eq '.data' || $_->{name} eq '.got' } $self->layout->sections;
         my $t_vmsize      = 0;
-        for my $s (@text_sections) { $t_vmsize += $s->{size}; }
+        for my $s (@text_sections) { my $end = $s->{off} + $s->{size}; $t_vmsize = $end if $end > $t_vmsize; }
         my $t_seg_size = ( $t_vmsize + $page_size - 1 ) & ~( $page_size - 1 );
         my ( $d_start_rva, $d_start_off, $d_size, $d_seg_size );
 
         if (@data_sections) {
             $d_start_rva = $data_sections[0]->{rva};
             $d_start_off = $data_sections[0]->{off};
-            $d_size      = 0;
-            for (@data_sections) { $d_size += $_->{size}; }
-            $d_seg_size = ( $d_size + $page_size - 1 ) & ~( $page_size - 1 );
+            $d_size      = ( $data_sections[-1]->{off} + $data_sections[-1]->{size} ) - $d_start_off;
+            $d_seg_size  = ( $d_size + $page_size - 1 ) & ~( $page_size - 1 );
         }
 
         # Load command constants:
@@ -403,8 +402,8 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             my $cmdsize      = 72 + 80 * scalar(@debug_sections);
             my $dw_start_rva = $debug_sections[0]->{rva};
             my $dw_start_off = $debug_sections[0]->{off};
-            my $dw_size      = 0;
-            for (@debug_sections) { $dw_size += $_->{size}; }
+            my $dw_size
+                = ( $debug_sections[-1]->{off} + $debug_sections[-1]->{size} ) - $dw_start_off;
             my $dw_size_aligned = ( $dw_size + $page_size - 1 ) & ~( $page_size - 1 );
             my $dw_cmd          = pack( 'L<2 a16 Q<4 L<4',
                 0x19, $cmdsize, '__DWARF', $base + $dw_start_rva,
