@@ -29,7 +29,7 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] **Spill slot offsets**  relative to `$stack_reg` (RSP/SP), correct.
 - [x] **RISCV64 prologue/epilogue**  integrates allocator's `used_callee` list; saves/restores int + FP registers.
 - [x] **ARM64 leaf detection**  skips `x30` save/restore for leaf funcs.
-- [ ] **Leaf function optimization**  partial on ARM64/RISCV64 (only link reg), missing on X86_64. Should skip all callee-save save/restore for leaf functions.
+- [x] **Leaf function optimization**  X86_64 now skips all prologue/epilogue for leaf functions without a frame (no calls, no callee saves, no spills, no alloca). Shadow space only allocated on Windows for non-leaf functions.
 - [x] **Caller-save register handling**  `insert_caller_save_code` called in all 3 native codegen pipelines, skipping return registers (`rax`/`xmm0`, `x0`/`v0`, `a0`/`fa0`).
 - [x] **Move coalescing**  `remove_redundant_moves` called in all 3 native codegen pipelines, eliminates `mov` where src/dst map to the same physical register.
 - [ ] **Floating-point callee-save on X86_64**  SysV ABI marks all XMM as caller-saved; codegen only uses `PUSH` (GP-only). Would need `MOVUPS`/`MOVDQA` stack save/restore for non-SysV ABI variants.
