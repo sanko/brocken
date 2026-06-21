@@ -236,6 +236,7 @@ class Brocken::Jenny::Codegen::X86_64 {
 
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
+                $is_leaf = 0 if $inst->opcode eq 'call_func';
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
@@ -243,22 +244,27 @@ class Brocken::Jenny::Codegen::X86_64 {
             }
         }
 
-        # X86_64 Standard Frame Pointer Prologue
-        $bytes .= pack( 'C', PUSH_BASE + 5 );         # push rbp
-        $bytes .= pack( 'CCC', 0x48, 0x89, 0xE5 );    # mov rbp, rsp
-
-        #
-        my $shadow_space = $platform->is_windows ? 32 : 0;
+        my $shadow_space = ( $platform->is_windows && !$is_leaf ) ? 32 : 0;
         my $total_frame  = ( $callee_size + $spill_frame + $shadow_space + $total_alloca + 15 ) & ~15;
-        if ( $total_frame > 0 ) {
-            $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $total_frame );    # sub rsp, total_frame
+        my $needs_frame  = $total_frame > 0 || $used_callee->@* > 0 || $total_alloca > 0;
+
+        if ( $is_leaf && !$needs_frame ) {
+            # Leaf function with no frame: skip all prologue bytes
         }
-        for my $i ( 0 .. $#$used_callee ) {
-            my $reg = $used_callee->[$i];
-            my $rid = $reg_id->($reg);
-            my $off = $total_frame - $shadow_space - ( $i * 8 ) - 8;
-            my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
-            $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x89, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
+        else {
+            # X86_64 Standard Frame Pointer Prologue
+            $bytes .= pack( 'C', PUSH_BASE + 5 );         # push rbp
+            $bytes .= pack( 'CCC', 0x48, 0x89, 0xE5 );    # mov rbp, rsp
+            if ( $total_frame > 0 ) {
+                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $total_frame );    # sub rsp, total_frame
+            }
+            for my $i ( 0 .. $#$used_callee ) {
+                my $reg = $used_callee->[$i];
+                my $rid = $reg_id->($reg);
+                my $off = $total_frame - $shadow_space - ( $i * 8 ) - 8;
+                my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
+                $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x89, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
+            }
         }
         my $resolve = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
@@ -796,16 +802,21 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'C', 0xE9 ) . "\x00\x00\x00\x00";
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    for my $i ( reverse 0 .. $#$used_callee ) {
-                        my $reg = $used_callee->[$i];
-                        my $rid = $reg_id->($reg);
-                        my $off = $total_frame - $shadow_space - ( $i * 8 ) - 8;
-                        my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
-                        $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x8B, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
+                    if ( $is_leaf && !$needs_frame ) {
+                        $bytes .= pack( 'C', RET_BYTE );
                     }
-                    $bytes .= pack( 'CCC', 0x48, 0x89, 0xEC );    # mov rsp, rbp
-                    $bytes .= pack( 'C',   POP_BASE + 5 );        # pop rbp
-                    $bytes .= pack( 'C',   RET_BYTE );
+                    else {
+                        for my $i ( reverse 0 .. $#$used_callee ) {
+                            my $reg = $used_callee->[$i];
+                            my $rid = $reg_id->($reg);
+                            my $off = $total_frame - $shadow_space - ( $i * 8 ) - 8;
+                            my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
+                            $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x8B, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
+                        }
+                        $bytes .= pack( 'CCC', 0x48, 0x89, 0xEC );    # mov rsp, rbp
+                        $bytes .= pack( 'C',   POP_BASE + 5 );        # pop rbp
+                        $bytes .= pack( 'C',   RET_BYTE );
+                    }
                 }
             }
         }
