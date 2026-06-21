@@ -156,8 +156,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         my @caller_regs = $is_float ? $platform->fp_registers('caller')->@* : $platform->registers('caller')->@*;
         my @callee_regs = $is_float ? $platform->fp_registers('callee')->@* : $platform->registers('callee')->@*;
         my $skip_reg    = $is_float ? $platform->fp_return_register         : $platform->return_register;
+        my $fiber_reg   = $is_float ? undef                                  : $platform->fiber_reg;
         @caller_regs = grep { $_ ne $skip_reg } @caller_regs;
         @callee_regs = grep { $_ ne $skip_reg } @callee_regs;
+        @caller_regs = grep { $_ ne $fiber_reg } @caller_regs if $fiber_reg;
+        @callee_regs = grep { $_ ne $fiber_reg } @callee_regs if $fiber_reg;
         my $spill_temp = pop @caller_regs;
         my @regs       = ( @caller_regs, @callee_regs );
         my %assignment;

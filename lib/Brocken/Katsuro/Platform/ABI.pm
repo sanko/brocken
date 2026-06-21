@@ -21,6 +21,7 @@ class Brocken::Katsuro::Platform::ABI {
     method param_registers()                       { [] }
     method return_register()                       {undef}
     method fp_return_register()                    {undef}
+    method fiber_reg()                             {undef}
 }
 
 =head1 NAME

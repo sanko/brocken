@@ -49,16 +49,36 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+        if ( $self->_has_fiber_ops_mf($mf) ) {
+            $callee_seen{ $platform->fiber_reg } = 1;
+        }
         my @used_callee = sort keys %callee_seen;
         my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
         return $bytes;
     }
 
     method emit_functions($ir_funcs) {
-        my @result;
-        for my $func ( $ir_funcs->@* ) {
+        my @mfs;
+        my $has_fiber  = 0;
+        my $main_index = -1;
+        for my $i ( 0 .. $#$ir_funcs ) {
+            my $func = $ir_funcs->[$i];
             my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
             my $mf      = $lowerer->lower($func);
+            $has_fiber  ||= $self->_has_fiber_ops_mf($mf);
+            $main_index = $i if $func->name eq 'main';
+            push @mfs, $mf;
+        }
+
+        my $emit_init = $has_fiber && $main_index >= 0;
+
+        my @result;
+        for my $i ( 0 .. $#mfs ) {
+            my $mf    = $mfs[$i];
+            my $fname = $ir_funcs->[$i]->name;
+            if ( $emit_init && $i == $main_index ) {
+                $fname = '_real_main';
+            }
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
             my $int_res = $alloc->allocate( $mf, $platform, 0 );
             $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
@@ -75,11 +95,112 @@ class Brocken::Jenny::Codegen::RISCV64 {
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+            if ( $self->_has_fiber_ops_mf($mf) ) {
+                $callee_seen{ $platform->fiber_reg } = 1;
+            }
             my @used_callee = sort keys %callee_seen;
             my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
-            push @result, { name => $func->name, bytes => $bytes, fixups => $func_fixups };
+            push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups };
         }
+
+        if ($emit_init) {
+            my $init_mf = $self->_build_fiber_init_mf;
+            unshift @result, $self->_emit_single_mf($init_mf);
+        }
+
         return \@result;
+    }
+
+    method _emit_single_mf($mf) {
+        my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
+        my $int_res = $alloc->allocate( $mf, $platform, 0 );
+        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0 );
+        my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1 );
+        my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
+        my %skip;
+        @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+        my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
+        my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
+        $alloc->remove_redundant_moves( $mf, \%assignment );
+        my %callee_seen;
+        @callee_seen{ $int_res->{used_callee}->@* } = ();
+        @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+        if ( $self->_has_fiber_ops_mf($mf) ) {
+            $callee_seen{ $platform->fiber_reg } = 1;
+        }
+        my @used_callee = sort keys %callee_seen;
+        my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        return { name => $mf->name, bytes => $bytes, fixups => $func_fixups };
+    }
+
+    method _has_fiber_ops_mf($mf) {
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                return 1 if $inst->opcode eq 'ctx_save' || $inst->opcode eq 'ctx_restore';
+            }
+        }
+        return 0;
+    }
+
+    method _build_fiber_init_mf() {
+        my $i64 = Brocken::Lindsay::IR::Type::i64();
+        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => 'main' );
+        my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
+
+        my $fcb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%init.fcb', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'alloca',
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 120, type => $i64 ) ],
+                comment  => 'main fiber FCB'
+            )
+        );
+
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'store',
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 88 }, type => $i64 ),
+                    $fcb
+                ],
+                comment => 'FCB.self = FCB addr'
+            )
+        );
+
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mv',
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 's11' ),
+                    $fcb
+                ],
+                comment => 'init fiber register s11'
+            )
+        );
+
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'call_func',
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => '_real_main' ) ],
+                comment  => 'call original main'
+            )
+        );
+
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'ret',
+                operands => [],
+                comment  => 'return to _start'
+            )
+        );
+
+        $mf->add_block($mbb);
+        $mf->compute_cfg;
+        return $mf;
     }
 
     method _encode( $mf, $assignment, $used_callee ) {
@@ -154,8 +275,18 @@ class Brocken::Jenny::Codegen::RISCV64 {
             die "Unexpected operand kind: ${\$op->kind}";
         };
         if ( $total_frame > 0 ) {
-            my $neg = ( -$total_frame ) & 0xFFF;
-            $bytes .= pack( 'V', ( $neg << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+            my $tf = $total_frame;
+            if ( $tf <= 2047 ) {
+                my $neg = ( -$tf ) & 0xFFF;
+                $bytes .= pack( 'V', ( $neg << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+            }
+            else {
+                my $hi = ( $tf + 0x800 ) >> 12;
+                my $lo = $tf & 0xFFF;
+                $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
+                $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
+                $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );
+            }
             for my $i ( 0 .. $#to_save ) {
                 my $reg      = $to_save[$i];
                 my $rid      = $reg_id->($reg);
@@ -306,9 +437,18 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 elsif ( $opcode eq 'alloca' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
+                    my $off   = $alloca_frame;
 
-                    # addi xd, sp, alloca_frame
-                    $bytes .= pack( 'V', ( ( $alloca_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    if ( $off <= 2047 ) {
+                        $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    }
+                    else {
+                        my $hi = ( $off + 0x800 ) >> 12;
+                        my $lo = $off & 0xFFF;
+                        $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( $did << 7 ) | LUI );
+                        $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM ) if $lo;
+                        $bytes .= pack( 'V', ( 0x00 << 25 ) | ( $did << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP );
+                    }
 
                     # alloca_frame tracks where the next alloca starts (grows forward from stack top)
                     $alloca_frame += $src->value;
@@ -549,14 +689,27 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 elsif ( $opcode eq 'ctx_save' ) {
                     my $ctx_r  = $resolve->($dst);
                     my $cid    = $reg_id->($ctx_r);
+                    my $adj_tmp = 28;  # t3
                     my @callee = qw(s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 ra sp);
+                    my $tf = $total_frame;
+                    if ( $tf <= 2047 ) {
+                        $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $adj_tmp << 7 ) | OP_IMM );
+                    }
+                    else {
+                        my $hi = ( $tf + 0x800 ) >> 12;
+                        my $lo = $tf & 0xFFF;
+                        $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( $adj_tmp << 7 ) | LUI );
+                        $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( $adj_tmp << 15 ) | ( 0 << 12 ) | ( $adj_tmp << 7 ) | OP_IMM ) if $lo;
+                        $bytes .= pack( 'V', ( $adj_tmp << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $adj_tmp << 7 ) | OP );
+                    }
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg    = $callee[$off_idx];
                         my $rid    = $reg_id->($reg);
                         my $off    = $off_idx * 8;
+                        my $srid   = ( $reg eq 'sp' ) ? $adj_tmp : $rid;
                         my $imm_lo = $off & 0x1F;
                         my $imm_hi = ( $off >> 5 ) & 0x7F;
-                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | STORE );
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $srid << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                     }
                 }
                 elsif ( $opcode eq 'ctx_restore' ) {
@@ -595,7 +748,17 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         }
                     }
                     if ( $total_frame > 0 ) {
-                        $bytes .= pack( 'V', ( ( $total_frame & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                        my $tf = $total_frame;
+                        if ( $tf <= 2047 ) {
+                            $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                        }
+                        else {
+                            my $hi = ( $tf + 0x800 ) >> 12;
+                            my $lo = $tf & 0xFFF;
+                            $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
+                            $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
+                            $bytes .= pack( 'V', ( 0x00 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );
+                        }
                     }
                     $bytes .= pack( 'V', JALR );
                 }
