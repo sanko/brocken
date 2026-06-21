@@ -64,6 +64,8 @@ Generates DWARF v5 compliant debug sections.
     }
 
     method build_all () {
+        @$func_ranges    = @$func_ranges[ 0 .. 999 ]   if @$func_ranges > 1000;
+        @$preserved_regs = @$preserved_regs[ 0 .. 63 ] if @$preserved_regs > 64;
         my $info = $self->build_debug_info;
         my ( $names, $str ) = $self->build_debug_names;
         my $sections = { '.debug_line' => $self->build_debug_line, '.debug_info' => $info, '.debug_abbrev' => $self->build_debug_abbrev, };

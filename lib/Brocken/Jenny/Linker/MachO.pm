@@ -3,8 +3,10 @@ use feature qw[class];
 no warnings qw[experimental::class portable];
 use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
+use Symbol 'gensym';
 
 class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
+    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
     field $has_ffi : reader = false;
     method set_has_ffi($v) { $has_ffi = $v; }
 
@@ -108,6 +110,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             my $target_off = $func_offsets{ $ff->{target} };
             die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
             my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
+            die "fixup offset $src_pos out of bounds" if $src_pos + 4 > length($text);
             if ( $ff->{type} eq 'call_rel32' ) {
                 my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
                 substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
@@ -276,11 +279,15 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             for ( 1 .. 3 ) {
                 my $root = pack( 'C', 0 ) . pack( 'C', $nextdefsym );
                 for my $n (@nodes) { $root .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } // 1024 ); }
-                my $offset = length($root);
+                my $offset    = length($root);
+                my $converged = 1;
                 for my $n (@nodes) {
-                    $node_offsets{ $n->{sym} } = $offset;
+                    my $new_off = $offset;
+                    $converged = 0 if defined $node_offsets{ $n->{sym} } && $node_offsets{ $n->{sym} } != $new_off;
+                    $node_offsets{ $n->{sym} } = $new_off;
                     $offset += length( $n->{bytes} );
                 }
+                last if $converged;
             }
             $trie = pack( 'C', 0 ) . pack( 'C', $nextdefsym );
             for my $n (@nodes) { $trie .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } ); }
@@ -399,11 +406,10 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         # LC_MAIN: entry point file offset, stack size=0 (use default)
         push @cmds, pack( 'L<2 Q<2', 0x80000028, 24, $t_sec->{off}, 0 ) if $self->type eq 'exe';
         if (@debug_sections) {
-            my $cmdsize      = 72 + 80 * scalar(@debug_sections);
-            my $dw_start_rva = $debug_sections[0]->{rva};
-            my $dw_start_off = $debug_sections[0]->{off};
-            my $dw_size
-                = ( $debug_sections[-1]->{off} + $debug_sections[-1]->{size} ) - $dw_start_off;
+            my $cmdsize         = 72 + 80 * scalar(@debug_sections);
+            my $dw_start_rva    = $debug_sections[0]->{rva};
+            my $dw_start_off    = $debug_sections[0]->{off};
+            my $dw_size         = ( $debug_sections[-1]->{off} + $debug_sections[-1]->{size} ) - $dw_start_off;
             my $dw_size_aligned = ( $dw_size + $page_size - 1 ) & ~( $page_size - 1 );
             my $dw_cmd          = pack( 'L<2 a16 Q<4 L<4',
                 0x19, $cmdsize, '__DWARF', $base + $dw_start_rva,
@@ -421,7 +427,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my $ncmds      = scalar(@cmds);
         my $sizeofcmds = 0;
         for (@cmds) { $sizeofcmds += length($_); }
-        open my $fh, '>', $output_file or die $!;
+        sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
         binmode $fh;
 
         # mach_header_64 (Exactly 32 bytes)
@@ -462,7 +468,12 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
         # ARM64 macOS mandatory ad-hoc signature
         if ( $os =~ /^(macos|darwin)/i ) {
-            my $cs_out = `codesign -f -s - "$output_file" 2>&1`;
+            my $cs_out = '';
+            if ( open my $cs_fh, '-|', 'codesign', '-f', '-s', '-', $output_file ) {
+                $cs_out = do { local $/; <$cs_fh> };
+                close $cs_fh;
+            }
+            chomp $cs_out;
             warn 'codesign output: ' . $cs_out if length $cs_out;
             warn 'codesign exit: ' . ( $? >> 8 ) . "\n";
         }

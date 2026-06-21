@@ -176,6 +176,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                 my $imm12 = ( $extra_frame + $aligned_alloca + $i * 8 ) >> 3;
                 $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
             }
+
             # Set x29 to point to saved x29 (frame pointer for backtrace)
             my $fp_idx = 0;
             for my $i ( 0 .. $#to_save ) {

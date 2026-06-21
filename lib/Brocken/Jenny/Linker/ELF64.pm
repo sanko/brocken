@@ -5,6 +5,7 @@ use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
 
 class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
+    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
 
 =pod
 
@@ -162,6 +163,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $target_off = $func_offsets{ $ff->{target} };
             die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
             my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
+            die "fixup offset $src_pos out of bounds" if $src_pos + 4 > length($text);
             if ( $ff->{type} eq 'call_rel32' ) {
                 my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
                 substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
@@ -286,9 +288,13 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my @found;
             for my $dir (@search_paths) {
                 next unless -d $dir;
-                my @matches = glob("$dir/libc.so.[0-9]*");
+                my @matches;
+                if ( opendir my $dh, $dir ) {
+                    @matches = map {"$dir/$_"} grep {/^libc\.so\.\d/} readdir $dh;
+                    closedir $dh;
+                }
                 for my $m (@matches) {
-                    next if $m =~ /_p\.so/;    # skip profiled
+                    next if $m =~ /_p\.so/;
                     push @found, $m;
                 }
             }
@@ -319,9 +325,13 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 my $prefix = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' : 'libpthread';
                 for my $dir (@search_paths) {
                     next unless -d $dir;
-                    my @matches = glob("$dir/$prefix.so.[0-9]*");
+                    my @matches;
+                    if ( opendir my $dh, $dir ) {
+                        @matches = map {"$dir/$_"} grep {/^\Q$prefix\E\.so\.\d/} readdir $dh;
+                        closedir $dh;
+                    }
                     for my $m (@matches) {
-                        next if $m =~ /_p\.so/;    # skip profiled
+                        next if $m =~ /_p\.so/;
                         push @found, $m;
                     }
                 }
@@ -526,7 +536,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $sec_idx = 1;
         my %sec_indices;
         for my $s ( $self->layout->sections ) { $sec_indices{ $s->{name} } = $sec_idx++; }
-        open my $fh, '>', $output_file or die $!;
+        sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
         binmode $fh;
 
         for my $s ( $self->layout->sections ) {

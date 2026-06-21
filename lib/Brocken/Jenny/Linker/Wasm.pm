@@ -5,6 +5,7 @@ use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
 
 class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
+    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
 
     method write_executable ( $output_file, $codegen_output, $platform ) {
         if ( ref $codegen_output eq 'ARRAY' ) {
@@ -110,7 +111,9 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
                 $code_sec .= $self->_uleb( length( $fd->{bytes} ) ) . $fd->{bytes};
             }
             $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $code_sec;
-            open my $fh, '>:raw', $output_file or die $!;
+            die 'Wasm code section too large' if length($code_sec) > 268435456;
+            sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
+            binmode $fh;
 
             # WASM magic number \0asm + version 1 (MVP)
             print $fh "\0asm\x01\x00\x00\x00";
@@ -155,7 +158,9 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         my $code_item = $self->_uleb( length($locals) + length($body) ) . $locals . $body;
         my $code_sec  = $self->_uleb(1) . $code_item;
         $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_sec) ) . $code_sec;
-        open my $fh, '>:raw', $output_file or die $!;
+        die 'Wasm code section too large' if length($code_sec) > 268435456;
+        sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
+        binmode $fh;
         print $fh "\0asm\x01\x00\x00\x00";
         print $fh $type_sec, $func_sec, $mem_sec, $export_sec, $code_sec;
         close $fh;

@@ -24,8 +24,24 @@ class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
             getpid => '_kern_getpid'
         };
         my $fn  = $stub->{$name} or return undef;
-        my $cmd = "objdump -d '$lib' | grep -A 20 '<$fn>:'";
-        my $dis = `$cmd 2>/dev/null` or return undef;
+        my $dis = '';
+        if ( open my $fh, '-|', 'objdump', '-d', $lib ) {
+            my $output = do { local $/; <$fh> };
+            close $fh;
+            my @lines   = split /\n/, $output;
+            my $capture = 0;
+            for my $line (@lines) {
+                if ( $line =~ /<\Q$fn\E>:/ ) {
+                    $capture = 21;
+                }
+                elsif ( $capture > 0 ) {
+                    $dis .= $line . "\n";
+                    $capture--;
+                }
+                last if $capture == 0;
+            }
+        }
+        return undef unless length $dis;
         if ( $arch =~ /x86_64|x64|amd64/i ) {
             return hex($1) if $dis =~ /mov\s+\$0x([0-9a-f]+),\s*%[er]?ax/i || $dis =~ /mov\s+[er]?ax,\s*0x([0-9a-f]+)/i;
         }

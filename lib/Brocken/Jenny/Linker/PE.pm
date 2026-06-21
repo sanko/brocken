@@ -6,6 +6,7 @@ use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
 
 class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
+    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
     field $ENABLE_COFF = 0;
 
 =pod
@@ -90,6 +91,7 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
             my $target_off = $func_offsets{ $ff->{target} };
             die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
             my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
+            die "fixup offset $src_pos out of bounds" if $src_pos + 4 > length($text);
             if ( $ff->{type} eq 'call_rel32' ) {
                 my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
                 substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
@@ -180,7 +182,7 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
         my $brk_sym_size = $self->brk_sym_size();
         my $has_brk_sym  = $brk_sym_size > 0;
         my $num_sections = 1 + ( $has_brk_sym ? 1 : 0 ) + ( $has_data ? 1 : 0 ) + ( $has_exports ? 1 : 0 ) + $has_reloc + ( $has_debug ? 1 : 0 );
-        open my $fh, '>', $output_file or die "Cannot open $output_file for writing: $!";
+        sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die "Cannot open $output_file for writing: $!";
         binmode $fh;
 
         # DOS MZ Header (Exactly 64 bytes: a2=magic, v29=29 WORDS, V=e_lfanew)
@@ -362,7 +364,7 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
     method write_shared_library ( $output_file, $code_bytes, $platform, $debug_bytes = undef ) {
         my $p = ref($platform) ? $platform : Brocken::Katsuro::Platform::parse($platform);
         $self->write_executable( $output_file, $code_bytes, $p, undef, $debug_bytes );
-        open my $fh, '+<', $output_file or die $!;
+        sysopen my $fh, $output_file, O_RDWR or die $!;
         binmode $fh;
         seek $fh, 0x96, 0;                # Offset to COFF Characteristics
         print $fh pack( 'v', 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
