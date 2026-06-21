@@ -546,6 +546,39 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $enc |= FP_FMT if $bits > 32;
                     $bytes .= pack( 'V', $enc );
                 }
+                elsif ( $opcode eq 'ctx_save' ) {
+                    my $ctx_r  = $resolve->($dst);
+                    my $cid    = $reg_id->($ctx_r);
+                    my @callee = qw(s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 ra sp);
+                    for my $off_idx ( 0 .. $#callee ) {
+                        my $reg    = $callee[$off_idx];
+                        my $rid    = $reg_id->($reg);
+                        my $off    = $off_idx * 8;
+                        my $imm_lo = $off & 0x1F;
+                        my $imm_hi = ( $off >> 5 ) & 0x7F;
+                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | STORE );
+                    }
+                }
+                elsif ( $opcode eq 'ctx_restore' ) {
+                    my $ctx_r  = $resolve->($dst);
+                    my $cid    = $reg_id->($ctx_r);
+                    my @callee = qw(s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 ra sp);
+                    for my $off_idx ( 0 .. $#callee ) {
+                        my $reg = $callee[$off_idx];
+                        my $rid = $reg_id->($reg);
+                        my $off = $off_idx * 8;
+                        $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | LOAD );
+                    }
+                    $bytes .= pack( 'V', JALR );
+                }
+                elsif ( $opcode eq 'lea_func' ) {
+                    my $dst_r     = $resolve->($dst);
+                    my $did       = $reg_id->($dst_r);
+                    my $func_name = $src->value;
+                    push @func_fixups, { offset => $current_offset->(), type => 'auipc_pcrel', target => $func_name, rd => $did };
+                    $bytes .= pack( 'V', ( $did << 7 ) | 0x17 );
+                    $bytes .= pack( 'V', ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $dst->value;
                     push @func_fixups, { offset => $current_offset->(), type => 'call_jal', target => $func_name };

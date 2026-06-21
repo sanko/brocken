@@ -2007,6 +2007,60 @@ class Brocken::Jenny::Lowerer::Wasm {
                         );
                     }
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i32_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                            comment  => 'fiber_create stub'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'fiber_create result' ) );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberTransfer') ) {
+                    my ( $fiber, $val ) = $inst->operands->@*;
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'transfer val' ) );
+                    if ( defined $inst->name ) {
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'local_set',
+                                operands => [$dst],
+                                comment  => 'fiber_transfer result'
+                            )
+                        );
+                    }
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberYield') ) {
+                    my ($val) = $inst->operands->@*;
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'yield val' ) );
+                    if ( defined $inst->name ) {
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'local_set',
+                                operands => [$dst],
+                                comment  => 'fiber_yield result'
+                            )
+                        );
+                    }
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberId') ) {
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i32_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                            comment  => 'fiber_id stub'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'fiber_id result' ) );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberPin') ) {
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                     if ( $inst->type->kind ne 'void' ) {
                         my $val = $inst->operands->[0];

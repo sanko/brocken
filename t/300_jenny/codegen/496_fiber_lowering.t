@@ -42,16 +42,17 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     $b->build_ret();
     my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
     $b->position_at_end( $main->append_block('entry') );
-    my $fiber  = $b->build_fiber_create( $worker, [], '%f' );
+    my $fiber = $b->build_fiber_create( $worker, [], '%f' );
     $b->build_fiber_transfer( $fiber, Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ), '%r' );
     $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
     my $pass = Brocken::Jenny::Pass::Fiber->new();
     $pass->lower($main);
     my @fiber_ops = ();
+
     for my $block ( $main->blocks->@* ) {
         for my $inst ( $block->instructions->@* ) {
-            push @fiber_ops, $inst if $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate')
-                || $inst->isa('Brocken::Lindsay::IR::Instruction::FiberTransfer');
+            push @fiber_ops, $inst
+                if $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') || $inst->isa('Brocken::Lindsay::IR::Instruction::FiberTransfer');
         }
     }
     ok scalar(@fiber_ops) >= 2, 'fiber instructions preserved after lower';
@@ -70,12 +71,13 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
     my $mf      = $lowerer->lower($main);
     my %opcodes;
+
     for my $mbb ( $mf->blocks->@* ) {
         for my $inst ( $mbb->instructions->@* ) {
             $opcodes{ $inst->opcode }++;
         }
     }
-    ok $opcodes{lea_func}, 'fiber_create lowered to lea_func';
+    ok $opcodes{lea_func},  'fiber_create lowered to lea_func';
     ok !$opcodes{ctx_save}, 'fiber_create does not emit ctx_save (initial setup only)';
 }
 
@@ -93,12 +95,13 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
     my $mf      = $lowerer->lower($main);
     my %opcodes;
+
     for my $mbb ( $mf->blocks->@* ) {
         for my $inst ( $mbb->instructions->@* ) {
             $opcodes{ $inst->opcode }++;
         }
     }
-    ok $opcodes{ctx_save},  'fiber_transfer produces ctx_save';
+    ok $opcodes{ctx_save},    'fiber_transfer produces ctx_save';
     ok $opcodes{ctx_restore}, 'fiber_transfer produces ctx_restore';
 }
 
@@ -112,12 +115,13 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
     my $mf      = $lowerer->lower($func);
     my %opcodes;
+
     for my $mbb ( $mf->blocks->@* ) {
         for my $inst ( $mbb->instructions->@* ) {
             $opcodes{ $inst->opcode }++;
         }
     }
-    ok $opcodes{ctx_save},  'fiber_yield produces ctx_save';
+    ok $opcodes{ctx_save},    'fiber_yield produces ctx_save';
     ok $opcodes{ctx_restore}, 'fiber_yield produces ctx_restore';
 }
 
@@ -139,12 +143,11 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     my $func = Brocken::Lindsay::IR::Function->new( name => 'pin_test', return_type => $void );
     $b->position_at_end( $func->append_block('entry') );
     my $dummy = Brocken::Lindsay::IR::Function->new( name => 'target', return_type => $void );
-    my $f = $b->build_fiber_create( $dummy, [], '%f' );
+    my $f     = $b->build_fiber_create( $dummy, [], '%f' );
     $b->build_fiber_pin( $f, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 1 ) );
     $b->build_ret();
     my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
     my $mf      = $lowerer->lower($func);
     ok $mf, 'fiber_pin lowered successfully';
 }
-
 done_testing;

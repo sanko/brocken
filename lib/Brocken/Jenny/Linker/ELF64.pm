@@ -5,6 +5,7 @@ use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
 
 class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
+    use Brocken::Jenny::Codegen::ARM64::Inst;
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
 
 =pod
@@ -109,18 +110,13 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             if ( $platform->is_arm64 ) {
 
                 # ARM64 entry: bl main -> adrp x8, exit-GOT-page -> ldr x8, [x8, exit-GOT-off] -> blr x8 -> brk #0
-                my $got_exit  = $self->import_rva('exit');
-                my $adrp_pc   = $text_rva + 4;
-                my $page_diff = ( $got_exit >> 12 ) - ( $adrp_pc >> 12 );
-                $page_diff &= 0x1FFFFF;
-                my $immlo   = $page_diff & 3;
-                my $immhi   = ( $page_diff >> 2 ) & 0x7FFFF;
-                my $adrp    = 0x90000000 | ( $immlo << 29 ) | ( $immhi << 5 ) | 8;
-                my $pimm    = ( $got_exit & 0xFFF ) >> 3;
-                my $ldr     = 0xF9400000 | ( $pimm << 10 ) | ( 8 << 5 ) | 8;
-                my $blr     = 0xD63F0100;
-                my $bl_main = 0x94000000 | ( ( ( 20 + ( $func_offsets{main} // 0 ) ) >> 2 ) & 0x3FFFFFF );
-                my $brk     = 0xD4200000;
+                my $got_exit = $self->import_rva('exit');
+                my $bl_main  = bl( 20 + ( $func_offsets{main} // 0 ) );
+                my $adrp     = adrp( 8, $got_exit, $text_rva + 4 );
+                my $pimm     = $got_exit & 0xFFF;
+                my $ldr      = ldr_64( 8, 8, $pimm );
+                my $blr      = blr(8);
+                my $brk      = brk(0);
                 $entry_stub = pack 'V5', $bl_main, $adrp, $ldr, $blr, $brk;
             }
             elsif ( $platform->is_riscv64 ) {
@@ -186,6 +182,26 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
                 $word = ( $word & 0x00000FFF ) | $enc;
                 substr( $text, $src_pos, 4, pack( 'V', $word ) );
+            }
+            elsif ( $ff->{type} eq 'adr' ) {
+                my $rel  = ( $entry_size + $target_off ) - $src_pos;
+                my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                my $rd   = $word & 0x1F;
+                my $lo   = $rel & 3;
+                my $hi   = ( $rel >> 2 ) & 0x7FFFF;
+                $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
+                substr( $text, $src_pos, 4, pack( 'V', $word ) );
+            }
+            elsif ( $ff->{type} eq 'auipc_pcrel' ) {
+                my $rel   = ( $entry_size + $target_off ) - $src_pos;
+                my $auipc = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                my $rd    = ( $auipc >> 7 ) & 0x1F;
+                my $hi    = ( ( $rel + 0x800 ) >> 12 ) & 0xFFFFF;
+                $auipc = ( $hi << 12 ) | ( $rd << 7 ) | 0x17;
+                substr( $text, $src_pos, 4, pack( 'V', $auipc ) );
+                my $lo   = $rel & 0xFFF;
+                my $addi = ( $lo << 20 ) | ( $rd << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13;
+                substr( $text, $src_pos + 4, 4, pack( 'V', $addi ) );
             }
         }
 

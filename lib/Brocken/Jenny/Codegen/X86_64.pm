@@ -560,10 +560,10 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'ctx_save' ) {
-                    my $ctx_r = $resolve->($dst);
-                    my $cid   = $reg_id->($ctx_r);
+                    my $ctx_r  = $resolve->($dst);
+                    my $cid    = $reg_id->($ctx_r);
                     my @callee = qw(rbx rbp r12 r13 r14 r15 rsp);
-                    for my $off_idx (0..$#callee) {
+                    for my $off_idx ( 0 .. $#callee ) {
                         my $reg  = $callee[$off_idx];
                         my $rid  = $reg_id->($reg);
                         my $disp = $off_idx * 8;
@@ -573,6 +573,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $mod = 1 if $mod == 0 && $rm == 5;
                         my $modrm = ( $mod << 6 ) | ( ( $rid & 7 ) << 3 ) | $rm;
                         $bytes .= pack( 'C', $rex ) . pack( 'C', 0x89 );
+
                         if ( $rm == 4 ) {
                             $bytes .= pack( 'CC', $modrm, 0x24 );
                         }
@@ -584,10 +585,10 @@ class Brocken::Jenny::Codegen::X86_64 {
                     }
                 }
                 elsif ( $opcode eq 'ctx_restore' ) {
-                    my $ctx_r = $resolve->($dst);
-                    my $cid   = $reg_id->($ctx_r);
+                    my $ctx_r  = $resolve->($dst);
+                    my $cid    = $reg_id->($ctx_r);
                     my @callee = qw(rbx rbp r12 r13 r14 r15 rsp);
-                    for my $off_idx (0..$#callee) {
+                    for my $off_idx ( 0 .. $#callee ) {
                         my $reg  = $callee[$off_idx];
                         my $rid  = $reg_id->($reg);
                         my $disp = $off_idx * 8;
@@ -597,6 +598,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $mod = 1 if $mod == 0 && $rm == 5;
                         my $modrm = ( $mod << 6 ) | ( ( $rid & 7 ) << 3 ) | $rm;
                         $bytes .= pack( 'C', $rex ) . pack( 'C', 0x8B );
+
                         if ( $rm == 4 ) {
                             $bytes .= pack( 'CC', $modrm, 0x24 );
                         }

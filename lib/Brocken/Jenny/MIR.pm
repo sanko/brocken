@@ -37,7 +37,7 @@ class Brocken::Jenny::MIR::MachineBasicBlock {
         my $last = $self->instructions->[-1];
         return $last->opcode =~ /^(jmp|beq|bne|br|ret|ctx_restore)$/;
     }
- 
+
     method terminator() {
         return undef if $self->instructions->@* == 0;
         my $last = $self->instructions->[-1];

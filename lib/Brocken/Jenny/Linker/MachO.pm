@@ -6,6 +6,7 @@ use Brocken::Katsuro::Platform;
 use Symbol 'gensym';
 
 class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
+    use Brocken::Jenny::Codegen::ARM64::Inst;
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
     field $has_ffi : reader = false;
     method set_has_ffi($v) { $has_ffi = $v; }
@@ -81,10 +82,10 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 # - movk x16, #sys_high, lsl #16
                 # - svc #0x80
                 # - brk #0 (Safety crash)
-                my $movz = 0xD2800000 | ( ( $exit_sys & 0xffff ) << 5 ) | 16;
-                my $movk = 0xF2A00000 | ( ( ( $exit_sys >> 16 ) & 0xffff ) << 5 ) | 16;
-                my $bl   = 0x94000000 | ( ( ( 20 + ( $func_offsets{main} // 0 ) ) >> 2 ) & 0x3FFFFFF );
-                $entry_stub = pack( 'V5', $bl, $movz, $movk, 0xD4001001, 0xD4200000 );
+                my $bl   = bl( 20 + ( $func_offsets{main} // 0 ) );
+                my $movz = movz_64( 16, $exit_sys & 0xFFFF );
+                my $movk = movk_64( 16, ( $exit_sys >> 16 ) & 0xFFFF, 1 );
+                $entry_stub = pack( 'V5', $bl, $movz, $movk, svc(0x80), brk(0) );
             }
             else {
                 # x86_64 (Intel Mac) native exit stub with 16-byte stack alignment:
@@ -133,6 +134,26 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
                 $word = ( $word & 0x00000FFF ) | $enc;
                 substr( $text, $src_pos, 4, pack( 'V', $word ) );
+            }
+            elsif ( $ff->{type} eq 'adr' ) {
+                my $rel  = ( $entry_size + $target_off ) - $src_pos;
+                my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                my $rd   = $word & 0x1F;
+                my $lo   = $rel & 3;
+                my $hi   = ( $rel >> 2 ) & 0x7FFFF;
+                $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
+                substr( $text, $src_pos, 4, pack( 'V', $word ) );
+            }
+            elsif ( $ff->{type} eq 'auipc_pcrel' ) {
+                my $rel   = ( $entry_size + $target_off ) - $src_pos;
+                my $auipc = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                my $rd    = ( $auipc >> 7 ) & 0x1F;
+                my $hi    = ( ( $rel + 0x800 ) >> 12 ) & 0xFFFFF;
+                $auipc = ( $hi << 12 ) | ( $rd << 7 ) | 0x17;
+                substr( $text, $src_pos, 4, pack( 'V', $auipc ) );
+                my $lo   = $rel & 0xFFF;
+                my $addi = ( $lo << 20 ) | ( $rd << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13;
+                substr( $text, $src_pos + 4, 4, pack( 'V', $addi ) );
             }
         }
 
@@ -193,13 +214,13 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             # LC_DYLD_INFO_ONLY bind opcodes:
             #   0x70 | seg = BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB
             #   0x10 | ord = BIND_OPCODE_SET_DYLIB_ORDINAL_IMM (ordinal 1 = libSystem)
-            #   0x50 | flag = BIND_OPCODE_SET_DYLIB_ORDINAL_IMM (ordinal 2 = special ordinal)
+            #   0x50 | type = BIND_OPCODE_SET_TYPE_IMM (type 0 = TEXT_ABSOLUTE_32, 1 = POINTER)
             #   0x40 | trailing = BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM
             #   0x90 = BIND_OPCODE_DO_BIND
             $bind_info .= pack( 'C', 0x70 | $data_seg ) . $_uleb->($got_off);
             for my $name ( '_dlopen', '_dlsym', '_pthread_create' ) {
                 $bind_info .= pack( 'C', 0x11 );
-                $bind_info .= pack( 'C', 0x51 );
+                $bind_info .= pack( 'C', 0x51 );                 # BIND_TYPE_POINTER
                 $bind_info .= pack( 'C', 0x40 ) . "${name}\0";
                 $bind_info .= pack( 'C', 0x90 );
             }
@@ -236,7 +257,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             $lc_id_dylib = pack( 'L<6', 0xD, 24 + length($dylib_name_pad), 24, 1, 1, 1 ) . $dylib_name_pad;
             my @exports = @{ $self->exported_funcs // [] };
             for my $name (@exports) {
-                my $mangled = "_$name";
+                my $mangled = '_' . $name;    # Prepended with an underscore to comply with Mach-O standards
                 push @syms, $mangled;
                 $sym_types{$mangled} = 0x0f;                                                                       # N_SECT | N_EXT
                 $sym_rvas{$mangled}  = $self->layout->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
@@ -284,14 +305,14 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 my $root = pack( 'C', 0 ) . pack( 'C', $nextdefsym );
                 for my $n (@nodes) { $root .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } // 1024 ); }
                 my $offset    = length($root);
-                my $converged = 1;
+                my $converged = 0;
                 for my $n (@nodes) {
                     my $new_off = $offset;
-                    $converged = 0 if defined $node_offsets{ $n->{sym} } && $node_offsets{ $n->{sym} } != $new_off;
+                    ++$converged if exists $node_offsets{ $n->{sym} } && $node_offsets{ $n->{sym} } == $new_off;
                     $node_offsets{ $n->{sym} } = $new_off;
                     $offset += length( $n->{bytes} );
                 }
-                last if $converged;
+                last if $converged == @nodes;
             }
             $trie = pack( 'C', 0 ) . pack( 'C', $nextdefsym );
             for my $n (@nodes) { $trie .= $n->{sym} . "\0" . $_uleb->( $node_offsets{ $n->{sym} } ); }
@@ -415,18 +436,20 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             my $dw_start_off    = $debug_sections[0]->{off};
             my $dw_size         = ( $debug_sections[-1]->{off} + $debug_sections[-1]->{size} ) - $dw_start_off;
             my $dw_size_aligned = ( $dw_size + $page_size - 1 ) & ~( $page_size - 1 );
-            my $dw_cmd          = pack( 'L<2 a16 Q<4 L<4',
+            my $dw_seg          = pack(
+                'L< L< a16 Q<4 L< L< L< L<',
                 0x19, $cmdsize, '__DWARF', $base + $dw_start_rva,
-                $dw_size_aligned, $dw_start_off, $dw_size_aligned, 0, 0, scalar(@debug_sections), 0 );
+                $dw_size_aligned, $dw_start_off, $dw_size_aligned, 0, 0, scalar(@debug_sections), 0
+            );
             for my $s (@debug_sections) {
-                $dw_cmd .= pack(
+                $dw_seg .= pack(
                     'a16 a16 Q<2 L<2 L<3 L<2 L<',
                     $sec_names{ $s->{name} },
                     '__DWARF',  $base + $s->{rva},
                     $s->{size}, $s->{off}, 0, 0, 0, 0, 0, 0, 0
                 );
             }
-            push @cmds, $dw_cmd;
+            push @cmds, $dw_seg;
         }
         my $ncmds      = scalar(@cmds);
         my $sizeofcmds = 0;
@@ -470,8 +493,8 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         close $fh;
         chmod 0755, $output_file;
 
-        # ARM64 macOS mandatory ad-hoc signature
-        if ( $os =~ /^(macos|darwin)/i ) {
+        # ARM64 macOS mandatory ad-hoc signature (skip dylibs -- codesign corrupts link edit offsets)
+        if ( $os =~ /^(macos|darwin)/i && $self->type ne 'shared' ) {
             my $cs_out = '';
             if ( open my $cs_fh, '-|', 'codesign', '-f', '-s', '-', $output_file ) {
                 $cs_out = do { local $/; <$cs_fh> };

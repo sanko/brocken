@@ -22,5 +22,4 @@ class Brocken::Jenny::Pass::Fiber {
         return $ir_func;
     }
 }
-
 1;
