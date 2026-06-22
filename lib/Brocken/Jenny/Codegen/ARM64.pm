@@ -145,6 +145,7 @@ class Brocken::Jenny::Codegen::ARM64 {
             $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
             $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
+            $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -178,6 +179,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
