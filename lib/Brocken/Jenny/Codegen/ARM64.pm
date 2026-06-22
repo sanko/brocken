@@ -459,7 +459,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                                 $emitted = 1;
                             }
                         }
-                        $bytes .= pack( 'V', ADD_X | ( $did << 16 ) | ( 31 << 5 ) | $did );
+                        $bytes .= pack( 'V', 0x8B200000 | ( $did << 16 ) | ( 0b011 << 13 ) | ( 31 << 5 ) | $did );
                     }
                     $alloca_frame += $size;
                 }
