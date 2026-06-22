@@ -64,6 +64,29 @@ subtest 'ARM64 fiber yield passes value to main exit code' => sub {
         ok( -f $output_file, 'ARM64 fiber test executable exists' )
             or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
 
+        # DEBUG: post-link hex dump + disassembly on ARM64
+        warn "\n### DEBUG: post-link binary '$output_file' ###\n";
+        open my $fh, '<:raw', $output_file or warn "  can't open $output_file: $!";
+        if ($fh) {
+            my $bin; read $fh, $bin, 4096; close $fh;
+            for ( my $i = 0; $i < length $bin; $i += 16 ) {
+                my $chunk = substr( $bin, $i, 16 );
+                my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
+                my $pad   = 16 - length($chunk);
+                $hex .= '   ' x $pad if $pad;
+                my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
+                warn sprintf( '%08x: %-48s %s', $i, $hex, $ascii ) . "\n";
+            }
+        }
+        warn "\n### DEBUG: disassembly ###\n";
+        if ( $platform->is_macos ) {
+            system("otool -v -t $output_file 2>&1");
+            system("llvm-objdump -d --arch=aarch64 $output_file 2>&1");
+        }
+        else {
+            system("objdump -d --architecture=aarch64 $output_file 2>&1");
+        }
+
         my $cmd = $platform->is_windows ? $output_file : "./$output_file";
         system {$cmd} $cmd;
         my $exit_code = $? >> 8;
