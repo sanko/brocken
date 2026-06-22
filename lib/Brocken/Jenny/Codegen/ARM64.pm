@@ -298,15 +298,43 @@ class Brocken::Jenny::Codegen::ARM64 {
             die "Unexpected operand kind: ${$op->kind}";
         };
         if ( $total_frame > 0 ) {
-            my $frame = $total_frame;
-            if ( $frame <= 0xFFF ) {
-                $bytes .= pack( 'V', SUB_SP | ( $frame << 10 ) );
+            # Windows ARM64 requires stack probing for frames > 4KB to
+            # ensure the guard page is expanded one page at a time.
+            if ( $platform->is_windows && $total_frame > 4096 ) {
+                my $pages     = int( $total_frame / 4096 );
+                my $remainder = $total_frame % 4096;
+                if ( $pages > 0 ) {
+                    my $emitted = 0;
+                    for my $hw ( 0 .. 3 ) {
+                        my $chunk = ( $pages >> ( $hw * 16 ) ) & 0xFFFF;
+                        if ( $chunk || !$emitted ) {
+                            my $base = $emitted ? MOVK_64 : MOVZ_64;
+                            $bytes .= pack( 'V', SF | $base | ( $chunk << 5 ) | ( $hw << 21 ) | 16 );
+                            $emitted = 1;
+                        }
+                    }
+                    my $loop_start = length $bytes;
+                    $bytes .= pack( 'V', SUB_SP | ( 1 << 10 ) | ( 1 << 22 ) );
+                    $bytes .= pack( 'V', 0xF94003FF );
+                    $bytes .= pack( 'V', 0xD1000610 );
+                    my $imm19 = ( ( $loop_start - length( $bytes ) ) >> 2 ) & 0x7FFFF;
+                    $bytes .= pack( 'V', 0xB5000000 | ( $imm19 << 5 ) | 16 );
+                }
+                if ( $remainder > 0 ) {
+                    $bytes .= pack( 'V', SUB_SP | ( $remainder << 10 ) );
+                }
             }
             else {
-                my $hi = $frame >> 12;
-                my $lo = $frame & 0xFFF;
-                $bytes .= pack( 'V', SUB_SP | ( $hi << 10 ) | ( 1 << 22 ) );
-                $bytes .= pack( 'V', SUB_SP | ( $lo << 10 ) ) if $lo;
+                my $frame = $total_frame;
+                if ( $frame <= 0xFFF ) {
+                    $bytes .= pack( 'V', SUB_SP | ( $frame << 10 ) );
+                }
+                else {
+                    my $hi = $frame >> 12;
+                    my $lo = $frame & 0xFFF;
+                    $bytes .= pack( 'V', SUB_SP | ( $hi << 10 ) | ( 1 << 22 ) );
+                    $bytes .= pack( 'V', SUB_SP | ( $lo << 10 ) ) if $lo;
+                }
             }
             for my $i ( 0 .. $#to_save ) {
                 my $reg   = $to_save[$i];
