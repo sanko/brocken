@@ -270,6 +270,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
+                    $total_alloca = ( $total_alloca + 15 ) & ~15;
                 }
             }
         }
@@ -497,6 +498,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', 0x8B200000 | ( $did << 16 ) | ( 0b011 << 13 ) | ( 31 << 5 ) | $did );
                     }
                     $alloca_frame += $size;
+                    $alloca_frame = ( $alloca_frame + 15 ) & ~15;
                 }
                 elsif ( $opcode eq 'load' ) {
                     my $dst_r  = $resolve->($dst);

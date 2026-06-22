@@ -216,6 +216,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
+                    $total_alloca = ( $total_alloca + 15 ) & ~15;
                 }
             }
         }
@@ -458,6 +459,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
 
                     # alloca_frame tracks where the next alloca starts (grows forward from stack top)
                     $alloca_frame += $src->value;
+                    $alloca_frame = ( $alloca_frame + 15 ) & ~15;
                 }
                 elsif ( $opcode eq 'load' ) {
                     my $dst_r  = $resolve->($dst);
