@@ -46,6 +46,9 @@ subtest 'ARM64 fiber yield passes value to main exit code' => sub {
             my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
             warn sprintf( '%08x: %-48s %s', $i, $hex, $ascii ) . "\n";
         }
+        for my $fix ( $f->{fixups}->@* ) {
+            warn "  fixup: offset=$fix->{offset} type=$fix->{type} target=$fix->{target}\n";
+        }
     }
     warn "(end of hex dumps)\n";
 

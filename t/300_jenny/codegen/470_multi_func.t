@@ -56,10 +56,37 @@ SKIP: {
             $linker  = Brocken::Jenny::Linker::ELF64->new();
         }
         my $funcs = $codegen->emit_functions( [ $main, $helper ] );
+
+        # DEBUG: hex dump on ARM64
+        if ( $host->is_arm64 ) {
+            for my $f ( $funcs->@* ) {
+                warn "\n### DEBUG: Function '$f->{name}' (" . length( $f->{bytes} ) . " bytes) ###\n";
+                my $bytes = $f->{bytes};
+                for ( my $i = 0; $i < length $bytes; $i += 16 ) {
+                    my $chunk = substr( $bytes, $i, 16 );
+                    my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
+                    my $pad   = 16 - length($chunk);
+                    $hex .= '   ' x $pad if $pad;
+                    my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
+                    warn sprintf( '  %08x: %-48s %s', $i, $hex, $ascii ) . "\n";
+                }
+                for my $fix ( $f->{fixups}->@* ) {
+                    warn "  fixup: offset=$fix->{offset} type=$fix->{type} target=$fix->{target}\n";
+                }
+            }
+        }
+
         is( ref $funcs,        'ARRAY', 'emit_functions returned array ref' );
         is( scalar $funcs->@*, 2,       'emit_functions returned 2 entries' );
         my $output_file = 'multi_func_native' . $host->bin_ext;
         $linker->write_executable( $output_file, $funcs, $host );
+
+        # DEBUG: disassemble on ARM64 Linux
+        if ( $host->is_arm64 && $host->is_linux ) {
+            warn "\n### DEBUG: objdump output ###\n";
+            system("objdump -d --architecture=aarch64 $output_file 2>&1");
+        }
+
         ok( -e $output_file, 'Multi-function binary exists' );
         run_exec( $output_file, expected_exit => 42, platform => $host, name => 'Multi-function helper(41) returned 42 on ' . $host->friendly );
     }
