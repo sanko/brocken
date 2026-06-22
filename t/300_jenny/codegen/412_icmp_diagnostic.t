@@ -20,7 +20,7 @@ SKIP: {
         Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ), '%cmp'
     );
     $builder->build_ret($cond);
-    my $codegen     = Brocken::Jenny::Codegen::RISCV64->new();
+    my $codegen     = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
     my $bytes       = $codegen->emit_function($func);
     my $linker      = Brocken::Jenny::Linker::ELF64->new();
     my $output_file = 'icmp_only_test' . $platform->bin_ext;
@@ -44,7 +44,7 @@ SKIP: {
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
     $builder->position_at_end($f_block);
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
-    my $codegen     = Brocken::Jenny::Codegen::RISCV64->new();
+    my $codegen     = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
     my $bytes       = $codegen->emit_function($func);
     my $linker      = Brocken::Jenny::Linker::ELF64->new();
     my $output_file = 'jmp_only_test' . $platform->bin_ext;
@@ -68,7 +68,7 @@ SKIP: {
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
     $builder->position_at_end($f_block);
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
-    my $codegen     = Brocken::Jenny::Codegen::RISCV64->new();
+    my $codegen     = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
     my $bytes       = $codegen->emit_function($func);
     my $linker      = Brocken::Jenny::Linker::ELF64->new();
     my $output_file = 'condbr_const_test' . $platform->bin_ext;

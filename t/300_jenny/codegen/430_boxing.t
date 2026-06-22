@@ -17,7 +17,7 @@ my $val   = $builder->build_unbox( $boxed, Brocken::Lindsay::IR::Type::i32(), '%
 $builder->build_ret($val);
 my $codegen
     = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-    $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+    $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
     Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
 my $bytes = $codegen->emit_function($func);
 ok( length($bytes) > 0, 'Generated box/unbox bytes for ' . $platform->friendly );

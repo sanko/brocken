@@ -7,7 +7,7 @@ use Brocken::Jenny::MIR;
 use List::Util qw[min max];
 
 class Brocken::Jenny::Lowerer::X86_64 {
-    method _abi() { state $abi = Brocken::Katsuro::Platform::ABI::X86_64->new }
+    method _abi() { state $abi //= Brocken::Katsuro::Platform::ABI::X86_64->new; $abi }
 
     method lower($ir_func) {
         my $mf = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );

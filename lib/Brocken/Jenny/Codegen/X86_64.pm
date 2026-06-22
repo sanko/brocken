@@ -8,7 +8,7 @@ use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
 
 class Brocken::Jenny::Codegen::X86_64 {
-    field $platform : param = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
+    field $platform : param;
     use constant {
         REX_W       => 0x08,
         REX_B       => 0x01,
