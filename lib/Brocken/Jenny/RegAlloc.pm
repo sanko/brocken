@@ -13,7 +13,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
 
     method allocate( $mf, $platform, $is_float = 0 ) {
         $mf->compute_cfg unless $mf->entry_block->successors->@*;
-        my @intervals = $self->_compute_live_intervals( $mf, $is_float );
+        my @intervals = $self->_compute_live_intervals( $mf, $platform, $is_float );
         return $self->_linear_scan( \@intervals, $platform, $is_float );
     }
 
@@ -25,15 +25,20 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return $op->value;
     }
 
-    method _vreg_names_from_mem_operands($inst) {
+    method _vreg_names_from_mem_operands($inst, $platform) {
+        state $phys_re = do {
+            my @regs = $platform->registers('available')->@*;
+            my $pat = join '|', map quotemeta, @regs;
+            qr/^($pat)$/;
+        };
         my @names;
         for my $op ( $inst->operands->@* ) {
             next unless $op->kind eq 'mem';
             my $base = $op->value->{base} // '';
 
-            # Track all variables as long as they aren't explicit stack pointers
-            # added post-allocation by the spill routines.
-            push @names, $base if $base ne '' && $base ne 'rsp' && $base ne 'sp';
+            # Track virtual register names, but skip known physical register names
+            # (like r12, which the lowerer uses directly in fiber memory operands).
+            push @names, $base if $base ne '' && $base !~ $phys_re;
             my $index = $op->value->{index} // '';
             push @names, $index if $index ne '';
         }
@@ -44,7 +49,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return $inst->operands->@*;
     }
 
-    method _compute_live_intervals( $mf, $is_float ) {
+    method _compute_live_intervals( $mf, $platform, $is_float ) {
         my @blocks = $mf->blocks->@*;
         my @bi_range;    # block_idx => [first_inst_idx, last_inst_idx]
         my $total_idx = 0;
@@ -74,7 +79,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                         $used{$name} = 1 unless exists $defd{$name};
                     }
                 }
-                for my $base ( $self->_vreg_names_from_mem_operands($inst) ) {
+                for my $base ( $self->_vreg_names_from_mem_operands($inst, $platform) ) {
                     next if $is_float;
                     $used{$base} = 1 unless exists $defd{$base};
                 }
@@ -133,7 +138,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     $first{$name} = List::Util::min( $first{$name} // $total_idx, $bi_first );
                     $last{$name}  = List::Util::max( $last{$name}  // 0, $bi_first );
                 }
-                for my $base ( $self->_vreg_names_from_mem_operands($inst) ) {
+                for my $base ( $self->_vreg_names_from_mem_operands($inst, $platform) ) {
                     next if $is_float;
                     $first{$base} = List::Util::min( $first{$base} // $total_idx, $bi_first );
                     $last{$base}  = List::Util::max( $last{$base}  // 0, $bi_first );
@@ -266,7 +271,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         for my $bb ( $mf->blocks->@* ) {
             my @new;
             for my $inst ( $bb->instructions->@* ) {
-                if ( $inst->opcode eq 'call_func' ) {
+                if ( $inst->opcode =~ /^(?:call_func|ctx_swap)$/ ) {
                     for my $r (@$caller_regs) {
                         my $mem
                             = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 }, );
@@ -279,7 +284,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     }
                 }
                 push @new, $inst;
-                if ( $inst->opcode eq 'call_func' ) {
+                if ( $inst->opcode =~ /^(?:call_func|ctx_swap)$/ ) {
                     for my $r ( reverse @$caller_regs ) {
                         my $mem
                             = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 },

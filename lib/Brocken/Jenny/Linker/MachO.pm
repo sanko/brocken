@@ -491,6 +491,9 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             }
             next unless length($payload) > 0 || $s->{size} > 0;
             seek( $fh, $s->{off}, 0 );
+            if ( length($payload) > $s->{size} ) {
+                die sprintf "Internal error: %s payload (%d B) exceeds section size (%d B)", $s->{name}, length($payload), $s->{size};
+            }
             $payload .= ( "\0" x ( $s->{size} - length($payload) ) ) if length($payload) < $s->{size};
             print $fh $payload;
         }
