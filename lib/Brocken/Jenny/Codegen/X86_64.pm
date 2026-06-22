@@ -256,7 +256,27 @@ class Brocken::Jenny::Codegen::X86_64 {
             $bytes .= pack( 'C', PUSH_BASE + 5 );         # push rbp
             $bytes .= pack( 'CCC', 0x48, 0x89, 0xE5 );    # mov rbp, rsp
             if ( $total_frame > 0 ) {
-                $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $total_frame );    # sub rsp, total_frame
+                # Windows x64 requires stack probing for frames > 4KB to
+                # ensure the guard page is expanded one page at a time.
+                if ( $platform->is_windows && $total_frame > 4096 ) {
+                    my $pages = int( $total_frame / 4096 );
+                    my $rem   = $total_frame % 4096;
+                    if ( $pages > 0 ) {
+                        $bytes .= pack( 'CV', 0xB9, $pages );                   # mov ecx, pages
+                        my $loop_start = length $bytes;
+                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, 4096 );       # sub rsp, 4096
+                        $bytes .= pack( 'CCC', 0x85, 0x04, 0x24 );              # test [rsp], eax  (probe)
+                        $bytes .= pack( 'CCC', 0x83, 0xE9, 0x01 );              # sub ecx, 1
+                        my $disp = $loop_start - length( $bytes ) - 2;
+                        $bytes .= pack( 'Cc', 0x75, $disp );                    # jne loop
+                    }
+                    if ( $rem > 0 ) {
+                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $rem );       # sub rsp, rem
+                    }
+                }
+                else {
+                    $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $total_frame );   # sub rsp, total_frame
+                }
             }
             for my $i ( 0 .. $#$used_callee ) {
                 my $reg = $used_callee->[$i];
@@ -277,9 +297,15 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $current_offset = sub { return length $bytes };
         my $mem_modrm      = sub ( $mem_op, $reg_idx ) {
             my $addr   = $mem_op->value;
-            my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
-            my $bid    = $reg_id->($base_r);
-            my $disp   = $addr->{disp} // 0;
+            state $phys_re = do {
+                my @regs = $platform->registers('available')->@*;
+                my $pat = join '|', map quotemeta, @regs;
+                qr/^($pat)$/;
+            };
+            my $base_kind = $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg';
+            my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind, value => $addr->{base} ) );
+            my $bid       = $reg_id->($base_r);
+            my $disp      = $addr->{disp} // 0;
             $disp += $total_alloca + $shadow_space if $base_r eq 'rsp';
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );

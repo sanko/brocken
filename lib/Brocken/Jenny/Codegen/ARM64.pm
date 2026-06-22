@@ -292,6 +292,11 @@ class Brocken::Jenny::Codegen::ARM64 {
             return $1 if $r =~ /^v(\d+)$/;
             return 0;
         };
+        state $phys_re = do {
+            my @regs = $platform->registers('available')->@*;
+            my $pat = join '|', map quotemeta, @regs;
+            qr/^($pat)$/;
+        };
         my $resolve = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
             return $op->value                                if $op->kind eq 'phys_reg';
@@ -495,7 +500,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $dst_r  = $resolve->($dst);
                     my $did    = $reg_id->($dst_r);
                     my $addr   = $src->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => ($addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg'), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
                     if ( defined $addr->{index} ) {
@@ -515,7 +520,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $src_r  = $resolve->($src);
                     my $sid    = $reg_id->($src_r);
                     my $addr   = $dst->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => ($addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg'), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
                     if ( defined $addr->{index} ) {
@@ -534,7 +539,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                 elsif ( $opcode eq 'store_imm' ) {
                     my ( $mem, $imm ) = $inst->operands->@*;
                     my $addr   = $mem->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => ($addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg'), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $imm->type && $imm->type->kind eq 'int' ) ? $imm->type->bits : 64;
 
@@ -626,7 +631,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $dst_r  = $resolve->($dst);
                     my $did    = $reg_id->($dst_r);
                     my $addr   = $src->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => ($addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg'), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = $dst->type ? $dst->type->bits : 64;
                     if ( defined $addr->{index} ) {
@@ -647,7 +652,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $src_r  = $resolve->($src);
                     my $sid    = $reg_id->($src_r);
                     my $addr   = $mem->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => ($addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg'), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = $src->type ? $src->type->bits : 64;
                     if ( defined $addr->{index} ) {

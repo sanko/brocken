@@ -94,7 +94,10 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         if ( !defined $self->layout ) {
             my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
-            $self->pre_layout( length($code_bytes) + 32, $extra_data, $platform );
+            my $entry_stub_len = $self->type eq 'exe'
+                ? ( $platform->is_arm64 || $platform->is_riscv64 ? 20 : 21 )
+                : 0;
+            $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform );
         }
         my $l          = $self->layout;
         my $is_pie     = ( $platform->is_bsd || $platform->is_haiku ) && !$shared;
@@ -151,6 +154,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $entry_stub .= pack( 'C2',    0x0F, 0x0B );            # ud2 (safety barrier)
             }
             $text = $entry_stub . $code_bytes;
+            $self->layout->get('.text')->{size} = length($text);
         }
 
         # Resolve cross-function call fixups at link time
@@ -607,6 +611,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
             elsif ( $s->{name} =~ /^\.(debug|eh_frame)/ ) {
                 $payload = $self->debug_section( $s->{name} ) || "\0";
+            }
+            if ( length($payload) > $s->{size} ) {
+                die sprintf "Internal error: %s payload (%d B) exceeds section size (%d B)", $s->{name}, length($payload), $s->{size};
             }
             $payload .= ( "\0" x ( $s->{size} - length($payload) ) ) if length($payload) < $s->{size};
             seek( $fh, $s->{off}, 0 );
