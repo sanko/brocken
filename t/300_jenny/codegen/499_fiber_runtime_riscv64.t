@@ -26,8 +26,8 @@ subtest 'RISCV64 fiber yield passes value to main exit code' => sub {
     $mb->position_at_end( $main->append_block('entry') );
     my $fcb  = $mb->build_fiber_create( $worker, [], '%fcb' );
     my $send = Brocken::Lindsay::IR::Constant->new( type => $i64, value => 42 );
-    $mb->build_fiber_transfer( $fcb, $send, '%recv' );
-    $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
+    my $recv = $mb->build_fiber_transfer( $fcb, $send, '%recv' );
+    $mb->build_ret($recv);
 
     my $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
     my $funcs   = $codegen->emit_functions( [ $main, $worker ] );
