@@ -8,7 +8,7 @@ use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
 
 class Brocken::Jenny::Codegen::ARM64 {
-    field $platform : param = Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu');
+    field $platform : param //= Brocken::Katsuro::Platform::parse();
     use constant {
         B            => 0x14000000,
         CBZ          => 0xB4000000,
@@ -30,6 +30,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         UMULH_X      => 0x9BC07C00,
         UDIV_X       => 0x9AC00800,
         ADD_IMM      => 0x11000000,
+        ADD_IMM_64   => 0x91000000,    # ADD_IMM | SF
         SUB_IMM      => 0x51000000,
         UBFM         => 0xD3400000,
         SBFM         => 0x93400000,
@@ -38,8 +39,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         MOVK_32      => 0x72800000,
         MOVK_64      => 0xF2800000,
         MOV_X        => 0xAA0003E0,
-        SUB_SP       => 0xC10003FF,
-        ADD_SP       => 0x810003FF,
+        SUB_SP       => 0xD10003FF,
+        ADD_SP       => 0x910003FF,
         MOV_SP       => 0x910003E0,
         LDR_32       => 0xB9400000,
         LDR_64       => 0xF9400000,
@@ -76,6 +77,9 @@ class Brocken::Jenny::Codegen::ARM64 {
         FMIN         => 0x1E205800,
         FMAX         => 0x1E204800,
         SF           => 0x80000000,
+        BR           => 0xD61F0000,
+        ADR          => 0x10000000,
+        FCB_RESUME_OFF => 112,
         RET          => 0xD65F03C0,
     };
 
@@ -281,6 +285,7 @@ class Brocken::Jenny::Codegen::ARM64 {
             $extra_frame    = $unified_frame - $callee_size;
         }
         my $total_frame    = $unified_frame + $aligned_alloca;
+        $alloca_frame = $unified_frame;
         my $reg_id         = sub ($r) {
             return 31 if $r eq 'sp';
             return $1 if $r =~ /^[xw](\d+)$/;
@@ -290,9 +295,9 @@ class Brocken::Jenny::Codegen::ARM64 {
         my $resolve = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
             return $op->value                                if $op->kind eq 'phys_reg';
-            die "Unexpected operand kind: ${\$op->kind}";
+            die "Unexpected operand kind: ${$op->kind}";
         };
-                if ( $total_frame > 0 ) {
+        if ( $total_frame > 0 ) {
             my $frame = $total_frame;
             if ( $frame <= 0xFFF ) {
                 $bytes .= pack( 'V', SUB_SP | ( $frame << 10 ) );
@@ -307,7 +312,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                 my $reg   = $to_save[$i];
                 my $rid   = $reg_id->($reg);
                 my $base  = $reg =~ /^v/ ? FSTR_64 : STR_64;
-                my $imm12 = ( $extra_frame + $aligned_alloca + $i * 8 ) >> 3;
+                my $imm12 = ( $extra_frame + $i * 8 ) >> 3;
                 $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
             }
 
@@ -316,8 +321,16 @@ class Brocken::Jenny::Codegen::ARM64 {
             for my $i ( 0 .. $#to_save ) {
                 $fp_idx = $i if $to_save[$i] eq 'x29';
             }
-            my $fp_off = $extra_frame + $aligned_alloca + $fp_idx * 8;
-            $bytes .= pack( 'V', 0x910003FD | ( $fp_off << 10 ) );
+            my $fp_off = $extra_frame + $fp_idx * 8;
+            if ( $fp_off <= 0xFFF ) {
+                $bytes .= pack( 'V', 0x910003FD | ( $fp_off << 10 ) );
+            }
+            else {
+                my $hi = $fp_off >> 12;
+                my $lo = $fp_off & 0xFFF;
+                $bytes .= pack( 'V', 0x910003FD | ( $hi << 10 ) | ( 1 << 22 ) );
+                $bytes .= pack( 'V', 0x910003BD | ( $lo << 10 ) ) if $lo;
+            }
         }
         my %labels;
         my @fixups;
@@ -465,7 +478,6 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp = $addr->{disp} // 0;
-                        $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? LDR_32 : LDR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
@@ -486,7 +498,6 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp = $addr->{disp} // 0;
-                        $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? STR_32 : STR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
@@ -524,7 +535,6 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp = $addr->{disp} // 0;
-                        $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12    = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $str_base = $bits >= 64 ? STR_64 : STR_32;
                         $bytes .= pack( 'V', $str_base | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
@@ -599,7 +609,6 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     else {
                         my $disp = $addr->{disp} // 0;
-                        $disp += $aligned_alloca if $base_r eq 'sp';
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FLDR_32 : FLDR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
@@ -620,8 +629,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $sid );
                     }
                     else {
-                        my $disp = $addr->{disp} // 0;
-                        $disp += $aligned_alloca if $base_r eq 'sp';
+                        my $disp   = $addr->{disp} // 0;
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FSTR_32 : FSTR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
@@ -685,7 +693,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     push @callee, 'x29', 'x30', 'sp';
 
                     # 1. MOV X17, SP -- save current SP
-                    $bytes .= pack( 'V', 0x910003F1 );
+                    $bytes .= pack( 'V', MOV_SP | 17 );
 
                     # 2. Save callee regs to current FCB
                     for my $off_idx ( 0 .. $#callee ) {
@@ -696,38 +704,45 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', STR_64 | ( $imm12 << 10 ) | ( $cid << 5 ) | $rid );
                     }
 
-                    # 3. Compute resume_pc -- ADR x16, #0 placeholder, patched after BR
+                    # 3. ADR x16, #0 placeholder, patched after BR x16 (step 10)
                     my $adr_off = $current_offset->();
-                    $bytes .= pack( 'V', 0x10000010 );    # ADR x16, #0
+                    $bytes .= pack( 'V', ADR | 16 );
 
-                    # 4. Store resume_pc at FCB[112]
-                    $bytes .= pack( 'V', 0xF9003B90 );    # STR x16, [x28, #112]
+                    # 4. Store resume_pc at FCB[FCB_RESUME_OFF]
+                    my $res_imm12 = FCB_RESUME_OFF >> 3;
+                    $bytes .= pack( 'V', STR_64 | ( $res_imm12 << 10 ) | ( $cid << 5 ) | 16 );
 
                     # 5. Switch fiber register to target FCB
-                    $bytes .= pack( 'V', 0x9100001C | ( $tid << 5 ) );    # ADD x28, Xtarget, #0
+                    $bytes .= pack( 'V', ADD_IMM_64 | ( $tid << 5 ) | 28 );
 
-                    # 6. Load target resume_pc FIRST (before restoring x28)
-                    $bytes .= pack( 'V', 0xF9403B90 );    # LDR x16, [x28, #112]
+                    # 6. Load target resume_pc from target FCB[FCB_RESUME_OFF] (using X28 as base)
+                    $bytes .= pack( 'V', LDR_64 | ( $res_imm12 << 10 ) | ( 28 << 5 ) | 16 );
 
-                    # 7. Restore callee regs from target FCB
+                    # 7. Restore callee regs from target FCB (using X28 as base)
+                    #    Skip x28 (idx 9) - will restore separately at the end since
+                    #    loading it would clobber the base pointer
                     for my $off_idx ( 0 .. $#callee ) {
+                        next if $callee[$off_idx] eq 'x28';
                         my $reg   = $callee[$off_idx];
                         my $rid   = $reg_id->($reg);
                         $rid = 17 if $reg eq 'sp';        # load into x17, not XZR
                         my $imm12 = ( $off_idx * 8 ) >> 3;
-                        $bytes .= pack( 'V', LDR_64 | ( $imm12 << 10 ) | ( $cid << 5 ) | $rid );
+                        $bytes .= pack( 'V', LDR_64 | ( $imm12 << 10 ) | ( 28 << 5 ) | $rid );
                     }
 
-                    # 8. MOV SP, X17 -- restore SP from target
-                    $bytes .= pack( 'V', 0x9100023F );
+                    # 7b. Restore x28 last (offset 72 = idx 9 * 8) - clobbers base, safe now
+                    $bytes .= pack( 'V', LDR_64 | ( ( 9 * 8 >> 3 ) << 10 ) | ( 28 << 5 ) | 28 );
 
-                    # 9. BR x16 -- jump to target's resume_pc
-                    $bytes .= pack( 'V', 0xD61F0200 );
+                    # 8. MOV SP, X17 -- restore SP from target
+                    $bytes .= pack( 'V', ADD_IMM_64 | ( 17 << 5 ) | 31 );
+
+                    # 9. BR x16 -- jump to target resume_pc
+                    $bytes .= pack( 'V', BR | ( 16 << 5 ) );
 
                     # 10. Patch ADR to point after BR x16
                     my $after = $current_offset->();
                     my $rel = $after - $adr_off;
-                    my $adr_enc = 0x10000010 | ( ( ( $rel >> 2 ) & 0x7FFFF ) << 5 ) | ( ( $rel & 3 ) << 29 );
+                    my $adr_enc = ADR | 16 | ( ( ( $rel >> 2 ) & 0x7FFFF ) << 5 ) | ( ( $rel & 3 ) << 29 );
                     substr $bytes, $adr_off, 4, pack( 'V', $adr_enc );
                 }
                 elsif ( $opcode eq 'lea_func' ) {
@@ -748,7 +763,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                             my $reg   = $to_save[$i];
                             my $rid   = $reg_id->($reg);
                             my $base  = $reg =~ /^v/ ? FLDR_64 : LDR_64;
-                            my $imm12 = ( $extra_frame + $aligned_alloca + $i * 8 ) >> 3;
+                            my $imm12 = ( $extra_frame + $i * 8 ) >> 3;
                             $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( 31 << 5 ) | $rid );
                         }
                     }
@@ -834,10 +849,10 @@ Generates ARM64 machine code from MIR. Implements full instruction encoding for 
 
 =head2 Frame Layout
 
-    SP -> [alloca area] [spill/caller-save slots] [callee saves] <- FP (x29)
+    SP -> [spill/caller-save slots] [callee saves] [alloca area] <- FP (x29)
 
-The alloca area is pre-scanned and allocated as a single SUB SP instruction in the prologue. All SP-relative memory
-accesses use the disp+aligned_alloca offset to skip past the alloca area.
+The alloca area is pre-scanned and allocated in the prologue. Placing it above the spill and callee-saved
+slots guarantees that memory load/store offsets from SP remain small enough to fit within 12-bit encoding boundaries.
 
 =head2 Key Constants
 
