@@ -161,10 +161,12 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             }
         }
 
-        # Automatically calculate layout if it wasn't called beforehand
+        # Automatically calculate layout if it wasn't called beforehand.
+        # Update section size so reused linker objects work with different-sized binaries.
         if ( !defined $self->layout ) {
             $self->pre_layout( length($text), length($data_bytes), $platform );
         }
+        $self->layout->get('.text')->{size} = length($text);
         my $base      = $self->image_base;
         my $page_size = $platform->page_size;    # 16KB for Apple Silicon, 4KB for Intel
 
