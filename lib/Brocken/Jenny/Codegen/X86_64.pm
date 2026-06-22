@@ -240,6 +240,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
+                    $total_alloca = ( $total_alloca + 15 ) & ~15;
                 }
             }
         }
@@ -510,15 +511,17 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
+                    $alloca_frame = ( $alloca_frame + 15 ) & ~15;
                     $alloca_frame += $size;
-                    my $rex   = 0x48 | ( $did >= 8 ? 4 : 0 );
-                    my $mod   = ( $alloca_top == 0 ) ? 0 : ( $alloca_top >= -128 && $alloca_top <= 127 ) ? 1 : 2;
-                    my $modrm = ( $mod << 6 ) | ( ( $did & 7 ) << 3 ) | 4;
-                    my $sib   = 0x24;
+                    my $aligned_top = ( $alloca_top + 15 ) & ~15;
+                    my $rex         = 0x48 | ( $did >= 8 ? 4 : 0 );
+                    my $mod         = ( $aligned_top == 0 ) ? 0 : ( $aligned_top >= -128 && $aligned_top <= 127 ) ? 1 : 2;
+                    my $modrm       = ( $mod << 6 ) | ( ( $did & 7 ) << 3 ) | 4;
+                    my $sib         = 0x24;
                     $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm ) . pack( 'C', $sib );
-                    $bytes .= pack( 'c', $alloca_top ) if $mod == 1;
-                    $bytes .= pack( 'V', $alloca_top ) if $mod == 2;
-                    $alloca_top += $size;
+                    $bytes .= pack( 'c', $aligned_top ) if $mod == 1;
+                    $bytes .= pack( 'V', $aligned_top ) if $mod == 2;
+                    $alloca_top = $aligned_top + $size;
                 }
                 elsif ( $opcode eq 'lea' ) {
                     my $dst_r = $resolve->($dst);
