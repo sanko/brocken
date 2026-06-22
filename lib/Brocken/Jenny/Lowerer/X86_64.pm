@@ -2476,10 +2476,10 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             opcode   => 'add',
                             operands => [ $saved_rsp, Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'imm',
-                                value => $stack_sz,
+                                value => $stack_sz - 8,
                                 type  => Brocken::Lindsay::IR::Type::i64()
                             ) ],
-                            comment => 'saved_rsp += stack_sz'
+                            comment => 'saved_rsp += stack_sz - 8 (simulate call push)'
                         )
                     );
                     my $fcb_rsp_field = Brocken::Jenny::MIR::MachineOperand->new(
