@@ -8,7 +8,7 @@ use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
 
 class Brocken::Jenny::Codegen::Wasm {
-    field $platform : param = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+    field $platform : param;
 
     method emit_function($ir_func) {
         my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();

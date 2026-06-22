@@ -18,7 +18,7 @@ my $platform = Brocken::Katsuro::Platform::parse();
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 constant bytes for ' . $platform->friendly );
@@ -49,7 +49,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 add bytes for ' . $platform->friendly );
@@ -80,7 +80,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 shl bytes for ' . $platform->friendly );
@@ -111,7 +111,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 mul bytes for ' . $platform->friendly );
@@ -142,7 +142,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 lshr bytes for ' . $platform->friendly );
@@ -178,7 +178,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 ashr bytes for ' . $platform->friendly );
@@ -214,7 +214,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 div bytes for ' . $platform->friendly );
@@ -245,7 +245,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 rem bytes for ' . $platform->friendly );
@@ -276,7 +276,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 carry add bytes for ' . $platform->friendly );
@@ -312,7 +312,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 sub (5-3) bytes for ' . $platform->friendly );
@@ -343,7 +343,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 borrow sub bytes for ' . $platform->friendly );
@@ -377,7 +377,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 edge mul bytes for ' . $platform->friendly );
@@ -413,7 +413,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 edge div bytes for ' . $platform->friendly );
@@ -449,7 +449,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 edge rem bytes for ' . $platform->friendly );
@@ -485,7 +485,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 sub negative rhs bytes for ' . $platform->friendly );
@@ -521,7 +521,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 add carry hi bytes for ' . $platform->friendly );
@@ -557,7 +557,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 and bytes for ' . $platform->friendly );
@@ -593,7 +593,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 or bytes for ' . $platform->friendly );
@@ -624,7 +624,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 xor bytes for ' . $platform->friendly );
@@ -660,7 +660,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 signed div bytes for ' . $platform->friendly );
@@ -694,7 +694,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 signed div 2 bytes for ' . $platform->friendly );
@@ -728,7 +728,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 signed div neg both bytes for ' . $platform->friendly );
@@ -764,7 +764,7 @@ SKIP: {
     );
     my $codegen
         = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
         Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 signed rem bytes for ' . $platform->friendly );

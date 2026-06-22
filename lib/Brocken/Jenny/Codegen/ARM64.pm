@@ -8,7 +8,7 @@ use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
 
 class Brocken::Jenny::Codegen::ARM64 {
-    field $platform : param //= Brocken::Katsuro::Platform::parse();
+    field $platform : param;
     use constant {
         B            => 0x14000000,
         CBZ          => 0xB4000000,

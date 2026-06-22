@@ -87,9 +87,86 @@ subtest 'ARM64 fiber yield passes value to main exit code' => sub {
             system("objdump -d --architecture=aarch64 $output_file 2>&1");
         }
 
-        my $cmd = $platform->is_windows ? $output_file : "./$output_file";
+        # On Windows, validate the PE format before attempting execution
+        if ( $platform->is_windows ) {
+            open my $fh, '<:raw', $output_file or die "can't open $output_file: $!";
+            my $bin; read $fh, $bin, 4096; close $fh;
+            my $pe_ok = 1;
+            # Check MZ magic
+            if ( substr( $bin, 0, 2 ) ne 'MZ' ) {
+                warn "PE VALIDATION: bad MZ magic\n";
+                $pe_ok = 0;
+            }
+            my $lfanew = unpack( 'V', substr( $bin, 0x3C, 4 ) );
+            if ( substr( $bin, $lfanew, 4 ) ne "PE\x00\x00" ) {
+                warn "PE VALIDATION: bad PE signature at offset $lfanew\n";
+                $pe_ok = 0;
+            }
+            my $machine             = unpack( 'v', substr( $bin, $lfanew + 4, 2 ) );
+            my $num_sections        = unpack( 'v', substr( $bin, $lfanew + 6, 2 ) );
+            my $size_of_opt_hdr     = unpack( 'v', substr( $bin, $lfanew + 20, 2 ) );
+            my $characteristics     = unpack( 'v', substr( $bin, $lfanew + 22, 2 ) );
+            my $opt_hdr_start       = $lfanew + 24;
+            my $entry_rva           = unpack( 'V', substr( $bin, $opt_hdr_start + 16, 4 ) );
+            my $base_of_code        = unpack( 'V', substr( $bin, $opt_hdr_start + 20, 4 ) );
+            my $opt_magic           = unpack( 'v', substr( $bin, $opt_hdr_start, 2 ) );
+            my $section_table_start = $opt_hdr_start + $size_of_opt_hdr;
+            warn "PE VALIDATION: machine=0x" . sprintf( '%04X', $machine )
+                . " sections=$num_sections opt_hdr_size=$size_of_opt_hdr chars=0x"
+                . sprintf( '%04X', $characteristics ) . "\n";
+            warn "PE VALIDATION: entry_rva=0x" . sprintf( '%X', $entry_rva )
+                . " base_of_code=0x" . sprintf( '%X', $base_of_code ) . "\n";
+            if ( $machine != 0xAA64 ) {
+                warn "PE VALIDATION: expected machine 0xAA64 (ARM64)\n";
+                $pe_ok = 0;
+            }
+            if ( $size_of_opt_hdr != 240 ) {
+                warn "PE VALIDATION: expected opt hdr size 240 (PE32+ with 16 data dirs), got $size_of_opt_hdr\n";
+                $pe_ok = 0;
+            }
+            if ( $entry_rva == 0 ) {
+                warn "PE VALIDATION: entry RVA is 0! Text section RVA is 0x1000\n";
+                $pe_ok = 0;
+            }
+            # Check optional header magic
+            if ( $opt_magic != 0x020B ) {
+                warn "PE VALIDATION: expected PE32+ magic 0x020B, got 0x" . sprintf( '%04X', $opt_magic ) . "\n";
+                $pe_ok = 0;
+            }
+            # Read section table and dump it
+            for my $i ( 0 .. $num_sections - 1 ) {
+                my $sec_start = $section_table_start + $i * 40;
+                my $sec_name  = substr( $bin, $sec_start, 8 );
+                $sec_name =~ s/\x00+$//;
+                my ( $sec_vsize, $sec_rva, $sec_rsize, $sec_rptr )
+                    = unpack( 'V4', substr( $bin, $sec_start + 8, 16 ) );
+                warn "PE SECTION $i: name='$sec_name' vsize=$sec_vsize rva=0x"
+                    . sprintf( '%X', $sec_rva ) . " rsize=$sec_rsize rptr=0x"
+                    . sprintf( '%X', $sec_rptr ) . "\n";
+            }
+            warn "PE VALIDATION: " . ( $pe_ok ? "OK" : "FAILED" ) . "\n";
+        }
+
+        # Try running with gdb in batch mode on Windows (if available)
+        if ( $platform->is_windows ) {
+            my $gdb_out;
+            if ( open my $fh, '-|', 'gdb', '-batch', '-nx', '-ex', 'run', '-ex', 'quit', '--args',
+                ".\\$output_file" )
+            {
+                $gdb_out = do { local $/; <$fh> };
+                close $fh;
+                warn "GDB output:\n$gdb_out\n" if $gdb_out;
+            }
+            else {
+                warn "gdb not available on this system\n";
+            }
+        }
+
+        my $cmd = $platform->is_windows ? ".\\$output_file" : "./$output_file";
         system {$cmd} $cmd;
         my $exit_code = $? >> 8;
+        my $errno = 0 + $!;
+        diag "system($cmd) returned exit=$exit_code, errno=$errno ('$!')" if $exit_code != 99;
         is( $exit_code, 99, 'ARM64 fiber test exited with 99' );
 
         unlink $output_file;

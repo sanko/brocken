@@ -30,7 +30,7 @@ $builder->build_add( $fv4, Brocken::Lindsay::IR::Constant->new( type => Brocken:
 $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
 my $codegen
     = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-    $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new() :
+    $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
     Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
 my $bytes = $codegen->emit_function($func);
 ok( length($bytes) > 0, 'Generated float battery bytes for ' . $platform->friendly );

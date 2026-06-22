@@ -8,7 +8,7 @@ use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
 
 class Brocken::Jenny::Codegen::RISCV64 {
-    field $platform : param //= Brocken::Katsuro::Platform::parse();
+    field $platform : param;
     use constant {
         JAL     => 0x0000006F,
         JALR    => 0x00008067,
