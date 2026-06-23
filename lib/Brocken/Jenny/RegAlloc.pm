@@ -14,7 +14,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
     method allocate( $mf, $platform, $is_float = 0 ) {
         $mf->compute_cfg unless $mf->entry_block->successors->@*;
         my @intervals = $self->_compute_live_intervals( $mf, $platform, $is_float );
-        return $self->_linear_scan( \@intervals, $platform, $is_float );
+        return $self->_linear_scan( $mf, \@intervals, $platform, $is_float );
     }
 
     method _vreg_name( $op, $is_float ) {
@@ -157,7 +157,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return @intervals;
     }
 
-    method _linear_scan( $intervals, $platform, $is_float ) {
+    method _linear_scan( $mf, $intervals, $platform, $is_float ) {
         my @caller_regs = $is_float ? $platform->fp_registers('caller')->@* : $platform->registers('caller')->@*;
         my @callee_regs = $is_float ? $platform->fp_registers('callee')->@* : $platform->registers('callee')->@*;
         my $skip_reg    = $is_float ? $platform->fp_return_register         : $platform->return_register;
@@ -166,6 +166,26 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         @callee_regs = grep { $_ ne $skip_reg } @callee_regs;
         @caller_regs = grep { $_ ne $fiber_reg } @caller_regs if $fiber_reg;
         @callee_regs = grep { $_ ne $fiber_reg } @callee_regs if $fiber_reg;
+        # Exclude physical registers that are used as destinations by any
+        # instruction in this function. This prevents argument-setup MOVs
+        # (e.g. `mov rcx, virt`) from clobbering virt_reg values that the
+        # allocator may have assigned to the same physical register.
+        my %defined_phys;
+        if ( $mf && $mf->blocks->@* ) {
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    my @ops = $inst->operands->@*;
+                    next unless @ops >= 1;
+                    my $dst = $ops[0];
+                    next unless $dst->kind eq 'phys_reg';
+                    my $is_dst_float = $dst->type ? ( $dst->type->kind eq 'float' ? 1 : 0 ) : 0;
+                    next if $is_float != $is_dst_float;
+                    next if $inst->opcode eq 'store' || $inst->opcode eq 'store_imm';
+                    $defined_phys{ $dst->value } = 1;
+                }
+            }
+        }
+        @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         my $spill_temp = pop @caller_regs;
         my @regs       = ( @caller_regs, @callee_regs );
         my %assignment;
@@ -313,6 +333,32 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                         $ops[0]->kind eq 'virt_reg' &&
                         $ops[1]->kind eq 'virt_reg' &&
                         ( $assignment->{ $ops[0]->value } // '' ) eq ( $assignment->{ $ops[1]->value } // '' );
+                }
+                push @new, $inst;
+            }
+            $bb->instructions->@* = @new;
+        }
+    }
+
+    method remove_redundant_caller_restores($mf) {
+        for my $bb ( $mf->blocks->@* ) {
+            my @new;
+            for my $i ( 0 .. $#{ $bb->instructions } ) {
+                my $inst = $bb->instructions->[$i];
+                my $next = $bb->instructions->[ $i + 1 ];
+                if (   $inst->opcode =~ /^(?:load|fload)$/
+                    && $inst->comment =~ /^caller-restore /
+                    && $next
+                    && $next->opcode =~ /^(?:mov|fmov)$/ )
+                {
+                    my ( $load_dst ) = $inst->operands->@*;
+                    my ( $mov_dst, $mov_src ) = $next->operands->@*;
+                    if (   $load_dst->kind eq 'phys_reg'
+                        && $mov_src->kind eq 'phys_reg'
+                        && $load_dst->value eq $mov_src->value )
+                    {
+                        next;
+                    }
                 }
                 push @new, $inst;
             }

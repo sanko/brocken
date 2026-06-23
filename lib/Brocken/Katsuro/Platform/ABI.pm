@@ -4,8 +4,11 @@ no warnings qw[experimental::class experimental::builtin];
 
 class Brocken::Katsuro::Platform::ABI {
 
-    sub parse ( $class, $arch ) {
-        if    ( $arch =~ /x86_64|x64|amd64/i ) { $class = 'Brocken::Katsuro::Platform::ABI::X86_64' }
+    sub parse ( $class, $arch, $os = undef ) {
+        if ( $arch =~ /x86_64|x64|amd64/i && defined $os && $os =~ /windows|win32|mswin/i ) {
+            $class = 'Brocken::Katsuro::Platform::ABI::X86_64_Win64'
+        }
+        elsif ( $arch =~ /x86_64|x64|amd64/i ) { $class = 'Brocken::Katsuro::Platform::ABI::X86_64' }
         elsif ( $arch =~ /aarch64|arm64/i )    { $class = 'Brocken::Katsuro::Platform::ABI::AArch64' }
         elsif ( $arch =~ /riscv64/i )          { $class = 'Brocken::Katsuro::Platform::ABI::RISCV64' }
         builtin::load_module $class;
@@ -19,6 +22,7 @@ class Brocken::Katsuro::Platform::ABI {
     method stack_reg()                             {undef}
     method dwarf_reg_num($name)                    {undef}
     method param_registers()                       { [] }
+    method fp_param_registers()                    { [] }
     method return_register()                       {undef}
     method fp_return_register()                    {undef}
     method fiber_reg()                             {undef}

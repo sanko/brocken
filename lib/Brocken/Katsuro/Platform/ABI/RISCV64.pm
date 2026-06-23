@@ -22,10 +22,11 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform:
     }
     method frame_reg()          {'s0'}
     method stack_reg()          {'sp'}
-    method param_registers()    { [qw(a0 a1 a2 a3 a4 a5 a6 a7)] }
-    method return_register()    {'a0'}
-    method fp_return_register() {'v0'}
-    method fiber_reg()          {'s11'}
+    method param_registers()       { [qw(a0 a1 a2 a3 a4 a5 a6 a7)] }
+    method fp_param_registers()    { [qw(f0 f1 f2 f3 f4 f5 f6 f7)] }
+    method return_register()       {'a0'}
+    method fp_return_register()    {'f0'}
+    method fiber_reg()             {'s11'}
 
     # RISC-V ABI register mappings to x0-x31 (zero=0, ra=1, sp=2, etc.)
     method dwarf_reg_num($name) {

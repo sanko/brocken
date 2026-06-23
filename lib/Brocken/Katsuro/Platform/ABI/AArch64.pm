@@ -14,18 +14,21 @@ class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform:
             # Order matters: x9-x15 (non-param caller regs) come before x1-x7 (param caller regs)
             # to avoid register allocator assigning vregs to param regs that get clobbered
             # by argument-setup mov instructions in the Lowerer.
-            available => [qw[x0 x9 x10 x11 x12 x13 x14 x15 x1 x2 x3 x4 x5 x6 x7 x20 x21 x22 x23 x24 x25 x26 x27 x28]],
+            # x18 is the platform register per AAPCS64 - reserved on Android/iOS/macOS
+            # x19-x28 are callee-saved
+            available => [qw[x0 x9 x10 x11 x12 x13 x14 x15 x1 x2 x3 x4 x5 x6 x7 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28]],
             caller    => [qw[x0 x9 x10 x11 x12 x13 x14 x15 x1 x2 x3 x4 x5 x6 x7]],
-            callee    => [qw[x20 x21 x22 x23 x24 x25 x26 x27 x28]]
+            callee    => [qw[x19 x20 x21 x22 x23 x24 x25 x26 x27 x28]]
         );
         return $data{$category} // [];
     }
     method frame_reg()          {'x29'}
     method stack_reg()          {'sp'}
-    method param_registers()    { [qw(x0 x1 x2 x3 x4 x5 x6 x7)] }
-    method return_register()    {'x0'}
-    method fp_return_register() {'v0'}
-    method fiber_reg()          {'x28'}
+    method param_registers()       { [qw(x0 x1 x2 x3 x4 x5 x6 x7)] }
+    method fp_param_registers()    { [qw(v0 v1 v2 v3 v4 v5 v6 v7)] }
+    method return_register()       {'x0'}
+    method fp_return_register()    {'v0'}
+    method fiber_reg()             {'x28'}
 
     # ARM64 FP/SIMD registers (AAPCS64 calling convention)
     # Note: v0-v7 are caller-saved, v8-v15 are callee-saved (only the lower 64 bits)

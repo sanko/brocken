@@ -2,17 +2,26 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
+use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
+my %class_to_triple = (
+    'Brocken::Jenny::Lowerer::X86_64'  => 'x86_64-unknown-linux-gnu',
+    'Brocken::Jenny::Lowerer::ARM64'   => 'aarch64-unknown-linux-gnu',
+    'Brocken::Jenny::Lowerer::RISCV64' => 'riscv64-unknown-linux-gnu',
+);
 my $check = sub {
     my ( $lowerer_class, $ir_name, $ir_body, %checks ) = @_;
     my $func    = Brocken::Lindsay::IR::Function->new( name => $ir_name, return_type => Brocken::Lindsay::IR::Type::i128() );
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func->append_block('entry') );
     $ir_body->($builder);
-    my $lowerer = $lowerer_class->new();
+    my $platform = $class_to_triple{$lowerer_class}
+        ? Brocken::Katsuro::Platform::parse($class_to_triple{$lowerer_class})
+        : undef;
+    my $lowerer = $platform ? $lowerer_class->new(platform => $platform) : $lowerer_class->new();
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
 
@@ -216,7 +225,7 @@ $check->(
     $builder->build_store( $val, $ptr );
     my $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::i128(), $ptr, '%loaded' );
     $builder->build_ret($loaded);
-    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new(platform => Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @stores  = grep { $_->opcode =~ /^store/ && $_->comment =~ /i128/ } @insts;
@@ -231,7 +240,7 @@ $check->(
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
-    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new(platform => Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @rax     = grep { $_->opcode eq 'mov' && $_->comment =~ /rax/ } @insts;
@@ -250,7 +259,7 @@ $check->(
     $builder->build_store( $val, $ptr );
     my $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::i128(), $ptr, '%loaded' );
     $builder->build_ret($loaded);
-    my $lowerer = Brocken::Jenny::Lowerer::ARM64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::ARM64->new(platform => Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @stores  = grep { $_->opcode =~ /^store/ && $_->comment =~ /i128/ } @insts;
@@ -265,7 +274,7 @@ $check->(
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
-    my $lowerer = Brocken::Jenny::Lowerer::ARM64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::ARM64->new(platform => Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @x0      = grep { $_->opcode eq 'mov' && $_->comment =~ /x0/ } @insts;
@@ -284,7 +293,7 @@ $check->(
     $builder->build_store( $val, $ptr );
     my $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::i128(), $ptr, '%loaded' );
     $builder->build_ret($loaded);
-    my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new(platform => Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @stores  = grep { $_->opcode =~ /^store/ && $_->comment =~ /i128 store/ } @insts;
@@ -299,7 +308,7 @@ $check->(
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
-    my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new(platform => Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @a0      = grep { $_->comment =~ /i128 lo/ } @insts;

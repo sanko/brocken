@@ -30,7 +30,7 @@ class Brocken::Jenny::Codegen::X86_64 {
 
     # Lower Lindsay IR to MIR, allocate registers, then encode to x86_64 machine code
     method emit_function($ir_func) {
-        my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+        my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
         my $mf      = $lowerer->lower($ir_func);
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
@@ -44,9 +44,11 @@ class Brocken::Jenny::Codegen::X86_64 {
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
         my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
         my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
-        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
-        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
+        my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
+        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
+        $alloc->remove_redundant_caller_restores($mf);
         $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
@@ -66,7 +68,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $main_index = -1;
         for my $i ( 0 .. $#$ir_funcs ) {
             my $func = $ir_funcs->[$i];
-            my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+            my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
             my $mf      = $lowerer->lower($func);
             $has_fiber  ||= $self->_has_fiber_ops_mf($mf);
             $main_index = $i if $func->name eq 'main';
@@ -95,9 +97,11 @@ class Brocken::Jenny::Codegen::X86_64 {
             @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
             my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
             my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
-            $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
-            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
+            my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
+            $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
+            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
+            $alloc->remove_redundant_caller_restores($mf);
             $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
@@ -131,9 +135,11 @@ class Brocken::Jenny::Codegen::X86_64 {
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
         my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
         my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
-        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
-        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
+        my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
+        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
+        $alloc->remove_redundant_caller_restores($mf);
         $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
@@ -602,11 +608,29 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $did   = $reg_id->($dst_r);
                     my $sid   = $reg_id->($src_r);
                     my $bits  = $dst->type  ? $dst->type->bits : 32;
-                    my $rex   = $bits >= 64 ? 0x48             : 0x40;
-                    $rex |= ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
-                    my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'C', $rex ) if $rex > 0x40;
-                    $bytes .= pack( 'CCC', 0x66, 0x0F, 0x6E ) . pack( 'C', $modrm );
+                    if ( $sid >= 8 ) {
+                        # AMD Zen 4 erratum: MOVD/MOVQ from R8-R15 to XMM
+                        # produces wrong results.  Work around by storing the
+                        # GPR to [rsp+0x20] and loading into XMM from memory.
+                        # The +0x20 offset avoids the return address that
+                        # the entry-stub call placed at [rsp].
+                        my $rex_store = 0x40 | ( $bits >= 64 ? 8 : 0 ) | ( $sid >= 8 ? 4 : 0 );
+                        my $modrm_st  = 0x44 | ( ( $sid & 7 ) << 3 );
+                        $bytes .= pack( 'C', $rex_store ) if $rex_store > 0x40;
+                        $bytes .= pack( 'CC', 0x89, $modrm_st ) . pack( 'CC', 0x24, 0x20 );
+                        my $op_load = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
+                        my $rex_load = 0x40 | ( $did >= 8 ? 4 : 0 );
+                        my $modrm_ld = 0x44 | ( ( $did & 7 ) << 3 );
+                        $bytes .= pack( 'C', $rex_load ) if $rex_load > 0x40;
+                        $bytes .= pack( 'CCCC', $op_load->[0], $op_load->[1], $op_load->[2], $modrm_ld ) . pack( 'CC', 0x24, 0x20 );
+                    }
+                    else {
+                        my $rex   = $bits >= 64 ? 0x48 : 0x40;
+                        $rex |= ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                        $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                        $bytes .= pack( 'CCC', 0x66, 0x0F, 0x6E ) . pack( 'C', $modrm );
+                    }
                 }
                 elsif ( $opcode eq 'fadd' ||
                     $opcode eq 'fsub'  ||
@@ -886,6 +910,13 @@ class Brocken::Jenny::Codegen::X86_64 {
             }
         }
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+    }
+
+    method _caller_save_base( $gp_spill, $fp_spill ) {
+        my $max_off = 0;
+        for my $off ( values $gp_spill->%* ) { $max_off = $off if $off > $max_off; }
+        for my $off ( values $fp_spill->%* ) { $max_off = $off if $off > $max_off; }
+        return $max_off ? int( $max_off / 8 ) + 1 : 0;
     }
 }
 

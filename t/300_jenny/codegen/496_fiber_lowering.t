@@ -1,6 +1,7 @@
 use v5.42;
 use Test2::V0;
 use lib 'lib', '../../lib', '../../../lib';
+use Brocken::Katsuro;
 use Brocken::Lindsay::IR;
 use Brocken::Lindsay::IR::Builder;
 use Brocken::Jenny::Pass::Fiber;
@@ -68,7 +69,7 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     $b->position_at_end( $main->append_block('entry') );
     $b->build_fiber_create( $worker, [], '%f' );
     $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new(platform => Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($main);
     my %opcodes;
 
@@ -92,7 +93,7 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     my $fiber = $b->build_fiber_create( $worker, [], '%f' );
     $b->build_fiber_transfer( $fiber, Brocken::Lindsay::IR::Constant->new( type => $i32, value => 42 ), '%r' );
     $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new(platform => Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($main);
     my %opcodes;
 
@@ -112,7 +113,7 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     $b->position_at_end( $func->append_block('entry') );
     $b->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ), '%yv' );
     $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new(platform => Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($func);
     my %opcodes;
 
@@ -132,7 +133,7 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     $b->position_at_end( $func->append_block('entry') );
     $b->build_fiber_id('%tid');
     $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ) );
-    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new(platform => Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($func);
     ok $mf, 'fiber_id lowered successfully';
 }
@@ -146,7 +147,7 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     my $f     = $b->build_fiber_create( $dummy, [], '%f' );
     $b->build_fiber_pin( $f, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 1 ) );
     $b->build_ret();
-    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new();
+    my $lowerer = Brocken::Jenny::Lowerer::X86_64->new(platform => Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu'));
     my $mf      = $lowerer->lower($func);
     ok $mf, 'fiber_pin lowered successfully';
 }

@@ -174,7 +174,7 @@ class Brocken::Katsuro::Platform {
     field $env        : reader : param = ();
     field $friendly   : reader : param = ();
     field $is_native  : reader : param = 0;
-    field $abi        : reader = Brocken::Katsuro::Platform::ABI->parse($arch);
+    field $abi        : reader = Brocken::Katsuro::Platform::ABI->parse($arch, $os);
     ADJUST {
         # Assign friendly names for display purposes, particularly for Apple platforms.
         if ( !defined $friendly ) {
