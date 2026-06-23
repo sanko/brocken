@@ -98,7 +98,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform );
         }
         my $l          = $self->layout;
-        my $is_pie     = ( $platform->is_bsd || $platform->is_haiku ) && !$shared;
+        my $is_pie     = $platform->is_haiku && !$shared;
         my $base       = $is_pie ? 0 : $self->image_base;
         my $elf_type   = $shared ? 3 : ( $is_pie ? 3 : 2 );    # ET_DYN (3) for PIE, ET_EXEC (2) for static
         my $text_rva   = $self->layout->get('.text')->{rva};
