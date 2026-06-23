@@ -2543,6 +2543,28 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
 
+                    # Zero-initialize callee-save slots before setting specific values.
+                    # The alloca does not zero memory, so uninitialized slots would
+                    # load garbage into callee registers on the fiber's first entry.
+                    for my $off ( 0, 8, 24, 32, 40 ) {
+                        my $f = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $inst->name . '.fcb', disp => $off },
+                            type  => Brocken::Lindsay::IR::Type::i64()
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'store_imm',
+                                operands => [ $f, Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => 0,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                ) ],
+                                comment => "FCB[$off] = 0"
+                            )
+                        );
+                    }
+
                     # Store self-pointer in FCB.r12 slot (offset 16)
                     my $fcb_self_field = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
