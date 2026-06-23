@@ -183,7 +183,8 @@ SKIP: {
 
         my $file = 'fiber_chain' . $ext;
         $linker->write_executable( $file, $funcs, $host );
-        run_exec( $file, expected_exit => 42, name => 'chain fiber last yield 42', platform => $host, keep => 1 );
+        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        run_exec( $file, expected_exit => 42, name => 'chain fiber last yield 42', platform => $host, keep => 1, gdb => $dbg );
     };
 
     # ────────────────────────────────────────────────────────────

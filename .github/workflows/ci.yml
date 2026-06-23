@@ -12,6 +12,7 @@ jobs:
       os: dragonflybsd
       perl: 5.42
       pkg: sudo pkg install -y perl5-5.42 || (sudo sed -i '' 's|/quarterly|/latest|' /usr/local/etc/pkg/repos/Avalon.conf && sudo pkg update -f && sudo pkg install -y perl5-5.42) || (curl -sL https://www.cpan.org/src/5.0/perl-5.42.2.tar.gz | tar xz -C /tmp && cd /tmp/perl-5.42.2 && ./Configure -des -Dprefix=/usr/local -Dusedevel && make -j$(getconf NPROCESSORS_ONLN) && sudo make install && sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl)
+      setup: 'sudo pkg install -y gdb || true'
       version: 6.4.2
   freebsd-arm64:
     name: FreeBSD
@@ -131,6 +132,7 @@ jobs:
       os: netbsd
       perl: 5.42
       pkg: sudo pkgin -y install perl || true
+      setup: 'sudo pkgin -y install gdb || true'
       version: 10.1
   omnios:
     name: OmniOS

@@ -19,7 +19,15 @@ package Test2::Tools::Brocken v0.0.1 {
         my $actual;
 
         if ($do_gdb) {
-            my @gdb_cmd = ( 'gdb', '-batch', '-nx', '-ex', 'run', '-ex', 'quit', '--args', $cmd, @$argv );
+            my @gdb_cmd = (
+                'gdb', '-batch', '-nx',
+                '-ex', 'run',
+                '-ex', 'bt',
+                '-ex', 'info registers',
+                '-ex', 'x/30i $rip-10',
+                '-ex', 'quit',
+                '--args', $cmd, @$argv
+            );
             my $gdb_out;
             if ( open my $fh, '-|', @gdb_cmd ) {
                 $gdb_out = do { local $/; <$fh> };
