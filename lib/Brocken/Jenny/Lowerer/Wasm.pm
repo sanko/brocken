@@ -2061,6 +2061,12 @@ class Brocken::Jenny::Lowerer::Wasm {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberPin') ) {
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateCreate') ) {
+                    die "isolate_create not yet implemented on Wasm";
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateJoin') ) {
+                    die "isolate_join not yet implemented on Wasm";
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                     if ( $inst->type->kind ne 'void' ) {
                         my $val = $inst->operands->[0];

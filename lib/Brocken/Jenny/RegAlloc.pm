@@ -25,10 +25,10 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return $op->value;
     }
 
-    method _vreg_names_from_mem_operands($inst, $platform) {
+    method _vreg_names_from_mem_operands( $inst, $platform ) {
         state $phys_re = do {
             my @regs = $platform->registers('available')->@*;
-            my $pat = join '|', map quotemeta, @regs;
+            my $pat  = join '|', map quotemeta, @regs;
             qr/^($pat)$/;
         };
         my @names;
@@ -79,7 +79,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                         $used{$name} = 1 unless exists $defd{$name};
                     }
                 }
-                for my $base ( $self->_vreg_names_from_mem_operands($inst, $platform) ) {
+                for my $base ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
                     next if $is_float;
                     $used{$base} = 1 unless exists $defd{$base};
                 }
@@ -138,7 +138,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     $first{$name} = List::Util::min( $first{$name} // $total_idx, $bi_first );
                     $last{$name}  = List::Util::max( $last{$name}  // 0, $bi_first );
                 }
-                for my $base ( $self->_vreg_names_from_mem_operands($inst, $platform) ) {
+                for my $base ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
                     next if $is_float;
                     $first{$base} = List::Util::min( $first{$base} // $total_idx, $bi_first );
                     $last{$base}  = List::Util::max( $last{$base}  // 0, $bi_first );
@@ -161,11 +161,12 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         my @caller_regs = $is_float ? $platform->fp_registers('caller')->@* : $platform->registers('caller')->@*;
         my @callee_regs = $is_float ? $platform->fp_registers('callee')->@* : $platform->registers('callee')->@*;
         my $skip_reg    = $is_float ? $platform->fp_return_register         : $platform->return_register;
-        my $fiber_reg   = $is_float ? undef                                  : $platform->fiber_reg;
+        my $fiber_reg   = $is_float ? undef                                 : $platform->fiber_reg;
         @caller_regs = grep { $_ ne $skip_reg } @caller_regs;
         @callee_regs = grep { $_ ne $skip_reg } @callee_regs;
         @caller_regs = grep { $_ ne $fiber_reg } @caller_regs if $fiber_reg;
         @callee_regs = grep { $_ ne $fiber_reg } @callee_regs if $fiber_reg;
+
         # Exclude physical registers that are used as destinations by any
         # instruction in this function. This prevents argument-setup MOVs
         # (e.g. `mov rcx, virt`) from clobbering virt_reg values that the
@@ -187,12 +188,13 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 }
             }
         }
+
         # Exclude r10/r11 when the function contains ctx_swap. The ctx_swap
         # encoding body uses these as internal temporaries (resume_pc and
         # saved_rsp), making them invisible to the per-function phys_reg
         # destination scan above. Any virtual register allocated to r10 or
         # r11 would have its value silently corrupted within ctx_swap.
-        if ($has_ctx_swap && !$is_float) {
+        if ( $has_ctx_swap && !$is_float ) {
             $defined_phys{r10} = 1;
             $defined_phys{r11} = 1;
         }
@@ -302,7 +304,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         for my $bb ( $mf->blocks->@* ) {
             my @new;
             for my $inst ( $bb->instructions->@* ) {
-                if ( $inst->opcode =~ /^(?:call_func|ctx_swap)$/ ) {
+                if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap)$/ ) {
                     for my $r (@$caller_regs) {
                         my $mem
                             = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 }, );
@@ -315,7 +317,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     }
                 }
                 push @new, $inst;
-                if ( $inst->opcode =~ /^(?:call_func|ctx_swap)$/ ) {
+                if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap)$/ ) {
                     for my $r ( reverse @$caller_regs ) {
                         my $mem
                             = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 },
@@ -357,17 +359,10 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             for my $i ( 0 .. $#{ $bb->instructions } ) {
                 my $inst = $bb->instructions->[$i];
                 my $next = $bb->instructions->[ $i + 1 ];
-                if (   $inst->opcode =~ /^(?:load|fload)$/
-                    && $inst->comment =~ /^caller-restore /
-                    && $next
-                    && $next->opcode =~ /^(?:mov|fmov)$/ )
-                {
-                    my ( $load_dst ) = $inst->operands->@*;
+                if ( $inst->opcode =~ /^(?:load|fload)$/ && $inst->comment =~ /^caller-restore / && $next && $next->opcode =~ /^(?:mov|fmov)$/ ) {
+                    my ($load_dst) = $inst->operands->@*;
                     my ( $mov_dst, $mov_src ) = $next->operands->@*;
-                    if (   $load_dst->kind eq 'phys_reg'
-                        && $mov_src->kind eq 'phys_reg'
-                        && $load_dst->value eq $mov_src->value )
-                    {
+                    if ( $load_dst->kind eq 'phys_reg' && $mov_src->kind eq 'phys_reg' && $load_dst->value eq $mov_src->value ) {
                         next;
                     }
                 }

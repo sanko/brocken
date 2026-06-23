@@ -17,7 +17,8 @@ use feature qw[class];
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func_main->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
-    my $codegen       = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new(platform=>$platform) : Brocken::Jenny::Codegen::X86_64->new(platform=>$platform);
+    my $codegen = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $machine_bytes = $codegen->emit_function($func_main);
     my $output_file   = './test_prog';
     my $linker        = Brocken::Jenny::Linker::MachO->new();
@@ -41,7 +42,8 @@ SKIP: {
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func_ext->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
-    my $codegen       = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new(platform=>$platform) : Brocken::Jenny::Codegen::X86_64->new(platform=>$platform);
+    my $codegen = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
+        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
     my $machine_bytes = $codegen->emit_function($func_ext);
     my $output_file   = './libtest_prog.dylib';
     my $linker        = Brocken::Jenny::Linker::MachO->new( type => 'shared' );

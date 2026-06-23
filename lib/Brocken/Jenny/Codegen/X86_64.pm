@@ -42,8 +42,8 @@ class Brocken::Jenny::Codegen::X86_64 {
         # Caller-save: save/restore caller regs around call_func (exclude return registers)
         my %skip;
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
-        my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
-        my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+        my @gp_caller   = grep { !$skip{$_} } $platform->registers('caller')->@*;
+        my @fp_caller   = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
         my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
         $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
@@ -53,6 +53,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+
         if ( $self->_has_fiber_ops_mf($mf) ) {
             $callee_seen{ $platform->fiber_reg } = 1;
         }
@@ -64,13 +65,15 @@ class Brocken::Jenny::Codegen::X86_64 {
     # Emit multiple functions with cross-function call fixups
     method emit_functions($ir_funcs) {
         my @mfs;
-        my $has_fiber  = 0;
-        my $main_index = -1;
+        my $has_fiber   = 0;
+        my $has_isolate = 0;
+        my $main_index  = -1;
         for my $i ( 0 .. $#$ir_funcs ) {
-            my $func = $ir_funcs->[$i];
+            my $func    = $ir_funcs->[$i];
             my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
             my $mf      = $lowerer->lower($func);
-            $has_fiber  ||= $self->_has_fiber_ops_mf($mf);
+            $has_fiber   ||= $self->_has_fiber_ops_mf($mf);
+            $has_isolate ||= $self->_has_isolate_ops_ir($func);
             $main_index = $i if $func->name eq 'main';
             push @mfs, $mf;
         }
@@ -79,7 +82,6 @@ class Brocken::Jenny::Codegen::X86_64 {
         # that allocates the main FCB, initializes r12, and calls the original
         # main (emitted as _real_main).
         my $emit_init = $has_fiber && $main_index >= 0;
-
         my @result;
         for my $i ( 0 .. $#mfs ) {
             my $mf    = $mfs[$i];
@@ -95,8 +97,8 @@ class Brocken::Jenny::Codegen::X86_64 {
             my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
             my %skip;
             @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
-            my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
-            my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+            my @gp_caller   = grep { !$skip{$_} } $platform->registers('caller')->@*;
+            my @fp_caller   = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
             my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
             $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
             $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
@@ -106,6 +108,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+
             if ( $self->_has_fiber_ops_mf($mf) ) {
                 $callee_seen{ $platform->fiber_reg } = 1;
             }
@@ -120,6 +123,16 @@ class Brocken::Jenny::Codegen::X86_64 {
             unshift @result, $self->_emit_single_mf($init_mf);
         }
 
+        # Emit isolate trampoline so pthread_create can reference it
+        if ($has_isolate) {
+            my $tramp_mf = $self->_build_isolate_trampoline_mf;
+            push @result, $self->_emit_single_mf($tramp_mf);
+        }
+
+        # On Windows x86_64, emit _create_thread thunk wrapping CreateThread
+        if ( $has_isolate && $platform->is_windows ) {
+            push @result, $self->_build_create_thread_fn;
+        }
         return \@result;
     }
 
@@ -133,8 +146,8 @@ class Brocken::Jenny::Codegen::X86_64 {
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
         my %skip;
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
-        my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
-        my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
+        my @gp_caller   = grep { !$skip{$_} } $platform->registers('caller')->@*;
+        my @fp_caller   = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
         my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
         $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
@@ -144,6 +157,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+
         if ( $self->_has_fiber_ops_mf($mf) ) {
             $callee_seen{ $platform->fiber_reg } = 1;
         }
@@ -162,6 +176,128 @@ class Brocken::Jenny::Codegen::X86_64 {
         return 0;
     }
 
+    # Check if an IR function contains isolate operations
+    method _has_isolate_ops_ir($func) {
+        for my $block ( $func->blocks->@* ) {
+            for my $inst ( $block->instructions->@* ) {
+                return 1
+                    if $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateCreate') || $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateJoin');
+            }
+        }
+        return 0;
+    }
+
+    # Build the isolate trampoline MIR function.
+    # Called by pthread_create (Unix, rdi=arg) or CreateThread (Windows, rcx=arg)
+    # on a new OS thread. Receives a void* arg pointing to { FCB* fcb, ICB* icb }.
+    # Sets r12 = FCB, stores ICB in FCB.os_thread, then calls FCB.resume_pc via
+    # call_indirect. The callee's return value (rax) is passed through to the joiner.
+    method _build_isolate_trampoline_mf() {
+        my $i64     = Brocken::Lindsay::IR::Type::i64();
+        my $ptr     = Brocken::Lindsay::IR::Type::ptr();
+        my $mf      = Brocken::Jenny::MIR::MachineFunction->new( name => '_isolate_trampoline' );
+        my $mbb     = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
+        my $arg_reg = $platform->is_windows ? 'rcx' : 'rdi';
+        my $arg_ptr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%arg', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $arg_ptr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_reg ) ],
+                comment  => "arg = $arg_reg"
+            )
+        );
+        my $fcb_ptr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%fcb', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'load',
+                operands =>
+                    [ $fcb_ptr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%arg', disp => 0 }, type => $ptr ) ],
+                comment => 'fcb = arg->fcb'
+            )
+        );
+        my $icb_ptr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%icb', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'load',
+                operands =>
+                    [ $icb_ptr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%arg', disp => 8 }, type => $ptr ) ],
+                comment => 'icb = arg->icb'
+            )
+        );
+
+        # FCB.os_thread = icb  (offset 72)
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'store',
+                operands =>
+                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => 72 }, type => $ptr ), $icb_ptr ],
+                comment => 'FCB.os_thread = ICB'
+            )
+        );
+
+        # r12 = fcb
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r12' ), $fcb_ptr ],
+                comment  => 'init fiber register r12'
+            )
+        );
+
+        # func_addr = FCB.resume_pc (offset 64)
+        my $func_addr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%func', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'load',
+                operands =>
+                    [ $func_addr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => 64 }, type => $ptr ) ],
+                comment => 'func = FCB.resume_pc'
+            )
+        );
+
+        # result = call_indirect func_addr
+        my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%ret', type => $i64 );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'call_indirect',
+                operands => [ $result, $func_addr ],
+                comment  => 'call user function'
+            )
+        );
+
+        # return result
+        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => 'return to pthread' ) );
+        $mf->add_block($mbb);
+        $mf->compute_cfg;
+        return $mf;
+    }
+
+    # Build the _create_thread thunk: wraps CreateThread with Win64 ABI.
+    # Receives args in Win64 convention: rcx=&handle, rdx=0(ignored), r8=start, r9=arg.
+    # Allocates shadow space + stack args, calls CreateThread, stores handle to *rcx.
+    # Returns raw bytes with fixups.
+    method _build_create_thread_fn() {
+        my $bytes = pack( 'C', 0x53 );                                       # push rbx
+        $bytes .= pack( 'C3', 0x48, 0x89, 0xCB );                            # mov rbx, rcx
+        $bytes .= pack( 'C2', 0x41, 0x50 );                                  # push r8 (start_routine)
+        $bytes .= pack( 'C2', 0x41, 0x51 );                                  # push r9 (arg)
+        $bytes .= pack( 'C4', 0x48, 0x83, 0xEC, 0x30 );                      # sub rsp, 48 (shadow + 2 stack args)
+        $bytes .= pack( 'C2', 0x31, 0xC9 );                                  # xor ecx, ecx
+        $bytes .= pack( 'C2', 0x31, 0xD2 );                                  # xor edx, edx
+        $bytes .= pack( 'C5', 0x4C, 0x8B, 0x44, 0x24, 0x38 );                # mov r8, [rsp+56] (saved r8)
+        $bytes .= pack( 'C5', 0x4C, 0x8B, 0x4C, 0x24, 0x30 );                # mov r9, [rsp+48] (saved r9)
+        $bytes .= pack( 'C9', 0x48, 0xC7, 0x44, 0x24, 0x20, 0, 0, 0, 0 );    # mov [rsp+32], 0 (flags)
+        $bytes .= pack( 'C9', 0x48, 0xC7, 0x44, 0x24, 0x28, 0, 0, 0, 0 );    # mov [rsp+40], 0 (threadId)
+        my $call_off = length($bytes);
+        $bytes .= pack( 'C',  0xE8 ) . pack( 'V', 0 );                       # call CreateThread (fixup placeholder)
+        $bytes .= pack( 'C3', 0x48, 0x89, 0x03 );                            # mov [rbx], rax
+        $bytes .= pack( 'C4', 0x48, 0x83, 0xC4, 0x40 );                      # add rsp, 64 (48+8+8 = skip reserved + r8/r9)
+        $bytes .= pack( 'C',  0x5B );                                        # pop rbx
+        $bytes .= pack( 'C',  0xC3 );                                        # ret
+        my @fixups = ( { offset => $call_off, type => 'call_rel32', target => 'CreateThread' } );
+        return { name => '_create_thread', bytes => $bytes, fixups => \@fixups };
+    }
+
     # Build the fiber init wrapper MIR function that sets up the main fiber's FCB.
     # Calls _real_main normally; the standard epilogue (mov rsp,rbp; pop rbp; ret)
     # correctly unwinds the frame.
@@ -170,12 +306,11 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $ptr = Brocken::Lindsay::IR::Type::ptr();
         my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => 'main' );
         my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
-
         my $fcb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%init.fcb', type => $ptr );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'alloca',
-                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 72, type => $i64 ) ],
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 80, type => $i64 ) ],
                 comment  => 'main fiber FCB'
             )
         );
@@ -184,11 +319,41 @@ class Brocken::Jenny::Codegen::X86_64 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands => [
-                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 16 }, type => $i64 ),
-                    $fcb
-                ],
+                operands =>
+                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 16 }, type => $i64 ), $fcb ],
                 comment => 'FCB.self = FCB addr'
+            )
+        );
+
+        # Allocate main Isolate Control Block (ICB) - thread-local state holder
+        my $icb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%init.icb', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'alloca',
+                operands => [ $icb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 64, type => $i64 ) ],
+                comment  => 'main thread ICB'
+            )
+        );
+
+        # Zero ICB.heap_cursor (offset 0) - marks "not yet initialized"
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'store_imm',
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.icb', disp => 0 }, type => $i64 ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0,                                  type => $i64 )
+                ],
+                comment => 'ICB.heap_cursor = NULL'
+            )
+        );
+
+        # Store ICB pointer in FCB.os_thread slot (offset 72)
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'store',
+                operands =>
+                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 72 }, type => $i64 ), $icb ],
+                comment => 'FCB.os_thread = &ICB'
             )
         );
 
@@ -196,11 +361,8 @@ class Brocken::Jenny::Codegen::X86_64 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'mov',
-                operands => [
-                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r12' ),
-                    $fcb
-                ],
-                comment => 'init fiber register r12'
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r12' ), $fcb ],
+                comment  => 'init fiber register r12'
             )
         );
 
@@ -214,14 +376,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         );
 
         # ret - standard epilogue does mov rsp,rbp; pop rbp; ret
-        $mbb->add_instruction(
-            Brocken::Jenny::MIR::MachineInstruction->new(
-                opcode   => 'ret',
-                operands => [],
-                comment  => 'return to _start'
-            )
-        );
-
+        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => 'return to _start' ) );
         $mf->add_block($mbb);
         $mf->compute_cfg;
         return $mf;
@@ -242,7 +397,7 @@ class Brocken::Jenny::Codegen::X86_64 {
 
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
-                $is_leaf = 0 if $inst->opcode eq 'call_func';
+                $is_leaf = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
@@ -250,12 +405,11 @@ class Brocken::Jenny::Codegen::X86_64 {
                 }
             }
         }
-
         my $shadow_space = ( $platform->is_windows && !$is_leaf ) ? 32 : 0;
         my $total_frame  = ( $callee_size + $spill_frame + $shadow_space + $total_alloca + 15 ) & ~15;
         my $needs_frame  = $total_frame > 0 || $used_callee->@* > 0 || $total_alloca > 0;
-
         if ( $is_leaf && !$needs_frame ) {
+
             # Leaf function with no frame: skip all prologue bytes
         }
         else {
@@ -263,26 +417,27 @@ class Brocken::Jenny::Codegen::X86_64 {
             $bytes .= pack( 'C', PUSH_BASE + 5 );         # push rbp
             $bytes .= pack( 'CCC', 0x48, 0x89, 0xE5 );    # mov rbp, rsp
             if ( $total_frame > 0 ) {
+
                 # Windows x64 requires stack probing for frames > 4KB to
                 # ensure the guard page is expanded one page at a time.
                 if ( $platform->is_windows && $total_frame > 4096 ) {
                     my $pages = int( $total_frame / 4096 );
                     my $rem   = $total_frame % 4096;
                     if ( $pages > 0 ) {
-                        $bytes .= pack( 'CV', 0xB9, $pages );                   # mov ecx, pages
+                        $bytes .= pack( 'CV', 0xB9, $pages );                # mov ecx, pages
                         my $loop_start = length $bytes;
-                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, 4096 );       # sub rsp, 4096
-                        $bytes .= pack( 'CCC', 0x85, 0x04, 0x24 );              # test [rsp], eax  (probe)
-                        $bytes .= pack( 'CCC', 0x83, 0xE9, 0x01 );              # sub ecx, 1
-                        my $disp = $loop_start - length( $bytes ) - 2;
-                        $bytes .= pack( 'Cc', 0x75, $disp );                    # jne loop
+                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, 4096 );    # sub rsp, 4096
+                        $bytes .= pack( 'CCC',  0x85, 0x04, 0x24 );          # test [rsp], eax  (probe)
+                        $bytes .= pack( 'CCC',  0x83, 0xE9, 0x01 );          # sub ecx, 1
+                        my $disp = $loop_start - length($bytes) - 2;
+                        $bytes .= pack( 'Cc', 0x75, $disp );                 # jne loop
                     }
                     if ( $rem > 0 ) {
-                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $rem );       # sub rsp, rem
+                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $rem );    # sub rsp, rem
                     }
                 }
                 else {
-                    $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $total_frame );   # sub rsp, total_frame
+                    $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, $total_frame );    # sub rsp, total_frame
                 }
             }
             for my $i ( 0 .. $#$used_callee ) {
@@ -303,14 +458,14 @@ class Brocken::Jenny::Codegen::X86_64 {
         my @func_fixups;
         my $current_offset = sub { return length $bytes };
         my $mem_modrm      = sub ( $mem_op, $reg_idx ) {
-            my $addr   = $mem_op->value;
+            my $addr = $mem_op->value;
             state $phys_re = do {
                 my @regs = $platform->registers('available')->@*;
-                my $pat = join '|', map quotemeta, @regs;
+                my $pat  = join '|', map quotemeta, @regs;
                 qr/^($pat)$/;
             };
             my $base_kind = $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg';
-            my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind, value => $addr->{base} ) );
+            my $base_r    = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind, value => $addr->{base} ) );
             my $bid       = $reg_id->($base_r);
             my $disp      = $addr->{disp} // 0;
             $disp += $total_alloca + $shadow_space if $base_r eq 'rsp';
@@ -607,8 +762,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $src_r = $resolve->($src);
                     my $did   = $reg_id->($dst_r);
                     my $sid   = $reg_id->($src_r);
-                    my $bits  = $dst->type  ? $dst->type->bits : 32;
+                    my $bits  = $dst->type ? $dst->type->bits : 32;
                     if ( $sid >= 8 ) {
+
                         # AMD Zen 4 erratum: MOVD/MOVQ from R8-R15 to XMM
                         # produces wrong results.  Work around by storing the
                         # GPR to [rsp+0x20] and loading into XMM from memory.
@@ -618,14 +774,14 @@ class Brocken::Jenny::Codegen::X86_64 {
                         my $modrm_st  = 0x44 | ( ( $sid & 7 ) << 3 );
                         $bytes .= pack( 'C', $rex_store ) if $rex_store > 0x40;
                         $bytes .= pack( 'CC', 0x89, $modrm_st ) . pack( 'CC', 0x24, 0x20 );
-                        my $op_load = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
+                        my $op_load  = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                         my $rex_load = 0x40 | ( $did >= 8 ? 4 : 0 );
                         my $modrm_ld = 0x44 | ( ( $did & 7 ) << 3 );
                         $bytes .= pack( 'C', $rex_load ) if $rex_load > 0x40;
                         $bytes .= pack( 'CCCC', $op_load->[0], $op_load->[1], $op_load->[2], $modrm_ld ) . pack( 'CC', 0x24, 0x20 );
                     }
                     else {
-                        my $rex   = $bits >= 64 ? 0x48 : 0x40;
+                        my $rex = $bits >= 64 ? 0x48 : 0x40;
                         $rex |= ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                         my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
                         $bytes .= pack( 'C', $rex ) if $rex > 0x40;
@@ -754,10 +910,10 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'ctx_swap' ) {
-                    my $ctx_r  = $resolve->($dst);      # fiber register (r12)
-                    my $cid    = $reg_id->($ctx_r);
-                    my $target_r = $resolve->($src);    # target FCB pointer
-                    my $tid    = $reg_id->($target_r);
+                    my $ctx_r    = $resolve->($dst);       # fiber register (r12)
+                    my $cid      = $reg_id->($ctx_r);
+                    my $target_r = $resolve->($src);       # target FCB pointer
+                    my $tid      = $reg_id->($target_r);
 
                     # 1. mov r11, rsp -- save current SP
                     $bytes .= pack( 'CCC', 0x4C, 0x8B, 0xDC );
@@ -774,6 +930,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $mod = 1 if $mod == 0 && $rm == 5;
                         my $modrm = ( $mod << 6 ) | ( ( $rid & 7 ) << 3 ) | $rm;
                         $bytes .= pack( 'C', $rex ) . pack( 'C', 0x89 );
+
                         if ( $rm == 4 ) {
                             $bytes .= pack( 'CC', $modrm, 0x24 );
                         }
@@ -793,7 +950,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $modrm_s = ( $mod_s << 6 ) | ( ( 0xB & 7 ) << 3 ) | $rm_s;
                     $bytes .= pack( 'C', $rex_s ) . pack( 'C', 0x89 );
                     if ( $rm_s == 4 ) { $bytes .= pack( 'CC', $modrm_s, 0x24 ) }
-                    else { $bytes .= pack( 'C', $modrm_s ) }
+                    else              { $bytes .= pack( 'C', $modrm_s ) }
                     if    ( $mod_s == 2 ) { $bytes .= pack( 'V', $rsp_off ) }
                     elsif ( $mod_s == 1 ) { $bytes .= "\x00" }
 
@@ -805,7 +962,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'C*', 0x4D, 0x89, 0x54, 0x24, 0x40 );
 
                     # 6. Switch fiber register to target FCB
-                    my $rex_m = 0x48 | ( $cid >= 8 ? 1 : 0 ) | ( $tid >= 8 ? 4 : 0 );
+                    my $rex_m   = 0x48 | ( $cid >= 8 ? 1 : 0 ) | ( $tid >= 8 ? 4 : 0 );
                     my $modrm_m = 0xC0 | ( ( $tid & 7 ) << 3 ) | ( $cid & 7 );
                     $bytes .= pack( 'C', $rex_m ) . pack( 'CC', 0x89, $modrm_m );
 
@@ -824,6 +981,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $mod = 1 if $mod == 0 && $rm == 5;
                         my $modrm = ( $mod << 6 ) | ( ( $rid & 7 ) << 3 ) | $rm;
                         $bytes .= pack( 'C', $rex ) . pack( 'C', 0x8B );
+
                         if ( $rm == 4 ) {
                             $bytes .= pack( 'CC', $modrm, 0x24 );
                         }
@@ -839,7 +997,7 @@ class Brocken::Jenny::Codegen::X86_64 {
 
                     # 10. Patch LEA to point after jmp r10
                     my $after = $current_offset->();
-                    my $rel = $after - $lea_off - 7;
+                    my $rel   = $after - $lea_off - 7;
                     substr $bytes, $lea_off + 3, 4, pack( 'V', $rel );
                 }
                 elsif ( $opcode eq 'lea_func' ) {
@@ -855,6 +1013,14 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $func_name = $dst->value;
                     push @func_fixups, { offset => $current_offset->(), type => 'call_rel32', target => $func_name };
                     $bytes .= pack( 'C', 0xE8 ) . "\x00\x00\x00\x00";
+                }
+                elsif ( $opcode eq 'call_indirect' ) {
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $rex   = $sid >= 8 ? 0x41 : 0x00;
+                    my $modrm = 0xD0 | ( $sid & 7 );
+                    if ($rex) { $bytes .= pack( 'C', $rex ) }
+                    $bytes .= pack( 'CC', 0xFF, $modrm );
                 }
                 elsif ( $opcode eq 'jmp_func' ) {
                     my $func_name = $dst->value;

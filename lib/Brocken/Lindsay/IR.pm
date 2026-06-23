@@ -146,6 +146,23 @@ class Brocken::Lindsay::IR::Instruction::FiberCreate : isa(Brocken::Lindsay::IR:
     }
 }
 
+class Brocken::Lindsay::IR::Instruction::IsolateCreate : isa(Brocken::Lindsay::IR::Instruction) {
+    field $callee : reader : param;    # Brocken::Lindsay::IR::Function
+
+    method render() {
+        my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
+        return sprintf '  %s = isolate_create @%s(%s)', ( $self->name // '%<anon>' ), $callee->name, $args;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::IsolateJoin : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $isolate = $self->operands->[0];
+        return sprintf '  isolate_join %s %s', $isolate->type->as_string, $isolate->as_string;
+    }
+}
+
 class Brocken::Lindsay::IR::Instruction::FiberTransfer : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {

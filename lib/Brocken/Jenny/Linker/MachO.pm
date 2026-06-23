@@ -31,7 +31,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
     }
 
     method import_rva($name) {
-        my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16 };
+        my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16, pthread_join => 24 };
         return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown Mach-O import: ' . $name );
     }
     method image_base () { return hex('100000000'); }    # 64-bit macOS default image base (4GB)
@@ -105,8 +105,47 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             $text = $entry_stub . $text_raw;
         }
 
-        # Resolve cross-function call fixups at link time
+        # Ensure layout is calculated (needed for GOT RVA in import stubs)
+        my @known_imports = qw(pthread_create pthread_join dlopen dlsym);
+        for my $ff (@func_fixups) {
+            next if exists $func_offsets{ $ff->{target} };
+            if ( grep { $ff->{target} eq $_ } @known_imports ) {
+                $self->set_has_ffi(1);
+                last;
+            }
+        }
+        if ( !defined $self->layout ) {
+            $self->pre_layout( length($text), length($data_bytes), $platform );
+        }
+
+        # Generate import stubs for undefined external functions
         my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
+        my $text_rva   = $self->layout->get('.text')->{rva};
+        for my $ff (@func_fixups) {
+            next if exists $func_offsets{ $ff->{target} };
+            next unless grep { $ff->{target} eq $_ } @known_imports;
+            my $got_rva;
+            eval { $got_rva = $self->import_rva( $ff->{target} ) };
+            next if $@;
+            next if exists $func_offsets{ $ff->{target} };
+            my $stub_ofs = length($text);
+            my $stub_bytes;
+
+            if ( $platform->is_x64 ) {
+                my $disp32 = $got_rva - ( $text_rva + $stub_ofs + 6 );
+                $stub_bytes = pack( 'CC l<', 0xFF, 0x25, $disp32 );
+            }
+            elsif ( $platform->is_arm64 ) {
+                $stub_bytes = pack( 'V', adrp( 16, $got_rva, $text_rva + $stub_ofs ) );
+                $stub_bytes .= pack( 'V', ldr_64( 16, 16, $got_rva & 0xFFF ) );
+                $stub_bytes .= pack( 'V', 0xD61F0000 | ( 16 << 5 ) );
+            }
+            $text .= $stub_bytes                                     if length($stub_bytes);
+            $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size if length($stub_bytes);
+        }
+        $self->layout->get('.text')->{size} = length($text);
+
+        # Resolve cross-function call fixups at link time
         for my $ff (@func_fixups) {
             my $target_off = $func_offsets{ $ff->{target} };
             die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
@@ -224,7 +263,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             #   0x40 | trailing = BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM
             #   0x90 = BIND_OPCODE_DO_BIND
             $bind_info .= pack( 'C', 0x70 | $data_seg ) . $_uleb->($got_off);
-            for my $name ( '_dlopen', '_dlsym', '_pthread_create' ) {
+            for my $name ( '_dlopen', '_dlsym', '_pthread_create', '_pthread_join' ) {
                 $bind_info .= pack( 'C', 0x11 );
                 $bind_info .= pack( 'C', 0x51 );                 # BIND_TYPE_POINTER
                 $bind_info .= pack( 'C', 0x40 ) . "${name}\0";
@@ -245,7 +284,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
         # Undefined dynamic external imports
         if ($got_sec) {
-            for my $name ( '_dlopen', '_dlsym', '_pthread_create' ) {
+            for my $name ( '_dlopen', '_dlsym', '_pthread_create', '_pthread_join' ) {
                 push @syms, $name;
                 $sym_types{$name} = 0x01;    # N_UNDF | N_EXT
                 $sym_rvas{$name}  = 0;
@@ -483,7 +522,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 $payload = $data_bytes // '';
             }
             elsif ( $s->{name} eq '.got' ) {
-                $payload = pack( 'Q< Q< Q<', 0, 0, 0 );
+                $payload = pack( 'Q< Q< Q< Q<', 0, 0, 0, 0 );
             }
             elsif ( $s->{name} eq '.linkedit' ) {
                 $payload = $bind_info . $trie . $symtab . $strtab;
