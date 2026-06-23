@@ -171,9 +171,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         # (e.g. `mov rcx, virt`) from clobbering virt_reg values that the
         # allocator may have assigned to the same physical register.
         my %defined_phys;
+        my $has_ctx_swap = 0;
         if ( $mf && $mf->blocks->@* ) {
             for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
+                    $has_ctx_swap = 1 if $inst->opcode eq 'ctx_swap';
                     my @ops = $inst->operands->@*;
                     next unless @ops >= 1;
                     my $dst = $ops[0];
@@ -186,6 +188,15 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             }
         }
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
+        # Exclude r10/r11 when the function contains ctx_swap. The ctx_swap
+        # encoding body uses these as internal temporaries (resume_pc and
+        # saved_rsp), making them invisible to the per-function phys_reg
+        # destination scan above. Any virtual register allocated to r10 or
+        # r11 would have its value silently corrupted within ctx_swap.
+        if ($has_ctx_swap && !$is_float) {
+            $defined_phys{r10} = 1;
+            $defined_phys{r11} = 1;
+        }
         my $spill_temp = pop @caller_regs;
         my @regs       = ( @caller_regs, @callee_regs );
         my %assignment;
