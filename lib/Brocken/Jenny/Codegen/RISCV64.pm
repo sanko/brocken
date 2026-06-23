@@ -32,7 +32,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
     };
 
     method emit_function($ir_func) {
-        my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
+        my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new( platform => $platform );
         my $mf      = $lowerer->lower($ir_func);
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
@@ -47,6 +47,8 @@ class Brocken::Jenny::Codegen::RISCV64 {
         $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
+        $alloc->remove_redundant_caller_restores($mf);
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -64,7 +66,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my $main_index = -1;
         for my $i ( 0 .. $#$ir_funcs ) {
             my $func = $ir_funcs->[$i];
-            my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new();
+            my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new( platform => $platform );
             my $mf      = $lowerer->lower($func);
             $has_fiber  ||= $self->_has_fiber_ops_mf($mf);
             $main_index = $i if $func->name eq 'main';
@@ -90,9 +92,12 @@ class Brocken::Jenny::Codegen::RISCV64 {
             @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
             my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
             my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
-            $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
-            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
+            my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
+            $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
+            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
+            $alloc->remove_redundant_caller_restores($mf);
+            $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -123,9 +128,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
         my @gp_caller = grep { !$skip{$_} } $platform->registers('caller')->@*;
         my @fp_caller = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
-        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0 );
-        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, scalar(@gp_caller) );
+        my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
+        $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
+        $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
+        $alloc->remove_redundant_caller_restores($mf);
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -830,6 +837,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
             }
         }
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+    }
+
+    method _caller_save_base( $gp_spill, $fp_spill ) {
+        my $max_off = 0;
+        for my $off ( values $gp_spill->%* ) { $max_off = $off if $off > $max_off; }
+        for my $off ( values $fp_spill->%* ) { $max_off = $off if $off > $max_off; }
+        return $max_off ? int( $max_off / 8 ) + 1 : 0;
     }
 }
 

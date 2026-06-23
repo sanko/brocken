@@ -2,11 +2,11 @@ use v5.42;
 use feature qw[class];
 no warnings qw[portable];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform::ABI::RISCV64;
 use Brocken::Jenny::MIR;
 
 class Brocken::Jenny::Lowerer::RISCV64 {
-    method _abi() { state $abi = Brocken::Katsuro::Platform::ABI::RISCV64->new }
+    field $platform : param;
+    method _abi() { $platform->abi }
 
     method lower($ir_func) {
         my $mf = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
@@ -22,16 +22,20 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                 );
             }
             if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
-                my @arg_regs = $self->_abi->param_registers->@*;
+                my @gp_regs = $self->_abi->param_registers->@*;
+                my @fp_regs = $self->_abi->fp_param_registers->@*;
+                my ( $gp_idx, $fp_idx ) = ( 0, 0 );
                 for my $i ( 0 .. $#{ $ir_func->params } ) {
-                    my $param = $ir_func->params->[$i];
-                    my $reg   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
-                    my $dst   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
+                    my $param    = $ir_func->params->[$i];
+                    my $is_float = $param->type && $param->type->kind eq 'float';
+                    my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
+                    my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
+                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'mov',
+                            opcode   => $is_float ? 'fmov' : 'mv',
                             operands => [ $dst, $reg ],
-                            comment  => "param $i from " . $arg_regs[$i]
+                            comment  => "param $i from " . $reg_name
                         )
                     );
                 }
@@ -2184,14 +2188,20 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     my $callee   = $inst->callee;
                     my @args     = $inst->operands->@*;
                     my $abi      = $self->_abi;
-                    my @arg_regs = $abi->param_registers->@*;
+                    my @gp_regs  = $abi->param_registers->@*;
+                    my @fp_regs  = $abi->fp_param_registers->@*;
+                    my ( $gp_idx, $fp_idx ) = ( 0, 0 );
                     for my $i ( 0 .. $#args ) {
-                        my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$i] );
+                        my $arg_type = $args[$i]->type;
+                        my $is_float = $arg_type && $arg_type->kind eq 'float';
+                        my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
+                        my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
+                        my $val      = $self->_lower_opnd( $args[$i] );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mv',
-                                operands => [ $reg, $self->_lower_opnd( $args[$i] ) ],
-                                comment  => "arg $i to $arg_regs[$i]"
+                                opcode   => $is_float ? 'fmov' : 'mv',
+                                operands => [ $reg, $val ],
+                                comment  => "arg $i to $reg_name"
                             )
                         );
                     }
