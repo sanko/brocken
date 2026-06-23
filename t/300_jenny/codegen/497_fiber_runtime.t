@@ -10,10 +10,50 @@ use feature qw[class];
 
 my $platform = Brocken::Katsuro::Platform::parse();
 
-subtest 'fiber yield passes value to main exit code' => sub {
-    SKIP: {
-        skip 'Only for x86_64 native hosts', 3 unless $platform->is_x64 && $platform->is_native;
+SKIP: {
+    skip 'Fiber runtime test only on native hosts', 1 unless $platform->is_native;
 
+    my ( $codegen, $linker, $ext );
+    if ( $platform->is_arm64 && $platform->is_macos ) {
+        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
+        $linker  = Brocken::Jenny::Linker::MachO->new();
+        $ext     = '';
+    }
+    elsif ( $platform->is_arm64 && $platform->is_windows ) {
+        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
+        $linker  = Brocken::Jenny::Linker::PE->new();
+        $ext     = '.exe';
+    }
+    elsif ( $platform->is_arm64 ) {
+        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
+        $linker  = Brocken::Jenny::Linker::ELF64->new();
+        $ext     = '';
+    }
+    elsif ( $platform->is_riscv64 ) {
+        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
+        $linker  = Brocken::Jenny::Linker::ELF64->new();
+        $ext     = '';
+    }
+    elsif ( $platform->is_x64 && $platform->is_macos ) {
+        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        $linker  = Brocken::Jenny::Linker::MachO->new();
+        $ext     = '';
+    }
+    elsif ( $platform->is_x64 && $platform->is_windows ) {
+        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        $linker  = Brocken::Jenny::Linker::PE->new();
+        $ext     = '.exe';
+    }
+    elsif ( $platform->is_x64 ) {
+        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+        $linker  = Brocken::Jenny::Linker::ELF64->new();
+        $ext     = '';
+    }
+    else {
+        skip 'Unsupported architecture for fiber runtime test', 1;
+    }
+
+    subtest 'fiber yield passes value to main exit code' => sub {
         my $i32 = Brocken::Lindsay::IR::Type::i32();
         my $i64 = Brocken::Lindsay::IR::Type::i64();
 
@@ -35,17 +75,12 @@ subtest 'fiber yield passes value to main exit code' => sub {
         $mb->build_ret($recv);
 
         # Compile with fiber init wrapper support
-        my $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-        my $funcs   = $codegen->emit_functions( [ $main, $worker ] );
+        my $funcs = $codegen->emit_functions( [ $main, $worker ] );
 
         ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' )
             or diag( explain( $funcs ) );
 
-        my $linker
-            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-            Brocken::Jenny::Linker::ELF64->new();
-        my $output_file = 'fiber_test' . $platform->bin_ext;
+        my $output_file = 'fiber_test' . $ext;
         $linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'Fiber test executable exists' )
             or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
@@ -56,7 +91,7 @@ subtest 'fiber yield passes value to main exit code' => sub {
         is( $exit_code, 99, 'Fiber test exited with 99 (yield value propagated)' );
 
         unlink $output_file;
-    }
-};
+    };
+}
 
 done_testing;
