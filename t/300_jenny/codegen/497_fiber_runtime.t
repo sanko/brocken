@@ -7,12 +7,9 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-
 my $platform = Brocken::Katsuro::Platform::parse();
-
 SKIP: {
     skip 'Fiber runtime test only on native hosts', 1 unless $platform->is_native;
-
     my ( $codegen, $linker, $ext );
     if ( $platform->is_arm64 && $platform->is_macos ) {
         $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
@@ -52,7 +49,6 @@ SKIP: {
     else {
         skip 'Unsupported architecture for fiber runtime test', 1;
     }
-
     subtest 'fiber yield passes value to main exit code' => sub {
         my $i32 = Brocken::Lindsay::IR::Type::i32();
         my $i64 = Brocken::Lindsay::IR::Type::i64();
@@ -69,29 +65,22 @@ SKIP: {
         my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
-        my $fcb     = $mb->build_fiber_create( $worker, [], '%fcb' );
-        my $send    = Brocken::Lindsay::IR::Constant->new( type => $i64, value => 42 );
-        my $recv    = $mb->build_fiber_transfer( $fcb, $send, '%recv' );
+        my $fcb  = $mb->build_fiber_create( $worker, [], '%fcb' );
+        my $send = Brocken::Lindsay::IR::Constant->new( type => $i64, value => 42 );
+        my $recv = $mb->build_fiber_transfer( $fcb, $send, '%recv' );
         $mb->build_ret($recv);
 
         # Compile with fiber init wrapper support
         my $funcs = $codegen->emit_functions( [ $main, $worker ] );
-
-        ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' )
-            or diag( explain( $funcs ) );
-
+        ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or diag( explain($funcs) );
         my $output_file = 'fiber_test' . $ext;
         $linker->write_executable( $output_file, $funcs, $platform );
-        ok( -f $output_file, 'Fiber test executable exists' )
-            or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
-
+        ok( -f $output_file, 'Fiber test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
         my $cmd = $platform->is_windows ? $output_file : "./$output_file";
         system {$cmd} $cmd;
         my $exit_code = $? >> 8;
         is( $exit_code, 99, 'Fiber test exited with 99 (yield value propagated)' );
-
         unlink $output_file;
     };
 }
-
 done_testing;

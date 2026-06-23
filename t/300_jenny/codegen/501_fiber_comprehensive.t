@@ -8,12 +8,9 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-
 my $host = Brocken::Katsuro::Platform::parse();
-
 SKIP: {
     skip 'Comprehensive fiber tests only on native hosts', 1 unless $host->is_native;
-
     my ( $codegen, $linker, $ext );
     if ( $host->is_arm64 && $host->is_macos ) {
         $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
@@ -53,7 +50,6 @@ SKIP: {
     else {
         skip 'Unsupported architecture for fiber tests', 1;
     }
-
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 
@@ -67,9 +63,8 @@ SKIP: {
         $wb->position_at_end( $worker->append_block('entry') );
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 100 ), '%y1' );
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 200 ), '%y2' );
-        $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 77 ), '%y3' );
+        $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 77 ),  '%y3' );
         $wb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-
         my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
@@ -78,10 +73,8 @@ SKIP: {
         $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 2 ), '%r2' );
         my $r3 = $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 3 ), '%r3' );
         $mb->build_ret($r3);
-
         my $funcs = $codegen->emit_functions( [ $main, $worker ] );
         is( scalar @$funcs, 3, '3 functions emitted (wrapper, _real_main, worker_fn)' );
-
         my $file = 'fiber_multi_yield' . $ext;
         $linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 77, name => 'multi-yield fiber exit 77', platform => $host );
@@ -98,13 +91,11 @@ SKIP: {
         $wb1->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 111 ), '%y1' );
         $wb1->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 111 ), '%y1b' );
         $wb1->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-
         my $worker2 = Brocken::Lindsay::IR::Function->new( name => 'worker_two', return_type => $i32 );
         my $wb2     = Brocken::Lindsay::IR::Builder->new();
         $wb2->position_at_end( $worker2->append_block('entry') );
         $wb2->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 222 ), '%y2' );
         $wb2->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-
         my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
@@ -112,13 +103,12 @@ SKIP: {
         my $f2 = $mb->build_fiber_create( $worker2, [], '%f2' );
         $mb->build_fiber_transfer( $f1, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r1' );
         $mb->build_fiber_transfer( $f2, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r2' );
+
         # Resume worker1 again after worker2 yielded back
         my $r3 = $mb->build_fiber_transfer( $f1, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r3' );
         $mb->build_ret($r3);
-
         my $funcs = $codegen->emit_functions( [ $main, $worker1, $worker2 ] );
         is( scalar @$funcs, 4, '4 functions emitted (wrapper, _real_main, worker_one, worker_two)' );
-
         my $file = 'fiber_two_workers' . $ext;
         $linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 111, name => 'two-fiber resume worker1 yields 111', platform => $host );
@@ -133,22 +123,20 @@ SKIP: {
         my $worker = Brocken::Lindsay::IR::Function->new( name => 'worker_fn', return_type => $i32 );
         my $wb     = Brocken::Lindsay::IR::Builder->new();
         $wb->position_at_end( $worker->append_block('entry') );
+
         # alloca 16384 bytes via a custom int type with enough bits
         my $big_type = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => 16384 * 8 );
         $wb->build_alloca( $big_type, '%big' );
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 55 ), '%yv' );
         $wb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-
         my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
-        my $fcb = $mb->build_fiber_create( $worker, [], '%fcb' );
+        my $fcb  = $mb->build_fiber_create( $worker, [], '%fcb' );
         my $recv = $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%recv' );
         $mb->build_ret($recv);
-
         my $funcs = $codegen->emit_functions( [ $main, $worker ] );
         is( scalar @$funcs, 3, '3 functions emitted (wrapper, _real_main, worker_fn)' );
-
         my $file = 'fiber_stack_stress' . $ext;
         $linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 55, name => 'stack stress fiber exit 55', platform => $host );
@@ -167,7 +155,6 @@ SKIP: {
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 30 ), '%y3' );
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 42 ), '%y4' );
         $wb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-
         my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
@@ -177,10 +164,8 @@ SKIP: {
         $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r3' );
         my $r4 = $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r4' );
         $mb->build_ret($r4);
-
         my $funcs = $codegen->emit_functions( [ $main, $worker ] );
         is( scalar @$funcs, 3, '3 functions emitted' );
-
         my $file = 'fiber_chain' . $ext;
         $linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
@@ -198,39 +183,34 @@ SKIP: {
         $wb1->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 50 ), '%y1' );
         $wb1->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 50 ), '%y1b' );
         $wb1->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-
         my $worker2 = Brocken::Lindsay::IR::Function->new( name => 'worker_two', return_type => $i32 );
         my $wb2     = Brocken::Lindsay::IR::Builder->new();
         $wb2->position_at_end( $worker2->append_block('entry') );
         $wb2->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 60 ), '%y2' );
         $wb2->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-
         my $worker3 = Brocken::Lindsay::IR::Function->new( name => 'worker_three', return_type => $i32 );
         my $wb3     = Brocken::Lindsay::IR::Builder->new();
         $wb3->position_at_end( $worker3->append_block('entry') );
         $wb3->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 70 ), '%y3' );
         $wb3->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-
         my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
         my $f1 = $mb->build_fiber_create( $worker1, [], '%f1' );
         my $f2 = $mb->build_fiber_create( $worker2, [], '%f2' );
         my $f3 = $mb->build_fiber_create( $worker3, [], '%f3' );
+
         # Transfer to each in sequence, then resume worker1
         $mb->build_fiber_transfer( $f1, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r1' );
         $mb->build_fiber_transfer( $f2, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r2' );
         $mb->build_fiber_transfer( $f3, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r3' );
         my $r4 = $mb->build_fiber_transfer( $f1, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r4' );
         $mb->build_ret($r4);
-
         my $funcs = $codegen->emit_functions( [ $main, $worker1, $worker2, $worker3 ] );
         is( scalar @$funcs, 5, '5 functions emitted' );
-
         my $file = 'fiber_interleave' . $ext;
         $linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 50, name => 'interleaved three-fiber exit 50', platform => $host );
     };
 }
-
 done_testing;

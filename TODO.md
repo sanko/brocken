@@ -49,6 +49,24 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [ ] **Large-value i128 tests**  all test values fit in 64 bits; no hi-part carry/borrow exercised.
 - [ ] **Endianness**  no handling for big-endian targets.
 
+### OS-level Threads (Isolates)
+- [x] IR instructions (`isolate_create`/`isolate_join`) in Lindsay IR + Builder
+- [x] `call_indirect` MIR opcode on all 4 targets (X86_64 `FF /2`, ARM64 `BLR`, RISCV64 `JALR`, Wasm stub)
+- [x] FCB.os_thread pointer (ICB) at offset 72/120/128, updated `fcb_sz` in all lowerers + codegens
+- [x] Main thread ICB allocation in fiber init wrapper
+- [x] X86_64 isolate_create lowering + isolate_join lowering (pthread_create/pthread_join)
+- [x] X86_64 isolate trampoline MIR function + `call_indirect` dispatch
+- [x] ARM64 isolate_create lowering + isolate_join lowering
+- [x] ARM64 isolate trampoline MIR function
+- [x] RISCV64 isolate_create lowering + isolate_join lowering
+- [x] RISCV64 isolate trampoline MIR function
+- [x] `pthread_join` added to ELF64 and Mach-O linker imports
+- [x] Conditional trampoline emission (only when isolate ops present)
+- [x] Compiled isolate runtime test (spawn + join + verify lifecycle)
+- [ ] **Isolate return value propagation**  `isolate_join` passes NULL retval; doesn't capture thread result
+- [ ] Wasm isolate stubs (lowerer + codegen)
+- [ ] Cross-isolate message passing (transferable objects)
+
 ## Phase 3: The Frontend (Parser & AST)
 - [ ] Define the "Brocken Subset" of Perl for self-hosting (variables, subs, basic control flow).
 - [ ] Implement Lexer and Parser.

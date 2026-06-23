@@ -44,8 +44,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 for my $i ( 0 .. $#{ $ir_func->params } ) {
                     my $param    = $ir_func->params->[$i];
                     my $is_float = $param->type && $param->type->kind eq 'float';
-                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
-                    my $tmp      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name . '.entry', type => $param->type );
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name,            type => $param->type );
+                    my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name . '.entry', type => $param->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => $is_float ? 'fmov' : 'mov',
@@ -2370,12 +2370,12 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
-                    my $callee   = $inst->callee;
-                    my @args     = $inst->operands->@*;
-                    my $abi      = $self->_abi;
-                    my @gp_regs  = $abi->param_registers->@*;
-                    my @fp_regs  = $abi->fp_param_registers->@*;
-                    
+                    my $callee  = $inst->callee;
+                    my @args    = $inst->operands->@*;
+                    my $abi     = $self->_abi;
+                    my @gp_regs = $abi->param_registers->@*;
+                    my @fp_regs = $abi->fp_param_registers->@*;
+
                     # Pre-compute register assignments for all args
                     my @arg_regs;
                     my ( $gp_idx, $fp_idx ) = ( 0, 0 );
@@ -2384,7 +2384,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         my $is_float = $arg_type && $arg_type->kind eq 'float';
                         $arg_regs[$i] = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
                     }
-                    
+
                     # Emit in reverse order so arg0 (reg rcx/rdi) is set last,
                     # avoiding clobber of virt_regs that may have been allocated
                     # to the same param register as a later argument.
@@ -2456,7 +2456,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
                     my $callee   = $inst->callee;
                     my $stack_sz = 64 * 1024;
-                    my $fcb_sz   = 72;      # +8 for resume_pc at offset 64
+                    my $fcb_sz   = 80;                                         # +8 os_thread at offset 72
                     my $stack    = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'virt_reg',
                         value => $inst->name . '.stk',
@@ -2522,11 +2522,14 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'add',
-                            operands => [ $saved_rsp, Brocken::Jenny::MIR::MachineOperand->new(
-                                kind  => 'imm',
-                                value => $stack_sz - 8,
-                                type  => Brocken::Lindsay::IR::Type::i64()
-                            ) ],
+                            operands => [
+                                $saved_rsp,
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $stack_sz - 8,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
+                            ],
                             comment => 'saved_rsp += stack_sz - 8 (simulate call push)'
                         )
                     );
@@ -2546,7 +2549,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     # Zero-initialize callee-save slots before setting specific values.
                     # The alloca does not zero memory, so uninitialized slots would
                     # load garbage into callee registers on the fiber's first entry.
-                    for my $off ( 0, 8, 24, 32, 40 ) {
+                    for my $off ( 0, 8, 24, 32, 40, 72 ) {
                         my $f = Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'mem',
                             value => { base => $inst->name . '.fcb', disp => $off },
@@ -2555,11 +2558,10 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'store_imm',
-                                operands => [ $f, Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'imm',
-                                    value => 0,
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                ) ],
+                                operands => [
+                                    $f,
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => Brocken::Lindsay::IR::Type::i64() )
+                                ],
                                 comment => "FCB[$off] = 0"
                             )
                         );
@@ -2607,6 +2609,20 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             comment  => 'FCB.resume_pc = entry addr'
                         )
                     );
+
+                    # Copy os_thread pointer from current fiber (r12) to new FCB[72]
+                    my $fcb_os_thread = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'mem',
+                        value => { base => $inst->name . '.fcb', disp => 72 },
+                        type  => Brocken::Lindsay::IR::Type::i64()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [ $fcb_os_thread, $fiber_reg ],
+                            comment  => 'FCB.os_thread = current fiber os_thread'
+                        )
+                    );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2619,8 +2635,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberTransfer') ) {
                     my ( $fiber, $val ) = $inst->operands->@*;
                     my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r12' );
-
-                    my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
+                    my $ret_reg   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
@@ -2649,11 +2664,10 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberYield') ) {
-                    my ($val) = $inst->operands->@*;
+                    my ($val)     = $inst->operands->@*;
                     my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r12' );
                     my $ptr       = Brocken::Lindsay::IR::Type::ptr();
-
-                    my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
+                    my $ret_reg   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
@@ -2663,11 +2677,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     );
 
                     # Load parent FCB from [r12 + 56]
-                    my $parent_tmp = Brocken::Jenny::MIR::MachineOperand->new(
-                        kind  => 'virt_reg',
-                        value => $inst->name . '.parent',
-                        type  => $ptr
-                    );
+                    my $parent_tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.parent', type => $ptr );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'load',
@@ -2691,7 +2701,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             comment  => 'swap to parent FCB'
                         )
                     );
-
                     if ( defined $inst->name ) {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         $mbb->add_instruction(
@@ -2714,6 +2723,388 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberPin') ) {
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateCreate') ) {
+                    my $callee   = $inst->callee;
+                    my $stack_sz = 64 * 1024;
+                    my $fcb_sz   = 80;
+                    my $icb_sz   = 64;
+                    my $i64      = Brocken::Lindsay::IR::Type::i64();
+                    my $ptr      = Brocken::Lindsay::IR::Type::ptr();
+                    my $stack    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.stk', type => $ptr );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [ $stack, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz, type => $i64 ) ],
+                            comment  => 'isolate stack'
+                        )
+                    );
+                    my $fptr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.fptr', type => $ptr );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'lea_func',
+                            operands => [ $fptr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $callee->name ) ],
+                            comment  => 'load isolate entry addr'
+                        )
+                    );
+                    my $fcb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.fcb', type => $ptr );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $fcb_sz, type => $i64 ) ],
+                            comment  => 'isolate FCB'
+                        )
+                    );
+                    my $saved_rsp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.rsp', type => $i64 );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $saved_rsp, $stack ],
+                            comment  => 'saved_rsp = stack'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'add',
+                            operands =>
+                                [ $saved_rsp, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz - 8, type => $i64 ) ],
+                            comment => 'saved_rsp += stack_sz - 8'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.fcb', disp => 48 },
+                                    type  => $i64
+                                ),
+                                $saved_rsp
+                            ],
+                            comment => 'FCB.saved_rsp'
+                        )
+                    );
+
+                    for my $off ( 0, 8, 24, 32, 40 ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'store_imm',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'mem',
+                                        value => { base => $inst->name . '.fcb', disp => $off },
+                                        type  => $i64
+                                    ),
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
+                                ],
+                                comment => "FCB[$off] = 0"
+                            )
+                        );
+                    }
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.fcb', disp => 16 },
+                                    type  => $i64
+                                ),
+                                $fcb
+                            ],
+                            comment => 'FCB.self = FCB addr'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store_imm',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.fcb', disp => 56 },
+                                    type  => $i64
+                                ),
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
+                            ],
+                            comment => 'FCB.parent = NULL'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.fcb', disp => 64 },
+                                    type  => $i64
+                                ),
+                                $fptr
+                            ],
+                            comment => 'FCB.resume_pc = entry addr'
+                        )
+                    );
+                    my $icb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.icb', type => $ptr );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [ $icb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $icb_sz, type => $i64 ) ],
+                            comment  => 'isolate ICB'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store_imm',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.icb', disp => 0 },
+                                    type  => $i64
+                                ),
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
+                            ],
+                            comment => 'ICB.heap_cursor = NULL'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.fcb', disp => 72 },
+                                    type  => $i64
+                                ),
+                                $icb
+                            ],
+                            comment => 'FCB.os_thread = ICB'
+                        )
+                    );
+                    my $arg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.arg', type => $ptr );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [ $arg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16, type => $i64 ) ],
+                            comment  => 'isolate arg {FCB,ICB}'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.arg', disp => 0 },
+                                    type  => $ptr
+                                ),
+                                $fcb
+                            ],
+                            comment => 'arg.fcb'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.arg', disp => 8 },
+                                    type  => $ptr
+                                ),
+                                $icb
+                            ],
+                            comment => 'arg.icb'
+                        )
+                    );
+                    my $tramp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.tramp', type => $ptr );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'lea_func',
+                            operands => [ $tramp, Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => '_isolate_trampoline' ) ],
+                            comment  => 'load trampoline addr'
+                        )
+                    );
+                    my $handle = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.handle', type => $ptr );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [ $handle, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8, type => $i64 ) ],
+                            comment  => 'handle storage'
+                        )
+                    );
+
+                    if ( $platform->is_windows ) {
+
+                        # On Windows x86_64, call _create_thread thunk (handles Win64 ABI for CreateThread)
+                        # Args use Win64 ABI: rcx=&handle, rdx=0(ignored), r8=start, r9=arg
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rcx' ), $handle ],
+                                comment  => 'arg1: &handle'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ),
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
+                                ],
+                                comment => 'arg2: (unused)'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r8' ), $tramp ],
+                                comment  => 'arg3: start_routine'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r9' ), $arg ],
+                                comment  => 'arg4: arg'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => '_create_thread' ) ],
+                                comment  => '_create_thread'
+                            )
+                        );
+                    }
+                    else {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdi' ), $handle ],
+                                comment  => 'arg1: &thread'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rsi' ),
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
+                                ],
+                                comment => 'arg2: NULL attr'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ), $tramp ],
+                                comment  => 'arg3: start_routine'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rcx' ), $arg ],
+                                comment  => 'arg4: arg'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'pthread_create' ) ],
+                                comment  => 'pthread_create'
+                            )
+                        );
+                    }
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'load',
+                            operands => [
+                                $dst,
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.handle', disp => 0 },
+                                    type  => $i64
+                                )
+                            ],
+                            comment => 'isolate_create result = handle'
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateJoin') ) {
+                    my $i64     = Brocken::Lindsay::IR::Type::i64();
+                    my $isolate = $inst->operands->[0];
+                    my $reg     = $self->_lower_opnd($isolate);
+                    if ( $platform->is_windows ) {
+
+                        # WaitForSingleObject(handle, INFINITE) then CloseHandle(handle)
+                        my $i32 = Brocken::Lindsay::IR::Type::i32();
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rcx' ), $reg ],
+                                comment  => 'arg1: handle'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ),
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0xFFFFFFFF, type => $i32 )
+                                ],
+                                comment => 'arg2: INFINITE'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'WaitForSingleObject' ) ],
+                                comment  => 'WaitForSingleObject'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rcx' ), $reg ],
+                                comment  => 'arg1: handle (again)'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'CloseHandle' ) ],
+                                comment  => 'CloseHandle'
+                            )
+                        );
+                    }
+                    else {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdi' ), $reg ],
+                                comment  => 'arg1: thread handle'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rsi' ),
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
+                                ],
+                                comment => 'arg2: NULL retval'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'pthread_join' ) ],
+                                comment  => 'pthread_join'
+                            )
+                        );
+                    }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FrameAddr') ) {
                     my $dst    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );

@@ -283,6 +283,29 @@ class Brocken::Lindsay::IR::Builder {
         );
         return $insert_block->append_inst($inst);
     }
+
+    method build_isolate_create( $callee, $args, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::IsolateCreate->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::i64(),
+            opcode   => 'isolate_create',
+            callee   => $callee,
+            operands => $args,
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_isolate_join($isolate) {
+        my $inst = Brocken::Lindsay::IR::Instruction::IsolateJoin->new(
+            name     => undef,
+            type     => Brocken::Lindsay::IR::Type::i64(),
+            opcode   => 'isolate_join',
+            operands => [$isolate],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
 }
 
 =encoding utf-8

@@ -29,8 +29,8 @@ class Brocken::Katsuro::Platform::ABI::X86_64_Win64 : isa(Brocken::Katsuro::Plat
     }
 
     # Win64 parameter passing: rcx, rdx, r8, r9 (4 integer regs, versus 6 on SysV)
-    method param_registers()       { [qw(rcx rdx r8 r9)] }
-    method fp_param_registers()    { [qw(xmm0 xmm1 xmm2 xmm3)] }
+    method param_registers()    { [qw(rcx rdx r8 r9)] }
+    method fp_param_registers() { [qw(xmm0 xmm1 xmm2 xmm3)] }
 }
 
 =encoding utf-8
@@ -41,8 +41,8 @@ Brocken::Katsuro::Platform::ABI::X86_64_Win64 - Windows x64 ABI Register Definit
 
 =head1 DESCRIPTION
 
-Defines the Microsoft x64 calling convention register sets: volatile (caller-saved),
-non-volatile (callee-saved), parameter passing, and DWARF register numbering.
+Defines the Microsoft x64 calling convention register sets: volatile (caller-saved), non-volatile (callee-saved),
+parameter passing, and DWARF register numbering.
 
 =head2 Key Differences from SysV AMD64
 

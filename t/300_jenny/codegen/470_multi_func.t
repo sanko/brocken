@@ -75,7 +75,6 @@ SKIP: {
                 }
             }
         }
-
         is( ref $funcs,        'ARRAY', 'emit_functions returned array ref' );
         is( scalar $funcs->@*, 2,       'emit_functions returned 2 entries' );
         my $output_file = 'multi_func_native' . $host->bin_ext;
@@ -86,7 +85,6 @@ SKIP: {
             warn "\n### DEBUG: objdump output ###\n";
             system("objdump -d --architecture=aarch64 $output_file 2>&1");
         }
-
         ok( -e $output_file, 'Multi-function binary exists' );
 
         # DEBUG: post-link hex dump + disassembly on ARM64
@@ -94,7 +92,9 @@ SKIP: {
             warn "\n### DEBUG: post-link binary '$output_file' ###\n";
             open my $fh, '<:raw', $output_file or warn "  can't open $output_file: $!";
             if ($fh) {
-                my $bin; read $fh, $bin, 4096; close $fh;
+                my $bin;
+                read $fh, $bin, 4096;
+                close $fh;
                 for ( my $i = 0; $i < length $bin; $i += 16 ) {
                     my $chunk = substr( $bin, $i, 16 );
                     my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
@@ -114,7 +114,6 @@ SKIP: {
                 system("llvm-objdump-19 -d --arch=aarch64 $output_file 2>&1");
             }
         }
-
         run_exec( $output_file, expected_exit => 42, platform => $host, name => 'Multi-function helper(41) returned 42 on ' . $host->friendly );
     }
 

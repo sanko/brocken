@@ -60,8 +60,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         #   dlsym          = +32  (offset 4, index 4)
         #   pthread_create = +40  (offset 5, index 5)
         #   exit / _exit   = +48  (offset 6, index 6)
+        #   pthread_join   = +56  (offset 7, index 7)
         # Slot 0-2 reserved (0, DYNAMIC, LINK_MAP).
-        my $imports = { dlopen => 24, dlsym => 32, pthread_create => 40, exit => 48, _exit => 48 };
+        my $imports = { dlopen => 24, dlsym => 32, pthread_create => 40, exit => 48, _exit => 48, pthread_join => 56 };
         return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown ELF import: ' . $name );
     }
 
@@ -93,7 +94,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $code_bytes = $code_data;
         }
         if ( !defined $self->layout ) {
-            my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
+            my $extra_data     = $platform->is_bsd    ? 32 : ( $platform->is_haiku ? 8 : 0 );
             my $entry_stub_len = $self->type eq 'exe' ? 20 : 0;
             $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform );
         }
@@ -155,8 +156,44 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $self->layout->get('.text')->{size} = length($text);
         }
 
+        # Generate import stubs for undefined external functions
+        my $entry_size    = $self->type eq 'exe' ? length($entry_stub) : 0;
+        my @known_imports = qw(pthread_create pthread_join dlopen dlsym);
+        for my $ff (@func_fixups) {
+            next if exists $func_offsets{ $ff->{target} };
+            next unless grep { $ff->{target} eq $_ } @known_imports;
+            next if exists $func_offsets{ $ff->{target} };
+            my $got_rva;
+            eval { $got_rva = $self->import_rva( $ff->{target} ) };
+            next if $@;
+            my $stub_ofs = length($text);
+            my $stub_bytes;
+
+            if ( $platform->is_x64 ) {
+                my $disp32 = $got_rva - ( $text_rva + $stub_ofs + 6 );
+                $stub_bytes = pack( 'CC l<', 0xFF, 0x25, $disp32 );
+            }
+            elsif ( $platform->is_arm64 ) {
+                $stub_bytes = pack( 'V', adrp( 16, $got_rva, $text_rva + $stub_ofs ) );
+                $stub_bytes .= pack( 'V', ldr_64( 16, 16, $got_rva & 0xFFF ) );
+                $stub_bytes .= pack( 'V', 0xD61F0000 | ( 16 << 5 ) );
+            }
+            elsif ( $platform->is_riscv64 ) {
+                my $diff  = $got_rva - ( $text_rva + $stub_ofs );
+                my $hi20  = ( $diff + 0x800 ) >> 12;
+                my $lo12  = $diff & 0xFFF;
+                my $auipc = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;
+                my $ld    = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
+                my $jalr  = ( 0 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 0 << 7 ) | 0x67;
+                $stub_bytes = pack( 'V3', $auipc, $ld, $jalr );
+            }
+            next unless length($stub_bytes);
+            $text .= $stub_bytes;
+            $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size;
+        }
+        $self->layout->get('.text')->{size} = length($text);
+
         # Resolve cross-function call fixups at link time
-        my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
         for my $ff (@func_fixups) {
             my $target_off = $func_offsets{ $ff->{target} };
             die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
@@ -302,7 +339,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         my @exports   = @{ $self->exported_funcs // [] };
         my $exit_name = $platform->is_haiku ? 'exit' : '_exit';
-        my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', $exit_name );
+        my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', 'pthread_join', $exit_name );
         my $libc      = $libc_map{$os_base} // 'libc.so';
 
         # Probe the exact dynamic libc.so name on the host filesystem when running natively
@@ -484,10 +521,13 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $exit_slot    = $base + $self->import_rva('exit');
         my $exit_sym_idx = $sym_indices{$exit_name};
         $rela_dyn .= pack( 'Q< Q< q<', $exit_slot, ( $exit_sym_idx << 32 ) | $rel_type, 0 );
+        my $join_slot    = $base + $self->import_rva('pthread_join');
+        my $join_sym_idx = $sym_indices{'pthread_join'};
+        $rela_dyn .= pack( 'Q< Q< q<', $join_slot, ( $join_sym_idx << 32 ) | $rel_type, 0 );
         $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
-        # GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit
-        my $got = pack( 'Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0 );
+        # GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join
+        my $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0 );
         $self->layout->get('.got')->{size} = length($got);
         my $elf_hash = sub {
             my $name = shift;

@@ -6,7 +6,7 @@ class Brocken::Katsuro::Platform::ABI {
 
     sub parse ( $class, $arch, $os = undef ) {
         if ( $arch =~ /x86_64|x64|amd64/i && defined $os && $os =~ /windows|win32|mswin/i ) {
-            $class = 'Brocken::Katsuro::Platform::ABI::X86_64_Win64'
+            $class = 'Brocken::Katsuro::Platform::ABI::X86_64_Win64';
         }
         elsif ( $arch =~ /x86_64|x64|amd64/i ) { $class = 'Brocken::Katsuro::Platform::ABI::X86_64' }
         elsif ( $arch =~ /aarch64|arm64/i )    { $class = 'Brocken::Katsuro::Platform::ABI::AArch64' }
