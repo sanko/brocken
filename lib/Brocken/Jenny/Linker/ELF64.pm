@@ -94,9 +94,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         if ( !defined $self->layout ) {
             my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
-            my $entry_stub_len = $self->type eq 'exe'
-                ? ( $platform->is_arm64 || $platform->is_riscv64 ? 20 : 21 )
-                : 0;
+            my $entry_stub_len = $self->type eq 'exe' ? 20 : 0;
             $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform );
         }
         my $l          = $self->layout;
