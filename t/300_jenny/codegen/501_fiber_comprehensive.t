@@ -183,7 +183,7 @@ SKIP: {
 
         my $file = 'fiber_chain' . $ext;
         $linker->write_executable( $file, $funcs, $host );
-        run_exec( $file, expected_exit => 42, name => 'chain fiber last yield 42', platform => $host );
+        run_exec( $file, expected_exit => 42, name => 'chain fiber last yield 42', platform => $host, gdb => 1 );
     };
 
     # ────────────────────────────────────────────────────────────
