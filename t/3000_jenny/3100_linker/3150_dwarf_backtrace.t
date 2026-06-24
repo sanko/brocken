@@ -3,17 +3,12 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro::Platform;
+use Brocken;
 use Brocken::Lindsay::IR;
 use Brocken::Lindsay::IR::Builder;
-use Brocken::Jenny::Codegen::X86_64;
-use Brocken::Jenny::Codegen::ARM64;
-use Brocken::Jenny::Codegen::RISCV64;
-use Brocken::Jenny::Linker::ELF64;
-use Brocken::Jenny::Linker::MachO;
-use Brocken::Jenny::Linker::PE;
 subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
-    my $host = Brocken::Katsuro::Platform::parse();
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
     skip_all('Native backtrace test requires native host') unless $host->is_native;
     my $b   = Brocken::Lindsay::IR::Builder->new();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
@@ -54,40 +49,11 @@ subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
     $b->build_ret($res2);
 
     # 4. Compile and Execute
-    my ( $codegen, $linker );
-    if ( $host->is_arm64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-    }
-    elsif ( $host->is_arm64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-    }
-    elsif ( $host->is_arm64 && ( $host->is_bsd || $host->is_linux ) ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-    }
-    elsif ( $host->is_riscv64 ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-    }
-    elsif ( $host->is_x64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-    }
-    elsif ( $host->is_x64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-    }
-    else {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-    }
-    my $funcs       = $codegen->emit_functions( [ $bar, $foo, $main ] );
-    my $output_file = 'backtrace_test' . $host->bin_ext;
-    $linker->set_func_ranges(
+    my $funcs       = $brocken->codegen->emit_functions( [ $bar, $foo, $main ] );
+    my $output_file = 'backtrace_test' . $brocken->ext;
+    $brocken->linker->set_func_ranges(
         [ { name => 'bar', start => 0, end => 0 }, { name => 'foo', start => 0, end => 0 }, { name => 'main', start => 0, end => 0 } ] );
-    $linker->write_executable( $output_file, $funcs, $host );
+    $brocken->linker->write_executable( $output_file, $funcs, $host );
     ok( -e $output_file, 'Backtrace binary compiled successfully' );
     run_exec(
         $output_file,

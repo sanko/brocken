@@ -3,53 +3,14 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $host = Brocken::Katsuro::Platform::parse();
 SKIP: {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
     skip 'Comprehensive fiber tests only on native hosts', 1 unless $host->is_native;
-    my ( $codegen, $linker, $ext );
-    if ( $host->is_arm64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_arm64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_arm64 ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_riscv64 ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_x64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_x64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_x64 ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    else {
-        skip 'Unsupported architecture for fiber tests', 1;
-    }
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 
@@ -73,10 +34,10 @@ SKIP: {
         $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 2 ), '%r2' );
         my $r3 = $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 3 ), '%r3' );
         $mb->build_ret($r3);
-        my $funcs = $codegen->emit_functions( [ $main, $worker ] );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
         is( scalar @$funcs, 3, '3 functions emitted (wrapper, _real_main, worker_fn)' );
-        my $file = 'fiber_multi_yield' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $file = 'fiber_multi_yield' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 77, name => 'multi-yield fiber exit 77', platform => $host );
     };
 
@@ -107,10 +68,10 @@ SKIP: {
         # Resume worker1 again after worker2 yielded back
         my $r3 = $mb->build_fiber_transfer( $f1, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r3' );
         $mb->build_ret($r3);
-        my $funcs = $codegen->emit_functions( [ $main, $worker1, $worker2 ] );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker1, $worker2 ] );
         is( scalar @$funcs, 4, '4 functions emitted (wrapper, _real_main, worker_one, worker_two)' );
-        my $file = 'fiber_two_workers' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $file = 'fiber_two_workers' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 111, name => 'two-fiber resume worker1 yields 111', platform => $host );
     };
 
@@ -135,10 +96,10 @@ SKIP: {
         my $fcb  = $mb->build_fiber_create( $worker, [], '%fcb' );
         my $recv = $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%recv' );
         $mb->build_ret($recv);
-        my $funcs = $codegen->emit_functions( [ $main, $worker ] );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
         is( scalar @$funcs, 3, '3 functions emitted (wrapper, _real_main, worker_fn)' );
-        my $file = 'fiber_stack_stress' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $file = 'fiber_stack_stress' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 55, name => 'stack stress fiber exit 55', platform => $host );
     };
 
@@ -164,10 +125,10 @@ SKIP: {
         $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r3' );
         my $r4 = $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r4' );
         $mb->build_ret($r4);
-        my $funcs = $codegen->emit_functions( [ $main, $worker ] );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
         is( scalar @$funcs, 3, '3 functions emitted' );
-        my $file = 'fiber_chain' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $file = 'fiber_chain' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 42, name => 'chain fiber last yield 42', platform => $host, keep => 1, gdb => $dbg );
     };
@@ -206,10 +167,10 @@ SKIP: {
         $mb->build_fiber_transfer( $f3, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r3' );
         my $r4 = $mb->build_fiber_transfer( $f1, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), '%r4' );
         $mb->build_ret($r4);
-        my $funcs = $codegen->emit_functions( [ $main, $worker1, $worker2, $worker3 ] );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker1, $worker2, $worker3 ] );
         is( scalar @$funcs, 5, '5 functions emitted' );
-        my $file = 'fiber_interleave' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $file = 'fiber_interleave' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 50, name => 'interleaved three-fiber exit 50', platform => $host );
     };
 }

@@ -3,13 +3,16 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro;
+use Brocken;
+use Brocken::Katsuro::Platform;
 use Brocken::Lindsay;
-use Brocken::Jenny;
+use Brocken::Jenny::Codegen::Wasm;
+use Brocken::Jenny::Linker::Wasm;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'Jenny::Codegen Multi-Function Calls' => sub {
-    my $host   = Brocken::Katsuro::Platform::parse();
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
     my $b      = Brocken::Lindsay::IR::Builder->new();
     my $p      = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => 'x' );
     my $helper = Brocken::Lindsay::IR::Function->new( name => 'helper', return_type => Brocken::Lindsay::IR::Type::i32(), params => [$p] );
@@ -22,40 +25,7 @@ subtest 'Jenny::Codegen Multi-Function Calls' => sub {
     # Test native (ELF/MachO/PE) backends when running on a supported platform
 SKIP: {
         skip 'Multi-function native test only on native hosts', 8 unless $host->is_native;
-        my ( $codegen, $linker );
-        if ( $host->is_arm64 && $host->is_macos ) {
-            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-            $linker  = Brocken::Jenny::Linker::MachO->new();
-        }
-        elsif ( $host->is_arm64 && $host->is_windows ) {
-            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-            $linker  = Brocken::Jenny::Linker::PE->new();
-        }
-        elsif ( $host->is_arm64 && $host->is_linux ) {
-            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-            $linker  = Brocken::Jenny::Linker::ELF64->new();
-        }
-        elsif ( $host->is_arm64 ) {
-            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-            $linker  = Brocken::Jenny::Linker::ELF64->new();
-        }
-        elsif ( $host->is_riscv64 ) {
-            $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-            $linker  = Brocken::Jenny::Linker::ELF64->new();
-        }
-        elsif ( $host->is_x64 && $host->is_macos ) {
-            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-            $linker  = Brocken::Jenny::Linker::MachO->new();
-        }
-        elsif ( $host->is_x64 && $host->is_windows ) {
-            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-            $linker  = Brocken::Jenny::Linker::PE->new();
-        }
-        else {
-            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-            $linker  = Brocken::Jenny::Linker::ELF64->new();
-        }
-        my $funcs = $codegen->emit_functions( [ $main, $helper ] );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $helper ] );
 
         # DEBUG: hex dump on ARM64
         if ( $host->is_arm64 ) {
@@ -77,8 +47,8 @@ SKIP: {
         }
         is( ref $funcs,        'ARRAY', 'emit_functions returned array ref' );
         is( scalar $funcs->@*, 2,       'emit_functions returned 2 entries' );
-        my $output_file = 'multi_func_native' . $host->bin_ext;
-        $linker->write_executable( $output_file, $funcs, $host );
+        my $output_file = 'multi_func_native' . $brocken->ext;
+        $brocken->linker->write_executable( $output_file, $funcs, $host );
 
         # DEBUG: disassemble on ARM64 Linux
         if ( $host->is_arm64 && $host->is_linux ) {
@@ -139,7 +109,8 @@ SKIP: {
     }
 };
 subtest 'Jenny::Codegen Multi-Function Shared Library' => sub {
-    my $host = Brocken::Katsuro::Platform::parse();
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
 SKIP: {
         skip 'Multi-function shared lib test only on native hosts', 6 unless $host->is_native;
         my $b      = Brocken::Lindsay::IR::Builder->new();
@@ -149,44 +120,12 @@ SKIP: {
         my $func_b = Brocken::Lindsay::IR::Function->new( name => 'func_b', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
         $b->position_at_end( $func_b->append_block('entry') );
         $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 100 ) );
-        my ( $codegen, $linker, $output_file );
-
-        if ( $host->is_arm64 && $host->is_macos ) {
-            $codegen     = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-            $linker      = Brocken::Jenny::Linker::MachO->new( type => 'shared' );
-            $output_file = 'multi_func_shared.dylib';
-        }
-        elsif ( $host->is_arm64 && $host->is_windows ) {
-            $codegen     = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-            $linker      = Brocken::Jenny::Linker::PE->new( type => 'shared' );
-            $output_file = 'multi_func_shared.dll';
-        }
-        elsif ( $host->is_arm64 ) {
-            $codegen     = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-            $linker      = Brocken::Jenny::Linker::ELF64->new( type => 'shared' );
-            $output_file = 'multi_func_shared.so';
-        }
-        elsif ( $host->is_riscv64 ) {
-            $codegen     = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-            $linker      = Brocken::Jenny::Linker::ELF64->new( type => 'shared' );
-            $output_file = 'multi_func_shared.so';
-        }
-        elsif ( $host->is_x64 && $host->is_macos ) {
-            $codegen     = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-            $linker      = Brocken::Jenny::Linker::MachO->new( type => 'shared' );
-            $output_file = 'multi_func_shared.dylib';
-        }
-        elsif ( $host->is_x64 && $host->is_windows ) {
-            $codegen     = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-            $linker      = Brocken::Jenny::Linker::PE->new( type => 'shared' );
-            $output_file = 'multi_func_shared.dll';
-        }
-        else {
-            $codegen     = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-            $linker      = Brocken::Jenny::Linker::ELF64->new( type => 'shared' );
-            $output_file = 'multi_func_shared.so';
-        }
-        my $funcs = $codegen->emit_functions( [ $func_a, $func_b ] );
+        my $linker = (ref $brocken->linker)->new(type => 'shared');
+        my $output_file;
+        if ( $host->is_macos )       { $output_file = 'multi_func_shared.dylib' }
+        elsif ( $host->is_windows )  { $output_file = 'multi_func_shared.dll' }
+        else                         { $output_file = 'multi_func_shared.so' }
+        my $funcs = $brocken->codegen->emit_functions( [ $func_a, $func_b ] );
         is( ref $funcs,        'ARRAY', 'emit_functions returned array ref' );
         is( scalar $funcs->@*, 2,       'emit_functions returned 2 entries' );
         $linker->set_exported_funcs( [ 'func_a', 'func_b' ] );
