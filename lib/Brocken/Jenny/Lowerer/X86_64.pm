@@ -2723,6 +2723,104 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberPin') ) {
+                    my $i64      = Brocken::Lindsay::IR::Type::i64();
+                    my $ptr      = Brocken::Lindsay::IR::Type::ptr();
+                    my $inst_tag = 'fp' . ( $inst->name // int( $inst + 0 ) );
+                    my ( $fiber, $mask_opnd ) = $inst->operands->@*;
+                    if ( $platform->is_windows ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rcx' ),
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => -2, type => $i64 )
+                                ],
+                                comment => 'GetCurrentThread() pseudo-handle'
+                            )
+                        );
+                        my $mask_lowered = $self->_lower_opnd($mask_opnd);
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ), $mask_lowered ],
+                                comment  => 'mask'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'SetThreadAffinityMask' ) ],
+                                comment  => 'SetThreadAffinityMask'
+                            )
+                        );
+                    }
+                    elsif ( $platform->is_linux ) {
+                        my $mask_slot = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst_tag . '.msk', type => $ptr );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'alloca',
+                                operands => [ $mask_slot, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8, type => $i64 ) ],
+                                comment  => 'mask slot'
+                            )
+                        );
+                        my $mask_lowered = $self->_lower_opnd($mask_opnd);
+                        my $store_op     = $mask_lowered->kind eq 'imm' ? 'store_imm' : 'store';
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => $store_op,
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'mem',
+                                        value => { base => $inst_tag . '.msk', disp => 0 },
+                                        type  => $i64
+                                    ),
+                                    $mask_lowered
+                                ],
+                                comment => 'store mask'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdi' ),
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
+                                ],
+                                comment => 'pid = 0 (current thread)'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rsi' ),
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8, type => $i64 )
+                                ],
+                                comment => 'cpusetsize = 8'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'lea',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ),
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'mem',
+                                        value => { base => $inst_tag . '.msk', disp => 0 },
+                                        type  => $ptr
+                                    )
+                                ],
+                                comment => '&mask'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'sched_setaffinity' ) ],
+                                comment  => 'sched_setaffinity'
+                            )
+                        );
+                    }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateCreate') ) {
                     my $callee   = $inst->callee;
@@ -2880,12 +2978,17 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             comment => 'FCB.os_thread = ICB'
                         )
                     );
-                    my $arg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.arg', type => $ptr );
+                    my $max_args = 6;
+                    my @ir_args  = $inst->operands->@*;
+                    my $num_args = scalar @ir_args;
+                    $num_args = $max_args if $num_args > $max_args;
+                    my $arg_size = 16 + 8 * $num_args;
+                    my $arg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.arg', type => $ptr );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'alloca',
-                            operands => [ $arg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16, type => $i64 ) ],
-                            comment  => 'isolate arg {FCB,ICB}'
+                            operands => [ $arg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $arg_size, type => $i64 ) ],
+                            comment  => "isolate arg {FCB,ICB,$num_args args}"
                         )
                     );
                     $mbb->add_instruction(
@@ -2916,6 +3019,18 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             comment => 'arg.icb'
                         )
                     );
+
+                    for my $ai ( 0 .. $num_args - 1 ) {
+                        my $av = $self->_lower_opnd( $ir_args[$ai] );
+                        my $am = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $inst->name . '.arg', disp => 16 + 8 * $ai },
+                            type  => $ptr
+                        );
+                        my $op = $av->kind eq 'imm' ? 'store_imm' : 'store';
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [ $am, $av ], comment => "arg[$ai]" ) );
+                    }
                     my $tramp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.tramp', type => $ptr );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2932,7 +3047,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             comment  => 'handle storage'
                         )
                     );
-
                     if ( $platform->is_windows ) {
 
                         # On Windows x86_64, call _create_thread thunk (handles Win64 ABI for CreateThread)
@@ -3034,11 +3148,21 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateJoin') ) {
                     my $i64     = Brocken::Lindsay::IR::Type::i64();
+                    my $ptr     = Brocken::Lindsay::IR::Type::ptr();
                     my $isolate = $inst->operands->[0];
                     my $reg     = $self->_lower_opnd($isolate);
                     if ( $platform->is_windows ) {
 
-                        # WaitForSingleObject(handle, INFINITE) then CloseHandle(handle)
+                        # WaitForSingleObject(handle, INFINITE), GetExitCodeThread(handle, &retval), then CloseHandle(handle)
+                        my $tag       = $inst->name // 'anon' . int($inst);
+                        my $retv_slot = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $tag . '.rv', type => $ptr );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'alloca',
+                                operands => [ $retv_slot, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8, type => $i64 ) ],
+                                comment  => 'retval slot'
+                            )
+                        );
                         my $i32 = Brocken::Lindsay::IR::Type::i32();
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3068,7 +3192,28 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'mov',
                                 operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rcx' ), $reg ],
-                                comment  => 'arg1: handle (again)'
+                                comment  => 'arg1: handle'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ), $retv_slot ],
+                                comment  => 'arg2: &retval'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'GetExitCodeThread' ) ],
+                                comment  => 'GetExitCodeThread'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rcx' ), $reg ],
+                                comment  => 'arg1: handle'
                             )
                         );
                         $mbb->add_instruction(
@@ -3078,8 +3223,35 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 comment  => 'CloseHandle'
                             )
                         );
+
+                        if ( defined $inst->name ) {
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'load',
+                                    operands => [
+                                        $dst,
+                                        Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'mem',
+                                            value => { base => $tag . '.rv', disp => 0 },
+                                            type  => $i64
+                                        )
+                                    ],
+                                    comment => 'isolate_join result'
+                                )
+                            );
+                        }
                     }
                     else {
+                        my $tag       = $inst->name // 'anon' . int($inst);
+                        my $retv_slot = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $tag . '.rv', type => $ptr );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'alloca',
+                                operands => [ $retv_slot, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8, type => $i64 ) ],
+                                comment  => 'retval slot'
+                            )
+                        );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'mov',
@@ -3090,11 +3262,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'mov',
-                                operands => [
-                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rsi' ),
-                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
-                                ],
-                                comment => 'arg2: NULL retval'
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rsi' ), $retv_slot ],
+                                comment  => 'arg2: &retval'
                             )
                         );
                         $mbb->add_instruction(
@@ -3104,6 +3273,23 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 comment  => 'pthread_join'
                             )
                         );
+                        if ( defined $inst->name ) {
+                            my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'load',
+                                    operands => [
+                                        $dst,
+                                        Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'mem',
+                                            value => { base => $tag . '.rv', disp => 0 },
+                                            type  => $i64
+                                        )
+                                    ],
+                                    comment => 'isolate_join result'
+                                )
+                            );
+                        }
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FrameAddr') ) {

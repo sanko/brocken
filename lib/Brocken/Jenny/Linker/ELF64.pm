@@ -56,13 +56,14 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
     method import_rva($name) {
 
         # GOT slot offsets for dynamic linker imports:
-        #   dlopen         = +24  (offset 3, index 3)
-        #   dlsym          = +32  (offset 4, index 4)
-        #   pthread_create = +40  (offset 5, index 5)
-        #   exit / _exit   = +48  (offset 6, index 6)
-        #   pthread_join   = +56  (offset 7, index 7)
+        #   dlopen            = +24  (offset 3, index 3)
+        #   dlsym             = +32  (offset 4, index 4)
+        #   pthread_create    = +40  (offset 5, index 5)
+        #   exit / _exit      = +48  (offset 6, index 6)
+        #   pthread_join      = +56  (offset 7, index 7)
+        #   sched_setaffinity = +64  (offset 8, index 8)
         # Slot 0-2 reserved (0, DYNAMIC, LINK_MAP).
-        my $imports = { dlopen => 24, dlsym => 32, pthread_create => 40, exit => 48, _exit => 48, pthread_join => 56 };
+        my $imports = { dlopen => 24, dlsym => 32, pthread_create => 40, exit => 48, _exit => 48, pthread_join => 56, sched_setaffinity => 64 };
         return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown ELF import: ' . $name );
     }
 
@@ -158,7 +159,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
         # Generate import stubs for undefined external functions
         my $entry_size    = $self->type eq 'exe' ? length($entry_stub) : 0;
-        my @known_imports = qw(pthread_create pthread_join dlopen dlsym);
+        my @known_imports = qw(pthread_create pthread_join dlopen dlsym sched_setaffinity);
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
             next unless grep { $ff->{target} eq $_ } @known_imports;
@@ -339,7 +340,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         my @exports   = @{ $self->exported_funcs // [] };
         my $exit_name = $platform->is_haiku ? 'exit' : '_exit';
-        my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', 'pthread_join', $exit_name );
+        my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', 'pthread_join', $exit_name, 'sched_setaffinity' );
         my $libc      = $libc_map{$os_base} // 'libc.so';
 
         # Probe the exact dynamic libc.so name on the host filesystem when running natively
@@ -524,10 +525,13 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $join_slot    = $base + $self->import_rva('pthread_join');
         my $join_sym_idx = $sym_indices{'pthread_join'};
         $rela_dyn .= pack( 'Q< Q< q<', $join_slot, ( $join_sym_idx << 32 ) | $rel_type, 0 );
+        my $sched_slot    = $base + $self->import_rva('sched_setaffinity');
+        my $sched_sym_idx = $sym_indices{'sched_setaffinity'};
+        $rela_dyn .= pack( 'Q< Q< q<', $sched_slot, ( $sched_sym_idx << 32 ) | $rel_type, 0 );
         $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
-        # GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join
-        my $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0 );
+  # GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join, [8]=sched_setaffinity
+        my $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0 );
         $self->layout->get('.got')->{size} = length($got);
         my $elf_hash = sub {
             my $name = shift;
