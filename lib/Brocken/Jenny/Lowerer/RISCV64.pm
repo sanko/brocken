@@ -29,14 +29,22 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                 for ( my $i = 0; $i <= $last; $i++ ) {
                     my $param    = $ir_func->params->[$i];
                     my $is_float = $param->type && $param->type->kind eq 'float';
-                    my $is_i128  = !$is_float && $param->type && $param->type->kind eq 'int' && $param->type->bits == 128;
+                    my $is_i128  = !$is_float   && $param->type && $param->type->kind eq 'int' && $param->type->bits == 128;
                     if ($is_i128) {
                         my $lo_reg_name = $gp_regs[ $gp_idx++ ];
                         my $hi_reg_name = $gp_regs[ $gp_idx++ ];
-                        my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
-                        my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
-                        my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() );
-                        my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() );
+                        my $lo_reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                        my $hi_reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
+                        my $lo_dst      = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'virt_reg',
+                            value => $param->name . '_lo',
+                            type  => Brocken::Lindsay::IR::Type::i64()
+                        );
+                        my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'virt_reg',
+                            value => $param->name . '_hi',
+                            type  => Brocken::Lindsay::IR::Type::i64()
+                        );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'mv',
@@ -2219,13 +2227,13 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     my ( $gp_idx, $fp_idx ) = ( 0, 0 );
                     for my $i ( 0 .. $#args ) {
                         my $arg_type = $args[$i]->type;
-                        my $is_float = $arg_type && $arg_type->kind eq 'float';
+                        my $is_float = $arg_type  && $arg_type->kind eq 'float';
                         my $is_i128  = !$is_float && $arg_type && $arg_type->kind eq 'int' && $arg_type->bits == 128;
                         if ($is_i128) {
                             my $lo_reg_name = $gp_regs[ $gp_idx++ ];
                             my $hi_reg_name = $gp_regs[ $gp_idx++ ];
-                            my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
-                            my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
+                            my $lo_reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                            my $hi_reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
                             my ( $lo, $hi ) = $self->_split_i128( $args[$i] );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2674,8 +2682,8 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     elsif ( $platform->is_netbsd ) {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'nop',
-                                comment  => 'NetBSD lacks sched_setaffinity; pin not implemented'
+                                opcode  => 'nop',
+                                comment => 'NetBSD lacks sched_setaffinity; pin not implemented'
                             )
                         );
                     }

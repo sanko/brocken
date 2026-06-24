@@ -2009,19 +2009,9 @@ class Brocken::Jenny::Lowerer::Wasm {
                         if ($is_i128) {
                             my ( $lo, $hi ) = $self->_split_i128($inst);
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'local_set',
-                                    operands => [$hi],
-                                    comment  => 'retval hi'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi], comment => 'retval hi' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'local_set',
-                                    operands => [$lo],
-                                    comment  => 'retval lo'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$lo], comment => 'retval lo' ) );
                         }
                         else {
                             $mbb->add_instruction(

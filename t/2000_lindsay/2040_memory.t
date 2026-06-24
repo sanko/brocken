@@ -39,9 +39,9 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
     my $b       = Brocken::Lindsay::IR::Builder->new();
-    my $i64  = Brocken::Lindsay::IR::Type::i64();
-    my $ptr  = Brocken::Lindsay::IR::Type::ptr();
-    my $void = Brocken::Lindsay::IR::Type::void();
+    my $i64     = Brocken::Lindsay::IR::Type::i64();
+    my $ptr     = Brocken::Lindsay::IR::Type::ptr();
+    my $void    = Brocken::Lindsay::IR::Type::void();
 
     # -------------------------------------------------------------------
     # 1. Build Brocken::Runtime::incref

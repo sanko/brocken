@@ -9,8 +9,8 @@ use feature qw[class];
 
 # ELF executable
 {
-    my $brocken  = Brocken->new();
-    my $platform = $brocken->platform;
+    my $brocken   = Brocken->new();
+    my $platform  = $brocken->platform;
     my $module    = Brocken::Lindsay::IR::Module->new( name => 'standalone_elf' );
     my $func_main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
     $module->add_function($func_main);

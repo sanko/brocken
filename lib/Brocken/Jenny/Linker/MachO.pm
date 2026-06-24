@@ -118,7 +118,6 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             $self->pre_layout( length($text), length($data_bytes), $platform );
         }
         else {
-
             # Update section sizes and recalculate layout so all subsequent RVA
             # lookups (text_rva, got_rva) reflect the current code/data sizes.
             $self->layout->get('.text')->{size} = length($text);
@@ -143,9 +142,9 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             eval { $got_rva = $self->import_rva( $ff->{target} ) };
             next if $@;
             next if exists $func_offsets{ $ff->{target} };
-            my $stub_ofs     = length($text);
+            my $stub_ofs = length($text);
             my $stub_bytes;
-            my $got_base     = $self->layout->get('.got')->{rva};
+            my $got_base = $self->layout->get('.got')->{rva};
 
             if ( $platform->is_x64 ) {
                 my $disp32 = $got_rva - ( $text_rva + $stub_ofs + 6 );
@@ -392,7 +391,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         $self->layout->calculate($page_size);
         $le_off = $self->layout->get('.linkedit')->{off};
         if (@stubs) {
-            my $got_sec   = $self->layout->get('.got');
+            my $got_sec  = $self->layout->get('.got');
             my $new_text = $self->layout->get('.text');
             if ( $got_sec && $new_text ) {
                 my $got_rva2 = $got_sec->{rva};
@@ -405,7 +404,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 }
                 elsif ( $platform->is_arm64 ) {
                     for my $s (@stubs) {
-                        my $got_rva = $got_rva2 + $s->{got_offset};
+                        my $got_rva  = $got_rva2 + $s->{got_offset};
                         my $stub_rva = $txt_rva2 + $s->{offset};
                         substr( $text, $s->{offset},     4, pack( 'V', adrp( 16, $got_rva, $stub_rva ) ) );
                         substr( $text, $s->{offset} + 4, 4, pack( 'V', ldr_64( 16, 16, $got_rva & 0xFFF ) ) );

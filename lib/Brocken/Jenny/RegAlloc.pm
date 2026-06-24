@@ -236,25 +236,32 @@ class Brocken::Jenny::RegAlloc::LinearScan {
 
     method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0 ) {
         return unless $spill_slots && keys %$spill_slots;
-        my $load_op    = $is_float ? 'fload'  : 'load';
-        my $store_op   = $is_float ? 'fstore' : 'store';
-        my %reads_dst  = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not);
+        my $load_op     = $is_float ? 'fload'  : 'load';
+        my $store_op    = $is_float ? 'fstore' : 'store';
+        my %reads_dst   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
-        my $temp_op    = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
-        my $mem_op     = sub ($o) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => undef ) };
-        my $load_inst  = sub ($o) {
-            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $load_op, operands => [ $temp_op->(), $mem_op->($o) ], comment => 'spill-reload' );
+        my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
+        my $mem_op
+            = sub ($o) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => undef ) };
+        my $load_inst = sub ($o) {
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => $load_op,
+                operands => [ $temp_op->(), $mem_op->($o) ],
+                comment  => 'spill-reload'
+            );
         };
         my $store_inst = sub ($o) {
-            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $store_op, operands => [ $mem_op->($o), $temp_op->() ], comment => 'spill-store' );
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => $store_op,
+                operands => [ $mem_op->($o), $temp_op->() ],
+                comment  => 'spill-store'
+            );
         };
-
         for my $bb ( $mf->blocks->@* ) {
             my @new;
             for my $inst ( $bb->instructions->@* ) {
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
-
                 my %sp;
                 for my $i ( 0 .. $#ops ) {
                     next unless $ops[$i]->kind eq 'virt_reg';
@@ -262,7 +269,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     next unless defined $off;
                     $sp{$i} = $off;
                 }
-
                 my $smem_off;
                 for my $op (@ops) {
                     next unless $op->kind eq 'mem';
@@ -272,22 +278,18 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                         $op->value->{base} = $spill_temp;
                     }
                 }
-
                 if ( !keys %sp && !defined $smem_off ) {
                     push @new, $inst;
                     next;
                 }
-
                 my $d_off = $sp{0};
                 my $s_off = $sp{1};
                 my $d_sp  = defined $d_off;
                 my $s_sp  = defined $s_off;
                 my $dd    = $d_sp && $s_sp && $d_off != $s_off;
-
                 if ($d_sp) {
                     $ops[0] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[0]->type );
                 }
-
                 if ( $s_sp && $dd && $can_mem_src{$opcode} ) {
                     $ops[1] = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
@@ -298,7 +300,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 elsif ($s_sp) {
                     $ops[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[1]->type );
                 }
-
                 my @load_offsets;
                 push @load_offsets, $smem_off if defined $smem_off;
                 if ($dd) {
@@ -315,9 +316,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     push @load_offsets, $d_off if $d_sp && $reads_dst{$opcode};
                 }
                 push @new, $load_inst->($_) for @load_offsets;
-
                 push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
-
                 if ($d_sp) {
                     push @new, $store_inst->($d_off);
                 }

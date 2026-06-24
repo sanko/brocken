@@ -9,15 +9,15 @@ use feature qw[class];
 
 # Mach-O executable
 {
-    my $brocken  = Brocken->new();
-    my $platform = $brocken->platform;
+    my $brocken   = Brocken->new();
+    my $platform  = $brocken->platform;
     my $module    = Brocken::Lindsay::IR::Module->new( name => 'standalone_macho' );
     my $func_main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
     $module->add_function($func_main);
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func_main->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
-    my $codegen = $brocken->codegen;
+    my $codegen       = $brocken->codegen;
     my $machine_bytes = $codegen->emit_function($func_main);
     my $output_file   = './test_prog';
     my $linker        = Brocken::Jenny::Linker::MachO->new();
@@ -42,7 +42,7 @@ SKIP: {
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func_ext->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
-    my $codegen = $brocken->codegen;
+    my $codegen       = $brocken->codegen;
     my $machine_bytes = $codegen->emit_function($func_ext);
     my $output_file   = './libtest_prog.dylib';
     my $linker        = Brocken::Jenny::Linker::MachO->new( type => 'shared' );

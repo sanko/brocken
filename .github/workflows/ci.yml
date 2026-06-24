@@ -26,7 +26,7 @@ jobs:
       os: freebsd
       perl: 5.42
       pkg: sudo pkg install -y perl5
-      version: 14.1
+      version: 15.1
   freebsd-x64:
     name: FreeBSD
     needs:
@@ -39,7 +39,7 @@ jobs:
       os: freebsd
       perl: 5.42
       pkg: sudo pkg install -y perl5
-      version: 14.1
+      version: 15.1
   haiku:
     name: Haiku
     needs:

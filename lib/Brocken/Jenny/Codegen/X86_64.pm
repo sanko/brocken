@@ -579,7 +579,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $bits    = $dst->type ? $dst->type->bits : 64;
                     my %imm_ext = ( add => 0,    sub => 5,    and => 4,    or => 1,    xor => 6,    adc => 2,    sbb => 3 );
                     my %reg_op  = ( add => 0x01, sub => 0x29, and => 0x21, or => 0x09, xor => 0x31, adc => 0x11, sbb => 0x19 );
-                    my %reg_mem = ( add => 0x03, sub => 0x2B, and => 0x23, or  => 0x0B, xor => 0x33, adc => 0x13, sbb => 0x1B );
+                    my %reg_mem = ( add => 0x03, sub => 0x2B, and => 0x23, or => 0x0B, xor => 0x33, adc => 0x13, sbb => 0x1B );
                     my $rex_w   = ( $bits >= 64 ) ? REX_W : 0;
                     if ( $src->kind eq 'imm' ) {
                         my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
@@ -1013,7 +1013,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     #    avoids a redundant load that clobbers the base register mid-loop)
                     my @cregs = qw(rbx rbp r12 r13 r14 r15 rsp);
                     for my $off_idx ( 0 .. $#cregs ) {
-                        my $reg  = $cregs[$off_idx];
+                        my $reg = $cregs[$off_idx];
                         next if $reg eq 'r12';
                         my $rid  = $reg_id->($reg);
                         my $disp = $off_idx * 8;

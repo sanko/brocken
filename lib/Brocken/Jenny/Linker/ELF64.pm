@@ -100,7 +100,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform );
         }
         else {
-
             # Update text size and recalculate layout so all subsequent RVA
             # lookups (e.g. import_rva, got_rva) reflect the current code size.
             $self->layout->get('.text')->{size} = length($code_bytes) + $entry_stub_len;
@@ -351,7 +350,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
             push @imports, 'sched_setaffinity';
         }
-        my $libc      = $libc_map{$os_base} // 'libc.so';
+        my $libc = $libc_map{$os_base} // 'libc.so';
 
         # Probe the exact dynamic libc.so name on the host filesystem when running natively
         if ( $platform->is_native ) {
@@ -535,6 +534,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $join_slot    = $base + $self->import_rva('pthread_join');
         my $join_sym_idx = $sym_indices{'pthread_join'};
         $rela_dyn .= pack( 'Q< Q< q<', $join_slot, ( $join_sym_idx << 32 ) | $rel_type, 0 );
+
         if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
             my $sched_slot    = $base + $self->import_rva('sched_setaffinity');
             my $sched_sym_idx = $sym_indices{'sched_setaffinity'};

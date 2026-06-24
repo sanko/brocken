@@ -7,7 +7,7 @@ use Brocken::Lindsay;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 SKIP: {
-    my $brocken = Brocken->new();
+    my $brocken  = Brocken->new();
     my $platform = $brocken->platform;
     skip 'Isolate runtime test only on native hosts', 1 unless $platform->is_native;
     subtest 'isolate_create and isolate_join basic lifecycle' => sub {
