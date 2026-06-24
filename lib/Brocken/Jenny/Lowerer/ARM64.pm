@@ -2970,12 +2970,17 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             comment => 'FCB.os_thread = ICB'
                         )
                     );
-                    my $arg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.arg', type => $ptr );
+                    my $max_args = 6;
+                    my @ir_args  = $inst->operands->@*;
+                    my $num_args = scalar @ir_args;
+                    $num_args = $max_args if $num_args > $max_args;
+                    my $arg_size = 16 + 8 * $num_args;
+                    my $arg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.arg', type => $ptr );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'alloca',
-                            operands => [ $arg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16, type => $i64 ) ],
-                            comment  => 'isolate arg {FCB,ICB}'
+                            operands => [ $arg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $arg_size, type => $i64 ) ],
+                            comment  => "isolate arg {FCB,ICB,$num_args args}"
                         )
                     );
                     $mbb->add_instruction(
@@ -3006,6 +3011,18 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             comment => 'arg.icb'
                         )
                     );
+
+                    for my $ai ( 0 .. $num_args - 1 ) {
+                        my $av = $self->_lower_opnd( $ir_args[$ai] );
+                        my $am = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $inst->name . '.arg', disp => 16 + 8 * $ai },
+                            type  => $ptr
+                        );
+                        my $op = $av->kind eq 'imm' ? 'store_imm' : 'store';
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [ $am, $av ], comment => "arg[$ai]" ) );
+                    }
                     my $tramp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.tramp', type => $ptr );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(

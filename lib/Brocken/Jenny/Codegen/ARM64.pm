@@ -314,6 +314,29 @@ class Brocken::Jenny::Codegen::ARM64 {
             )
         );
 
+        # Load up to 6 args from arg struct (offsets 16-56) into calling-convention registers
+        my @arg_regs = qw(x0 x1 x2 x3 x4 x5);
+        for my $ai ( 0 .. $#arg_regs ) {
+            my $a_val = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => "%a$ai", type => $i64 );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'load',
+                    operands => [
+                        $a_val,
+                        Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%arg', disp => 16 + 8 * $ai }, type => $i64 )
+                    ],
+                    comment => "load arg$ai"
+                )
+            );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'mov',
+                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$ai] ), $a_val ],
+                    comment  => "arg$ai -> $arg_regs[$ai]"
+                )
+            );
+        }
+
         # result = call_indirect func_addr
         my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%ret', type => $i64 );
         $mbb->add_instruction(
