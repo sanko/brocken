@@ -2196,6 +2196,13 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mv',
+                                    operands => [ $dst, $t0 ],
+                                    comment  => 'i128 icmp combined to dst'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'sltiu',
                                     operands => [ $dst, $i_one ],
                                     comment  => 'i128 icmp seqz'
