@@ -25,19 +25,45 @@ class Brocken::Jenny::Lowerer::ARM64 {
                 my @gp_regs = $self->_abi->param_registers->@*;
                 my @fp_regs = $self->_abi->fp_param_registers->@*;
                 my ( $gp_idx, $fp_idx ) = ( 0, 0 );
-                for my $i ( 0 .. $#{ $ir_func->params } ) {
+                my $last = $#{ $ir_func->params };
+                for ( my $i = 0; $i <= $last; $i++ ) {
                     my $param    = $ir_func->params->[$i];
                     my $is_float = $param->type && $param->type->kind eq 'float';
-                    my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
-                    my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
-                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => $is_float ? 'fmov' : 'mov',
-                            operands => [ $dst, $reg ],
-                            comment  => "param $i from " . $reg_name
-                        )
-                    );
+                    my $is_i128  = !$is_float && $param->type && $param->type->kind eq 'int' && $param->type->bits == 128;
+                    if ($is_i128) {
+                        my $lo_reg_name = $gp_regs[ $gp_idx++ ];
+                        my $hi_reg_name = $gp_regs[ $gp_idx++ ];
+                        my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                        my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
+                        my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() );
+                        my $hi_dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $lo_dst, $lo_reg ],
+                                comment  => "param $i lo from $lo_reg_name"
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $hi_dst, $hi_reg ],
+                                comment  => "param $i hi from $hi_reg_name"
+                            )
+                        );
+                    }
+                    else {
+                        my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
+                        my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
+                        my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => $is_float ? 'fmov' : 'mov',
+                                operands => [ $dst, $reg ],
+                                comment  => "param $i from " . $reg_name
+                            )
+                        );
+                    }
                 }
             }
             for my $inst ( $block->instructions->@* ) {
@@ -2389,16 +2415,40 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     for my $i ( 0 .. $#args ) {
                         my $arg_type = $args[$i]->type;
                         my $is_float = $arg_type && $arg_type->kind eq 'float';
-                        my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
-                        my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
-                        my $val      = $self->_lower_opnd( $args[$i] );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => $is_float ? 'fmov' : 'mov',
-                                operands => [ $reg, $val ],
-                                comment  => "arg $i to $reg_name"
-                            )
-                        );
+                        my $is_i128  = !$is_float && $arg_type && $arg_type->kind eq 'int' && $arg_type->bits == 128;
+                        if ($is_i128) {
+                            my $lo_reg_name = $gp_regs[ $gp_idx++ ];
+                            my $hi_reg_name = $gp_regs[ $gp_idx++ ];
+                            my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                            my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
+                            my ( $lo, $hi ) = $self->_split_i128( $args[$i] );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $lo_reg, $lo ],
+                                    comment  => "arg $i lo to $lo_reg_name"
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $hi_reg, $hi ],
+                                    comment  => "arg $i hi to $hi_reg_name"
+                                )
+                            );
+                        }
+                        else {
+                            my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
+                            my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
+                            my $val      = $self->_lower_opnd( $args[$i] );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $is_float ? 'fmov' : 'mov',
+                                    operands => [ $reg, $val ],
+                                    comment  => "arg $i to $reg_name"
+                                )
+                            );
+                        }
                     }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2408,7 +2458,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         )
                     );
                     if ( defined $inst->name ) {
-                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        my $dst     = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
                         if ( $inst->type->kind eq 'float' ) {
                             my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->fp_return_register );
                             $mbb->add_instruction(
@@ -2416,6 +2467,25 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                     opcode   => 'fmov',
                                     operands => [ $dst, $fp_ret ],
                                     comment  => "retval from " . $abi->fp_return_register
+                                )
+                            );
+                        }
+                        elsif ($is_i128) {
+                            my $x0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
+                            my $x1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x1' );
+                            my ( $lo, $hi ) = $self->_split_i128($inst);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $lo, $x0 ],
+                                    comment  => "retval i128 lo from x0"
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $hi, $x1 ],
+                                    comment  => "retval i128 hi from x1"
                                 )
                             );
                         }

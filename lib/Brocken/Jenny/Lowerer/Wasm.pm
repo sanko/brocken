@@ -1987,7 +1987,15 @@ class Brocken::Jenny::Lowerer::Wasm {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
                     my $callee = $inst->callee;
                     for my $arg ( $inst->operands->@* ) {
-                        $mbb->add_instruction( $self->_wasm_push( $arg, 'arg' ) );
+                        my $is_i128 = $arg->type && $arg->type->kind eq 'int' && $arg->type->bits == 128;
+                        if ($is_i128) {
+                            my ( $lo, $hi ) = $self->_split_i128($arg);
+                            $mbb->add_instruction( $self->_wasm_push_opnd( $lo, 'arg lo' ) );
+                            $mbb->add_instruction( $self->_wasm_push_opnd( $hi, 'arg hi' ) );
+                        }
+                        else {
+                            $mbb->add_instruction( $self->_wasm_push( $arg, 'arg' ) );
+                        }
                     }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -1997,14 +2005,34 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                     if ( defined $inst->name ) {
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'local_set',
-                                operands =>
-                                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type ) ],
-                                comment => 'retval to ' . $inst->name
-                            )
-                        );
+                        my $is_i128 = $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128;
+                        if ($is_i128) {
+                            my ( $lo, $hi ) = $self->_split_i128($inst);
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'local_set',
+                                    operands => [$hi],
+                                    comment  => 'retval hi'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'local_set',
+                                    operands => [$lo],
+                                    comment  => 'retval lo'
+                                )
+                            );
+                        }
+                        else {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'local_set',
+                                    operands =>
+                                        [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type ) ],
+                                    comment => 'retval to ' . $inst->name
+                                )
+                            );
+                        }
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
