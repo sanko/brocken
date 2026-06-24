@@ -2,6 +2,26 @@
 
 Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in place, we need to bridge the gap between abstract SSA and executable machine code.
 
+## Active Sprint
+
+### Brocken Class Refactoring
+- [x] `Brocken->new()` constructor auto-selects codegen, linker, and ext based on platform
+- [x] Migrated 13 test files from manual if/elsif/else chains to `Brocken->new()`:
+      `3501`–`3508` (isolate/fiber), `3402`, `3405`, `3280`, `3150`, `3270`
+- [x] Fixed `Brocken.pm:59`; `$platform->triple` → `$platform->friendly` (method didn't exist)
+- [ ] **Remaining ~30 test files** still use manual codegen/linker selection; migrate to `Brocken->new()`
+
+### macOS Intel CI Failures
+- [x] **3505_isolate_args.t**; was generating ELF binaries on macOS (exit 126). Fixed by Brocken ADJUST (uses MachO linker on macOS).
+- [ ] **3502_isolate_fiber_interop.t**; SIGSEGV (`$?=11`) on macOS Intel. Binary is valid Mach-O but runtime crashes in fiber ops inside isolates.
+- [ ] **3503_multi_isolate.t**; Same SIGSEGV (`$?=11`) on macOS Intel. Fiber+isolate tests crash.
+- [ ] Root-cause the fiber ctx_swap / isolate trampoline interaction on x86_64 Mach-O.
+
+### Isolate Return Values
+- [x] `isolate_join` IR + lowering on all 4 native targets
+- [x] `isolate_join` with retval slot on X86_64, ARM64, RISCV64
+- [ ] `isolate_join` passes NULL retval; doesn't capture thread result
+
 ## Phase 1: Lowering & Instruction Selection (Jenny Expansion)
 - [x] Implement a `Lowerer` that converts SSA `Lindsay` IR into platform-specific "Machine IR" (MIR).
 - [x] Support complex addressing modes in MIR (`[base + disp]` via `mem` operands).
