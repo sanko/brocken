@@ -2,8 +2,7 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
-use Brocken::Katsuro;
-use Brocken::Jenny;
+use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'LiveInterval' => sub {
@@ -14,7 +13,8 @@ subtest 'LiveInterval' => sub {
     is $li->end,   5,    'interval end';
 };
 subtest 'LinearScan basic allocation' => sub {
-    my $platform = Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu');
+    my $brocken  = Brocken->new();
+    my $platform = $brocken->platform;
     my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => 'test', frame_size => 0 );
     my $bb       = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
     $mf->add_block($bb);
@@ -34,7 +34,8 @@ subtest 'LinearScan basic allocation' => sub {
     ok defined $alloc->{assignment}{'%b'}, '%b assigned to a register';
 };
 subtest 'LinearScan with many virtual registers' => sub {
-    my $platform = Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu');
+    my $brocken  = Brocken->new();
+    my $platform = $brocken->platform;
     my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => 'heavy', frame_size => 0 );
     my $bb       = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
     $mf->add_block($bb);

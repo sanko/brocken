@@ -160,8 +160,11 @@ subtest 'remove_redundant_moves_no_assignment' => sub {
     is $bb->instructions->[0]->opcode,  'mov', 'mov not removed';
 };
 subtest 'x86_64 leaf vs non-leaf prologue' => sub {
-    my $platform = Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu');
-    my $codegen  = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $brocken  = Brocken->new();
+    my $platform = $brocken->platform;
+    SKIP: {
+        skip 'x86_64-specific prologue test', 8 unless $platform->is_x64;
+        my $codegen = $brocken->codegen;
 
     # Build a leaf MIR function (no call_func) with callee-save regs pre-assigned
     my $mf_leaf = Brocken::Jenny::MIR::MachineFunction->new( name => 'leaf', frame_size => 0 );
@@ -199,6 +202,7 @@ subtest 'x86_64 leaf vs non-leaf prologue' => sub {
     # Modern: both end with epilogue: 48 89 EC (mov rsp, rbp) then 5D (pop rbp) then C3 (ret)
     is( substr( $leaf_bytes,    -5, 4 ), pack( 'C*', 0x48, 0x89, 0xEC, 0x5D ), 'leaf ends with standard epilogue' );
     is( substr( $nonleaf_bytes, -5, 4 ), pack( 'C*', 0x48, 0x89, 0xEC, 0x5D ), 'non-leaf ends with standard epilogue' );
+    }
 };
 subtest 'leaf function runtime correctness' => sub {
 SKIP: {
