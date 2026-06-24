@@ -9,7 +9,7 @@ use feature qw[class];
 my $brocken  = Brocken->new();
 my $platform = $brocken->platform;
 SKIP: {
-    skip 'Execution test only supported on native hosts', 60 unless $platform->is_native;
+    skip 'Execution test only supported on native hosts', 132 unless $platform->is_native;
     for my $tc (
         [ eq  => 42, 42, 1, '42 eq 42' ],
         [ eq  => 42, 0,  0, '42 eq 0' ],
@@ -31,6 +31,26 @@ SKIP: {
         [ sle => 42, 0,  0, '42 sle 0' ],
         [ sge => 42, 0,  1, '42 sge 0' ],
         [ sge => 0,  42, 0, '0 sge 42' ],
+        [ eq  => -1, -1, 1, '-1 eq -1' ],
+        [ eq  => -1,  0, 0, '-1 eq 0' ],
+        [ ne  => -1,  0, 1, '-1 ne 0' ],
+        [ ne  => -1, -1, 0, '-1 ne -1' ],
+        [ ult => -1,  0, 0, '-1 ult 0 (false: -1 is huge unsigned)' ],
+        [ ult =>  0, -1, 1, '0 ult -1 (true: 0 < huge)' ],
+        [ ugt => -1,  0, 1, '-1 ugt 0 (true: -1 is huge)' ],
+        [ ugt =>  0, -1, 0, '0 ugt -1 (false: 0 < huge)' ],
+        [ ule => -1,  0, 0, '-1 ule 0 (false)' ],
+        [ ule =>  0, -1, 1, '0 ule -1 (true)' ],
+        [ uge => -1,  0, 1, '-1 uge 0 (true)' ],
+        [ uge =>  0, -1, 0, '0 uge -1 (false)' ],
+        [ slt => -1,  0, 1, '-1 slt 0 (true: signed)' ],
+        [ slt =>  0, -1, 0, '0 slt -1 (false)' ],
+        [ sgt => -1,  0, 0, '-1 sgt 0 (false)' ],
+        [ sgt =>  0, -1, 1, '0 sgt -1 (true)' ],
+        [ sle => -1,  0, 1, '-1 sle 0 (true)' ],
+        [ sle =>  0, -1, 0, '0 sle -1 (false)' ],
+        [ sge => -1,  0, 0, '-1 sge 0 (false)' ],
+        [ sge =>  0, -1, 1, '0 sge -1 (true)' ],
     ) {
         my ( $pred, $a, $b, $expected, $desc ) = @$tc;
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );

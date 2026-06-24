@@ -48,10 +48,12 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $opcode eq 'shl'  ||
                             $opcode eq 'lshr' ||
                             $opcode eq 'ashr' ||
-                            $opcode eq 'mul'  ||
-                            $opcode eq 'div'  ||
-                            $opcode eq 'rem' )
-                    ) {
+                             $opcode eq 'mul'  ||
+                             $opcode eq 'div'  ||
+                             $opcode eq 'rem'  ||
+                             $opcode eq 'min'  ||
+                             $opcode eq 'max' )
+                     ) {
                         if ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
                             my ( $lo_lhs, $hi_lhs ) = $self->_split_i128($lhs);
                             my ( $lo_dst, $hi_dst ) = $self->_split_i128($inst);
@@ -1366,6 +1368,67 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$lo_dst] ) );
                             $mbb->add_instruction( $self->_wasm_push_opnd( $out_hi, 'out_hi' ) );
                             $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi_dst] ) );
+                        }
+                        elsif ( $opcode eq 'min' || $opcode eq 'max' ) {
+                            my ( $lo_lhs, $hi_lhs ) = $self->_split_i128($lhs);
+                            my ( $lo_rhs, $hi_rhs ) = $self->_split_i128($rhs);
+                            my ( $lo_dst, $hi_dst ) = $self->_split_i128($inst);
+                            my $mask_tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_mask', type => Brocken::Lindsay::IR::Type::i32() );
+                            my $tmp_lhs_lo = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_llo', type => Brocken::Lindsay::IR::Type::i64() );
+                            my $tmp_lhs_hi = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_lhi', type => Brocken::Lindsay::IR::Type::i64() );
+                            my $tmp_rhs_lo = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rlo', type => Brocken::Lindsay::IR::Type::i64() );
+                            my $tmp_rhs_hi = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rhi', type => Brocken::Lindsay::IR::Type::i64() );
+
+                            # Save operands to locals
+                            $mbb->add_instruction( $self->_wasm_push_opnd( $lo_lhs, 'i128 minmax lo_lhs' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$tmp_lhs_lo], comment => 'i128 minmax save lo_lhs' ) );
+                            $mbb->add_instruction( $self->_wasm_push_opnd( $hi_lhs, 'i128 minmax hi_lhs' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$tmp_lhs_hi], comment => 'i128 minmax save hi_lhs' ) );
+                            $mbb->add_instruction( $self->_wasm_push_opnd( $lo_rhs, 'i128 minmax lo_rhs' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$tmp_rhs_lo], comment => 'i128 minmax save lo_rhs' ) );
+                            $mbb->add_instruction( $self->_wasm_push_opnd( $hi_rhs, 'i128 minmax hi_rhs' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$tmp_rhs_hi], comment => 'i128 minmax save hi_rhs' ) );
+
+                            # Compute mask: hi_lt | (hi_eq & lo_lt)
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_lhs_hi], comment => 'i128 minmax lhs_hi' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_rhs_hi], comment => 'i128 minmax rhs_hi' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_lt_s', operands => [], comment => 'i128 minmax hi_lt' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_lhs_hi], comment => 'i128 minmax lhs_hi' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_rhs_hi], comment => 'i128 minmax rhs_hi' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_eq', operands => [], comment => 'i128 minmax hi_eq' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_lhs_lo], comment => 'i128 minmax lhs_lo' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_rhs_lo], comment => 'i128 minmax rhs_lo' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_lt_u', operands => [], comment => 'i128 minmax lo_lt' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_and', operands => [], comment => 'i128 minmax hi_eq&lo_lt' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_or', operands => [], comment => 'i128 minmax mask' ) );
+
+                            if ( $opcode eq 'max' ) {
+                                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_eqz', operands => [], comment => 'i128 max invert mask' ) );
+                            }
+
+                            # Extend mask to i64 for AND with i64 values
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [], comment => 'i128 minmax mask extend' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$mask_tmp], comment => 'i128 minmax save mask64' ) );
+
+                            # lo_dst = ((lo_lhs XOR lo_rhs) AND mask) XOR lo_rhs
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_lhs_lo], comment => 'i128 minmax lhs_lo' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_rhs_lo], comment => 'i128 minmax rhs_lo' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [], comment => 'i128 minmax lo xor' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask_tmp], comment => 'i128 minmax mask' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_and', operands => [], comment => 'i128 minmax lo and' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_rhs_lo], comment => 'i128 minmax rhs_lo' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [], comment => 'i128 minmax lo sel' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$lo_dst], comment => 'i128 minmax store lo' ) );
+
+                            # hi_dst = ((hi_lhs XOR hi_rhs) AND mask) XOR hi_rhs
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_lhs_hi], comment => 'i128 minmax lhs_hi' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_rhs_hi], comment => 'i128 minmax rhs_hi' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [], comment => 'i128 minmax hi xor' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$mask_tmp], comment => 'i128 minmax mask' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_and', operands => [], comment => 'i128 minmax hi and' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tmp_rhs_hi], comment => 'i128 minmax rhs_hi' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_xor', operands => [], comment => 'i128 minmax hi sel' ) );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi_dst], comment => 'i128 minmax store hi' ) );
                         }
                         else {
                             my ( $lo_lhs, $hi_lhs ) = $self->_split_i128($lhs);
