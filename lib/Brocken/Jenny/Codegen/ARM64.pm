@@ -80,6 +80,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         SF             => 0x80000000,
         BR             => 0xD61F0000,
         ADR            => 0x10000000,
+        BL             => 0x94000000,
+        BLR            => 0xD63F0000,
         FCB_RESUME_OFF => 112,
         RET            => 0xD65F03C0,
     };
@@ -492,10 +494,10 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     my $loop_start = length $bytes;
                     $bytes .= pack( 'V', SUB_SP | ( 1 << 10 ) | ( 1 << 22 ) );
-                    $bytes .= pack( 'V', 0xF94003FF );
-                    $bytes .= pack( 'V', 0xD1000610 );
+                    $bytes .= pack( 'V', LDR_64 | ( 31 << 5 ) | 31 );
+                    $bytes .= pack( 'V', ( SUB_IMM | SF ) | ( 1 << 10 ) | ( 16 << 5 ) | 16 );
                     my $imm19 = ( ( $loop_start - length($bytes) ) >> 2 ) & 0x7FFFF;
-                    $bytes .= pack( 'V', 0xB5000000 | ( $imm19 << 5 ) | 16 );
+                    $bytes .= pack( 'V', CBNZ | ( $imm19 << 5 ) | 16 );
                 }
                 if ( $remainder > 0 ) {
                     $bytes .= pack( 'V', SUB_SP | ( $remainder << 10 ) );
@@ -528,13 +530,13 @@ class Brocken::Jenny::Codegen::ARM64 {
             }
             my $fp_off = $extra_frame + $fp_idx * 8;
             if ( $fp_off <= 0xFFF ) {
-                $bytes .= pack( 'V', 0x910003FD | ( $fp_off << 10 ) );
+                $bytes .= pack( 'V', ADD_IMM_64 | ( 31 << 5 ) | 29 | ( $fp_off << 10 ) );
             }
             else {
                 my $hi = $fp_off >> 12;
                 my $lo = $fp_off & 0xFFF;
-                $bytes .= pack( 'V', 0x910003FD | ( $hi << 10 ) | ( 1 << 22 ) );
-                $bytes .= pack( 'V', 0x910003BD | ( $lo << 10 ) ) if $lo;
+                $bytes .= pack( 'V', ADD_IMM_64 | ( 31 << 5 ) | 29 | ( $hi << 10 ) | ( 1 << 22 ) );
+                $bytes .= pack( 'V', ADD_IMM_64 | ( 29 << 5 ) | 29 | ( $lo << 10 ) ) if $lo;
             }
         }
         my %labels;
@@ -664,7 +666,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                                 $emitted = 1;
                             }
                         }
-                        $bytes .= pack( 'V', 0x8B0003E0 | ( $did << 16 ) | $did );
+                        $bytes .= pack( 'V', ADD_X | ( 31 << 5 ) | ( $did << 16 ) | $did );
                     }
                     $alloca_frame += $size;
                     $alloca_frame = ( $alloca_frame + 15 ) & ~15;
@@ -812,7 +814,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $did   = $reg_id->($dst_r);
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
-                    $bytes .= pack( 'V', 0xEB00001F | ( $sid << 16 ) | ( $did << 5 ) );
+                    $bytes .= pack( 'V', SF | CMP_REG | ( $sid << 16 ) | ( $did << 5 ) );
                     $bytes .= pack( 'V', CSINC | ( 31 << 16 ) | ( 2 << 12 ) | ( 31 << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'fload' ) {
@@ -981,17 +983,17 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $did       = $reg_id->($dst_r);
                     my $func_name = $src->value;
                     push @func_fixups, { offset => $current_offset->(), type => 'adr', target => $func_name, rd => $did };
-                    $bytes .= pack( 'V', 0x10000000 | $did );
+                    $bytes .= pack( 'V', ADR | $did );
                 }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $dst->value;
                     push @func_fixups, { offset => $current_offset->(), type => 'call_bl', target => $func_name };
-                    $bytes .= pack( 'V', 0x94000000 );
+                    $bytes .= pack( 'V', BL );
                 }
                 elsif ( $opcode eq 'call_indirect' ) {
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
-                    $bytes .= pack( 'V', 0xD63F0000 | ( $sid << 5 ) );
+                    $bytes .= pack( 'V', BLR | ( $sid << 5 ) );
                 }
                 elsif ( $opcode eq 'ret' ) {
                     if ( $callee_size > 0 ) {
