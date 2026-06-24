@@ -9,19 +9,21 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] Migrated 13 test files from manual if/elsif/else chains to `Brocken->new()`:
       `3501`–`3508` (isolate/fiber), `3402`, `3405`, `3280`, `3150`, `3270`
 - [x] Fixed `Brocken.pm:59`; `$platform->triple` → `$platform->friendly` (method didn't exist)
-- [ ] **Remaining ~30 test files** still use manual codegen/linker selection; migrate to `Brocken->new()`
+- [x] Migrated all native tests (no runtime codegen/linker): `3020_regalloc.t`, `3030_regalloc_frame.t`
+- [ ] **Linker-format tests** (`3110_elf.t`, `3120_pe.t`, `3130_macho.t`, `3140_ffi.t`) intentionally test specific linker formats; cannot use `$brocken->linker` since that returns the host linker.
+- [ ] **Cross-platform lowering tests** (`3250_gep.t`, `3260_i128_lowering.t`, `3401_fiber_lowering.t`) explicitly test each arch's lowerer (X86_64, ARM64, RISCV64, Wasm); not about codegen/linker selection.
 
 ### macOS Intel CI Failures
 - [x] **3505_isolate_args.t**; was generating ELF binaries on macOS (exit 126). Fixed by Brocken ADJUST (uses MachO linker on macOS).
 - [x] **3502_isolate_fiber_interop.t**; SIGSEGV (`$?=11`) on macOS Intel. Root cause: fiber functions without a terminal `ret` fell through across function boundaries on resume. Fixed by adding second yield + ret to `fiber_a` in `202c0bd`.
 - [x] **3503_multi_isolate.t**; Same SIGSEGV (`$?=11`). Same root cause as 3502.
 - [x] Root-cause the fiber ctx_swap / isolate trampoline interaction on x86_64 Mach-O. — `r12` was being clobbered in the ctx_swap restore loop; skipped restore since r12 already holds target FCB (step 6 of x86_64 ctx_swap). Fixed in `202c0bd`.
-- [ ] **Other macOS failures**; check remaining isolate/fiber tests on macOS Intel after the above fixes.
+- [x] **Other macOS failures**; Mach-O import stub recalculation used base GOT RVA instead of per-function GOT slot RVA, causing all import stubs (pthread_create, pthread_join, dlopen, dlsym) to point to dlopen's GOT slot. Fixed by storing per-stub GOT offset and recomputing absolute RVA from current GOT base.
 
 ### Isolate Return Values
 - [x] `isolate_join` IR + lowering on all 4 native targets
 - [x] `isolate_join` with retval slot on X86_64, ARM64, RISCV64
-- [ ] `isolate_join` passes NULL retval; doesn't capture thread result
+- [x] `isolate_join` passes NULL retval; doesn't capture thread result (Mach-O import stub fix)
 
 ## Phase 1: Lowering & Instruction Selection (Jenny Expansion)
 - [x] Implement a `Lowerer` that converts SSA `Lindsay` IR into platform-specific "Machine IR" (MIR).
@@ -63,8 +65,9 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] i128 binops (add/sub/and/or/xor/shl/lshr/ashr/mul)  all 4 targets.
 - [x] i128 return values are correctly split into lo/hi across two registers on native targets.
 - [x] i128 load/store on all 4 targets, via `_split_i128`.
-- [ ] **i128 call arguments**  not split; passes single i128 values through registers designed for 64-bit scalars.
-- [ ] **i128 entry block parameters**  not split; same issue as call arguments.
+- [x] **i128 call arguments**  split into lo/hi across two consecutive param registers in all 4 lowerers.
+- [x] **i128 entry block parameters**  split into _lo/_hi virt_regs at the entry block, consuming two param regs.
+- [x] **i128 call return capture (ARM64, RISCV64, Wasm)**  caller now reconstructs _lo/_hi from both return registers (x0/x1, a0/a1, Wasm stack) — was only done on X86_64.
 - [ ] **Signed i128 div/rem**  all targets use unsigned algorithm; no sign-extension or absolute-value handling.
 - [ ] **i128 `min`/`max`**  not implemented on any target for i128 width.
 - [ ] **Large-value i128 tests**  all test values fit in 64 bits; no hi-part carry/borrow exercised.
@@ -84,7 +87,7 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] `pthread_join` added to ELF64 and Mach-O linker imports
 - [x] Conditional trampoline emission (only when isolate ops present)
 - [x] Compiled isolate runtime test (spawn + join + verify lifecycle)
-- [ ] **Isolate return value propagation**  `isolate_join` passes NULL retval; doesn't capture thread result
+- [x] **Isolate return value propagation**  `isolate_join` passes NULL retval; doesn't capture thread result — fixed by Mach-O import stub fix (stubs pointed to dlopen, not pthread_join)
 - [ ] Wasm isolate stubs (lowerer + codegen)
 - [ ] Cross-isolate message passing (transferable objects)
 
