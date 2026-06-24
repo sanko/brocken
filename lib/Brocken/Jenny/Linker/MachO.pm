@@ -121,6 +121,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         # Generate import stubs for undefined external functions
         my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
         my $text_rva   = $self->layout->get('.text')->{rva};
+        my @stubs;
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
             next unless grep { $ff->{target} eq $_ } @known_imports;
@@ -134,11 +135,13 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             if ( $platform->is_x64 ) {
                 my $disp32 = $got_rva - ( $text_rva + $stub_ofs + 6 );
                 $stub_bytes = pack( 'CC l<', 0xFF, 0x25, $disp32 );
+                push @stubs, { offset => $stub_ofs };
             }
             elsif ( $platform->is_arm64 ) {
                 $stub_bytes = pack( 'V', adrp( 16, $got_rva, $text_rva + $stub_ofs ) );
                 $stub_bytes .= pack( 'V', ldr_64( 16, 16, $got_rva & 0xFFF ) );
                 $stub_bytes .= pack( 'V', 0xD61F0000 | ( 16 << 5 ) );
+                push @stubs, { offset => $stub_ofs };
             }
             $text .= $stub_bytes                                     if length($stub_bytes);
             $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size if length($stub_bytes);
@@ -373,6 +376,27 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         $self->layout->get('.linkedit')->{size} = $le_payload_size > 64 ? $le_payload_size : 64;
         $self->layout->calculate($page_size);
         $le_off = $self->layout->get('.linkedit')->{off};
+        if (@stubs) {
+            my $got_sec  = $self->layout->get('.got');
+            my $new_text = $self->layout->get('.text');
+            if ( $got_sec && $new_text ) {
+                my $got_rva2 = $got_sec->{rva};
+                my $txt_rva2 = $new_text->{rva};
+                if ( $platform->is_x64 ) {
+                    for my $s (@stubs) {
+                        my $disp32 = $got_rva2 - ( $txt_rva2 + $s->{offset} + 6 );
+                        substr( $text, $s->{offset} + 2, 4, pack( 'l<', $disp32 ) );
+                    }
+                }
+                elsif ( $platform->is_arm64 ) {
+                    for my $s (@stubs) {
+                        my $stub_rva = $txt_rva2 + $s->{offset};
+                        substr( $text, $s->{offset},     4, pack( 'V', adrp( 16, $got_rva2, $stub_rva ) ) );
+                        substr( $text, $s->{offset} + 4, 4, pack( 'V', ldr_64( 16, 16, $got_rva2 & 0xFFF ) ) );
+                    }
+                }
+            }
+        }
         my %seg_names = ( '.text' => '__TEXT', '.data' => '__DATA', '.got' => '__DATA', '.brk_sym' => '__TEXT' );
         my %sec_names = ( '.text' => '__text', '.data' => '__data', '.got' => '__got',  '.brk_sym' => '__brk_sym' );
         for my $s ( $self->layout->sections ) {

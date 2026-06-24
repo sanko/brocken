@@ -3,12 +3,12 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../../lib', '../../../lib', '../../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $platform = Brocken::Katsuro::Platform::parse();
+my $brocken  = Brocken->new();
+my $platform = $brocken->platform;
 
 # Test 1: constant i128 return (42)
 {
@@ -16,19 +16,13 @@ my $platform = Brocken::Katsuro::Platform::parse();
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 constant bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_const_native' . $platform->bin_ext;
+        my $output_file = 'i128_const_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 constant file exists' );
         run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 constant returned 42 on ' . $platform->friendly );
@@ -47,19 +41,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 add bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_add_native' . $platform->bin_ext;
+        my $output_file = 'i128_add_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 add file exists' );
         run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 add (40+2) returned 42 on ' . $platform->friendly );
@@ -78,19 +66,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 shl bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_shl_native' . $platform->bin_ext;
+        my $output_file = 'i128_shl_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 shl file exists' );
         run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 shl (21<<1) returned 42 on ' . $platform->friendly );
@@ -109,19 +91,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 mul bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_mul_native' . $platform->bin_ext;
+        my $output_file = 'i128_mul_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 mul file exists' );
         run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 mul (21*2) returned 42 on ' . $platform->friendly );
@@ -140,19 +116,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 lshr bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_lshr_native' . $platform->bin_ext;
+        my $output_file = 'i128_lshr_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 lshr file exists' );
         run_exec(
@@ -176,19 +146,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 ashr bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_ashr_native' . $platform->bin_ext;
+        my $output_file = 'i128_ashr_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 ashr file exists' );
         run_exec(
@@ -212,19 +176,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 div bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_div_native' . $platform->bin_ext;
+        my $output_file = 'i128_div_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 div file exists' );
         run_exec( $output_file, expected_exit => 21, platform => $platform, name => 'Native i128 div (42/2) returned 21 on ' . $platform->friendly );
@@ -243,19 +201,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 rem bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_rem_native' . $platform->bin_ext;
+        my $output_file = 'i128_rem_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 rem file exists' );
         run_exec( $output_file, expected_exit => 1, platform => $platform, name => 'Native i128 rem (21%10) returned 1 on ' . $platform->friendly );
@@ -274,19 +226,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 carry add bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_carry_add_native' . $platform->bin_ext;
+        my $output_file = 'i128_carry_add_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 carry add file exists' );
         run_exec(
@@ -310,19 +256,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 sub (5-3) bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sub_5_3_native' . $platform->bin_ext;
+        my $output_file = 'i128_sub_5_3_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 sub (5-3) file exists' );
         run_exec( $output_file, expected_exit => 2, platform => $platform, name => 'Native i128 sub (5-3) returned 2 on ' . $platform->friendly );
@@ -341,19 +281,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 borrow sub bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_borrow_sub_native' . $platform->bin_ext;
+        my $output_file = 'i128_borrow_sub_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 borrow sub file exists' );
         my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
@@ -375,19 +309,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 edge mul bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_edge_mul_native' . $platform->bin_ext;
+        my $output_file = 'i128_edge_mul_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 edge mul file exists' );
         run_exec(
@@ -411,19 +339,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 edge div bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_edge_div_native' . $platform->bin_ext;
+        my $output_file = 'i128_edge_div_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 edge div file exists' );
         run_exec(
@@ -447,19 +369,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 edge rem bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_edge_rem_native' . $platform->bin_ext;
+        my $output_file = 'i128_edge_rem_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 edge rem file exists' );
         run_exec(
@@ -483,19 +399,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 sub negative rhs bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sub_neg_native' . $platform->bin_ext;
+        my $output_file = 'i128_sub_neg_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 sub negative rhs file exists' );
         run_exec(
@@ -519,19 +429,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 add carry hi bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_add_carry_hi_native' . $platform->bin_ext;
+        my $output_file = 'i128_add_carry_hi_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 add carry hi file exists' );
         run_exec(
@@ -555,19 +459,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 and bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_and_native' . $platform->bin_ext;
+        my $output_file = 'i128_and_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 and file exists' );
         run_exec(
@@ -591,19 +489,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 or bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_or_native' . $platform->bin_ext;
+        my $output_file = 'i128_or_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 or file exists' );
         run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Native i128 or (0 | 42) returned 42 on ' . $platform->friendly );
@@ -622,19 +514,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 xor bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_xor_native' . $platform->bin_ext;
+        my $output_file = 'i128_xor_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 xor file exists' );
         run_exec(
@@ -658,19 +544,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 signed div bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sdiv1_native' . $platform->bin_ext;
+        my $output_file = 'i128_sdiv1_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 signed div (-42/2) file exists' );
         my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
@@ -692,19 +572,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 signed div 2 bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sdiv2_native' . $platform->bin_ext;
+        my $output_file = 'i128_sdiv2_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 signed div (42/-2) file exists' );
         my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
@@ -726,19 +600,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 signed div neg both bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sdiv3_native' . $platform->bin_ext;
+        my $output_file = 'i128_sdiv3_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 signed div (-42/-2) file exists' );
         run_exec(
@@ -762,19 +630,13 @@ SKIP: {
             '%r'
         )
     );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated native i128 signed rem bytes for ' . $platform->friendly );
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
+    my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_srem1_native' . $platform->bin_ext;
+        my $output_file = 'i128_srem1_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, 'Native i128 signed rem (-42%5) file exists' );
         my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";

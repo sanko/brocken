@@ -1,9 +1,8 @@
 use v5.42;
 use Test2::V0;
 use lib 'lib', '../../../lib', '../../lib', '../lib';
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -12,7 +11,8 @@ use feature qw[class];
 # A leaf function (no calls) with no frame should skip
 # all prologue/epilogue — just mov + ret.
 # ──────────────────────────────────────────────────────
-my $platform = Brocken::Katsuro::Platform::parse();
+my $brocken  = Brocken->new();
+my $platform = $brocken->platform;
 SKIP: {
     skip 'Leaf optimization only tested on X86_64', 5 unless $platform->is_x64;
 
@@ -21,7 +21,7 @@ SKIP: {
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
-    my $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $bytes   = $codegen->emit_function($func);
     ok( length($bytes) > 0, 'Leaf function produced bytes' );
 
@@ -40,11 +40,8 @@ SKIP: {
     is( $bytes, $expected, 'Leaf function bytes match expected: mov rax, 42; ret' );
 
     # Run the binary to verify correctness
-    my $linker
-        = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-        $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-        Brocken::Jenny::Linker::ELF64->new();
-    my $output_file = 'leaf_test' . $platform->bin_ext;
+    my $linker      = $brocken->linker;
+    my $output_file = 'leaf_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
     ok( -x $output_file || $platform->is_windows, 'Leaf binary exists' );
     my $cmd = $platform->is_windows ? $output_file : "./$output_file";

@@ -4,7 +4,7 @@ use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as
 use lib 'lib', '../../lib', '../lib';
 use Brocken::Lindsay;
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro::Platform;
+use Brocken;
 use Brocken::Lindsay::IR;
 use Brocken::Lindsay::IR::Builder;
 no warnings qw[experimental::class experimental::builtin portable];
@@ -36,8 +36,9 @@ IR
     is $module->as_string, $expected_ir, 'Generated Memory IR matches expected LLVM-style output';
 }
 subtest 'Memory Model: RC and Bump Allocation' => sub {
-    my $host = Brocken::Katsuro::Platform::parse();
-    my $b    = Brocken::Lindsay::IR::Builder->new();
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+    my $b       = Brocken::Lindsay::IR::Builder->new();
     my $i64  = Brocken::Lindsay::IR::Type::i64();
     my $ptr  = Brocken::Lindsay::IR::Type::ptr();
     my $void = Brocken::Lindsay::IR::Type::void();
@@ -119,37 +120,11 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     my @functions = ( $incref_fn, $decref_fn, $alloc_fn, $main );
 SKIP: {
         skip 'Native memory model test only runs on native hosts', 1 unless $host->is_native;
-        my ( $codegen, $linker );
-        #
-        if ( $host->is_macos ) {
-            require Brocken::Jenny::Linker::MachO;
-            $linker = Brocken::Jenny::Linker::MachO->new();
-        }
-        elsif ( $host->is_windows ) {
-            require Brocken::Katsuro::Platform::Windows;
-            require Brocken::Jenny::Linker::PE;
-            $linker = Brocken::Jenny::Linker::PE->new();
-        }
-        else {
-            require Brocken::Jenny::Linker::ELF64;
-            $linker = Brocken::Jenny::Linker::ELF64->new();
-        }
-        #
-        if ( $host->is_arm64 ) {
-            require Brocken::Jenny::Codegen::ARM64;
-            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        }
-        elsif ( $host->is_riscv64 ) {
-            require Brocken::Jenny::Codegen::RISCV64;
-            $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-        }
-        else {
-            require Brocken::Jenny::Codegen::X86_64;
-            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        }
+        my $codegen = $brocken->codegen;
+        my $linker  = $brocken->linker;
         #
         my $funcs       = $codegen->emit_functions( \@functions );
-        my $output_file = 'memory_model_test' . $host->bin_ext;
+        my $output_file = 'memory_model_test' . $brocken->ext;
         $linker->write_executable( $output_file, $funcs, $host );
 
         # If this succeeds and returns 1, our allocator, RC system,

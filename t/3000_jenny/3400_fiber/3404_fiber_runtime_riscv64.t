@@ -2,12 +2,12 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../../../lib';
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $platform = Brocken::Katsuro::Platform::parse();
+my $brocken  = Brocken->new();
+my $platform = $brocken->platform;
 subtest 'RISCV64 fiber yield passes value to main exit code' => sub {
     my $i32    = Brocken::Lindsay::IR::Type::i32();
     my $i64    = Brocken::Lindsay::IR::Type::i64();
@@ -24,7 +24,7 @@ subtest 'RISCV64 fiber yield passes value to main exit code' => sub {
     my $send = Brocken::Lindsay::IR::Constant->new( type => $i64, value => 42 );
     my $recv = $mb->build_fiber_transfer( $fcb, $send, '%recv' );
     $mb->build_ret($recv);
-    my $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
+    my $codegen = $brocken->codegen;
     my $funcs   = $codegen->emit_functions( [ $main, $worker ] );
     ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or diag( explain($funcs) );
 
@@ -43,11 +43,8 @@ subtest 'RISCV64 fiber yield passes value to main exit code' => sub {
     warn "(end of hex dumps)\n";
 SKIP: {
         skip 'Only for RISC-V 64 native hosts', 2 unless $platform->is_riscv64 && $platform->is_native;
-        my $linker
-            = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-            $platform->is_windows ? Brocken::Jenny::Linker::PE->new() :
-            Brocken::Jenny::Linker::ELF64->new();
-        my $output_file = 'fiber_test_riscv64' . $platform->bin_ext;
+        my $linker      = $brocken->linker;
+        my $output_file = 'fiber_test_riscv64' . $brocken->ext;
         $linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'RISCV64 fiber test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
         my $cmd = $platform->is_windows ? $output_file : "./$output_file";
