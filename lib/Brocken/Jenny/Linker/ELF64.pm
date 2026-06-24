@@ -348,7 +348,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my @exports   = @{ $self->exported_funcs // [] };
         my $exit_name = $platform->is_haiku ? 'exit' : '_exit';
         my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', 'pthread_join', $exit_name );
-        if ( $platform->is_linux || $platform->is_freebsd || $platform->is_netbsd || $platform->is_dragonflybsd ) {
+        if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
             push @imports, 'sched_setaffinity';
         }
         my $libc      = $libc_map{$os_base} // 'libc.so';
@@ -535,7 +535,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $join_slot    = $base + $self->import_rva('pthread_join');
         my $join_sym_idx = $sym_indices{'pthread_join'};
         $rela_dyn .= pack( 'Q< Q< q<', $join_slot, ( $join_sym_idx << 32 ) | $rel_type, 0 );
-        if ( $platform->is_linux || $platform->is_freebsd || $platform->is_netbsd || $platform->is_dragonflybsd ) {
+        if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
             my $sched_slot    = $base + $self->import_rva('sched_setaffinity');
             my $sched_sym_idx = $sym_indices{'sched_setaffinity'};
             $rela_dyn .= pack( 'Q< Q< q<', $sched_slot, ( $sched_sym_idx << 32 ) | $rel_type, 0 );
