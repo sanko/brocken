@@ -22,10 +22,20 @@ SKIP: {
         $linker  = Brocken::Jenny::Linker::ELF64->new();
         $ext     = '';
     }
+    elsif ( $host->is_arm64 && ( $host->is_freebsd || $host->is_netbsd || $host->is_dragonflybsd ) ) {
+        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
+        $linker  = Brocken::Jenny::Linker::ELF64->new();
+        $ext     = '';
+    }
     elsif ( $host->is_arm64 ) {
         skip 'FiberPin not supported on this ARM64 platform', 1;
     }
     elsif ( $host->is_riscv64 && $host->is_linux ) {
+        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
+        $linker  = Brocken::Jenny::Linker::ELF64->new();
+        $ext     = '';
+    }
+    elsif ( $host->is_riscv64 && ( $host->is_freebsd || $host->is_netbsd || $host->is_dragonflybsd ) ) {
         $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
         $linker  = Brocken::Jenny::Linker::ELF64->new();
         $ext     = '';
@@ -41,8 +51,8 @@ SKIP: {
     elsif ( $host->is_x64 && $host->is_macos ) {
         skip 'FiberPin not supported on macOS', 1;
     }
-    elsif ( $host->is_x64 && $host->is_bsd ) {
-        skip 'FiberPin not supported on BSD', 1;
+    elsif ( $host->is_x64 && $host->is_openbsd ) {
+        skip 'FiberPin not supported on OpenBSD', 1;
     }
     elsif ( $host->is_x64 ) {
         $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );

@@ -2541,7 +2541,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     my $ptr      = Brocken::Lindsay::IR::Type::ptr();
                     my $inst_tag = 'fp' . ( $inst->name // int( $inst + 0 ) );
                     my ( $fiber, $mask_opnd ) = $inst->operands->@*;
-                    if ( $platform->is_linux ) {
+                    if ( $platform->is_linux || $platform->is_freebsd || $platform->is_netbsd || $platform->is_dragonflybsd ) {
                         my $mask_slot = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst_tag . '.msk', type => $ptr );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
