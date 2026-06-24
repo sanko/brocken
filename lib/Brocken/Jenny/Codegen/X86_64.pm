@@ -579,12 +579,20 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $bits    = $dst->type ? $dst->type->bits : 64;
                     my %imm_ext = ( add => 0,    sub => 5,    and => 4,    or => 1,    xor => 6,    adc => 2,    sbb => 3 );
                     my %reg_op  = ( add => 0x01, sub => 0x29, and => 0x21, or => 0x09, xor => 0x31, adc => 0x11, sbb => 0x19 );
+                    my %reg_mem = ( add => 0x03, sub => 0x2B, and => 0x23, or  => 0x0B, xor => 0x33, adc => 0x13, sbb => 0x1B );
                     my $rex_w   = ( $bits >= 64 ) ? REX_W : 0;
                     if ( $src->kind eq 'imm' ) {
                         my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                         my $ext   = $imm_ext{$opcode};
                         my $modrm = 0xC0 | ( $ext << 3 ) | ( $did & 7 );
                         $bytes .= pack( 'CCCV', $rex, ARITH_IMM, $modrm, $src->value );
+                    }
+                    elsif ( $src->kind eq 'mem' ) {
+                        my $op = $reg_mem{$opcode};
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did & 7 );
+                        my $rex = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | $rex_x | $rex_b;
+                        $bytes .= pack( 'CCC', $rex, $op, $modrm );
+                        $bytes .= join '', $extra->@*;
                     }
                     else {
                         my $src_r = $resolve->($src);
@@ -887,6 +895,12 @@ class Brocken::Jenny::Codegen::X86_64 {
                         my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                         my $modrm = 0xC0 | ( 7 << 3 ) | ( $did & 7 );
                         $bytes .= pack( 'CCCV', $rex, ARITH_IMM, $modrm, $src->value );
+                    }
+                    elsif ( $src->kind eq 'mem' ) {
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did & 7 );
+                        my $rex = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | $rex_x | $rex_b;
+                        $bytes .= pack( 'CCC', $rex, 0x3B, $modrm );
+                        $bytes .= join '', $extra->@*;
                     }
                     else {
                         my $src_r = $resolve->($src);

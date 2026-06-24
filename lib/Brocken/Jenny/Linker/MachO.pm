@@ -117,6 +117,20 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         if ( !defined $self->layout ) {
             $self->pre_layout( length($text), length($data_bytes), $platform );
         }
+        else {
+
+            # Update section sizes and recalculate layout so all subsequent RVA
+            # lookups (text_rva, got_rva) reflect the current code/data sizes.
+            $self->layout->get('.text')->{size} = length($text);
+            my $data_sec = $self->layout->get('.data');
+            if ($data_sec) {
+                $data_sec->{size} = length($data_bytes);
+            }
+            if ( $has_ffi && !$self->layout->get('.got') ) {
+                $self->layout->add_section( '.got', 512, 3 );
+            }
+            $self->layout->calculate( $self->layout->section_align );
+        }
 
         # Generate import stubs for undefined external functions
         my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;

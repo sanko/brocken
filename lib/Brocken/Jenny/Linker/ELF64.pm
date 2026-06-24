@@ -94,10 +94,17 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         else {
             $code_bytes = $code_data;
         }
+        my $entry_stub_len = $self->type eq 'exe' ? 20 : 0;
         if ( !defined $self->layout ) {
-            my $extra_data     = $platform->is_bsd    ? 32 : ( $platform->is_haiku ? 8 : 0 );
-            my $entry_stub_len = $self->type eq 'exe' ? 20 : 0;
+            my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
             $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform );
+        }
+        else {
+
+            # Update text size and recalculate layout so all subsequent RVA
+            # lookups (e.g. import_rva, got_rva) reflect the current code size.
+            $self->layout->get('.text')->{size} = length($code_bytes) + $entry_stub_len;
+            $self->layout->calculate( $self->layout->section_align );
         }
         my $l          = $self->layout;
         my $is_pie     = $platform->is_haiku && !$shared;
