@@ -362,7 +362,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 if ( $inst->opcode =~ /^(?:load|fload)$/ && $inst->comment =~ /^caller-restore / && $next && $next->opcode =~ /^(?:mov|fmov)$/ ) {
                     my ($load_dst) = $inst->operands->@*;
                     my ( $mov_dst, $mov_src ) = $next->operands->@*;
-                    if ( $load_dst->kind eq 'phys_reg' && $mov_src->kind eq 'phys_reg' && $load_dst->value eq $mov_src->value ) {
+                    if ( $load_dst->kind eq 'phys_reg' && $mov_dst->kind eq 'phys_reg' && $load_dst->value eq $mov_dst->value ) {
                         next;
                     }
                 }

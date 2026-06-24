@@ -43,9 +43,10 @@ SKIP: {
 
     # 2. Isolate with chained fiber transfers
     #    Worker creates two fibers, transfers between them.
-    #    Note: fiber functions must NOT end with ret because
-    #    ctx_swap jumps (not calls) to the fiber entry point,
-    #    so there is no valid return address on the fiber stack.
+    #    fiber_a must have at least 2 yields (or a ret after the last
+    #    yield) because it is resumed a second time; otherwise execution
+    #    falls through the function boundary into the next function's code
+    #    (linkers concatenate functions back-to-back with no padding).
     subtest 'Isolate with chained fiber transfers' => sub {
         my $i32     = Brocken::Lindsay::IR::Type::i32();
         my $i64     = Brocken::Lindsay::IR::Type::i64();
@@ -53,10 +54,13 @@ SKIP: {
         my $ab      = Brocken::Lindsay::IR::Builder->new();
         $ab->position_at_end( $fiber_a->append_block('entry') );
         $ab->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 111 ), '%y1' );
+        $ab->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 111 ), '%y1b' );
+        $ab->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
         my $fiber_b = Brocken::Lindsay::IR::Function->new( name => 'fiber_b', return_type => $i32 );
         my $bb      = Brocken::Lindsay::IR::Builder->new();
         $bb->position_at_end( $fiber_b->append_block('entry') );
         $bb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 222 ), '%y2' );
+        $bb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
         my $worker = Brocken::Lindsay::IR::Function->new( name => 'worker_fn', return_type => $i32 );
         my $wb     = Brocken::Lindsay::IR::Builder->new();
         $wb->position_at_end( $worker->append_block('entry') );
