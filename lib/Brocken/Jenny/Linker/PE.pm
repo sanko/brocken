@@ -143,7 +143,7 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
 
         # Generate import stubs for undefined external functions
         my $entry_size    = $self->type eq 'exe' ? length($entry_stub) : 0;
-        my @known_imports = qw(CreateThread WaitForSingleObject CloseHandle);
+        my @known_imports = qw(CreateThread WaitForSingleObject CloseHandle SetThreadAffinityMask GetExitCodeThread);
         my %import_names;
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };

@@ -296,9 +296,9 @@ class Brocken::Lindsay::IR::Builder {
         return $insert_block->append_inst($inst);
     }
 
-    method build_isolate_join($isolate) {
+    method build_isolate_join( $isolate, $name = undef ) {
         my $inst = Brocken::Lindsay::IR::Instruction::IsolateJoin->new(
-            name     => undef,
+            name     => $name // $self->_next_id(),
             type     => Brocken::Lindsay::IR::Type::i64(),
             opcode   => 'isolate_join',
             operands => [$isolate],

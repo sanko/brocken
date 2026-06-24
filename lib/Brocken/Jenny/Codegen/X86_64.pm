@@ -189,9 +189,10 @@ class Brocken::Jenny::Codegen::X86_64 {
 
     # Build the isolate trampoline MIR function.
     # Called by pthread_create (Unix, rdi=arg) or CreateThread (Windows, rcx=arg)
-    # on a new OS thread. Receives a void* arg pointing to { FCB* fcb, ICB* icb }.
-    # Sets r12 = FCB, stores ICB in FCB.os_thread, then calls FCB.resume_pc via
-    # call_indirect. The callee's return value (rax) is passed through to the joiner.
+    # on a new OS thread. Receives a void* arg pointing to { FCB* fcb, ICB* icb, i64 args[6] }.
+    # Sets r12 = FCB, stores ICB in FCB.os_thread, loads up to 6 args into the
+    # platform calling-convention registers, then calls FCB.resume_pc via
+    # call_indirect. The callee's return value (rax) is passed through.
     method _build_isolate_trampoline_mf() {
         my $i64     = Brocken::Lindsay::IR::Type::i64();
         my $ptr     = Brocken::Lindsay::IR::Type::ptr();
@@ -254,6 +255,29 @@ class Brocken::Jenny::Codegen::X86_64 {
                 comment => 'func = FCB.resume_pc'
             )
         );
+
+        # Load up to 6 args from arg struct (offsets 16-56) into calling-convention registers
+        my @arg_regs = $platform->is_windows ? qw(rcx rdx r8 r9) : qw(rdi rsi rdx rcx r8 r9);
+        for my $ai ( 0 .. $#arg_regs ) {
+            my $a_val = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => "%a$ai", type => $i64 );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'load',
+                    operands => [
+                        $a_val,
+                        Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%arg', disp => 16 + 8 * $ai }, type => $i64 )
+                    ],
+                    comment => "load arg$ai"
+                )
+            );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'mov',
+                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[$ai] ), $a_val ],
+                    comment  => "arg$ai -> $arg_regs[$ai]"
+                )
+            );
+        }
 
         # result = call_indirect func_addr
         my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%ret', type => $i64 );
