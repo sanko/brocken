@@ -993,10 +993,14 @@ class Brocken::Jenny::Codegen::X86_64 {
                     # 7. Load target resume_pc FIRST (before restoring r12)
                     $bytes .= pack( 'C*', 0x4D, 0x8B, 0x54, 0x24, 0x40 );
 
-                    # 8. Restore callee regs from target FCB (rsp last -- overwrites r12 & rsp)
+                    # 8. Restore callee regs from target FCB (rsp last -- r12 not restored,
+                    #    it was set to the target FCB address in step 6 and the FCB
+                    #    self-pointer at FCB[16] equals the same value, so skipping it
+                    #    avoids a redundant load that clobbers the base register mid-loop)
                     my @cregs = qw(rbx rbp r12 r13 r14 r15 rsp);
                     for my $off_idx ( 0 .. $#cregs ) {
                         my $reg  = $cregs[$off_idx];
+                        next if $reg eq 'r12';
                         my $rid  = $reg_id->($reg);
                         my $disp = $off_idx * 8;
                         my $rex  = 0x48 | ( $rid >= 8 ? 4 : 0 ) | ( $cid >= 8 ? 1 : 0 );

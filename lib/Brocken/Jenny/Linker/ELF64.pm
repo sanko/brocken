@@ -340,7 +340,10 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         my @exports   = @{ $self->exported_funcs // [] };
         my $exit_name = $platform->is_haiku ? 'exit' : '_exit';
-        my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', 'pthread_join', $exit_name, 'sched_setaffinity' );
+        my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', 'pthread_join', $exit_name );
+        if ( $platform->is_linux || $platform->is_freebsd || $platform->is_netbsd || $platform->is_dragonflybsd ) {
+            push @imports, 'sched_setaffinity';
+        }
         my $libc      = $libc_map{$os_base} // 'libc.so';
 
         # Probe the exact dynamic libc.so name on the host filesystem when running natively
@@ -525,9 +528,11 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $join_slot    = $base + $self->import_rva('pthread_join');
         my $join_sym_idx = $sym_indices{'pthread_join'};
         $rela_dyn .= pack( 'Q< Q< q<', $join_slot, ( $join_sym_idx << 32 ) | $rel_type, 0 );
-        my $sched_slot    = $base + $self->import_rva('sched_setaffinity');
-        my $sched_sym_idx = $sym_indices{'sched_setaffinity'};
-        $rela_dyn .= pack( 'Q< Q< q<', $sched_slot, ( $sched_sym_idx << 32 ) | $rel_type, 0 );
+        if ( $platform->is_linux || $platform->is_freebsd || $platform->is_netbsd || $platform->is_dragonflybsd ) {
+            my $sched_slot    = $base + $self->import_rva('sched_setaffinity');
+            my $sched_sym_idx = $sym_indices{'sched_setaffinity'};
+            $rela_dyn .= pack( 'Q< Q< q<', $sched_slot, ( $sched_sym_idx << 32 ) | $rel_type, 0 );
+        }
         $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
   # GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join, [8]=sched_setaffinity
