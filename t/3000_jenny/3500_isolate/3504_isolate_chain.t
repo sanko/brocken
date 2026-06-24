@@ -3,53 +3,14 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $host = Brocken::Katsuro::Platform::parse();
 SKIP: {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
     skip 'Isolate chain test only on native hosts', 1 unless $host->is_native;
-    my ( $codegen, $linker, $ext );
-    if ( $host->is_arm64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_arm64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_arm64 ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_riscv64 ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_x64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_x64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_x64 ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    else {
-        skip 'Unsupported architecture', 1;
-    }
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 
@@ -72,9 +33,9 @@ SKIP: {
         my $outer_iso = $mb->build_isolate_create( $outer, [], '%o' );
         $mb->build_isolate_join($outer_iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $outer, $inner ] );
-        my $file  = 'isolate_chain_2' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $outer, $inner ] );
+        my $file  = 'isolate_chain_2' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate spawns isolate exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
@@ -104,9 +65,9 @@ SKIP: {
         my $main_iso = $mb->build_isolate_create( $outer, [], '%m' );
         $mb->build_isolate_join($main_iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $outer, $middle, $inner ] );
-        my $file  = 'isolate_chain_3' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $outer, $middle, $inner ] );
+        my $file  = 'isolate_chain_3' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate chain depth 3 exit 99', platform => $host, keep => 1, gdb => $dbg );
     };

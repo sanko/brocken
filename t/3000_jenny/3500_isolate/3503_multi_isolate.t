@@ -3,53 +3,14 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $host = Brocken::Katsuro::Platform::parse();
 SKIP: {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
     skip 'Multi-isolate test only on native hosts', 1 unless $host->is_native;
-    my ( $codegen, $linker, $ext );
-    if ( $host->is_arm64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_arm64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_arm64 ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_riscv64 ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_x64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_x64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_x64 ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    else {
-        skip 'Unsupported architecture', 1;
-    }
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 
@@ -70,9 +31,9 @@ SKIP: {
         $mb->build_isolate_join($i2);
         $mb->build_isolate_join($i3);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $worker ] );
-        my $file  = 'three_isolates' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
+        my $file  = 'three_isolates' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'three concurrent isolates exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
@@ -103,9 +64,9 @@ SKIP: {
         $mb->build_isolate_join($i3);
         $mb->build_isolate_join($i4);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $worker, $inner ] );
-        my $file  = 'four_isolate_fibers' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker, $inner ] );
+        my $file  = 'four_isolate_fibers' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'four isolates with fiber yield exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
@@ -138,9 +99,9 @@ SKIP: {
             $mb->build_isolate_join($h);
         }
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $worker, $inner ] );
-        my $file  = 'eight_isolate_fibers' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker, $inner ] );
+        my $file  = 'eight_isolate_fibers' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'eight isolates with fiber chaining exit 99', platform => $host, keep => 1, gdb => $dbg );
     };

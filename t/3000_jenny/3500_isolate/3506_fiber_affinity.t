@@ -3,65 +3,14 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $host = Brocken::Katsuro::Platform::parse();
 SKIP: {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
     skip 'Fiber affinity test only on native hosts', 1 unless $host->is_native;
-    my ( $codegen, $linker, $ext );
-    if ( $host->is_arm64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_arm64 && $host->is_linux ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_arm64 && ( $host->is_freebsd || $host->is_netbsd || $host->is_dragonflybsd ) ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_arm64 ) {
-        skip 'FiberPin not supported on this ARM64 platform', 1;
-    }
-    elsif ( $host->is_riscv64 && $host->is_linux ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_riscv64 && ( $host->is_freebsd || $host->is_netbsd || $host->is_dragonflybsd ) ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_riscv64 ) {
-        skip 'FiberPin not supported on this RISCV64 platform', 1;
-    }
-    elsif ( $host->is_x64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_x64 && $host->is_macos ) {
-        skip 'FiberPin not supported on macOS', 1;
-    }
-    elsif ( $host->is_x64 && $host->is_openbsd ) {
-        skip 'FiberPin not supported on OpenBSD', 1;
-    }
-    elsif ( $host->is_x64 ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    else {
-        skip 'Unsupported architecture for FiberPin', 1;
-    }
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 
@@ -79,9 +28,9 @@ SKIP: {
         $mb->build_fiber_pin( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 1 ) );
         $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 1 ), '%r1' );
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $inner ] );
-        my $file  = 'fiber_pin_cpu0' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $inner ] );
+        my $file  = 'fiber_pin_cpu0' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'fiber pin CPU 0 exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
@@ -101,9 +50,9 @@ SKIP: {
         $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 1 ), '%r1' );
         $mb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 2 ), '%r2' );
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $inner ] );
-        my $file  = 'fiber_pin_chained' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $inner ] );
+        my $file  = 'fiber_pin_chained' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'fiber pin chained exit 99', platform => $host, keep => 1, gdb => $dbg );
     };

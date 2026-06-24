@@ -2,53 +2,14 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../../../lib';
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $platform = Brocken::Katsuro::Platform::parse();
 SKIP: {
+    my $brocken = Brocken->new();
+    my $platform = $brocken->platform;
     skip 'Isolate runtime test only on native hosts', 1 unless $platform->is_native;
-    my ( $codegen, $linker, $ext );
-    if ( $platform->is_arm64 && $platform->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $platform->is_arm64 && $platform->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $platform->is_arm64 ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $platform->is_riscv64 ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $platform->is_x64 && $platform->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $platform->is_x64 && $platform->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $platform->is_x64 ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    else {
-        skip 'Unsupported architecture for isolate runtime test', 1;
-    }
     subtest 'isolate_create and isolate_join basic lifecycle' => sub {
         my $i32 = Brocken::Lindsay::IR::Type::i32();
         my $i64 = Brocken::Lindsay::IR::Type::i64();
@@ -68,12 +29,12 @@ SKIP: {
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
 
         # Compile with isolate trampoline support
-        my $funcs           = $codegen->emit_functions( [ $main, $worker ] );
+        my $funcs           = $brocken->codegen->emit_functions( [ $main, $worker ] );
         my $expect_fn_count = $platform->is_windows ? 4 : 3;
         ok( scalar @$funcs == $expect_fn_count, "emit_functions produced $expect_fn_count functions" ) or
             diag( join( ', ', map { $_->{name} // '?' } $funcs->@* ) );
-        my $output_file = 'isolate_test' . $ext;
-        $linker->write_executable( $output_file, $funcs, $platform );
+        my $output_file = 'isolate_test' . $brocken->ext;
+        $brocken->linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'Isolate test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
         my $cmd = $platform->is_windows ? $output_file : "./$output_file";
         system {$cmd} $cmd;

@@ -3,28 +3,15 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $host = Brocken::Katsuro::Platform::parse();
 SKIP: {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+    skip 'Isolate args test only on X86_64', 1 unless $host->is_x64;
     skip 'Isolate args test only on native hosts', 1 unless $host->is_native;
-    my ( $codegen, $linker, $ext );
-    if ( $host->is_x64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_x64 ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    else {
-        skip 'Isolate args test only on X86_64', 1;
-    }
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 
@@ -45,9 +32,9 @@ SKIP: {
         my $iso = $mb->build_isolate_create( $worker, [ Brocken::Lindsay::IR::Constant->new( type => $i64, value => 99 ) ], '%iso' );
         $mb->build_isolate_join($iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $worker ] );
-        my $file  = 'isolate_one_arg' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
+        my $file  = 'isolate_one_arg' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate with one arg exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
@@ -80,9 +67,9 @@ SKIP: {
         );
         $mb->build_isolate_join($iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $worker ] );
-        my $file  = 'isolate_multi_args' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
+        my $file  = 'isolate_multi_args' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate with 3 args exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
@@ -99,9 +86,9 @@ SKIP: {
         my $iso = $mb->build_isolate_create( $worker, [], '%iso' );
         $mb->build_isolate_join($iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
-        my $funcs = $codegen->emit_functions( [ $main, $worker ] );
-        my $file  = 'isolate_no_args_backward' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
+        my $file  = 'isolate_no_args_backward' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate with no args exit 99', platform => $host, keep => 1, gdb => $dbg );
     };

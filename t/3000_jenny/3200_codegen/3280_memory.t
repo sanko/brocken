@@ -3,12 +3,12 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $host = Brocken::Katsuro::Platform::parse();
+my $brocken = Brocken->new();
+my $host    = $brocken->platform;
 
 sub build_alloc_func {
     my $cursor_ptr = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%cursor_ptr' );
@@ -117,43 +117,13 @@ subtest 'Jenny::Codegen Memory System' => sub {
     );
     my $result = $b->build_load( Brocken::Lindsay::IR::Type::i64(), $payload_ptr, '%result' );
     $b->build_ret($result);
-    my ( $codegen, $linker );
-
-    if ( $host->is_arm64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-    }
-    elsif ( $host->is_arm64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-    }
-    elsif ( $host->is_arm64 ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-    }
-    elsif ( $host->is_riscv64 ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-    }
-    elsif ( $host->is_x64 && $host->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-    }
-    elsif ( $host->is_x64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-    }
-    else {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-    }
-    my $funcs = $codegen->emit_functions( [ $main, $alloc, $box, $inc, $dec ] );
+    my $funcs = $brocken->codegen->emit_functions( [ $main, $alloc, $box, $inc, $dec ] );
     is( ref $funcs,        'ARRAY', 'emit_functions returned array ref' );
     is( scalar $funcs->@*, 5,       'emit_functions returned 5 entries' );
 SKIP: {
         skip 'Execution test only on native hosts', 2 unless $host->is_native;
-        my $output_file = 'memory_test' . $host->bin_ext;
-        $linker->write_executable( $output_file, $funcs, $host );
+        my $output_file = 'memory_test' . $brocken->ext;
+        $brocken->linker->write_executable( $output_file, $funcs, $host );
         ok( -e $output_file, 'Memory system binary exists' );
         run_exec(
             $output_file,

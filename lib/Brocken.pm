@@ -1,52 +1,69 @@
 package Brocken v0.0.1 {
-    use v5.40;
+    use v5.42;
+    use feature qw[class];
+    no warnings qw[experimental::class];
     use Brocken::Katsuro;
     use Brocken::Lindsay;
     use Brocken::Jenny;
+    use Brocken::Jenny::Codegen::X86_64;
+    use Brocken::Jenny::Codegen::ARM64;
+    use Brocken::Jenny::Codegen::RISCV64;
+    use Brocken::Jenny::Linker::MachO;
+    use Brocken::Jenny::Linker::PE;
+    use Brocken::Jenny::Linker::ELF64;
 
-    sub new_compiler( $platform_triple = undef ) {
-        my $platform = Brocken::Katsuro::Platform->parse($platform_triple);
-        return Brocken::Jenny->new( platform => $platform );
+    class Brocken {
+        field $platform :param = undef;
+        field $codegen;
+        field $linker;
+        field $ext;
+
+        ADJUST {
+            $platform //= Brocken::Katsuro::Platform::parse();
+            if ( $platform->is_arm64 && $platform->is_macos ) {
+                $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
+                $linker  = Brocken::Jenny::Linker::MachO->new();
+                $ext     = '';
+            }
+            elsif ( $platform->is_arm64 && $platform->is_windows ) {
+                $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
+                $linker  = Brocken::Jenny::Linker::PE->new();
+                $ext     = '.exe';
+            }
+            elsif ( $platform->is_arm64 ) {
+                $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
+                $linker  = Brocken::Jenny::Linker::ELF64->new();
+                $ext     = '';
+            }
+            elsif ( $platform->is_riscv64 ) {
+                $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
+                $linker  = Brocken::Jenny::Linker::ELF64->new();
+                $ext     = '';
+            }
+            elsif ( $platform->is_x64 && $platform->is_macos ) {
+                $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+                $linker  = Brocken::Jenny::Linker::MachO->new();
+                $ext     = '';
+            }
+            elsif ( $platform->is_x64 && $platform->is_windows ) {
+                $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+                $linker  = Brocken::Jenny::Linker::PE->new();
+                $ext     = '.exe';
+            }
+            elsif ( $platform->is_x64 ) {
+                $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+                $linker  = Brocken::Jenny::Linker::ELF64->new();
+                $ext     = '';
+            }
+            else {
+                die "Unsupported platform for Brocken: " . $platform->friendly;
+            }
+        }
+
+        method platform() { return $platform }
+        method codegen()  { return $codegen }
+        method linker()   { return $linker }
+        method ext()      { return $ext }
     }
 };
 1;
-__END__
-=encoding utf-8
-
-=head1 NAME
-
-Brocken - Compiler?
-
-=head1 SYNOPSIS
-
-    use Brocken;
-    ...;
-
-=head1 DESCRIPTION
-
-Compiler?
-
-=head1 See Also
-
-TODO
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-See the F<LICENSE> file for full text.
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=begin stopwords
-
-
-=end stopwords
-
-=cut

@@ -2,53 +2,14 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../../../lib';
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $platform = Brocken::Katsuro::Platform::parse();
 SKIP: {
+    my $brocken  = Brocken->new();
+    my $platform = $brocken->platform;
     skip 'Fiber runtime test only on native hosts', 1 unless $platform->is_native;
-    my ( $codegen, $linker, $ext );
-    if ( $platform->is_arm64 && $platform->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $platform->is_arm64 && $platform->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $platform->is_arm64 ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $platform->is_riscv64 ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $platform->is_x64 && $platform->is_macos ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::MachO->new();
-        $ext     = '';
-    }
-    elsif ( $platform->is_x64 && $platform->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $platform->is_x64 ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    else {
-        skip 'Unsupported architecture for fiber runtime test', 1;
-    }
     subtest 'fiber yield passes value to main exit code' => sub {
         my $i32 = Brocken::Lindsay::IR::Type::i32();
         my $i64 = Brocken::Lindsay::IR::Type::i64();
@@ -71,10 +32,10 @@ SKIP: {
         $mb->build_ret($recv);
 
         # Compile with fiber init wrapper support
-        my $funcs = $codegen->emit_functions( [ $main, $worker ] );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
         ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or diag( explain($funcs) );
-        my $output_file = 'fiber_test' . $ext;
-        $linker->write_executable( $output_file, $funcs, $platform );
+        my $output_file = 'fiber_test' . $brocken->ext;
+        $brocken->linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'Fiber test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
         my $cmd = $platform->is_windows ? $output_file : "./$output_file";
         system {$cmd} $cmd;

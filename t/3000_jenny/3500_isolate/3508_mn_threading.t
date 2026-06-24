@@ -3,55 +3,14 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec];
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $host = Brocken::Katsuro::Platform::parse();
 SKIP: {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
     skip 'M:N threading test only on native hosts', 1 unless $host->is_native;
-    my ( $codegen, $linker, $ext );
-    if ( $host->is_x64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_x64 && $host->is_macos ) {
-        skip 'M:N threading not supported on macOS', 1;
-    }
-    elsif ( $host->is_x64 && $host->is_bsd ) {
-        skip 'M:N threading not supported on BSD', 1;
-    }
-    elsif ( $host->is_x64 ) {
-        $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_arm64 && $host->is_windows ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::PE->new();
-        $ext     = '.exe';
-    }
-    elsif ( $host->is_arm64 && $host->is_linux ) {
-        $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_arm64 ) {
-        skip 'M:N threading not on ARM64', 1;
-    }
-    elsif ( $host->is_riscv64 && $host->is_linux ) {
-        $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $host );
-        $linker  = Brocken::Jenny::Linker::ELF64->new();
-        $ext     = '';
-    }
-    elsif ( $host->is_riscv64 ) {
-        skip 'M:N threading not on RISCV64', 1;
-    }
-    else {
-        skip 'Unsupported architecture', 1;
-    }
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
     subtest 'Two workers each with a fiber' => sub {
@@ -82,9 +41,9 @@ SKIP: {
         my $r2   = $mb->build_isolate_join( $iso2, '%r2' );
         my $sum  = $mb->build_add( $r1, $r2, '%sum' );
         $mb->build_ret($sum);
-        my $funcs = $codegen->emit_functions( [ $main, $worker1, $worker2, $fiber_fn ] );
-        my $file  = 'mn_two_workers' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker1, $worker2, $fiber_fn ] );
+        my $file  = 'mn_two_workers' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 121, name => 'two workers sum 121', platform => $host, keep => 1, gdb => $dbg );
     };
@@ -114,9 +73,9 @@ SKIP: {
         my $t1 = $mb->build_add( $r1, $r2, '%t1' );
         my $t2 = $mb->build_add( $t1, $r3, '%t2' );
         $mb->build_ret($t2);
-        my $funcs = $codegen->emit_functions( [ $main, $worker_fn, $fiber_fn ] );
-        my $file  = 'mn_three_workers' . $ext;
-        $linker->write_executable( $file, $funcs, $host );
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker_fn, $fiber_fn ] );
+        my $file  = 'mn_three_workers' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 240, name => 'three workers sum 240', platform => $host, keep => 1, gdb => $dbg );
     };
