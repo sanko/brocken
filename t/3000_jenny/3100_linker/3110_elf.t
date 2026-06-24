@@ -2,25 +2,22 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
 # ELF executable
 {
-    my $platform  = Brocken::Katsuro::Platform::parse();
+    my $brocken  = Brocken->new();
+    my $platform = $brocken->platform;
     my $module    = Brocken::Lindsay::IR::Module->new( name => 'standalone_elf' );
     my $func_main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
     $module->add_function($func_main);
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func_main->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen       = $brocken->codegen;
     my $machine_bytes = $codegen->emit_function($func_main);
     my $output_file   = './test_prog';
     my $linker        = Brocken::Jenny::Linker::ELF64->new();
@@ -38,17 +35,15 @@ SKIP: {
 
 # ELF shared library
 {
-    my $platform = Brocken::Katsuro::Platform::parse();
+    my $brocken  = Brocken->new();
+    my $platform = $brocken->platform;
     my $module   = Brocken::Lindsay::IR::Module->new( name => 'shared_elf' );
     my $func_ext = Brocken::Lindsay::IR::Function->new( name => 'my_func', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
     $module->add_function($func_ext);
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func_ext->append_block('entry') );
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
-    my $codegen
-        = $platform->is_arm64 ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-        $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-        Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+    my $codegen       = $brocken->codegen;
     my $machine_bytes = $codegen->emit_function($func_ext);
     my $output_file   = './libtest_prog.so';
     my $linker        = Brocken::Jenny::Linker::ELF64->new( type => 'shared' );

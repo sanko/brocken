@@ -2,14 +2,14 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 use Brocken::Jenny::Codegen::ARM64::Inst;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 use Config;
-my $platform   = Brocken::Katsuro::Platform::parse();
+my $brocken    = Brocken->new();
+my $platform   = $brocken->platform;
 my $is_arm64   = $platform->is_arm64;
 my $is_riscv64 = $platform->is_riscv64;
 my $is_x64     = $platform->is_x64;
@@ -23,10 +23,7 @@ $module->add_function($func_ext);
 my $builder = Brocken::Lindsay::IR::Builder->new();
 $builder->position_at_end( $func_ext->append_block('entry') );
 $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
-my $codegen
-    = $is_arm64           ? Brocken::Jenny::Codegen::ARM64->new( platform => $platform ) :
-    $platform->is_riscv64 ? Brocken::Jenny::Codegen::RISCV64->new( platform => $platform ) :
-    Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
+my $codegen = $brocken->codegen;
 my $machine_bytes = $codegen->emit_function($func_ext);
 my $ext           = $platform->lib_ext;
 my $lib_file      = './libtest_prog' . $ext;

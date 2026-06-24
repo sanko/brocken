@@ -2,12 +2,12 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../../lib', '../../lib', '../lib';
-use Brocken::Katsuro;
+use Brocken;
 use Brocken::Lindsay;
-use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-my $platform = Brocken::Katsuro::Platform::parse();
+my $brocken  = Brocken->new();
+my $platform = $brocken->platform;
 SKIP: {
     skip 'Only for RISC-V', 2 unless $platform->is_riscv64 && $platform->is_native;
     my $func    = Brocken::Lindsay::IR::Function->new( name => 'icmp_only', return_type => Brocken::Lindsay::IR::Type::i32() );
@@ -20,10 +20,10 @@ SKIP: {
         Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ), '%cmp'
     );
     $builder->build_ret($cond);
-    my $codegen     = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
+    my $codegen     = $brocken->codegen;
     my $bytes       = $codegen->emit_function($func);
-    my $linker      = Brocken::Jenny::Linker::ELF64->new();
-    my $output_file = 'icmp_only_test' . $platform->bin_ext;
+    my $linker      = $brocken->linker;
+    my $output_file = 'icmp_only_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
     my $cmd = "./$output_file";
     system {$cmd} $cmd;
@@ -44,10 +44,10 @@ SKIP: {
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
     $builder->position_at_end($f_block);
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
-    my $codegen     = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
+    my $codegen     = $brocken->codegen;
     my $bytes       = $codegen->emit_function($func);
-    my $linker      = Brocken::Jenny::Linker::ELF64->new();
-    my $output_file = 'jmp_only_test' . $platform->bin_ext;
+    my $linker      = $brocken->linker;
+    my $output_file = 'jmp_only_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
     my $cmd = "./$output_file";
     system {$cmd} $cmd;
@@ -68,10 +68,10 @@ SKIP: {
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
     $builder->position_at_end($f_block);
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) );
-    my $codegen     = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
+    my $codegen     = $brocken->codegen;
     my $bytes       = $codegen->emit_function($func);
-    my $linker      = Brocken::Jenny::Linker::ELF64->new();
-    my $output_file = 'condbr_const_test' . $platform->bin_ext;
+    my $linker      = $brocken->linker;
+    my $output_file = 'condbr_const_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
     my $cmd = "./$output_file";
     system {$cmd} $cmd;

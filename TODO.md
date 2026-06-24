@@ -13,9 +13,10 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 
 ### macOS Intel CI Failures
 - [x] **3505_isolate_args.t**; was generating ELF binaries on macOS (exit 126). Fixed by Brocken ADJUST (uses MachO linker on macOS).
-- [ ] **3502_isolate_fiber_interop.t**; SIGSEGV (`$?=11`) on macOS Intel. Binary is valid Mach-O but runtime crashes in fiber ops inside isolates.
-- [ ] **3503_multi_isolate.t**; Same SIGSEGV (`$?=11`) on macOS Intel. Fiber+isolate tests crash.
-- [ ] Root-cause the fiber ctx_swap / isolate trampoline interaction on x86_64 Mach-O.
+- [x] **3502_isolate_fiber_interop.t**; SIGSEGV (`$?=11`) on macOS Intel. Root cause: fiber functions without a terminal `ret` fell through across function boundaries on resume. Fixed by adding second yield + ret to `fiber_a` in `202c0bd`.
+- [x] **3503_multi_isolate.t**; Same SIGSEGV (`$?=11`). Same root cause as 3502.
+- [x] Root-cause the fiber ctx_swap / isolate trampoline interaction on x86_64 Mach-O. — `r12` was being clobbered in the ctx_swap restore loop; skipped restore since r12 already holds target FCB (step 6 of x86_64 ctx_swap). Fixed in `202c0bd`.
+- [ ] **Other macOS failures**; check remaining isolate/fiber tests on macOS Intel after the above fixes.
 
 ### Isolate Return Values
 - [x] `isolate_join` IR + lowering on all 4 native targets
