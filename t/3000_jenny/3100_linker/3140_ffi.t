@@ -23,7 +23,7 @@ $module->add_function($func_ext);
 my $builder = Brocken::Lindsay::IR::Builder->new();
 $builder->position_at_end( $func_ext->append_block('entry') );
 $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
-my $codegen = $brocken->codegen;
+my $codegen       = $brocken->codegen;
 my $machine_bytes = $codegen->emit_function($func_ext);
 my $ext           = $platform->lib_ext;
 my $lib_file      = './libtest_prog' . $ext;

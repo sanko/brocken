@@ -49,8 +49,8 @@ SKIP: {
         $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
         $builder->position_at_end($f_block);
         $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 0 ) );
-        my $codegen    = $brocken->codegen;
-        my $bytes       = $codegen->emit_function($func);
+        my $codegen = $brocken->codegen;
+        my $bytes   = $codegen->emit_function($func);
         ok( length($bytes) > 0, "Generated native i128 icmp $desc bytes for " . $platform->friendly );
         my $linker      = $brocken->linker;
         my $output_file = "i128_icmp_${pred}_native" . $brocken->ext;

@@ -13,11 +13,10 @@ package Brocken v0.0.1 {
     use Brocken::Jenny::Linker::ELF64;
 
     class Brocken {
-        field $platform :param = undef;
+        field $platform : param = undef;
         field $codegen;
         field $linker;
         field $ext;
-
         ADJUST {
             $platform //= Brocken::Katsuro::Platform::parse();
             if ( $platform->is_arm64 && $platform->is_macos ) {
@@ -59,7 +58,6 @@ package Brocken v0.0.1 {
                 die "Unsupported platform for Brocken: " . $platform->friendly;
             }
         }
-
         method platform() { return $platform }
         method codegen()  { return $codegen }
         method linker()   { return $linker }

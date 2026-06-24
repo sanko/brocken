@@ -13,9 +13,9 @@ use feature qw[class];
 subtest 'Jenny::Codegen Multi-Function Calls' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $b      = Brocken::Lindsay::IR::Builder->new();
-    my $p      = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => 'x' );
-    my $helper = Brocken::Lindsay::IR::Function->new( name => 'helper', return_type => Brocken::Lindsay::IR::Type::i32(), params => [$p] );
+    my $b       = Brocken::Lindsay::IR::Builder->new();
+    my $p       = Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i32(), name => 'x' );
+    my $helper  = Brocken::Lindsay::IR::Function->new( name => 'helper', return_type => Brocken::Lindsay::IR::Type::i32(), params => [$p] );
     $b->position_at_end( $helper->append_block('entry') );
     $b->build_ret( $b->build_add( $p, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 1 ) ) );
     my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
@@ -120,15 +120,16 @@ SKIP: {
         my $func_b = Brocken::Lindsay::IR::Function->new( name => 'func_b', return_type => Brocken::Lindsay::IR::Type::i32(), params => [] );
         $b->position_at_end( $func_b->append_block('entry') );
         $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 100 ) );
-        my $linker = (ref $brocken->linker)->new(type => 'shared');
+        my $linker = ( ref $brocken->linker )->new( type => 'shared' );
         my $output_file;
-        if ( $host->is_macos )       { $output_file = 'multi_func_shared.dylib' }
-        elsif ( $host->is_windows )  { $output_file = 'multi_func_shared.dll' }
-        else                         { $output_file = 'multi_func_shared.so' }
+        if    ( $host->is_macos )   { $output_file = 'multi_func_shared.dylib' }
+        elsif ( $host->is_windows ) { $output_file = 'multi_func_shared.dll' }
+        else                        { $output_file = 'multi_func_shared.so' }
         my $funcs = $brocken->codegen->emit_functions( [ $func_a, $func_b ] );
         is( ref $funcs,        'ARRAY', 'emit_functions returned array ref' );
         is( scalar $funcs->@*, 2,       'emit_functions returned 2 entries' );
         $linker->set_exported_funcs( [ 'func_a', 'func_b' ] );
+
         if ( $linker->isa('Brocken::Jenny::Linker::PE') ) {
             $linker->write_shared_library( $output_file, $funcs, $host );
         }
