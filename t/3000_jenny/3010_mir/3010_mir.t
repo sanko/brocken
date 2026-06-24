@@ -1,7 +1,7 @@
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
-use lib 'lib', '../../lib', '../lib';
+use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
