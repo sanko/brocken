@@ -21,6 +21,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         EOR_W          => 0x4A000000,
         MUL_W          => 0x1B007C00,
         ADD_X          => 0x8B000000,
+        ADD_X_EXT      => 0x8B200000,
+        UXTX_OPT       => 0b011,
         SUB_X          => 0xCB000000,
         ADCS_X         => 0x9A000000,
         SBCS_X         => 0xDA000000,
@@ -666,7 +668,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                                 $emitted = 1;
                             }
                         }
-                        $bytes .= pack( 'V', ADD_X | ( 31 << 5 ) | ( $did << 16 ) | $did );
+                        $bytes .= pack( 'V', ADD_X_EXT | ( $did << 16 ) | ( UXTX_OPT << 13 ) | ( 31 << 5 ) | $did );
                     }
                     $alloca_frame += $size;
                     $alloca_frame = ( $alloca_frame + 15 ) & ~15;
