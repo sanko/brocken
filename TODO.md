@@ -68,9 +68,9 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] **i128 call arguments**  split into lo/hi across two consecutive param registers in all 4 lowerers.
 - [x] **i128 entry block parameters**  split into _lo/_hi virt_regs at the entry block, consuming two param regs.
 - [x] **i128 call return capture (ARM64, RISCV64, Wasm)**  caller now reconstructs _lo/_hi from both return registers (x0/x1, a0/a1, Wasm stack) — was only done on X86_64.
-- [ ] **Signed i128 div/rem**  all targets use unsigned algorithm; no sign-extension or absolute-value handling.
+- [x] **Signed i128 div/rem**  all targets use abs(inputs) + apply sign to output.
 - [x] **i128 `min`/`max`**  implemented on all 4 targets (X86_64, ARM64, RISCV64, Wasm).
-- [~] **Large-value i128 tests**  added negative-value icmp tests (hi=-1) covering all 10 predicates; still need positive values > 2^64.
+- [x] **Large-value i128 icmp tests**  added native (246 tests) and Wasm (328 tests) execution tests with Math::BigInt constants > 2^64.
 - [ ] **Endianness**  no handling for big-endian targets.
 
 ### OS-level Threads (Isolates)
