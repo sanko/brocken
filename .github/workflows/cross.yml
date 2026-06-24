@@ -48,10 +48,11 @@ jobs:
           sudo chown -R $(id -un) . 2>/dev/null || true
         shell: 'cpa.sh {0}'
       - continue-on-error: true
+        if: always()
         name: Upload results as artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          if-no-files-found: error
+          if-no-files-found: warn
           name: 'test-output-${{ inputs.os }}-${{ inputs.version }}-perl${{ inputs.perl }}.${{inputs.perl_subversion}}-${{ inputs.arch }}'
           path: 'test-output-${{ inputs.os }}-${{ inputs.version }}-perl${{ inputs.perl }}.${{inputs.perl_subversion}}-${{ inputs.arch }}.txt'
 name: bsd module
