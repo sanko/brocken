@@ -1607,7 +1607,36 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 my $mask = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_mask', type => Brocken::Lindsay::IR::Type::i64() );
                                 my $zero = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 );
                                 my $one = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => -1, type => Brocken::Lindsay::IR::Type::i64() );
-
+                                if ( $hi_rhs->kind eq 'imm' ) {
+                                    my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_rh',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $r, $hi_rhs ],
+                                            comment  => 'i128 minmax rhs hi'
+                                        )
+                                    );
+                                    $hi_rhs = $r;
+                                }
+                                if ( $lo_rhs->kind eq 'imm' ) {
+                                    my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_rl',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $r, $lo_rhs ],
+                                            comment  => 'i128 minmax rhs lo'
+                                        )
+                                    );
+                                    $lo_rhs = $r;
+                                }
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $t0, $hi_lhs ], comment => 'i128 minmax hi' ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cmp', operands => [ $t0, $hi_rhs ], comment => 'i128 minmax hi cmp' ) );
                                 $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $t0, $zero ], comment => 'i128 minmax zero' ) );
@@ -2225,6 +2254,36 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         }
                         elsif ( $pred eq 'ult' || $pred eq 'slt' ) {
                             my $cset_hi = $pred eq 'ult' ? 'cset_cc' : 'cset_lt';
+                            if ( $hi_rhs->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_rh',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $r, $hi_rhs ],
+                                        comment  => 'i128 icmp rhs hi'
+                                    )
+                                );
+                                $hi_rhs = $r;
+                            }
+                            if ( $lo_rhs->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_rl',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $r, $lo_rhs ],
+                                        comment  => 'i128 icmp rhs lo'
+                                    )
+                                );
+                                $lo_rhs = $r;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -2290,6 +2349,36 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         }
                         elsif ( $pred eq 'ugt' || $pred eq 'sgt' ) {
                             my $cset_hi = $pred eq 'ugt' ? 'cset_cc' : 'cset_lt';
+                            if ( $hi_lhs->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_lh',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $r, $hi_lhs ],
+                                        comment  => 'i128 icmp lhs hi'
+                                    )
+                                );
+                                $hi_lhs = $r;
+                            }
+                            if ( $lo_lhs->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_ll',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $r, $lo_lhs ],
+                                        comment  => 'i128 icmp lhs lo'
+                                    )
+                                );
+                                $lo_lhs = $r;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -2361,6 +2450,36 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 ( 'cset_lt', 0 );
                             my ( $hi_a, $hi_b, $lo_a, $lo_b )
                                 = $swap ? ( $hi_rhs, $hi_lhs, $lo_rhs, $lo_lhs ) : ( $hi_lhs, $hi_rhs, $lo_lhs, $lo_rhs );
+                            if ( $hi_b->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_bh',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $r, $hi_b ],
+                                        comment  => 'i128 icmp hi rhs'
+                                    )
+                                );
+                                $hi_b = $r;
+                            }
+                            if ( $lo_b->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_bl',
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $r, $lo_b ],
+                                        comment  => 'i128 icmp lo rhs'
+                                    )
+                                );
+                                $lo_b = $r;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
