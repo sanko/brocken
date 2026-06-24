@@ -141,7 +141,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      gcc_pkg: sudo pkg install developer/gcc49 || sudo pkg install gcc || true
+      gcc_pkg: sudo pkg install developer/gcc --accept || sudo pkg install developer/gcc11 --accept || sudo pkg install gcc --accept || sudo pkg install developer/gcc49 --accept || true
       host: ubuntu-latest
       os: omnios
       perl: 5.42
