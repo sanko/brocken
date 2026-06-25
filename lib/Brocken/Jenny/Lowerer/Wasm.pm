@@ -2325,10 +2325,30 @@ class Brocken::Jenny::Lowerer::Wasm {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberPin') ) {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateCreate') ) {
-                    die "isolate_create not yet implemented on Wasm";
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i64_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                            comment  => 'isolate_create stub (threading TBD)'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
+                            comment => 'isolate_create result' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateJoin') ) {
-                    die "isolate_join not yet implemented on Wasm";
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i64_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                            comment  => 'isolate_join stub (threading TBD)'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
+                            comment => 'isolate_join result' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                     if ( $inst->type->kind ne 'void' ) {
