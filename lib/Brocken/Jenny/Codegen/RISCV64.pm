@@ -496,13 +496,10 @@ class Brocken::Jenny::Codegen::RISCV64 {
                                 $tmp >>= 11;
                             }
                             my $first = pop @chunks;
-                            $bytes .= pack( 'V',
-                                ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                             for my $chunk ( reverse @chunks ) {
-                                $bytes .= pack( 'V',
-                                    ( 11 << 20 ) | ( $did << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
-                                $bytes .= pack( 'V',
-                                    ( ( $chunk & 0xFFF ) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                                $bytes .= pack( 'V', ( 11 << 20 ) | ( $did << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                                $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                             }
                         }
                     }

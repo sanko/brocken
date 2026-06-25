@@ -2208,6 +2208,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                     comment  => 'i128 icmp seqz'
                                 )
                             );
+
                             if ( $pred eq 'ne' ) {
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
