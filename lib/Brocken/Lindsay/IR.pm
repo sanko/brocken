@@ -195,6 +195,55 @@ class Brocken::Lindsay::IR::Instruction::FiberPin : isa(Brocken::Lindsay::IR::In
     }
 }
 
+class Brocken::Lindsay::IR::Instruction::ChanCreate : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $capacity = $self->operands->[0];
+        return sprintf '  %s = chan_create %s %s', ( $self->name // '%<anon>' ), $capacity->type->as_string, $capacity->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::ChanSend : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my ( $chan, $val ) = $self->operands->@*;
+        return sprintf '  chan_send %s %s, %s %s', $chan->type->as_string, $chan->as_string, $val->type->as_string, $val->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::ChanRecv : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $chan = $self->operands->[0];
+        return sprintf '  %s = chan_recv %s %s', ( $self->name // '%<anon>' ), $chan->type->as_string, $chan->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::ChanClose : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $chan = $self->operands->[0];
+        return sprintf '  chan_close %s %s', $chan->type->as_string, $chan->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::ChanTrySend : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my ( $chan, $val ) = $self->operands->@*;
+        return sprintf '  %s = chan_try_send %s %s, %s %s', ( $self->name // '%<anon>' ),
+            $chan->type->as_string, $chan->as_string, $val->type->as_string, $val->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::ChanTryRecv : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $chan = $self->operands->[0];
+        return sprintf '  %s = chan_try_recv %s %s', ( $self->name // '%<anon>' ), $chan->type->as_string, $chan->as_string;
+    }
+}
+
 class Brocken::Lindsay::IR::Instruction::FrameAddr : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
