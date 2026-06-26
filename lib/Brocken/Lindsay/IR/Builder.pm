@@ -306,6 +306,72 @@ class Brocken::Lindsay::IR::Builder {
         );
         return $insert_block->append_inst($inst);
     }
+
+    method build_chan_create( $capacity, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::ChanCreate->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::ptr(),
+            opcode   => 'chan_create',
+            operands => [$capacity],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_chan_send( $chan, $val ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::ChanSend->new(
+            name     => undef,
+            type     => Brocken::Lindsay::IR::Type::void(),
+            opcode   => 'chan_send',
+            operands => [ $chan, $val ],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_chan_recv( $chan, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::ChanRecv->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::i64(),
+            opcode   => 'chan_recv',
+            operands => [$chan],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_chan_close($chan) {
+        my $inst = Brocken::Lindsay::IR::Instruction::ChanClose->new(
+            name     => undef,
+            type     => Brocken::Lindsay::IR::Type::void(),
+            opcode   => 'chan_close',
+            operands => [$chan],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_chan_try_send( $chan, $val, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::ChanTrySend->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::i1(),
+            opcode   => 'chan_try_send',
+            operands => [ $chan, $val ],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_chan_try_recv( $chan, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::ChanTryRecv->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::i64(),
+            opcode   => 'chan_try_recv',
+            operands => [$chan],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
 }
 
 =encoding utf-8

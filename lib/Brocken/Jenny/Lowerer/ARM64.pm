@@ -3734,6 +3734,57 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $dst, $fp_reg ], comment => "frame_addr" ) );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanCreate') ) {
+                    my $i64 = Brocken::Lindsay::IR::Type::i64();
+                    my $ptr = Brocken::Lindsay::IR::Type::ptr();
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $ptr );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 ) ],
+                            comment  => 'chan_create stub (null ptr)'
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanSend') ) {
+                    # stub -- no-op
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanRecv') ) {
+                    my $i64 = Brocken::Lindsay::IR::Type::i64();
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $i64 );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 ) ],
+                            comment  => 'chan_recv stub (0)'
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanClose') ) {
+                    # stub -- no-op
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanTrySend') ) {
+                    my $i1  = Brocken::Lindsay::IR::Type::i1();
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $i1 );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i1 ) ],
+                            comment  => 'chan_try_send stub (false)'
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanTryRecv') ) {
+                    my $i64 = Brocken::Lindsay::IR::Type::i64();
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $i64 );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 ) ],
+                            comment  => 'chan_try_recv stub (0)'
+                        )
+                    );
+                }
             }
             $mf->add_block($mbb);
         }

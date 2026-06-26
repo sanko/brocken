@@ -2350,6 +2350,64 @@ class Brocken::Jenny::Lowerer::Wasm {
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
                             comment => 'isolate_join result' ) );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanCreate') ) {
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i64_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                            comment  => 'chan_create stub (null ptr)'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
+                            comment => 'chan_create result' ) );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanSend') ) {
+                    # stub -- no-op
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanRecv') ) {
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i64_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                            comment  => 'chan_recv stub (0)'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
+                            comment => 'chan_recv result' ) );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanClose') ) {
+                    # stub -- no-op
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanTrySend') ) {
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i64_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                            comment  => 'chan_try_send stub (false)'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
+                            comment => 'chan_try_send result' ) );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanTryRecv') ) {
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i64_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                            comment  => 'chan_try_recv stub (0)'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
+                            comment => 'chan_try_recv result' ) );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                     if ( $inst->type->kind ne 'void' ) {
                         my $val = $inst->operands->[0];
