@@ -3747,6 +3747,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanSend') ) {
+
                     # stub -- no-op
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanRecv') ) {
@@ -3761,6 +3762,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanClose') ) {
+
                     # stub -- no-op
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanTrySend') ) {

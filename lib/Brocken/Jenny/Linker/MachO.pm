@@ -31,7 +31,17 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
     }
 
     method import_rva($name) {
-        my $imports = { dlopen => 0, dlsym => 8, pthread_create => 16, pthread_join => 24 };
+        my $imports = {
+            dlopen                 => 0,
+            dlsym                  => 8,
+            pthread_create         => 16,
+            pthread_join           => 24,
+            pthread_mutex_lock     => 32,
+            pthread_mutex_unlock   => 40,
+            pthread_cond_wait      => 48,
+            pthread_cond_signal    => 56,
+            pthread_cond_broadcast => 64,
+        };
         return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown Mach-O import: ' . $name );
     }
     method image_base () { return hex('100000000'); }    # 64-bit macOS default image base (4GB)
@@ -280,7 +290,11 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             #   0x40 | trailing = BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM
             #   0x90 = BIND_OPCODE_DO_BIND
             $bind_info .= pack( 'C', 0x70 | $data_seg ) . $_uleb->($got_off);
-            for my $name ( '_dlopen', '_dlsym', '_pthread_create', '_pthread_join' ) {
+            for my $name (
+                '_dlopen',             '_dlsym',                '_pthread_create',    '_pthread_join',
+                '_pthread_mutex_lock', '_pthread_mutex_unlock', '_pthread_cond_wait', '_pthread_cond_signal',
+                '_pthread_cond_broadcast'
+            ) {
                 $bind_info .= pack( 'C', 0x11 );
                 $bind_info .= pack( 'C', 0x51 );                 # BIND_TYPE_POINTER
                 $bind_info .= pack( 'C', 0x40 ) . "${name}\0";
@@ -301,7 +315,11 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
         # Undefined dynamic external imports
         if ($got_sec) {
-            for my $name ( '_dlopen', '_dlsym', '_pthread_create', '_pthread_join' ) {
+            for my $name (
+                '_dlopen',             '_dlsym',                '_pthread_create',    '_pthread_join',
+                '_pthread_mutex_lock', '_pthread_mutex_unlock', '_pthread_cond_wait', '_pthread_cond_signal',
+                '_pthread_cond_broadcast'
+            ) {
                 push @syms, $name;
                 $sym_types{$name} = 0x01;    # N_UNDF | N_EXT
                 $sym_rvas{$name}  = 0;

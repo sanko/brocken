@@ -56,14 +56,32 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
     method import_rva($name) {
 
         # GOT slot offsets for dynamic linker imports:
-        #   dlopen            = +24  (offset 3, index 3)
-        #   dlsym             = +32  (offset 4, index 4)
-        #   pthread_create    = +40  (offset 5, index 5)
-        #   exit / _exit      = +48  (offset 6, index 6)
-        #   pthread_join      = +56  (offset 7, index 7)
-        #   sched_setaffinity = +64  (offset 8, index 8)
+        #   dlopen               = +24  (offset 3,  index 3)
+        #   dlsym                = +32  (offset 4,  index 4)
+        #   pthread_create       = +40  (offset 5,  index 5)
+        #   exit / _exit         = +48  (offset 6,  index 6)
+        #   pthread_join         = +56  (offset 7,  index 7)
+        #   sched_setaffinity    = +64  (offset 8,  index 8)
+        #   pthread_mutex_lock   = +72  (offset 9,  index 9)
+        #   pthread_mutex_unlock = +80  (offset 10, index 10)
+        #   pthread_cond_wait    = +88  (offset 11, index 11)
+        #   pthread_cond_signal  = +96  (offset 12, index 12)
+        #   pthread_cond_broadcast = +104 (offset 13, index 13)
         # Slot 0-2 reserved (0, DYNAMIC, LINK_MAP).
-        my $imports = { dlopen => 24, dlsym => 32, pthread_create => 40, exit => 48, _exit => 48, pthread_join => 56, sched_setaffinity => 64 };
+        my $imports = {
+            dlopen                 => 24,
+            dlsym                  => 32,
+            pthread_create         => 40,
+            exit                   => 48,
+            _exit                  => 48,
+            pthread_join           => 56,
+            sched_setaffinity      => 64,
+            pthread_mutex_lock     => 72,
+            pthread_mutex_unlock   => 80,
+            pthread_cond_wait      => 88,
+            pthread_cond_signal    => 96,
+            pthread_cond_broadcast => 104,
+        };
         return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown ELF import: ' . $name );
     }
 
@@ -165,7 +183,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
         # Generate import stubs for undefined external functions
         my $entry_size    = $self->type eq 'exe' ? length($entry_stub) : 0;
-        my @known_imports = qw(pthread_create pthread_join dlopen dlsym sched_setaffinity);
+        my @known_imports = qw(pthread_create pthread_join dlopen dlsym sched_setaffinity
+            pthread_mutex_lock pthread_mutex_unlock pthread_cond_wait pthread_cond_signal pthread_cond_broadcast);
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
             next unless grep { $ff->{target} eq $_ } @known_imports;
@@ -346,7 +365,11 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         my @exports   = @{ $self->exported_funcs // [] };
         my $exit_name = $platform->is_haiku ? 'exit' : '_exit';
-        my @imports   = ( 'dlopen', 'dlsym', 'pthread_create', 'pthread_join', $exit_name );
+        my @imports   = (
+            'dlopen',              'dlsym',              'pthread_create',       'pthread_join',
+            $exit_name,            'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_cond_wait',
+            'pthread_cond_signal', 'pthread_cond_broadcast'
+        );
         if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
             push @imports, 'sched_setaffinity';
         }
@@ -540,10 +563,25 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $sched_sym_idx = $sym_indices{'sched_setaffinity'};
             $rela_dyn .= pack( 'Q< Q< q<', $sched_slot, ( $sched_sym_idx << 32 ) | $rel_type, 0 );
         }
+        my $mutex_lock_slot    = $base + $self->import_rva('pthread_mutex_lock');
+        my $mutex_lock_sym_idx = $sym_indices{'pthread_mutex_lock'};
+        $rela_dyn .= pack( 'Q< Q< q<', $mutex_lock_slot, ( $mutex_lock_sym_idx << 32 ) | $rel_type, 0 );
+        my $mutex_unlock_slot    = $base + $self->import_rva('pthread_mutex_unlock');
+        my $mutex_unlock_sym_idx = $sym_indices{'pthread_mutex_unlock'};
+        $rela_dyn .= pack( 'Q< Q< q<', $mutex_unlock_slot, ( $mutex_unlock_sym_idx << 32 ) | $rel_type, 0 );
+        my $cond_wait_slot    = $base + $self->import_rva('pthread_cond_wait');
+        my $cond_wait_sym_idx = $sym_indices{'pthread_cond_wait'};
+        $rela_dyn .= pack( 'Q< Q< q<', $cond_wait_slot, ( $cond_wait_sym_idx << 32 ) | $rel_type, 0 );
+        my $cond_signal_slot    = $base + $self->import_rva('pthread_cond_signal');
+        my $cond_signal_sym_idx = $sym_indices{'pthread_cond_signal'};
+        $rela_dyn .= pack( 'Q< Q< q<', $cond_signal_slot, ( $cond_signal_sym_idx << 32 ) | $rel_type, 0 );
+        my $cond_broadcast_slot    = $base + $self->import_rva('pthread_cond_broadcast');
+        my $cond_broadcast_sym_idx = $sym_indices{'pthread_cond_broadcast'};
+        $rela_dyn .= pack( 'Q< Q< q<', $cond_broadcast_slot, ( $cond_broadcast_sym_idx << 32 ) | $rel_type, 0 );
         $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
-  # GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join, [8]=sched_setaffinity
-        my $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+# GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join, [8]=sched_setaffinity, [9]=pthread_mutex_lock, [10]=pthread_mutex_unlock, [11]=pthread_cond_wait, [12]=pthread_cond_signal, [13]=pthread_cond_broadcast
+        my $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
         $self->layout->get('.got')->{size} = length($got);
         my $elf_hash = sub {
             my $name = shift;

@@ -2334,8 +2334,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
-                            comment => 'isolate_create result' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'isolate_create result' )
+                    );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateJoin') ) {
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
@@ -2347,8 +2347,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
-                            comment => 'isolate_join result' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'isolate_join result' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanCreate') ) {
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
@@ -2360,10 +2359,10 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
-                            comment => 'chan_create result' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'chan_create result' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanSend') ) {
+
                     # stub -- no-op
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanRecv') ) {
@@ -2376,10 +2375,10 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
-                            comment => 'chan_recv result' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'chan_recv result' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanClose') ) {
+
                     # stub -- no-op
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanTrySend') ) {
@@ -2392,8 +2391,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
-                            comment => 'chan_try_send result' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'chan_try_send result' )
+                    );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanTryRecv') ) {
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
@@ -2405,8 +2404,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst],
-                            comment => 'chan_try_recv result' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'chan_try_recv result' )
+                    );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Ret') ) {
                     if ( $inst->type->kind ne 'void' ) {

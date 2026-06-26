@@ -231,8 +231,8 @@ class Brocken::Lindsay::IR::Instruction::ChanTrySend : isa(Brocken::Lindsay::IR:
 
     method render() {
         my ( $chan, $val ) = $self->operands->@*;
-        return sprintf '  %s = chan_try_send %s %s, %s %s', ( $self->name // '%<anon>' ),
-            $chan->type->as_string, $chan->as_string, $val->type->as_string, $val->as_string;
+        return sprintf '  %s = chan_try_send %s %s, %s %s', ( $self->name // '%<anon>' ), $chan->type->as_string, $chan->as_string,
+            $val->type->as_string, $val->as_string;
     }
 }
 
