@@ -1318,8 +1318,14 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $fcond, $r_hi ],
+                                        opcode   => 'cmp',
+                                        operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'cset_ne',
+                                        operands => [$fcond],
                                     )
                                 );
                                 $mbb->add_instruction(
