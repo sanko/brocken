@@ -67,21 +67,115 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             my $bb   = $blocks[$bi];
             my %defd = ();
             my %used = ();
-            for my $inst ( $bb->instructions->@* ) {
-                my @ops = $self->_register_operands($inst);
-                for my $op (@ops) {
-                    my $name = $self->_vreg_name( $op, $is_float );
-                    next unless defined $name;
-                    if ( $op == $ops[0] && $inst->opcode ne 'store' && $inst->opcode ne 'store_imm' ) {
-                        $defd{$name} = 1 unless exists $used{$name};
+
+            # Detect intra-block loops: find the first label that is the
+            # target of a branch within the same block.  Such blocks contain
+            # a preamble (pre-label) and a loop body (post-label).
+            # Loop-carried vregs (defined in preamble, used in loop body)
+            # must appear in USE[b] so their live intervals span the full
+            # block rather than ending at their last mention.
+            my $split_idx = -1;
+            {
+                my %labels_in_block;
+                for my $i ( 0 .. $#{ $bb->instructions } ) {
+                    my $inst = $bb->instructions->[$i];
+                    next unless $inst->opcode eq 'label';
+                    $labels_in_block{ $inst->operands->[0]->value } = $i;
+                }
+                for my $i ( 0 .. $#{ $bb->instructions } ) {
+                    my $inst = $bb->instructions->[$i];
+                    my $target;
+                    if ( $inst->opcode eq 'bne' || $inst->opcode eq 'beq' ) {
+                        $target = $inst->operands->[1]->value;
                     }
-                    else {
-                        $used{$name} = 1 unless exists $defd{$name};
+                    elsif ( $inst->opcode eq 'jmp' ) {
+                        $target = $inst->operands->[0]->value;
+                    }
+                    if ( defined $target && exists $labels_in_block{$target} ) {
+                        my $label_idx = $labels_in_block{$target};
+                        if ( $split_idx < 0 || $label_idx < $split_idx ) {
+                            $split_idx = $label_idx;
+                        }
                     }
                 }
-                for my $base ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
-                    next if $is_float;
-                    $used{$base} = 1 unless exists $defd{$base};
+            }
+
+            if ( $split_idx > 0 ) {
+                my @pre_insts  = $bb->instructions->@[ 0 .. $split_idx - 1 ];
+                my @post_insts = $bb->instructions->@[ $split_idx .. $#{ $bb->instructions } ];
+
+                my %pre_defd;
+                my %pre_used;
+                for my $inst (@pre_insts) {
+                    my @ops = $self->_register_operands($inst);
+                    for my $op (@ops) {
+                        my $name = $self->_vreg_name( $op, $is_float );
+                        next unless defined $name;
+                        if ( $op == $ops[0] && $inst->opcode ne 'store' && $inst->opcode ne 'store_imm' ) {
+                            $pre_defd{$name} = 1 unless exists $pre_used{$name};
+                        }
+                        else {
+                            $pre_used{$name} = 1 unless exists $pre_defd{$name};
+                        }
+                    }
+                    for my $base ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
+                        next if $is_float;
+                        $pre_used{$base} = 1 unless exists $pre_defd{$base};
+                    }
+                }
+
+                my %post_defd;
+                my %post_used;
+                for my $inst (@post_insts) {
+                    my @ops = $self->_register_operands($inst);
+                    for my $op (@ops) {
+                        my $name = $self->_vreg_name( $op, $is_float );
+                        next unless defined $name;
+                        if ( $op == $ops[0] && $inst->opcode ne 'store' && $inst->opcode ne 'store_imm' ) {
+                            $post_defd{$name} = 1 unless exists $post_used{$name};
+                        }
+                        else {
+                            $post_used{$name} = 1 unless exists $post_defd{$name};
+                        }
+                    }
+                    for my $base ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
+                        next if $is_float;
+                        $post_used{$base} = 1 unless exists $post_defd{$base};
+                    }
+                }
+
+                # use = pre_use U (pre_def ^ post_use)
+                # def = pre_def U post_def
+                for my $v ( keys %pre_used ) {
+                    $used{$v} = 1;
+                }
+                for my $v ( keys %pre_defd ) {
+                    $used{$v} = 1 if $post_used{$v};
+                }
+                for my $v ( keys %pre_defd ) {
+                    $defd{$v} = 1;
+                }
+                for my $v ( keys %post_defd ) {
+                    $defd{$v} = 1;
+                }
+            }
+            else {
+                for my $inst ( $bb->instructions->@* ) {
+                    my @ops = $self->_register_operands($inst);
+                    for my $op (@ops) {
+                        my $name = $self->_vreg_name( $op, $is_float );
+                        next unless defined $name;
+                        if ( $op == $ops[0] && $inst->opcode ne 'store' && $inst->opcode ne 'store_imm' ) {
+                            $defd{$name} = 1 unless exists $used{$name};
+                        }
+                        else {
+                            $used{$name} = 1 unless exists $defd{$name};
+                        }
+                    }
+                    for my $base ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
+                        next if $is_float;
+                        $used{$base} = 1 unless exists $defd{$base};
+                    }
                 }
             }
             $def{$bi} = \%defd;
