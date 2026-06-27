@@ -30,6 +30,12 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
     }
 
+    method entry_stub_len($platform) {
+        return 0 unless $self->type eq 'exe';
+        return 20 if $platform->is_arm64;  # bl, movz, movk, svc, brk = 5*4
+        return 21; # x86_64: and(4) + call(5) + mov(3) + mov-eax(5) + syscall(2) + ud2(2)
+    }
+
     method import_rva($name) {
         my $imports = {
             dlopen                 => 0,

@@ -53,6 +53,13 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
     }
 
+    method entry_stub_len($platform) {
+        return 0 unless $self->type eq 'exe';
+        return 20 if $platform->is_arm64;    # bl, adrp, ldr, blr, brk = 5*4
+        return 20 if $platform->is_riscv64;  # jal, auipc, ld, jalr, ebreak = 5*4
+        return 30;  # x86_64: and(4) + sub(7) + mov(3) + call(5) + mov(3) + call-exit(6) + ud2(2)
+    }
+
     method import_rva($name) {
 
         # GOT slot offsets for dynamic linker imports:
@@ -112,7 +119,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         else {
             $code_bytes = $code_data;
         }
-        my $entry_stub_len = $self->type eq 'exe' ? ( $platform->is_arm64 ? 24 : ( $platform->is_riscv64 ? 20 : 30 ) ) : 0;
+        my $entry_stub_len = $self->entry_stub_len($platform);
         if ( !defined $self->layout ) {
             my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
             $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform );

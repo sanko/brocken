@@ -39,11 +39,11 @@ SKIP: {
         }
         elsif ( $node_path && -x $node_path ) {
             my $js
-                = 'const fs=require("fs");const buf=fs.readFileSync("' .
-                $output_file . '");' .
-                'WebAssembly.instantiate(buf)' .
-                '.then(res=>{process.exit(res.instance.exports.main());})' .
-                '.catch(e=>{console.error(e);process.exit(1);});';
+                = "const fs=require('fs');const buf=fs.readFileSync('" .
+                $output_file . "');" .
+                "WebAssembly.instantiate(buf)" .
+                ".then(res=>{process.exit(res.instance.exports.main());})" .
+                ".catch(e=>{console.error(e);process.exit(1);});";
             system( 'node', '-e', $js );
             is $? >> 8, 42, 'Memory Wasm returned 42 via node';
         }
@@ -77,11 +77,11 @@ SKIP: {
         }
         elsif ( $node_path && -x $node_path ) {
             my $js
-                = 'const fs=require("fs");const buf=fs.readFileSync("' .
-                $output_file . '");' .
-                'WebAssembly.instantiate(buf)' .
-                '.then(res=>{process.exit(res.instance.exports.main());})' .
-                '.catch(e=>{console.error(e);process.exit(1);});';
+                = "const fs=require('fs');const buf=fs.readFileSync('" .
+                $output_file . "');" .
+                "WebAssembly.instantiate(buf)" .
+                ".then(res=>{process.exit(res.instance.exports.main());})" .
+                ".catch(e=>{console.error(e);process.exit(1);});";
             system( 'node', '-e', $js );
             is $? >> 8, 42, 'Box/unbox Wasm returned 42 via node';
         }
