@@ -383,7 +383,6 @@ subtest 'Array with i128 native type' => sub {
     my $c       = Brocken::Compiler->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
-        skip 'i128 native tests only on x86_64'                unless $host->is_x64;
         my $module = $c->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
 my [i64; 3] @arr;
