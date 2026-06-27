@@ -91,7 +91,7 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     # -------------------------------------------------------------------
     # 4. Build main() - The Integration Test
     # -------------------------------------------------------------------
-    my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i64, params => [] );
+    my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i64, params => [] );
     $b->position_at_end( $main->append_block('entry') );
 
     # Simulate our 32KB Immix block by allocating a smaller block on the local stack
@@ -117,7 +117,7 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     # -------------------------------------------------------------------
     # 5. Compile and Execute
     # -------------------------------------------------------------------
-    my @functions = ( $incref_fn, $decref_fn, $alloc_fn, $main );
+    my @functions = ( $main, $incref_fn, $decref_fn, $alloc_fn );
 SKIP: {
         skip 'Native memory model test only runs on native hosts', 1 unless $host->is_native;
         my $codegen = $brocken->codegen;

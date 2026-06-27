@@ -9,8 +9,8 @@ no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 my $host          = Brocken::Katsuro::Platform::parse();
 my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
-my $null          = $host->is_windows ? 'NUL' : '/dev/null';
-my $wasmtime_path = `which wasmtime 2>/dev/null`;
+my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
+my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
 
 # f32 arithmetic

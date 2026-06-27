@@ -315,6 +315,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     push @load_offsets, $s_off if $s_sp;
                     push @load_offsets, $d_off if $d_sp && $reads_dst{$opcode};
                 }
+                for my $i ( 2 .. $#ops ) {
+                    next unless defined $sp{$i};
+                    push @load_offsets, $sp{$i};
+                    $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[$i]->type );
+                }
                 push @new, $load_inst->($_) for @load_offsets;
                 push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
                 if ($d_sp) {

@@ -42,17 +42,17 @@ subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
     my $res = $b->build_call( $bar, [] );
     $b->build_ret($res);
 
-    # 3. Build main()
-    my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i64, params => [] );
-    $b->position_at_end( $main->append_block('entry') );
+    # 3. Build entry function
+    my $entry = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i64, params => [] );
+    $b->position_at_end( $entry->append_block('entry') );
     my $res2 = $b->build_call( $foo, [] );
     $b->build_ret($res2);
 
     # 4. Compile and Execute
-    my $funcs       = $brocken->codegen->emit_functions( [ $bar, $foo, $main ] );
+    my $funcs       = $brocken->codegen->emit_functions( [ $bar, $foo, $entry ] );
     my $output_file = 'backtrace_test' . $brocken->ext;
     $brocken->linker->set_func_ranges(
-        [ { name => 'bar', start => 0, end => 0 }, { name => 'foo', start => 0, end => 0 }, { name => 'main', start => 0, end => 0 } ] );
+        [ { name => 'bar', start => 0, end => 0 }, { name => 'foo', start => 0, end => 0 }, { name => '_BROCKEN_ENTRY', start => 0, end => 0 } ] );
     $brocken->linker->write_executable( $output_file, $funcs, $host );
     ok( -e $output_file, 'Backtrace binary compiled successfully' );
     run_exec(

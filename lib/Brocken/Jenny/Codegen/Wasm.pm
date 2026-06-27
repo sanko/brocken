@@ -28,6 +28,7 @@ class Brocken::Jenny::Codegen::Wasm {
         }
         my ( $result, $fixups ) = $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type );
         $result->{fixups} = $fixups if @$fixups;
+        $result->{name}   = $ir_func->name;
         return $result;
     }
 

@@ -23,7 +23,7 @@ SKIP: {
         $wb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
 
         # Main: create worker fiber and transfer to it
-        my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
+        my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
         my $fcb  = $mb->build_fiber_create( $worker, [], '%fcb' );
@@ -33,7 +33,8 @@ SKIP: {
 
         # Compile with fiber init wrapper support
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
-        ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or diag( explain($funcs) );
+        ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or
+            diag( 'got: ', [ map { $_->{name} } @$funcs ] );
         my $output_file = 'fiber_test' . $brocken->ext;
         $brocken->linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'Fiber test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };

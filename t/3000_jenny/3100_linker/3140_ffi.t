@@ -219,10 +219,7 @@ SKIP: {
             = $is_arm64 ? $make_arm64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos ) :
             $is_riscv64 ? $make_riscv64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos ) :
             $make_x64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos, $platform->syscall('exit') );
-        my $entry_stub_len = $platform->is_arm64 ? 24
-            : ( $platform->is_riscv64 ? 20
-            : ( $platform->is_macos ? 21
-            :                        30 ) );
+        my $entry_stub_len = $platform->is_arm64 ? 24 : ( $platform->is_riscv64 ? 20 : ( $platform->is_macos ? 21 : 30 ) );
         open my $fh, '+<:raw', $wrapper_file or die $!;
         seek( $fh, $text_off + $entry_stub_len, 0 );
         print $fh $wrapper_bytes;

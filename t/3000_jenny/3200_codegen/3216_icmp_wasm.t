@@ -8,14 +8,14 @@ use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 my $host          = Brocken::Katsuro::Platform::parse();
-my $null          = $host->is_windows ? 'NUL' : '/dev/null';
-my $wasmtime_path = `which wasmtime 2>/dev/null`;
+my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
+my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
 
 # ICmp signed Wasm
 SKIP: {
     my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
-    my $func     = Brocken::Lindsay::IR::Function->new( name => 'icmp_wasm', return_type => Brocken::Lindsay::IR::Type::i32() );
+    my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
     my $builder  = Brocken::Lindsay::IR::Builder->new();
     my $entry    = $func->append_block('entry');
     my $t_block  = $func->append_block('if.then');
@@ -54,7 +54,7 @@ SKIP: {
 # ICmp unsigned Wasm
 SKIP: {
     my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
-    my $func     = Brocken::Lindsay::IR::Function->new( name => 'icmp_unsigned_wasm', return_type => Brocken::Lindsay::IR::Type::i32() );
+    my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
     my $builder  = Brocken::Lindsay::IR::Builder->new();
     my $entry    = $func->append_block('entry');
     my $t_block  = $func->append_block('if.then');

@@ -112,7 +112,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         else {
             $code_bytes = $code_data;
         }
-        my $entry_stub_len = $self->type eq 'exe' ? 20 : 0;
+        my $entry_stub_len = $self->type eq 'exe' ? ( $platform->is_arm64 ? 24 : ( $platform->is_riscv64 ? 20 : 30 ) ) : 0;
         if ( !defined $self->layout ) {
             my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
             $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform );
@@ -138,7 +138,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
                 # ARM64 entry: bl main -> adrp x8, exit-GOT-page -> ldr x8, [x8, exit-GOT-off] -> blr x8 -> brk #0
                 my $got_exit = $self->import_rva('exit');
-                my $bl_main  = bl( 20 + ( $func_offsets{main} // 0 ) );
+                my $bl_main  = bl( 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
                 my $adrp     = adrp( 8, $got_exit, $text_rva + 4 );
                 my $pimm     = $got_exit & 0xFFF;
                 my $ldr      = ldr_64( 8, 8, $pimm );
@@ -157,7 +157,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 my $auipc      = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;
                 my $ld         = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
                 my $jalr       = ( 0 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 0 << 7 ) | 0x67;
-                my $jal_offset = 20 + ( $func_offsets{main} // 0 );
+                my $jal_offset = 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 );
                 my $halfword   = $jal_offset >> 1;
                 my $jal_imm    = ( ( $halfword >> 19 ) & 1 ) << 31 | ( ( $halfword & 0x3FF ) << 21 ) | ( ( $halfword >> 10 ) & 1 ) << 20
                     | ( ( $halfword >> 11 ) & 0xFF ) << 12;
@@ -166,16 +166,27 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $entry_stub = pack( 'V5', $jal, $auipc, $ld, $jalr, $ebreak );
             }
             else {
-                # x86_64 Dynamic Exit Stub with System V RSP alignment
-                my $got_exit = $self->import_rva('exit');
-                my $next_ip  = $text_rva + 18;
-                my $rel32    = $got_exit - $next_ip;
-                my $main_rel = 11 + ( $func_offsets{main} // 0 );
-                $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );    # and rsp, -16
-                $entry_stub .= pack( 'C V',   0xE8, $main_rel );       # call main (rel32)
-                $entry_stub .= pack( 'C3',    0x48, 0x89, 0xC7 );      # mov rdi, rax (return value -> exit arg1)
-                $entry_stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );    # call [rip + got_exit] (indirect)
-                $entry_stub .= pack( 'C2',    0x0F, 0x0B );            # ud2 (safety barrier)
+                # x86_64 Dynamic Exit Stub with heap + System V RSP alignment
+                # Layout:
+                #   0:  and rsp, -16
+                #   4:  sub rsp, HEAP_SIZE  (1 MB)
+                #  11:  mov rdi, rsp          (heap base in rdi, harmless if main takes no args)
+                #  14:  call main
+                #  19:  mov rdi, rax
+                #  22:  call [rip + exit]
+                #  28:  ud2
+                my $HEAP_SIZE = 1048576;
+                my $got_exit  = $self->import_rva('exit');
+                my $next_ip   = $text_rva + 28;
+                my $rel32     = $got_exit - $next_ip;
+                my $main_rel  = 11 + ( $func_offsets{_BROCKEN_ENTRY} // 0 );
+                $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );              # and rsp, -16
+                $entry_stub .= pack( 'C3 V',  0x48, 0x81, 0xEC, $HEAP_SIZE );    # sub rsp, HEAP_SIZE
+                $entry_stub .= pack( 'C3',    0x48, 0x89, 0xE7 );                # mov rdi, rsp
+                $entry_stub .= pack( 'C V',   0xE8, $main_rel );                 # call main
+                $entry_stub .= pack( 'C3',    0x48, 0x89, 0xC7 );                # mov rdi, rax
+                $entry_stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );              # call [rip + exit]
+                $entry_stub .= pack( 'C2',    0x0F, 0x0B );                      # ud2
             }
             $text = $entry_stub . $code_bytes;
             $self->layout->get('.text')->{size} = length($text);

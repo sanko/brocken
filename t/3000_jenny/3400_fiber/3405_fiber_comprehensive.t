@@ -26,7 +26,7 @@ SKIP: {
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 200 ), '%y2' );
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 77 ),  '%y3' );
         $wb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-        my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
+        my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
         my $fcb = $mb->build_fiber_create( $worker, [], '%fcb' );
@@ -57,7 +57,7 @@ SKIP: {
         $wb2->position_at_end( $worker2->append_block('entry') );
         $wb2->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 222 ), '%y2' );
         $wb2->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-        my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
+        my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
         my $f1 = $mb->build_fiber_create( $worker1, [], '%f1' );
@@ -90,7 +90,7 @@ SKIP: {
         $wb->build_alloca( $big_type, '%big' );
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 55 ), '%yv' );
         $wb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-        my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
+        my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
         my $fcb  = $mb->build_fiber_create( $worker, [], '%fcb' );
@@ -116,7 +116,7 @@ SKIP: {
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 30 ), '%y3' );
         $wb->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 42 ), '%y4' );
         $wb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-        my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
+        my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
         my $fcb = $mb->build_fiber_create( $worker, [], '%fcb' );
@@ -154,7 +154,7 @@ SKIP: {
         $wb3->position_at_end( $worker3->append_block('entry') );
         $wb3->build_fiber_yield( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 70 ), '%y3' );
         $wb3->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-        my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
+        my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i32 );
         my $mb   = Brocken::Lindsay::IR::Builder->new();
         $mb->position_at_end( $main->append_block('entry') );
         my $f1 = $mb->build_fiber_create( $worker1, [], '%f1' );
