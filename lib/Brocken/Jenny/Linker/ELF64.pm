@@ -308,7 +308,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         elsif ( $platform->is_dragonflybsd ) {
             $osabi     = 9;
-            $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600400 );
+            $note_data = pack( 'L<3 a12 L<', 9, 4, 1, "DragonFly\0\0\0", 600400 );
         }
         my %interp_map = (
             linux        => '/lib64/ld-linux-x86-64.so.2',
@@ -738,7 +738,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $flags = 2;
             }
             elsif ( $s->{name} eq '.data' ) {
-                $flags = 3;
+                $flags      = ( $platform->is_dragonflybsd ) ? 2 : 3;
             }
             elsif ( $s->{name} eq '.interp' ) {
                 $type  = 1;
