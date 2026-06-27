@@ -4,6 +4,7 @@ no warnings qw[experimental::class];
 class Brocken::Katsuro::Lexer v0.0.1 {
     use Carp qw[croak];
     field $source : param;
+    field $filename : param = '(eval)';
     field $pos  = 0;
     field $line = 1;
     field $col  = 1;
@@ -11,7 +12,7 @@ class Brocken::Katsuro::Lexer v0.0.1 {
         my our state const type sub method class role has field ADJUST DESTROY
         return exit fiber yield transfer try catch finally throw defer
         if elsif else unless while until for foreach next last redo map say print
-        true false Int String Any Bool ptr i8 i16 i32 i64 f32 f64
+        true false True False __CLASS__ Int String Any Bool ptr i8 i16 i32 i64 i128 f32 f64
         use require
     ];
 
@@ -65,7 +66,7 @@ class Brocken::Katsuro::Lexer v0.0.1 {
             }
 
             # 5. Match Operators (multi-character first)
-            if ( $remaining =~ /^(==|!=|<=|>=|<=>|=>|->|\&\&|\|\||\/\/|\.\.\.?)/ ) {
+            if ( $remaining =~ /^(==|!=|<=|>=|<=>|=>|->|\&\&|\|\||\/\/=|\/\/|\.\.\.?)/ ) {
                 my $val = $1;
                 push @tokens, $self->_token( 'OP', $val );
                 $self->_advance_pos( length($val) );
@@ -88,7 +89,7 @@ class Brocken::Katsuro::Lexer v0.0.1 {
 
             # Lexical Error fallback
             my $bad_char = substr( $remaining, 0, 1 );
-            croak "Lexical Error: Unexpected character '$bad_char' at line $line, col $col";
+            croak "Lexical Error: Unexpected character '$bad_char' at $filename line $line, col $col";
         }
         push @tokens, $self->_token( 'EOF', '' );
         return \@tokens;

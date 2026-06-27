@@ -45,4 +45,17 @@ BROCKEN
     # Check that EOF token exists
     is( $tokens->[-1]{type}, 'EOF', 'Token stream ends with EOF sentinel' );
 };
+subtest 'Lexer error includes filename' => sub {
+    my $lexer = Brocken::Katsuro::Lexer->new( source => "my i64 \$x = \x80;", filename => 'test.br' );
+    my $err   = eval { $lexer->lex(); undef } // $@;
+    ok( $err, 'lex error thrown' );
+    like( $err, qr/test\.br/, 'error mentions filename' );
+    like( $err, qr/line 1/,   'error mentions line' );
+    like( $err, qr/col 13/,   'error mentions col' );
+};
+subtest 'Lexer error default filename' => sub {
+    my $lexer = Brocken::Katsuro::Lexer->new( source => "\x80" );
+    my $err   = eval { $lexer->lex(); undef } // $@;
+    like( $err, qr/\(eval\)/, 'default filename is (eval)' );
+};
 done_testing;
