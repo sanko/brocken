@@ -151,12 +151,13 @@ class Brocken::Lindsay::IR::Builder {
         return $insert_block->append_inst($inst);
     }
 
-    method build_alloca( $type, $name = undef ) {
+    method build_alloca( $type, $name = undef, $count = undef ) {
         my $inst = Brocken::Lindsay::IR::Instruction::Alloca->new(
             name           => $name // $self->_next_id(),
             type           => Brocken::Lindsay::IR::Type::ptr(),
             opcode         => 'alloca',
             allocated_type => $type,
+            count          => $count,
             parent         => $insert_block
         );
         return $insert_block->append_inst($inst);

@@ -67,21 +67,29 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
                 # - ldp x29, x30, [sp], #16
                 # - uxtb w0, w0  (truncate exit code to 8 bits)
                 # - ret
-                my $bl = bl( 16 + ( $func_offsets{main} // 0 ) );
+                my $bl = bl( 16 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
                 $entry_stub = pack( 'V6', stp_pre( 29, 30, 31, -16 ), add_imm( 29, 31, 0 ), $bl, ldp_post( 29, 30, 31, 16 ), uxtb( 0, 0 ), ret(), );
             }
             else {
-                # Windows x86_64 Entry Stub (with shadow space):
-                # - sub rsp, 40
-                # - call main (past stub + truncation)
-                # - add rsp, 40
-                # - movzx eax, al  (truncate exit code to 8 bits)
-                # - ret
-                $entry_stub = pack( 'C4', 0x48, 0x83, 0xEC, 0x28 );
-                $entry_stub .= pack( 'C V', 0xE8, 8 + ( $func_offsets{main} // 0 ) );
-                $entry_stub .= pack( 'C4',  0x48, 0x83, 0xC4, 0x28 );
-                $entry_stub .= pack( 'C3',  0x0F, 0xB6, 0xC0 );
-                $entry_stub .= pack( 'C',   0xC3 );
+                # Windows x86_64 Entry Stub with heap:
+                # Layout (34 bytes total):
+                #   0:  sub rsp, HEAP_SIZE    (1 MB heap allocation)
+                #   7:  mov rcx, rsp           (heap base in rcx, harmless if main takes no args)
+                #  10:  sub rsp, 40            (shadow space for main)
+                #  14:  call main
+                #  19:  add rsp, 40            (remove shadow space)
+                #  23:  add rsp, HEAP_SIZE
+                #  30:  movzx eax, al
+                #  33:  ret
+                my $HEAP_SIZE = 1048576;
+                $entry_stub = pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );                          # sub rsp, HEAP_SIZE
+                $entry_stub .= pack( 'C3',   0x48, 0x89, 0xE1 );                                     # mov rcx, rsp
+                $entry_stub .= pack( 'C4',   0x48, 0x83, 0xEC, 0x28 );                               # sub rsp, 40
+                $entry_stub .= pack( 'C V',  0xE8, 15 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );    # call main
+                $entry_stub .= pack( 'C4',   0x48, 0x83, 0xC4, 0x28 );                               # add rsp, 40
+                $entry_stub .= pack( 'C3 V', 0x48, 0x81, 0xC4, $HEAP_SIZE );                         # add rsp, HEAP_SIZE
+                $entry_stub .= pack( 'C3',   0x0F, 0xB6, 0xC0 );                                     # movzx eax, al
+                $entry_stub .= pack( 'C',    0xC3 );                                                 # ret
             }
             $text = $entry_stub . $text_raw;
         }
@@ -418,7 +426,7 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
 
         # PE32+ Optional Header (Magic=0x020b): fields include entry, image base 0x140000000, section alignment 0x1000, file alignment 0x200,
         # subsystem=3 (CONSOLE), DLL characteristics=0x8160 (NX compatible + TSA aware + DYNAMIC_BASE),
-        # stack reserve 0x100000, stack commit 0x1000, heap reserve 0x100000, heap commit 0x1000
+        # stack reserve 0x400000 (4MB), stack commit 0x200000 (2MB covers 1MB entry-stub heap), heap reserve 0x100000, heap commit 0x1000
         my $size_of_image = $sec_rva;
         my $size_of_code  = $sec_raw_code_size;
         my $init_data_size
@@ -426,7 +434,7 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
         my $os_ver     = 6;
         my $opt_header = pack( 'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2',
             0x020b,         14, 10, $size_of_code, $init_data_size, 0, 0x1000, 0x1000, 0x140000000, 4096, 512, $os_ver, 0, 0, 0, $os_ver, 0, 0,
-            $size_of_image, $size_of_headers, 0, 3, 0x8160, 0x100000, 0x1000, 0x100000, 0x1000, 0, 16 );
+            $size_of_image, $size_of_headers, 0, 3, 0x8160, 0x400000, 0x200000, 0x100000, 0x1000, 0, 16 );
 
         # Data directories (128 bytes = 16 entries x 8 bytes each):
         #   [0]=export, [1]=import, [5]=reloc

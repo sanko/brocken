@@ -286,9 +286,12 @@ class Brocken::Lindsay::IR::Instruction::GetElementPtr : isa(Brocken::Lindsay::I
 
 class Brocken::Lindsay::IR::Instruction::Alloca : isa(Brocken::Lindsay::IR::Instruction) {
     field $allocated_type : reader : param;
+    field $count : reader : param = undef;
 
     method render() {
-        return sprintf '  %s = alloca %s', ( $self->name // '%<anon>' ), $allocated_type->as_string;
+        my $str = sprintf '  %s = alloca %s', ( $self->name // '%<anon>' ), $allocated_type->as_string;
+        $str .= sprintf ', i64 %s', $count->value if $count;
+        return $str;
     }
 }
 
@@ -343,7 +346,12 @@ class Brocken::Lindsay::IR::Block {
     }
 
     method terminator() {
-        return $instructions->[-1] if $instructions->@*;
+        return undef unless $instructions->@*;
+        my $last = $instructions->[-1];
+        return $last
+            if $last->isa('Brocken::Lindsay::IR::Instruction::Ret') ||
+            $last->isa('Brocken::Lindsay::IR::Instruction::Br') ||
+            $last->isa('Brocken::Lindsay::IR::Instruction::CondBr');
         return undef;
     }
 

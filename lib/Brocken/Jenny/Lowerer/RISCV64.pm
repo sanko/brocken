@@ -1862,7 +1862,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
                     my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    my $size = $inst->allocated_type->bits / 8;
+                    my $size = ( $inst->allocated_type->bits / 8 ) * ( $inst->count ? $inst->count->value : 1 );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'alloca',

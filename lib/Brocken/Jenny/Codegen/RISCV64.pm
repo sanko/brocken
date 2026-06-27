@@ -65,22 +65,22 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my @mfs;
         my $has_fiber   = 0;
         my $has_isolate = 0;
-        my $main_index  = -1;
+        my $entry_index = -1;
         for my $i ( 0 .. $#$ir_funcs ) {
             my $func    = $ir_funcs->[$i];
             my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new( platform => $platform );
             my $mf      = $lowerer->lower($func);
             $has_fiber   ||= $self->_has_fiber_ops_mf($mf);
             $has_isolate ||= $self->_has_isolate_ops_ir($func);
-            $main_index = $i if $func->name eq 'main';
+            $entry_index = $i if $func->name eq '_BROCKEN_ENTRY';
             push @mfs, $mf;
         }
-        my $emit_init = $has_fiber && $main_index >= 0;
+        my $emit_init = $has_fiber && $entry_index >= 0;
         my @result;
         for my $i ( 0 .. $#mfs ) {
             my $mf    = $mfs[$i];
             my $fname = $ir_funcs->[$i]->name;
-            if ( $emit_init && $i == $main_index ) {
+            if ( $emit_init && $i == $entry_index ) {
                 $fname = '_real_main';
             }
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();

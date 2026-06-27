@@ -125,7 +125,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         # Single-function path (backward compat with hashref from emit_function)
         my $body        = $codegen_output->{body};
         my $locals      = $codegen_output->{locals};
-        my $name        = 'main';
+        my $name        = $codegen_output->{name} // '_BROCKEN_ENTRY';
         my $type_idx    = 0;
         my $func_idx    = 0;
         my $ret_valtype = $codegen_output->{return_valtype} // 0x7F;

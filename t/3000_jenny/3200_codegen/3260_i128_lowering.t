@@ -646,8 +646,7 @@ $check->(
             )
         );
     },
-    seta  => 'x86_64 i128 div: seta produced',
-    setae => 'x86_64 i128 div: setae produced'
+    div128_64 => 'x86_64 i128 div: div128_64 produced'
 );
 $check->(
     $X,
@@ -662,8 +661,8 @@ $check->(
             )
         );
     },
-    setb => 'x86_64 i128 rem: setb produced',
-    seta => 'x86_64 i128 rem: seta produced'
+    setb      => 'x86_64 i128 rem: setb produced',
+    div128_64 => 'x86_64 i128 rem: div128_64 produced'
 );
 $check->(
     $A,

@@ -92,7 +92,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 # - movk x16, #sys_high, lsl #16
                 # - svc #0x80
                 # - brk #0 (Safety crash)
-                my $bl   = bl( 20 + ( $func_offsets{main} // 0 ) );
+                my $bl   = bl( 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
                 my $movz = movz_64( 16, $exit_sys & 0xFFFF );
                 my $movk = movk_64( 16, ( $exit_sys >> 16 ) & 0xFFFF, 1 );
                 $entry_stub = pack( 'V5', $bl, $movz, $movk, svc(0x80), brk(0) );
@@ -106,7 +106,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 # - syscall:        0f 05
                 # - ud2:            0f 0b
                 $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );
-                $entry_stub .= pack( 'C V', 0xE8, 12 + ( $func_offsets{main} // 0 ) );
+                $entry_stub .= pack( 'C V', 0xE8, 12 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
                 $entry_stub .= pack( 'C3',  0x48, 0x89, 0xC7 );
                 $entry_stub .= pack( 'C V', 0xB8, $exit_sys );
                 $entry_stub .= pack( 'C2',  0x0F, 0x05 );

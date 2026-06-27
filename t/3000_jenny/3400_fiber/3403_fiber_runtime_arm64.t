@@ -17,7 +17,7 @@ subtest 'ARM64 fiber yield passes value to main exit code' => sub {
     my $yield_val = Brocken::Lindsay::IR::Constant->new( type => $i64, value => 99 );
     $wb->build_fiber_yield( $yield_val, '%yv' );
     $wb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 0 ) );
-    my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
+    my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i32 );
     my $mb   = Brocken::Lindsay::IR::Builder->new();
     $mb->position_at_end( $main->append_block('entry') );
     my $fcb  = $mb->build_fiber_create( $worker, [], '%fcb' );
@@ -26,7 +26,8 @@ subtest 'ARM64 fiber yield passes value to main exit code' => sub {
     $mb->build_ret($recv);
     my $codegen = $brocken->codegen;
     my $funcs   = $codegen->emit_functions( [ $main, $worker ] );
-    ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or diag( explain($funcs) );
+    ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or
+        diag( 'got: ', [ map { $_->{name} } @$funcs ] );
 
     for my $f ( $funcs->@* ) {
         warn "=== Hex dump of function '$f->{name}' (" . length( $f->{bytes} ) . " bytes) ===\n";
