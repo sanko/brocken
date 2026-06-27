@@ -562,8 +562,40 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                     else {
-                        my $src_r = $resolve->($src);
-                        my $sid   = $reg_id->($src_r);
+                        my $src_r;
+                        my $sid;
+                        if ( $src->kind eq 'imm' ) {
+                            my %used;
+                            @used{ values %$assignment } = ();
+                            my $tmp_r;
+                            for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
+                            die 'no temp register for imm operand' unless $tmp_r;
+                            $sid = $reg_id->($tmp_r);
+                            my $val = $src->value;
+                            if ( $val >= -2048 && $val <= 2047 ) {
+                                my $imm = $val & 0xFFF;
+                                $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
+                            }
+                            else {
+                                my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
+                                my @chunks;
+                                while ( $tmp != 0 ) {
+                                    push @chunks, $tmp & 0x7FF;
+                                    $tmp >>= 11;
+                                }
+                                my $first = pop @chunks;
+                                $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
+                                for my $chunk ( reverse @chunks ) {
+                                    $bytes .= pack( 'V', ( 11 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $sid << 7 ) | OP_IMM );
+                                    $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
+                                }
+                            }
+                            $src_r = $tmp_r;
+                        }
+                        else {
+                            $src_r = $resolve->($src);
+                            $sid = $reg_id->($src_r);
+                        }
                         $bytes .= pack( 'V',
                             ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
                     }
