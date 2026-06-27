@@ -76,7 +76,7 @@ my $make_x64_wrapper = sub ( $ext_str, $dlopen_rva, $dlsym_rva, $text, $macho, $
     my $func_name        = "my_func\0";
     my $lib_path_offset  = 128;
     my $func_name_offset = $lib_path_offset + length($lib_path);
-    my $entry_stub_len   = $macho ? 21 : 20;
+    my $entry_stub_len   = $macho ? 21 : 30;
     my $main_rva         = $text + $entry_stub_len;
     my $disp_libpath     = $lib_path_offset - 12;
     my $disp_dlopen      = $dlopen_rva - ( $main_rva + 23 );
@@ -117,7 +117,7 @@ my $make_arm64_wrapper = sub {
     my $func_name        = "my_func\0";
     my $lib_path_offset  = 64;
     my $func_name_offset = $lib_path_offset + length($lib_path);
-    my $entry_stub_len   = 20;
+    my $entry_stub_len   = $macho ? 20 : 24;
     my $main_rva         = $text + $entry_stub_len;
     my $disp_libpath     = $lib_path_offset - 8;
     my $disp_funcname    = $func_name_offset - 32;
@@ -219,7 +219,10 @@ SKIP: {
             = $is_arm64 ? $make_arm64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos ) :
             $is_riscv64 ? $make_riscv64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos ) :
             $make_x64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos, $platform->syscall('exit') );
-        my $entry_stub_len = $platform->is_arm64 ? 20 : ( $platform->is_macos ? 21 : 20 );
+        my $entry_stub_len = $platform->is_arm64 ? 24
+            : ( $platform->is_riscv64 ? 20
+            : ( $platform->is_macos ? 21
+            :                        30 ) );
         open my $fh, '+<:raw', $wrapper_file or die $!;
         seek( $fh, $text_off + $entry_stub_len, 0 );
         print $fh $wrapper_bytes;
