@@ -27,6 +27,10 @@ Key milestones reached so far:
 - Isolate (OS thread) lowering via `pthread_create`/`CreateThread` on all native targets
 - i128 arithmetic on all 4 targets
 - Standard Wasm module emission (no runtime imports)
+- Channel IR instructions, lowering stubs, and tests (6-instruction set)
+- Mutex/condvar (pthread_mutex_*, pthread_cond_*, SRWLOCK/CV) imports for all 3 native linkers
+- Katsuro v0.1 frontend: Lexer + Pratt Parser + AST + Compiler orchestrator (16 subtests)
+- Brocken v0.1 bootstrapping subset spec (`docs/subset.md`)
 
 ---
 
@@ -1022,10 +1026,12 @@ Using `wasmtime_fiber::Fiber` for cooperative isolation was considered but rejec
 | Fibers + ctx_swap | Done | ✅ |
 | i128 arithmetic | Done | ✅ |
 | Isolates (pthread/CreateThread) | Done | ✅ |
-| Channels (mutex/condvar) | **Next** | 🚧 |
-| Immix allocator + ICB expansion | After channels | 📝 |
+| Channels (IR, lower stubs, linker imports) | Done | ✅ |
+| Channels (data + native lower) | Deferred (post-frontend) | ⏸ |
+| Immix allocator + ICB expansion | Deferred (post-frontend) | 📝 |
 | Perceus RC elision | After allocator | 📝 |
-| Frontend (Katsuro parser) | Parallel track | 📝 |
+| Frontend (Katsuro v0.1) — Lexer + Parser + AST + Compiler | **Done** | ✅ |
+| AST→Lindsay IR Lowerer | **Next** | 🚧 |
 | Self-hosting bootstrap | Q4 2026 | 📝 |
 | Transferable objects | After allocator + RC | 📝 |
 | SIMD auto-vectorization | Future | 📝 |

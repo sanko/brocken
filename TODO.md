@@ -10,8 +10,8 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
       `3501`–`3508` (isolate/fiber), `3402`, `3405`, `3280`, `3150`, `3270`
 - [x] Fixed `Brocken.pm:59`; `$platform->triple` → `$platform->friendly` (method didn't exist)
 - [x] Migrated all native tests (no runtime codegen/linker): `3020_regalloc.t`, `3030_regalloc_frame.t`
-- [ ] **Linker-format tests** (`3110_elf.t`, `3120_pe.t`, `3130_macho.t`, `3140_ffi.t`) intentionally test specific linker formats; cannot use `$brocken->linker` since that returns the host linker.
-- [ ] **Cross-platform lowering tests** (`3250_gep.t`, `3260_i128_lowering.t`, `3401_fiber_lowering.t`) explicitly test each arch's lowerer (X86_64, ARM64, RISCV64, Wasm); not about codegen/linker selection.
+- [x] **Linker-format tests** (`3110_elf.t`, `3120_pe.t`, `3130_macho.t`, `3140_ffi.t`) intentionally test specific linker formats; cannot use `$brocken->linker` since that returns the host linker. All pass.
+- [x] **Cross-platform lowering tests** (`3250_gep.t`, `3260_i128_lowering.t`, `3401_fiber_lowering.t`) explicitly test each arch's lowerer (X86_64, ARM64, RISCV64, Wasm); not about codegen/linker selection. All pass.
 
 ### macOS Intel CI Failures
 - [x] **3505_isolate_args.t**; was generating ELF binaries on macOS (exit 126). Fixed by Brocken ADJUST (uses MachO linker on macOS).
@@ -88,33 +88,90 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] Conditional trampoline emission (only when isolate ops present)
 - [x] Compiled isolate runtime test (spawn + join + verify lifecycle)
 - [x] **Isolate return value propagation**  `isolate_join` passes NULL retval; doesn't capture thread result — fixed by Mach-O import stub fix (stubs pointed to dlopen, not pthread_join)
-- [ ] Wasm isolate stubs (lowerer + codegen)
-- [ ] Cross-isolate message passing (transferable objects)
+- [x] Wasm isolate stubs (lowerer) — `isolate_create`/`isolate_join` return `i64_const 0` placeholder
 
-## Phase 3: The Frontend (Parser & AST)
-- [ ] Define the "Brocken Subset" of Perl for self-hosting (variables, subs, basic control flow).
-- [ ] Implement Lexer and Parser.
-- [ ] **Gradual Typing & Native Builtins:** Introduce syntax for raw machine types (`my ptr $x`, `my i64 $y`) to bypass Fat Scalar overhead.
-- [ ] **Pseudo-Namespace Intrinsics:** Recognize calls like `Brocken::load_i64($ptr)` or `Brocken::ptr_add($p, $offset)` in the parser and lower them directly to single MIR instructions, enabling us to write the runtime in Perl.
-- [ ] Implement AST to Lindsay IR Codegen pass.
+## Active Sprint: Katsuro Frontend (Bootstrapping Subset v0.1)
 
-## Phase 3: The Frontend (Katsuro)
-- [ ] Define the "Brocken Subset" of Perl for self-hosting (variables, subs, basic control flow).
-- [ ] Implement Lexer and Pratt Parser.
-- [ ] **Gradual Typing & Native Builtins:** Introduce syntax for raw machine types (`my ptr $x`, `my i64 $y`) to bypass Fat Scalar overhead.
-- [ ] **Pseudo-Namespace Intrinsics:** Recognize calls like `Brocken::load_i64($ptr)` or `Brocken::ptr_add($p, $offset)` in the parser and lower them directly to single MIR instructions, enabling us to write the runtime in Perl.
-- [ ] Implement AST to Lindsay IR Codegen pass.
+### Completed: Language Features
+- [x] **Subset spec:** `docs/subset.md` — formal Brocken v0.1 bootstrapping language spec
+- [x] **Lexer:** Finite-state tokenizer with keywords, sigils, numbers, strings, operators
+- [x] **AST nodes:** Program, VarDecl, Assign, Block, If, While, Return, BinOp, UnOp, Const,
+      Var, Ident, Paren, Call, IntrinsicCall, SubDecl, ClassDecl, FieldDecl, ArrayDecl, ArrayIndex
+- [x] **Parser:** Recursive descent (statements) + Pratt parser (expressions) —
+      handles all v0.1 constructs including arrays, classes, methods, field access, `use feature`
+- [x] **Compiler orchestrator:** `Brocken::Compiler` — lex → parse → AST
+- [x] **Tests:** 25 parser subtests; 26 lowerer subtests; 19 integration subtests (all passing)
+
+### Completed: Lowering & Pipeline
+- [x] **AST→Lindsay IR Lowerer:** Two-pass conversion of `AST::Program` into `Lindsay::IR::Module`
+      with blocks, instructions, and SSA values using the existing Builder API.
+      Handles: sub decl, class methods, var decl/assign, if/elsif/else, while, return,
+      binops, unops, comparisons, function calls, Brocken::* intrinsics, say/print, arrays,
+      field access, auto-generated readers/writers/constructors, ADJUST blocks.
+- [x] **End-to-end pipeline:** Wire Compiler output into Jenny codegen + linker → runnable binary.
+      Test compiles v0.1 programs, codegens, links, executes, and verifies exit codes.
+      19 subtests covering: constants, vars, arithmetic, if/else, while, comparisons,
+      function calls, factorial, logical not, class constructors, readers, writers,
+      custom methods, ADJUST, direct field read/write, implicit main, arrays, i128.
+
+### Completed: Array Support
+- [x] **ArrayDecl AST node** — parses `my i64 @arr = [10, 20, 30];`
+- [x] **ArrayIndex AST node** — parses `$arr[0]` for both read and write
+- [x] **Lowering** — alloca with element count, GEP for element access, load/store
+
+### Completed: Class Methods & Auto-Generated Accessors
+- [x] **Method declarations** — `method foo() -> TYPE { ... }` inside class, lowered as `ClassName::foo`
+- [x] **`:reader` attribute** — auto-generates getter method
+- [x] **`:writer` attribute** — auto-generates setter method (`set_<name>`)
+- [x] **`:param` attribute** — auto-generates constructor (`ClassName->new(...)`)
+- [x] **ADJUST block** — runs after constructor assigns :param fields
+- [x] **`__CLASS__` expression** — compile-time class name constant
+- [x] **MethodCall expression** — `$obj->method(args)` lowered to `ClassName::method($obj, args)`
+
+### Completed: Implicit Entry Point
+- [x] **`sub main` is just a function** — no special heap param, no automatic invocation
+- [x] **Top-level code becomes `_BROCKEN_ENTRY`** — internal function with heap_base param
+- [x] **All codegen/linker paths** — replaced `main` references with `_BROCKEN_ENTRY`
+- [x] **Parser filters `use feature`** — returns `undef` statements filtered in `parse_program`
+
+### Known Issues (Resolved)
+- [x] **Duplicate block names in MIR codegen:** Fixed — Lowerer now generates unique block names via `$block_id` counter.
+- [x] **`terminator` returned last instruction regardless of type:** Fixed — now checks `isa` for Ret/Br/CondBr.
+- [x] **SSA name collisions on var ref:** Fixed — `lower_var_ref` no longer passes explicit names to `build_load`.
+- [x] **`as_condition` i1 detection:** Fixed — now checks `bits == 1` instead of `kind eq 'i1'`.
+- [x] **Class runtime ordering:** ClassDecls now generate before SubDecl bodies in Pass 2, so auto-generated methods exist when entry function body calls them.
+
+### Upcoming
+- [ ] **Dynamic (boxed) types at top level:** `my Int $x = 10` currently lowers like `i64`; needs actual box allocation
+- [ ] **String support:** String literals, `say("hello")` with runtime string data, string concatenation
+- [ ] **Debug info:** Source location tracking through the pipeline (line numbers in errors)
+- [ ] **Better error messages:** Report source line + column for parse/lower/codegen errors
+- [ ] **Hash support:** `%` hashes, basic key-value storage
+- [ ] **Write `core.brocken`:** Start implementing runtime primitives (allocator, channels) using v0.1 subset
+
+## Deferred (post-frontend)
+
+### Channels (blocked until Immix allocator)
+- [x] **IR instructions:** `chan_create`, `chan_send`, `chan_recv`, `chan_close`, `chan_try_send`, `chan_try_recv` (IR.pm + Builder.pm)
+- [x] **Lowering stubs (all 4 targets):** Wasm + X86_64 + ARM64 + RISCV64 return 0 / no-op
+- [x] **Tests:** Lowering tests (MIR opcode verification on all 4 targets) + IR render tests
+- [x] **Doc:** Interface spec defined in `docs/brief.md` §3 + Mermaid diagrams
+- [x] **Linker imports:** Added mutex/condvar symbols (pthread_mutex_lock/unlock, pthread_cond_wait/signal/broadcast) to ELF64, MachO, and PE linkers
+- [ ] **Channel data structure:** Global fixed-size table in .data section
+- [ ] **Lowering (X86_64/ARM64/RISCV64):** Inline pthread_mutex/pthread_cond sequences
+- [ ] **Runtime tests:** Two-isolate send/recv (native, compiled execution)
 
 ## Phase 4: Self-Hosted Runtime & Memory Management (`core.brocken`)
 *Architecture Note: Brocken uses "Isolates" (share-nothing OS threads) and cooperative fibers. Because heaps are entirely thread-local, Garbage Collection and Reference Counting require **zero atomic locks**.*
 
-- [ ] **Fat Scalar Layout:** Define the universal value struct using the native subset (Type Tag, RC, Cycle-Detector Mark, Payload).
-- [ ] **Immediate RC:** Implement `incref` and `decref` builtins. Guarantee deterministic `DESTROY` blocks.
-- [ ] **Bacon & Rajan Trial Deletion:** Implement the cycle collector to reap uncollectable circular references via the Isolate's Suspect Buffer.
-- [ ] **RC Immix Allocator:** Implement 32KB block / 256-byte line bump-pointer allocation in the Perl subset.
-- [ ] **Fiber Stack Scanning:** Implement logic to walk the stacks of suspended fibers to find live GC roots.
-- [ ] **UTF-8 Everywhere Strings:** Implement native string operations assuming pure UTF-8 payloads.
-- [ ] **Self-Hosted PerlIO:** Implement a vtable-based layered I/O system (e.g., `:unix` raw bytes -> `:utf8` validation).
+- [x] **Fat Scalar Layout:** 16-byte dynamic value struct (refcount + gc_flags + type_tag + aux_data + payload). Implemented via `box`/`unbox` IR (stack-allocated for now).
+- [ ] **Immediate RC:** Build the `Brocken::Runtime::incref`/`decref` module (currently placeholders in lowering).
+- [ ] **Immix Cycle Detector:** Mark-region trace of the isolate's Immix heap to reclaim cyclic garbage. Replaces trial deletion.
+- [ ] **RC Immix Allocator:** Implement 32KB block / 256-byte line bump-pointer allocation in the Perl subset. Replace the current `box`→`alloca` approach.
+- [ ] **Perceus RC Elision:** Static analysis pass cancels redundant incref/decref pairs; enables in-place mutation when refcount==1.
+- [ ] **Fiber Stack Scanning:** Walk stacks of suspended fibers to find live GC roots.
+- [ ] **UTF-8 Everywhere Strings:** Native string operations assuming pure UTF-8 payloads.
+- [ ] **Self-Hosted PerlIO:** Vtable-based layered I/O system (e.g., `:unix` raw bytes → `:utf8` validation).
 
 ## Phase 5: Optimization & GC Lowering (Lindsay Middle-end)
 - [ ] **RC Insertion Pass:** Automatically insert `incref` and `decref` IR instructions around variable assignments. Utilize the Defer Stack to emit `decref` operations at scope exits.
