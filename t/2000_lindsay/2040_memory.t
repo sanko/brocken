@@ -124,7 +124,7 @@ SKIP: {
         my $linker  = $brocken->linker;
         #
         my $funcs       = $codegen->emit_functions( \@functions );
-        my $output_file = 'memory_model_test' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/memory_model_test' . $brocken->ext;
         $linker->write_executable( $output_file, $funcs, $host );
 
         # If this succeeds and returns 1, our allocator, RC system,

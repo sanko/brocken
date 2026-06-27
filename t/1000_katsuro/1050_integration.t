@@ -13,10 +13,9 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile('return 42;');
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
-        my $file   = 'e2e_ret_const' . $brocken->ext;
+        my $file   = $brocken->tmpdir . '/e2e_ret_const' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, 'return 42' );
         unlink $file;
     }
@@ -33,10 +32,9 @@ $y = 32;
 return $x + $y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_vars' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_vars' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, '10 + 32 = 42' );
         unlink $file;
     }
@@ -51,10 +49,9 @@ my i64 $r = 1 + 2 * 3;
 return $r;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_arith' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_arith' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 7, '1 + 2 * 3 = 7' );
         unlink $file;
     }
@@ -73,10 +70,9 @@ if ($x) {
 }
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_if' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_if' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, 'if branch taken' );
         unlink $file;
     }
@@ -95,10 +91,9 @@ if ($x) {
 }
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_else' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_else' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, 'else branch taken' );
         unlink $file;
     }
@@ -118,10 +113,9 @@ while ($i < 10) {
 return $s;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_while' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_while' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 45, 'sum 0..9 = 45' );
         unlink $file;
     }
@@ -139,10 +133,9 @@ if ($a != $b) { return 2; }
 return 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_cmp' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_cmp' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 2, 'a != b is true' );
         unlink $file;
     }
@@ -159,10 +152,9 @@ sub helper() -> i64 {
 return helper();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_call' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_call' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, 'helper() returned 42' );
         unlink $file;
     }
@@ -185,10 +177,9 @@ sub factorial(i64 $n) -> i64 {
 return factorial(5);
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_fact' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_fact' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 120, '5! = 120' );
         unlink $file;
     }
@@ -204,10 +195,9 @@ if (! $a) { return 42; }
 return 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_not' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_not' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, '!0 is true' );
         unlink $file;
     }
@@ -225,10 +215,9 @@ my ptr $p = Point->new(42);
 return $p->x();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_class_reader' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_class_reader' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, 'class with reader method' );
         unlink $file;
     }
@@ -247,10 +236,9 @@ $c->set_count(32);
 return $c->count();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_class_writer' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_class_writer' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 32, 'class with writer method' );
         unlink $file;
     }
@@ -271,10 +259,9 @@ my ptr $p = Point->new(3);
 return $p->x();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_class_adjust' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_class_adjust' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 10, 'ADJUST clamps value to minimum 10' );
         unlink $file;
     }
@@ -293,10 +280,9 @@ my ptr $p = Point->new(21);
 return $p->double();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_class_method' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_class_method' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, 'custom method returns doubled value' );
         unlink $file;
     }
@@ -314,10 +300,9 @@ my ptr $p = Point->new(42);
 return $p->x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_field_read' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_field_read' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, 'direct field read returns param value' );
         unlink $file;
     }
@@ -336,10 +321,9 @@ $p->x = 42;
 return $p->x;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_field_write' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_field_write' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, 'field write then read returns written value' );
         unlink $file;
     }
@@ -358,10 +342,9 @@ my i64 $y = 32;
 return $x + $y;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_implicit_main' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_implicit_main' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 42, 'implicit main returns 42' );
         unlink $file;
     }
@@ -385,10 +368,9 @@ my i64 $sum = @arr[0] + @arr[1] + @arr[2] + @arr[3] + @arr[4];
 return $sum;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_array_sum' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_array_sum' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 150, 'sum of array elements 10+20+30+40+50 = 150' );
         unlink $file;
     }
@@ -411,10 +393,9 @@ my [i64; 3] @arr;
 return @arr[0] + @arr[1] + @arr[2];
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        my $file  = 'e2e_array_feature' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/e2e_array_feature' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $cmd = $host->is_windows ? $file : "./$file";
-        system {$cmd} $cmd;
+        system $file;
         is( $? >> 8, 6, 'array sum with feature flag = 6' );
         unlink $file;
     }

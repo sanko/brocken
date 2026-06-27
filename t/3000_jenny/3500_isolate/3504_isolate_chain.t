@@ -34,7 +34,7 @@ SKIP: {
         $mb->build_isolate_join($outer_iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
         my $funcs = $brocken->codegen->emit_functions( [ $main, $outer, $inner ] );
-        my $file  = 'isolate_chain_2' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/isolate_chain_2' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate spawns isolate exit 99', platform => $host, keep => 1, gdb => $dbg );
@@ -66,7 +66,7 @@ SKIP: {
         $mb->build_isolate_join($main_iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
         my $funcs = $brocken->codegen->emit_functions( [ $main, $outer, $middle, $inner ] );
-        my $file  = 'isolate_chain_3' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/isolate_chain_3' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate chain depth 3 exit 99', platform => $host, keep => 1, gdb => $dbg );

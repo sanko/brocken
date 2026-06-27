@@ -93,7 +93,7 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 ## Active Sprint: Katsuro Frontend (Bootstrapping Subset v0.1)
 
 ### Completed: Language Features
-- [x] **Subset spec:** `docs/subset.md` — formal Brocken v0.1 bootstrapping language spec
+- [x] **Subset spec:** `docs/spec.md §2.16` — formal Brocken v0.1 bootstrapping language spec
 - [x] **Lexer:** Finite-state tokenizer with keywords, sigils, numbers, strings, operators
 - [x] **AST nodes:** Program, VarDecl, Assign, Block, If, While, Return, BinOp, UnOp, Const,
       Var, Ident, Paren, Call, IntrinsicCall, SubDecl, ClassDecl, FieldDecl, ArrayDecl, ArrayIndex
@@ -155,7 +155,7 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] **IR instructions:** `chan_create`, `chan_send`, `chan_recv`, `chan_close`, `chan_try_send`, `chan_try_recv` (IR.pm + Builder.pm)
 - [x] **Lowering stubs (all 4 targets):** Wasm + X86_64 + ARM64 + RISCV64 return 0 / no-op
 - [x] **Tests:** Lowering tests (MIR opcode verification on all 4 targets) + IR render tests
-- [x] **Doc:** Interface spec defined in `docs/brief.md` §3 + Mermaid diagrams
+- [x] **Doc:** Interface spec defined in `docs/spec.md §5.3` + Mermaid diagrams
 - [x] **Linker imports:** Added mutex/condvar symbols (pthread_mutex_lock/unlock, pthread_cond_wait/signal/broadcast) to ELF64, MachO, and PE linkers
 - [ ] **Channel data structure:** Global fixed-size table in .data section
 - [ ] **Lowering (X86_64/ARM64/RISCV64):** Inline pthread_mutex/pthread_cond sequences

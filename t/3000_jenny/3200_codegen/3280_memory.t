@@ -122,7 +122,7 @@ subtest 'Jenny::Codegen Memory System' => sub {
     is( scalar $funcs->@*, 5,       'emit_functions returned 5 entries' );
 SKIP: {
         skip 'Execution test only on native hosts', 2 unless $host->is_native;
-        my $output_file = 'memory_test' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/memory_test' . $brocken->ext;
         $brocken->linker->write_executable( $output_file, $funcs, $host );
         ok( -e $output_file, 'Memory system binary exists' );
         run_exec(

@@ -8,6 +8,7 @@ use Brocken::Jenny::Codegen::ARM64::Inst;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 use Config;
+use Cwd qw(getcwd);
 my $brocken    = Brocken->new();
 my $platform   = $brocken->platform;
 my $is_arm64   = $platform->is_arm64;
@@ -26,7 +27,7 @@ $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Linds
 my $codegen       = $brocken->codegen;
 my $machine_bytes = $codegen->emit_function($func_ext);
 my $ext           = $platform->lib_ext;
-my $lib_file      = './libtest_prog' . $ext;
+my $lib_file      = $brocken->tmpdir . '/libtest_prog' . $ext;
 
 if ($is_windows) {
     my $shared_linker = Brocken::Jenny::Linker::PE->new( type => 'shared' );
@@ -200,19 +201,19 @@ SKIP: {
         }
     }
     elsif ( $is_posix && ( $is_x64 || $is_arm64 || $is_riscv64 ) ) {
-        my $wrapper_file = './test_wrapper';
+        my $wrapper_file = $brocken->tmpdir . '/test_wrapper';
         my $wrapper_linker
             = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new( type => 'exe' ) : Brocken::Jenny::Linker::ELF64->new( type => 'exe' );
         $wrapper_linker->set_has_ffi(1) if $platform->is_macos;
         my $code_sz     = ( $is_arm64 || $is_riscv64 ) ? 128 : 160;
         my $dummy_bytes = "\x00" x $code_sz;
         $wrapper_linker->write_executable( $wrapper_file, $dummy_bytes, $platform );
-        my $got_rva    = $wrapper_linker->layout->get('.got')->{rva};
-        my $dlopen_rva = $wrapper_linker->import_rva('dlopen');
-        my $dlsym_rva  = $wrapper_linker->import_rva('dlsym');
-        my $text_rva   = $wrapper_linker->layout->get('.text')->{rva};
-        my $text_off   = $wrapper_linker->layout->get('.text')->{off};
-        my $entry_stub_len  = $wrapper_linker->entry_stub_len($platform);
+        my $got_rva        = $wrapper_linker->layout->get('.got')->{rva};
+        my $dlopen_rva     = $wrapper_linker->import_rva('dlopen');
+        my $dlsym_rva      = $wrapper_linker->import_rva('dlsym');
+        my $text_rva       = $wrapper_linker->layout->get('.text')->{rva};
+        my $text_off       = $wrapper_linker->layout->get('.text')->{off};
+        my $entry_stub_len = $wrapper_linker->entry_stub_len($platform);
         my $wrapper_bytes
             = $is_arm64 ? $make_arm64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos, $entry_stub_len ) :
             $is_riscv64 ? $make_riscv64_wrapper->( $ext, $dlopen_rva, $dlsym_rva, $text_rva, $platform->is_macos, $entry_stub_len ) :
@@ -226,7 +227,10 @@ SKIP: {
         ok -x $wrapper_file, 'POSIX wrapper has execution permissions';
         local $ENV{LD_LIBRARY_PATH}   = join( ':', '.', $ENV{LD_LIBRARY_PATH}   // () );
         local $ENV{DYLD_LIBRARY_PATH} = join( ':', '.', $ENV{DYLD_LIBRARY_PATH} // () );
-        system('./test_wrapper');
+        my $cwd = getcwd;
+        chdir $brocken->tmpdir;
+        system './test_wrapper';
+        chdir $cwd;
         my $status    = $?;
         my $exit_code = $status >> 8;
         my $signal    = $status & 127;

@@ -21,7 +21,7 @@ ok( length($bytes) > 0, 'Generated box/unbox bytes for ' . $platform->friendly )
 my $linker = $brocken->linker;
 SKIP: {
     skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-    my $output_file = 'box_test' . $brocken->ext;
+    my $output_file = $brocken->tmpdir . '/box_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
     ok( -x $output_file || $platform->is_windows, 'Box/unbox binary exists' );
     run_exec( $output_file, expected_exit => 42, platform => $platform, name => 'Box/unbox binary returned 42 on ' . $platform->friendly );

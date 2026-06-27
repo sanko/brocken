@@ -45,11 +45,10 @@ subtest 'RISCV64 fiber yield passes value to main exit code' => sub {
 SKIP: {
         skip 'Only for RISC-V 64 native hosts', 2 unless $platform->is_riscv64 && $platform->is_native;
         my $linker      = $brocken->linker;
-        my $output_file = 'fiber_test_riscv64' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/fiber_test_riscv64' . $brocken->ext;
         $linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'RISCV64 fiber test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
-        my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, 99, 'RISCV64 fiber test exited with 99' );
         unlink $output_file;

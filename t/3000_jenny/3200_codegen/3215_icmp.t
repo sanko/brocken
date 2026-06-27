@@ -33,11 +33,10 @@ my $platform = $brocken->platform;
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'icmp_test' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/icmp_test' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file || $platform->is_windows, 'ICmp binary exists' );
-        my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, 42, 'ICmp signed (42 sgt 0 = true) returned 42 on ' . $platform->friendly );
         unlink $output_file;
@@ -68,11 +67,10 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'icmp_unsigned_test' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/icmp_unsigned_test' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file || $platform->is_windows, 'ICmp unsigned binary exists' );
-        my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, 42, 'ICmp unsigned (42 ugt 0 = true) returned 42 on ' . $platform->friendly );
         unlink $output_file;

@@ -24,11 +24,10 @@ ok( length($bytes) > 0, 'Generated math bytes for ' . $platform->friendly );
 my $linker = $brocken->linker;
 SKIP: {
     skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-    my $output_file = 'math_test' . $brocken->ext;
+    my $output_file = $brocken->tmpdir . '/math_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
     ok( -x $output_file || $platform->is_windows, 'Math binary exists' );
-    my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-    system {$cmd} $cmd;
+    system $output_file;
     my $exit_code = $? >> 8;
     is( $exit_code, 42, 'Math binary returned 42 on ' . $platform->friendly );
     unlink $output_file;

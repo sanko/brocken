@@ -36,7 +36,7 @@ SKIP: {
         $mb->build_ret($r3);
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
         is( scalar @$funcs, 3, '3 functions emitted (wrapper, _real_main, worker_fn)' );
-        my $file = 'fiber_multi_yield' . $brocken->ext;
+        my $file = $brocken->tmpdir . '/fiber_multi_yield' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 77, name => 'multi-yield fiber exit 77', platform => $host );
     };
@@ -70,7 +70,7 @@ SKIP: {
         $mb->build_ret($r3);
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker1, $worker2 ] );
         is( scalar @$funcs, 4, '4 functions emitted (wrapper, _real_main, worker_one, worker_two)' );
-        my $file = 'fiber_two_workers' . $brocken->ext;
+        my $file = $brocken->tmpdir . '/fiber_two_workers' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 111, name => 'two-fiber resume worker1 yields 111', platform => $host );
     };
@@ -98,7 +98,7 @@ SKIP: {
         $mb->build_ret($recv);
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
         is( scalar @$funcs, 3, '3 functions emitted (wrapper, _real_main, worker_fn)' );
-        my $file = 'fiber_stack_stress' . $brocken->ext;
+        my $file = $brocken->tmpdir . '/fiber_stack_stress' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 55, name => 'stack stress fiber exit 55', platform => $host );
     };
@@ -127,7 +127,7 @@ SKIP: {
         $mb->build_ret($r4);
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
         is( scalar @$funcs, 3, '3 functions emitted' );
-        my $file = 'fiber_chain' . $brocken->ext;
+        my $file = $brocken->tmpdir . '/fiber_chain' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 42, name => 'chain fiber last yield 42', platform => $host, keep => 1, gdb => $dbg );
@@ -169,7 +169,7 @@ SKIP: {
         $mb->build_ret($r4);
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker1, $worker2, $worker3 ] );
         is( scalar @$funcs, 5, '5 functions emitted' );
-        my $file = 'fiber_interleave' . $brocken->ext;
+        my $file = $brocken->tmpdir . '/fiber_interleave' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         run_exec( $file, expected_exit => 50, name => 'interleaved three-fiber exit 50', platform => $host );
     };

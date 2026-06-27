@@ -33,11 +33,10 @@ SKIP: {
         my $expect_fn_count = $platform->is_windows ? 4 : 3;
         ok( scalar @$funcs == $expect_fn_count, "emit_functions produced $expect_fn_count functions" ) or
             diag( join( ', ', map { $_->{name} // '?' } $funcs->@* ) );
-        my $output_file = 'isolate_test' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/isolate_test' . $brocken->ext;
         $brocken->linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'Isolate test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
-        my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, 99, 'Isolate test exited with 99 (lifecycle completed)' );
 

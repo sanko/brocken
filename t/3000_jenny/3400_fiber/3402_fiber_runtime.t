@@ -35,11 +35,10 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
         ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or
             diag( 'got: ', [ map { $_->{name} } @$funcs ] );
-        my $output_file = 'fiber_test' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/fiber_test' . $brocken->ext;
         $brocken->linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'Fiber test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
-        my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, 99, 'Fiber test exited with 99 (yield value propagated)' );
         unlink $output_file;

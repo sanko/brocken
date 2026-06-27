@@ -6,7 +6,8 @@ use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature qw[class];
+use feature               qw[class];
+use Test2::Tools::Brocken qw(temp_path);
 my $host          = Brocken::Katsuro::Platform::parse();
 my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
@@ -28,7 +29,7 @@ chomp $node_path if $node_path;
     my $res     = $codegen->emit_function($func);
     ok( length( $res->{body} ) > 0, 'Generated Wasm memory bytes' );
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
-    my $output_file = 'mem_test.wasm';
+    my $output_file = temp_path('mem_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
     ok( -e $output_file, 'Wasm memory file exists' );
 SKIP: {
@@ -66,7 +67,7 @@ SKIP: {
     my $res     = $codegen->emit_function($func);
     ok( length( $res->{body} ) > 0, 'Generated Wasm box/unbox bytes' );
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
-    my $output_file = 'box_test.wasm';
+    my $output_file = temp_path('box_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
     ok( -e $output_file, 'Wasm box/unbox file exists' );
 SKIP: {

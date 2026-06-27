@@ -53,11 +53,53 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
     }
 
+    method _build_entry_stub( $platform, $func_offsets, $text_rva, $got_exit ) {
+        if ( $platform->is_arm64 ) {
+            my $sub  = pack( 'V', 0xD1000000 | ( 1 << 23 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31 );
+            my $add  = add_imm( 0, 31, 0 );
+            my $bl_main = bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
+            my $adrp    = adrp( 8, $got_exit, $text_rva + 12 );
+            my $ldr     = ldr_64( 8, 8, $got_exit & 0xFFF );
+            my $blr     = blr(8);
+            my $brk     = brk(0);
+            return pack 'V7', $sub, $add, $bl_main, $adrp, $ldr, $blr, $brk;
+        }
+        if ( $platform->is_riscv64 ) {
+            my $auipc_pc = $text_rva + 16;
+            my $diff     = $got_exit - $auipc_pc;
+            my $hi20     = ( $diff + 0x800 ) >> 12;
+            my $lo12     = $diff & 0xFFF;
+            my $lui      = pack( 'V', ( 256 << 12 ) | ( 5 << 7 ) | 0x37 );
+            my $sub      = pack( 'V', 0x40510133 );
+            my $mv       = pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 10 << 7 ) | 0x13 );
+            my $auipc    = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;
+            my $ld       = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
+            my $jalr     = ( 0 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 0 << 7 ) | 0x67;
+            my $jal_ofs  = 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
+            my $half     = $jal_ofs >> 1;
+            my $jal_imm  = ( ( $half >> 19 ) & 1 ) << 31 | ( ( $half & 0x3FF ) << 21 )
+                | ( ( $half >> 10 ) & 1 ) << 20 | ( ( $half >> 11 ) & 0xFF ) << 12;
+            my $jal   = $jal_imm | ( 1 << 7 ) | 0x6F;
+            my $ebrk  = 0x00100073;
+            return pack 'V8', $lui, $sub, $mv, $jal, $auipc, $ld, $jalr, $ebrk;
+        }
+        my $HEAP_SIZE = 1048576;
+        my $next_ip   = $text_rva + 28;
+        my $rel32     = $got_exit - $next_ip;
+        my $main_rel  = 11 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
+        my $stub      = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );              # and rsp, -16
+        $stub .= pack( 'C3 V',  0x48, 0x81, 0xEC, $HEAP_SIZE );            # sub rsp, HEAP_SIZE
+        $stub .= pack( 'C3',    0x48, 0x89, 0xE7 );                        # mov rdi, rsp
+        $stub .= pack( 'C V',   0xE8, $main_rel );                          # call main
+        $stub .= pack( 'C3',    0x48, 0x89, 0xC7 );                        # mov rdi, rax
+        $stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );                      # call [rip + exit]
+        $stub .= pack( 'C2',    0x0F, 0x0B );                               # ud2
+        return $stub;
+    }
+
     method entry_stub_len($platform) {
         return 0 unless $self->type eq 'exe';
-        return 20 if $platform->is_arm64;    # bl, adrp, ldr, blr, brk = 5*4
-        return 20 if $platform->is_riscv64;  # jal, auipc, ld, jalr, ebreak = 5*4
-        return 30;  # x86_64: and(4) + sub(7) + mov(3) + call(5) + mov(3) + call-exit(6) + ud2(2)
+        return length( $self->_build_entry_stub( $platform, {}, 0, 0 ) );
     }
 
     method import_rva($name) {
@@ -141,60 +183,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $entry_stub = '';
 
         if ( $self->type eq 'exe' ) {
-            if ( $platform->is_arm64 ) {
-
-                # ARM64 entry: bl main -> adrp x8, exit-GOT-page -> ldr x8, [x8, exit-GOT-off] -> blr x8 -> brk #0
-                my $got_exit = $self->import_rva('exit');
-                my $bl_main  = bl( 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
-                my $adrp     = adrp( 8, $got_exit, $text_rva + 4 );
-                my $pimm     = $got_exit & 0xFFF;
-                my $ldr      = ldr_64( 8, 8, $pimm );
-                my $blr      = blr(8);
-                my $brk      = brk(0);
-                $entry_stub = pack 'V5', $bl_main, $adrp, $ldr, $blr, $brk;
-            }
-            elsif ( $platform->is_riscv64 ) {
-
-                # RISC-V entry: jal main -> auipc t0, exit-GOT-hi -> ld t0, [t0, exit-GOT-lo] -> jalr zero, t0, 0 -> ebreak
-                my $got_exit   = $self->import_rva('exit');
-                my $auipc_pc   = $text_rva + 4;
-                my $diff       = $got_exit - $auipc_pc;
-                my $hi20       = ( $diff + 0x800 ) >> 12;
-                my $lo12       = $diff & 0xFFF;
-                my $auipc      = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;
-                my $ld         = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
-                my $jalr       = ( 0 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 0 << 7 ) | 0x67;
-                my $jal_offset = 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 );
-                my $halfword   = $jal_offset >> 1;
-                my $jal_imm    = ( ( $halfword >> 19 ) & 1 ) << 31 | ( ( $halfword & 0x3FF ) << 21 ) | ( ( $halfword >> 10 ) & 1 ) << 20
-                    | ( ( $halfword >> 11 ) & 0xFF ) << 12;
-                my $jal    = $jal_imm | ( 1 << 7 ) | 0x6F;
-                my $ebreak = 0x00100073;
-                $entry_stub = pack( 'V5', $jal, $auipc, $ld, $jalr, $ebreak );
-            }
-            else {
-                # x86_64 Dynamic Exit Stub with heap + System V RSP alignment
-                # Layout:
-                #   0:  and rsp, -16
-                #   4:  sub rsp, HEAP_SIZE  (1 MB)
-                #  11:  mov rdi, rsp          (heap base in rdi, harmless if main takes no args)
-                #  14:  call main
-                #  19:  mov rdi, rax
-                #  22:  call [rip + exit]
-                #  28:  ud2
-                my $HEAP_SIZE = 1048576;
-                my $got_exit  = $self->import_rva('exit');
-                my $next_ip   = $text_rva + 28;
-                my $rel32     = $got_exit - $next_ip;
-                my $main_rel  = 11 + ( $func_offsets{_BROCKEN_ENTRY} // 0 );
-                $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );              # and rsp, -16
-                $entry_stub .= pack( 'C3 V',  0x48, 0x81, 0xEC, $HEAP_SIZE );    # sub rsp, HEAP_SIZE
-                $entry_stub .= pack( 'C3',    0x48, 0x89, 0xE7 );                # mov rdi, rsp
-                $entry_stub .= pack( 'C V',   0xE8, $main_rel );                 # call main
-                $entry_stub .= pack( 'C3',    0x48, 0x89, 0xC7 );                # mov rdi, rax
-                $entry_stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );              # call [rip + exit]
-                $entry_stub .= pack( 'C2',    0x0F, 0x0B );                      # ud2
-            }
+            my $got_exit  = $self->import_rva('exit');
+            $entry_stub = $self->_build_entry_stub( $platform, \%func_offsets, $text_rva, $got_exit );
             $text = $entry_stub . $code_bytes;
             $self->layout->get('.text')->{size} = length($text);
         }

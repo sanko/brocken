@@ -40,6 +40,7 @@ into a final executable or shared library.
     method set_exported_funcs($f) { $exported_funcs = $f; }
     #
     method entry_stub_len($platform) { return 0; }
+
     method rva_for($name) {
         return 0x1000 if $name eq '.text' && !defined $_layout;
         return $self->layout->get($name)->{rva};

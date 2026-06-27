@@ -35,7 +35,7 @@ SKIP: {
         $mb->build_isolate_join($iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker, $inner ] );
-        my $file  = 'isolate_fiber_interop' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/isolate_fiber_interop' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'fiber inside isolate exit 99', platform => $host, keep => 1, gdb => $dbg );
@@ -77,7 +77,7 @@ SKIP: {
         $mb->build_isolate_join($iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker, $fiber_a, $fiber_b ] );
-        my $file  = 'isolate_chained_fibers' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/isolate_chained_fibers' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate with chained fibers exit 99', platform => $host, keep => 1, gdb => $dbg );

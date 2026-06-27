@@ -26,7 +26,7 @@ my $platform = $brocken->platform;
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_const_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_const_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 1 constant: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -58,7 +58,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_add_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_add_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 2 add: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -90,7 +90,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_shl_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_shl_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 3 shl: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -122,7 +122,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_mul_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_mul_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 3b mul: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -154,7 +154,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_lshr_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_lshr_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 4 lshr: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -191,7 +191,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_ashr_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_ashr_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 5 ashr: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -228,7 +228,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_div_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_div_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 6 div: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -260,7 +260,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_rem_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_rem_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 7 rem: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -292,7 +292,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_carry_add_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_carry_add_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 8 carry add: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -329,7 +329,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sub_5_3_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_sub_5_3_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 9 sub: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -361,13 +361,12 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_borrow_sub_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_borrow_sub_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 9b borrow sub: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
         ok( -e $output_file, 'Native i128 borrow sub file exists' );
-        my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, 255, 'Native i128 borrow sub (0-1) returned 255 on ' . $platform->friendly );
         my $t3 = time;
@@ -396,7 +395,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_edge_mul_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_edge_mul_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 10 mul: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -433,7 +432,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_edge_div_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_edge_div_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 11 div: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -470,7 +469,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_edge_rem_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_edge_rem_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 12 rem: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -507,7 +506,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sub_neg_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_sub_neg_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 13 sub neg: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -544,7 +543,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_add_carry_hi_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_add_carry_hi_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 14 carry hi: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -581,7 +580,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_and_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_and_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 15 and: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -618,7 +617,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_or_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_or_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 16 or: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -650,7 +649,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_xor_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_xor_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 17 xor: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -687,13 +686,12 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sdiv1_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_sdiv1_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 18 sdiv1: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
         ok( -e $output_file, 'Native i128 signed div (-42/2) file exists' );
-        my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit = $? >> 8;
         is( $exit, 235, 'Native i128 signed div (-42/2) returned 235 (-21) on ' . $platform->friendly );
         my $t3 = time;
@@ -722,13 +720,12 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sdiv2_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_sdiv2_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 19 sdiv2: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
         ok( -e $output_file, 'Native i128 signed div (42/-2) file exists' );
-        my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit = $? >> 8;
         is( $exit, 235, 'Native i128 signed div (42/-2) returned 235 (-21) on ' . $platform->friendly );
         my $t3 = time;
@@ -757,7 +754,7 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_sdiv3_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_sdiv3_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 20 sdiv3: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
@@ -794,13 +791,12 @@ SKIP: {
     my $linker = $brocken->linker;
 SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-        my $output_file = 'i128_srem1_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/i128_srem1_native' . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         my $t2 = time;
         diag( 'Test 21 srem: link=' . int( ( $t2 - $t1 ) * 1000 + 0.5 ) . 'ms' );
         ok( -e $output_file, 'Native i128 signed rem (-42%5) file exists' );
-        my $cmd = $platform->is_windows ? '.\\' . $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit = $? >> 8;
         is( $exit, 254, 'Native i128 signed rem (-42%5) returned 254 (-2) on ' . $platform->friendly );
         my $t3 = time;

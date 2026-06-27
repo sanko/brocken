@@ -33,7 +33,7 @@ SKIP: {
         $mb->build_isolate_join($iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
-        my $file  = 'isolate_one_arg' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/isolate_one_arg' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate with one arg exit 99', platform => $host, keep => 1, gdb => $dbg );
@@ -68,7 +68,7 @@ SKIP: {
         $mb->build_isolate_join($iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
-        my $file  = 'isolate_multi_args' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/isolate_multi_args' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate with 3 args exit 99', platform => $host, keep => 1, gdb => $dbg );
@@ -87,7 +87,7 @@ SKIP: {
         $mb->build_isolate_join($iso);
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
-        my $file  = 'isolate_no_args_backward' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/isolate_no_args_backward' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate with no args exit 99', platform => $host, keep => 1, gdb => $dbg );

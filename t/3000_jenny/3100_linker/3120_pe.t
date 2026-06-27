@@ -20,7 +20,7 @@ use feature qw[class];
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
     my $codegen       = $brocken->codegen;
     my $machine_bytes = $codegen->emit_function($func_main);
-    my $output_file   = 'test_prog.exe';
+    my $output_file   = $brocken->tmpdir . '/test_prog.exe';
     my $linker        = Brocken::Jenny::Linker::PE->new();
     $linker->write_executable( $output_file, $machine_bytes, $platform );
     ok -e $output_file, 'Windows executable file created successfully';
@@ -48,7 +48,7 @@ SKIP: {
     $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 42 ) );
     my $codegen       = $brocken->codegen;
     my $machine_bytes = $codegen->emit_function($func_ext);
-    my $output_file   = './libtest_prog.dll';
+    my $output_file   = $brocken->tmpdir . '/libtest_prog.dll';
     my $linker        = Brocken::Jenny::Linker::PE->new( type => 'shared' );
     $linker->set_exported_funcs( ['my_func'] );
     $linker->set_labels( { E_my_func => 0 } );

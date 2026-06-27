@@ -6,7 +6,8 @@ use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature qw[class];
+use feature               qw[class];
+use Test2::Tools::Brocken qw(temp_path);
 my $host          = Brocken::Katsuro::Platform::parse();
 my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
@@ -28,7 +29,7 @@ chomp $wasmtime_path if $wasmtime_path;
     my $res     = $codegen->emit_function($func);
     ok( length( $res->{body} ) > 0, 'Generated Wasm f32 math bytes' );
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
-    my $output_file = 'f32_math_test.wasm';
+    my $output_file = temp_path('f32_math_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
     ok( -e $output_file, 'Wasm f32 math file exists' );
 SKIP: {
@@ -59,7 +60,7 @@ SKIP: {
     my $res     = $codegen->emit_function($func);
     ok( length( $res->{body} ) > 0, 'Generated Wasm f64 math bytes' );
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
-    my $output_file = 'f64_math_test.wasm';
+    my $output_file = temp_path('f64_math_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
     ok( -e $output_file, 'Wasm f64 math file exists' );
 SKIP: {
@@ -126,7 +127,7 @@ SKIP: {
     my $res     = $codegen->emit_function($func);
     ok( length( $res->{body} ) > 0, 'Generated Wasm float icmp bytes' );
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
-    my $output_file = 'ficmp_test.wasm';
+    my $output_file = temp_path('ficmp_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
     ok( -e $output_file, 'Wasm float icmp file exists' );
 SKIP: {
@@ -185,7 +186,7 @@ SKIP: {
     my $res     = $codegen->emit_function($func);
     ok( length( $res->{body} ) > 0, 'Generated Wasm float unary/minmax bytes' );
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
-    my $output_file = 'fum_test.wasm';
+    my $output_file = temp_path('fum_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
     ok( -e $output_file, 'Wasm float unary/minmax file exists' );
 SKIP: {
