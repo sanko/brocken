@@ -34,11 +34,10 @@ ok( length($bytes) > 0, 'Generated float battery bytes for ' . $platform->friend
 my $linker = $brocken->linker;
 SKIP: {
     skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
-    my $output_file = 'fbat_test' . $brocken->ext;
+    my $output_file = $brocken->tmpdir . '/fbat_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
     ok( -e $output_file, 'Float battery binary exists' );
-    my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-    my $ret = system {$cmd} $cmd;
+    my $ret = system $output_file;
 SKIP: {
         skip "system() failed to spawn ($!)", 1 if $ret == -1;
         my $exit_code = $? >> 8;

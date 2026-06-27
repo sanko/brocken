@@ -30,10 +30,32 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
     }
 
+    method _build_entry_stub( $platform, $func_offsets, $exit_sys ) {
+        if ( $platform->is_arm64 ) {
+            my $sub  = pack( 'V', 0xD1000000 | ( 1 << 23 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31 );
+            my $add  = add_imm( 0, 31, 0 );
+            my $bl   = bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
+            my $movz = movz_64( 16, $exit_sys & 0xFFFF );
+            my $movk = movk_64( 16, ( $exit_sys >> 16 ) & 0xFFFF, 1 );
+            return pack( 'V7', $sub, $add, $bl, $movz, $movk, svc(0x80), brk(0) );
+        }
+        my $HEAP_SIZE   = 0x10_00_00;
+        my $call_target = 12 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
+        my $stub        = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );
+        $stub .= pack( 'C3 V',  0x48, 0x81, 0xEC, $HEAP_SIZE );
+        $stub .= pack( 'C3',    0x48, 0x89, 0xE7 );
+        $stub .= pack( 'C V',   0xE8, $call_target );
+        $stub .= pack( 'C3',    0x48, 0x89, 0xC7 );
+        $stub .= pack( 'C V',   0xB8, $exit_sys );
+        $stub .= pack( 'C2',    0x0F, 0x05 );
+        $stub .= pack( 'C2',    0x0F, 0x0B );
+        return $stub;
+    }
+
     method entry_stub_len($platform) {
         return 0 unless $self->type eq 'exe';
-        return 20 if $platform->is_arm64;  # bl, movz, movk, svc, brk = 5*4
-        return 21; # x86_64: and(4) + call(5) + mov(3) + mov-eax(5) + syscall(2) + ud2(2)
+        my $exit_sys = $platform->syscall('exit') // 0x2000001;
+        return length( $self->_build_entry_stub( $platform, {}, $exit_sys ) );
     }
 
     method import_rva($name) {
@@ -86,38 +108,10 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my $entry_stub   = '';
         my $arch         = $platform->arch;
         my $os           = $platform->os;
-
-        # Prepend platform-specific Mach-O _start stubs if compiling an executable
+        # Prepend platform-specific Mach-O entry stubs if compiling an executable
         if ( $self->type eq 'exe' ) {
             my $exit_sys = $platform->syscall('exit') // 0x2000001;
-            if ( $platform->is_arm64 ) {
-
-                # ARM64 (Apple Silicon) native exit stub:
-                # - bl main (relative call offset +20 bytes -> 5 instructions)
-                # - movz x16, #sys_low
-                # - movk x16, #sys_high, lsl #16
-                # - svc #0x80
-                # - brk #0 (Safety crash)
-                my $bl   = bl( 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
-                my $movz = movz_64( 16, $exit_sys & 0xFFFF );
-                my $movk = movk_64( 16, ( $exit_sys >> 16 ) & 0xFFFF, 1 );
-                $entry_stub = pack( 'V5', $bl, $movz, $movk, svc(0x80), brk(0) );
-            }
-            else {
-                # x86_64 (Intel Mac) native exit stub with 16-byte stack alignment:
-                # - and rsp, -16:   48 83 e4 f0    (Align stack for System V ABI)
-                # - call main:      e8 0c 00 00 00 (Relative call 12 bytes ahead to start at byte 21)
-                # - mov rdi, rax:   48 89 c7       (Copy main's return code to first argument)
-                # - mov eax, sys:   b8 ...         (0x2000001 is exit syscall with macOS offset)
-                # - syscall:        0f 05
-                # - ud2:            0f 0b
-                $entry_stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );
-                $entry_stub .= pack( 'C V', 0xE8, 12 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
-                $entry_stub .= pack( 'C3',  0x48, 0x89, 0xC7 );
-                $entry_stub .= pack( 'C V', 0xB8, $exit_sys );
-                $entry_stub .= pack( 'C2',  0x0F, 0x05 );
-                $entry_stub .= pack( 'C2',  0x0F, 0x0B );
-            }
+            $entry_stub = $self->_build_entry_stub( $platform, \%func_offsets, $exit_sys );
             $text = $entry_stub . $text_raw;
         }
 

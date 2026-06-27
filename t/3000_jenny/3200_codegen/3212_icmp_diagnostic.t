@@ -23,10 +23,9 @@ SKIP: {
     my $codegen     = $brocken->codegen;
     my $bytes       = $codegen->emit_function($func);
     my $linker      = $brocken->linker;
-    my $output_file = 'icmp_only_test' . $brocken->ext;
+    my $output_file = $brocken->tmpdir . '/icmp_only_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
-    my $cmd = "./$output_file";
-    system {$cmd} $cmd;
+    system $output_file;
     my $exit_code = $? >> 8;
     is( $exit_code, 1, 'ICmp result (42 sgt 0 = 1) returned 1' );
     unlink $output_file;
@@ -47,10 +46,9 @@ SKIP: {
     my $codegen     = $brocken->codegen;
     my $bytes       = $codegen->emit_function($func);
     my $linker      = $brocken->linker;
-    my $output_file = 'jmp_only_test' . $brocken->ext;
+    my $output_file = $brocken->tmpdir . '/jmp_only_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
-    my $cmd = "./$output_file";
-    system {$cmd} $cmd;
+    system $output_file;
     my $exit_code = $? >> 8;
     is( $exit_code, 42, 'JMP (unconditional branch to if.then) returned 42' );
     unlink $output_file;
@@ -71,10 +69,9 @@ SKIP: {
     my $codegen     = $brocken->codegen;
     my $bytes       = $codegen->emit_function($func);
     my $linker      = $brocken->linker;
-    my $output_file = 'condbr_const_test' . $brocken->ext;
+    my $output_file = $brocken->tmpdir . '/condbr_const_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
-    my $cmd = "./$output_file";
-    system {$cmd} $cmd;
+    system $output_file;
     my $exit_code = $? >> 8;
     is( $exit_code, 42, 'CondBr constant condition (1 = true) returned 42' );
     unlink $output_file;

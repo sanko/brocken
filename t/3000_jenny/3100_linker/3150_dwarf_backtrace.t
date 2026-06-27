@@ -50,7 +50,7 @@ subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
 
     # 4. Compile and Execute
     my $funcs       = $brocken->codegen->emit_functions( [ $bar, $foo, $entry ] );
-    my $output_file = 'backtrace_test' . $brocken->ext;
+    my $output_file = $brocken->tmpdir . '/backtrace_test' . $brocken->ext;
     $brocken->linker->set_func_ranges(
         [ { name => 'bar', start => 0, end => 0 }, { name => 'foo', start => 0, end => 0 }, { name => '_BROCKEN_ENTRY', start => 0, end => 0 } ] );
     $brocken->linker->write_executable( $output_file, $funcs, $host );

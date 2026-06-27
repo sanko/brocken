@@ -29,7 +29,7 @@ SKIP: {
         $eb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 1 ), '%r1' );
         $eb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
         my $funcs = $brocken->codegen->emit_functions( [ $entry, $inner ] );
-        my $file  = 'fiber_pin_cpu0' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/fiber_pin_cpu0' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'fiber pin CPU 0 exit 99', platform => $host, keep => 1, gdb => $dbg );
@@ -51,7 +51,7 @@ SKIP: {
         $eb->build_fiber_transfer( $fcb, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 2 ), '%r2' );
         $eb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
         my $funcs = $brocken->codegen->emit_functions( [ $entry, $inner ] );
-        my $file  = 'fiber_pin_chained' . $brocken->ext;
+        my $file  = $brocken->tmpdir . '/fiber_pin_chained' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'fiber pin chained exit 99', platform => $host, keep => 1, gdb => $dbg );

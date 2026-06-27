@@ -48,7 +48,7 @@ subtest 'ARM64 fiber yield passes value to main exit code' => sub {
 SKIP: {
         skip 'Only for ARM64 native hosts', 2 unless $platform->is_arm64 && $platform->is_native;
         my $linker      = $brocken->linker;
-        my $output_file = 'fiber_test_arm64' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/fiber_test_arm64' . $brocken->ext;
         $linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'ARM64 fiber test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
 
@@ -155,11 +155,10 @@ SKIP: {
                 warn "gdb not available on this system\n";
             }
         }
-        my $cmd = $platform->is_windows ? ".\\$output_file" : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit_code = $? >> 8;
         my $errno     = 0 + $!;
-        diag "system($cmd) returned exit=$exit_code, errno=$errno ('$!')" if $exit_code != 99;
+        diag "system($output_file) returned exit=$exit_code, errno=$errno ('$!')" if $exit_code != 99;
         is( $exit_code, 99, 'ARM64 fiber test exited with 99' );
         unlink $output_file;
     }

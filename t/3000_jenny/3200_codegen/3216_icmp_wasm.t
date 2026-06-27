@@ -6,7 +6,8 @@ use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature qw[class];
+use feature               qw[class];
+use Test2::Tools::Brocken qw(temp_path);
 my $host          = Brocken::Katsuro::Platform::parse();
 my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
@@ -35,7 +36,7 @@ SKIP: {
     my $res     = $codegen->emit_function($func);
     ok( length( $res->{body} ) > 0, 'Generated Wasm icmp bytes' );
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
-    my $output_file = 'icmp_test.wasm';
+    my $output_file = temp_path('icmp_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
     ok( -e $output_file, 'Wasm icmp file exists' );
 SKIP: {
@@ -74,7 +75,7 @@ SKIP: {
     my $res     = $codegen->emit_function($func);
     ok( length( $res->{body} ) > 0, 'Generated Wasm unsigned icmp bytes' );
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
-    my $output_file = 'icmp_unsigned_test.wasm';
+    my $output_file = temp_path('icmp_unsigned_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
     ok( -e $output_file, 'Wasm unsigned icmp file exists' );
 SKIP: {

@@ -41,11 +41,10 @@ SKIP: {
 
     # Run the binary to verify correctness
     my $linker      = $brocken->linker;
-    my $output_file = 'leaf_test' . $brocken->ext;
+    my $output_file = $brocken->tmpdir . '/leaf_test' . $brocken->ext;
     $linker->write_executable( $output_file, $bytes, $platform );
     ok( -x $output_file || $platform->is_windows, 'Leaf binary exists' );
-    my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-    system {$cmd} $cmd;
+    system $output_file;
     my $exit_code = $? >> 8;
     is( $exit_code, 42, 'Leaf binary returned 42' );
     unlink $output_file;

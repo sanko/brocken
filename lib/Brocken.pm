@@ -11,13 +11,17 @@ package Brocken v0.0.1 {
     use Brocken::Jenny::Linker::MachO;
     use Brocken::Jenny::Linker::PE;
     use Brocken::Jenny::Linker::ELF64;
+    use File::Temp;
 
     class Brocken {
         field $platform : param = undef;
         field $codegen;
         field $linker;
         field $ext;
+        field $tmpdir_obj;
+        method tmpdir () { return $tmpdir_obj->dirname }
         ADJUST {
+            $tmpdir_obj = File::Temp->newdir( CLEANUP => 1 );
             $platform //= Brocken::Katsuro::Platform::parse();
             if ( $platform->is_arm64 && $platform->is_macos ) {
                 $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );

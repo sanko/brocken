@@ -6,7 +6,8 @@ use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature qw[class];
+use feature               qw[class];
+use Test2::Tools::Brocken qw(temp_path);
 my $host          = Brocken::Katsuro::Platform::parse();
 my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
@@ -25,7 +26,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 constant bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_const.wasm';
+        my $output_file = temp_path('i128_const') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 constant file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -53,7 +54,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 add bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_add.wasm';
+        my $output_file = temp_path('i128_add') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 add file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -80,7 +81,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 sub bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_sub.wasm';
+        my $output_file = temp_path('i128_sub') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 sub file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -107,7 +108,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 and bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_and.wasm';
+        my $output_file = temp_path('i128_and') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 and file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -134,7 +135,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 or bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_or.wasm';
+        my $output_file = temp_path('i128_or') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 or file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -161,7 +162,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 xor bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_xor.wasm';
+        my $output_file = temp_path('i128_xor') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 xor file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -188,7 +189,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 shl bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_shl.wasm';
+        my $output_file = temp_path('i128_shl') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 shl file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -215,7 +216,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 lshr bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_lshr.wasm';
+        my $output_file = temp_path('i128_lshr') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 lshr file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -242,7 +243,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 ashr bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_ashr.wasm';
+        my $output_file = temp_path('i128_ashr') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 ashr file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -269,7 +270,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 mul bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_mul.wasm';
+        my $output_file = temp_path('i128_mul') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 mul file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -296,7 +297,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 div bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_div.wasm';
+        my $output_file = temp_path('i128_div') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 div file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -323,7 +324,7 @@ SKIP: {
         my $res     = $codegen->emit_function($func);
         ok( length( $res->{body} ) > 0, 'Generated Wasm i128 rem bytes' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'i128_rem.wasm';
+        my $output_file = temp_path('i128_rem') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
         ok( -e $output_file, 'Wasm i128 rem file exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];

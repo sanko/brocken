@@ -47,7 +47,7 @@ SKIP: {
         }
         is( ref $funcs,        'ARRAY', 'emit_functions returned array ref' );
         is( scalar $funcs->@*, 2,       'emit_functions returned 2 entries' );
-        my $output_file = 'multi_func_native' . $brocken->ext;
+        my $output_file = $brocken->tmpdir . '/multi_func_native' . $brocken->ext;
         $brocken->linker->write_executable( $output_file, $funcs, $host );
 
         # DEBUG: disassemble on ARM64 Linux
@@ -99,7 +99,7 @@ SKIP: {
         is( ref $funcs,        'ARRAY', 'Wasm emit_functions returned array ref' );
         is( scalar $funcs->@*, 2,       'Wasm emit_functions returned 2 entries' );
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
-        my $output_file = 'multi_func_wasm.wasm';
+        my $output_file = $brocken->tmpdir . '/multi_func_wasm.wasm';
         $linker->write_executable( $output_file, $funcs, $wasm_platform );
         ok( -e $output_file, 'Wasm multi-function binary exists' );
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -122,9 +122,9 @@ SKIP: {
         $b->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 100 ) );
         my $linker = ( ref $brocken->linker )->new( type => 'shared' );
         my $output_file;
-        if    ( $host->is_macos )   { $output_file = 'multi_func_shared.dylib' }
-        elsif ( $host->is_windows ) { $output_file = 'multi_func_shared.dll' }
-        else                        { $output_file = 'multi_func_shared.so' }
+        if    ( $host->is_macos )   { $output_file = $brocken->tmpdir . '/multi_func_shared.dylib' }
+        elsif ( $host->is_windows ) { $output_file = $brocken->tmpdir . '/multi_func_shared.dll' }
+        else                        { $output_file = $brocken->tmpdir . '/multi_func_shared.so' }
         my $funcs = $brocken->codegen->emit_functions( [ $func_a, $func_b ] );
         is( ref $funcs,        'ARRAY', 'emit_functions returned array ref' );
         is( scalar $funcs->@*, 2,       'emit_functions returned 2 entries' );

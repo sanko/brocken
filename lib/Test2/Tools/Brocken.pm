@@ -3,7 +3,16 @@ package Test2::Tools::Brocken v0.0.1 {
     use Exporter 'import';
     use Test2::API qw[context];
     use Carp       qw[croak];
-    our @EXPORT = qw[run_exec];
+    use File::Temp;
+    our @EXPORT = qw[run_exec temp_path];
+    my $TMPDIR;
+
+    sub temp_path ($basename) {
+        $TMPDIR //= File::Temp->newdir( CLEANUP => 1, TMPDIR => 1 );
+        my $dir = $TMPDIR->dirname;
+        $dir =~ s/\\/\//g;
+        return $dir . '/' . $basename;
+    }
 
     sub run_exec ( $file, %args ) {
         croak "run_exec: file '$file' not found" unless -e $file;
@@ -15,7 +24,7 @@ package Test2::Tools::Brocken v0.0.1 {
         my $keep     = $args{keep} // 0;
         my $argv     = $args{args} // [];
         my $ctx      = context();
-        my $cmd      = ( defined $platform && $platform->is_windows ) ? ".\\$file" : "./$file";
+        my $cmd      = $file;
         my $actual;
 
         if ($do_gdb) {

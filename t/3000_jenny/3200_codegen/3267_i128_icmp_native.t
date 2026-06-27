@@ -81,11 +81,10 @@ SKIP: {
         my $bytes   = $codegen->emit_function($func);
         ok( length($bytes) > 0, "Generated native i128 icmp $desc bytes for " . $platform->friendly );
         my $linker      = $brocken->linker;
-        my $output_file = "i128_icmp_${pred}_native" . $brocken->ext;
+        my $output_file = $brocken->tmpdir . "/i128_icmp_${pred}_native" . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, "Native i128 icmp $desc file exists" );
-        my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, $expected ? 42 : 0, "Native i128 icmp $desc returned " . ( $expected ? 42 : 0 ) . " on " . $platform->friendly );
         unlink $output_file if -e $output_file;
@@ -151,11 +150,10 @@ SKIP: {
         my $bytes   = $codegen->emit_function($func);
         ok( length($bytes) > 0, "Generated native i128 icmp $desc bytes for " . $platform->friendly );
         my $linker      = $brocken->linker;
-        my $output_file = "i128_icmp_large_${pred}_native" . $brocken->ext;
+        my $output_file = $brocken->tmpdir . "/i128_icmp_large_${pred}_native" . $brocken->ext;
         $linker->write_executable( $output_file, $bytes, $platform );
         ok( -e $output_file, "Native i128 icmp $desc file exists" );
-        my $cmd = $platform->is_windows ? $output_file : "./$output_file";
-        system {$cmd} $cmd;
+        system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, $expected ? 42 : 0, "Native i128 icmp $desc returned " . ( $expected ? 42 : 0 ) . " on " . $platform->friendly );
         unlink $output_file if -e $output_file;
