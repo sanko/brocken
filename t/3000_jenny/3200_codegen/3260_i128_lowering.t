@@ -677,7 +677,7 @@ $check->(
             )
         );
     },
-    cset_hi => 'ARM64 i128 div: cset_hi produced',
+    udiv    => 'ARM64 i128 div: udiv produced',
     cset_cs => 'ARM64 i128 div: cset_cs produced'
 );
 $check->(
@@ -693,7 +693,7 @@ $check->(
             )
         );
     },
-    cset_hi => 'ARM64 i128 rem: cset_hi produced',
+    udiv    => 'ARM64 i128 rem: udiv produced',
     cset_cc => 'ARM64 i128 rem: cset_cc produced'
 );
 $check->(
