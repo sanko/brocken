@@ -55,7 +55,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
     method _build_entry_stub( $platform, $func_offsets, $text_rva, $got_exit ) {
         if ( $platform->is_arm64 ) {
-            my $sub  = pack( 'V', 0xD1000000 | ( 1 << 23 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31 );
+            my $sub  = 0xD1000000 | ( 1 << 22 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31;
             my $add  = add_imm( 0, 31, 0 );
             my $bl_main = bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
             my $adrp    = adrp( 8, $got_exit, $text_rva + 12 );
@@ -69,9 +69,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $diff     = $got_exit - $auipc_pc;
             my $hi20     = ( $diff + 0x800 ) >> 12;
             my $lo12     = $diff & 0xFFF;
-            my $lui      = pack( 'V', ( 256 << 12 ) | ( 5 << 7 ) | 0x37 );
-            my $sub      = pack( 'V', 0x40510133 );
-            my $mv       = pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 10 << 7 ) | 0x13 );
+            my $lui      = ( 256 << 12 ) | ( 5 << 7 ) | 0x37;
+            my $sub      = 0x40510133;
+            my $mv       = ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 10 << 7 ) | 0x13;
             my $auipc    = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;
             my $ld       = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
             my $jalr     = ( 0 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 0 << 7 ) | 0x67;

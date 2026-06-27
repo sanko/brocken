@@ -32,7 +32,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
     method _build_entry_stub( $platform, $func_offsets, $exit_sys ) {
         if ( $platform->is_arm64 ) {
-            my $sub  = pack( 'V', 0xD1000000 | ( 1 << 23 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31 );
+            my $sub  = 0xD1000000 | ( 1 << 22 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31;
             my $add  = add_imm( 0, 31, 0 );
             my $bl   = bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
             my $movz = movz_64( 16, $exit_sys & 0xFFFF );
