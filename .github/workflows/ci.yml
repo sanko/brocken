@@ -1,14 +1,14 @@
 ---
 jobs:
   dragonflybsd:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'dragonflybsd' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'dragonflybsd' }}
     name: DragonFly BSD
     needs:
       - setup
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: dragonflybsd
@@ -17,14 +17,14 @@ jobs:
       setup: export LC_ALL=C LANG=C LC_CTYPE=C LC_NUMERIC=C LC_COLLATE=C LC_TIME=C LC_MESSAGES=C LC_MONETARY=C; sudo pkg install -y gdb || true
       version: 6.4.2
   freebsd-arm64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'freebsd' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'freebsd' }}
     name: FreeBSD
     needs:
       - setup
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: freebsd
@@ -32,14 +32,14 @@ jobs:
       pkg: sudo pkg install -y perl5
       version: 15.1
   freebsd-x64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'freebsd' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'freebsd' }}
     name: FreeBSD
     needs:
       - setup
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: freebsd
@@ -47,7 +47,7 @@ jobs:
       pkg: sudo pkg install -y perl5
       version: 15.1
   haiku:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'haiku' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'haiku' }}
     name: Haiku
     needs:
       - setup
@@ -55,7 +55,7 @@ jobs:
     with:
       arch: x86-64
       gcc_pkg: sudo pkgman install gcc || sudo pkgman install gcc_x86
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       host: ubuntu-latest
       os: haiku
       perl: 5.42
@@ -63,7 +63,7 @@ jobs:
       pkg: sudo pkgman install "perl>=5.42.2" -y || echo "perl 5.42 not available"
       version: r1beta5
   linux-arm64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'linux' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'linux' }}
     name: Linux
     needs:
       - setup
@@ -72,10 +72,10 @@ jobs:
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04-arm
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       title: ARM
   linux-x64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'linux' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'linux' }}
     name: Linux
     needs:
       - setup
@@ -84,10 +84,10 @@ jobs:
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       title: Intel
   macos-arm:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'macos' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'macos' }}
     name: macOS
     needs:
       - setup
@@ -96,10 +96,10 @@ jobs:
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: macos-15
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       title: Apple Silicon
   macos-intel:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'macos' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'macos' }}
     name: macOS
     needs:
       - setup
@@ -108,10 +108,10 @@ jobs:
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: macos-15-intel
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       title: Intel
   midnightbsd:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'midnightbsd' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'midnightbsd' }}
     name: MidnightBSD
     needs:
       - setup
@@ -119,14 +119,14 @@ jobs:
     with:
       arch: x86-64
       gcc_pkg: sudo mport install gcc || true
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       host: ubuntu-latest
       os: midnightbsd
       perl: 5.42
       pkg: sudo mport install perl5.42-5.42.2 || true; sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl
       version: 4.0.4
   netbsd-arm64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'netbsd' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'netbsd' }}
     name: NetBSD
     needs:
       - setup
@@ -134,14 +134,14 @@ jobs:
     with:
       arch: arm64
       gcc_pkg: which gcc 2>/dev/null || sudo pkgin -y install gcc || true
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       host: ubuntu-latest
       os: netbsd
       perl: 5.42
       pkg: sudo pkgin -y install perl || true
       version: 10.1
   netbsd-x64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'netbsd' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'netbsd' }}
     name: NetBSD
     needs:
       - setup
@@ -154,10 +154,10 @@ jobs:
       perl: 5.42
       pkg: sudo pkgin -y install perl || true
       setup: sudo pkgin -y install gdb || true
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       version: 10.1
   omnios:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'omnios' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'omnios' }}
     name: OmniOS
     needs:
       - setup
@@ -165,14 +165,14 @@ jobs:
     with:
       arch: x86-64
       gcc_pkg: sudo pkg install developer/gcc --accept || sudo pkg install developer/gcc11 --accept || sudo pkg install gcc --accept || sudo pkg install developer/gcc49 --accept || true
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       host: ubuntu-latest
       os: omnios
       perl: 5.42
       pkg: 'sudo pkg install perl || [ $? -eq 4 ]'
       version: r151058
   openbsd-arm64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'openbsd' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'openbsd' }}
     name: OpenBSD
     needs:
       - setup
@@ -180,7 +180,7 @@ jobs:
     with:
       arch: arm64
       gcc_pkg: which gcc 2>/dev/null || true
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       host: ubuntu-latest
       os: openbsd
       perl: 5.40
@@ -188,7 +188,7 @@ jobs:
       pkg: echo "using system perl"
       version: 7.9
   openbsd-x64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'openbsd' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'openbsd' }}
     name: OpenBSD
     needs:
       - setup
@@ -196,7 +196,7 @@ jobs:
     with:
       arch: x86-64
       gcc_pkg: which gcc 2>/dev/null || true
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       host: ubuntu-latest
       os: openbsd
       perl: 5.40
@@ -353,7 +353,7 @@ jobs:
           name: status-files
           path: status/
   riscv64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'riscv64' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'riscv64' }}
     name: Linux
     needs:
       - setup
@@ -362,14 +362,32 @@ jobs:
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04-riscv
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       title: RISC-V
   setup:
     name: Generate Testing Matrix
     outputs:
       matrix: '${{ steps.matrix.outputs.matrix }}'
+      runner: '${{ steps.parse_tags.outputs.runner }}'
+      test_files: '${{ steps.parse_tags.outputs.test_files }}'
     runs-on: ubuntu-22.04
     steps:
+      - name: Parse commit message tags for runner/test filtering
+        id: parse_tags
+        env:
+          DISPATCH_RUNNER: ${{ github.event.inputs.runner }}
+          DISPATCH_TEST: ${{ github.event.inputs.test_files }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.body || '' }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "runner=${DISPATCH_RUNNER:-all}" >> "$GITHUB_OUTPUT"
+            echo "test_files=${DISPATCH_TEST:-}" >> "$GITHUB_OUTPUT"
+          else
+            RUNNER=$(echo "$COMMIT_MSG" | grep -oP '\[runner:\K[^\]]+' || echo "all")
+            TEST=$(echo "$COMMIT_MSG" | grep -oP '\[test:\K[^\]]+' || echo "")
+            echo "runner=$RUNNER" >> "$GITHUB_OUTPUT"
+            echo "test_files=$TEST" >> "$GITHUB_OUTPUT"
+          fi
       - env:
           DATA: |
             {
@@ -379,7 +397,7 @@ jobs:
         id: matrix
         run: "jq -rn 'env.DATA | fromjson | @json \"matrix=\\(.)\"' > $GITHUB_OUTPUT\n"
   wasm:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'linux' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'linux' }}
     name: WebAssembly
     needs:
       - setup
@@ -388,10 +406,10 @@ jobs:
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       title: WebAssembly
   win32-arm64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'windows' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'windows' }}
     name: Windows
     needs:
       - setup
@@ -400,10 +418,10 @@ jobs:
       flags: -Dusethreads
       os: windows-11-arm
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       title: ARM
   win32-x64:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runner == 'all' || inputs.runner == 'windows' }}
+    if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'windows' }}
     name: Windows
     needs:
       - setup
@@ -412,7 +430,7 @@ jobs:
       flags: -Dusethreads
       os: windows-2022
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: ${{ inputs.test_files || '' }}
+      test_files: ${{ needs.setup.outputs.test_files }}
       title: Intel
 name: CI Matrix
 on:
