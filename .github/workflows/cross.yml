@@ -35,6 +35,7 @@ jobs:
           # Add perl's site bin to PATH (needed on e.g. OmniOS where cpanm installs outside default PATH)
           export PATH="$PATH:$(perl -MConfig -e 'print $Config{installsitebin}' 2>/dev/null):$(perl -MConfig -e 'print $Config{installscript}' 2>/dev/null)"
           sudo env PATH="$PATH" LC_ALL=C cpanm --installdeps --notest .
+          ${{ inputs.diag }}
           if [ -n "${{ inputs.test_files }}" ]; then
             perl Build.PL
             ./Build
@@ -93,6 +94,10 @@ on:
         required: false
         type: string
       test_files:
+        default: ''
+        required: false
+        type: string
+      diag:
         default: ''
         required: false
         type: string
