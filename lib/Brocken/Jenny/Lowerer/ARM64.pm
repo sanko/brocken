@@ -1119,770 +1119,662 @@ class Brocken::Jenny::Lowerer::ARM64 {
 
                                 # ---- end signed handling ----
                                 if ($fast_path) {
-                                # q_hi = hi_lhs / lo_rhs  (64-bit native udiv)
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $q_hi, $hi_lhs ],
-                                        comment  => 'i128 div fast q_hi mv'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'udiv',
-                                        operands => [ $q_hi, $lo_rhs ],
-                                        comment  => 'i128 div fast q_hi = hi/lo'
-                                    )
-                                );
-                                # r_hi = hi_lhs - q_hi * lo_rhs (remainder)
-                                my $frem = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fre',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $frem, $q_hi ],
-                                        comment  => 'i128 div fast frem mv'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mul',
-                                        operands => [ $frem, $lo_rhs ],
-                                        comment  => 'i128 div fast frem mul'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $r_hi, $hi_lhs ],
-                                        comment  => 'i128 div fast r_hi mv'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sub',
-                                        operands => [ $r_hi, $frem ],
-                                        comment  => 'i128 div fast r_hi = hi - q*lo'
-                                    )
-                                );
-                                # 64-iteration MIR loop for q_lo and final remainder
-                                my $fcnt = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fcn',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                my $fone = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fon',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $fone, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $fcnt, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 64 ) ],
-                                        comment  => 'i128 div fast counter=64'
-                                    )
-                                );
-                                my $flbl = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->name . '_flp' );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'label',
-                                        operands => [$flbl],
-                                    )
-                                );
-                                # cnt--
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sub',
-                                        operands => [ $fcnt, $fone ],
-                                        comment  => 'i128 div fast cnt--'
-                                    )
-                                );
-                                # bit = (lo_lhs >> cnt) & 1
-                                my $fbit = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fbt',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $fbit, $lo_lhs ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'lshr',
-                                        operands => [ $fbit, $fcnt ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'and',
-                                        operands => [ $fbit, $fone ],
-                                    )
-                                );
-                                # carry = r_lo >> 63
-                                my $fcarry = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fcy',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $fcarry, $r_lo ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'lshr',
-                                        operands => [ $fcarry, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ],
-                                    )
-                                );
-                                # r_lo = (r_lo << 1) | bit
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $r_lo, $r_lo ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'shl',
-                                        operands => [ $r_lo, $fone ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'or',
-                                        operands => [ $r_lo, $fbit ],
-                                    )
-                                );
-                                # r_hi = (r_hi << 1) | carry
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $r_hi, $r_hi ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'shl',
-                                        operands => [ $r_hi, $fone ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'or',
-                                        operands => [ $r_hi, $fcarry ],
-                                    )
-                                );
-                                # cond = (r_hi != 0) || (r_lo >= lo_rhs)  [d_hi = 0]
-                                my $flge = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_flg',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $flge, $r_lo ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'cmp',
-                                        operands => [ $flge, $lo_rhs ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'cset_cs',
-                                        operands => [$flge],
-                                    )
-                                );
-                                my $fcond = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fcd',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'cmp',
-                                        operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'cset_ne',
-                                        operands => [$fcond],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'or',
-                                        operands => [ $fcond, $flge ],
-                                    )
-                                );
-                                # neg_cond = -cond
-                                my $fneg = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fng',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $fneg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sub',
-                                        operands => [ $fneg, $fcond ],
-                                    )
-                                );
-                                # masked_lo = lo_rhs & neg_cond
-                                my $fmdl = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fml',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $fmdl, $lo_rhs ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'and',
-                                        operands => [ $fmdl, $fneg ],
-                                    )
-                                );
-                                # borrow = r_lo < masked_lo
-                                my $fbor = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fbr',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $fbor, $r_lo ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'cmp',
-                                        operands => [ $fbor, $fmdl ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'cset_cc',
-                                        operands => [$fbor],
-                                    )
-                                );
-                                # r_lo -= masked_lo
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $r_lo, $r_lo ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sub',
-                                        operands => [ $r_lo, $fmdl ],
-                                    )
-                                );
-                                # r_hi -= borrow  (masked_hi = 0 since d_hi = 0)
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $r_hi, $r_hi ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sub',
-                                        operands => [ $r_hi, $fbor ],
-                                    )
-                                );
-                                # qbit = (1 << cnt) & neg_cond
-                                my $fqb = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_fqb',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $fqb, $fone ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'shl',
-                                        operands => [ $fqb, $fcnt ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'and',
-                                        operands => [ $fqb, $fneg ],
-                                    )
-                                );
-                                # q_lo |= qbit
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $q_lo, $q_lo ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'or',
-                                        operands => [ $q_lo, $fqb ],
-                                    )
-                                );
-                                # Branch back if counter != 0
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'bne',
-                                        operands => [ $fcnt, $flbl ],
-                                        comment  => 'i128 div fast loop'
-                                    )
-                                );
-                            }
-                            else {
-                                for my $ii ( reverse 0 .. 127 ) {
-                                    my $val   = $ii >= 64 ? $hi_lhs  : $lo_lhs;
-                                    my $shift = $ii >= 64 ? $ii - 64 : $ii;
-                                    my $bit   = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_b$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
+
+                                    # q_hi = hi_lhs / lo_rhs  (64-bit native udiv)
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $q_hi, $hi_lhs ],
+                                            comment  => 'i128 div fast q_hi mv'
+                                        )
                                     );
-                                    my $carry = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_c$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
-                                    );
-                                    my $t_hi_gt = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_hgt$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
-                                    );
-                                    my $t_hi_eq = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_heq$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
-                                    );
-                                    my $t_lo_ge = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_lge$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
-                                    );
-                                    my $t_cond = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_cond$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
-                                    );
-                                    my $t_neg = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_neg$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
-                                    );
-                                    my $t_mdl = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_mdl$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
-                                    );
-                                    my $t_bor = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_bor$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
-                                    );
-                                    my $t_mdh = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => $inst->name . "_mdh$ii",
-                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'udiv',
+                                            operands => [ $q_hi, $lo_rhs ],
+                                            comment  => 'i128 div fast q_hi = hi/lo'
+                                        )
                                     );
 
-                                    # bit = (val >> shift) & 1
-                                    my $one = Brocken::Jenny::MIR::MachineOperand->new(
+                                    # r_hi = hi_lhs - q_hi * lo_rhs (remainder)
+                                    my $frem = Brocken::Jenny::MIR::MachineOperand->new(
                                         kind  => 'virt_reg',
-                                        value => $inst->name . "_one$ii",
+                                        value => $inst->name . '_fre',
                                         type  => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mv',
-                                            operands => [ $bit, $val ],
-                                            comment  => "i128 div bit$ii val"
+                                            operands => [ $frem, $q_hi ],
+                                            comment  => 'i128 div fast frem mv'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mul',
+                                            operands => [ $frem, $lo_rhs ],
+                                            comment  => 'i128 div fast frem mul'
                                         )
                                     );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mv',
-                                            operands => [ $one, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
-                                            comment  => "i128 div bit$ii one"
+                                            operands => [ $r_hi, $hi_lhs ],
+                                            comment  => 'i128 div fast r_hi mv'
                                         )
                                     );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'lshr',
-                                            operands => [
-                                                $bit,
-                                                Brocken::Jenny::MIR::MachineOperand->new(
-                                                    kind  => 'imm',
-                                                    value => $shift,
-                                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                                )
-                                            ],
-                                            comment => "i128 div bit$ii shr"
+                                            opcode   => 'sub',
+                                            operands => [ $r_hi, $frem ],
+                                            comment  => 'i128 div fast r_hi = hi - q*lo'
+                                        )
+                                    );
+
+                                    # 64-iteration MIR loop for q_lo and final remainder
+                                    my $fcnt = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_fcn',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    my $fone = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_fon',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $fone, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
                                         )
                                     );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'and',
-                                            operands => [ $bit, $one ],
-                                            comment  => "i128 div bit$ii and"
+                                            opcode   => 'mv',
+                                            operands => [ $fcnt, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 64 ) ],
+                                            comment  => 'i128 div fast counter=64'
                                         )
                                     );
+                                    my $flbl = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->name . '_flp' );
+                                    $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$flbl], ) );
+
+                                    # cnt--
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sub',
+                                            operands => [ $fcnt, $fone ],
+                                            comment  => 'i128 div fast cnt--'
+                                        )
+                                    );
+
+                                    # bit = (lo_lhs >> cnt) & 1
+                                    my $fbit = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_fbt',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fbit, $lo_lhs ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'lshr', operands => [ $fbit, $fcnt ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $fbit, $fone ], ) );
 
                                     # carry = r_lo >> 63
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $carry, $r_lo ],
-                                            comment  => "i128 div carry$ii load"
-                                        )
+                                    my $fcarry = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_fcy',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
                                     );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fcarry, $r_lo ], ) );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'lshr',
-                                            operands => [ $carry, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ],
-                                            comment  => "i128 div carry$ii shr"
+                                            operands => [ $fcarry, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ],
                                         )
                                     );
 
                                     # r_lo = (r_lo << 1) | bit
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $r_lo, $r_lo ],
-                                            comment  => "i128 div r_lo$ii shl"
-                                        )
-                                    );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_lo, $r_lo ], ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'shl',
-                                            operands => [ $r_lo, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
-                                            comment  => "i128 div r_lo$ii shl"
-                                        )
-                                    );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'shl', operands => [ $r_lo, $fone ], ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'or',
-                                            operands => [ $r_lo, $bit ],
-                                            comment  => "i128 div r_lo$ii or"
-                                        )
-                                    );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $r_lo, $fbit ], ) );
 
                                     # r_hi = (r_hi << 1) | carry
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $r_hi, $r_hi ],
-                                            comment  => "i128 div r_hi$ii shl"
-                                        )
-                                    );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_hi, $r_hi ], ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'shl',
-                                            operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
-                                            comment  => "i128 div r_hi$ii shl"
-                                        )
-                                    );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'shl', operands => [ $r_hi, $fone ], ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'or',
-                                            operands => [ $r_hi, $carry ],
-                                            comment  => "i128 div r_hi$ii or"
-                                        )
-                                    );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $r_hi, $fcarry ], ) );
 
-                                    # cond_hi_gt = r_hi > d_hi  (unsigned greater than)
+                                    # cond = (r_hi != 0) || (r_lo >= lo_rhs)  [d_hi = 0]
+                                    my $flge = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_flg',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $t_hi_gt, $r_hi ],
-                                            comment  => "i128 div hgt$ii load"
-                                        )
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $flge, $r_lo ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cmp', operands => [ $flge, $lo_rhs ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_cs', operands => [$flge], ) );
+                                    my $fcond = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_fcd',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'cmp',
-                                            operands => [ $t_hi_gt, $hi_rhs ],
-                                            comment  => "i128 div hgt$ii cmp"
+                                            operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
                                         )
                                     );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'cset_hi',
-                                            operands => [$t_hi_gt],
-                                            comment  => "i128 div hgt$ii cset_hi"
-                                        )
-                                    );
-
-                                    # cond_hi_eq = r_hi == d_hi
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_ne', operands => [$fcond], ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $t_hi_eq, $r_hi ],
-                                            comment  => "i128 div heq$ii load"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'cmp',
-                                            operands => [ $t_hi_eq, $hi_rhs ],
-                                            comment  => "i128 div heq$ii cmp"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'cset_eq',
-                                            operands => [$t_hi_eq],
-                                            comment  => "i128 div heq$ii cset_eq"
-                                        )
-                                    );
-
-                                    # cond_lo_ge = r_lo >= d_lo  (unsigned, carry set)
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $t_lo_ge, $r_lo ],
-                                            comment  => "i128 div lge$ii load"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'cmp',
-                                            operands => [ $t_lo_ge, $lo_rhs ],
-                                            comment  => "i128 div lge$ii cmp"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'cset_cs',
-                                            operands => [$t_lo_ge],
-                                            comment  => "i128 div lge$ii cset_cs"
-                                        )
-                                    );
-
-                                    # cond = cond_hi_gt | (cond_hi_eq & cond_lo_ge)
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'and',
-                                            operands => [ $t_hi_eq, $t_lo_ge ],
-                                            comment  => "i128 div cond$ii and"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'or',
-                                            operands => [ $t_hi_gt, $t_hi_eq ],
-                                            comment  => "i128 div cond$ii or"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $t_cond, $t_hi_gt ],
-                                            comment  => "i128 div cond$ii save"
-                                        )
-                                    );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $fcond, $flge ], ) );
 
                                     # neg_cond = -cond
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $t_neg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
-                                            comment  => "i128 div neg$ii zero"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'sub',
-                                            operands => [ $t_neg, $t_cond ],
-                                            comment  => "i128 div neg$ii sub"
-                                        )
-                                    );
-
-                                    # masked_d_lo = d_lo & neg_cond
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $t_mdl, $lo_rhs ],
-                                            comment  => "i128 div mdl$ii load"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'and',
-                                            operands => [ $t_mdl, $t_neg ],
-                                            comment  => "i128 div mdl$ii and"
-                                        )
-                                    );
-
-                                    # borrow = r_lo < masked_d_lo  (unsigned less than)
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $t_bor, $r_lo ],
-                                            comment  => "i128 div bor$ii load"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'cmp',
-                                            operands => [ $t_bor, $t_mdl ],
-                                            comment  => "i128 div bor$ii cmp"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'cset_cc',
-                                            operands => [$t_bor],
-                                            comment  => "i128 div bor$ii cset_cc"
-                                        )
-                                    );
-
-                                    # r_lo -= masked_d_lo
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $r_lo, $r_lo ],
-                                            comment  => "i128 div r_lo$ii sub"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'sub',
-                                            operands => [ $r_lo, $t_mdl ],
-                                            comment  => "i128 div r_lo$ii sub"
-                                        )
-                                    );
-
-                                    # masked_d_hi = d_hi & neg_cond
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $t_mdh, $hi_rhs ],
-                                            comment  => "i128 div mdh$ii load"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'and',
-                                            operands => [ $t_mdh, $t_neg ],
-                                            comment  => "i128 div mdh$ii and"
-                                        )
-                                    );
-
-                                    # r_hi -= masked_d_hi + borrow
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $r_hi, $r_hi ],
-                                            comment  => "i128 div r_hi$ii sub"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'sub',
-                                            operands => [ $r_hi, $t_mdh ],
-                                            comment  => "i128 div r_hi$ii sub mdh"
-                                        )
-                                    );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'sub',
-                                            operands => [ $r_hi, $t_bor ],
-                                            comment  => "i128 div r_hi$ii sub bor"
-                                        )
-                                    );
-
-                                    # Q_bit = (1 << (ii % 64)) & neg_cond
-                                    my $qbit_val = 1 << ( $ii % 64 );
-                                    my $qbit     = Brocken::Jenny::MIR::MachineOperand->new(
+                                    my $fneg = Brocken::Jenny::MIR::MachineOperand->new(
                                         kind  => 'virt_reg',
-                                        value => $inst->name . "_qb$ii",
+                                        value => $inst->name . '_fng',
                                         type  => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mv',
-                                            operands => [ $qbit, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $qbit_val ) ],
-                                            comment  => "i128 div qb$ii val"
+                                            operands => [ $fneg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
                                         )
                                     );
                                     $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $fneg, $fcond ], ) );
+
+                                    # masked_lo = lo_rhs & neg_cond
+                                    my $fmdl = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_fml',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fmdl, $lo_rhs ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $fmdl, $fneg ], ) );
+
+                                    # borrow = r_lo < masked_lo
+                                    my $fbor = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_fbr',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fbor, $r_lo ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cmp', operands => [ $fbor, $fmdl ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_cc', operands => [$fbor], ) );
+
+                                    # r_lo -= masked_lo
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_lo, $r_lo ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $r_lo, $fmdl ], ) );
+
+                                    # r_hi -= borrow  (masked_hi = 0 since d_hi = 0)
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_hi, $r_hi ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $r_hi, $fbor ], ) );
+
+                                    # qbit = (1 << cnt) & neg_cond
+                                    my $fqb = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_fqb',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fqb, $fone ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'shl', operands => [ $fqb, $fcnt ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $fqb, $fneg ], ) );
+
+                                    # q_lo |= qbit
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $q_lo, $q_lo ], ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $q_lo, $fqb ], ) );
+
+                                    # Branch back if counter != 0
+                                    $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'and',
-                                            operands => [ $qbit, $t_neg ],
-                                            comment  => "i128 div qb$ii and"
+                                            opcode   => 'bne',
+                                            operands => [ $fcnt, $flbl ],
+                                            comment  => 'i128 div fast loop'
                                         )
                                     );
-                                    if ( $ii >= 64 ) {
+                                }
+                                else {
+                                    for my $ii ( reverse 0 .. 127 ) {
+                                        my $val   = $ii >= 64 ? $hi_lhs  : $lo_lhs;
+                                        my $shift = $ii >= 64 ? $ii - 64 : $ii;
+                                        my $bit   = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_b$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        my $carry = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_c$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        my $t_hi_gt = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_hgt$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        my $t_hi_eq = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_heq$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        my $t_lo_ge = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_lge$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        my $t_cond = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_cond$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        my $t_neg = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_neg$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        my $t_mdl = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_mdl$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        my $t_bor = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_bor$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        my $t_mdh = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_mdh$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+
+                                        # bit = (val >> shift) & 1
+                                        my $one = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_one$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
                                         $mbb->add_instruction(
                                             Brocken::Jenny::MIR::MachineInstruction->new(
                                                 opcode   => 'mv',
-                                                operands => [ $q_hi, $q_hi ],
-                                                comment  => "i128 div q_hi$ii or"
+                                                operands => [ $bit, $val ],
+                                                comment  => "i128 div bit$ii val"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $one, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
+                                                comment  => "i128 div bit$ii one"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'lshr',
+                                                operands => [
+                                                    $bit,
+                                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                                        kind  => 'imm',
+                                                        value => $shift,
+                                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                                    )
+                                                ],
+                                                comment => "i128 div bit$ii shr"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'and',
+                                                operands => [ $bit, $one ],
+                                                comment  => "i128 div bit$ii and"
+                                            )
+                                        );
+
+                                        # carry = r_lo >> 63
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $carry, $r_lo ],
+                                                comment  => "i128 div carry$ii load"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'lshr',
+                                                operands => [ $carry, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ],
+                                                comment  => "i128 div carry$ii shr"
+                                            )
+                                        );
+
+                                        # r_lo = (r_lo << 1) | bit
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $r_lo, $r_lo ],
+                                                comment  => "i128 div r_lo$ii shl"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'shl',
+                                                operands => [ $r_lo, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
+                                                comment  => "i128 div r_lo$ii shl"
                                             )
                                         );
                                         $mbb->add_instruction(
                                             Brocken::Jenny::MIR::MachineInstruction->new(
                                                 opcode   => 'or',
-                                                operands => [ $q_hi, $qbit ],
-                                                comment  => "i128 div q_hi$ii or"
+                                                operands => [ $r_lo, $bit ],
+                                                comment  => "i128 div r_lo$ii or"
                                             )
                                         );
-                                    }
-                                    else {
+
+                                        # r_hi = (r_hi << 1) | carry
                                         $mbb->add_instruction(
                                             Brocken::Jenny::MIR::MachineInstruction->new(
                                                 opcode   => 'mv',
-                                                operands => [ $q_lo, $q_lo ],
-                                                comment  => "i128 div q_lo$ii or"
+                                                operands => [ $r_hi, $r_hi ],
+                                                comment  => "i128 div r_hi$ii shl"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'shl',
+                                                operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
+                                                comment  => "i128 div r_hi$ii shl"
                                             )
                                         );
                                         $mbb->add_instruction(
                                             Brocken::Jenny::MIR::MachineInstruction->new(
                                                 opcode   => 'or',
-                                                operands => [ $q_lo, $qbit ],
-                                                comment  => "i128 div q_lo$ii or"
+                                                operands => [ $r_hi, $carry ],
+                                                comment  => "i128 div r_hi$ii or"
                                             )
                                         );
+
+                                        # cond_hi_gt = r_hi > d_hi  (unsigned greater than)
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $t_hi_gt, $r_hi ],
+                                                comment  => "i128 div hgt$ii load"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'cmp',
+                                                operands => [ $t_hi_gt, $hi_rhs ],
+                                                comment  => "i128 div hgt$ii cmp"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'cset_hi',
+                                                operands => [$t_hi_gt],
+                                                comment  => "i128 div hgt$ii cset_hi"
+                                            )
+                                        );
+
+                                        # cond_hi_eq = r_hi == d_hi
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $t_hi_eq, $r_hi ],
+                                                comment  => "i128 div heq$ii load"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'cmp',
+                                                operands => [ $t_hi_eq, $hi_rhs ],
+                                                comment  => "i128 div heq$ii cmp"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'cset_eq',
+                                                operands => [$t_hi_eq],
+                                                comment  => "i128 div heq$ii cset_eq"
+                                            )
+                                        );
+
+                                        # cond_lo_ge = r_lo >= d_lo  (unsigned, carry set)
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $t_lo_ge, $r_lo ],
+                                                comment  => "i128 div lge$ii load"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'cmp',
+                                                operands => [ $t_lo_ge, $lo_rhs ],
+                                                comment  => "i128 div lge$ii cmp"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'cset_cs',
+                                                operands => [$t_lo_ge],
+                                                comment  => "i128 div lge$ii cset_cs"
+                                            )
+                                        );
+
+                                        # cond = cond_hi_gt | (cond_hi_eq & cond_lo_ge)
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'and',
+                                                operands => [ $t_hi_eq, $t_lo_ge ],
+                                                comment  => "i128 div cond$ii and"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'or',
+                                                operands => [ $t_hi_gt, $t_hi_eq ],
+                                                comment  => "i128 div cond$ii or"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $t_cond, $t_hi_gt ],
+                                                comment  => "i128 div cond$ii save"
+                                            )
+                                        );
+
+                                        # neg_cond = -cond
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $t_neg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                                comment  => "i128 div neg$ii zero"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'sub',
+                                                operands => [ $t_neg, $t_cond ],
+                                                comment  => "i128 div neg$ii sub"
+                                            )
+                                        );
+
+                                        # masked_d_lo = d_lo & neg_cond
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $t_mdl, $lo_rhs ],
+                                                comment  => "i128 div mdl$ii load"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'and',
+                                                operands => [ $t_mdl, $t_neg ],
+                                                comment  => "i128 div mdl$ii and"
+                                            )
+                                        );
+
+                                        # borrow = r_lo < masked_d_lo  (unsigned less than)
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $t_bor, $r_lo ],
+                                                comment  => "i128 div bor$ii load"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'cmp',
+                                                operands => [ $t_bor, $t_mdl ],
+                                                comment  => "i128 div bor$ii cmp"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'cset_cc',
+                                                operands => [$t_bor],
+                                                comment  => "i128 div bor$ii cset_cc"
+                                            )
+                                        );
+
+                                        # r_lo -= masked_d_lo
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $r_lo, $r_lo ],
+                                                comment  => "i128 div r_lo$ii sub"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'sub',
+                                                operands => [ $r_lo, $t_mdl ],
+                                                comment  => "i128 div r_lo$ii sub"
+                                            )
+                                        );
+
+                                        # masked_d_hi = d_hi & neg_cond
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $t_mdh, $hi_rhs ],
+                                                comment  => "i128 div mdh$ii load"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'and',
+                                                operands => [ $t_mdh, $t_neg ],
+                                                comment  => "i128 div mdh$ii and"
+                                            )
+                                        );
+
+                                        # r_hi -= masked_d_hi + borrow
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $r_hi, $r_hi ],
+                                                comment  => "i128 div r_hi$ii sub"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'sub',
+                                                operands => [ $r_hi, $t_mdh ],
+                                                comment  => "i128 div r_hi$ii sub mdh"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'sub',
+                                                operands => [ $r_hi, $t_bor ],
+                                                comment  => "i128 div r_hi$ii sub bor"
+                                            )
+                                        );
+
+                                        # Q_bit = (1 << (ii % 64)) & neg_cond
+                                        my $qbit_val = 1 << ( $ii % 64 );
+                                        my $qbit     = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => $inst->name . "_qb$ii",
+                                            type  => Brocken::Lindsay::IR::Type::i64()
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mv',
+                                                operands => [ $qbit, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $qbit_val ) ],
+                                                comment  => "i128 div qb$ii val"
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'and',
+                                                operands => [ $qbit, $t_neg ],
+                                                comment  => "i128 div qb$ii and"
+                                            )
+                                        );
+                                        if ( $ii >= 64 ) {
+                                            $mbb->add_instruction(
+                                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                                    opcode   => 'mv',
+                                                    operands => [ $q_hi, $q_hi ],
+                                                    comment  => "i128 div q_hi$ii or"
+                                                )
+                                            );
+                                            $mbb->add_instruction(
+                                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                                    opcode   => 'or',
+                                                    operands => [ $q_hi, $qbit ],
+                                                    comment  => "i128 div q_hi$ii or"
+                                                )
+                                            );
+                                        }
+                                        else {
+                                            $mbb->add_instruction(
+                                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                                    opcode   => 'mv',
+                                                    operands => [ $q_lo, $q_lo ],
+                                                    comment  => "i128 div q_lo$ii or"
+                                                )
+                                            );
+                                            $mbb->add_instruction(
+                                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                                    opcode   => 'or',
+                                                    operands => [ $q_lo, $qbit ],
+                                                    comment  => "i128 div q_lo$ii or"
+                                                )
+                                            );
+                                        }
                                     }
                                 }
-                            }
-                            my $sign_q_tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                my $sign_q_tmp = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'virt_reg',
                                     value => $inst->name . '_sqt',
                                     type  => Brocken::Lindsay::IR::Type::i64()

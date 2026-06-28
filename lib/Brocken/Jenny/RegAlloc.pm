@@ -99,11 +99,9 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     }
                 }
             }
-
             if ( $split_idx > 0 ) {
                 my @pre_insts  = $bb->instructions->@[ 0 .. $split_idx - 1 ];
                 my @post_insts = $bb->instructions->@[ $split_idx .. $#{ $bb->instructions } ];
-
                 my %pre_defd;
                 my %pre_used;
                 for my $inst (@pre_insts) {
@@ -123,7 +121,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                         $pre_used{$base} = 1 unless exists $pre_defd{$base};
                     }
                 }
-
                 my %post_defd;
                 my %post_used;
                 for my $inst (@post_insts) {

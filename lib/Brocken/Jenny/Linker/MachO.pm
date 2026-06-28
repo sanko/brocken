@@ -42,13 +42,13 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my $HEAP_SIZE   = 0x10_00_00;
         my $call_target = 12 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
         my $stub        = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );
-        $stub .= pack( 'C3 V',  0x48, 0x81, 0xEC, $HEAP_SIZE );
-        $stub .= pack( 'C3',    0x48, 0x89, 0xE7 );
-        $stub .= pack( 'C V',   0xE8, $call_target );
-        $stub .= pack( 'C3',    0x48, 0x89, 0xC7 );
-        $stub .= pack( 'C V',   0xB8, $exit_sys );
-        $stub .= pack( 'C2',    0x0F, 0x05 );
-        $stub .= pack( 'C2',    0x0F, 0x0B );
+        $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );
+        $stub .= pack( 'C3',   0x48, 0x89, 0xE7 );
+        $stub .= pack( 'C V',  0xE8, $call_target );
+        $stub .= pack( 'C3',   0x48, 0x89, 0xC7 );
+        $stub .= pack( 'C V',  0xB8, $exit_sys );
+        $stub .= pack( 'C2',   0x0F, 0x05 );
+        $stub .= pack( 'C2',   0x0F, 0x0B );
         return $stub;
     }
 
@@ -108,11 +108,12 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my $entry_stub   = '';
         my $arch         = $platform->arch;
         my $os           = $platform->os;
+
         # Prepend platform-specific Mach-O entry stubs if compiling an executable
         if ( $self->type eq 'exe' ) {
             my $exit_sys = $platform->syscall('exit') // 0x2000001;
             $entry_stub = $self->_build_entry_stub( $platform, \%func_offsets, $exit_sys );
-            $text = $entry_stub . $text_raw;
+            $text       = $entry_stub . $text_raw;
         }
 
         # Ensure layout is calculated (needed for GOT RVA in import stubs)
