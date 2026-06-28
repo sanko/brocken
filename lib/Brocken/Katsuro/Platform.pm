@@ -125,6 +125,7 @@ class Brocken::Katsuro::Platform {
             elsif ( $^O eq 'darwin' )                 { $vendor = 'apple';   $os = 'darwin';      $env = 'macho' }
             elsif ( $^O eq 'haiku' )                  { $vendor = 'pc';      $os = 'haiku';       $env = 'elf' }
             elsif ( $^O eq 'midnightbsd' )            { $vendor = 'pc';      $os = 'midnightbsd'; $env = 'elf' }
+            elsif ( $^O eq 'dragonfly' )              { $vendor = 'pc';      $os = 'dragonfly';   $env = 'elf' }
             elsif ( $^O =~ /bsd/i )                   { $vendor = 'pc';      $os = $^O;           $env = 'elf' }
             elsif ( $^O =~ /solaris|sunos|illumos/i ) { $vendor = 'unknown'; $os = 'solaris';     $env = 'elf' }
         }
@@ -203,7 +204,7 @@ class Brocken::Katsuro::Platform {
                 $os_name = 'Solaris'       if $os =~ /solaris/i;
                 $os_name = 'OmniOS'        if $os =~ /omnios/i;
                 $os_name = 'MidnightBSD'   if $os =~ /midnightbsd/i;
-                $os_name = 'DragonFly BSD' if $os =~ /dragonflybsd/i;
+                $os_name = 'DragonFly BSD' if $os =~ /dragonfly(bsd)?/i;
                 $os_name = 'WebAssembly'   if $self->is_wasm;
                 my $arch_name = $arch;
                 $arch_name = 'x64'    if $arch eq 'x86_64';
