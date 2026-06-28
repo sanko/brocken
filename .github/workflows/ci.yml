@@ -14,7 +14,7 @@ jobs:
       os: dragonflybsd
       perl: 5.42
       pkg: sudo pkg install -y perl5-5.42 || (sudo sed -i '' 's|/quarterly|/latest|' /usr/local/etc/pkg/repos/Avalon.conf && sudo pkg update -f && sudo pkg install -y perl5-5.42) || (curl -sL https://www.cpan.org/src/5.0/perl-5.42.2.tar.gz | tar xz -C /tmp && cd /tmp/perl-5.42.2 && ./Configure -des -Dprefix=/usr/local -Dusedevel && make -j$(getconf NPROCESSORS_ONLN) && sudo make install && sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl)
-      setup: export LC_ALL=C LANG=C LC_CTYPE=C LC_NUMERIC=C LC_COLLATE=C LC_TIME=C LC_MESSAGES=C LC_MONETARY=C; sudo pkg install -y gdb || true
+      setup: export LC_ALL=C LANG=C LC_CTYPE=C LC_NUMERIC=C LC_COLLATE=C LC_TIME=C LC_MESSAGES=C LC_MONETARY=C; sudo pkg install -y gdb p5-Test-Harness || true
       version: 6.4.2
   freebsd-arm64:
     if: ${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'freebsd' }}
