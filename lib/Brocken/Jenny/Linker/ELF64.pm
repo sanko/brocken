@@ -516,26 +516,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $libpthread;
 
             if ( $platform->is_dragonflybsd ) {
-
-                # DragonFlyBSD: libpthread.so is a proxy with weak stub symbols
-                # (from libpthread/dummy.c). Link directly against libthread_xu.so
-                # (the real threading implementation) instead.
-                $libpthread = 'libpthread.so';
-                for my $dir ( '/usr/lib/thread', '/usr/lib' ) {
-                    next unless -d $dir;
-                    if ( opendir my $dh, $dir ) {
-                        my @matches = sort { length($b) <=> length($a) } grep { /^libthread_xu\.so/ } readdir $dh;
-                        closedir $dh;
-                        for my $m (@matches) {
-                            my $soname = _elf_soname("$dir/$m");
-                            if ($soname) {
-                                $libpthread = $soname;
-                                last;
-                            }
-                        }
-                        last if $libpthread ne 'libpthread.so';
-                    }
-                }
+                $libpthread = 'libpthread.so.0';
             }
             else {
                 $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
