@@ -34,7 +34,13 @@ jobs:
       - name: Run tests
         run: |
           perl -V
-          cpanm --test-only -v .
+          if ('${{ inputs.test_files }}' -ne '') {
+            perl Build.PL
+            perl Build
+            prove -Ilib -lv ${{ inputs.test_files }}
+          } else {
+            cpanm --test-only -v .
+          }
           
           if ($LASTEXITCODE -eq 0) {
             perl -V > test-output-${{ inputs.os }}-${{ inputs.perl }}${{ inputs.flags }}.txt
@@ -61,6 +67,10 @@ on:
         type: string
       perl:
         required: true
+        type: string
+      test_files:
+        default: ''
+        required: false
         type: string
       title:
         default: ''
