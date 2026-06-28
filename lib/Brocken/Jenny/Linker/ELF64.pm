@@ -416,7 +416,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 }
             }
         }
-        my @libs = ();
+        my @libs = ($libc);
         if ( !$platform->is_haiku && !$platform->is_solaris ) {
             my $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
             $libpthread = 'libthread_xu.so.2' if $platform->is_dragonflybsd;
@@ -457,7 +457,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
             push @libs, $libpthread;
         }
-        push @libs, $libc;
         my $dynstr = "\0";
         my %str_off;
         for my $s ( @libs, @imports, @exports ) {
