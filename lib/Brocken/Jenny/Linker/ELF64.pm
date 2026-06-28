@@ -417,10 +417,13 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
         }
         my @libs = ($libc);
-        if ( !$platform->is_haiku && !$platform->is_solaris && !$platform->is_dragonflybsd ) {
+        if ( !$platform->is_haiku && !$platform->is_solaris ) {
             my $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
-            $libpthread = 'libpthread.so' if $platform->is_openbsd || $platform->is_netbsd;
-            if ( $platform->is_native ) {
+            if ( $platform->is_dragonflybsd ) {
+                $libpthread = 'libthread_xu.so';
+            } elsif ( $platform->is_openbsd || $platform->is_netbsd ) {
+                $libpthread = 'libpthread.so';
+            } elsif ( $platform->is_native ) {
                 my @search_paths = (
                     '/usr/lib', '/lib', '/lib64', '/usr/lib64',
                     '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
