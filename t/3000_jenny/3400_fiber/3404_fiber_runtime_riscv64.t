@@ -29,19 +29,7 @@ subtest 'RISCV64 fiber yield passes value to main exit code' => sub {
     ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or
         diag( 'got: ', [ map { $_->{name} } @$funcs ] );
 
-    for my $f ( $funcs->@* ) {
-        warn "=== Hex dump of function '$f->{name}' (" . length( $f->{bytes} ) . " bytes) ===\n";
-        my $bytes = $f->{bytes};
-        for ( my $i = 0; $i < length $bytes; $i += 16 ) {
-            my $chunk = substr( $bytes, $i, 16 );
-            my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
-            my $pad   = 16 - length($chunk);
-            $hex .= '   ' x $pad if $pad;
-            my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
-            warn sprintf( '%08x: %-48s %s', $i, $hex, $ascii ) . "\n";
-        }
-    }
-    warn "(end of hex dumps)\n";
+    # DEBUG: hex dump disabled
 SKIP: {
         skip 'Only for RISC-V 64 native hosts', 2 unless $platform->is_riscv64 && $platform->is_native;
         my $linker      = $brocken->linker;

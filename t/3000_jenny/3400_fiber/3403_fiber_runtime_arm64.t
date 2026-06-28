@@ -29,22 +29,7 @@ subtest 'ARM64 fiber yield passes value to main exit code' => sub {
     ok( scalar @$funcs == 3, 'emit_functions produced 3 functions (main wrapper, _real_main, worker_fn)' ) or
         diag( 'got: ', [ map { $_->{name} } @$funcs ] );
 
-    for my $f ( $funcs->@* ) {
-        warn "=== Hex dump of function '$f->{name}' (" . length( $f->{bytes} ) . " bytes) ===\n";
-        my $bytes = $f->{bytes};
-        for ( my $i = 0; $i < length $bytes; $i += 16 ) {
-            my $chunk = substr( $bytes, $i, 16 );
-            my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
-            my $pad   = 16 - length($chunk);
-            $hex .= '   ' x $pad if $pad;
-            my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
-            warn sprintf( '%08x: %-48s %s', $i, $hex, $ascii ) . "\n";
-        }
-        for my $fix ( $f->{fixups}->@* ) {
-            warn "  fixup: offset=$fix->{offset} type=$fix->{type} target=$fix->{target}\n";
-        }
-    }
-    warn "(end of hex dumps)\n";
+    # DEBUG: hex dump disabled
 SKIP: {
         skip 'Only for ARM64 native hosts', 2 unless $platform->is_arm64 && $platform->is_native;
         my $linker      = $brocken->linker;
@@ -52,30 +37,7 @@ SKIP: {
         $linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'ARM64 fiber test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
 
-        # DEBUG: post-link hex dump + disassembly on ARM64
-        warn "\n### DEBUG: post-link binary '$output_file' ###\n";
-        open my $fh, '<:raw', $output_file or warn "  can't open $output_file: $!";
-        if ($fh) {
-            my $bin;
-            read $fh, $bin, 4096;
-            close $fh;
-            for ( my $i = 0; $i < length $bin; $i += 16 ) {
-                my $chunk = substr( $bin, $i, 16 );
-                my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
-                my $pad   = 16 - length($chunk);
-                $hex .= '   ' x $pad if $pad;
-                my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
-                warn sprintf( '%08x: %-48s %s', $i, $hex, $ascii ) . "\n";
-            }
-        }
-        warn "\n### DEBUG: disassembly ###\n";
-        if ( $platform->is_macos ) {
-            system("otool -v -t $output_file 2>&1");
-            system("llvm-objdump -d --arch=aarch64 $output_file 2>&1");
-        }
-        else {
-            system("objdump -d --architecture=aarch64 $output_file 2>&1");
-        }
+        # DEBUG: post-link hex dump + disassembly disabled
 
         # On Windows, validate the PE format before attempting execution
         if ( $platform->is_windows ) {
