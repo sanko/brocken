@@ -55,8 +55,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
     method _build_entry_stub( $platform, $func_offsets, $text_rva, $got_exit ) {
         if ( $platform->is_arm64 ) {
-            my $sub  = 0xD1000000 | ( 1 << 22 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31;
-            my $add  = add_imm( 0, 31, 0 );
+            my $sub     = 0xD1000000 | ( 1 << 22 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31;
+            my $add     = add_imm( 0, 31, 0 );
             my $bl_main = bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
             my $adrp    = adrp( 8, $got_exit, $text_rva + 12 );
             my $ldr     = ldr_64( 8, 8, $got_exit & 0xFFF );
@@ -77,23 +77,23 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $jalr     = ( 0 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 0 << 7 ) | 0x67;
             my $jal_ofs  = 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
             my $half     = $jal_ofs >> 1;
-            my $jal_imm  = ( ( $half >> 19 ) & 1 ) << 31 | ( ( $half & 0x3FF ) << 21 )
-                | ( ( $half >> 10 ) & 1 ) << 20 | ( ( $half >> 11 ) & 0xFF ) << 12;
-            my $jal   = $jal_imm | ( 1 << 7 ) | 0x6F;
-            my $ebrk  = 0x00100073;
+            my $jal_imm
+                = ( ( $half >> 19 ) & 1 ) << 31 | ( ( $half & 0x3FF ) << 21 ) | ( ( $half >> 10 ) & 1 ) << 20 | ( ( $half >> 11 ) & 0xFF ) << 12;
+            my $jal  = $jal_imm | ( 1 << 7 ) | 0x6F;
+            my $ebrk = 0x00100073;
             return pack 'V8', $lui, $sub, $mv, $jal, $auipc, $ld, $jalr, $ebrk;
         }
         my $HEAP_SIZE = 1048576;
         my $next_ip   = $text_rva + 28;
         my $rel32     = $got_exit - $next_ip;
         my $main_rel  = 11 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
-        my $stub      = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );              # and rsp, -16
-        $stub .= pack( 'C3 V',  0x48, 0x81, 0xEC, $HEAP_SIZE );            # sub rsp, HEAP_SIZE
-        $stub .= pack( 'C3',    0x48, 0x89, 0xE7 );                        # mov rdi, rsp
-        $stub .= pack( 'C V',   0xE8, $main_rel );                          # call main
-        $stub .= pack( 'C3',    0x48, 0x89, 0xC7 );                        # mov rdi, rax
-        $stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );                      # call [rip + exit]
-        $stub .= pack( 'C2',    0x0F, 0x0B );                               # ud2
+        my $stub      = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );            # and rsp, -16
+        $stub .= pack( 'C3 V',  0x48, 0x81, 0xEC, $HEAP_SIZE );          # sub rsp, HEAP_SIZE
+        $stub .= pack( 'C3',    0x48, 0x89, 0xE7 );                      # mov rdi, rsp
+        $stub .= pack( 'C V',   0xE8, $main_rel );                       # call main
+        $stub .= pack( 'C3',    0x48, 0x89, 0xC7 );                      # mov rdi, rax
+        $stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );                    # call [rip + exit]
+        $stub .= pack( 'C2',    0x0F, 0x0B );                            # ud2
         return $stub;
     }
 
@@ -136,6 +136,101 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
     # Standard Linux x86_64 static image base; PIE/BSD use base 0 for ASLR.
     method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
+
+    # Given an ELF shared library path, returns its DT_SONAME (or undef).
+    sub _elf_soname ($path) {
+        open my $fh, '<:raw', $path or return undef;
+        read( $fh, my $ehdr, 64 ) == 64 or do { close $fh; return undef };
+        return undef unless substr( $ehdr, 0, 4 ) eq "\x7FELF";
+        my $class  = ord substr $ehdr, 4, 1;    # 1=32, 2=64
+        my $endian = ord( substr $ehdr, 5, 1 ) == 1 ? '<' : '>';
+        my ( $e_phoff, $e_phentsize, $e_phnum );
+        if ( $class == 2 ) {
+            $e_phoff     = unpack "Q$endian", substr $ehdr, 32, 8;
+            $e_phentsize = unpack 'v',        substr $ehdr, 54, 2;
+            $e_phnum     = unpack 'v',        substr $ehdr, 56, 2;
+        }
+        else {
+            $e_phoff     = unpack "L$endian", substr $ehdr, 28, 4;
+            $e_phentsize = unpack 'v',        substr $ehdr, 42, 2;
+            $e_phnum     = unpack 'v',        substr $ehdr, 44, 2;
+        }
+        my @loads;
+        my ( $dyn_vaddr, $dyn_size );
+        for my $i ( 0 .. $e_phnum - 1 ) {
+            seek $fh, $e_phoff + $i * $e_phentsize, 0;
+            read $fh, my $phdr, $e_phentsize or next;
+            my $p_type = unpack "L$endian", substr $phdr, 0, 4;
+            if ( $p_type == 2 ) {    # PT_DYNAMIC
+                if ( $class == 2 ) {
+                    $dyn_vaddr = unpack "Q$endian", substr $phdr, 16, 8;
+                    $dyn_size  = unpack "Q$endian", substr $phdr, 32, 8;
+                }
+                else {
+                    $dyn_vaddr = unpack "L$endian", substr $phdr, 8,  4;
+                    $dyn_size  = unpack "L$endian", substr $phdr, 20, 4;
+                }
+            }
+            elsif ( $p_type == 1 ) {    # PT_LOAD
+                my ( $p_vaddr, $p_offset, $p_filesz );
+                if ( $class == 2 ) {
+                    $p_offset = unpack "Q$endian", substr $phdr, 8,  8;
+                    $p_vaddr  = unpack "Q$endian", substr $phdr, 16, 8;
+                    $p_filesz = unpack "Q$endian", substr $phdr, 32, 8;
+                }
+                else {
+                    $p_offset = unpack "L$endian", substr $phdr, 4,  4;
+                    $p_vaddr  = unpack "L$endian", substr $phdr, 8,  4;
+                    $p_filesz = unpack "L$endian", substr $phdr, 16, 4;
+                }
+                push @loads, [ $p_vaddr, $p_offset, $p_filesz ];
+            }
+        }
+        return undef unless defined $dyn_vaddr && @loads;
+        my $dyn_foff;
+        for my $l (@loads) {
+            my ( $vaddr, $foff, $fsize ) = @$l;
+            if ( $dyn_vaddr >= $vaddr && $dyn_vaddr < $vaddr + $fsize ) {
+                $dyn_foff = $foff + ( $dyn_vaddr - $vaddr );
+                last;
+            }
+        }
+        return undef unless defined $dyn_foff;
+        my ( $soname_off, $strtab_vaddr, $strtab_size );
+        my $dyn_entsize = $class == 2 ? 16 : 8;
+        for ( my $j = 0; $j * $dyn_entsize < $dyn_size; $j++ ) {
+            seek $fh, $dyn_foff + $j * $dyn_entsize, 0;
+            read $fh, my $dyn, $dyn_entsize or last;
+            my $d_tag;
+            my $d_val;
+            if ( $class == 2 ) {
+                $d_tag = unpack "q$endian", substr $dyn, 0, 8;
+                $d_val = unpack "Q$endian", substr $dyn, 8, 8;
+            }
+            else {
+                $d_tag = unpack "l$endian", substr $dyn, 0, 4;
+                $d_val = unpack "L$endian", substr $dyn, 4, 4;
+            }
+            last if $d_tag == 0;                                 # DT_NULL
+            if    ( $d_tag == 14 ) { $soname_off   = $d_val }    # DT_SONAME
+            elsif ( $d_tag == 5 )  { $strtab_vaddr = $d_val }    # DT_STRTAB
+            elsif ( $d_tag == 10 ) { $strtab_size  = $d_val }    # DT_STRSZ
+        }
+        return undef unless defined $soname_off && defined $strtab_vaddr;
+        my $strtab_foff;
+        for my $l (@loads) {
+            my ( $vaddr, $foff, $fsize ) = @$l;
+            if ( $strtab_vaddr >= $vaddr && $strtab_vaddr < $vaddr + $fsize ) {
+                $strtab_foff = $foff + ( $strtab_vaddr - $vaddr );
+                last;
+            }
+        }
+        return undef unless defined $strtab_foff;
+        seek $fh, $strtab_foff + $soname_off, 0;
+        read $fh, my $soname, $strtab_size ? $strtab_size - $soname_off : 256;
+        $soname =~ s/\0.*$//;
+        return $soname;
+    }
 
     method write_executable ( $output_file, $code_data, $platform, $shared = false, $debug_bytes = undef ) {
         $platform = Brocken::Katsuro::Platform::parse($platform) unless ref $platform;
@@ -183,9 +278,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $entry_stub = '';
 
         if ( $self->type eq 'exe' ) {
-            my $got_exit  = $self->import_rva('exit');
-            $entry_stub = $self->_build_entry_stub( $platform, \%func_offsets, $text_rva, $got_exit );
-            $text = $entry_stub . $code_bytes;
+            my $got_exit = $self->import_rva('exit');
+            $entry_stub                         = $self->_build_entry_stub( $platform, \%func_offsets, $text_rva, $got_exit );
+            $text                               = $entry_stub . $code_bytes;
             $self->layout->get('.text')->{size} = length($text);
         }
 
@@ -419,9 +514,22 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my @libs = ($libc);
         if ( !$platform->is_haiku && !$platform->is_solaris ) {
             my $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
-            if ( $platform->is_openbsd || $platform->is_netbsd || $platform->is_dragonflybsd ) {
-                $libpthread = 'libpthread.so';
-            } elsif ( $platform->is_native ) {
+
+            # Try compiler query to find the actual pthread library
+            for my $cc (qw(clang gcc cc)) {
+                my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;
+                chomp $out if defined $out;
+                if ( $out && $out ne 'libpthread.so' && -e $out ) {
+                    my $soname = _elf_soname($out);
+                    if ($soname) {
+                        $libpthread = $soname;
+                        last;
+                    }
+                }
+            }
+
+            # Fallback: search filesystem for the threading library
+            if ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' ) {
                 my @search_paths = (
                     '/usr/lib', '/lib', '/lib64', '/usr/lib64',
                     '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
@@ -430,29 +538,42 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 my $prefix = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' : 'libpthread';
                 for my $dir (@search_paths) {
                     next unless -d $dir;
-                    my @matches;
                     if ( opendir my $dh, $dir ) {
-                        @matches = map {"$dir/$_"} grep {/^\Q$prefix\E\.so\.\d/} readdir $dh;
+                        push @found, map {"$dir/$_"} grep { /^\Q$prefix\E\.so(?:\.\d+)?$/ && !/_p\.so/ } readdir $dh;
                         closedir $dh;
-                    }
-                    for my $m (@matches) {
-                        next if $m =~ /_p\.so/;
-                        push @found, $m;
                     }
                 }
                 if (@found) {
-                    my $best = (
-                        sort {
-                            my ( $amaj, $amin ) = $a =~ /\.so\.(\d+)(?:\.(\d+))?/;
-                            my ( $bmaj, $bmin ) = $b =~ /\.so\.(\d+)(?:\.(\d+))?/;
-                            ( $amaj // 0 ) <=> ( $bmaj // 0 ) || ( ( $amin // 0 ) <=> ( $bmin // 0 ) );
-                        } @found
-                    )[-1];
-                    if ($best) {
-                        require File::Basename;
-                        $libpthread = File::Basename::basename($best);
+
+                    # Prefer a file with an ELF SONAME
+                    for my $f ( sort { length($a) <=> length($b) } @found ) {
+                        my $soname = _elf_soname($f);
+                        if ($soname) {
+                            $libpthread = $soname;
+                            last;
+                        }
+                    }
+
+                    # Fallback to the most-versioned filename
+                    if ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' ) {
+                        my $most = (
+                            sort {
+                                my ( $am, $an ) = $a =~ /\.so\.(\d+)(?:\.(\d+))?/;
+                                my ( $bm, $bn ) = $b =~ /\.so\.(\d+)(?:\.(\d+))?/;
+                                ( $bm // 0 ) <=> ( $am // 0 ) || ( ( $bn // 0 ) <=> ( $an // 0 ) );
+                            } grep {/\.so\.\d/} @found
+                        )[0];
+                        if ($most) {
+                            require File::Basename;
+                            $libpthread = File::Basename::basename($most);
+                        }
                     }
                 }
+            }
+
+            # Platform-specific overrides when neither compiler nor filesystem found anything
+            if ( $platform->is_openbsd || $platform->is_netbsd || $platform->is_dragonflybsd ) {
+                $libpthread = 'libpthread.so';
             }
             push @libs, $libpthread;
         }

@@ -594,7 +594,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         }
                         else {
                             $src_r = $resolve->($src);
-                            $sid = $reg_id->($src_r);
+                            $sid   = $reg_id->($src_r);
                         }
                         $bytes .= pack( 'V',
                             ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
