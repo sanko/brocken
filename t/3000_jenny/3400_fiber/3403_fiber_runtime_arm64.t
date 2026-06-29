@@ -38,7 +38,6 @@ SKIP: {
         ok( -f $output_file, 'ARM64 fiber test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
 
         # DEBUG: post-link hex dump + disassembly disabled
-
         # On Windows, validate the PE format before attempting execution
         if ( $platform->is_windows ) {
             open my $fh, '<:raw', $output_file or die "can't open $output_file: $!";
