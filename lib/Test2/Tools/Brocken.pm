@@ -64,25 +64,25 @@ package Test2::Tools::Brocken v0.0.1 {
         my $mismatch = defined $expected && $actual != $expected;
         if ($mismatch) {
             warn "$name: expected exit code $expected, got $actual (raw status \$?=$?)\n";
-            if ( -e $file ) {
-                if ( open my $fh, '<:raw', $file ) {
-                    my $bytes = do { local $/; <$fh> };
-                    close $fh;
-                    my $len = length $bytes;
-                    for ( my $i = 0; $i < $len; $i += 16 ) {
-                        my $chunk = substr( $bytes, $i, 16 );
-                        my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
-                        my $pad   = 16 - length($chunk);
-                        $hex .= '   ' x $pad if $pad;
-                        my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
-                        warn sprintf( '%08x: %-48s %s', $i, $hex, $ascii ) . "\n";
-                    }
-                    warn "(hex dump of $file, $len bytes)\n";
-                }
-                else {
-                    warn "Cannot open $file for hex dump: $!\n";
-                }
-            }
+#            if ( -e $file ) {
+#                if ( open my $fh, '<:raw', $file ) {
+#                    my $bytes = do { local $/; <$fh> };
+#                    close $fh;
+#                    my $len = length $bytes;
+#                    for ( my $i = 0; $i < $len; $i += 16 ) {
+#                        my $chunk = substr( $bytes, $i, 16 );
+#                        my $hex   = join( ' ', map { sprintf '%02X', ord $_ } split( //, $chunk ) );
+#                        my $pad   = 16 - length($chunk);
+#                        $hex .= '   ' x $pad if $pad;
+#                        my $ascii = join( '', map { ord $_ >= 32 && ord $_ < 127 ? $_ : '.' } split( //, $chunk ) );
+#                        warn sprintf( '%08x: %-48s %s', $i, $hex, $ascii ) . "\n";
+#                    }
+#                    warn "(hex dump of $file, $len bytes)\n";
+#                }
+#                else {
+#                    warn "Cannot open $file for hex dump: $!\n";
+#                }
+#            }
         }
         $ctx->ok( !$mismatch, $name ) if defined $expected;
         unlink $file unless $keep;
