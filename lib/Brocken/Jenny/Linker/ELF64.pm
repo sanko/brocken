@@ -412,7 +412,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             freebsd      => '/libexec/ld-elf.so.1',
             netbsd       => '/usr/libexec/ld.elf_so',
             openbsd      => '/usr/libexec/ld.so',
-            dragonfly    => '/usr/libexec/ld-elf.so.2',
             dragonflybsd => '/usr/libexec/ld-elf.so.2',
             solaris      => '/lib/64/ld.so.1',
             midnightbsd  => '/libexec/ld-elf.so.1',
@@ -425,7 +424,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             freebsd      => 'libc.so.7',
             netbsd       => 'libc.so.12',
             openbsd      => 'libc.so.98.1',
-            dragonfly    => 'libc.so.8',
             dragonflybsd => 'libc.so.8',
             solaris      => 'libc.so.1',
             midnightbsd  => 'libc.so.7',
@@ -585,7 +583,14 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             if ( $platform->is_openbsd || $platform->is_netbsd ) {
                 $libpthread = 'libpthread.so';
             }
-            push @libs, $libpthread;
+            push @libs, $libpthread // {
+                linux        => 'libpthread.so.0',
+                freebsd      => 'libthr.so.3',
+                midnightbsd  => 'libthr.so.3',
+                dragonflybsd => 'libthread_xu.so',
+                netbsd       => 'libpthread.so.1',
+                openbsd      => 'libpthread.so.26.1'    # OpenBSD versions change; use generic or recent
+            }->{$platform};
         }
         my $dynstr = "\0";
         my %str_off;
