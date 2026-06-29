@@ -85,7 +85,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         BL             => 0x94000000,
         BLR            => 0xD63F0000,
         FCB_RESUME_OFF => 112,
-        RET            => 0xD65F03C0
+        RET            => 0xD65F03C0,
     };
 
     method emit_function($ir_func) {
@@ -478,7 +478,10 @@ class Brocken::Jenny::Codegen::ARM64 {
             die "Unexpected operand kind: ${$op->kind}";
         };
         if ( $total_frame > 0 ) {
-            if ( $total_frame > 4096 ) {
+
+            # Windows ARM64 requires stack probing for frames > 4KB to
+            # ensure the guard page is expanded one page at a time.
+            if ( $platform->is_windows && $total_frame > 4096 ) {
                 my $pages     = int( $total_frame / 4096 );
                 my $remainder = $total_frame % 4096;
                 if ( $pages > 0 ) {

@@ -510,87 +510,96 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
         }
         my @libs = ($libc);
-        my $libpthread;
         if ( !$platform->is_haiku && !$platform->is_solaris ) {
+            my $libpthread;
+
             if ( $platform->is_dragonflybsd ) {
-                $libpthread = 'libthread_xu.so.0';
-            }
-            elsif ( $platform->is_freebsd || $platform->is_midnightbsd ) {
-                $libpthread = 'libthr.so.3';
+
+                # DragonFlyBSD: libpthread.so is a proxy with weak stub symbols
+                # (from libpthread/dummy.c). Link directly against libthread_xu.so
+                # (the real threading implementation) instead.
+                $libpthread = 'libpthread.so';
+                for my $dir ( '/usr/lib/thread', '/usr/lib' ) {
+                    next unless -d $dir;
+                    if ( opendir my $dh, $dir ) {
+                        my @matches = sort { length($b) <=> length($a) } grep { /^libthread_xu\.so/ } readdir $dh;
+                        closedir $dh;
+                        for my $m (@matches) {
+                            my $soname = _elf_soname("$dir/$m");
+                            if ($soname) {
+                                $libpthread = $soname;
+                                last;
+                            }
+                        }
+                        last if $libpthread ne 'libpthread.so';
+                    }
+                }
             }
             else {
-                $libpthread = 'libpthread.so.0';
-            }
-        }
+                $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
 
-        # Try compiler query to find the actual pthread library
-        my $query_name = $platform->is_dragonflybsd ? 'libthread_xu.so' : 'libpthread.so';
-        for my $cc (qw(clang gcc cc)) {
-            my $out = `$cc -pthread -print-file-name=$query_name 2>/dev/null`;
-            chomp $out if defined $out;
-            if ( $out && $out ne $query_name && -e $out ) {
-                my $soname = _elf_soname($out);
-                if ($soname) {
-                    $libpthread = $soname;
-                    last;
-                }
-            }
-        }
-
-        # Fallback: search filesystem for the threading library
-        if ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' || $libpthread eq 'libthread_xu.so' ) {
-            my @search_paths = (
-                '/usr/lib', '/lib', '/lib64', '/usr/lib64',
-                '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
-            );
-            my @found;
-            my $prefix = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' : $platform->is_dragonflybsd ? 'libthread_xu' : 'libpthread';
-            for my $dir (@search_paths) {
-                next unless -d $dir;
-                if ( opendir my $dh, $dir ) {
-                    push @found, map {"$dir/$_"} grep { /^\Q$prefix\E\.so(?:\.\d+)?$/ && !/_p\.so/ } readdir $dh;
-                    closedir $dh;
-                }
-            }
-            if (@found) {
-
-                # Prefer a file with an ELF SONAME
-                for my $f ( sort { length($a) <=> length($b) } @found ) {
-                    my $soname = _elf_soname($f);
-                    if ($soname) {
-                        $libpthread = $soname;
-                        last;
+                # Try compiler query to find the actual pthread library
+                for my $cc (qw(clang gcc cc)) {
+                    my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;
+                    chomp $out if defined $out;
+                    if ( $out && $out ne 'libpthread.so' && -e $out ) {
+                        my $soname = _elf_soname($out);
+                        if ($soname) {
+                            $libpthread = $soname;
+                            last;
+                        }
                     }
                 }
 
-                # Fallback to the most-versioned filename
-                if ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' || $libpthread eq 'libthread_xu.so' ) {
-                    my $most = (
-                        sort {
-                            my ( $am, $an ) = $a =~ /\.so\.(\d+)(?:\.(\d+))?/;
-                            my ( $bm, $bn ) = $b =~ /\.so\.(\d+)(?:\.(\d+))?/;
-                            ( $bm // 0 ) <=> ( $am // 0 ) || ( ( $bn // 0 ) <=> ( $an // 0 ) );
-                        } grep {/\.so\.\d/} @found
-                    )[0];
-                    if ($most) {
-                        require File::Basename;
-                        $libpthread = File::Basename::basename($most);
+                # Fallback: search filesystem for the threading library
+                if ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' ) {
+                    my @search_paths = (
+                        '/usr/lib', '/lib', '/lib64', '/usr/lib64',
+                        '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
+                    );
+                    my @found;
+                    my $prefix = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' : 'libpthread';
+                    for my $dir (@search_paths) {
+                        next unless -d $dir;
+                        if ( opendir my $dh, $dir ) {
+                            push @found, map {"$dir/$_"} grep { /^\Q$prefix\E\.so(?:\.\d+)?$/ && !/_p\.so/ } readdir $dh;
+                            closedir $dh;
+                        }
+                    }
+                    if (@found) {
+
+                        # Prefer a file with an ELF SONAME
+                        for my $f ( sort { length($a) <=> length($b) } @found ) {
+                            my $soname = _elf_soname($f);
+                            if ($soname) {
+                                $libpthread = $soname;
+                                last;
+                            }
+                        }
+
+                        # Fallback to the most-versioned filename
+                        if ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' ) {
+                            my $most = (
+                                sort {
+                                    my ( $am, $an ) = $a =~ /\.so\.(\d+)(?:\.(\d+))?/;
+                                    my ( $bm, $bn ) = $b =~ /\.so\.(\d+)(?:\.(\d+))?/;
+                                    ( $bm // 0 ) <=> ( $am // 0 ) || ( ( $bn // 0 ) <=> ( $an // 0 ) );
+                                } grep {/\.so\.\d/} @found
+                            )[0];
+                            if ($most) {
+                                require File::Basename;
+                                $libpthread = File::Basename::basename($most);
+                            }
+                        }
                     }
                 }
-            }
 
-            # Platform-specific overrides when neither compiler nor filesystem found anything
-            if ( $platform->is_openbsd || $platform->is_netbsd ) {
-                $libpthread = 'libpthread.so';
+                # Platform-specific overrides when neither compiler nor filesystem found anything
+                if ( $platform->is_openbsd || $platform->is_netbsd ) {
+                    $libpthread = 'libpthread.so';
+                }
             }
-            push @libs, $libpthread // {
-                linux        => 'libpthread.so.0',
-                freebsd      => 'libthr.so.3',
-                midnightbsd  => 'libthr.so.3',
-                dragonflybsd => 'libthread_xu.so',
-                netbsd       => 'libpthread.so.1',
-                openbsd      => 'libpthread.so.26.1'    # OpenBSD versions change; use generic or recent
-            }->{$platform};
+            push @libs, $libpthread;
         }
         my $dynstr = "\0";
         my %str_off;
