@@ -516,15 +516,21 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
                 $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
 
-                # Try compiler query to find the actual pthread library
-                for my $cc (qw(clang gcc cc)) {
-                    my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;
-                    chomp $out if defined $out;
-                    if ( $out && $out ne 'libpthread.so' && -e $out ) {
-                        my $soname = _elf_soname($out);
-                        if ($soname) {
-                            $libpthread = $soname;
-                            last;
+                # Try compiler query to find the actual pthread library.
+                # On DragonFly BSD the libpthread.so symlink resolves to
+                # libthread_xu.so.2 (stored outside the standard library path);
+                # the resolved SONAME would be unfindable by the RTLD, so skip
+                # the compiler probe on DragonFly and keep the default.
+                if ( !$platform->is_dragonflybsd ) {
+                    for my $cc (qw(clang gcc cc)) {
+                        my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;
+                        chomp $out if defined $out;
+                        if ( $out && $out ne 'libpthread.so' && -e $out ) {
+                            my $soname = _elf_soname($out);
+                            if ($soname) {
+                                $libpthread = $soname;
+                                last;
+                            }
                         }
                     }
                 }
@@ -575,6 +581,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 # Platform-specific overrides when neither compiler nor filesystem found anything
                 if ( $platform->is_openbsd || $platform->is_netbsd ) {
                     $libpthread = 'libpthread.so';
+                }
+                if ( $platform->is_dragonflybsd ) {
+                    $libpthread = 'libpthread.so.0';
                 }
             push @libs, $libpthread;
         }
