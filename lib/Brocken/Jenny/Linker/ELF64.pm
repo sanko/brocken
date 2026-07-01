@@ -40,6 +40,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         # Non-alloc symbol and string tables for static linking/debugging (nm)
         $layout->add_section( '.symtab', 4096, 0 );
         $layout->add_section( '.strtab', 4096, 0 );
+        $layout->add_section( '.eh_frame', 4096, 0 );
         #
         if ( $dbg >= 1 ) {
             $layout->add_section( '.debug_line',     4096, 0 );
@@ -49,7 +50,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $layout->add_section( '.debug_pubnames', 4096, 0 );
             $layout->add_section( '.debug_names',    4096, 0 );
             $layout->add_section( '.debug_str',      4096, 0 );
-            $layout->add_section( '.eh_frame',       4096, 0 );
         }
     }
 
@@ -953,6 +953,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $num_ph++ if $note_data;
         $num_ph++ if $pintable_data;
         $num_ph++ if $is_pie;
+        my $eh_frame_sec = $self->layout->get('.eh_frame');
+        $num_ph++ if $eh_frame_sec;
         my @phdrs     = ();
         my $extra_off = 64 + ( $num_ph * 56 );
 
@@ -1029,6 +1031,18 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 length($pintable_data), length($pintable_data), 4
                 );
             $extra_off += length($pintable_data);
+        }
+        if ($eh_frame_sec) {
+
+            # PT_GNU_EH_FRAME=0x6474e550: exception handling frame (matches GCC)
+            push @phdrs,
+                pack(
+                'L< L< Q< Q< Q< Q< Q< Q<',
+                0x6474e550, 4, $eh_frame_sec->{off},
+                $base + $eh_frame_sec->{rva},
+                $base + $eh_frame_sec->{rva},
+                $eh_frame_sec->{size}, $eh_frame_sec->{size}, 4
+                );
         }
 
         # PT_GNU_STACK=0x6474e551: flags=6 (RW, no exec) for non-executable stack
