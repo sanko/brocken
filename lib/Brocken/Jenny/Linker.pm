@@ -87,7 +87,7 @@ into a final executable or shared library.
             :
             0x1000;
         $_layout = Brocken::Jenny::Linker::Layout->new( file_align => $page_align, section_align => $page_align );
-        $self->_setup_layout( $_layout, $text_size, $data_size, $platform, $debug );
+        $self->_setup_layout( $_layout, $text_size, $data_size, $platform, $platform->os, $debug );
         $_layout->calculate($page_align);
     }
     method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 )           {...}
