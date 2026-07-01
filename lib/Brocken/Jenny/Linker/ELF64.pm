@@ -780,6 +780,12 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $dynamic .= pack( 'Q< Q<', 9,  24 );                         # DT_RELAENT (sizeof(Elf64_Rela))
         $dynamic .= pack( 'Q< Q<', 3,  $base + $got_rva_actual );    # DT_PLTGOT
 
+        # DT_DEBUG=0x15: inform dynamic linker to maintain r_debug pointer.
+        # Value 0 means the linker initializes it at a platform-default slot.
+        if ( $platform->is_dragonflybsd ) {
+            $dynamic .= pack( 'Q< Q<', 0x15, 0 );
+        }
+
         if ($is_pie) {
 
             # DT_GNU_PRELINKED=0x6ffffffb: flags=0x08000000 (DF_1_PIE)
