@@ -605,7 +605,11 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my %sym_indices;
         for my $name (@imports) {
             $sym_indices{$name} = $sym_idx++;
-            $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 0, 0, 0 );
+            # STB_GLOBAL|STT_FUNC = 0x12; STB_WEAK|STT_FUNC = 0x22
+            # sched_setaffinity is absent on DragonFly BSD (it uses pthread_setaffinity_np);
+            # emit it as a weak symbol so RTLD doesn't abort if the symbol is missing.
+            my $st_info = ( $name eq 'sched_setaffinity' && $platform->is_dragonflybsd ) ? 0x22 : 0x12;
+            $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, $st_info, 0, 0, 0, 0 );
         }
         if ( $self->type eq 'shared' ) {
             for my $name (@exports) {
