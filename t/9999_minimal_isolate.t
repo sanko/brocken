@@ -55,6 +55,12 @@ my $out_file = temp_path('test_prog');
 $linker->write_executable( $out_file, $funcs, $platform );
 ok( -f $out_file, "Binary created for $triple" );
 
+# Dump full ELF structure for the generated binary on DragonFly
+if ($platform->is_dragonflybsd) {
+    my $readelf_out = `readelf -a '$out_file' 2>&1`;
+    diag("Brocken binary readelf -a:\n$readelf_out");
+}
+
 # Run it
 my $dbg = $platform->is_dragonflybsd || $platform->is_netbsd ? 1 : 0;
 run_exec( $out_file, expected_exit => 99, name => "minimal isolate exit 99 on $triple", platform => $platform, keep => 1, gdb => $dbg );
