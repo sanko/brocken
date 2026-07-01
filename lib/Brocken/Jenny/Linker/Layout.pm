@@ -26,16 +26,16 @@ This class calculates the physical file offsets and relative virtual addresses (
     }
 
     # Computes the alignment-corrected offsets and RVAs.
+    # Ensures off % section_align == rva % section_align so any LOAD
+    # segment boundary maintains p_offset == p_vaddr (mod p_align).
     method calculate($min_hdr) {
-        $header_size = ( $min_hdr + $file_align - 1 ) & ~( $file_align - 1 );
+        $header_size = ( $min_hdr + $section_align - 1 ) & ~( $section_align - 1 );
         my $curr_off = $header_size;
-
-        # RVA must mathematically align with file offset on strict formats (Mach-O)
-        my $curr_rva = ( $header_size + $section_align - 1 ) & ~( $section_align - 1 );
+        my $curr_rva = $header_size;
         for my $s (@sections) {
             $s->{off} = $curr_off;
             $s->{rva} = $curr_rva;
-            $curr_off += ( $s->{size} + $file_align - 1 ) & ~( $file_align - 1 );
+            $curr_off += ( $s->{size} + $section_align - 1 ) & ~( $section_align - 1 );
             $curr_rva += ( $s->{size} + $section_align - 1 ) & ~( $section_align - 1 );
         }
         return $curr_rva;

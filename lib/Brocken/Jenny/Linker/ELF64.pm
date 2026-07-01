@@ -1028,18 +1028,17 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $interp_sec->{size}, $interp_sec->{size}, 1
                 );
         }
-        my $hash_sec  = $self->layout->get('.hash');
-        my $rx_p_off  = 0;
-        my $rx_p_size = $hash_sec->{off} + $hash_sec->{size};
-
-        # PT_LOAD=1, flags=RX(5): maps .text through .hash
-        push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 1, 5, $rx_p_off, $base, $base, $rx_p_size, $rx_p_size, $page_align );
         my $dyn_sec  = $self->layout->get('.dynamic');
         my $got_sec  = $self->layout->get('.got');
-        my $rw_p_off = $dyn_sec->{off} & ~( $page_align - 1 );
+        my $rx_p_off = 0;
+        my $rx_p_size = $dyn_sec->{off};
+
+        # PT_LOAD=1, flags=RX(5): maps .text through .gnu.hash (all before .dynamic)
+        push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 1, 5, $rx_p_off, $base, $base, $rx_p_size, $rx_p_size, $page_align );
+        my $rw_p_off = $dyn_sec->{off};
         my $rw_size  = ( $got_sec->{off} + $got_sec->{size} ) - $rw_p_off;
 
-        # PT_LOAD=1, flags=RW(6): maps .dynamic through .got (page-aligned to cover zero-fill gap)
+        # PT_LOAD=1, flags=RW(6): maps .dynamic through .got (GCC-style overlapping LOAD)
         push @phdrs,
             pack( 'L< L< Q< Q< Q< Q< Q< Q<', 1, 6, $rw_p_off, $base + $dyn_sec->{rva}, $base + $dyn_sec->{rva}, $rw_size, $rw_size, $page_align );
 
