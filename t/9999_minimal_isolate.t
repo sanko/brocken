@@ -21,6 +21,7 @@ my %os2triple = (
 my $triple = $os2triple{$^O} or plan skip_all => "Unknown OS: $^O";
 
 my $platform = Brocken::Katsuro::Platform::parse($triple);
+plan skip_all => 'DragonFly BSD threading not supported' if $platform->is_dragonflybsd;
 note("Platform: $triple");
 
 my $i32 = Brocken::Lindsay::IR::Type::i32();
