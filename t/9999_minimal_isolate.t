@@ -1,7 +1,7 @@
 use v5.42;
+use lib 'lib', '../lib';
 use Test2::V0;
 use Test2::Tools::Brocken qw[run_exec temp_path];
-use lib 'lib', '../lib';
 use Brocken;
 use Brocken::Lindsay;
 use Brocken::Katsuro::Platform;
