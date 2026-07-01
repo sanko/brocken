@@ -31,6 +31,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $layout->add_section( '.dynsym',   4096, 2 );
         $layout->add_section( '.rela.dyn', 4096, 2 );
         $layout->add_section( '.hash',     4096, 2 );
+        $layout->add_section( '.gnu.hash', 4096, 2 );
 
         # Writable data and dynamic linking tables (mapped to RW segment)
         $layout->add_section( '.dynamic', 4096,       3 );    # RW (Alloc + Write)
@@ -753,6 +754,49 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         my $hash = pack( 'L<*', $nbucket, $nchain, @buckets, @chains );
         $self->layout->get('.hash')->{size}   = length($hash);
+
+        # GNU hash table (DT_GNU_HASH / .gnu.hash)
+        my $dl_new_hash = sub {
+            my $name = shift;
+            my $h    = 5381;
+            for my $c ( split //, $name ) {
+                $h = ( ( $h << 5 ) + $h ) + ord($c);    # h * 33 + c
+                $h &= 0xffffffff;
+            }
+            return $h;
+        };
+        my $gnu_nbucket   = 3;
+        my $gnu_symndx    = 1;
+        my $gnu_maskwords = 1;
+        my $gnu_shift2    = 3;
+        my $bloom         = 0;
+        my @gnu_buckets   = (0) x $gnu_nbucket;
+        my @gnu_chains    = (0) x ( $sym_idx - $gnu_symndx );
+        {
+            my %by_bucket;
+            for my $name ( keys %sym_indices ) {
+                my $idx = $sym_indices{$name};
+                next if $idx < $gnu_symndx;
+                my $h = $dl_new_hash->($name);
+                push @{ $by_bucket{ $h % $gnu_nbucket } }, { idx => $idx, hash => $h };
+            }
+            for my $b ( keys %by_bucket ) {
+                my @syms = sort { $a->{idx} <=> $b->{idx} } @{ $by_bucket{$b} };
+                $gnu_buckets[$b] = $syms[-1]->{idx};
+                for my $i ( 0 .. $#syms ) {
+                    my $sym = $syms[$i];
+                    my $val = $sym->{hash} & ~1;
+                    $val |= 1 if $i == 0;
+                    $gnu_chains[ $sym->{idx} - $gnu_symndx ] = $val;
+                    $bloom |= ( 1 << ( $sym->{hash} % 64 ) ) | ( 1 << ( ( $sym->{hash} >> $gnu_shift2 ) % 64 ) );
+                }
+            }
+        }
+        my $gnu_hash = pack( 'L< L< L< L<', $gnu_nbucket, $gnu_symndx, $gnu_maskwords, $gnu_shift2 );
+        $gnu_hash .= pack( 'Q<', $bloom );
+        $gnu_hash .= pack( 'L<*', @gnu_buckets, @gnu_chains );
+        $self->layout->get('.gnu.hash')->{size} = length($gnu_hash);
+
         $self->layout->get('.symtab')->{size} = length($dynsym);
         $self->layout->get('.strtab')->{size} = length($dynstr);
         $self->layout->calculate($page_align);
@@ -760,6 +804,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $str_rva        = $self->layout->get('.dynstr')->{rva};
         my $sym_rva        = $self->layout->get('.dynsym')->{rva};
         my $hash_rva       = $self->layout->get('.hash')->{rva};
+        my $gnu_hash_rva   = $self->layout->get('.gnu.hash')->{rva};
         my $rela_rva       = $self->layout->get('.rela.dyn')->{rva};
         my $got_rva_actual = $self->layout->get('.got')->{rva};
         my $dynamic        = '';
@@ -771,6 +816,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $dynamic .= pack( 'Q< Q<', 1, $str_off{$lib} );    # DT_NEEDED
         }
         $dynamic .= pack( 'Q< Q<', 4,  $base + $hash_rva );          # DT_HASH
+        $dynamic .= pack( 'Q< Q<', 0x6ffffef5, $base + $gnu_hash_rva ); # DT_GNU_HASH
         $dynamic .= pack( 'Q< Q<', 5,  $base + $str_rva );           # DT_STRTAB
         $dynamic .= pack( 'Q< Q<', 6,  $base + $sym_rva );           # DT_SYMTAB
         $dynamic .= pack( 'Q< Q<', 10, length($dynstr) );            # DT_STRSZ
@@ -835,6 +881,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
             elsif ( $s->{name} eq '.hash' ) {
                 $payload = $hash;
+            }
+            elsif ( $s->{name} eq '.gnu.hash' ) {
+                $payload = $gnu_hash;
             }
             elsif ( $s->{name} eq '.dynamic' ) {
                 $payload = $dynamic;
@@ -920,6 +969,12 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $flags      = 2;
                 $sh_link    = $sec_indices{'.dynsym'} // 0;
                 $sh_entsize = 4;
+            }
+            elsif ( $s->{name} eq '.gnu.hash' ) {
+                $type       = 0x6ffffff6;    # SHT_GNU_HASH
+                $flags      = 2;
+                $sh_link    = $sec_indices{'.dynsym'} // 0;
+                $sh_entsize = 0;
             }
             elsif ( $s->{name} eq '.dynamic' ) {
                 $type       = 6;
