@@ -10,6 +10,7 @@ SKIP: {
     my $brocken  = Brocken->new();
     my $platform = $brocken->platform;
     skip 'Isolate runtime test only on native hosts', 1 unless $platform->is_native;
+    skip 'DragonFly BSD threading not supported', 1 if $platform->is_dragonflybsd;
     subtest 'isolate_create and isolate_join basic lifecycle' => sub {
         my $i32 = Brocken::Lindsay::IR::Type::i32();
         my $i64 = Brocken::Lindsay::IR::Type::i64();

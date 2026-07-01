@@ -11,6 +11,7 @@ SKIP: {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
     skip 'Isolate retval test only on native hosts', 1 unless $host->is_native;
+    skip 'DragonFly BSD threading not supported', 1 if $host->is_dragonflybsd;
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
     subtest 'Isolate returns 42' => sub {

@@ -11,6 +11,7 @@ SKIP: {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
     skip 'Isolate+fiber interop test only on native hosts', 1 unless $host->is_native;
+    skip 'DragonFly BSD threading not supported', 1 if $host->is_dragonflybsd;
 
     # 1. Fiber create/transfer/yield inside an isolate
     #    Tests ctx_swap works from a non-original thread stack.
