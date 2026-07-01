@@ -1,0 +1,11 @@
+# Minimal Brocken equivalent of the GCC pthread test
+# gcc test: pthread_create/join a worker that returns 42
+# Brocken: isolate_create/join a worker that returns 42
+
+sub worker_fn() -> i32 {
+    return 42;
+}
+
+my i64 $iso = isolate_create(worker_fn);
+isolate_join($iso);
+return 99;
