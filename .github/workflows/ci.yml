@@ -1,7 +1,7 @@
 ---
 jobs:
   dragonflybsd:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'dragonflybsd' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'dragonflybsd') }}"
     name: DragonFly BSD
     needs:
       - setup
@@ -18,7 +18,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       version: 6.4.2
   freebsd-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'freebsd' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'freebsd-arm64') || contains(needs.setup.outputs.runner, 'freebsd-x64') }}"
     name: FreeBSD
     needs:
       - setup
@@ -33,7 +33,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       version: 15.1
   freebsd-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'freebsd' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'freebsd-arm64') || contains(needs.setup.outputs.runner, 'freebsd-x64') }}"
     name: FreeBSD
     needs:
       - setup
@@ -49,7 +49,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       version: 15.1
   haiku:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'haiku' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'haiku') }}"
     name: Haiku
     needs:
       - setup
@@ -65,7 +65,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       version: r1beta5
   linux-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'linux' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'linux-x64') || contains(needs.setup.outputs.runner, 'linux-arm64') }}"
     name: Linux
     needs:
       - setup
@@ -77,7 +77,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: ARM
   linux-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'linux' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'linux-x64') || contains(needs.setup.outputs.runner, 'linux-arm64') }}"
     name: Linux
     needs:
       - setup
@@ -89,7 +89,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: Intel
   macos-arm:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'macos' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'macos-intel') || contains(needs.setup.outputs.runner, 'macos-arm') }}"
     name: macOS
     needs:
       - setup
@@ -101,7 +101,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: Apple Silicon
   macos-intel:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'macos' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'macos-intel') || contains(needs.setup.outputs.runner, 'macos-arm') }}"
     name: macOS
     needs:
       - setup
@@ -113,7 +113,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: Intel
   midnightbsd:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'midnightbsd' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'midnightbsd') }}"
     name: MidnightBSD
     needs:
       - setup
@@ -128,7 +128,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       version: 4.0.4
   netbsd-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'netbsd' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'netbsd-x64') || contains(needs.setup.outputs.runner, 'netbsd-arm64') }}"
     name: NetBSD
     needs:
       - setup
@@ -143,7 +143,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       version: 10.1
   netbsd-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'netbsd' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'netbsd-x64') || contains(needs.setup.outputs.runner, 'netbsd-arm64') }}"
     name: NetBSD
     needs:
       - setup
@@ -159,7 +159,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       version: 10.1
   omnios:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'omnios' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'omnios') }}"
     name: OmniOS
     needs:
       - setup
@@ -174,7 +174,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       version: r151058
   openbsd-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'openbsd' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'openbsd-x64') || contains(needs.setup.outputs.runner, 'openbsd-arm64') }}"
     name: OpenBSD
     needs:
       - setup
@@ -190,7 +190,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       version: 7.9
   openbsd-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'openbsd' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'openbsd-x64') || contains(needs.setup.outputs.runner, 'openbsd-arm64') }}"
     name: OpenBSD
     needs:
       - setup
@@ -355,7 +355,7 @@ jobs:
           name: status-files
           path: status/
   riscv64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'riscv64' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'riscv64') }}"
     name: Linux
     needs:
       - setup
@@ -381,13 +381,59 @@ jobs:
         id: parse_tags
         name: Parse commit message tags for runner/test filtering
         run: |
+          expand_runner() {
+            local input="$1"
+            [ "$input" = "all" ] && { echo "all"; return; }
+            local result=""
+            IFS=',' read -ra ENTRIES <<< "$input"
+            for entry in "${ENTRIES[@]}"; do
+              entry="${entry#"${entry%%[! ]*}"}"; entry="${entry%"${entry##*[! ]}"}"
+              [ -z "$entry" ] && continue
+              local runner="${entry%%#*}"
+              local arch=""
+              [[ "$entry" == *"#"* ]] && arch="${entry#*#}"
+              case "$runner" in
+                dragonflybsd|dragonfly) result="$result dragonflybsd" ;;
+                freebsd)
+                  if [ -z "$arch" ]; then result="$result freebsd-x64 freebsd-arm64"
+                  elif [[ "$arch" =~ ^(x86-64|intel)$ ]]; then result="$result freebsd-x64"
+                  elif [[ "$arch" =~ ^(arm64|arm)$ ]]; then result="$result freebsd-arm64"; fi ;;
+                linux)
+                  if [ -z "$arch" ]; then result="$result linux-x64 linux-arm64"
+                  elif [[ "$arch" =~ ^(x86-64|intel)$ ]]; then result="$result linux-x64"
+                  elif [[ "$arch" =~ ^(arm64|arm)$ ]]; then result="$result linux-arm64"
+                  elif [[ "$arch" =~ ^(riscv64|riscv)$ ]]; then result="$result riscv64"; fi ;;
+                macos)
+                  if [ -z "$arch" ]; then result="$result macos-intel macos-arm"
+                  elif [[ "$arch" =~ ^(intel|x86-64)$ ]]; then result="$result macos-intel"
+                  elif [[ "$arch" =~ ^(arm|arm64|apple)$ ]]; then result="$result macos-arm"; fi ;;
+                windows)
+                  if [ -z "$arch" ]; then result="$result win32-x64 win32-arm64"
+                  elif [[ "$arch" =~ ^(x86-64|intel)$ ]]; then result="$result win32-x64"
+                  elif [[ "$arch" =~ ^(arm64|arm)$ ]]; then result="$result win32-arm64"; fi ;;
+                netbsd)
+                  if [ -z "$arch" ]; then result="$result netbsd-x64 netbsd-arm64"
+                  elif [[ "$arch" =~ ^(x86-64|intel)$ ]]; then result="$result netbsd-x64"
+                  elif [[ "$arch" =~ ^(arm64|arm)$ ]]; then result="$result netbsd-arm64"; fi ;;
+                openbsd)
+                  if [ -z "$arch" ]; then result="$result openbsd-x64 openbsd-arm64"
+                  elif [[ "$arch" =~ ^(x86-64|intel)$ ]]; then result="$result openbsd-x64"
+                  elif [[ "$arch" =~ ^(arm64|arm)$ ]]; then result="$result openbsd-arm64"; fi ;;
+                haiku) result="$result haiku" ;;
+                midnightbsd) result="$result midnightbsd" ;;
+                omnios) result="$result omnios" ;;
+                riscv64) result="$result riscv64" ;;
+              esac
+            done
+            echo "${result:1}"
+          }
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "runner=${DISPATCH_RUNNER:-all}" >> "$GITHUB_OUTPUT"
+            echo "runner=$(expand_runner "${DISPATCH_RUNNER:-all}")" >> "$GITHUB_OUTPUT"
             echo "test_files=${DISPATCH_TEST:-}" >> "$GITHUB_OUTPUT"
           else
-            RUNNER=$(echo "$COMMIT_MSG" | grep -oP '\[runner:\K[^\]]+' || echo "all")
+            RAW_RUNNER=$(echo "$COMMIT_MSG" | grep -oP '\[runner:\K[^\]]+' || echo "all")
             TEST=$(echo "$COMMIT_MSG" | grep -oP '\[test:\K[^\]]+' || echo "")
-            echo "runner=$RUNNER" >> "$GITHUB_OUTPUT"
+            echo "runner=$(expand_runner "$RAW_RUNNER")" >> "$GITHUB_OUTPUT"
             echo "test_files=$TEST" >> "$GITHUB_OUTPUT"
           fi
       - env:
@@ -399,7 +445,7 @@ jobs:
         id: matrix
         run: "jq -rn 'env.DATA | fromjson | @json \"matrix=\\(.)\"' > $GITHUB_OUTPUT\n"
   wasm:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'linux' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'linux-x64') || contains(needs.setup.outputs.runner, 'linux-arm64') }}"
     name: WebAssembly
     needs:
       - setup
@@ -411,7 +457,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: WebAssembly
   win32-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'windows' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'win32-x64') || contains(needs.setup.outputs.runner, 'win32-arm64') }}"
     name: Windows
     needs:
       - setup
@@ -423,7 +469,7 @@ jobs:
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: ARM
   win32-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || needs.setup.outputs.runner == 'windows' }}"
+    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'win32-x64') || contains(needs.setup.outputs.runner, 'win32-arm64') }}"
     name: Windows
     needs:
       - setup
@@ -444,21 +490,8 @@ on:
     inputs:
       runner:
         default: all
-        description: Runner(s) to execute (or "all")
-        options:
-          - all
-          - dragonflybsd
-          - freebsd
-          - linux
-          - macos
-          - windows
-          - netbsd
-          - openbsd
-          - haiku
-          - midnightbsd
-          - omnios
-          - riscv64
-        type: choice
+        description: 'Runner(s) to execute (comma-separated, e.g. "freebsd,linux" or "openbsd#arm,linux#riscv"). See [runner:...] commit tag docs.'
+        type: string
       test_files:
         default: ''
         description: Test file pattern (e.g. t/3000_jenny/3500_isolate/*.t)
