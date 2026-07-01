@@ -12,7 +12,7 @@ SKIP: {
     my $host    = $brocken->platform;
     skip 'Isolate args test only on X86_64',       1 unless $host->is_x64;
     skip 'Isolate args test only on native hosts', 1 unless $host->is_native;
-    skip 'DragonFly BSD threading not supported', 1 if $host->is_dragonflybsd;
+
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 

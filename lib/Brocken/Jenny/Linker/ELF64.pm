@@ -84,16 +84,26 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $ebrk = 0x00100073;
             return pack 'V8', $lui, $sub, $mv, $jal, $auipc, $ld, $jalr, $ebrk;
         }
+
         my $HEAP_SIZE = 1048576;
-        my $next_ip   = $text_rva + 28;
-        my $rel32     = $got_exit - $next_ip;
-        my $main_rel  = 11 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
-        my $stub      = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );            # and rsp, -16
+        my $stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );                 # and rsp, -16
         $stub .= pack( 'C3 V',  0x48, 0x81, 0xEC, $HEAP_SIZE );          # sub rsp, HEAP_SIZE
         $stub .= pack( 'C3',    0x48, 0x89, 0xE7 );                      # mov rdi, rsp
-        $stub .= pack( 'C V',   0xE8, $main_rel );                       # call main
+
+        # Calculate dynamic call target offset (call main)
+        my $tail_len = 5 + 3 + 6 + 2;                                    # call(5) + mov(3) + call exit(6) + ud2(2)
+        my $final_len = length($stub) + $tail_len;
+        my $main_target = $text_rva + $final_len + ($func_offsets->{_BROCKEN_ENTRY} // 0);
+        my $rip_after_call = $text_rva + length($stub) + 5;
+        my $main_rel = $main_target - $rip_after_call;
+
+        $stub .= pack( 'C l<',  0xE8, $main_rel );                       # call main
         $stub .= pack( 'C3',    0x48, 0x89, 0xC7 );                      # mov rdi, rax
-        $stub .= pack( 'C2 l<', 0xFF, 0x15, $rel32 );                    # call [rip + exit]
+
+        # Calculate dynamic exit call offset
+        my $exit_rip = $text_rva + length($stub) + 6;
+        my $exit_rel = $got_exit - $exit_rip;
+        $stub .= pack( 'C2 l<', 0xFF, 0x15, $exit_rel );                 # call [rip + exit]
         $stub .= pack( 'C2',    0x0F, 0x0B );                            # ud2
         return $stub;
     }
@@ -118,6 +128,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         #   pthread_cond_signal  = +96  (offset 12, index 12)
         #   pthread_cond_broadcast = +104 (offset 13, index 13)
         # Slot 0-2 reserved (0, DYNAMIC, LINK_MAP).
+        # pthread_self was previously slot 14 (+112) but removed -- Dragonfly's
+        # pthread_self reads %fs:0x10 directly and cannot be called before TLS init.
         my $imports = {
             dlopen                 => 24,
             dlsym                  => 32,
@@ -405,7 +417,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         elsif ( $platform->is_dragonflybsd ) {
             $osabi     = 0;
             $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600401 );
-            $note_data .= pack( 'L<3 a12 L<', 10, 4, 32, "DragonFly\0\0\0", 0 );
+            $note_data .= pack( 'L<3 a12 L<', 10, 4, 32, "DragonFly\0\0\0", 1 );    # DF_FEATURE_PTHREAD
         }
         my %interp_map = (
             linux        => '/lib64/ld-linux-x86-64.so.2',
@@ -476,7 +488,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
             push @imports, 'sched_setaffinity';
         }
-        my $libc = $libc_map{$os_base} // 'libc.so';
+
+        my $libc = $libc_map{$os_base} // 'libc.so.6';
 
         # Probe the exact dynamic libc.so name on the host filesystem when running natively
         if ( $platform->is_native ) {
@@ -487,108 +500,139 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my @found;
             for my $dir (@search_paths) {
                 next unless -d $dir;
-                my @matches;
                 if ( opendir my $dh, $dir ) {
-                    @matches = map {"$dir/$_"} grep {/^libc\.so\.\d/} readdir $dh;
+                    push @found, map {"$dir/$_"} grep { /^libc\.so(?:\.\d+)*/ && !/_p\.so/ } readdir $dh;
                     closedir $dh;
-                }
-                for my $m (@matches) {
-                    next if $m =~ /_p\.so/;
-                    push @found, $m;
                 }
             }
             if (@found) {
-                my $best = (
-                    sort {
-                        my ( $amaj, $amin ) = $a =~ /libc\.so\.(\d+)(?:\.(\d+))?/;
-                        my ( $bmaj, $bmin ) = $b =~ /libc\.so\.(\d+)(?:\.(\d+))?/;
-                        ( $amaj // 0 ) <=> ( $bmaj // 0 ) || ( ( $amin // 0 ) <=> ( $bmin // 0 ) );
-                    } @found
-                )[-1];
-                if ($best) {
-                    require File::Basename;
-                    $libc = File::Basename::basename($best);
+                # Prefer files with actual SONAMEs
+                my $best_soname;
+                for my $f ( sort { length($a) <=> length($b) } @found ) {
+                    my $soname = _elf_soname($f);
+                    if ($soname) {
+                        $best_soname = $soname;
+                        last;
+                    }
+                }
+                if ($best_soname) {
+                    $libc = $best_soname;
+                } else {
+                    # Fallback to the most-versioned filename
+                    my $best = (
+                        sort {
+                            my @av = $a =~ /\.(\d+)/g;
+                            my @bv = $b =~ /\.(\d+)/g;
+                            my $cmp = 0;
+                            for (my $i = 0; $i < @av || $i < @bv; $i++) {
+                                $cmp = ($av[$i]//0) <=> ($bv[$i]//0);
+                                last if $cmp;
+                            }
+                            $cmp;
+                        } @found
+                    )[-1];
+                    if ($best) {
+                        require File::Basename;
+                        $libc = File::Basename::basename($best);
+                    }
                 }
             }
         }
-        my @libs = ($libc);
-        if ( !$platform->is_haiku && !$platform->is_solaris ) {
+
+        my @libs;
+        if ( !$platform->is_haiku && !$platform->is_solaris && !$platform->is_openbsd ) {
             my $libpthread;
 
+            # Setup OS-specific fallback defaults for threading libraries
+            if ( $platform->is_freebsd || $platform->is_midnightbsd ) {
+                $libpthread = 'libthr.so.3';
+            } elsif ( $platform->is_dragonflybsd ) {
+                $libpthread = 'libthread_xu.so.2';
+            } elsif ( $platform->is_netbsd ) {
+                $libpthread = 'libpthread.so.1';
+            } else {
+                $libpthread = 'libpthread.so.0'; # Serves DragonFly BSD correctly
+            }
 
-                $libpthread = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr.so.3' : 'libpthread.so.0';
-
-                # Try compiler query to find the actual pthread library.
-                # On DragonFly BSD the libpthread.so symlink resolves to
-                # libthread_xu.so.2 (stored outside the standard library path);
-                # the resolved SONAME would be unfindable by the RTLD, so skip
-                # the compiler probe on DragonFly and keep the default.
-                if ( !$platform->is_dragonflybsd ) {
-                    for my $cc (qw(clang gcc cc)) {
-                        my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;
-                        chomp $out if defined $out;
-                        if ( $out && $out ne 'libpthread.so' && -e $out ) {
-                            my $soname = _elf_soname($out);
-                            if ($soname) {
-                                $libpthread = $soname;
-                                last;
-                            }
-                        }
+            # Try compiler query to find the actual pthread library.
+            for my $cc (qw(clang gcc cc)) {
+                my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;
+                chomp $out if defined $out;
+                if ( $out && $out ne 'libpthread.so' && -e $out ) {
+                    my $soname = _elf_soname($out);
+                    if ($soname) {
+                        $libpthread = $soname;
+                        last;
                     }
-                }
-
-                # Fallback: search filesystem for the threading library
-                if ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' ) {
-                    my @search_paths = (
-                        '/usr/lib', '/lib', '/lib64', '/usr/lib64',
-                        '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
-                    );
-                    my @found;
-                    my $prefix = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' : 'libpthread';
-                    for my $dir (@search_paths) {
-                        next unless -d $dir;
-                        if ( opendir my $dh, $dir ) {
-                            push @found, map {"$dir/$_"} grep { /^\Q$prefix\E\.so(?:\.\d+)?$/ && !/_p\.so/ } readdir $dh;
-                            closedir $dh;
-                        }
-                    }
-                    if (@found) {
-
-                        # Prefer a file with an ELF SONAME
-                        for my $f ( sort { length($a) <=> length($b) } @found ) {
-                            my $soname = _elf_soname($f);
-                            if ($soname) {
-                                $libpthread = $soname;
-                                last;
-                            }
-                        }
-
-                        # Fallback to the most-versioned filename
-                        if ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' ) {
-                            my $most = (
-                                sort {
-                                    my ( $am, $an ) = $a =~ /\.so\.(\d+)(?:\.(\d+))?/;
-                                    my ( $bm, $bn ) = $b =~ /\.so\.(\d+)(?:\.(\d+))?/;
-                                    ( $bm // 0 ) <=> ( $am // 0 ) || ( ( $bn // 0 ) <=> ( $an // 0 ) );
-                                } grep {/\.so\.\d/} @found
-                            )[0];
-                            if ($most) {
-                                require File::Basename;
-                                $libpthread = File::Basename::basename($most);
-                            }
-                        }
-                    }
-                }
-
-                # Platform-specific overrides when neither compiler nor filesystem found anything
-                if ( $platform->is_openbsd || $platform->is_netbsd ) {
-                    $libpthread = 'libpthread.so';
                 }
                 if ( $platform->is_dragonflybsd ) {
-                    $libpthread = 'libpthread.so.0';
+                    my $out_xu = `$cc -pthread -print-file-name=libthread_xu.so 2>/dev/null`;
+                    chomp $out_xu if defined $out_xu;
+                    if ( $out_xu && $out_xu ne 'libthread_xu.so' && -e $out_xu ) {
+                        my $soname = _elf_soname($out_xu);
+                        if ($soname) {
+                            $libpthread = $soname;
+                            last;
+                        }
+                    }
                 }
+            }
+
+            # Fallback: search filesystem for the threading library
+            if ( $platform->is_native && ($libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' || $libpthread eq 'libthread_xu.so.2') ) {
+                my @search_paths = (
+                    '/usr/lib', '/lib', '/lib64', '/usr/lib64',
+                    '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
+                );
+                my @found;
+                my $prefix = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' :
+                             $platform->is_dragonflybsd ? 'libthread_xu' : 'libpthread';
+                for my $dir (@search_paths) {
+                    next unless -d $dir;
+                    if ( opendir my $dh, $dir ) {
+                        push @found, map {"$dir/$_"} grep { /^\Q$prefix\E\.so(?:\.\d+)*/ && !/_p\.so/ } readdir $dh;
+                        closedir $dh;
+                    }
+                }
+                if (@found) {
+                    my $best_soname;
+                    for my $f ( sort { length($a) <=> length($b) } @found ) {
+                        my $soname = _elf_soname($f);
+                        if ($soname) {
+                            $best_soname = $soname;
+                            last;
+                        }
+                    }
+
+                    if ($best_soname) {
+                        $libpthread = $best_soname;
+                    } else {
+                        my $most = (
+                            sort {
+                                my @av = $a =~ /\.(\d+)/g;
+                                my @bv = $b =~ /\.(\d+)/g;
+                                my $cmp = 0;
+                                for (my $i = 0; $i < @av || $i < @bv; $i++) {
+                                    $cmp = ($av[$i]//0) <=> ($bv[$i]//0);
+                                    last if $cmp;
+                                }
+                                $cmp;
+                            } @found
+                        )[-1];
+                        if ($most) {
+                            require File::Basename;
+                            $libpthread = File::Basename::basename($most);
+                        }
+                    }
+                }
+            }
+
+            # The threading library must be loaded before libc.so so it can properly intercept
+            # weak internal symbols and initialize Thread Local Storage (TLS).
             push @libs, $libpthread;
         }
+        push @libs, $libc;
+
         my $dynstr = "\0";
         my %str_off;
         for my $s ( @libs, @imports, @exports ) {
@@ -1016,7 +1060,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $num_ph++ if $is_pie;
         my $eh_frame_sec = $self->layout->get('.eh_frame');
         $num_ph++ if $eh_frame_sec;
-        $num_ph++ if $platform->is_dragonflybsd;
+        $num_ph++ if $platform->is_bsd;
         my @phdrs     = ();
         my $extra_off = 64 + ( $num_ph * 56 );
 
@@ -1106,9 +1150,14 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 );
         }
 
-        if ( $platform->is_dragonflybsd ) {
-            # PT_TLS=7: empty TLS segment for DragonFly ld-elf.so.2 TLS init
-            push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 7, 4, 0, 0, 0, 0, 0, 1 );
+        if ( $platform->is_bsd ) {
+            # PT_TLS=7: Creates an empty thread-local storage segment.
+            # This segment signals `rtld` that the binary expects Thread Control
+            # Block (TCB) memory layout capabilities.
+            my $data_sec = $self->layout->get('.data');
+            my $tls_vaddr = $data_sec ? $base + $data_sec->{rva} : $base;
+            my $tls_off = $data_sec ? $data_sec->{off} : 0;
+            push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 7, 6, $tls_off, $tls_vaddr, $tls_vaddr, 0, 8, 8 );
         }
 
         # PT_GNU_STACK=0x6474e551: flags=6 (RW, no exec) for non-executable stack

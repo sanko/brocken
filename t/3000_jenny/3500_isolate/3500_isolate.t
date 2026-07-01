@@ -4,7 +4,6 @@ use lib 'lib', '../../lib', '../../../lib';
 use Brocken::Lindsay::IR;
 use Brocken::Lindsay::IR::Builder;
 use Brocken::Katsuro::Platform;
-plan skip_all => 'DragonFly BSD threading not supported' if Brocken::Katsuro::Platform::parse()->is_dragonflybsd;
 no warnings qw[experimental::class];
 use feature qw[class];
 my $i64  = Brocken::Lindsay::IR::Type::i64();
