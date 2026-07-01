@@ -3250,7 +3250,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             )
                         );
                     }
-                    elsif ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
+                    elsif ( $platform->is_linux || $platform->is_freebsd ) {
                         my $mask_slot = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst_tag . '.msk', type => $ptr );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3314,6 +3314,14 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 opcode   => 'call_func',
                                 operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'sched_setaffinity' ) ],
                                 comment  => 'sched_setaffinity'
+                            )
+                        );
+                    }
+                    elsif ( $platform->is_dragonflybsd ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode  => 'nop',
+                                comment => 'DragonFly uses pthread_setaffinity_np; pin not yet implemented'
                             )
                         );
                     }
