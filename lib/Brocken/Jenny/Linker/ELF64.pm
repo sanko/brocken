@@ -403,7 +403,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         elsif ( $platform->is_dragonflybsd ) {
             $osabi     = 0;
-            $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600400 );
+            $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600401 );
             $note_data .= pack( 'L<3 a12 L<', 10, 4, 32, "DragonFly\0\0\0", 0 );
         }
         my %interp_map = (
