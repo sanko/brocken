@@ -1016,6 +1016,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $num_ph++ if $is_pie;
         my $eh_frame_sec = $self->layout->get('.eh_frame');
         $num_ph++ if $eh_frame_sec;
+        $num_ph++ if $platform->is_dragonflybsd;
         my @phdrs     = ();
         my $extra_off = 64 + ( $num_ph * 56 );
 
@@ -1103,6 +1104,12 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $base + $eh_frame_sec->{rva},
                 $eh_frame_sec->{size}, $eh_frame_sec->{size}, 4
                 );
+        }
+
+        if ( $platform->is_dragonflybsd ) {
+            # PT_TLS=7: empty TLS segment — DragonFly ld-elf.so.2 requires this
+            # to initialize %fs for the main thread's TLS base.
+            push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 7, 4, 0, 0, 0, 0, 0, 1 );
         }
 
         # PT_GNU_STACK=0x6474e551: flags=6 (RW, no exec) for non-executable stack
