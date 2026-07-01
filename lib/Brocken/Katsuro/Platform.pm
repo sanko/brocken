@@ -125,7 +125,7 @@ class Brocken::Katsuro::Platform {
             elsif ( $^O eq 'darwin' )                 { $vendor = 'apple';   $os = 'darwin';      $env = 'macho' }
             elsif ( $^O eq 'haiku' )                  { $vendor = 'pc';      $os = 'haiku';       $env = 'elf' }
             elsif ( $^O eq 'midnightbsd' )            { $vendor = 'pc';      $os = 'midnightbsd'; $env = 'elf' }
-            elsif ( $^O eq 'dragonflybsd' )              { $vendor = 'pc';      $os = 'dragonflybsd';   $env = 'elf' }
+            elsif ( $^O =~ /^dragonfly/ )                 { $vendor = 'pc';      $os = 'dragonflybsd';   $env = 'elf' }
             elsif ( $^O =~ /bsd/i )                   { $vendor = 'pc';      $os = $^O;           $env = 'elf' }
             elsif ( $^O =~ /solaris|sunos|illumos/i ) { $vendor = 'unknown'; $os = 'solaris';     $env = 'elf' }
         }
