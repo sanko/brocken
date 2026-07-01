@@ -36,6 +36,14 @@ SKIP: {
         my $output_file = $brocken->tmpdir . '/isolate_test' . $brocken->ext;
         $brocken->linker->write_executable( $output_file, $funcs, $platform );
         ok( -f $output_file, 'Isolate test executable exists' ) or do { unlink $output_file if -f $output_file; skip 'no binary', 0 };
+        if ( $platform->is_dragonflybsd || $platform->is_freebsd ) {
+            diag( '=== readelf -l (program headers) ===' );
+            system( 'readelf -l ' . $output_file . ' 2>&1' );
+            diag( '=== readelf -d (dynamic section) ===' );
+            system( 'readelf -d ' . $output_file . ' 2>&1' );
+            diag( '=== readelf -h (ELF header) ===' );
+            system( 'readelf -h ' . $output_file . ' 2>&1' );
+        }
         system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, 99, 'Isolate test exited with 99 (lifecycle completed)' );
