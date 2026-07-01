@@ -1107,8 +1107,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
 
         if ( $platform->is_dragonflybsd ) {
-            # PT_TLS=7: empty TLS segment — DragonFly ld-elf.so.2 requires this
-            # to initialize %fs for the main thread's TLS base.
+            # PT_TLS=7: empty TLS segment for DragonFly ld-elf.so.2 TLS init
             push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 7, 4, 0, 0, 0, 0, 0, 1 );
         }
 
