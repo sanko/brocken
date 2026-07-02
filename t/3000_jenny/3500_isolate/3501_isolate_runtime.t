@@ -144,16 +144,14 @@ SKIP: {
                     chomp $elf_type;
                     diag("    libc ELF type: $elf_type");
 
-                    # Dump /proc/self/map via GDB
+                    # Dump /proc/self/map via GDB (run then crash to get state)
                     diag("  --- /proc/self/map (from GDB batch) ---");
-                    my $map_out = `gdb -batch -ex 'set pagination off' -ex 'info proc mappings' -ex quit $output_file 2>&1 | grep -E '[0-9a-f]+-[0-9a-f]+' | head -40`;
+                    my $map_out = `gdb -batch -ex run -ex 'info proc mappings' -ex quit $output_file 2>&1 | grep -E '0x[0-9a-f]+-' | head -40`;
                     for (split /\n/, $map_out) { s/\t/ /g; diag("  $_"); }
 
                     # Read runtime GOT value using GDB
                     diag("  --- runtime GOT entry value (from GDB) ---");
-                    # Expected: got_addr = libc_base + 0x338770 (from file VA)
-                    # We don't know libc_base at run time, but GDB can compute it from sigblockall symbol
-                    my $gdb_got = `gdb -batch -ex 'set pagination off' -ex 'info functions sigblockall' -ex 'print/x (sigblockall + 9 + 7 + 0x2f9ba8)' -ex 'x/gx (sigblockall + 9 + 7 + 0x2f9ba8)' -ex 'info reg fs_base' -ex quit $output_file 2>&1`;
+                    my $gdb_got = `gdb -batch -ex run -ex 'print/x (sigblockall + 9 + 7 + 0x2f9ba8)' -ex 'x/gx (sigblockall + 9 + 7 + 0x2f9ba8)' -ex 'info reg fs_base' -ex quit $output_file 2>&1`;
                     for (split /\n/, $gdb_got) { s/\t/ /g; diag("  $_"); }
                 }
             } else {
