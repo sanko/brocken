@@ -129,7 +129,7 @@ SKIP: {
         is( scalar @$funcs, 3, '3 functions emitted' );
         my $file = $brocken->tmpdir . '/fiber_chain' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 42, name => 'chain fiber last yield 42', platform => $host, keep => 1, gdb => $dbg );
     };
 

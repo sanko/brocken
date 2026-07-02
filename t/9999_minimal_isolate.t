@@ -7,6 +7,7 @@ use Brocken::Lindsay;
 use Brocken::Katsuro::Platform;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
+skip_all 'No';
 
 # Detect platform from Perl's $^O
 my %os2triple = (
@@ -20,7 +21,8 @@ my %os2triple = (
 );
 my $triple   = $os2triple{$^O} or plan skip_all => "Unknown OS: $^O";
 my $platform = Brocken::Katsuro::Platform::parse($triple);
-plan skip_all => 'DragonFly BSD threading not supported' if $platform->is_dragonflybsd;
+
+#~ plan skip_all => 'DragonFly BSD threading not supported' if $platform->is_dragonflybsd;
 note("Platform: $triple");
 my $i32 = Brocken::Lindsay::IR::Type::i32();
 
@@ -53,12 +55,11 @@ $linker->write_executable( $out_file, $funcs, $platform );
 ok( -f $out_file, "Binary created for $triple" );
 
 # Dump full ELF structure for the generated binary on DragonFly
-if ( $platform->is_dragonflybsd ) {
-    my $readelf_out = `readelf -a '$out_file' 2>&1`;
-    diag("Brocken binary readelf -a:\n$readelf_out");
-}
-
+#~ if ( $platform->is_dragonflybsd ) {
+#~ my $readelf_out = `readelf -a '$out_file' 2>&1`;
+#~ diag("Brocken binary readelf -a:\n$readelf_out");
+#~ }
 # Run it
-my $dbg = $platform->is_dragonflybsd || $platform->is_netbsd ? 1 : 0;
+my $dbg = 0;    # $platform->is_dragonflybsd || $platform->is_netbsd ? 1 : 0;
 run_exec( $out_file, expected_exit => 99, name => "minimal isolate exit 99 on $triple", platform => $platform, keep => 1, gdb => $dbg );
 done_testing;

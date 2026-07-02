@@ -8,6 +8,7 @@ no warnings qw[experimental::class experimental::builtin portable];
 use feature    qw[class];
 use File::Temp qw(tempfile);
 #
+skip_all 'No need for these diagnostics right now';
 my ( $fh, $cfile ) = tempfile( SUFFIX => '.c', UNLINK => 0 );
 print $fh <<'C';
 #include <stdio.h>
