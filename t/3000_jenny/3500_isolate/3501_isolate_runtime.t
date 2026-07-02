@@ -162,6 +162,66 @@ SKIP: {
                 }
             }
         }
+        if ( $platform->is_dragonflybsd ) {
+            diag('=== GCC comparison: compile C pthread binary ===');
+            my ( $sfh, $c_path ) = File::Temp::tempfile( 'gcc_diag_XXXX', SUFFIX => '.c', TMPDIR => 1, UNLINK => 0 );
+            my $gcc_bin = $c_path;
+            $gcc_bin =~ s/\.c$//;
+            print $sfh <<'CCODE';
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+void* thread_func(void* arg) { int* val = (int*)arg; printf("thread: %d\n", *val); return NULL; }
+int main() {
+    pthread_t t; int val = 42;
+    if (pthread_create(&t, NULL, thread_func, &val) != 0) { fprintf(stderr, "pthread_create failed\n"); return 1; }
+    if (pthread_join(t, NULL) != 0) { fprintf(stderr, "pthread_join failed\n"); return 1; }
+    printf("main: ok\n"); return 0;
+}
+CCODE
+            close $sfh;
+            my $gcc_out = `gcc -lpthread -o $gcc_bin $c_path 2>&1`;
+            my $gcc_rc = $? >> 8;
+            if ($gcc_rc == 0) {
+                diag('=== GCC binary compiled OK ===');
+                diag('--- readelf -l comparison ---');
+                my $our_phdr = `readelf -l $output_file 2>&1`;
+                my $gcc_phdr = `readelf -l $gcc_bin 2>&1`;
+                diag("BROCKEN binary program headers:\n$our_phdr");
+                diag("GCC binary program headers:\n$gcc_phdr");
+                diag('--- readelf -d comparison ---');
+                my $our_dyn = `readelf -d $output_file 2>&1`;
+                my $gcc_dyn = `readelf -d $gcc_bin 2>&1`;
+                diag("BROCKEN dynamic section:\n$our_dyn");
+                diag("GCC dynamic section:\n$gcc_dyn");
+                diag('--- readelf -S comparison ---');
+                my $our_sec = `readelf -S $output_file 2>&1`;
+                my $gcc_sec = `readelf -S $gcc_bin 2>&1`;
+                diag("BROCKEN section headers:\n$our_sec");
+                diag("GCC section headers:\n$gcc_sec");
+                diag('--- readelf -s comparison ---');
+                my $our_sym = `readelf -s $output_file 2>&1`;
+                my $gcc_sym = `readelf -s $gcc_bin 2>&1`;
+                diag("BROCKEN symbol table:\n$our_sym");
+                diag("GCC symbol table:\n$gcc_sym");
+                diag('--- .interp content comparison ---');
+                my $our_interp = `strings -n 1 $output_file | grep '^/' | head -1`;
+                my $gcc_interp = `strings -n 1 $gcc_bin | grep '^/' | head -1`;
+                $our_interp //= '';
+                $gcc_interp //= '';
+                chomp $our_interp;
+                chomp $gcc_interp;
+                diag("  BROCKEN interp: '$our_interp'");
+                diag("  GCC interp:     '$gcc_interp'");
+                diag('--- objdump -p (GCC full private header) ---');
+                my $gcc_objdump = `objdump -p $gcc_bin 2>&1`;
+                diag($gcc_objdump);
+            } else {
+                diag("gcc compilation failed (exit $gcc_rc): $gcc_out");
+            }
+            for my $f ($c_path, $gcc_bin) { unlink $f if defined $f && -f $f; }
+        }
         system $output_file;
         my $exit_code = $? >> 8;
         is( $exit_code, 99, 'Isolate test exited with 99 (lifecycle completed)' );
