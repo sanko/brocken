@@ -1,0 +1,28 @@
+# core.brocken -- Brocken v0.1 Runtime Primitives
+# Automatically compiled alongside user code.
+
+# Initialize heap metadata in the first 16 bytes of the heap buffer:
+#   [heap_base + 0] = cursor (ptr to next free byte, starts at heap_base + 16)
+#   [heap_base + 8] = limit (ptr past end of heap)
+sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
+    my ptr $initial_cursor = Brocken::ptr_add($heap_base, 16);
+    Brocken::store_i64($heap_base, $initial_cursor);
+    my ptr $limit_addr = Brocken::ptr_add($heap_base, 8);
+    Brocken::store_i64($limit_addr, Brocken::ptr_add($heap_base, $heap_size));
+    return;
+}
+
+# Bump-allocate $size bytes from the heap at $heap_base.
+# Returns pointer to the allocated block, or 0 on out-of-memory.
+sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
+    my ptr $cursor_ptr = $heap_base;
+    my ptr $cursor = Brocken::load_i64($cursor_ptr);
+    my ptr $limit = Brocken::load_i64(Brocken::ptr_add($heap_base, 8));
+    my ptr $result = $cursor;
+    my ptr $new_cursor = Brocken::ptr_add($cursor, $size);
+    if (Brocken::ptr_cmp_gt($new_cursor, $limit)) {
+        return 0;
+    }
+    Brocken::store_i64($cursor_ptr, $new_cursor);
+    return $result;
+}
