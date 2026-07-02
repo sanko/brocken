@@ -66,7 +66,7 @@ class Brocken::Katsuro::Lexer v0.0.1 {
             }
 
             # 5. Match Operators (multi-character first)
-            if ( $remaining =~ /^(==|!=|<=|>=|<=>|=>|->|\&\&|\|\||\/\/=|\/\/|\.\.\.?)/ ) {
+            if ( $remaining =~ /^(<<|>>|==|!=|<=|>=|<=>|=>|->|\&\&|\|\||\/\/=|\/\/|\.\.\.?)/ ) {
                 my $val = $1;
                 push @tokens, $self->_token( 'OP', $val );
                 $self->_advance_pos( length($val) );
