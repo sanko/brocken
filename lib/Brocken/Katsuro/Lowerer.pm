@@ -32,10 +32,28 @@ class Brocken::Katsuro::Lowerer {
         f64    => Brocken::Lindsay::IR::Type::f64(),
         ptr    => Brocken::Lindsay::IR::Type::ptr(),
         void   => Brocken::Lindsay::IR::Type::void(),
-        Bool   => Brocken::Lindsay::IR::Type::i1(),
-        Int    => Brocken::Lindsay::IR::Type::i64(),
+        Bool   => Brocken::Lindsay::IR::Type::dynamic(),
+        Int    => Brocken::Lindsay::IR::Type::dynamic(),
         Any    => Brocken::Lindsay::IR::Type::dynamic(),
         String => Brocken::Lindsay::IR::Type::ptr(),
+    );
+
+    # Native representation types for constants (never dynamic/boxed)
+    my %TYPE_NATIVE_MAP = (
+        Int    => Brocken::Lindsay::IR::Type::i64(),
+        Bool   => Brocken::Lindsay::IR::Type::i1(),
+        Any    => Brocken::Lindsay::IR::Type::i64(),
+        String => Brocken::Lindsay::IR::Type::ptr(),
+        i1     => Brocken::Lindsay::IR::Type::i1(),
+        i8     => Brocken::Lindsay::IR::Type::i8(),
+        i16    => Brocken::Lindsay::IR::Type::i16(),
+        i32    => Brocken::Lindsay::IR::Type::i32(),
+        i64    => Brocken::Lindsay::IR::Type::i64(),
+        i128   => Brocken::Lindsay::IR::Type::i128(),
+        f32    => Brocken::Lindsay::IR::Type::f32(),
+        f64    => Brocken::Lindsay::IR::Type::f64(),
+        ptr    => Brocken::Lindsay::IR::Type::ptr(),
+        void   => Brocken::Lindsay::IR::Type::void(),
     );
 
     method _loc($ast) {
@@ -47,6 +65,10 @@ class Brocken::Katsuro::Lowerer {
 
     method type_from_name($name) {
         return $TYPE_MAP{$name} // Carp::croak("Unknown type '$name'");
+    }
+
+    method native_type_from_name($name) {
+        return $TYPE_NATIVE_MAP{$name} // $self->type_from_name($name);
     }
 
     # Type size in bytes for field offset calculation
@@ -506,7 +528,7 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method lower_const($ast) {
-        return Brocken::Lindsay::IR::Constant->new( type => $self->type_from_name( $ast->type ), value => $ast->value, );
+        return Brocken::Lindsay::IR::Constant->new( type => $self->native_type_from_name( $ast->type ), value => $ast->value, );
     }
 
     method lower_var_ref($ast) {
@@ -574,6 +596,13 @@ class Brocken::Katsuro::Lowerer {
         my $lhs = $self->lower_expression( $ast->lhs );
         my $rhs = $self->lower_expression( $ast->rhs );
         my $op  = $ast->op;
+
+        # Unbox dynamic operands to i64 for arithmetic/comparison
+        my $native = Brocken::Lindsay::IR::Type::i64();
+        if ( $lhs->type->kind eq 'dynamic' || $rhs->type->kind eq 'dynamic' ) {
+            $lhs = $self->maybe_convert_type( $lhs, $native );
+            $rhs = $self->maybe_convert_type( $rhs, $native );
+        }
         return $builder->build_add( $lhs, $rhs ) if $op eq '+';
         return $builder->build_sub( $lhs, $rhs ) if $op eq '-';
         return $builder->build_mul( $lhs, $rhs ) if $op eq '*';
@@ -593,6 +622,11 @@ class Brocken::Katsuro::Lowerer {
     method lower_unop($ast) {
         my $operand = $self->lower_expression( $ast->expr );
         my $op      = $ast->op;
+
+        # Unbox dynamic operands to i64 before unary ops
+        if ( $operand->type->kind eq 'dynamic' ) {
+            $operand = $self->maybe_convert_type( $operand, Brocken::Lindsay::IR::Type::i64() );
+        }
         return $builder->build_neg($operand) if $op eq '-';
         if ( $op eq '!' ) {
             my $zero = Brocken::Lindsay::IR::Constant->new( type => $operand->type, value => 0 );
@@ -619,8 +653,14 @@ class Brocken::Katsuro::Lowerer {
             }
         }
         my @args;
+        my $param_idx = 0;
         for my $arg ( $ast->args->@* ) {
-            push @args, $self->lower_expression($arg);
+            my $val = $self->lower_expression($arg);
+            if ( $param_idx < $callee->params->@* ) {
+                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
+            }
+            push @args, $val;
+            $param_idx++;
         }
         my $ret_is_void = $callee->return_type->kind eq 'void';
         return $builder->build_call( $callee, \@args, $ret_is_void ? undef : '%' . $name . '_res' );
@@ -649,6 +689,11 @@ class Brocken::Katsuro::Lowerer {
     # === Condition conversion ===
     method as_condition($val) {
         return $val if $val->type->bits == 1;
+
+        # Unbox dynamic to i64 before comparing against zero
+        if ( $val->type->kind eq 'dynamic' ) {
+            $val = $self->maybe_convert_type( $val, Brocken::Lindsay::IR::Type::i64() );
+        }
         my $zero = Brocken::Lindsay::IR::Constant->new( type => $val->type, value => 0 );
         return $builder->build_icmp( 'ne', $val, $zero );
     }
@@ -656,6 +701,18 @@ class Brocken::Katsuro::Lowerer {
     # === Type conversion helper ===
     method maybe_convert_type( $val, $target_type ) {
         return $val if $val->type->kind eq $target_type->kind && $val->type->bits == $target_type->bits;
+
+        # Box: native -> dynamic
+        if ( $target_type->kind eq 'dynamic' && $val->type->kind ne 'dynamic' ) {
+            return $builder->build_box($val);
+        }
+
+        # Unbox: dynamic -> native
+        if ( $val->type->kind eq 'dynamic' && $target_type->kind ne 'dynamic' ) {
+            return $builder->build_unbox( $val, $target_type );
+        }
+
+        # Integer widening
         if ( $val->type->kind eq 'int' && $target_type->kind eq 'int' ) {
             if ( $val->type->bits < $target_type->bits ) {
                 return $builder->build_add( $val, Brocken::Lindsay::IR::Constant->new( type => $val->type, value => 0 ) );
@@ -724,18 +781,30 @@ class Brocken::Katsuro::Lowerer {
                 my $struct_type = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => $total_size * 8 );
                 $self_ptr = $builder->build_alloca( $struct_type, '%obj' );
             }
-            my @args = ($self_ptr);
+            my @args       = ($self_ptr);
+            my $ctor_p_idx = 1;
             for my $arg ( $ast->args->@* ) {
-                push @args, $self->lower_expression($arg);
+                my $val = $self->lower_expression($arg);
+                if ( $ctor_p_idx < $callee->params->@* ) {
+                    $val = $self->maybe_convert_type( $val, $callee->params->[$ctor_p_idx]->type );
+                }
+                push @args, $val;
+                $ctor_p_idx++;
             }
             $builder->build_call( $callee, \@args, undef );
             return $self_ptr;
         }
         my $obj_ptr = $obj_is_class ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) :
             $self->lower_expression( $ast->obj );
-        my @args = ($obj_ptr);
+        my @args      = ($obj_ptr);
+        my $param_idx = 1;
         for my $arg ( $ast->args->@* ) {
-            push @args, $self->lower_expression($arg);
+            my $val = $self->lower_expression($arg);
+            if ( $param_idx < $callee->params->@* ) {
+                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
+            }
+            push @args, $val;
+            $param_idx++;
         }
         my $ret_is_void = $callee->return_type->kind eq 'void';
         return $builder->build_call( $callee, \@args, $ret_is_void ? undef : '%' . $ast->method . '_res' );
