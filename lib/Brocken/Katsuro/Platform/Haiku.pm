@@ -6,6 +6,9 @@ use Brocken::Katsuro::Platform;
 class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
     my %cache;
     method is_haiku() {1}
+    method libc_name() {'libroot.so'}
+    method interpreter() {'/boot/system/runtime_loader'}
+    method exit_name() {'exit'}
 
     # Haiku's syscall numbers are unstable and not officially exposed.
     # We use a heuristic by disassembling libroot.so functions to find the
@@ -25,6 +28,7 @@ class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
         };
         my $fn  = $stub->{$name} or return undef;
         my $dis = '';
+        no warnings 'exec';
         if ( open my $fh, '-|', 'objdump', '-d', $lib ) {
             my $output = do { local $/; <$fh> };
             close $fh;

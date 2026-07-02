@@ -5,6 +5,9 @@ use Brocken::Katsuro::Platform::BSD;
 
 class Brocken::Katsuro::Platform::OpenBSD : isa(Brocken::Katsuro::Platform::BSD) {
     method is_openbsd() {1}
+    method libc_name()       {'libc.so.98.1'}
+    method libpthread_name() {'libpthread.so'}
+    method interpreter()     {'/usr/libexec/ld.so'}
 
     # OpenBSD uses its own syscall numbering lineage (derived from 4.4BSD with local changes).
     # Key difference from FreeBSD: mmap=197 (not 477). Other common syscalls share numbers
