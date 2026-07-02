@@ -2,15 +2,11 @@ use v5.40;
 use Test2::V0;
 use File::Temp qw(tempfile);
 use lib 'lib', '../lib', 'blib/lib', '../blib/lib';
-
 my $os = $^O;
 note("Host OS: $os");
-
 SKIP: {
-    skip 'gcc thread disassembly test requires a Unix-like OS with gcc', 1
-        if $os eq 'MSWin32' || $os eq 'cygwin';
-
-    my $cc = 'gcc';
+    skip 'gcc thread disassembly test requires a Unix-like OS with gcc', 1 if $os eq 'MSWin32' || $os eq 'cygwin';
+    my $cc    = 'gcc';
     my $cc_ok = system("$cc --version >/dev/null 2>&1");
     skip "gcc not found (tried '$cc')", 1 if $cc_ok != 0;
 
@@ -21,13 +17,11 @@ SKIP: {
     # Show preprocessor defines relevant to OS/threads
     diag("=== gcc -dM -E (OS+thread defines) ===");
     system("$cc -lpthread -dM -E -x c /dev/null 2>&1 | grep -iE 'freebsd|dragonfly|linux|gnu|thread|tls|_REENTRANT|_PTHREADS' || true");
-
-    my ($sfh, $c_path) = tempfile('gcc_diag_XXXX', SUFFIX => '.c', TMPDIR => 1, UNLINK => 0);
+    my ( $sfh, $c_path ) = tempfile( 'gcc_diag_XXXX', SUFFIX => '.c', TMPDIR => 1, UNLINK => 0 );
     my $bin_path = $c_path;
     $bin_path =~ s/\.c$//;
-    my $s_path  = $c_path;
+    my $s_path = $c_path;
     $s_path =~ s/\.c$/.s/;
-
     my $c_code = <<'CCODE';
 #include <pthread.h>
 #include <stdio.h>
@@ -55,18 +49,16 @@ int main() {
     return 0;
 }
 CCODE
-
     print $sfh $c_code;
     close $sfh;
-
-    ok(-f $c_path, "C source written: $c_path");
+    ok( -f $c_path, "C source written: $c_path" );
 
     # ---- Step 1: Assembly dump via gcc -S ----
     note("=== Step 1: gcc -S (assembly output) ===");
     my $asm_out = `$cc -lpthread -S -o $s_path $c_path 2>&1`;
-    my $rc1 = $? >> 8;
-    if ($rc1 == 0) {
-        ok(1, 'gcc -S succeeded');
+    my $rc1     = $? >> 8;
+    if ( $rc1 == 0 ) {
+        ok( 1, 'gcc -S succeeded' );
         open my $afh, '<', $s_path or diag("Cannot read $s_path: $!");
         if ($afh) {
             local $/;
@@ -74,20 +66,22 @@ CCODE
             close $afh;
             note("Assembly output:\n$asm");
         }
-    } else {
+    }
+    else {
         diag("gcc -S failed (exit $rc1): $asm_out");
-        ok(0, 'gcc -S succeeded');
+        ok( 0, 'gcc -S succeeded' );
     }
 
     # ---- Step 2: Compile full binary ----
     note("=== Step 2: gcc -o (full binary) ===");
     my $compile = `$cc -lpthread -o $bin_path $c_path 2>&1`;
-    my $rc2 = $? >> 8;
-    if ($rc2 == 0) {
-        ok(1, "gcc compilation succeeded: $bin_path");
-    } else {
+    my $rc2     = $? >> 8;
+    if ( $rc2 == 0 ) {
+        ok( 1, "gcc compilation succeeded: $bin_path" );
+    }
+    else {
         diag("gcc compilation failed (exit $rc2): $compile");
-        ok(0, 'gcc compilation succeeded');
+        ok( 0, 'gcc compilation succeeded' );
     }
 
     # ---- Step 3: Run the binary ----
@@ -96,17 +90,18 @@ CCODE
     my $rc3 = $? >> 8;
     diag("Binary output: $run");
     diag("Exit code: $rc3");
-    if ($rc3 == 0) {
-        ok(1, 'Binary execution succeeded');
-    } else {
+    if ( $rc3 == 0 ) {
+        ok( 1, 'Binary execution succeeded' );
+    }
+    else {
         diag('Binary execution FAILED');
-        ok(0, 'Binary execution succeeded');
+        ok( 0, 'Binary execution succeeded' );
     }
 
     # ---- Step 4: ELF dump (program headers, dynamic section, section headers) ----
     note("=== Step 4: ELF Information ===");
     my $elf_ok = 0;
-    if (system('readelf --version >/dev/null 2>&1') == 0) {
+    if ( system('readelf --version >/dev/null 2>&1') == 0 ) {
         $elf_ok = 1;
         diag("=== readelf -h (ELF header) ===");
         system("readelf -h $bin_path 2>&1");
@@ -122,7 +117,8 @@ CCODE
         system("readelf -r $bin_path 2>&1");
         diag("=== readelf -s (symbol table) ===");
         system("readelf -s $bin_path 2>&1");
-    } elsif (system('objdump --version >/dev/null 2>&1') == 0) {
+    }
+    elsif ( system('objdump --version >/dev/null 2>&1') == 0 ) {
         $elf_ok = 1;
         diag("=== objdump -p (private/dynamic) ===");
         system("objdump -p $bin_path 2>&1");
@@ -134,10 +130,11 @@ CCODE
         system("objdump -R $bin_path 2>&1");
         diag("=== objdump -t (symbol table) ===");
         system("objdump -t $bin_path 2>&1");
-    } else {
+    }
+    else {
         diag('No readelf or objdump available');
     }
-    ok($elf_ok, 'ELF dump completed');
+    ok( $elf_ok, 'ELF dump completed' );
 
     # ---- Step 5: Hex dump of raw binary ----
     note("=== Step 5: Hex dump ===");
@@ -151,34 +148,31 @@ CCODE
         $bin = <$bfh>;
     }
     close $bfh;
-
-    my $len = length($bin);
+    my $len      = length($bin);
     my $dump_max = $len > 8192 ? 8192 : $len;
     diag("Binary size: $len bytes, dumping first $dump_max bytes");
-
-    for (my $i = 0; $i < $dump_max; $i += 16) {
-        my $chunk = substr($bin, $i, 16);
+    for ( my $i = 0; $i < $dump_max; $i += 16 ) {
+        my $chunk = substr( $bin, $i, 16 );
         my $hex;
-        my $ascii = '';
+        my $ascii     = '';
         my $chunk_len = length($chunk);
-        for my $j (0 .. $chunk_len - 1) {
-            my $byte = ord(substr($chunk, $j, 1));
-            $hex .= sprintf('%02x', $byte);
-            if    ($j == $chunk_len - 1) { }               # last byte - no trailing space
-            elsif ($j == 7)              { $hex .= '  '; } # group gap - two spaces
-            else                         { $hex .= ' ';  } # normal separator
-            $ascii .= ($byte >= 32 && $byte < 127) ? chr($byte) : '.';
+        for my $j ( 0 .. $chunk_len - 1 ) {
+            my $byte = ord( substr( $chunk, $j, 1 ) );
+            $hex .= sprintf( '%02x', $byte );
+            if    ( $j == $chunk_len - 1 ) { }                  # last byte - no trailing space
+            elsif ( $j == 7 )              { $hex .= '  '; }    # group gap - two spaces
+            else                           { $hex .= ' '; }     # normal separator
+            $ascii .= ( $byte >= 32 && $byte < 127 ) ? chr($byte) : '.';
         }
-        diag(sprintf "%08x  %-48s  |%s|", $i, $hex, $ascii);
+        diag( sprintf "%08x  %-48s  |%s|", $i, $hex, $ascii );
     }
-    ok(1, 'Hex dump completed');
+    ok( 1, 'Hex dump completed' );
 
     # ---- Cleanup ----
     note("=== Cleanup ===");
-    for my $f ($c_path, $s_path, $bin_path) {
+    for my $f ( $c_path, $s_path, $bin_path ) {
         unlink $f if defined $f && -f $f;
     }
     note('Temporary files removed');
 }
-
 done_testing;

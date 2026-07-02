@@ -11,7 +11,6 @@ SKIP: {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
     skip 'M:N threading test only on native hosts', 1 unless $host->is_native;
-
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
     subtest 'Two workers each with a fiber' => sub {

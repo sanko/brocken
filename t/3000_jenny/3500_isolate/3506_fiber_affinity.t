@@ -11,7 +11,6 @@ SKIP: {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
     skip 'Fiber affinity test only on native hosts', 1 unless $host->is_native;
-
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 
