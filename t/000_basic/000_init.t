@@ -5,7 +5,7 @@ use Brocken::Target::OS;
 use Test2::V0;
 my $p         = Brocken->new();
 my $plat      = $p->platform;
-my %os_map    = ( windows => 'win64', darwin => 'macos' );
+my %os_map    = ( windows => 'win64', darwin => 'macos', dragonflybsd => 'dragonfly' );
 my $os_name   = $os_map{ $plat->os } // $plat->os;
 my %arch_map  = ( x86_64 => 'x64', aarch64 => 'arm64' );
 my $arch_name = $arch_map{ $plat->arch } // $plat->arch;
