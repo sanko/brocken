@@ -443,7 +443,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600401 );
             $note_data .= pack( 'L<3 a12 L<', 10, 4, 32, "DragonFly\0\0\0", 1 );    # DF_FEATURE_PTHREAD
         }
-
         my $pintable_data = '';
         if ( $has_pintable && $platform->is_openbsd ) {
             my $pos             = 0;
@@ -475,7 +474,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
         }
         my @exports = @{ $self->exported_funcs // [] };
-        my @imports  = (
+        my @imports = (
             'dlopen',              'dlsym',              'pthread_create',       'pthread_join',
             $platform->exit_name,  'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_cond_wait',
             'pthread_cond_signal', 'pthread_cond_broadcast'
@@ -540,6 +539,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my @libs;
         my $libpthread = $platform->libpthread_name;
         if ( defined $libpthread ) {
+
             # Try compiler query to find the actual pthread library.
             for my $cc (qw(clang gcc cc)) {
                 my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;

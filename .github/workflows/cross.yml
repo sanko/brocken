@@ -7,11 +7,11 @@ jobs:
       - uses: actions/checkout@v5.0.0
         with:
           submodules: true
-      - uses: actions/cache@v5
-        id: perl-cache
+      - id: perl-cache
+        uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/.perl-cache
-          key: cross-${{ inputs.os }}-${{ inputs.arch }}-perl-v${{ inputs.perl }}.${{ inputs.perl_subversion }}
+          key: 'cross-${{ inputs.os }}-${{ inputs.arch }}-perl-v${{ inputs.perl }}.${{ inputs.perl_subversion }}'
+          path: '${{ github.workspace }}/.perl-cache'
       - env:
           AUTHOR_TESTING: 0
           AUTOMATED_TESTING: 1
