@@ -10,20 +10,18 @@ use feature qw[class];
 
 # Detect platform from Perl's $^O
 my %os2triple = (
-    MSWin32 => 'x86_64-pc-windows-msvc',
-    linux   => 'x86_64-pc-linux-gnu',
-    freebsd => 'x86_64-pc-freebsd-elf',
+    MSWin32   => 'x86_64-pc-windows-msvc',
+    linux     => 'x86_64-pc-linux-gnu',
+    freebsd   => 'x86_64-pc-freebsd-elf',
     dragonfly => 'x86_64-pc-dragonflybsd-elf',
-    netbsd  => 'x86_64-pc-netbsd-elf',
-    openbsd => 'x86_64-pc-openbsd-elf',
-    darwin  => 'x86_64-apple-macosx',
+    netbsd    => 'x86_64-pc-netbsd-elf',
+    openbsd   => 'x86_64-pc-openbsd-elf',
+    darwin    => 'x86_64-apple-macosx',
 );
-my $triple = $os2triple{$^O} or plan skip_all => "Unknown OS: $^O";
-
+my $triple   = $os2triple{$^O} or plan skip_all => "Unknown OS: $^O";
 my $platform = Brocken::Katsuro::Platform::parse($triple);
 plan skip_all => 'DragonFly BSD threading not supported' if $platform->is_dragonflybsd;
 note("Platform: $triple");
-
 my $i32 = Brocken::Lindsay::IR::Type::i32();
 
 # Minimal worker: just return 42
@@ -44,20 +42,18 @@ $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 )
 my $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
 my $funcs   = $codegen->emit_functions( [ $main, $worker ] );
 diag('Functions:');
-for my $f ($funcs->@*) {
-    diag("  $f->{name}: " . length($f->{bytes}) . " bytes");
+for my $f ( $funcs->@* ) {
+    diag( "  $f->{name}: " . length( $f->{bytes} ) . " bytes" );
 }
 
 # Link ELF/PE
-my $linker   = $platform->is_windows
-    ? Brocken::Jenny::Linker::PE->new()
-    : Brocken::Jenny::Linker::ELF64->new();
+my $linker   = $platform->is_windows ? Brocken::Jenny::Linker::PE->new() : Brocken::Jenny::Linker::ELF64->new();
 my $out_file = temp_path('test_prog');
 $linker->write_executable( $out_file, $funcs, $platform );
 ok( -f $out_file, "Binary created for $triple" );
 
 # Dump full ELF structure for the generated binary on DragonFly
-if ($platform->is_dragonflybsd) {
+if ( $platform->is_dragonflybsd ) {
     my $readelf_out = `readelf -a '$out_file' 2>&1`;
     diag("Brocken binary readelf -a:\n$readelf_out");
 }
@@ -65,5 +61,4 @@ if ($platform->is_dragonflybsd) {
 # Run it
 my $dbg = $platform->is_dragonflybsd || $platform->is_netbsd ? 1 : 0;
 run_exec( $out_file, expected_exit => 99, name => "minimal isolate exit 99 on $triple", platform => $platform, keep => 1, gdb => $dbg );
-
 done_testing;
