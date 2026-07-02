@@ -45,27 +45,23 @@ BROCKEN
 subtest 'Return constant' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    return 42;
-}
+return 42;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/ret\s+i64\s+42/, 'returns constant 42' );
 };
 subtest 'Variable declaration and assignment' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my i64 $x = 10;
-    my i64 $y;
-    $y = 20;
-    return $x;
-}
+my i64 $x = 10;
+my i64 $y;
+$y = 20;
+return $x;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+i64/,     'alloca for i64' );
     like( $text, qr/store\s+i64\s+10/, 'store initializer 10' );
@@ -75,13 +71,11 @@ BROCKEN
 subtest 'Binary arithmetic with precedence' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my i64 $r = 1 + 2 * 3;
-    return $r;
-}
+my i64 $r = 1 + 2 * 3;
+return $r;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/mul\s+i64\s+2,\s+3/, 'multiply first' );
     like( $text, qr/add\s+i64\s+1,/,     'then add' );
@@ -89,18 +83,16 @@ BROCKEN
 subtest 'If/else control flow' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my i64 $x = 0;
-    if ($x) {
-        $x = 1;
-    } else {
-        $x = 2;
-    }
-    return $x;
+my i64 $x = 0;
+if ($x) {
+    $x = 1;
+} else {
+    $x = 2;
 }
+return $x;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/br\s+i1/,     'conditional branch' );
     like( $text, qr/then_\d+:/,   'then label' );
@@ -109,16 +101,14 @@ BROCKEN
 subtest 'While loop' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my i64 $i = 0;
-    while ($i < 10) {
-        $i = $i + 1;
-    }
-    return $i;
+my i64 $i = 0;
+while ($i < 10) {
+    $i = $i + 1;
 }
+return $i;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/while_header_\d+:/, 'header label' );
     like( $text, qr/while_body_\d+:/,   'body label' );
@@ -127,18 +117,16 @@ BROCKEN
 subtest 'Comparison operators' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my i64 $a = 10;
-    my i64 $b = 20;
-    if ($a == $b) { return 1; }
-    if ($a != $b) { return 2; }
-    if ($a < $b)  { return 3; }
-    if ($a > $b)  { return 4; }
-    return 0;
-}
+my i64 $a = 10;
+my i64 $b = 20;
+if ($a == $b) { return 1; }
+if ($a != $b) { return 2; }
+if ($a < $b)  { return 3; }
+if ($a > $b)  { return 4; }
+return 0;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/icmp\s+eq/,  'icmp eq' );
     like( $text, qr/icmp\s+ne/,  'icmp ne' );
@@ -148,28 +136,24 @@ BROCKEN
 subtest 'Unary negation and logical not' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my i64 $a = -5;
-    if (! $a) { return 1; }
-    return 0;
-}
+my i64 $a = -5;
+if (! $a) { return 1; }
+return 0;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/neg\s+i64/, 'neg for negation' );
 };
 subtest 'Intrinsic calls' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my ptr $p = 0;
-    my ptr $q = Brocken::ptr_add($p, 16);
-    return 0;
-}
+my ptr $p = 0;
+my ptr $q = Brocken::ptr_add($p, 16);
+return 0;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/add\s+ptr/, 'ptr_add lowered to add' );
 };
@@ -269,11 +253,9 @@ subtest 'Function calls' => sub {
 sub helper() -> i64 {
     return 42;
 }
-sub main() -> i64 {
-    return helper();
-}
+return helper();
 BROCKEN
-    is( $mod->functions->@*, 4, 'four functions (2 runtime + helper + main)' );
+    is( $mod->functions->@*, 4, 'four functions (2 runtime + helper + entry)' );
     my $text = $mod->as_string();
     like( $text, qr/call\s+i64\s+\@helper/, 'call to helper' );
 };
@@ -308,14 +290,12 @@ subtest 'Standalone field access as expression statement' => sub {
 class Point {
     field i64 $x :param;
 }
-sub main() -> i64 {
-    my ptr $p = Point->new(42);
-    $p->x;
-    return $p->x;
-}
+my ptr $p = Point->new(42);
+$p->x;
+return $p->x;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/getelementptr/, 'GEP for field access' );
     like( $text, qr/load\s+i64/,    'load i64 from field' );
@@ -329,17 +309,15 @@ class Point {
 sub make() -> Point {
     return Point->new(42);
 }
-sub main() -> i64 {
-    return make()->x;
-}
+return make()->x;
 BROCKEN
     my $make = find_function( $mod, 'make' );
     ok( $make, 'found function make' );
     is( $make->params->@*,             0,     'make takes no params' );
     is( $make->return_type->as_string, 'ptr', 'make returns ptr' );
-    my $main = find_function( $mod, 'main' );
-    ok( $main, 'found function main' );
-    my $text = $main->as_string();
+    my $entry = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $entry, 'found entry function' );
+    my $text = $entry->as_string();
     like( $text, qr/call\s+ptr\s+\@make/, 'call to make' );
     like( $text, qr/getelementptr/,       'GEP for field access' );
     like( $text, qr/load\s+i64/,          'load i64 from field' );
@@ -349,13 +327,11 @@ BROCKEN
 subtest 'Array declaration and element read' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my [i64; 10] @arr;
-    return @arr[3];
-}
+my [i64; 10] @arr;
+return @arr[3];
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+i64,\s+i64\s+10/, 'alloca with count 10' );
     like( $text, qr/getelementptr\s+i64/,      'GEP with i64 base type' );
@@ -366,14 +342,12 @@ BROCKEN
 subtest 'Array element write' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my [i64; 5] @arr;
-    @arr[2] = 42;
-    return @arr[2];
-}
+my [i64; 5] @arr;
+@arr[2] = 42;
+return @arr[2];
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found function main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+i64,\s+i64\s+5/, 'alloca with count 5' );
     like( $text, qr/store\s+i64\s+42/,        'store to array element' );
@@ -412,30 +386,14 @@ BROCKEN
     like( $text, qr/getelementptr\s+i64/,     'GEP for array access' );
     like( $text, qr/ret\s+i64/,               'return in entry' );
 };
-subtest 'Explicit sub main is just a function' => sub {
-    my $c   = Brocken::Compiler->new;
-    my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    return 99;
-}
-BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'explicit main function found' );
-    is( $f->return_type->as_string, 'i64', 'explicit main returns i64' );
-    is( $f->params->@*,             0,     'explicit main has no special params' );
-    my $text = $f->as_string();
-    like( $text, qr/ret\s+i64\s+99/, 'return 99' );
-};
 subtest 'int type lowers to i64' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my int $x = 42;
-    return $x;
-}
+my int $x = 42;
+return $x;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+i64/,     'int variable is i64 alloca' );
     like( $text, qr/store\s+i64\s+42/, 'int store as i64' );
@@ -445,26 +403,22 @@ BROCKEN
 subtest 'bool type lowers to i1' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my bool $flag = 1;
-    return 0;
-}
+my bool $flag = 1;
+return 0;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+i1/, 'bool variable is i1 alloca' );
 };
 subtest 'u64 type variable' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my u64 $x = 100;
-    return $x;
-}
+my u64 $x = 100;
+return $x;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+u64/,      'u64 variable is u64 alloca' );
     like( $text, qr/store\s+i64\s+100/, 'u64 store as i64 (literal)' );
@@ -474,14 +428,12 @@ BROCKEN
 subtest 'u8 and u16 type variables' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my u8 $a = 10;
-    my u16 $b = 20;
-    return 0;
-}
+my u8 $a = 10;
+my u16 $b = 20;
+return 0;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+u8/,  'u8 variable is u8 alloca' );
     like( $text, qr/alloca\s+u16/, 'u16 variable is u16 alloca' );
@@ -489,67 +441,74 @@ BROCKEN
 subtest 'u32 type variable' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my u32 $x = 50;
-    return 0;
-}
+my u32 $x = 50;
+return 0;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+u32/, 'u32 variable is u32 alloca' );
 };
 subtest 'Int alias (capital I) lowers to i64' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my Int $x = 7;
-    return $x;
-}
+my Int $x = 7;
+return $x;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+i64/, 'Int variable is i64 alloca' );
 };
 subtest 'Bool alias (capital B) lowers to i1' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my Bool $flag = 1;
-    return 0;
-}
+my Bool $flag = 1;
+return 0;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
     my $text = $f->as_string();
     like( $text, qr/alloca\s+i1/, 'Bool variable is i1 alloca' );
 };
 subtest 'unsigned widening emits zext' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my u8 $small = 200;
-    my i64 $big = $small;
-    return $big;
-}
+my u8 $small = 200;
+my i64 $big = $small;
+return $big;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
     my $text = $f->as_string();
     like( $text, qr/zext\s+u8/, 'unsigned widening uses zext' );
+};
+subtest 'Shift operators << and >>' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my i64 $a = 1 << 3;
+my i64 $b = 8 >> 1;
+my u32 $c = 16;
+my u32 $d = 32 >> 2;
+my u64 $e = $c >> 1;
+return $a + $b + $d + $e;
+BROCKEN
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
+    my $text = $f->as_string();
+    like( $text, qr/shl\s+i64/,  '1 << 3 emits shl' );
+    like( $text, qr/ashr\s+i64/, 'signed >> emits ashr' );
+    like( $text, qr/lshr\s+u32/, 'unsigned >> emits lshr' );
 };
 subtest 'signed widening emits sext' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub main() -> i64 {
-    my i8 $small = -5;
-    my i64 $big = $small;
-    return $big;
-}
+my i8 $small = -5;
+my i64 $big = $small;
+return $big;
 BROCKEN
-    my $f = find_function( $mod, 'main' );
-    ok( $f, 'found main' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
     my $text = $f->as_string();
     like( $text, qr/sext\s+i8/, 'signed widening uses sext' );
 };

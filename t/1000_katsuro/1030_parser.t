@@ -145,6 +145,19 @@ subtest 'Comparison operators' => sub {
     isa_ok( $init->rhs, ['Brocken::Katsuro::AST::Expr::BinOp'] );
     is( $init->rhs->op, '!=' );
 };
+subtest 'Shift operators << and >>' => sub {
+    my $c    = Brocken::Compiler->new;
+    my $prog = $c->parse_only('my i64 $r = 1 << 2 + 3 >> 4;');
+    my $init = $prog->statements->[0]->init;
+    isa_ok( $init, ['Brocken::Katsuro::AST::Expr::BinOp'] );
+    is( $init->op, '>>', 'top op is >>' );
+    isa_ok( $init->lhs, ['Brocken::Katsuro::AST::Expr::BinOp'] );
+    is( $init->lhs->op,         '<<', 'inner op is <<' );
+    is( $init->lhs->lhs->value, 1,    'lhs of << is 1' );
+    isa_ok( $init->lhs->rhs, ['Brocken::Katsuro::AST::Expr::BinOp'] );
+    is( $init->lhs->rhs->op, '+', 'inner op is + (higher precedence than <<)' );
+    is( $init->rhs->value,   4,   'rhs of >> is 4' );
+};
 subtest 'Function calls' => sub {
     my $c    = Brocken::Compiler->new;
     my $prog = $c->parse_only('foo(1, 2); bar();');
