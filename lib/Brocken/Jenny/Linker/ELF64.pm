@@ -34,6 +34,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $layout->add_section( '.gnu.hash', 4096, 2 ) if $os eq 'dragonflybsd';
         $layout->add_section( '.init',     16,   5 ) if $os eq 'dragonflybsd';
         $layout->add_section( '.fini',     16,   5 ) if $os eq 'dragonflybsd';
+        $layout->add_section( '.gnu.version',     64, 2 ) if $os eq 'dragonflybsd';
+        $layout->add_section( '.gnu.version_r',   64, 2 ) if $os eq 'dragonflybsd';
 
         # Writable data and dynamic linking tables (mapped to RW segment)
         $layout->add_section( '.dynamic', 4096,       3 );    # RW (Alloc + Write)
@@ -657,6 +659,12 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $str_off{'_gSharedObjectHaikuVersion'} = length($dynstr);
             $dynstr .= "_gSharedObjectHaikuVersion\0";
         }
+        my $dragonfly_ver_str = '';
+        if ( $platform->is_dragonflybsd ) {
+            $dragonfly_ver_str = 'DF306.0';
+            $str_off{$dragonfly_ver_str} = length($dynstr);
+            $dynstr .= $dragonfly_ver_str . "\0";
+        }
         $self->layout->get('.dynstr')->{size} = length($dynstr);
         my $dynsym  = pack( 'L< C C S< Q< Q<', 0, 0, 0, 0, 0, 0 );
         my $sym_idx = 1;
@@ -729,6 +737,41 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $dynsym .= pack( 'L< C C S< Q< Q<', $ver_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 4, 4 );
         }
         $self->layout->get('.dynsym')->{size} = length($dynsym);
+        my $versym  = '';
+        my $verneed = '';
+        if ( $platform->is_dragonflybsd ) {
+
+            # .gnu.version (VERSYM): uint16 array, one per .dynsym entry
+            # 0 = local, 1 = global (defined here), 2+ = version index matching VERNEED
+            my $version_idx = 2;
+            for my $i ( 0 .. $sym_idx - 1 ) {
+                if ( $i == 0 ) {
+                    $versym .= pack( 'S<', 0 );                         # NULL: local
+                }
+                elsif ( $i == $sym_indices{'__progname'} || $i == $sym_indices{'environ'} ) {
+                    $versym .= pack( 'S<', 1 );                          # defined in .data: global
+                }
+                else {
+                    $versym .= pack( 'S<', $version_idx );               # import: version index 2
+                }
+            }
+            $self->layout->get('.gnu.version')->{size} = length($versym);
+
+            # .gnu.version_r (VERNEED): version dependency on libc.so.8 with DF306.0
+            my $libc_name    = $libc_map{dragonflybsd} // 'libc.so.8';
+            my $libc_str_off = $str_off{$libc_name} // die 'libc string offset not found';
+            my $ver_str_off  = $str_off{$dragonfly_ver_str} // die 'version string offset not found';
+            $verneed .= pack( 'S< S< L< L< L<', 1, 1, $libc_str_off, 16, 0 );    # Verneed
+            my $hash = 0;
+            for my $c ( split //, $dragonfly_ver_str ) {
+                $hash = ( $hash << 4 ) + ord($c);
+                my $g = $hash & 0xf0000000;
+                $hash ^= $g >> 24 if $g;
+                $hash &= ~$g;
+            }
+            $verneed .= pack( 'L< S< S< L< L<', $hash, 0, $version_idx, $ver_str_off, 0 );    # Vernaux
+            $self->layout->get('.gnu.version_r')->{size} = length($verneed);
+        }
 
         # Relocation type per architecture:
         #   ARM64:   R_AARCH64_GLOB_DAT   = 1025
@@ -887,6 +930,11 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $fini_sec = $self->layout->get('.fini');
             $dynamic .= pack( 'Q< Q<', 12, $base + $init_sec->{rva} ) if $init_sec;
             $dynamic .= pack( 'Q< Q<', 13, $base + $fini_sec->{rva} ) if $fini_sec;
+            my $versym_sec   = $self->layout->get('.gnu.version');
+            my $verneed_sec  = $self->layout->get('.gnu.version_r');
+            $dynamic .= pack( 'Q< Q<', 0x6ffffff0, $base + $versym_sec->{rva} )  if $versym_sec;
+            $dynamic .= pack( 'Q< Q<', 0x6ffffffe, $base + $verneed_sec->{rva} ) if $verneed_sec;
+            $dynamic .= pack( 'Q< Q<', 0x6fffffff, 1 );
         }
         if ($is_pie) {
 
@@ -943,6 +991,12 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
             elsif ( $s->{name} eq '.gnu.hash' ) {
                 $payload = $gnu_hash;
+            }
+            elsif ( $s->{name} eq '.gnu.version' ) {
+                $payload = $versym;
+            }
+            elsif ( $s->{name} eq '.gnu.version_r' ) {
+                $payload = $verneed;
             }
             elsif ( $s->{name} eq '.dynamic' ) {
                 $payload = $dynamic;
@@ -1036,6 +1090,18 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $type       = 0x6ffffff6;                     # SHT_GNU_HASH
                 $flags      = 2;
                 $sh_link    = $sec_indices{'.dynsym'} // 0;
+                $sh_entsize = 0;
+            }
+            elsif ( $s->{name} eq '.gnu.version' ) {
+                $type       = 0x6ffffff0;                     # SHT_GNU_versym
+                $flags      = 2;
+                $sh_link    = $sec_indices{'.dynsym'} // 0;
+                $sh_entsize = 2;
+            }
+            elsif ( $s->{name} eq '.gnu.version_r' ) {
+                $type       = 0x6ffffffe;                     # SHT_GNU_verneed
+                $flags      = 2;
+                $sh_link    = $sec_indices{'.dynstr'} // 0;
                 $sh_entsize = 0;
             }
             elsif ( $s->{name} eq '.dynamic' ) {
