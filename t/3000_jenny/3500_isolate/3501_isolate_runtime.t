@@ -62,9 +62,9 @@ SKIP: {
             my ($sig_addr, $sig_lib);
             for my $lib (grep -e, glob('/lib/libc.so.* /usr/lib/libc.so.*')) {
                 for my $cmd (
-                    "nm -D $lib 2>/dev/null | grep -i sigblock",
-                    "objdump -T $lib 2>/dev/null | grep -i sigblock",
-                    "readelf -s $lib 2>/dev/null | grep -i sigblock",
+                    "nm -D $lib 2>/dev/null | grep -w sigblockall",
+                    "objdump -T $lib 2>/dev/null | grep -w sigblockall",
+                    "readelf -s $lib 2>/dev/null | grep -w sigblockall",
                 ) {
                     my $out = `$cmd`;
                     chomp $out;
@@ -108,9 +108,9 @@ SKIP: {
                 }
             } else {
                 diag('  sigblockall NOT found via nm/objdump/readelf in any libc');
-                diag('  --- fallback: dumping all libc dynamic symbols matching "sig" ---');
+                diag('  --- fallback: dumping all libc symbols matching "blockallsigs" ---');
                 for my $lib (grep -e, glob('/lib/libc.so.* /usr/lib/libc.so.*')) {
-                    my $out = `nm -D $lib 2>/dev/null | grep -i sig`;
+                    my $out = `nm -D $lib 2>/dev/null | grep -i blockallsigs`;
                     next unless $out;
                     diag("  $lib:");
                     for ( split /\n/, $out ) { s/\t/ /g; diag("    $_"); }
