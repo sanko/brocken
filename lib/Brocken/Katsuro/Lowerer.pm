@@ -620,16 +620,28 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_add( $lhs, $rhs ) if $op eq '+';
         return $builder->build_sub( $lhs, $rhs ) if $op eq '-';
         return $builder->build_mul( $lhs, $rhs ) if $op eq '*';
-        return $builder->build_div( $lhs, $rhs ) if $op eq '/';
-        return $builder->build_rem( $lhs, $rhs ) if $op eq '%';
-        return $builder->build_and( $lhs, $rhs ) if $op eq '&&';
-        return $builder->build_or( $lhs, $rhs )  if $op eq '||';
-        return $builder->build_icmp( 'eq',  $lhs, $rhs ) if $op eq '==';
-        return $builder->build_icmp( 'ne',  $lhs, $rhs ) if $op eq '!=';
-        return $builder->build_icmp( 'slt', $lhs, $rhs ) if $op eq '<';
-        return $builder->build_icmp( 'sgt', $lhs, $rhs ) if $op eq '>';
-        return $builder->build_icmp( 'sle', $lhs, $rhs ) if $op eq '<=';
-        return $builder->build_icmp( 'sge', $lhs, $rhs ) if $op eq '>=';
+        if ( $op eq '/' ) {
+            return $lhs->type->is_signed ? $builder->build_div( $lhs, $rhs ) : $builder->build_udiv( $lhs, $rhs );
+        }
+        if ( $op eq '%' ) {
+            return $lhs->type->is_signed ? $builder->build_rem( $lhs, $rhs ) : $builder->build_urem( $lhs, $rhs );
+        }
+        return $builder->build_and( $lhs, $rhs )        if $op eq '&&';
+        return $builder->build_or( $lhs, $rhs )         if $op eq '||';
+        return $builder->build_icmp( 'eq', $lhs, $rhs ) if $op eq '==';
+        return $builder->build_icmp( 'ne', $lhs, $rhs ) if $op eq '!=';
+        if ( $op eq '<' ) {
+            return $builder->build_icmp( $lhs->type->is_signed ? 'slt' : 'ult', $lhs, $rhs );
+        }
+        if ( $op eq '>' ) {
+            return $builder->build_icmp( $lhs->type->is_signed ? 'sgt' : 'ugt', $lhs, $rhs );
+        }
+        if ( $op eq '<=' ) {
+            return $builder->build_icmp( $lhs->type->is_signed ? 'sle' : 'ule', $lhs, $rhs );
+        }
+        if ( $op eq '>=' ) {
+            return $builder->build_icmp( $lhs->type->is_signed ? 'sge' : 'uge', $lhs, $rhs );
+        }
         Carp::croak( "Unknown binary operator '$op' at " . $self->_loc($ast) );
     }
 

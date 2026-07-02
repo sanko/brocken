@@ -1897,14 +1897,25 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                 }
-                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') || $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') ) {
                     my ($val) = $inst->operands->@*;
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'mov',
+                            opcode   => 'movzx',
                             operands => [ $dst, $self->_lower_opnd($val) ],
-                            comment  => $inst->opcode . ' ' . ( $val->name || $val->value )
+                            comment  => 'zext ' . ( $val->name || $val->value )
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
+                    my ($val) = $inst->operands->@*;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'movsx',
+                            operands => [ $dst, $self->_lower_opnd($val) ],
+                            comment  => 'sext ' . ( $val->name || $val->value )
                         )
                     );
                 }

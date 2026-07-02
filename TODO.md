@@ -178,3 +178,39 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [ ] **RC Elision & Reuse (Perceus-lite):** Optimize away redundant `incref`/`decref` pairs. If an object is uniquely owned (RC==1), mutate it in place rather than allocating a copy.
 - [ ] Constant Folding & Dead Code Elimination (DCE).
 - [ ] **Stack Map Generation:** Update `Jenny::Linker` to emit a `.brocken_stackmaps` section so the GC knows exactly which physical registers and stack slots hold pointers during a fiber yield.
+
+## Active Sprint: Type System Expansion
+
+### Phase A: Type Infrastructure (Lowerer + IR)
+- [x] Add `%TYPE_MAP` entries for `int`, `bool`, `u8`..`u128`
+- [x] Fix `%TYPE_NATIVE_MAP` for `Int`/`Bool` (→ i64/i1, not dynamic)
+- [x] Add signedness-aware widening to `maybe_convert_type` (zext/sext)
+- [x] Add `zext`/`sext` IR instructions to `IR.pm` + `Builder.pm`
+- [x] Backend: lower `zext`/`sext` on all 4 targets
+- [x] Add signed/unsigned div/rem IR instructions (`udiv`/`urem`)
+- [ ] Backend: proper `movzx`/`movsx`/`UXTB`/`SXTB` encoding for zext/sext (currently plain `mov`)
+
+### Phase B: Int/Bool native alias support
+- [x] Lower `Int` and `Bool` as native types (i64/i1)
+- [x] Update `maybe_convert_type` for Int→int aliasing
+- [x] Constant lowering for `Int`/`Bool`
+- [x] Parser: add `int`, `bool`, `u8`..`u128` keywords
+
+### Phase C: String Constants & .rodata
+- [ ] Add `.rodata` section to linkers (ELF64, PE, MachO, Wasm)
+- [ ] Lower string literals to `.rodata` (length-prefixed, null-terminated)
+- [ ] Emit `lea`/ADRP+ADD to reference `.rodata` addresses
+- [ ] Wire `say`/`print` to `.rodata` strings (replace alloca+store)
+
+### Phase D: Struct Types (IR level)
+- [ ] Add structural type to IR: `Type::struct([field_types...], [field_names...])`
+- [ ] Extend GEP for struct field access (byte offset from struct layout)
+- [ ] Lower field access to struct-aware GEP
+
+### Phase E: Signedness in Binop Lowering
+- [x] Default signedness for `int` type (signed i64; same for `Int`)
+- [x] Propagate signedness through `lower_binop`:
+  - `/` → `div` (signed) or `udiv` (unsigned)
+  - `%` → `rem` (signed) or `urem` (unsigned)
+  - `<`/`>`/`<=`/`>=` → signed predicates (`slt`/`sgt`/`sle`/`sge`) or unsigned (`ult`/`ugt`/`ule`/`uge`)
+- [ ] Add `<<`/`>>` shift operators to parser + lexer; `>>` → `ashr` (signed) or `lshr` (unsigned)

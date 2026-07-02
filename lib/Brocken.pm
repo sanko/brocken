@@ -66,6 +66,8 @@ package Brocken v0.0.1 {
         method codegen()  { return $codegen }
         method linker()   { return $linker }
         method ext()      { return $ext }
+        method os()       { return $platform->os }
+        method arch()     { return $platform->arch }
     }
 };
 1;

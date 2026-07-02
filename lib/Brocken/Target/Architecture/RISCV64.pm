@@ -168,25 +168,25 @@ class Brocken::Target::Architecture::RISCV64 {
             my $target = $labels{ $_->{target} };
             my $off    = $target - $_->{offset};    # byte offset
             if ( $_->{type} && $_->{type} eq 'jal' ) {
-                my $instr = 0x6F;                   # JAL x0
-                $instr |= ( ( $off >> 20 ) & 1 ) << 31;        # off[20]
-                $instr |= ( ( $off >> 1 ) & 0x3FF ) << 21;     # off[10:1]
-                $instr |= ( ( $off >> 11 ) & 1 ) << 20;        # off[11]
-                $instr |= ( ( $off >> 12 ) & 0xFF ) << 12;     # off[19:12]
+                my $instr = 0x6F;                             # JAL x0
+                $instr |= ( ( $off >> 20 ) & 1 ) << 31;       # off[20]
+                $instr |= ( ( $off >> 1 ) & 0x3FF ) << 21;    # off[10:1]
+                $instr |= ( ( $off >> 11 ) & 1 ) << 20;       # off[11]
+                $instr |= ( ( $off >> 12 ) & 0xFF ) << 12;    # off[19:12]
                 substr( $code, $_->{offset}, 4, pack( 'L<', $instr ) );
             }
             else {
                 my $funct3 = $_->{funct3};
                 my $rs1    = $_->{rs1};
                 my $rs2    = $_->{rs2};
-                my $instr  = 0x63;                              # BRANCH
-                $instr |= ( ( $off >> 12 ) & 1 ) << 31;        # off[12]
-                $instr |= ( ( $off >> 5 ) & 0x3F ) << 25;      # off[10:5]
+                my $instr  = 0x63;                            # BRANCH
+                $instr |= ( ( $off >> 12 ) & 1 ) << 31;       # off[12]
+                $instr |= ( ( $off >> 5 ) & 0x3F ) << 25;     # off[10:5]
                 $instr |= ( $rs2 << 20 );
                 $instr |= ( $rs1 << 15 );
                 $instr |= ( $funct3 << 12 );
-                $instr |= ( ( $off >> 1 ) & 0xF ) << 8;        # off[4:1]
-                $instr |= ( ( $off >> 11 ) & 1 ) << 7;         # off[11]
+                $instr |= ( ( $off >> 1 ) & 0xF ) << 8;       # off[4:1]
+                $instr |= ( ( $off >> 11 ) & 1 ) << 7;        # off[11]
                 substr( $code, $_->{offset}, 4, pack( 'L<', $instr ) );
             }
         }
