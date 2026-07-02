@@ -46,9 +46,8 @@ SKIP: {
         }
         if ( $platform->is_dragonflybsd ) {
             diag('=== DragonFly libc diagnostics ===');
-            for my $lib (qw(/usr/lib/libc.so.8 /usr/lib/libpthread.so.0 /usr/lib/libthread_xu.so.2)) {
-                next unless -e $lib;
-                diag("--- $lib PT_TLS (readelf -l) ---");
+            for my $lib (grep -e, glob('/lib/libc.so.* /usr/lib/libc.so.* /lib/libpthread.so.* /usr/lib/libpthread.so.* /usr/lib/libthread_xu.so.*')) {
+                diag("--- $lib (readelf -l) ---");
                 my $lout = `readelf -l $lib 2>&1`;
                 for ( split /\n/, $lout ) {
                     if (/PT_TLS|LOAD|Type|Offset|VirtAddr|FileSiz|MemSiz|Flags|Align/) {
@@ -58,46 +57,64 @@ SKIP: {
                 }
             }
 
-            # Find sigblockall symbol and dump its disassembly + GOT data
+            # Find sigblockall symbol across all libs using nm (dynamic syms)
             diag('--- sigblockall analysis ---');
-            my $sym_out = `readelf -s /usr/lib/libc.so.8 2>/dev/null | grep sigblockall`;
-            chomp $sym_out;
-            diag("  readelf -s: $sym_out");
-            my $sig_addr;
-            if ( $sym_out =~ /:\s+([0-9a-fA-F]+)\s/ ) {
-                $sig_addr = hex($1);
+            my ($sig_addr, $sig_lib);
+            for my $lib (grep -e, glob('/lib/libc.so.* /usr/lib/libc.so.*')) {
+                for my $cmd (
+                    "nm -D $lib 2>/dev/null | grep -i sigblock",
+                    "objdump -T $lib 2>/dev/null | grep -i sigblock",
+                    "readelf -s $lib 2>/dev/null | grep -i sigblock",
+                ) {
+                    my $out = `$cmd`;
+                    chomp $out;
+                    next unless $out;
+                    diag("  $cmd => $out");
+                    if ($out =~ /([0-9a-fA-F]+)\s/) {
+                        $sig_addr = hex($1);
+                        $sig_lib  = $lib;
+                        last;
+                    }
+                }
+                last if $sig_addr;
             }
+
             if ($sig_addr) {
-                my $start = sprintf '%x', $sig_addr;
+                my $start = sprintf '%x', $sig_addr - 0x10;
                 my $stop  = sprintf '%x', $sig_addr + 0x40;
-                my $dis   = `objdump -d --start-address=0x$start --stop-address=0x$stop /usr/lib/libc.so.8 2>&1`;
+                diag("  --- $sig_lib disassembly around sigblockall (0x$start-0x$stop) ---");
+                my $dis = `objdump -d --start-address=0x$start --stop-address=0x$stop $sig_lib 2>&1`;
                 for ( split /\n/, $dis ) { s/\t/ /g; diag("  $_"); }
 
-                # The instruction at sigblockall+9 is:
-                #   mov 0x2f9ba8(%rip),%rax
-                # This loads from RIP at runtime.  We need the file-level offset.
-                # RIP-relative at offset (sig_addr+9+7 = sig_addr+0x10) with disp32 = 0x2f9ba8.
-                # Target file offset = (sig_addr + 0x10) + 0x2f9ba8.  That's the GOT/data addr.
-                my $got_file_offset = $sig_addr + 0x10 + 0x2f9ba8;
-                diag( sprintf '  GOT/data file offset from sigblockall+9 = 0x%x', $got_file_offset );
+                # Dump relocation table for the matched lib
+                diag("  relocation table for $sig_lib:");
+                my $rel = `readelf -r $sig_lib 2>&1`;
+                for ( split /\n/, $rel ) { s/\t/ /g; diag("  $_"); }
 
-                # Check relocation at or near that file offset
-                diag('  readelf -r entries at that offset:');
-                my $hex_off = sprintf '%x', $got_file_offset;
-                my $rel     = `readelf -r /usr/lib/libc.so.8 2>&1`;
-                for ( split /\n/, $rel ) {
-                    if (/\Q$hex_off\E/i) { s/\t/ /g; diag("  $_"); }
+                # Hexdump .got and .data
+                diag("  hexdump .got (objdump -s) for $sig_lib:");
+                my $got = `objdump -s -j .got $sig_lib 2>&1`;
+                for ( split /\n/, $got ) { s/\t/ /g; diag("  $_"); }
+                diag("  hexdump .data (objdump -s) for $sig_lib:");
+                my $data = `objdump -s -j .data $sig_lib 2>&1 | head -40`;
+                for ( split /\n/, $data ) { s/\t/ /g; diag("  $_"); }
+
+                # Compute the runtime address for the GOT entry used by sigblockall+9
+                if ( $sig_lib =~ m|/libc\.so| ) {
+                    diag( '  --- sigblockall+9 GOT entry analysis (runtime addrs from GDB) ---' );
+                    diag( '  FS.base ~= 0x800876980' );
+                    diag( '  rax = 0x800878fd0 (loaded by mov 0x2f9ba8(%rip),%rax at sigblockall+9)' );
+                    diag( sprintf '  rax - FS.base = 0x%x (expected ~0x28 for td_sigblock_count offset)', 0x800878fd0 - 0x800876980 );
                 }
-
-                # Raw 8-byte value at that file offset
-                diag('  raw 8 bytes at that offset (od):');
-                my $od = `od -A x -t x8 -j $got_file_offset -N 8 /usr/lib/libc.so.8 2>&1`;
-                for ( split /\n/, $od ) { s/\t/ /g; diag("  $_"); }
-
-                # Also dump offset comparisons with FS.base values from GDB
-                diag('  FS.base ~= 0x800876980 (from GDB %fs:0x0)');
-                diag('  rax = 0x800878fd0 (from GDB crash register dump)');
-                diag( sprintf '  rax - FS.base = 0x%x', 0x800878fd0 - 0x800876980 );
+            } else {
+                diag('  sigblockall NOT found via nm/objdump/readelf in any libc');
+                diag('  --- fallback: dumping all libc dynamic symbols matching "sig" ---');
+                for my $lib (grep -e, glob('/lib/libc.so.* /usr/lib/libc.so.*')) {
+                    my $out = `nm -D $lib 2>/dev/null | grep -i sig`;
+                    next unless $out;
+                    diag("  $lib:");
+                    for ( split /\n/, $out ) { s/\t/ /g; diag("    $_"); }
+                }
             }
         }
         system $output_file;
