@@ -424,7 +424,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             freebsd      => '/libexec/ld-elf.so.1',
             netbsd       => '/usr/libexec/ld.elf_so',
             openbsd      => '/usr/libexec/ld.so',
-            dragonflybsd => '/usr/libexec/ld-elf.so.2',
+            dragonflybsd => '/libexec/ld-elf.so.2',
             solaris      => '/lib/64/ld.so.1',
             midnightbsd  => '/libexec/ld-elf.so.1',
             haiku        => '/boot/system/runtime_loader'
