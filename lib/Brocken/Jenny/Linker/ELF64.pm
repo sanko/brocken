@@ -443,30 +443,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600401 );
             $note_data .= pack( 'L<3 a12 L<', 10, 4, 32, "DragonFly\0\0\0", 1 );    # DF_FEATURE_PTHREAD
         }
-        my %interp_map = (
-            linux        => '/lib64/ld-linux-x86-64.so.2',
-            linux_arm    => '/lib/ld-linux-aarch64.so.1',
-            linux_riscv  => '/lib/ld-linux-riscv64-lp64d.so.1',
-            freebsd      => '/libexec/ld-elf.so.1',
-            netbsd       => '/usr/libexec/ld.elf_so',
-            openbsd      => '/usr/libexec/ld.so',
-            dragonflybsd => '/libexec/ld-elf.so.2',
-            solaris      => '/lib/64/ld.so.1',
-            midnightbsd  => '/libexec/ld-elf.so.1',
-            haiku        => '/boot/system/runtime_loader'
-        );
-        my %libc_map = (
-            linux        => 'libc.so.6',
-            linux_arm    => 'libc.so.6',
-            linux_riscv  => 'libc.so.6',
-            freebsd      => 'libc.so.7',
-            netbsd       => 'libc.so.12',
-            openbsd      => 'libc.so.98.1',
-            dragonflybsd => 'libc.so.8',
-            solaris      => 'libc.so.1',
-            midnightbsd  => 'libc.so.7',
-            haiku        => 'libroot.so'
-        );
+
         my $pintable_data = '';
         if ( $has_pintable && $platform->is_openbsd ) {
             my $pos             = 0;
@@ -489,33 +466,27 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         my $interp     = '';
         my $has_interp = 0;
-        my $os_base    = ( $platform->os =~ /^([A-Za-z]+)/ )[0] // $platform->os;
         if ( $self->type eq 'exe' ) {
-            my $interp_key
-                = ( $platform->is_arm64 && $platform->is_linux ) ? 'linux_arm' :
-                ( $platform->is_riscv64 && $platform->is_linux ) ? 'linux_riscv' :
-                $os_base;
-            my $ipath = $interp_map{$interp_key} // '/lib/ld.so.1';
-            if ( length $ipath ) {
+            my $ipath = $platform->interpreter;
+            if ( defined $ipath && length $ipath ) {
                 $interp                               = $ipath . "\0";
                 $self->layout->get('.interp')->{size} = length($interp);
                 $has_interp                           = 1;
             }
         }
-        my @exports   = @{ $self->exported_funcs // [] };
-        my $exit_name = ( $platform->is_haiku || $platform->is_dragonflybsd ) ? 'exit' : '_exit';
-        my @imports   = (
+        my @exports = @{ $self->exported_funcs // [] };
+        my @imports  = (
             'dlopen',              'dlsym',              'pthread_create',       'pthread_join',
-            $exit_name,            'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_cond_wait',
+            $platform->exit_name,  'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_cond_wait',
             'pthread_cond_signal', 'pthread_cond_broadcast'
         );
-        if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
+        if ( $platform->needs_sched_setaffinity ) {
             push @imports, 'sched_setaffinity';
         }
         if ( $platform->is_dragonflybsd ) {
             push @imports, '_init_tls', '_rtld_call_init';
         }
-        my $libc = $libc_map{$os_base} // 'libc.so.6';
+        my $libc = $platform->libc_name;
 
         # Probe the exact dynamic libc.so name on the host filesystem when running natively
         if ( $platform->is_native ) {
@@ -567,26 +538,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
         }
         my @libs;
-        if ( !$platform->is_haiku && !$platform->is_solaris ) {
-            my $libpthread;
-
-            # Setup OS-specific fallback defaults for threading libraries
-            if ( $platform->is_freebsd || $platform->is_midnightbsd ) {
-                $libpthread = 'libthr.so.3';
-            }
-            elsif ( $platform->is_dragonflybsd ) {
-                $libpthread = 'libthread_xu.so.2';
-            }
-            elsif ( $platform->is_netbsd ) {
-                $libpthread = 'libpthread.so.1';
-            }
-            elsif ( $platform->is_openbsd ) {
-                $libpthread = 'libpthread.so';
-            }
-            else {
-                $libpthread = 'libpthread.so.0';    # Serves DragonFly BSD correctly
-            }
-
+        my $libpthread = $platform->libpthread_name;
+        if ( defined $libpthread ) {
             # Try compiler query to find the actual pthread library.
             for my $cc (qw(clang gcc cc)) {
                 my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;
@@ -606,56 +559,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                         if ($soname) {
                             $libpthread = $soname;
                             last;
-                        }
-                    }
-                }
-            }
-
-            # Fallback: search filesystem for the threading library
-            if ( $platform->is_native && ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' || $libpthread eq 'libthread_xu.so.2' ) )
-            {
-                my @search_paths = (
-                    '/usr/lib', '/lib', '/lib64', '/usr/lib64',
-                    '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
-                );
-                my @found;
-                my $prefix
-                    = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' : $platform->is_dragonflybsd ? 'libthread_xu' : 'libpthread';
-                for my $dir (@search_paths) {
-                    next unless -d $dir;
-                    if ( opendir my $dh, $dir ) {
-                        push @found, map {"$dir/$_"} grep { /^\Q$prefix\E\.so(?:\.\d+)*/ && !/_p\.so/ } readdir $dh;
-                        closedir $dh;
-                    }
-                }
-                if (@found) {
-                    my $best_soname;
-                    for my $f ( sort { length($a) <=> length($b) } @found ) {
-                        my $soname = _elf_soname($f);
-                        if ($soname) {
-                            $best_soname = $soname;
-                            last;
-                        }
-                    }
-                    if ($best_soname) {
-                        $libpthread = $best_soname;
-                    }
-                    else {
-                        my $most = (
-                            sort {
-                                my @av  = $a =~ /\.(\d+)/g;
-                                my @bv  = $b =~ /\.(\d+)/g;
-                                my $cmp = 0;
-                                for ( my $i = 0; $i < @av || $i < @bv; $i++ ) {
-                                    $cmp = ( $av[$i] // 0 ) <=> ( $bv[$i] // 0 );
-                                    last if $cmp;
-                                }
-                                $cmp;
-                            } @found
-                        )[-1];
-                        if ($most) {
-                            require File::Basename;
-                            $libpthread = File::Basename::basename($most);
                         }
                     }
                 }
@@ -776,7 +679,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $pthread_sym_idx = $sym_indices{'pthread_create'};
         $rela_dyn .= pack( 'Q< Q< q<', $pthread_slot, ( $pthread_sym_idx << 32 ) | $rel_type, 0 );
         my $exit_slot    = $base + $self->import_rva('exit');
-        my $exit_sym_idx = $sym_indices{$exit_name};
+        my $exit_sym_idx = $sym_indices{ $platform->exit_name };
         $rela_dyn .= pack( 'Q< Q< q<', $exit_slot, ( $exit_sym_idx << 32 ) | $rel_type, 0 );
         my $join_slot    = $base + $self->import_rva('pthread_join');
         my $join_sym_idx = $sym_indices{'pthread_join'};

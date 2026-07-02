@@ -6,6 +6,16 @@ use Brocken::Katsuro::Platform;
 class Brocken::Katsuro::Platform::Linux : isa(Brocken::Katsuro::Platform) {
     method is_linux() {1}
     method format()   {'elf'}
+    method libc_name() {
+        return 'libc.so.6';
+    }
+    method libpthread_name() {'libpthread.so.0'}
+    method interpreter() {
+        return '/lib/ld-linux-aarch64.so.1' if $self->is_arm64;
+        return '/lib/ld-linux-riscv64-lp64d.so.1' if $self->is_riscv64;
+        return '/lib64/ld-linux-x86-64.so.2';
+    }
+    method needs_sched_setaffinity() {1}
 
     # Linux-specific syscall numbers. These differ significantly from BSD.
     method syscalls() {

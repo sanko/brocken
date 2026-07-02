@@ -24,6 +24,7 @@ class Brocken::Katsuro::Platform {
     # This is critical for feature detection where commands might fail.
     sub get_cmd_output(@cmd) {
         my $output;
+        no warnings 'exec';
         if ( open my $fh, '-|', @cmd ) {
             $output = do { local $/; <$fh> };
             close $fh;
@@ -115,6 +116,7 @@ class Brocken::Katsuro::Platform {
                 $os     = 'linux';
                 $env    = 'gnu';
                 my $ldd_output = '';
+                no warnings 'exec';
                 if ( open my $fh, '-|', 'ldd', '--version' ) {
                     $ldd_output = do { local $/; <$fh> };
                     close $fh;
@@ -252,6 +254,12 @@ class Brocken::Katsuro::Platform {
     method is_solaris ()     {0}
     method is_wasm()         {0}
     method is_posix()        {1}
+    #
+    method libc_name()       {'libc.so'}
+    method libpthread_name() {undef}
+    method interpreter()     {undef}
+    method exit_name()       {'_exit'}
+    method needs_sched_setaffinity() {0}
     #
     method is_arm64()   { $self->arch eq 'aarch64' }
     method is_riscv64() { $self->arch eq 'riscv64' }

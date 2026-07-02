@@ -5,6 +5,9 @@ use Brocken::Katsuro::Platform::BSD;
 
 class Brocken::Katsuro::Platform::NetBSD : isa(Brocken::Katsuro::Platform::BSD) {
     method is_netbsd() {1}
+    method libc_name()       {'libc.so.12'}
+    method libpthread_name() {'libpthread.so.1'}
+    method interpreter()     {'/usr/libexec/ld.elf_so'}
 
     # NetBSD uses its own syscall numbering lineage (derived from 4.4BSD with local changes).
     # Key difference from FreeBSD: mmap=197 (not 477). Other common syscalls share numbers
