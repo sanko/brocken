@@ -101,10 +101,7 @@ SKIP: {
 
                 # Compute the runtime address for the GOT entry used by sigblockall+9
                 if ( $sig_lib =~ m|/libc\.so| ) {
-                    diag( '  --- sigblockall+9 GOT entry analysis (runtime addrs from GDB) ---' );
-                    diag( '  FS.base ~= 0x800876980' );
-                    diag( '  rax = 0x800878fd0 (loaded by mov 0x2f9ba8(%rip),%rax at sigblockall+9)' );
-                    diag( sprintf '  rax - FS.base = 0x%x (expected ~0x28 for td_sigblock_count offset)', 0x800878fd0 - 0x800876980 );
+                    diag( '  --- sigblockall+9 GOT entry analysis ---' );
 
                     # Find LOAD segments to compute file offset of GOT entry
                     my $load_info = `readelf -l $sig_lib 2>&1`;
