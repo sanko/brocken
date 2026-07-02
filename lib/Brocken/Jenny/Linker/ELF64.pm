@@ -56,7 +56,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
     }
 
-    method _build_entry_stub( $platform, $func_offsets, $text_rva, $got_exit ) {
+    method _build_entry_stub( $platform, $func_offsets, $text_rva, $got_exit, $got_init_tls = undef, $got_rtld_call_init = undef ) {
         if ( $platform->is_arm64 ) {
             my $sub     = 0xD1000000 | ( 1 << 22 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31;
             my $add     = add_imm( 0, 31, 0 );
@@ -91,26 +91,43 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );    # sub rsp, HEAP_SIZE
         $stub .= pack( 'C3', 0x48, 0x89, 0xE7 );                  # mov rdi, rsp
 
+        # DragonFly: call _init_tls and _rtld_call_init before main for TLS setup
+        my $pre_main = '';
+        if ( defined $got_init_tls ) {
+            $pre_main .= pack( 'C', 0x57 );                         # push rdi (save heap_base)
+            my $rir1 = $text_rva + length($stub) + length($pre_main) + 6;
+            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_init_tls - $rir1 );           # call [rip + init_tls]
+            my $rir2 = $text_rva + length($stub) + length($pre_main) + 6;
+            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_rtld_call_init - $rir2 );      # call [rip + rtld_call_init]
+            $pre_main .= pack( 'C', 0x5F );                         # pop rdi (restore heap_base)
+        }
+        $stub .= $pre_main;
+
         # Calculate dynamic call target offset (call main)
-        my $tail_len       = 5 + 3 + 6 + 2;                                                       # call(5) + mov(3) + call exit(6) + ud2(2)
-        my $final_len      = length($stub) + $tail_len;
+        my $tail_len       = length($pre_main) + 5 + 3 + 6 + 2;                              # pre_main + call(5) + mov(3) + call exit(6) + ud2(2)
+        my $final_len      = length($stub) + 5 + 3 + 6 + 2;
         my $main_target    = $text_rva + $final_len + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
         my $rip_after_call = $text_rva + length($stub) + 5;
         my $main_rel       = $main_target - $rip_after_call;
-        $stub .= pack( 'C l<', 0xE8, $main_rel );                                                 # call main
-        $stub .= pack( 'C3', 0x48, 0x89, 0xC7 );                                                  # mov rdi, rax
+        $stub .= pack( 'C l<', 0xE8, $main_rel );                                            # call main
+        $stub .= pack( 'C3', 0x48, 0x89, 0xC7 );                                             # mov rdi, rax
 
         # Calculate dynamic exit call offset
         my $exit_rip = $text_rva + length($stub) + 6;
         my $exit_rel = $got_exit - $exit_rip;
-        $stub .= pack( 'C2 l<', 0xFF, 0x15, $exit_rel );                                          # call [rip + exit]
-        $stub .= pack( 'C2', 0x0F, 0x0B );                                                        # ud2
+        $stub .= pack( 'C2 l<', 0xFF, 0x15, $exit_rel );                                     # call [rip + exit]
+        $stub .= pack( 'C2', 0x0F, 0x0B );                                                   # ud2
         return $stub;
     }
 
     method entry_stub_len($platform) {
         return 0 unless $self->type eq 'exe';
-        return length( $self->_build_entry_stub( $platform, {}, 0, 0 ) );
+        my ( $got_init_tls, $got_rtld_call_init );
+        if ( $platform->is_dragonflybsd ) {
+            $got_init_tls       = 0;
+            $got_rtld_call_init = 8;
+        }
+        return length( $self->_build_entry_stub( $platform, {}, 0, 0, $got_init_tls, $got_rtld_call_init ) );
     }
 
     method import_rva($name) {
@@ -127,9 +144,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         #   pthread_cond_wait    = +88  (offset 11, index 11)
         #   pthread_cond_signal  = +96  (offset 12, index 12)
         #   pthread_cond_broadcast = +104 (offset 13, index 13)
+        #   _init_tls            = +112 (offset 14, index 14)
+        #   _rtld_call_init      = +120 (offset 15, index 15)
         # Slot 0-2 reserved (0, DYNAMIC, LINK_MAP).
-        # pthread_self was previously slot 14 (+112) but removed -- Dragonfly's
-        # pthread_self reads %fs:0x10 directly and cannot be called before TLS init.
         my $imports = {
             dlopen                 => 24,
             dlsym                  => 32,
@@ -143,6 +160,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             pthread_cond_wait      => 88,
             pthread_cond_signal    => 96,
             pthread_cond_broadcast => 104,
+            _init_tls              => 112,
+            _rtld_call_init        => 120,
         };
         return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown ELF import: ' . $name );
     }
@@ -292,7 +311,12 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
         if ( $self->type eq 'exe' ) {
             my $got_exit = $self->import_rva('exit');
-            $entry_stub                         = $self->_build_entry_stub( $platform, \%func_offsets, $text_rva, $got_exit );
+            my ( $got_init_tls, $got_rtld_call_init );
+            if ( $platform->is_dragonflybsd ) {
+                $got_init_tls       = $self->import_rva('_init_tls');
+                $got_rtld_call_init = $self->import_rva('_rtld_call_init');
+            }
+            $entry_stub                         = $self->_build_entry_stub( $platform, \%func_offsets, $text_rva, $got_exit, $got_init_tls, $got_rtld_call_init );
             $text                               = $entry_stub . $code_bytes;
             $self->layout->get('.text')->{size} = length($text);
         }
@@ -487,6 +511,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         );
         if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
             push @imports, 'sched_setaffinity';
+        }
+        if ( $platform->is_dragonflybsd ) {
+            push @imports, '_init_tls', '_rtld_call_init';
         }
         my $libc = $libc_map{$os_base} // 'libc.so.6';
 
@@ -772,10 +799,24 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $cond_broadcast_slot    = $base + $self->import_rva('pthread_cond_broadcast');
         my $cond_broadcast_sym_idx = $sym_indices{'pthread_cond_broadcast'};
         $rela_dyn .= pack( 'Q< Q< q<', $cond_broadcast_slot, ( $cond_broadcast_sym_idx << 32 ) | $rel_type, 0 );
+        if ( $platform->is_dragonflybsd ) {
+            my $init_tls_slot    = $base + $self->import_rva('_init_tls');
+            my $init_tls_sym_idx = $sym_indices{'_init_tls'};
+            $rela_dyn .= pack( 'Q< Q< q<', $init_tls_slot, ( $init_tls_sym_idx << 32 ) | $rel_type, 0 );
+            my $rtld_call_slot    = $base + $self->import_rva('_rtld_call_init');
+            my $rtld_call_sym_idx = $sym_indices{'_rtld_call_init'};
+            $rela_dyn .= pack( 'Q< Q< q<', $rtld_call_slot, ( $rtld_call_sym_idx << 32 ) | $rel_type, 0 );
+        }
         $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
-# GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join, [8]=sched_setaffinity, [9]=pthread_mutex_lock, [10]=pthread_mutex_unlock, [11]=pthread_cond_wait, [12]=pthread_cond_signal, [13]=pthread_cond_broadcast
-        my $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+# GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join, [8]=sched_setaffinity, [9]=pthread_mutex_lock, [10]=pthread_mutex_unlock, [11]=pthread_cond_wait, [12]=pthread_cond_signal, [13]=pthread_cond_broadcast, [14]=_init_tls, [15]=_rtld_call_init
+        my $got;
+        if ( $platform->is_dragonflybsd ) {
+            $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+        }
+        else {
+            $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+        }
         $self->layout->get('.got')->{size} = length($got);
         my $elf_hash = sub {
             my $name = shift;
