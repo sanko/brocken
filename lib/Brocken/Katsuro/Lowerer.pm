@@ -28,18 +28,27 @@ class Brocken::Katsuro::Lowerer {
         i32    => Brocken::Lindsay::IR::Type::i32(),
         i64    => Brocken::Lindsay::IR::Type::i64(),
         i128   => Brocken::Lindsay::IR::Type::i128(),
+        u8     => Brocken::Lindsay::IR::Type::u8(),
+        u16    => Brocken::Lindsay::IR::Type::u16(),
+        u32    => Brocken::Lindsay::IR::Type::u32(),
+        u64    => Brocken::Lindsay::IR::Type::u64(),
+        u128   => Brocken::Lindsay::IR::Type::u128(),
         f32    => Brocken::Lindsay::IR::Type::f32(),
         f64    => Brocken::Lindsay::IR::Type::f64(),
         ptr    => Brocken::Lindsay::IR::Type::ptr(),
         void   => Brocken::Lindsay::IR::Type::void(),
-        Bool   => Brocken::Lindsay::IR::Type::dynamic(),
-        Int    => Brocken::Lindsay::IR::Type::dynamic(),
+        int    => Brocken::Lindsay::IR::Type::i64(),
+        bool   => Brocken::Lindsay::IR::Type::i1(),
+        Int    => Brocken::Lindsay::IR::Type::i64(),
+        Bool   => Brocken::Lindsay::IR::Type::i1(),
         Any    => Brocken::Lindsay::IR::Type::dynamic(),
         String => Brocken::Lindsay::IR::Type::ptr(),
     );
 
     # Native representation types for constants (never dynamic/boxed)
     my %TYPE_NATIVE_MAP = (
+        int    => Brocken::Lindsay::IR::Type::i64(),
+        bool   => Brocken::Lindsay::IR::Type::i1(),
         Int    => Brocken::Lindsay::IR::Type::i64(),
         Bool   => Brocken::Lindsay::IR::Type::i1(),
         Any    => Brocken::Lindsay::IR::Type::i64(),
@@ -50,6 +59,11 @@ class Brocken::Katsuro::Lowerer {
         i32    => Brocken::Lindsay::IR::Type::i32(),
         i64    => Brocken::Lindsay::IR::Type::i64(),
         i128   => Brocken::Lindsay::IR::Type::i128(),
+        u8     => Brocken::Lindsay::IR::Type::u8(),
+        u16    => Brocken::Lindsay::IR::Type::u16(),
+        u32    => Brocken::Lindsay::IR::Type::u32(),
+        u64    => Brocken::Lindsay::IR::Type::u64(),
+        u128   => Brocken::Lindsay::IR::Type::u128(),
         f32    => Brocken::Lindsay::IR::Type::f32(),
         f64    => Brocken::Lindsay::IR::Type::f64(),
         ptr    => Brocken::Lindsay::IR::Type::ptr(),
@@ -712,10 +726,10 @@ class Brocken::Katsuro::Lowerer {
             return $builder->build_unbox( $val, $target_type );
         }
 
-        # Integer widening
+        # Integer widening: zero-extend for unsigned, sign-extend for signed
         if ( $val->type->kind eq 'int' && $target_type->kind eq 'int' ) {
             if ( $val->type->bits < $target_type->bits ) {
-                return $builder->build_add( $val, Brocken::Lindsay::IR::Constant->new( type => $val->type, value => 0 ) );
+                return $val->type->is_signed ? $builder->build_sext( $val, $target_type ) : $builder->build_zext( $val, $target_type );
             }
         }
         $val;

@@ -6,25 +6,33 @@ no warnings qw[experimental::class];
 # Types
 # ============================================================
 class Brocken::Lindsay::IR::Type {
-    field $kind : reader : param;        # 'int', 'float', 'ptr', 'void', 'dynamic'
-    field $bits : reader : param = 0;    # 8, 16, 32, 64, ...
+    field $kind   : reader : param;        # 'int', 'float', 'ptr', 'void', 'dynamic'
+    field $bits   : reader : param = 0;    # 8, 16, 32, 64, ...
+    field $signed : reader : param = 1;    # 1=signed, 0=unsigned (only for 'int' kind)
 
     # Singletons for common types to save memory and allow `==` comparison
-    sub i1      { state $t //= __PACKAGE__->new( kind => 'int',   bits => 1 );   $t }      # bool
-    sub i8      { state $t //= __PACKAGE__->new( kind => 'int',   bits => 8 );   $t }      # byte / int8 / uint8
-    sub i16     { state $t //= __PACKAGE__->new( kind => 'int',   bits => 16 );  $t }      # short / int16 / uint16
-    sub i32     { state $t //= __PACKAGE__->new( kind => 'int',   bits => 32 );  $t }      # int / char / int32 / uint32
-    sub i64     { state $t //= __PACKAGE__->new( kind => 'int',   bits => 64 );  $t }      # long / int64 / uint64
-    sub i128    { state $t //= __PACKAGE__->new( kind => 'int',   bits => 128 ); $t }      # __int128
-    sub f32     { state $t //= __PACKAGE__->new( kind => 'float', bits => 32 );  $t }      # float
-    sub f64     { state $t //= __PACKAGE__->new( kind => 'float', bits => 64 );  $t }      # double
-    sub ptr     { state $t //= __PACKAGE__->new( kind => 'ptr',   bits => 64 );  $t }      # opaque pointer (64-bit on this arch)
-    sub void    { state $t //= __PACKAGE__->new( kind => 'void' );                 $t }
-    sub dynamic { state $t //= __PACKAGE__->new( kind => 'dynamic', bits => 128 ); $t }    # 16-byte Fat Scalar (Tag + Payload), our SV*
+    sub i1               { state $t //= __PACKAGE__->new( kind => 'int', bits => 1,   signed => 1 ); $t }
+    sub i8               { state $t //= __PACKAGE__->new( kind => 'int', bits => 8,   signed => 1 ); $t }
+    sub i16              { state $t //= __PACKAGE__->new( kind => 'int', bits => 16,  signed => 1 ); $t }
+    sub i32              { state $t //= __PACKAGE__->new( kind => 'int', bits => 32,  signed => 1 ); $t }
+    sub i64              { state $t //= __PACKAGE__->new( kind => 'int', bits => 64,  signed => 1 ); $t }
+    sub i128             { state $t //= __PACKAGE__->new( kind => 'int', bits => 128, signed => 1 ); $t }
+    sub u8               { state $t //= __PACKAGE__->new( kind => 'int', bits => 8,   signed => 0 ); $t }
+    sub u16              { state $t //= __PACKAGE__->new( kind => 'int', bits => 16,  signed => 0 ); $t }
+    sub u32              { state $t //= __PACKAGE__->new( kind => 'int', bits => 32,  signed => 0 ); $t }
+    sub u64              { state $t //= __PACKAGE__->new( kind => 'int', bits => 64,  signed => 0 ); $t }
+    sub u128             { state $t //= __PACKAGE__->new( kind => 'int', bits => 128, signed => 0 ); $t }
+    sub f32              { state $t //= __PACKAGE__->new( kind => 'float', bits => 32 );    $t }
+    sub f64              { state $t //= __PACKAGE__->new( kind => 'float', bits => 64 );    $t }
+    sub ptr              { state $t //= __PACKAGE__->new( kind => 'ptr', bits => 64 );      $t }
+    sub void             { state $t //= __PACKAGE__->new( kind => 'void' );                 $t }
+    sub dynamic          { state $t //= __PACKAGE__->new( kind => 'dynamic', bits => 128 ); $t }
+    method is_signed()   { $kind eq 'int' ? $signed  : 1 }
+    method is_unsigned() { $kind eq 'int' ? !$signed : 0 }
 
     method as_string() {
-        return "i$bits" if $kind eq 'int';
-        return "f$bits" if $kind eq 'float';
+        return $signed ? "i$bits" : "u$bits" if $kind eq 'int';
+        return "f$bits"                      if $kind eq 'float';
         return $kind;
     }
 }
@@ -118,6 +126,24 @@ class Brocken::Lindsay::IR::Instruction::Unbox : isa(Brocken::Lindsay::IR::Instr
     method render() {
         my $val = $self->operands->[0];
         return sprintf '  %s = unbox %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $self->type->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::Zext : isa(Brocken::Lindsay::IR::Instruction) {
+    field $target_type : reader : param;
+
+    method render() {
+        my $val = $self->operands->[0];
+        return sprintf '  %s = zext %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $target_type->as_string;
+    }
+}
+
+class Brocken::Lindsay::IR::Instruction::Sext : isa(Brocken::Lindsay::IR::Instruction) {
+    field $target_type : reader : param;
+
+    method render() {
+        my $val = $self->operands->[0];
+        return sprintf '  %s = sext %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $target_type->as_string;
     }
 }
 

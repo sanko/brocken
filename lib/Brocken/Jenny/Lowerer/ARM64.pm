@@ -81,6 +81,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     $opcode eq 'mul'  ||
                     $opcode eq 'div'  ||
                     $opcode eq 'rem'  ||
+                    $opcode eq 'udiv' ||
+                    $opcode eq 'urem' ||
                     $opcode eq 'and'  ||
                     $opcode eq 'or'   ||
                     $opcode eq 'xor'  ||
@@ -125,6 +127,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 $opcode eq 'mul'  ||
                                 $opcode eq 'div'  ||
                                 $opcode eq 'rem'  ||
+                                $opcode eq 'udiv' ||
+                                $opcode eq 'urem' ||
                                 $opcode eq 'min'  ||
                                 $opcode eq 'max' )
                         ) {
@@ -897,7 +901,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                     )
                                 );
                             }
-                            elsif ( $opcode eq 'div' || $opcode eq 'rem' ) {
+                            elsif ( $opcode eq 'div' || $opcode eq 'rem' || $opcode eq 'udiv' || $opcode eq 'urem' ) {
                                 my ( $lo_lhs, $hi_lhs ) = $self->_split_i128($lhs);
                                 my ( $lo_rhs, $hi_rhs ) = $self->_split_i128($rhs);
                                 my $fast_path;
@@ -2139,7 +2143,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 );
                             }
                         }
-                        elsif ( $opcode eq 'div' ) {
+                        elsif ( $opcode eq 'div' || $opcode eq 'udiv' ) {
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' ) {
                                 my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_dv',
@@ -2164,7 +2168,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'udiv', operands => [ $dst, $rhs_opnd ], comment => 'udiv' )
                             );
                         }
-                        elsif ( $opcode eq 'rem' ) {
+                        elsif ( $opcode eq 'rem' || $opcode eq 'urem' ) {
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' ) {
                                 my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rm',
@@ -2236,6 +2240,17 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             );
                         }
                     }
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') || $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
+                    my ($val) = $inst->operands->@*;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mv',
+                            operands => [ $dst, $self->_lower_opnd($val) ],
+                            comment  => $inst->opcode . ' ' . ( $val->name || $val->value )
+                        )
+                    );
                 }
                 elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
                     my ($val) = $inst->operands->@*;

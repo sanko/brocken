@@ -424,6 +424,46 @@ BROCKEN
     isa_ok( $prog->statements->[0], ['Brocken::Katsuro::AST::Stmt::VarDecl'] );
     is( $prog->statements->[0]->type, 'i128', 'i128 type enabled by feature' );
 };
+subtest 'int type keyword' => sub {
+    my $c    = Brocken::Compiler->new;
+    my $prog = $c->parse_only('my int $x = 42;');
+    is( $prog->statements->@*,        1,     'one statement' );
+    is( $prog->statements->[0]->type, 'int', 'int type recognized' );
+};
+subtest 'bool type keyword' => sub {
+    my $c    = Brocken::Compiler->new;
+    my $prog = $c->parse_only('my bool $flag = 1;');
+    is( $prog->statements->@*,        1,      'one statement' );
+    is( $prog->statements->[0]->type, 'bool', 'bool type recognized' );
+};
+subtest 'u8-u64 type keywords' => sub {
+    my $c    = Brocken::Compiler->new;
+    my $prog = $c->parse_only('my u8 $a; my u16 $b; my u32 $c; my u64 $d;');
+    is( $prog->statements->@*,        4,     'four statements' );
+    is( $prog->statements->[0]->type, 'u8',  'u8 type recognized' );
+    is( $prog->statements->[1]->type, 'u16', 'u16 type recognized' );
+    is( $prog->statements->[2]->type, 'u32', 'u32 type recognized' );
+    is( $prog->statements->[3]->type, 'u64', 'u64 type recognized' );
+};
+subtest 'u128 requires feature flag' => sub {
+    my $c = Brocken::Compiler->new;
+    eval { $c->parse_only('my u128 $x;') };
+    ok( $@, 'u128 without feature flag throws error' );
+    my $c2    = Brocken::Compiler->new;
+    my $prog2 = $c2->parse_only(<<'BROCKEN');
+use feature 'brocken_native_types';
+my u128 $x;
+BROCKEN
+    is( $prog2->statements->@*,        1,      'one statement with feature' );
+    is( $prog2->statements->[0]->type, 'u128', 'u128 type with feature flag' );
+};
+subtest 'Int and Bool aliases' => sub {
+    my $c    = Brocken::Compiler->new;
+    my $prog = $c->parse_only('my Int $x; my Bool $b;');
+    is( $prog->statements->@*,        2,      'two statements' );
+    is( $prog->statements->[0]->type, 'Int',  'Int type recognized' );
+    is( $prog->statements->[1]->type, 'Bool', 'Bool type recognized' );
+};
 
 # === Source position tests ===
 subtest 'Source positions on expressions and statements' => sub {

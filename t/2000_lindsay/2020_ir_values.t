@@ -138,4 +138,34 @@ subtest 'Phi' => sub {
     isa_ok $phi, ['Brocken::Lindsay::IR::Instruction::Phi'], 'Phi construction';
     like $phi->render, qr/phi/, 'Phi render';
 };
+subtest 'Zext' => sub {
+    my $val  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::u8(), value => 42 );
+    my $zext = Brocken::Lindsay::IR::Instruction::Zext->new(
+        name        => 'z',
+        type        => Brocken::Lindsay::IR::Type::i64(),
+        opcode      => 'zext',
+        target_type => Brocken::Lindsay::IR::Type::i64(),
+        operands    => [$val],
+    );
+    isa_ok $zext, ['Brocken::Lindsay::IR::Instruction::Zext'], 'Zext construction';
+    is $zext->opcode,                 'zext', 'Zext opcode';
+    is $zext->target_type->as_string, 'i64',  'Zext target_type';
+    is $zext->operands->[0],          $val,   'Zext operand is val';
+    like $zext->render, qr/zext u8 42 to i64/, 'Zext render';
+};
+subtest 'Sext' => sub {
+    my $val  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i8(), value => -1 );
+    my $sext = Brocken::Lindsay::IR::Instruction::Sext->new(
+        name        => 's',
+        type        => Brocken::Lindsay::IR::Type::i64(),
+        opcode      => 'sext',
+        target_type => Brocken::Lindsay::IR::Type::i64(),
+        operands    => [$val],
+    );
+    isa_ok $sext, ['Brocken::Lindsay::IR::Instruction::Sext'], 'Sext construction';
+    is $sext->opcode,                 'sext', 'Sext opcode';
+    is $sext->target_type->as_string, 'i64',  'Sext target_type';
+    is $sext->operands->[0],          $val,   'Sext operand is val';
+    like $sext->render, qr/sext i8 -1 to i64/, 'Sext render';
+};
 done_testing;
