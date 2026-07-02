@@ -5,10 +5,10 @@ use Brocken::Katsuro::Platform;
 
 class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
     my %cache;
-    method is_haiku() {1}
-    method libc_name() {'libroot.so'}
+    method is_haiku()    {1}
+    method libc_name()   {'libroot.so'}
     method interpreter() {'/boot/system/runtime_loader'}
-    method exit_name() {'exit'}
+    method exit_name()   {'exit'}
 
     # Haiku's syscall numbers are unstable and not officially exposed.
     # We use a heuristic by disassembling libroot.so functions to find the

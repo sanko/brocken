@@ -4,7 +4,7 @@ no warnings qw[experimental::class];
 use Brocken::Katsuro::Platform::BSD;
 
 class Brocken::Katsuro::Platform::OpenBSD : isa(Brocken::Katsuro::Platform::BSD) {
-    method is_openbsd() {1}
+    method is_openbsd()      {1}
     method libc_name()       {'libc.so.98.1'}
     method libpthread_name() {'libpthread.so'}
     method interpreter()     {'/usr/libexec/ld.so'}
