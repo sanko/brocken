@@ -78,28 +78,68 @@ Sigils are invariant — they never change based on context (unlike Perl 5).
 
 If a type is omitted, it defaults to `Any` (a 16-byte Fat Scalar).
 
-| Type | Description |
-|------|-------------|
-| `Any` | Dynamic — 16-byte fat scalar with refcount, GC flags, type tag, payload |
-| `Int` | 64-bit signed integer |
-| `String` | Immutable, UTF-8 encoded text |
-| `Bool` | `true` (1) and `false` (0) |
-| `Array` | Collection (stores pointers to Fat Scalars) |
-| `Hash` | Key-value dictionary |
-| `Class` | Object blueprint |
+| Type | Maps To | Description |
+|------|---------|-------------|
+| `Any` | `dynamic` | 16-byte fat scalar with refcount, GC flags, type tag, payload |
+| `Int` | `int` | Shorthand for the native `int` type (alias) |
+| `Bool` | `bool` | Shorthand for the native `bool` type (alias) |
+| `String` | `ptr` | Immutable, UTF-8 encoded text (pointer to bytes) |
+| `Array` | — | Collection (planned) |
+| `Hash` | — | Key-value dictionary (planned) |
+| `Class` | — | Object blueprint |
 
-Valid type keywords: `Any`, `Int`, `String`, `Bool`, `ptr`, `i8`, `i16`, `i32`,
-`i64`, `i128`, `f32`, `f64`.
+`Int` and `Bool` are not dynamic types — they are aliases for the native `int` and `bool` types declared in §2.1.3. A variable written as `my Int $x` or `my Bool $flag` gets a raw, unboxed machine value with no fat-scalar overhead.
+
+Valid type keywords: `Any`, `Int`, `Bool`, `String`, `int`, `bool`,
+`i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `i128`, `u128`,
+`f32`, `f64`, `ptr`.
 
 #### 2.1.3 Native Types (Unsafe Subset)
 
 To allow Brocken's runtime and Garbage Collector to be written in Brocken itself, the compiler exposes raw, unboxed machine types. These types bypass the Fat Scalar tagging, carry zero runtime overhead, and are strictly ignored by the Reference Counting engine.
 
-| Type | Description |
-|------|-------------|
-| `i8`, `i16`, `i32`, `i64` | Raw machine integers |
-| `f32`, `f64` | Raw floating-point numbers |
-| `ptr` | A raw memory address |
+##### Architecture-Independent Types
+
+| Type | IR Kind | Width | Description |
+|------|---------|-------|-------------|
+| `i8` | `int` | 8 | Signed byte |
+| `u8` | `int` | 8 | Unsigned byte |
+| `i16` | `int` | 16 | Signed short |
+| `u16` | `int` | 16 | Unsigned short |
+| `i32` | `int` | 32 | Signed int |
+| `u32` | `int` | 32 | Unsigned int |
+| `i64` | `int` | 64 | Signed long |
+| `u64` | `int` | 64 | Unsigned long |
+| `i128` | `int` | 128 | Signed 128-bit integer (feature `brocken_native_types`) |
+| `u128` | `int` | 128 | Unsigned 128-bit integer (feature `brocken_native_types`) |
+| `f32` | `float` | 32 | IEEE 754 single-precision |
+| `f64` | `float` | 64 | IEEE 754 double-precision |
+| `ptr` | `ptr` | 64 | Opaque memory address |
+
+##### Architecture-Native Shorthands
+
+| Type | Maps To | Description |
+|------|---------|-------------|
+| `int` | `i64` on all current targets | Native signed integer (word size) |
+| `bool` | `i1` | Native boolean (`true` = 1, `false` = 0) |
+
+`int` and `bool` exist so generic algorithms can be written without hard-coding a width. On all current targets (x86_64, ARM64, RISCV64, Wasm) `int` maps to `i64`. `Int` and `Bool` are user-facing aliases for `int` and `bool` respectively (see §2.1.2).
+
+##### Signed vs Unsigned Semantics
+
+Signedness is encoded in the type name (`i` prefix = signed, `u` prefix = unsigned) and affects:
+
+| Operation | Signed | Unsigned |
+|-----------|--------|----------|
+| Division | `div` | `udiv` |
+| Remainder | `rem` | `urem` |
+| Right shift | `ashr` (arithmetic) | `lshr` (logical) |
+| Extension (widening) | `sext` (sign-extend) | `zext` (zero-extend) |
+| Comparison predicates | `sgt`, `slt`, `sge`, `sle` | `ugt`, `ult`, `uge`, `ule` |
+
+Addition, subtraction, multiplication, left shift, and bitwise logical ops (`and`, `or`, `xor`) are identical for signed and unsigned at the machine level — they produce the same bit pattern. Signedness only matters for the operations above.
+
+The lowerer's `maybe_convert_type` (§3.4) uses signedness to choose the correct extension opcode when widening. The backend encoder selects the correct instruction form based on the IR opcode (e.g., x86_64 `idiv` vs `div`, `sar` vs `shr`).
 
 **The `Brocken::` Pseudo-Namespace.** Instead of writing inline assembly, Brocken exposes raw IR instructions via the `Brocken::` pseudo-namespace. The parser recognizes these and translates them directly into single Lindsay IR instructions:
 
@@ -109,6 +149,163 @@ my ptr $heap_cursor;
 my i64 $size = 32;
 my ptr $next = Brocken::ptr_add($heap_cursor, $size);
 ```
+
+#### 2.1.4 Struct Types (Planned)
+
+User-defined compound types with named fields, declared via the `struct` keyword:
+
+```perl
+struct Point {
+    i64 $x;
+    i64 $y;
+}
+```
+
+Struct types retain field names at the IR level for debug info and reflection. Field access uses named lookup (`$pt.x`), lowered to a compile-time byte offset computed from the struct layout. Layout respects alignment requirements:
+
+| Field Type | Alignment | Size |
+|------------|-----------|------|
+| `i8` / `u8` | 1 | 1 |
+| `i16` / `u16` | 2 | 2 |
+| `i32` / `u32` | 4 | 4 |
+| `i64` / `u64` / `int` | 8 | 8 |
+| `i128` / `u128` | 16 | 16 |
+| `f32` | 4 | 4 |
+| `f64` | 8 | 8 |
+| `ptr` | 8 | 8 |
+
+Fields are laid out with natural alignment padding between members. The total struct size is rounded up to the alignment of the most-aligned member. Example:
+
+```perl
+struct Packed {
+    i8   $a;       # offset 0,  size 1
+    i32  $b;       # offset 4,  size 4  (3 bytes padding after $a)
+    ptr  $c;       # offset 8,  size 8
+    i8   $d;       # offset 16, size 1
+    # total: 24 (rounded up to alignment of ptr=8)
+}
+```
+
+Structs can nest:
+
+```perl
+struct Line {
+    Point $start;
+    Point $end;
+    f64   $length;  # cached length
+}
+```
+
+A struct variable declared without `new` lives on the stack:
+
+```perl
+my Point $pt;           # 16 bytes on stack, zero-initialized
+my Point $pt = { x: 10, y: 20 };  # struct literal
+my i64 $x = $pt.x;      # field read — compile-time offset
+$pt.y = 30;             # field write
+```
+
+Structs declared with `my` on the heap (via `new`) get RC treatment:
+
+```perl
+my Point $pt = Point->new(x => 10, y => 20);  # heap-allocated, RC'd
+```
+
+##### Relation to Classes
+
+Classes (§2.6) are structs with methods, auto-generated accessors, constructors, and lifecycle hooks (`ADJUST`, `DESTROY`). A `class` without methods is structurally identical to a `struct`. The difference is semantic: classes are always heap-allocated and RC-managed; structs can live on the stack.
+
+#### 2.1.5 Static Data & .rodata Section
+
+Compile-time constant data (string literals, const-initialized arrays, struct literals) is emitted into the `.rodata` section of the output binary.
+
+```perl
+say("Hello, World!");
+```
+
+The string `"Hello, World!"` is stored as a length-prefixed UTF-8 byte sequence in `.rodata`:
+
+```
+Offset  Content
+0-4     Length (32-bit little-endian): 13
+5-17    UTF-8 bytes: "Hello, World!"
+18      0x00 (null terminator for C interop)
+```
+
+The `say`/`print` builtins receive a pointer to this structure. The lowerer emits a `.rodata` entry and passes its link-time-resolved address as an immediate operand.
+
+Compound constant data follows the same pattern:
+
+```perl
+const HEX_DIGITS = "0123456789ABCDEF";   # in .rodata
+```
+
+The linker places `.rodata` after `.text` but before `.data`:
+
+```
+.text      (code)
+.rodata    (read-only data — strings, const arrays)
+.data      (read-write data — mutable globals)
+```
+
+On ELF64 this maps to `PT_LOAD` segments with appropriate page permissions (R-X for text, R-- for rodata, RW- for data).
+
+#### 2.1.6 References (Planned)
+
+A reference is a non-null pointer that participates in reference counting. Declared with `ref(T)`:
+
+```perl
+my $x = 42;
+my ref(Int) $r = \$x;    # reference to $x
+say($$r);                # dereference → 42
+```
+
+References are lowered to `ptr` in the IR but carry additional semantics:
+
+- **Non-null**: A reference always points to a valid object. No null-check needed before dereference.
+- **RC participation**: Creating a reference increments the target's refcount. Dropping a reference decrements it.
+- **No ownership**: The referent is not deallocated when the reference goes out of scope — only when all owning pointers do.
+
+The optimizer can use the non-null guarantee to elide null checks and the RC guarantee to elide early frees.
+
+In the IR, references are opaque pointers (`ptr` type) with `incref` emitted at creation and `decref` emitted at scope exit, wired into the same Perceus RC elision pass that handles class instances.
+
+#### 2.1.7 Typed Pointers (Planned)
+
+A typed pointer carries the type of the pointed-to value at the source level, but lowers to the same opaque `ptr` in the IR:
+
+```perl
+my ptr(i64) $p = ...;       # pointer to an i64
+my i64 $val = $p[0];        # load i64 through typed pointer — no cast needed
+$p[0] = 42;                 # store i64 through typed pointer
+```
+
+The difference between `ptr` and `ptr(T)` is purely a source-level annotation:
+
+| Expression | Untyped `ptr` | Typed `ptr(T)` |
+|------------|---------------|----------------|
+| Declaration | `my ptr $p` | `my ptr(i64) $p` |
+| Load | `Brocken::load_i64($p)` | `$p[0]` |
+| Store | `Brocken::store_i64($p, 42)` | `$p[0] = 42` |
+| Arithmetic | `Brocken::ptr_add($p, 8)` | `$p + 1` (element-scaled) |
+
+Typed pointers support element-scaled arithmetic: `$p + n` advances by `n * sizeof(T)` bytes, not `n` raw bytes. This mirrors C's pointer arithmetic semantics.
+
+In the IR, both typed and untyped pointers use opaque `ptr`. The element type `T` is stored as an annotation on the `getelementptr` instruction for the optimizer's use but is ignored by the backend encoder.
+
+#### 2.1.8 Type Aliases (Planned)
+
+The `type` keyword creates compile-time type aliases:
+
+```perl
+type Byte = u8;
+type Word = u16;
+type DWord = u32;
+
+my Byte $b = 255;
+```
+
+Type aliases are resolved at parse time and do not create new types. They are purely syntactic sugar.
 
 ### 2.2 Variable Scoping & Declarations
 
@@ -361,12 +558,17 @@ The minimum viable Brocken subset needed to write `core.brocken` (the Immix allo
 
 ```perl
 my $dynamic_var;              # Any (Fat Scalar) — default
-my i64 $count = 0;            # Raw 64-bit integer
+my int $count = 0;            # Native integer (i64 on all current targets)
+my Int $age = 30;             # Same as `int` — capitalized alias
+my bool $flag = true;         # Native boolean
+my Bool $done = false;        # Same as `bool` — capitalized alias
 my ptr $cursor;               # Raw pointer
-my i32 $slot;                 # 32-bit unsigned
-my i8 $byte;                  # 8-bit unsigned
+my i32 $slot;                 # 32-bit signed
+my u32 $index;                # 32-bit unsigned
+my i8 $byte;                  # 8-bit signed
+my u8 $flags;                 # 8-bit unsigned
 my i64 @arr = [10, 20, 30];   # Fixed-size array
-my [i64; 10] @arr;            # Fixed-size array declaration
+my [int; 10] @arr;            # Fixed-size array declaration
 ```
 
 Array elements are accessed by index; bounds are not checked yet:
@@ -429,7 +631,7 @@ See §2.7 for the full table of `Brocken::` intrinsics.
 #### 2.16.7 Feature Flags
 
 ```perl
-use feature 'brocken_native_types';   # enables i128
+use feature 'brocken_native_types';   # enables i128, u128
 ```
 
 ### 2.17 Excluded Features (Deferred from v0.1)
@@ -437,7 +639,12 @@ use feature 'brocken_native_types';   # enables i128
 | Feature | Reason |
 |---------|--------|
 | `%` hashes | Not needed for the runtime; can be built on top later |
+| `struct` keyword | Classes serve as structs in v0.1; dedicated struct syntax deferred |
+| `ref(T)` references | RC decref/scope machinery not yet connected |
+| `ptr(T)` typed pointers | Source-level annotation only; lowering is identical to opaque `ptr` |
+| `.rodata` strings | String literals currently use stack alloca; `.rodata` section deferred |
 | String ops (`eq`, `ne`, `.`, length, etc.) | String *literals* compile as const data; runtime operations are deferred |
+| `type` aliases | Purely syntactic; trivial to add post-v0.1 |
 | Regex | Deferred entirely |
 | `map`/`grep` | Defer until list primitives exist |
 | `eval` | Blocks on dynamic codegen |
