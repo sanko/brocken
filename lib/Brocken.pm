@@ -69,3 +69,31 @@ package Brocken v0.0.1 {
     }
 };
 1;
+__END__
+
+=pod
+
+=head1 NAME
+
+Brocken - A thing to waste my time on.
+
+=head1 Description
+
+Idk...
+
+=head1 Status
+
+Expect breakage.
+
+=head1 AUTHOR
+
+Sanko Robinson
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+Artistic-2.0 or MIT. You decide.
+
+=cut
+
