@@ -7,11 +7,6 @@ jobs:
       - uses: actions/checkout@v5.0.0
         with:
           submodules: true
-      - id: perl-cache
-        uses: actions/cache@v5
-        with:
-          key: 'cross-${{ inputs.os }}-${{ inputs.arch }}-perl-v${{ inputs.perl }}.${{ inputs.perl_subversion }}'
-          path: '${{ github.workspace }}/.perl-cache'
       - env:
           AUTHOR_TESTING: 0
           AUTOMATED_TESTING: 1
@@ -26,11 +21,6 @@ jobs:
           version: '${{ inputs.version }}'
       - name: 'Test on ${{ inputs.os }}'
         run: |
-          if [ -f "${{ github.workspace }}/.perl-cache/perl.tar.gz" ]; then
-            echo "Restoring perl from cache..."
-            sudo tar xzf "${{ github.workspace }}/.perl-cache/perl.tar.gz" -C /
-            hash -r
-          fi
           uname -a
           echo $SHELL
           pwd
@@ -40,18 +30,6 @@ jobs:
           ${{ inputs.setup }}
           ${{ inputs.pkg }}
           perl -v
-          if [ ! -f "${{ github.workspace }}/.perl-cache/perl.tar.gz" ]; then
-            PERL_PREFIX=$(perl -MConfig -e 'print $Config{installprefix}')
-            # Only cache non-system perl installs (not /usr)
-            if [ -n "$PERL_PREFIX" ] && [ "$PERL_PREFIX" != "/usr" ] && [ -d "$PERL_PREFIX/bin" ]; then
-              echo "Caching perl installation from $PERL_PREFIX..."
-              mkdir -p "${{ github.workspace }}/.perl-cache"
-              sudo tar czf "${{ github.workspace }}/.perl-cache/perl.tar.gz" \
-                "$PERL_PREFIX/bin/perl*" \
-                "$PERL_PREFIX/lib/perl5/" \
-                2>/dev/null || true
-            fi
-          fi
           ${{ inputs.gcc_pkg }}
           curl -L https://cpanmin.us | LC_ALL=C sudo perl - --notest App::cpanminus Module::Build::Tiny
           # Add perl's site bin to PATH (needed on e.g. OmniOS where cpanm installs outside default PATH)
