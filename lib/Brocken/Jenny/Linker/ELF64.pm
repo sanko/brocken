@@ -32,6 +32,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $layout->add_section( '.rela.dyn', 4096, 2 );
         $layout->add_section( '.hash',     4096, 2 );
         $layout->add_section( '.gnu.hash', 4096, 2 ) if $os eq 'dragonflybsd';
+        $layout->add_section( '.init',     16,   5 ) if $os eq 'dragonflybsd';
+        $layout->add_section( '.fini',     16,   5 ) if $os eq 'dragonflybsd';
 
         # Writable data and dynamic linking tables (mapped to RW segment)
         $layout->add_section( '.dynamic', 4096,       3 );    # RW (Alloc + Write)
@@ -881,6 +883,10 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         # Value 0 means the linker initializes it at a platform-default slot.
         if ( $platform->is_dragonflybsd ) {
             $dynamic .= pack( 'Q< Q<', 0x15, 0 );
+            my $init_sec = $self->layout->get('.init');
+            my $fini_sec = $self->layout->get('.fini');
+            $dynamic .= pack( 'Q< Q<', 12, $base + $init_sec->{rva} ) if $init_sec;
+            $dynamic .= pack( 'Q< Q<', 13, $base + $fini_sec->{rva} ) if $fini_sec;
         }
         if ($is_pie) {
 
@@ -910,6 +916,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $payload = "\0" x $s->{size};
             if ( $s->{name} eq '.text' ) {
                 $payload = $text;
+            }
+            elsif ( $s->{name} eq '.init' || $s->{name} eq '.fini' ) {
+                $payload = "\xc3";
             }
             elsif ( $s->{name} eq '.brk_sym' ) {
                 $payload = $self->build_brk_sym();
@@ -973,6 +982,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $sh_info    = 0;
             my $sh_entsize = 0;
             if ( $s->{name} eq '.text' ) {
+                $flags = 6;
+            }
+            elsif ( $s->{name} eq '.init' || $s->{name} eq '.fini' ) {
                 $flags = 6;
             }
             elsif ( $s->{name} eq '.brk_sym' ) {
