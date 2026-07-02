@@ -1149,11 +1149,14 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $eh_frame_sec->{size}, $eh_frame_sec->{size}, 4
                 );
         }
-        if ( $platform->is_bsd ) {
+        if ( $platform->is_bsd && !$platform->is_dragonflybsd ) {
 
-            # PT_TLS=7: Creates an empty thread-local storage segment.
+            # PT_TLS=7: Creates a minimal thread-local storage segment.
             # This segment signals `rtld` that the binary expects Thread Control
             # Block (TCB) memory layout capabilities.
+            # Dragonfly excluded: its libc uses R_X86_64_TPOFF64 relocations
+            # referencing thread-struct offsets that break when any PT_TLS
+            # segment is present in the executable.
             my $data_sec  = $self->layout->get('.data');
             my $tls_vaddr = $data_sec ? $base + $data_sec->{rva} : $base;
             my $tls_off   = $data_sec ? $data_sec->{off}         : 0;
