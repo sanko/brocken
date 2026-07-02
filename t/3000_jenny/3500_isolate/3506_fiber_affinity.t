@@ -31,7 +31,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $entry, $inner ] );
         my $file  = $brocken->tmpdir . '/fiber_pin_cpu0' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'fiber pin CPU 0 exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
 
@@ -53,7 +53,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $entry, $inner ] );
         my $file  = $brocken->tmpdir . '/fiber_pin_chained' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'fiber pin chained exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
 }

@@ -36,7 +36,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $outer, $inner ] );
         my $file  = $brocken->tmpdir . '/isolate_chain_2' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate spawns isolate exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
 
@@ -68,7 +68,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $outer, $middle, $inner ] );
         my $file  = $brocken->tmpdir . '/isolate_chain_3' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate chain depth 3 exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
 }

@@ -44,7 +44,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker1, $worker2, $fiber_fn ] );
         my $file  = $brocken->tmpdir . '/mn_two_workers' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 121, name => 'two workers sum 121', platform => $host, keep => 1, gdb => $dbg );
     };
     subtest 'Three workers with chained fiber transfers' => sub {
@@ -76,7 +76,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker_fn, $fiber_fn ] );
         my $file  = $brocken->tmpdir . '/mn_three_workers' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 240, name => 'three workers sum 240', platform => $host, keep => 1, gdb => $dbg );
     };
 }

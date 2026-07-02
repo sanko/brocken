@@ -34,7 +34,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
         my $file  = $brocken->tmpdir . '/three_isolates' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'three concurrent isolates exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
 
@@ -67,7 +67,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker, $inner ] );
         my $file  = $brocken->tmpdir . '/four_isolate_fibers' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'four isolates with fiber yield exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
 
@@ -102,7 +102,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $worker, $inner ] );
         my $file  = $brocken->tmpdir . '/eight_isolate_fibers' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'eight isolates with fiber chaining exit 99', platform => $host, keep => 1, gdb => $dbg );
     };
 }

@@ -4,6 +4,7 @@ use File::Temp qw(tempfile);
 use lib 'lib', '../lib', 'blib/lib', '../blib/lib';
 my $os = $^O;
 note("Host OS: $os");
+skip_all 'No need for these diagnostics right now';
 SKIP: {
     skip 'gcc thread disassembly test requires a Unix-like OS with gcc', 1 if $os eq 'MSWin32' || $os eq 'cygwin';
     my $cc    = 'gcc';

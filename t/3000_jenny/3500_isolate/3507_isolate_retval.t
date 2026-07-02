@@ -27,7 +27,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $inner ] );
         my $file  = $brocken->tmpdir . '/isolate_retval_42' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 42, name => 'isolate retval 42', platform => $host, keep => 1, gdb => $dbg );
     };
     subtest 'Isolate returns 0' => sub {
@@ -44,7 +44,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $inner ] );
         my $file  = $brocken->tmpdir . '/isolate_retval_0' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 0, name => 'isolate retval 0', platform => $host, keep => 1, gdb => $dbg );
     };
     subtest 'Isolate returns 99' => sub {
@@ -61,7 +61,7 @@ SKIP: {
         my $funcs = $brocken->codegen->emit_functions( [ $main, $inner ] );
         my $file  = $brocken->tmpdir . '/isolate_retval_99' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
-        my $dbg = $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
+        my $dbg = 0;    # $host->is_dragonflybsd || $host->is_netbsd ? 1 : 0;
         run_exec( $file, expected_exit => 99, name => 'isolate retval 99', platform => $host, keep => 1, gdb => $dbg );
     };
 }
