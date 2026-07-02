@@ -39,8 +39,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $layout->add_section( '.got',     512,        6 );    # RW
 
         # Non-alloc symbol and string tables for static linking/debugging (nm)
-        $layout->add_section( '.symtab', 4096, 0 );
-        $layout->add_section( '.strtab', 4096, 0 );
+        $layout->add_section( '.symtab',   4096, 0 );
+        $layout->add_section( '.strtab',   4096, 0 );
         $layout->add_section( '.eh_frame', 4096, 0 );
         #
         if ( $dbg >= 1 ) {
@@ -84,27 +84,25 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $ebrk = 0x00100073;
             return pack 'V8', $lui, $sub, $mv, $jal, $auipc, $ld, $jalr, $ebrk;
         }
-
         my $HEAP_SIZE = 1048576;
-        my $stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );                 # and rsp, -16
-        $stub .= pack( 'C3 V',  0x48, 0x81, 0xEC, $HEAP_SIZE );          # sub rsp, HEAP_SIZE
-        $stub .= pack( 'C3',    0x48, 0x89, 0xE7 );                      # mov rdi, rsp
+        my $stub      = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );     # and rsp, -16
+        $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );    # sub rsp, HEAP_SIZE
+        $stub .= pack( 'C3', 0x48, 0x89, 0xE7 );                  # mov rdi, rsp
 
         # Calculate dynamic call target offset (call main)
-        my $tail_len = 5 + 3 + 6 + 2;                                    # call(5) + mov(3) + call exit(6) + ud2(2)
-        my $final_len = length($stub) + $tail_len;
-        my $main_target = $text_rva + $final_len + ($func_offsets->{_BROCKEN_ENTRY} // 0);
+        my $tail_len       = 5 + 3 + 6 + 2;                                                       # call(5) + mov(3) + call exit(6) + ud2(2)
+        my $final_len      = length($stub) + $tail_len;
+        my $main_target    = $text_rva + $final_len + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
         my $rip_after_call = $text_rva + length($stub) + 5;
-        my $main_rel = $main_target - $rip_after_call;
-
-        $stub .= pack( 'C l<',  0xE8, $main_rel );                       # call main
-        $stub .= pack( 'C3',    0x48, 0x89, 0xC7 );                      # mov rdi, rax
+        my $main_rel       = $main_target - $rip_after_call;
+        $stub .= pack( 'C l<', 0xE8, $main_rel );                                                 # call main
+        $stub .= pack( 'C3', 0x48, 0x89, 0xC7 );                                                  # mov rdi, rax
 
         # Calculate dynamic exit call offset
         my $exit_rip = $text_rva + length($stub) + 6;
         my $exit_rel = $got_exit - $exit_rip;
-        $stub .= pack( 'C2 l<', 0xFF, 0x15, $exit_rel );                 # call [rip + exit]
-        $stub .= pack( 'C2',    0x0F, 0x0B );                            # ud2
+        $stub .= pack( 'C2 l<', 0xFF, 0x15, $exit_rel );                                          # call [rip + exit]
+        $stub .= pack( 'C2', 0x0F, 0x0B );                                                        # ud2
         return $stub;
     }
 
@@ -488,7 +486,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
             push @imports, 'sched_setaffinity';
         }
-
         my $libc = $libc_map{$os_base} // 'libc.so.6';
 
         # Probe the exact dynamic libc.so name on the host filesystem when running natively
@@ -506,6 +503,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 }
             }
             if (@found) {
+
                 # Prefer files with actual SONAMEs
                 my $best_soname;
                 for my $f ( sort { length($a) <=> length($b) } @found ) {
@@ -517,15 +515,16 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 }
                 if ($best_soname) {
                     $libc = $best_soname;
-                } else {
+                }
+                else {
                     # Fallback to the most-versioned filename
                     my $best = (
                         sort {
-                            my @av = $a =~ /\.(\d+)/g;
-                            my @bv = $b =~ /\.(\d+)/g;
+                            my @av  = $a =~ /\.(\d+)/g;
+                            my @bv  = $b =~ /\.(\d+)/g;
                             my $cmp = 0;
-                            for (my $i = 0; $i < @av || $i < @bv; $i++) {
-                                $cmp = ($av[$i]//0) <=> ($bv[$i]//0);
+                            for ( my $i = 0; $i < @av || $i < @bv; $i++ ) {
+                                $cmp = ( $av[$i] // 0 ) <=> ( $bv[$i] // 0 );
                                 last if $cmp;
                             }
                             $cmp;
@@ -538,7 +537,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 }
             }
         }
-
         my @libs;
         if ( !$platform->is_haiku && !$platform->is_solaris && !$platform->is_openbsd ) {
             my $libpthread;
@@ -546,12 +544,15 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             # Setup OS-specific fallback defaults for threading libraries
             if ( $platform->is_freebsd || $platform->is_midnightbsd ) {
                 $libpthread = 'libthr.so.3';
-            } elsif ( $platform->is_dragonflybsd ) {
+            }
+            elsif ( $platform->is_dragonflybsd ) {
                 $libpthread = 'libthread_xu.so.2';
-            } elsif ( $platform->is_netbsd ) {
+            }
+            elsif ( $platform->is_netbsd ) {
                 $libpthread = 'libpthread.so.1';
-            } else {
-                $libpthread = 'libpthread.so.0'; # Serves DragonFly BSD correctly
+            }
+            else {
+                $libpthread = 'libpthread.so.0';    # Serves DragonFly BSD correctly
             }
 
             # Try compiler query to find the actual pthread library.
@@ -579,14 +580,15 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
 
             # Fallback: search filesystem for the threading library
-            if ( $platform->is_native && ($libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' || $libpthread eq 'libthread_xu.so.2') ) {
+            if ( $platform->is_native && ( $libpthread eq 'libpthread.so.0' || $libpthread eq 'libthr.so.3' || $libpthread eq 'libthread_xu.so.2' ) )
+            {
                 my @search_paths = (
                     '/usr/lib', '/lib', '/lib64', '/usr/lib64',
                     '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
                 );
                 my @found;
-                my $prefix = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' :
-                             $platform->is_dragonflybsd ? 'libthread_xu' : 'libpthread';
+                my $prefix
+                    = $platform->is_freebsd || $platform->is_midnightbsd ? 'libthr' : $platform->is_dragonflybsd ? 'libthread_xu' : 'libpthread';
                 for my $dir (@search_paths) {
                     next unless -d $dir;
                     if ( opendir my $dh, $dir ) {
@@ -603,17 +605,17 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                             last;
                         }
                     }
-
                     if ($best_soname) {
                         $libpthread = $best_soname;
-                    } else {
+                    }
+                    else {
                         my $most = (
                             sort {
-                                my @av = $a =~ /\.(\d+)/g;
-                                my @bv = $b =~ /\.(\d+)/g;
+                                my @av  = $a =~ /\.(\d+)/g;
+                                my @bv  = $b =~ /\.(\d+)/g;
                                 my $cmp = 0;
-                                for (my $i = 0; $i < @av || $i < @bv; $i++) {
-                                    $cmp = ($av[$i]//0) <=> ($bv[$i]//0);
+                                for ( my $i = 0; $i < @av || $i < @bv; $i++ ) {
+                                    $cmp = ( $av[$i] // 0 ) <=> ( $bv[$i] // 0 );
                                     last if $cmp;
                                 }
                                 $cmp;
@@ -632,7 +634,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             push @libs, $libpthread;
         }
         push @libs, $libc;
-
         my $dynstr = "\0";
         my %str_off;
         for my $s ( @libs, @imports, @exports ) {
@@ -660,6 +661,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my %sym_indices;
         for my $name (@imports) {
             $sym_indices{$name} = $sym_idx++;
+
             # STB_GLOBAL|STT_FUNC = 0x12; STB_WEAK|STT_FUNC = 0x22
             # sched_setaffinity is absent on DragonFly BSD (it uses pthread_setaffinity_np);
             # emit it as a weak symbol so RTLD doesn't abort if the symbol is missing.
@@ -797,11 +799,11 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $buckets[$b]  = $idx;
         }
         my $hash = pack( 'L<*', $nbucket, $nchain, @buckets, @chains );
-        $self->layout->get('.hash')->{size}   = length($hash);
-
+        $self->layout->get('.hash')->{size} = length($hash);
         my $gnu_hash_rva = 0;
         my $gnu_hash     = '';
         if ( $platform->is_dragonflybsd ) {
+
             # GNU hash table (DT_GNU_HASH / .gnu.hash) -- DragonFly ld-elf.so.2
             # requires it for TLS initialization (SYSV .hash alone is insufficient).
             my $dl_new_hash = sub {
@@ -846,15 +848,14 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $self->layout->get('.gnu.hash')->{size} = length($gnu_hash);
             $gnu_hash_rva = $self->layout->get('.gnu.hash')->{rva};
         }
-
         $self->layout->get('.symtab')->{size} = length($dynsym);
         $self->layout->get('.strtab')->{size} = length($dynstr);
         $self->layout->calculate($page_align);
-        my $dyn_rva        = $self->layout->get('.dynamic')->{rva};
-        my $str_rva        = $self->layout->get('.dynstr')->{rva};
-        my $sym_rva        = $self->layout->get('.dynsym')->{rva};
-        my $hash_rva       = $self->layout->get('.hash')->{rva};
-        $gnu_hash_rva      = $platform->is_dragonflybsd ? $self->layout->get('.gnu.hash')->{rva} : 0;
+        my $dyn_rva  = $self->layout->get('.dynamic')->{rva};
+        my $str_rva  = $self->layout->get('.dynstr')->{rva};
+        my $sym_rva  = $self->layout->get('.dynsym')->{rva};
+        my $hash_rva = $self->layout->get('.hash')->{rva};
+        $gnu_hash_rva = $platform->is_dragonflybsd ? $self->layout->get('.gnu.hash')->{rva} : 0;
         my $rela_rva       = $self->layout->get('.rela.dyn')->{rva};
         my $got_rva_actual = $self->layout->get('.got')->{rva};
         my $dynamic        = '';
@@ -865,23 +866,22 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         for my $lib (@libs) {
             $dynamic .= pack( 'Q< Q<', 1, $str_off{$lib} );    # DT_NEEDED
         }
-        $dynamic .= pack( 'Q< Q<', 4,  $base + $hash_rva );          # DT_HASH
+        $dynamic .= pack( 'Q< Q<', 4,          $base + $hash_rva );                                     # DT_HASH
         $dynamic .= pack( 'Q< Q<', 0x6ffffef5, $base + $gnu_hash_rva ) if $platform->is_dragonflybsd;
-        $dynamic .= pack( 'Q< Q<', 5,  $base + $str_rva );           # DT_STRTAB
-        $dynamic .= pack( 'Q< Q<', 6,  $base + $sym_rva );           # DT_SYMTAB
-        $dynamic .= pack( 'Q< Q<', 10, length($dynstr) );            # DT_STRSZ
-        $dynamic .= pack( 'Q< Q<', 11, 24 );                         # DT_SYMENT (sizeof(Elf64_Sym))
-        $dynamic .= pack( 'Q< Q<', 7,  $base + $rela_rva );          # DT_RELA
-        $dynamic .= pack( 'Q< Q<', 8,  length($rela_dyn) );          # DT_RELASZ
-        $dynamic .= pack( 'Q< Q<', 9,  24 );                         # DT_RELAENT (sizeof(Elf64_Rela))
-        $dynamic .= pack( 'Q< Q<', 3,  $base + $got_rva_actual );    # DT_PLTGOT
+        $dynamic .= pack( 'Q< Q<', 5,          $base + $str_rva );                                      # DT_STRTAB
+        $dynamic .= pack( 'Q< Q<', 6,          $base + $sym_rva );                                      # DT_SYMTAB
+        $dynamic .= pack( 'Q< Q<', 10,         length($dynstr) );                                       # DT_STRSZ
+        $dynamic .= pack( 'Q< Q<', 11,         24 );                                                    # DT_SYMENT (sizeof(Elf64_Sym))
+        $dynamic .= pack( 'Q< Q<', 7,          $base + $rela_rva );                                     # DT_RELA
+        $dynamic .= pack( 'Q< Q<', 8,          length($rela_dyn) );                                     # DT_RELASZ
+        $dynamic .= pack( 'Q< Q<', 9,          24 );                                                    # DT_RELAENT (sizeof(Elf64_Rela))
+        $dynamic .= pack( 'Q< Q<', 3,          $base + $got_rva_actual );                               # DT_PLTGOT
 
         # DT_DEBUG=0x15: inform dynamic linker to maintain r_debug pointer.
         # Value 0 means the linker initializes it at a platform-default slot.
         if ( $platform->is_dragonflybsd ) {
             $dynamic .= pack( 'Q< Q<', 0x15, 0 );
         }
-
         if ($is_pie) {
 
             # DT_GNU_PRELINKED=0x6ffffffb: flags=0x08000000 (DF_1_PIE)
@@ -1021,7 +1021,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $sh_entsize = 4;
             }
             elsif ( $s->{name} eq '.gnu.hash' ) {
-                $type       = 0x6ffffff6;    # SHT_GNU_HASH
+                $type       = 0x6ffffff6;                     # SHT_GNU_HASH
                 $flags      = 2;
                 $sh_link    = $sec_indices{'.dynsym'} // 0;
                 $sh_entsize = 0;
@@ -1079,9 +1079,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $interp_sec->{size}, $interp_sec->{size}, 1
                 );
         }
-        my $dyn_sec  = $self->layout->get('.dynamic');
-        my $got_sec  = $self->layout->get('.got');
-        my $rx_p_off = 0;
+        my $dyn_sec   = $self->layout->get('.dynamic');
+        my $got_sec   = $self->layout->get('.got');
+        my $rx_p_off  = 0;
         my $rx_p_size = $dyn_sec->{off};
 
         # PT_LOAD=1, flags=RX(5): maps .text through .gnu.hash (all before .dynamic)
@@ -1149,14 +1149,14 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $eh_frame_sec->{size}, $eh_frame_sec->{size}, 4
                 );
         }
-
         if ( $platform->is_bsd ) {
+
             # PT_TLS=7: Creates an empty thread-local storage segment.
             # This segment signals `rtld` that the binary expects Thread Control
             # Block (TCB) memory layout capabilities.
-            my $data_sec = $self->layout->get('.data');
+            my $data_sec  = $self->layout->get('.data');
             my $tls_vaddr = $data_sec ? $base + $data_sec->{rva} : $base;
-            my $tls_off = $data_sec ? $data_sec->{off} : 0;
+            my $tls_off   = $data_sec ? $data_sec->{off}         : 0;
             push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 7, 6, $tls_off, $tls_vaddr, $tls_vaddr, 0, 8, 8 );
         }
 
