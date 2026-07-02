@@ -1072,7 +1072,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $num_ph++ if $is_pie;
         my $eh_frame_sec = $self->layout->get('.eh_frame');
         $num_ph++ if $eh_frame_sec;
-        $num_ph++ if $platform->is_bsd;
+        $num_ph++ if $platform->is_freebsd;
         my @phdrs     = ();
         my $extra_off = 64 + ( $num_ph * 56 );
 
