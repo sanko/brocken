@@ -479,7 +479,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
         }
         my @exports   = @{ $self->exported_funcs // [] };
-        my $exit_name = $platform->is_haiku ? 'exit' : '_exit';
+        my $exit_name = ( $platform->is_haiku || $platform->is_dragonflybsd ) ? 'exit' : '_exit';
         my @imports   = (
             'dlopen',              'dlsym',              'pthread_create',       'pthread_join',
             $exit_name,            'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_cond_wait',
@@ -1161,15 +1161,14 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $eh_frame_sec->{size}, $eh_frame_sec->{size}, 4
                 );
         }
-        if ($platform->is_bsd) {
+        if ( $platform->is_freebsd ) {
 
             # PT_TLS=7: Creates a minimal thread-local storage segment.
-            # This segment signals `rtld` that the binary expects Thread Control
-            # Block (TCB) memory layout capabilities.
-            # Required on DragonFly too: without PT_TLS the kernel does not
-            # initialize FS.base for new threads, causing SIGSEGV on %fs:0
-            # access in libc's sigblockall. The R_X86_64_TPOFF64 relocation
-            # works correctly (GOT = target_offset - 0xCF8).
+            # Required on FreeBSD to trigger rtld TLS initialization.
+            # On DragonFly this actually HARM: the kernel sets FS.base to an
+            # 8-byte zero-filled area from our PT_TLS, but libc's sigblockall
+            # expects a full TCB there. Without PT_TLS the kernel leaves FS.base
+            # alone and rtld manages it correctly (matching GCC's behavior).
             my $data_sec  = $self->layout->get('.data');
             my $tls_vaddr = $data_sec ? $base + $data_sec->{rva} : $base;
             my $tls_off   = $data_sec ? $data_sec->{off}         : 0;
