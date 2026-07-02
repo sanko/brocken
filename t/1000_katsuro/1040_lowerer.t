@@ -426,6 +426,133 @@ BROCKEN
     my $text = $f->as_string();
     like( $text, qr/ret\s+i64\s+99/, 'return 99' );
 };
+subtest 'int type lowers to i64' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub main() -> i64 {
+    my int $x = 42;
+    return $x;
+}
+BROCKEN
+    my $f = find_function( $mod, 'main' );
+    ok( $f, 'found main' );
+    my $text = $f->as_string();
+    like( $text, qr/alloca\s+i64/,     'int variable is i64 alloca' );
+    like( $text, qr/store\s+i64\s+42/, 'int store as i64' );
+    like( $text, qr/load\s+i64/,       'load i64' );
+    like( $text, qr/ret\s+i64/,        'return i64' );
+};
+subtest 'bool type lowers to i1' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub main() -> i64 {
+    my bool $flag = 1;
+    return 0;
+}
+BROCKEN
+    my $f = find_function( $mod, 'main' );
+    ok( $f, 'found main' );
+    my $text = $f->as_string();
+    like( $text, qr/alloca\s+i1/, 'bool variable is i1 alloca' );
+};
+subtest 'u64 type variable' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub main() -> i64 {
+    my u64 $x = 100;
+    return $x;
+}
+BROCKEN
+    my $f = find_function( $mod, 'main' );
+    ok( $f, 'found main' );
+    my $text = $f->as_string();
+    like( $text, qr/alloca\s+u64/,      'u64 variable is u64 alloca' );
+    like( $text, qr/store\s+i64\s+100/, 'u64 store as i64 (literal)' );
+    like( $text, qr/load\s+u64/,        'load u64' );
+    like( $text, qr/ret\s+u64/,         'return u64' );
+};
+subtest 'u8 and u16 type variables' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub main() -> i64 {
+    my u8 $a = 10;
+    my u16 $b = 20;
+    return 0;
+}
+BROCKEN
+    my $f = find_function( $mod, 'main' );
+    ok( $f, 'found main' );
+    my $text = $f->as_string();
+    like( $text, qr/alloca\s+u8/,  'u8 variable is u8 alloca' );
+    like( $text, qr/alloca\s+u16/, 'u16 variable is u16 alloca' );
+};
+subtest 'u32 type variable' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub main() -> i64 {
+    my u32 $x = 50;
+    return 0;
+}
+BROCKEN
+    my $f = find_function( $mod, 'main' );
+    ok( $f, 'found main' );
+    my $text = $f->as_string();
+    like( $text, qr/alloca\s+u32/, 'u32 variable is u32 alloca' );
+};
+subtest 'Int alias (capital I) lowers to i64' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub main() -> i64 {
+    my Int $x = 7;
+    return $x;
+}
+BROCKEN
+    my $f = find_function( $mod, 'main' );
+    ok( $f, 'found main' );
+    my $text = $f->as_string();
+    like( $text, qr/alloca\s+i64/, 'Int variable is i64 alloca' );
+};
+subtest 'Bool alias (capital B) lowers to i1' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub main() -> i64 {
+    my Bool $flag = 1;
+    return 0;
+}
+BROCKEN
+    my $f = find_function( $mod, 'main' );
+    ok( $f, 'found main' );
+    my $text = $f->as_string();
+    like( $text, qr/alloca\s+i1/, 'Bool variable is i1 alloca' );
+};
+subtest 'unsigned widening emits zext' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub main() -> i64 {
+    my u8 $small = 200;
+    my i64 $big = $small;
+    return $big;
+}
+BROCKEN
+    my $f = find_function( $mod, 'main' );
+    ok( $f, 'found main' );
+    my $text = $f->as_string();
+    like( $text, qr/zext\s+u8/, 'unsigned widening uses zext' );
+};
+subtest 'signed widening emits sext' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub main() -> i64 {
+    my i8 $small = -5;
+    my i64 $big = $small;
+    return $big;
+}
+BROCKEN
+    my $f = find_function( $mod, 'main' );
+    ok( $f, 'found main' );
+    my $text = $f->as_string();
+    like( $text, qr/sext\s+i8/, 'signed widening uses sext' );
+};
 
 # === Error message position tests ===
 subtest 'Undefined variable error includes position' => sub {

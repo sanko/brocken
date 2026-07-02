@@ -47,6 +47,32 @@ class Brocken::Lindsay::IR::Builder {
     method build_abs( $operand, $name  = undef ) { $self->build_unop( 'abs',  $operand, $name ) }
     method build_sqrt( $operand, $name = undef ) { $self->build_unop( 'sqrt', $operand, $name ) }
 
+    method build_zext( $val, $target_type, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::Zext->new(
+            name        => $name // $self->_next_id(),
+            type        => $target_type,
+            opcode      => 'zext',
+            target_type => $target_type,
+            operands    => [$val],
+            parent      => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_sext( $val, $target_type, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::Sext->new(
+            name        => $name // $self->_next_id(),
+            type        => $target_type,
+            opcode      => 'sext',
+            target_type => $target_type,
+            operands    => [$val],
+            parent      => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+    method build_udiv( $lhs, $rhs, $name = undef ) { $self->build_binop( 'udiv', $lhs, $rhs, $name ) }
+    method build_urem( $lhs, $rhs, $name = undef ) { $self->build_binop( 'urem', $lhs, $rhs, $name ) }
+
     method build_frame_addr( $name = undef ) {
         my $inst = Brocken::Lindsay::IR::Instruction::FrameAddr->new(
             name   => $name // $self->_next_id(),

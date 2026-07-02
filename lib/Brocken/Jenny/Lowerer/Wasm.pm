@@ -27,6 +27,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                     $opcode eq 'mul'  ||
                     $opcode eq 'div'  ||
                     $opcode eq 'rem'  ||
+                    $opcode eq 'udiv' ||
+                    $opcode eq 'urem' ||
                     $opcode eq 'and'  ||
                     $opcode eq 'or'   ||
                     $opcode eq 'xor'  ||
@@ -51,6 +53,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $opcode eq 'mul'  ||
                             $opcode eq 'div'  ||
                             $opcode eq 'rem'  ||
+                            $opcode eq 'udiv' ||
+                            $opcode eq 'urem' ||
                             $opcode eq 'min'  ||
                             $opcode eq 'max' )
                     ) {
@@ -942,7 +946,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi_dst], comment => 'save hi' ) );
                         }
-                        elsif ( $opcode eq 'div' || $opcode eq 'rem' ) {
+                        elsif ( $opcode eq 'div' || $opcode eq 'rem' || $opcode eq 'udiv' || $opcode eq 'urem' ) {
                             my ( $lo_lhs, $hi_lhs ) = $self->_split_i128($lhs);
                             my ( $lo_rhs, $hi_rhs ) = $self->_split_i128($rhs);
                             my ( $lo_dst, $hi_dst ) = $self->_split_i128($inst);
@@ -1785,6 +1789,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                             mul  => "${p}_mul",
                             div  => "${p}_div_u",
                             rem  => "${p}_rem_u",
+                            udiv => "${p}_div_u",
+                            urem => "${p}_rem_u",
                             and  => "${p}_and",
                             or   => "${p}_or",
                             xor  => "${p}_xor",
@@ -1807,6 +1813,14 @@ class Brocken::Jenny::Lowerer::Wasm {
                             )
                         );
                     }
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') || $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
+                    my ($val) = $inst->operands->@*;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction( $self->_wasm_push( $val, $inst->opcode . ' val' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
+                    );
                 }
                 elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
                     my ($val) = $inst->operands->@*;

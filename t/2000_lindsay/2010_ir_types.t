@@ -41,4 +41,56 @@ subtest 'type as_string' => sub {
     is Brocken::Lindsay::IR::Type::void()->as_string,    'void',    'void as_string';
     is Brocken::Lindsay::IR::Type::dynamic()->as_string, 'dynamic', 'dynamic as_string';
 };
+subtest 'unsigned type singletons' => sub {
+    isa_ok Brocken::Lindsay::IR::Type::u8(),   ['Brocken::Lindsay::IR::Type'], 'u8 singleton';
+    isa_ok Brocken::Lindsay::IR::Type::u16(),  ['Brocken::Lindsay::IR::Type'], 'u16 singleton';
+    isa_ok Brocken::Lindsay::IR::Type::u32(),  ['Brocken::Lindsay::IR::Type'], 'u32 singleton';
+    isa_ok Brocken::Lindsay::IR::Type::u64(),  ['Brocken::Lindsay::IR::Type'], 'u64 singleton';
+    isa_ok Brocken::Lindsay::IR::Type::u128(), ['Brocken::Lindsay::IR::Type'], 'u128 singleton';
+};
+subtest 'unsigned type as_string' => sub {
+    is Brocken::Lindsay::IR::Type::u8()->as_string,   'u8',   'u8 as_string';
+    is Brocken::Lindsay::IR::Type::u16()->as_string,  'u16',  'u16 as_string';
+    is Brocken::Lindsay::IR::Type::u32()->as_string,  'u32',  'u32 as_string';
+    is Brocken::Lindsay::IR::Type::u64()->as_string,  'u64',  'u64 as_string';
+    is Brocken::Lindsay::IR::Type::u128()->as_string, 'u128', 'u128 as_string';
+};
+subtest 'is_signed / is_unsigned' => sub {
+    ok Brocken::Lindsay::IR::Type::i1()->is_signed,      'i1 is_signed';
+    ok Brocken::Lindsay::IR::Type::i8()->is_signed,      'i8 is_signed';
+    ok Brocken::Lindsay::IR::Type::i16()->is_signed,     'i16 is_signed';
+    ok Brocken::Lindsay::IR::Type::i32()->is_signed,     'i32 is_signed';
+    ok Brocken::Lindsay::IR::Type::i64()->is_signed,     'i64 is_signed';
+    ok Brocken::Lindsay::IR::Type::i128()->is_signed,    'i128 is_signed';
+    ok Brocken::Lindsay::IR::Type::f32()->is_signed,     'f32 is_signed (non-int defaults to signed)';
+    ok Brocken::Lindsay::IR::Type::f64()->is_signed,     'f64 is_signed (non-int defaults to signed)';
+    ok Brocken::Lindsay::IR::Type::ptr()->is_signed,     'ptr is_signed (non-int defaults to signed)';
+    ok Brocken::Lindsay::IR::Type::void()->is_signed,    'void is_signed (non-int defaults to signed)';
+    ok Brocken::Lindsay::IR::Type::dynamic()->is_signed, 'dynamic is_signed (non-int defaults to signed)';
+    ok !Brocken::Lindsay::IR::Type::u8()->is_signed,     'u8 is NOT signed';
+    ok !Brocken::Lindsay::IR::Type::u16()->is_signed,    'u16 is NOT signed';
+    ok !Brocken::Lindsay::IR::Type::u32()->is_signed,    'u32 is NOT signed';
+    ok !Brocken::Lindsay::IR::Type::u64()->is_signed,    'u64 is NOT signed';
+    ok !Brocken::Lindsay::IR::Type::u128()->is_signed,   'u128 is NOT signed';
+    ok !Brocken::Lindsay::IR::Type::i1()->is_unsigned,   'i1 is NOT unsigned';
+    ok !Brocken::Lindsay::IR::Type::i32()->is_unsigned,  'i32 is NOT unsigned';
+    ok !Brocken::Lindsay::IR::Type::i64()->is_unsigned,  'i64 is NOT unsigned';
+    ok !Brocken::Lindsay::IR::Type::f32()->is_unsigned,  'f32 is NOT unsigned (non-int)';
+    ok !Brocken::Lindsay::IR::Type::ptr()->is_unsigned,  'ptr is NOT unsigned (non-int)';
+    ok Brocken::Lindsay::IR::Type::u8()->is_unsigned,    'u8 is unsigned';
+    ok Brocken::Lindsay::IR::Type::u16()->is_unsigned,   'u16 is unsigned';
+    ok Brocken::Lindsay::IR::Type::u32()->is_unsigned,   'u32 is unsigned';
+    ok Brocken::Lindsay::IR::Type::u64()->is_unsigned,   'u64 is unsigned';
+    ok Brocken::Lindsay::IR::Type::u128()->is_unsigned,  'u128 is unsigned';
+};
+subtest 'custom signed / unsigned types' => sub {
+    my $s = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => 13, signed => 1 );
+    ok $s->is_signed,    'custom int<13> signed';
+    ok !$s->is_unsigned, 'custom int<13> not unsigned';
+    is $s->as_string, 'i13', 'custom signed as_string i13';
+    my $u = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => 13, signed => 0 );
+    ok !$u->is_signed,  'custom uint<13> not signed';
+    ok $u->is_unsigned, 'custom uint<13> unsigned';
+    is $u->as_string, 'u13', 'custom unsigned as_string u13';
+};
 done_testing;

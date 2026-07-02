@@ -59,4 +59,52 @@ subtest 'build IR module' => sub {
     like $ir, qr/ModuleID = 'testmod'/, 'module header';
     like $ir, qr/define i32 \@main/,    'module function';
 };
+subtest 'build_zext' => sub {
+    my $builder = Brocken::Lindsay::IR::Builder->new();
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'test_zext', return_type => Brocken::Lindsay::IR::Type::i64() );
+    my $block   = $func->append_block('entry');
+    $builder->position_at_end($block);
+    my $val = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::u8(), value => 42 );
+    my $ext = $builder->build_zext( $val, Brocken::Lindsay::IR::Type::i64() );
+    $builder->build_ret($ext);
+    isa_ok $ext, ['Brocken::Lindsay::IR::Instruction::Zext'], 'build_zext returns Zext';
+    is $ext->opcode, 'zext', 'Zext opcode';
+    like $func->as_string, qr/zext u8 42 to i64/, 'IR contains zext';
+};
+subtest 'build_sext' => sub {
+    my $builder = Brocken::Lindsay::IR::Builder->new();
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'test_sext', return_type => Brocken::Lindsay::IR::Type::i64() );
+    my $block   = $func->append_block('entry');
+    $builder->position_at_end($block);
+    my $val = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i8(), value => -1 );
+    my $ext = $builder->build_sext( $val, Brocken::Lindsay::IR::Type::i64() );
+    $builder->build_ret($ext);
+    isa_ok $ext, ['Brocken::Lindsay::IR::Instruction::Sext'], 'build_sext returns Sext';
+    is $ext->opcode, 'sext', 'Sext opcode';
+    like $func->as_string, qr/sext i8 -1 to i64/, 'IR contains sext';
+};
+subtest 'build_udiv' => sub {
+    my $builder = Brocken::Lindsay::IR::Builder->new();
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'test_udiv', return_type => Brocken::Lindsay::IR::Type::i64() );
+    my $block   = $func->append_block('entry');
+    $builder->position_at_end($block);
+    my $lhs = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 10 );
+    my $rhs = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 3 );
+    my $div = $builder->build_udiv( $lhs, $rhs );
+    $builder->build_ret($div);
+    is $div->opcode, 'udiv', 'udiv opcode';
+    like $func->as_string, qr/udiv i64 10, 3/, 'IR contains udiv';
+};
+subtest 'build_urem' => sub {
+    my $builder = Brocken::Lindsay::IR::Builder->new();
+    my $func    = Brocken::Lindsay::IR::Function->new( name => 'test_urem', return_type => Brocken::Lindsay::IR::Type::i64() );
+    my $block   = $func->append_block('entry');
+    $builder->position_at_end($block);
+    my $lhs = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 10 );
+    my $rhs = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 3 );
+    my $rem = $builder->build_urem( $lhs, $rhs );
+    $builder->build_ret($rem);
+    is $rem->opcode, 'urem', 'urem opcode';
+    like $func->as_string, qr/urem i64 10, 3/, 'IR contains urem';
+};
 done_testing;

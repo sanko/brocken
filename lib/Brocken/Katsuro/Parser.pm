@@ -23,8 +23,8 @@ class Brocken::Katsuro::Parser {
         PREC_CALL    => 60,
         PREC_DEREF   => 65,
     };
-    my %TYPE_KEYWORDS = map { $_ => 1 } qw(Int String Any Bool ptr i8 i16 i32 i64 i128 f32 f64);
-    my %FEATURE_TYPES = ( i128 => 'brocken_native_types' );
+    my %TYPE_KEYWORDS = map { $_ => 1 } qw(Int String Any Bool ptr int bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64);
+    my %FEATURE_TYPES = ( i128 => 'brocken_native_types', u128 => 'brocken_native_types' );
     method peek()    { $tokens->[$pos] }
     method prev()    { $tokens->[ $pos - 1 ] }
     method advance() { $tokens->[ $pos++ ] }
