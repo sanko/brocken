@@ -26,7 +26,13 @@ MANIFEST
 
 MYMETA.*
 
-/.-*
+/Brocken-*
+
+test-output-*/
+fum_test.wasm
+gh_run_*.log
+status-files/
+wasm_hex_dbg.txt
 
 .tidyall.d/
 *.gz
@@ -39,4 +45,5 @@ eg/lib/*.pm
 
 *.session
 
+*.txt
 *.exe

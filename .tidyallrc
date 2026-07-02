@@ -32,3 +32,6 @@ select = **/*.{pl,pm,pod}
 select = **/*.{cpp,cxx,h,c,xs,xsh}
 ignore = **/ppport.h
 ; see .clang-format
+
+[YAML]
+select = .github/**/*.{yaml,yml}
