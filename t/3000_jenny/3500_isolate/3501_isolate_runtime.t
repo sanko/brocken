@@ -105,6 +105,56 @@ SKIP: {
                     diag( '  FS.base ~= 0x800876980' );
                     diag( '  rax = 0x800878fd0 (loaded by mov 0x2f9ba8(%rip),%rax at sigblockall+9)' );
                     diag( sprintf '  rax - FS.base = 0x%x (expected ~0x28 for td_sigblock_count offset)', 0x800878fd0 - 0x800876980 );
+
+                    # Find LOAD segments to compute file offset of GOT entry
+                    my $load_info = `readelf -l $sig_lib 2>&1`;
+                    # RW LOAD: second LOAD, we need its FileSiz+MemSiz
+                    my ($rw_file_off, $rw_va, $rw_file_sz);
+                    for (split /\n/, $load_info) {
+                        if (/LOAD\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+0x[0-9a-f]+\s+0x[0-9a-f]+\s+0x([0-9a-f]+)/) {
+                            ($rw_file_off, $rw_va, $rw_file_sz) = (hex($1), hex($2), hex($3));
+                        }
+                    }
+                    if ($rw_va) {
+                        my $rw_file_off_end = $rw_file_off + $rw_file_sz;
+                        my $got_va = 0x338770;
+                        my $inside = ($got_va >= $rw_va && $got_va < $rw_va + $rw_file_sz);
+                        my $file_off = $rw_file_off + ($got_va - $rw_va);
+                        diag("  --- file-level GOT entry ($got_va) ---");
+                        diag("    RW LOAD: VA=0x$rw_va, file_off=0x$rw_file_off, file_sz=0x$rw_file_sz, end=0x$rw_file_off_end");
+                        diag("    GOT VA 0x$got_va " . ($inside ? "INSIDE RW LOAD" : "OUTSIDE RW LOAD"));
+                        diag("    GOT file offset: 0x" . sprintf('%x', $file_off));
+                        my $od_out = `od -A x -t x8 -j $file_off -N 8 $sig_lib 2>&1`;
+                        chomp $od_out;
+                        diag("    raw file bytes (od): $od_out");
+                    }
+
+                    diag("  --- runtime GOT analysis (file-level) ---");
+
+                    # nm -D with object size/st_type for __lpmap_blockallsigs
+                    my $sym = `nm -D $sig_lib 2>/dev/null | grep '__lpmap_blockallsigs'`;
+                    chomp $sym;
+                    diag("    __lpmap_blockallsigs (nm -D): $sym");
+                    my $readelf_sym = `readelf -s $sig_lib 2>/dev/null | grep '__lpmap_blockallsigs'`;
+                    chomp $readelf_sym;
+                    diag("    __lpmap_blockallsigs (readelf -s): $readelf_sym");
+
+                    # Check if libc is ET_EXEC or ET_DYN
+                    my $elf_type = `readelf -h $sig_lib 2>/dev/null | grep 'Type:'`;
+                    chomp $elf_type;
+                    diag("    libc ELF type: $elf_type");
+
+                    # Dump /proc/self/map via GDB
+                    diag("  --- /proc/self/map (from GDB batch) ---");
+                    my $map_out = `gdb -batch -ex 'set pagination off' -ex 'info proc mappings' -ex quit $output_file 2>&1 | grep -E '[0-9a-f]+-[0-9a-f]+' | head -40`;
+                    for (split /\n/, $map_out) { s/\t/ /g; diag("  $_"); }
+
+                    # Read runtime GOT value using GDB
+                    diag("  --- runtime GOT entry value (from GDB) ---");
+                    # Expected: got_addr = libc_base + 0x338770 (from file VA)
+                    # We don't know libc_base at run time, but GDB can compute it from sigblockall symbol
+                    my $gdb_got = `gdb -batch -ex 'set pagination off' -ex 'info functions sigblockall' -ex 'print/x (sigblockall + 9 + 7 + 0x2f9ba8)' -ex 'x/gx (sigblockall + 9 + 7 + 0x2f9ba8)' -ex 'info reg fs_base' -ex quit $output_file 2>&1`;
+                    for (split /\n/, $gdb_got) { s/\t/ /g; diag("  $_"); }
                 }
             } else {
                 diag('  sigblockall NOT found via nm/objdump/readelf in any libc');
