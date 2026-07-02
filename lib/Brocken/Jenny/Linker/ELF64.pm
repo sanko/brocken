@@ -1060,7 +1060,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $num_ph++ if $is_pie;
         my $eh_frame_sec = $self->layout->get('.eh_frame');
         $num_ph++ if $eh_frame_sec;
-        $num_ph++ if $platform->is_bsd && !$platform->is_dragonflybsd;
+        $num_ph++ if $platform->is_bsd;
         my @phdrs     = ();
         my $extra_off = 64 + ( $num_ph * 56 );
 
@@ -1149,14 +1149,15 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 $eh_frame_sec->{size}, $eh_frame_sec->{size}, 4
                 );
         }
-        if ( $platform->is_bsd && !$platform->is_dragonflybsd ) {
+        if ($platform->is_bsd) {
 
             # PT_TLS=7: Creates a minimal thread-local storage segment.
             # This segment signals `rtld` that the binary expects Thread Control
             # Block (TCB) memory layout capabilities.
-            # Dragonfly excluded: its libc uses R_X86_64_TPOFF64 relocations
-            # referencing thread-struct offsets that break when any PT_TLS
-            # segment is present in the executable.
+            # Required on DragonFly too: without PT_TLS the kernel does not
+            # initialize FS.base for new threads, causing SIGSEGV on %fs:0
+            # access in libc's sigblockall. The R_X86_64_TPOFF64 relocation
+            # works correctly (GOT = target_offset - 0xCF8).
             my $data_sec  = $self->layout->get('.data');
             my $tls_vaddr = $data_sec ? $base + $data_sec->{rva} : $base;
             my $tls_off   = $data_sec ? $data_sec->{off}         : 0;
