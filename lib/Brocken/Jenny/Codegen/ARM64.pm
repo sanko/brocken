@@ -587,6 +587,48 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', MOV_X | ( $sid << 16 ) | $did );
                     }
                 }
+                elsif ( $opcode eq 'movzx' ) {
+                    my $src_bits = $src->type ? $src->type->bits : 64;
+                    my $dst_r    = $resolve->($dst);
+                    my $did      = $reg_id->($dst_r);
+                    my $src_r    = $resolve->($src);
+                    my $sid      = $reg_id->($src_r);
+                    if ( $src_bits >= 32 ) {
+
+                        # 32-bit zext: MOV Wd, Wn (zeros upper 32)
+                        $bytes .= pack( 'V', 0x2A0003E0 | ( $sid << 16 ) | $did );
+                    }
+                    elsif ( $src_bits >= 16 ) {
+
+                        # UXTH Wd, Wn
+                        $bytes .= pack( 'V', 0x53003C00 | ( $sid << 16 ) | $did );
+                    }
+                    else {
+                        # UXTB Wd, Wn
+                        $bytes .= pack( 'V', 0x53001C00 | ( $sid << 16 ) | $did );
+                    }
+                }
+                elsif ( $opcode eq 'movsx' ) {
+                    my $src_bits = $src->type ? $src->type->bits : 64;
+                    my $dst_r    = $resolve->($dst);
+                    my $did      = $reg_id->($dst_r);
+                    my $src_r    = $resolve->($src);
+                    my $sid      = $reg_id->($src_r);
+                    if ( $src_bits >= 32 ) {
+
+                        # SXTW Xd, Wn
+                        $bytes .= pack( 'V', 0x93407C00 | ( $sid << 16 ) | $did );
+                    }
+                    elsif ( $src_bits >= 16 ) {
+
+                        # SXTH Wd, Wn
+                        $bytes .= pack( 'V', 0x13003C00 | ( $sid << 16 ) | $did );
+                    }
+                    else {
+                        # SXTB Wd, Wn
+                        $bytes .= pack( 'V', 0x13001C00 | ( $sid << 16 ) | $did );
+                    }
+                }
                 elsif ( $opcode eq 'add' ||
                     $opcode eq 'sub'   ||
                     $opcode eq 'and'   ||

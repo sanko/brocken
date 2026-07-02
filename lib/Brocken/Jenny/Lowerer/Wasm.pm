@@ -1814,10 +1814,53 @@ class Brocken::Jenny::Lowerer::Wasm {
                         );
                     }
                 }
-                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') || $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
-                    my ($val) = $inst->operands->@*;
-                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    $mbb->add_instruction( $self->_wasm_push( $val, $inst->opcode . ' val' ) );
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') ) {
+                    my ($val)    = $inst->operands->@*;
+                    my $src_bits = $val->type ? $val->type->bits : 64;
+                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'zext val' ) );
+                    if ( $src_bits < 64 ) {
+                        my $mask = ( 1 << $src_bits ) - 1;
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $mask ) ],
+                                comment  => 'mask'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_and', operands => [], comment => 'zext' ) );
+                    }
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
+                    my ($val)    = $inst->operands->@*;
+                    my $src_bits = $val->type ? $val->type->bits : 64;
+                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'sext val' ) );
+                    if ( $src_bits < 64 ) {
+                        my $shift = 64 - $src_bits;
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $shift ) ],
+                                comment  => 'shift'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shl', operands => [], comment => 'sext shl' ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $shift ) ],
+                                comment  => 'shift'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shr_s', operands => [], comment => 'sext shr_s' ) );
+                    }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
                     );

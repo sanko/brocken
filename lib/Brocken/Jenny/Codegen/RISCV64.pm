@@ -511,6 +511,52 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                 }
+                elsif ( $opcode eq 'movzx' ) {
+                    my $src_bits = $src->type ? $src->type->bits : 64;
+                    my $dst_r    = $resolve->($dst);
+                    my $did      = $reg_id->($dst_r);
+                    my $src_r    = $resolve->($src);
+                    my $sid      = $reg_id->($src_r);
+                    if ( $src_bits <= 8 ) {
+
+                        # andi rd, rs, 255
+                        $bytes .= pack( 'V', ( 255 << 20 ) | ( $sid << 15 ) | ( 7 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    }
+                    elsif ( $src_bits <= 16 ) {
+
+                        # slli rd, rs, 48; srli rd, rd, 48
+                        $bytes .= pack( 'V', ( 48 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                        $bytes .= pack( 'V', ( 48 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    }
+                    else {
+                        # slli rd, rs, 32; srli rd, rd, 32
+                        $bytes .= pack( 'V', ( 32 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                        $bytes .= pack( 'V', ( 32 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    }
+                }
+                elsif ( $opcode eq 'movsx' ) {
+                    my $src_bits = $src->type ? $src->type->bits : 64;
+                    my $dst_r    = $resolve->($dst);
+                    my $did      = $reg_id->($dst_r);
+                    my $src_r    = $resolve->($src);
+                    my $sid      = $reg_id->($src_r);
+                    if ( $src_bits <= 8 ) {
+
+                        # slli rd, rs, 56; srai rd, rd, 56
+                        $bytes .= pack( 'V', ( 56 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                        $bytes .= pack( 'V', SRAI_B | ( 56 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    }
+                    elsif ( $src_bits <= 16 ) {
+
+                        # slli rd, rs, 48; srai rd, rd, 48
+                        $bytes .= pack( 'V', ( 48 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                        $bytes .= pack( 'V', SRAI_B | ( 48 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    }
+                    else {
+                        # addiw rd, rs, 0 (sign-extends 32-bit to 64-bit)
+                        $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x1B );
+                    }
+                }
                 elsif ( $opcode eq 'add' ||
                     $opcode eq 'sub'   ||
                     $opcode eq 'and'   ||
