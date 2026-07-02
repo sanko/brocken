@@ -567,7 +567,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
         }
         my @libs;
-        if ( !$platform->is_haiku && !$platform->is_solaris && !$platform->is_openbsd ) {
+        if ( !$platform->is_haiku && !$platform->is_solaris ) {
             my $libpthread;
 
             # Setup OS-specific fallback defaults for threading libraries
@@ -579,6 +579,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
             elsif ( $platform->is_netbsd ) {
                 $libpthread = 'libpthread.so.1';
+            }
+            elsif ( $platform->is_openbsd ) {
+                $libpthread = 'libpthread.so';
             }
             else {
                 $libpthread = 'libpthread.so.0';    # Serves DragonFly BSD correctly
