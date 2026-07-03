@@ -1036,6 +1036,11 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $adr_enc = ADR | 16 | ( ( ( $rel >> 2 ) & 0x7FFFF ) << 5 ) | ( ( $rel & 3 ) << 29 );
                     substr $bytes, $adr_off, 4, pack( 'V', $adr_enc );
                 }
+                elsif ( $opcode eq 'syscall' ) {
+
+                    # svc #0
+                    $bytes .= pack( 'V', 0xD4000001 );
+                }
                 elsif ( $opcode eq 'lea_func' ) {
                     my $dst_r     = $resolve->($dst);
                     my $did       = $reg_id->($dst_r);

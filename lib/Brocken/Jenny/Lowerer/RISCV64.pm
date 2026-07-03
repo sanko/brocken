@@ -3318,6 +3318,42 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         );
                     }
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Syscall') ) {
+                    my @args     = $inst->operands->@*;
+                    my $num_reg  = $platform->syscall_num_reg;
+                    my $ret_reg  = $platform->syscall_ret_reg;
+                    my @arg_regs = qw(a0 a1 a2 a3 a4 a5);
+                    my $num_opnd = $self->_lower_opnd( shift @args );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $num_reg ), $num_opnd ],
+                            comment  => 'syscall number'
+                        )
+                    );
+                    for my $i ( 0 .. $#args ) {
+                        my $arg_reg  = $arg_regs[$i] // last;
+                        my $arg_opnd = $self->_lower_opnd( $args[$i] );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_reg ), $arg_opnd ],
+                                comment  => "syscall arg $i"
+                            )
+                        );
+                    }
+                    $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'syscall' ) );
+                    if ( defined $inst->name ) {
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $ret_reg ) ],
+                                comment  => 'syscall result'
+                            )
+                        );
+                    }
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FrameAddr') ) {
                     my $dst    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     my $fp_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $self->_abi->frame_reg );

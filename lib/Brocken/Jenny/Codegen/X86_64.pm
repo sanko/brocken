@@ -1127,6 +1127,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $rel   = $after - $lea_off - 7;
                     substr $bytes, $lea_off + 3, 4, pack( 'V', $rel );
                 }
+                elsif ( $opcode eq 'syscall' ) {
+                    $bytes .= pack( 'CC', 0x0F, 0x05 );
+                }
                 elsif ( $opcode eq 'lea_func' ) {
                     my $dst_r     = $resolve->($dst);
                     my $did       = $reg_id->($dst_r);

@@ -137,6 +137,15 @@ class Brocken::Lindsay::IR::Instruction::Call : isa(Brocken::Lindsay::IR::Instru
     }
 }
 
+class Brocken::Lindsay::IR::Instruction::Syscall : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
+        my $res  = $self->name // '%<anon>';
+        return sprintf '  %s = syscall(%s)', $res, $args;
+    }
+}
+
 class Brocken::Lindsay::IR::Instruction::Box : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {

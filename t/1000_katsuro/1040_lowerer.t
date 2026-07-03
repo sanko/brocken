@@ -157,6 +157,34 @@ BROCKEN
     my $text = $f->as_string();
     like( $text, qr/add\s+ptr/, 'ptr_add lowered to add' );
 };
+subtest 'Bitwise intrinsics' => sub {
+    for my $tc (
+        [ band => 'and',  q{Brocken::band(3, 6)} ],
+        [ bor  => 'or',   q{Brocken::bor(3, 6)} ],
+        [ bxor => 'xor',  q{Brocken::bxor(3, 6)} ],
+        [ shl  => 'shl',  q{Brocken::shl(3, 1)} ],
+        [ shr  => 'lshr', q{Brocken::shr(6, 1)} ],
+    ) {
+        my ( $name, $op, $src ) = @$tc;
+        my $c   = Brocken::Compiler->new;
+        my $mod = $c->compile("my i64 \$x = $src;\nreturn \$x;\n");
+        my $f   = find_function( $mod, '_BROCKEN_ENTRY' );
+        ok( $f, "found entry function for $name" );
+        my $text = $f->as_string();
+        like( $text, qr/$op\s+/i, "$name lowered to $op" );
+    }
+};
+subtest 'Syscall intrinsic' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my i64 $ret = Brocken::syscall(0, 0, 0, 0);
+return 0;
+BROCKEN
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
+    my $text = $f->as_string();
+    like( $text, qr/syscall\(/, 'syscall lowered to syscall IR' );
+};
 subtest 'Class field access via $self->field in method' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');

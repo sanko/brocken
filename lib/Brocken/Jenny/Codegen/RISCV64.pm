@@ -985,6 +985,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     substr $bytes, $auipc_off,     4, pack( 'V', ( $upper << 12 ) | ( $adj_tmp << 7 ) | 0x17 );
                     substr $bytes, $auipc_off + 4, 4, pack( 'V', ( ( $lower & 0xFFF ) << 20 ) | ( $adj_tmp << 15 ) | ( $adj_tmp << 7 ) | OP_IMM );
                 }
+                elsif ( $opcode eq 'syscall' ) {
+
+                    # ecall
+                    $bytes .= pack( 'V', 0x00000073 );
+                }
                 elsif ( $opcode eq 'lea_func' ) {
                     my $dst_r     = $resolve->($dst);
                     my $did       = $reg_id->($dst_r);

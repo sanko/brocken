@@ -428,7 +428,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         for my $bb ( $mf->blocks->@* ) {
             my @new;
             for my $inst ( $bb->instructions->@* ) {
-                if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap)$/ ) {
+                if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap|syscall)$/ ) {
                     for my $r (@$caller_regs) {
                         my $mem
                             = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 }, );
@@ -441,7 +441,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     }
                 }
                 push @new, $inst;
-                if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap)$/ ) {
+                if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap|syscall)$/ ) {
                     for my $r ( reverse @$caller_regs ) {
                         my $mem
                             = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 },
