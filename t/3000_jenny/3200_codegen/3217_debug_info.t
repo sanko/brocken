@@ -6,7 +6,9 @@ use Brocken;
 use Brocken::Compiler;
 use Brocken::Katsuro::Platform;
 use Config;
-use Fcntl qw(O_RDONLY);
+use Fcntl    qw(O_RDONLY);
+use IPC::Cmd qw(can_run);
+use File::Spec;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -82,7 +84,7 @@ BROCKEN
             my $l = Brocken->new;
             $l->linker->set_debug_data($debug_data);
             $l->linker->set_debug_level($lv);
-            my $file = $l->tmpdir . "/debug_lv$lv" . $l->ext;
+            my $file = File::Spec->catfile( $l->tmpdir, "debug_lv$lv" . $l->ext );
             $l->linker->write_executable( $file, $funcs, $host );
             ok( -e $file, "level $lv: binary written" );
             system $file;
@@ -94,7 +96,7 @@ BROCKEN
 subtest 'GDB backtrace with debug info at level 5 (COFF symbols)' => sub {
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
-    my $has_gdb = defined( eval {`gdb --version 2>&1`} ) && $? == 0;
+    my $has_gdb = can_run('gdb');
 SKIP: {
         skip 'gdb not available', 1 unless $has_gdb;
         my $source = <<'BROCKEN';
@@ -113,7 +115,7 @@ BROCKEN
         my $debug_data = $brocken->codegen->build_debug_data( $ir_funcs, $funcs, 'test_gdb.brocken', $text_base, {}, 5 );
         $brocken->linker->set_debug_data($debug_data);
         $brocken->linker->set_debug_level(5);
-        my $file = $brocken->tmpdir . '/gdb_backtrace_test' . $brocken->ext;
+        my $file = File::Spec->catfile( $brocken->tmpdir, 'gdb_backtrace_test' . $brocken->ext );
         $brocken->linker->write_executable( $file, $funcs, $host );
         ok( -e $file, 'binary with debug info written' );
         ( my $gdb_file = $file ) =~ s{\\}{/}g;
@@ -198,7 +200,7 @@ BROCKEN
             my $l = Brocken->new;
             $l->linker->set_debug_data($debug_data);
             $l->linker->set_debug_level($lv);
-            my $file = $l->tmpdir . "/struct_die_lv$lv" . $l->ext;
+            my $file = File::Spec->catfile( $l->tmpdir, "struct_die_lv$lv" . $l->ext );
             $l->linker->write_executable( $file, $funcs, $host );
             ok( -e $file, "level $lv: binary written" );
             system $file;
@@ -224,13 +226,13 @@ BROCKEN
             my $debug_data = $brocken->codegen->build_debug_data( $ir_funcs, $funcs, 'test_coff_levels.brocken', $text_base, {}, $lv );
             $brocken->linker->set_debug_data($debug_data);
             $brocken->linker->set_debug_level($lv);
-            my $file = $brocken->tmpdir . "/coff_lv$lv" . $brocken->ext;
+            my $file = File::Spec->catfile( $brocken->tmpdir, "coff_lv$lv" . $brocken->ext );
             $brocken->linker->write_executable( $file, $funcs, $host );
             ok( -e $file, "level $lv: binary written" );
             system $file;
             is( $? >> 8, 42, "level $lv: result 42" );
             ( my $gf = $file ) =~ s{\\}{/}g;
-            my $has_gdb = defined( eval {`gdb --version 2>&1`} ) && $? == 0;
+            my $has_gdb = can_run('gdb');
 
             if ($has_gdb) {
                 my $funcs_out = `gdb -readnow -batch -ex "file $gf" -ex "info functions" -ex quit 2>&1`;
