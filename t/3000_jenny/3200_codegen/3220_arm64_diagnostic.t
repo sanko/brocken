@@ -15,7 +15,7 @@ sub _binary_info ($path) {
     binmode $fh;
     read $fh, my $hdr, 2 or return "can't read: $!";
     return "no MZ" unless $hdr eq 'MZ';
-    read $fh, my $e_lfanew_buf, 60;
+    read $fh, my $e_lfanew_buf, 62;
     my $e_lfanew = unpack 'V', substr( $e_lfanew_buf, 58, 4 );
     seek $fh, $e_lfanew, 0;
     read $fh, my $pe_sig, 4;
