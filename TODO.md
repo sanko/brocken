@@ -249,11 +249,12 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 **Priority:** Low
 **Dependencies:** Tied to Wasm encoder's block structure. Changing Wasm's structured control flow would require updating the inline offset tracking.
 
-### Gap 11: Runtime functions share user source file for `DW_AT_decl_file`
+### Gap 11: Runtime functions share user source file for `DW_AT_decl_file` [x] Fixed
 **Description:** All functions (user code + runtime helpers like `Brocken::Runtime::_init`) currently get `source_file => $source_file` in `build_debug_data`, so `DW_AT_decl_file` points to the user's source file for everything. Runtime functions should ideally reference a different source file (e.g., `core.brocken` or `<runtime>`).
-**Impact:** Low. GDB will attribute runtime functions to the user's source file. Cosmetic for backtraces that include runtime frames.
+**Status:** Fixed. Each backend's `build_debug_data` now checks `$fname =~ /^Brocken::Runtime::/` and sets `source_file => '<runtime>'` for those functions, including per-instruction source locations. The `source_files` array automatically picks up the distinct file name.
+**Impact:** Low. GDB will now attribute runtime functions to `<runtime>` instead of the user's source file.
 **Priority:** Low
-**Dependencies:** Need to identify runtime functions by name (e.g., prefix `Brocken::Runtime::`) and assign them a different source file. The infrastructure (per-function `source_file` in func_ranges, `source_files` array in DWARF constructor) is already in place — just need the distinguishing logic in each backend's `build_debug_data`.
+**Dependencies:** None.
 
 ### Gap 12: All source_locs use implicit file index 0 [x] Fixed
 **Description:** The line number program entries (source_locs) don't carry a file index. All source locations implicitly refer to the first file in the file table (index 0 → DWARF file index 1). If we ever have multiple source files contributing to one compilation unit, line entries can't distinguish them.
