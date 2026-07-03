@@ -28,6 +28,7 @@ into a final executable or shared library.
     field $preserved_regs : reader = [];
     field $frame_size     : reader = 0;
     field $timestamp      : reader = undef;
+    field $debug_level    : reader = 0;
     #
     method set_preserved_regs($r) { $preserved_regs = $r; }
     method set_frame_size($s)     { $frame_size     = $s; }
@@ -35,6 +36,7 @@ into a final executable or shared library.
     method effective_timestamp()  { $timestamp // time() }
     method set_debug_data($d)     { $debug_data = $d; }
     method debug_section($name)   { return $self->debug_data->{$name} // ''; }
+    method set_debug_level($l)    { $debug_level    = $l; }
     method set_func_ranges($r)    { $func_ranges    = $r; }
     method set_labels($l)         { $labels         = $l; }
     method set_exported_funcs($f) { $exported_funcs = $f; }

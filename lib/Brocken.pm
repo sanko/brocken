@@ -14,7 +14,8 @@ package Brocken v0.0.1 {
     use File::Temp;
 
     class Brocken {
-        field $platform : param = undef;
+        field $platform    : param = undef;
+        field $debug_level : param = 0;
         field $codegen;
         field $linker;
         field $ext;
@@ -62,12 +63,13 @@ package Brocken v0.0.1 {
                 die "Unsupported platform for Brocken: " . $platform->friendly;
             }
         }
-        method platform() { return $platform }
-        method codegen()  { return $codegen }
-        method linker()   { return $linker }
-        method ext()      { return $ext }
-        method os()       { return $platform->os }
-        method arch()     { return $platform->arch }
+        method platform()    { return $platform }
+        method codegen()     { return $codegen }
+        method linker()      { return $linker }
+        method ext()         { return $ext }
+        method os()          { return $platform->os }
+        method arch()        { return $platform->arch }
+        method debug_level() { return $debug_level }
     }
 };
 1;

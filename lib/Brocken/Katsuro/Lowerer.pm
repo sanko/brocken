@@ -13,7 +13,7 @@ class Brocken::Katsuro::Lowerer {
     field $current_class;                 # class name when inside a method/ADJUST
     field $symbols               = {};    # "name" -> ptr (alloca or GEP result)
     field $functions             = {};    # "name" -> Brocken::Lindsay::IR::Function
-    field $classes               = {};    # "ClassName" -> {fields=>[...], total_size=>N, methods=>[...], adjust=>undef}
+    field $classes : reader      = {};    # "ClassName" -> {fields=>[...], total_size=>N, methods=>[...], adjust=>undef}
     field $block_id              = 0;
     field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
@@ -212,12 +212,27 @@ class Brocken::Katsuro::Lowerer {
     method register_class($ast) {
         my @fields;
         my $offset = 0;
+        my @field_types;
+        my @field_names;
+        my @field_offsets;
         for my $f ( $ast->fields->@* ) {
             my $ir_type = $self->type_from_name( $f->type );
+            push @field_types,   $ir_type;
+            push @field_names,   $f->name;
+            push @field_offsets, $offset;
             push @fields, { name => $f->name, type => $f->type, ir_type => $ir_type, offset => $offset, size => $self->type_size($ir_type), };
             $offset += $self->type_size($ir_type);
         }
-        $classes->{ $ast->name } = { fields => \@fields, total_size => $offset, methods => [], adjust => undef, };
+        my $struct_type = Brocken::Lindsay::IR::Type->new(
+            kind           => 'struct',
+            struct_name    => $ast->name,
+            field_types    => \@field_types,
+            field_names    => \@field_names,
+            _field_offsets => \@field_offsets,
+            bits           => $offset * 8,
+            signed         => 0,
+        );
+        $classes->{ $ast->name } = { fields => \@fields, total_size => $offset, methods => [], adjust => undef, struct_type => $struct_type, };
     }
 
     method register_function($ast) {
@@ -278,7 +293,8 @@ class Brocken::Katsuro::Lowerer {
         for my $i ( 0 .. $ast->params->@* - 1 ) {
             my $p      = $current_func->params->[$i];
             my $pname  = $ast->params->[$i]{name};
-            my $alloca = $builder->build_alloca( $p->type, '%' . $pname . '.addr' );
+            my $ptype  = $ast->params->[$i]{type} // 'Any';
+            my $alloca = $builder->build_alloca( $p->type, '%' . $pname . '.addr', undef, 0, 0, $pname, $ptype );
             $builder->build_store( $p, $alloca );
             $symbols->{$pname} = $alloca;
         }
@@ -333,7 +349,8 @@ class Brocken::Katsuro::Lowerer {
 
     method lower_var_decl($ast) {
         my $ir_type = $self->type_from_name( $ast->type );
-        my $alloca  = $builder->build_alloca( $ir_type, '%' . $ast->name . '.addr' );
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $alloca = $builder->build_alloca( $ir_type, '%' . $ast->name . '.addr', undef, $line, $col, $ast->name, $ast->type );
         $symbols->{ $ast->name } = $alloca;
         if ( defined $ast->init ) {
             if ( $ast->init->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
@@ -343,12 +360,13 @@ class Brocken::Katsuro::Lowerer {
             }
             my $val = $self->lower_expression( $ast->init );
             $val = $self->maybe_convert_type( $val, $ir_type );
-            $builder->build_store( $val, $alloca );
+            $builder->build_store( $val, $alloca, $line, $col );
         }
     }
 
     method lower_assign($ast) {
         my $target = $ast->target;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
         if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') &&
             $ast->expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
             $ast->expr->method eq 'new' &&
@@ -387,51 +405,54 @@ class Brocken::Katsuro::Lowerer {
         }
         $val = $self->maybe_convert_type( $val, $stored_type );
         if ( $ast->op eq '//=' ) {
-            my $existing = $builder->build_load( $stored_type, $addr );
+            my $existing = $builder->build_load( $stored_type, $addr, undef, $line, $col );
             my $zero     = Brocken::Lindsay::IR::Constant->new( type => $stored_type, value => 0 );
-            my $is_undef = $builder->build_icmp( 'eq', $existing, $zero );
-            my $new_val  = $builder->build_select( $is_undef, $val, $existing );
-            $builder->build_store( $new_val, $addr );
+            my $is_undef = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+            my $new_val  = $builder->build_select( $is_undef, $val, $existing, undef, $line, $col );
+            $builder->build_store( $new_val, $addr, $line, $col );
         }
         else {
-            $builder->build_store( $val, $addr );
+            $builder->build_store( $val, $addr, $line, $col );
         }
     }
 
     method lower_return($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
         if ( defined $ast->expr ) {
             my $val      = $self->lower_expression( $ast->expr );
             my $ret_type = $current_func->return_type;
             $val = $self->maybe_convert_type( $val, $ret_type );
-            $builder->build_ret($val);
+            $builder->build_ret( $val, $line, $col );
         }
         else {
-            $builder->build_ret();
+            $builder->build_ret( undef, $line, $col );
         }
     }
 
     method lower_if($ast) {
         my $parent_block = $current_block;
         my $func         = $current_func;
-        my $then_block   = $func->append_block( $self->unique_block_name('then') );
-        my $merge_block  = $func->append_block( $self->unique_block_name('if_end') );
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $then_block  = $func->append_block( $self->unique_block_name('then') );
+        my $merge_block = $func->append_block( $self->unique_block_name('if_end') );
         my $else_block;
         my $has_else = defined $ast->else || $ast->elsif->@* > 0;
-        my $cond     = $self->as_condition( $self->lower_expression( $ast->cond ) );
+        my $cond     = $self->as_condition( $self->lower_expression( $ast->cond ), $line, $col );
+
         if ($has_else) {
             $else_block = $func->append_block( $self->unique_block_name('else') );
             $builder->position_at_end($parent_block);
-            $builder->build_cond_br( $cond, $then_block, $else_block );
+            $builder->build_cond_br( $cond, $then_block, $else_block, $line, $col );
         }
         else {
             $builder->position_at_end($parent_block);
-            $builder->build_cond_br( $cond, $then_block, $merge_block );
+            $builder->build_cond_br( $cond, $then_block, $merge_block, $line, $col );
         }
         $builder->position_at_end($then_block);
         $current_block = $then_block;
         $self->lower_block_body( $ast->then );
         unless ( $current_block->terminator ) {
-            $builder->build_br($merge_block);
+            $builder->build_br( $merge_block, $line, $col );
         }
         if ($has_else) {
             $builder->position_at_end($else_block);
@@ -444,7 +465,7 @@ class Brocken::Katsuro::Lowerer {
                 $self->lower_block_body( $ast->else );
             }
             unless ( $current_block->terminator ) {
-                $builder->build_br($merge_block);
+                $builder->build_br( $merge_block, $line, $col );
             }
         }
         $builder->position_at_end($merge_block);
@@ -452,7 +473,8 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method lower_elsif_chain( $pair, $merge_block, $all_pairs, $idx ) {
-        my $cond = $self->as_condition( $self->lower_expression( $pair->[0] ) );
+        my ( $line, $col ) = ( $pair->[0]->line // 0, $pair->[0]->col // 0 );
+        my $cond = $self->as_condition( $self->lower_expression( $pair->[0] ), $line, $col );
         my $body = $pair->[1];
         my $func = $current_func;
         my $then = $func->append_block( $self->unique_block_name('elsif_then') );
@@ -461,18 +483,18 @@ class Brocken::Katsuro::Lowerer {
         if ( $next_idx < $all_pairs->@* ) {
             $next = $func->append_block( $self->unique_block_name('elsif_n') );
             $builder->position_at_end($current_block);
-            $builder->build_cond_br( $cond, $then, $next );
+            $builder->build_cond_br( $cond, $then, $next, $line, $col );
         }
         else {
             $next = $merge_block;
             $builder->position_at_end($current_block);
-            $builder->build_cond_br( $cond, $then, $next );
+            $builder->build_cond_br( $cond, $then, $next, $line, $col );
         }
         $builder->position_at_end($then);
         $current_block = $then;
         $self->lower_block_body($body);
         unless ( $current_block->terminator ) {
-            $builder->build_br($merge_block);
+            $builder->build_br( $merge_block, $line, $col );
         }
         if ( $next->name ne 'if_end' ) {
             $builder->position_at_end($next);
@@ -482,22 +504,23 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method lower_while($ast) {
-        my $func   = $current_func;
+        my $func = $current_func;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
         my $header = $func->append_block( $self->unique_block_name('while_header') );
         my $body   = $func->append_block( $self->unique_block_name('while_body') );
         my $exit   = $func->append_block( $self->unique_block_name('while_end') );
         $builder->position_at_end($current_block);
-        $builder->build_br($header);
+        $builder->build_br( $header, $line, $col );
         $builder->position_at_end($header);
         $current_block = $header;
-        my $cond = $self->as_condition( $self->lower_expression( $ast->cond ) );
-        $builder->build_cond_br( $cond, $body, $exit );
+        my $cond = $self->as_condition( $self->lower_expression( $ast->cond ), $line, $col );
+        $builder->build_cond_br( $cond, $body, $exit, $line, $col );
         $builder->position_at_end($body);
         $current_block = $body;
         $self->lower_block_body( $ast->body );
 
         unless ( $current_block->terminator ) {
-            $builder->build_br($header);
+            $builder->build_br( $header, $line, $col );
         }
         $builder->position_at_end($exit);
         $current_block = $exit;
@@ -546,6 +569,7 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method lower_var_ref($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
 
         # Array variables: @arr returns the base pointer directly
         if ( $ast->sigil eq '@' ) {
@@ -571,14 +595,14 @@ class Brocken::Katsuro::Lowerer {
         else {
             $loaded_type = $sym->allocated_type // Brocken::Lindsay::IR::Type::i64();
         }
-        return $builder->build_load( $loaded_type, $sym );
+        return $builder->build_load( $loaded_type, $sym, undef, $line, $col );
     }
 
     method lower_array_decl($ast) {
         my $ir_type  = $self->type_from_name( $ast->elem_type );
         my $size_val = $self->lower_expression( $ast->size_expr );
         my $key      = '@' . $ast->name;
-        my $alloca   = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val );
+        my $alloca   = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
         $symbols->{$key} = $alloca;
     }
 
@@ -586,6 +610,7 @@ class Brocken::Katsuro::Lowerer {
         my $array_expr = $ast->array;
         my $array_base;
         my $elem_type;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
         if ( $array_expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
             my $key = '@' . $array_expr->name;
             my $sym = $symbols->{$key};
@@ -598,18 +623,19 @@ class Brocken::Katsuro::Lowerer {
             $elem_type  = $array_base->type;
         }
         my $index_val = $self->lower_expression( $ast->index );
-        return $builder->build_gep( $elem_type, $array_base, [$index_val], '%idx.addr' );
+        return $builder->build_gep( $elem_type, $array_base, [$index_val], '%idx.addr', $line, $col );
     }
 
     method lower_array_index($ast) {
         my $addr = $self->lower_array_addr($ast);
-        return $builder->build_load( $addr->base_type, $addr );
+        return $builder->build_load( $addr->base_type, $addr, undef, $ast->line, $ast->col );
     }
 
     method lower_binop($ast) {
         my $lhs = $self->lower_expression( $ast->lhs );
         my $rhs = $self->lower_expression( $ast->rhs );
         my $op  = $ast->op;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
 
         # Unbox dynamic operands to i64 for arithmetic/comparison
         my $native = Brocken::Lindsay::IR::Type::i64();
@@ -617,34 +643,37 @@ class Brocken::Katsuro::Lowerer {
             $lhs = $self->maybe_convert_type( $lhs, $native );
             $rhs = $self->maybe_convert_type( $rhs, $native );
         }
-        return $builder->build_add( $lhs, $rhs ) if $op eq '+';
-        return $builder->build_sub( $lhs, $rhs ) if $op eq '-';
-        return $builder->build_mul( $lhs, $rhs ) if $op eq '*';
+        return $builder->build_add( $lhs, $rhs, undef, $line, $col ) if $op eq '+';
+        return $builder->build_sub( $lhs, $rhs, undef, $line, $col ) if $op eq '-';
+        return $builder->build_mul( $lhs, $rhs, undef, $line, $col ) if $op eq '*';
         if ( $op eq '/' ) {
-            return $lhs->type->is_signed ? $builder->build_div( $lhs, $rhs ) : $builder->build_udiv( $lhs, $rhs );
+            return $lhs->type->is_signed ? $builder->build_div( $lhs, $rhs, undef, $line, $col ) :
+                $builder->build_udiv( $lhs, $rhs, undef, $line, $col );
         }
         if ( $op eq '%' ) {
-            return $lhs->type->is_signed ? $builder->build_rem( $lhs, $rhs ) : $builder->build_urem( $lhs, $rhs );
+            return $lhs->type->is_signed ? $builder->build_rem( $lhs, $rhs, undef, $line, $col ) :
+                $builder->build_urem( $lhs, $rhs, undef, $line, $col );
         }
-        return $builder->build_shl( $lhs, $rhs ) if $op eq '<<';
+        return $builder->build_shl( $lhs, $rhs, undef, $line, $col ) if $op eq '<<';
         if ( $op eq '>>' ) {
-            return $lhs->type->is_signed ? $builder->build_ashr( $lhs, $rhs ) : $builder->build_lshr( $lhs, $rhs );
+            return $lhs->type->is_signed ? $builder->build_ashr( $lhs, $rhs, undef, $line, $col ) :
+                $builder->build_lshr( $lhs, $rhs, undef, $line, $col );
         }
-        return $builder->build_and( $lhs, $rhs )        if $op eq '&&';
-        return $builder->build_or( $lhs, $rhs )         if $op eq '||';
-        return $builder->build_icmp( 'eq', $lhs, $rhs ) if $op eq '==';
-        return $builder->build_icmp( 'ne', $lhs, $rhs ) if $op eq '!=';
+        return $builder->build_and( $lhs, $rhs, undef, $line, $col )        if $op eq '&&';
+        return $builder->build_or( $lhs, $rhs, undef, $line, $col )         if $op eq '||';
+        return $builder->build_icmp( 'eq', $lhs, $rhs, undef, $line, $col ) if $op eq '==';
+        return $builder->build_icmp( 'ne', $lhs, $rhs, undef, $line, $col ) if $op eq '!=';
         if ( $op eq '<' ) {
-            return $builder->build_icmp( $lhs->type->is_signed ? 'slt' : 'ult', $lhs, $rhs );
+            return $builder->build_icmp( $lhs->type->is_signed ? 'slt' : 'ult', $lhs, $rhs, undef, $line, $col );
         }
         if ( $op eq '>' ) {
-            return $builder->build_icmp( $lhs->type->is_signed ? 'sgt' : 'ugt', $lhs, $rhs );
+            return $builder->build_icmp( $lhs->type->is_signed ? 'sgt' : 'ugt', $lhs, $rhs, undef, $line, $col );
         }
         if ( $op eq '<=' ) {
-            return $builder->build_icmp( $lhs->type->is_signed ? 'sle' : 'ule', $lhs, $rhs );
+            return $builder->build_icmp( $lhs->type->is_signed ? 'sle' : 'ule', $lhs, $rhs, undef, $line, $col );
         }
         if ( $op eq '>=' ) {
-            return $builder->build_icmp( $lhs->type->is_signed ? 'sge' : 'uge', $lhs, $rhs );
+            return $builder->build_icmp( $lhs->type->is_signed ? 'sge' : 'uge', $lhs, $rhs, undef, $line, $col );
         }
         Carp::croak( "Unknown binary operator '$op' at " . $self->_loc($ast) );
     }
@@ -652,15 +681,16 @@ class Brocken::Katsuro::Lowerer {
     method lower_unop($ast) {
         my $operand = $self->lower_expression( $ast->expr );
         my $op      = $ast->op;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
 
         # Unbox dynamic operands to i64 before unary ops
         if ( $operand->type->kind eq 'dynamic' ) {
             $operand = $self->maybe_convert_type( $operand, Brocken::Lindsay::IR::Type::i64() );
         }
-        return $builder->build_neg($operand) if $op eq '-';
+        return $builder->build_neg( $operand, undef, $line, $col ) if $op eq '-';
         if ( $op eq '!' ) {
             my $zero = Brocken::Lindsay::IR::Constant->new( type => $operand->type, value => 0 );
-            return $builder->build_icmp( 'eq', $operand, $zero );
+            return $builder->build_icmp( 'eq', $operand, $zero, undef, $line, $col );
         }
         Carp::croak( "Unknown unary operator '$op' at " . $self->_loc($ast) );
     }
@@ -668,6 +698,7 @@ class Brocken::Katsuro::Lowerer {
     method lower_call_expr($ast) {
         my $name   = $ast->func_name;
         my $callee = $functions->{$name};
+        my ( $line, $col ) = ( $ast->line, $ast->col );
         unless ($callee) {
             if ( $name eq 'say' || $name eq 'print' ) {
                 $callee = Brocken::Lindsay::IR::Function->new(
@@ -693,59 +724,61 @@ class Brocken::Katsuro::Lowerer {
             $param_idx++;
         }
         my $ret_is_void = $callee->return_type->kind eq 'void';
-        return $builder->build_call( $callee, \@args, $ret_is_void ? undef : '%' . $name . '_res' );
+        return $builder->build_call( $callee, \@args, $ret_is_void ? undef : '%' . $name . '_res', $line, $col );
     }
 
     method lower_intrinsic($ast) {
         my $name = $ast->name;
         my @args;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
         for my $arg ( $ast->args->@* ) {
             push @args, $self->lower_expression($arg);
         }
-        return $builder->build_add( $args[0], $args[1] )                           if $name eq 'ptr_add';
-        return $builder->build_sub( $args[0], $args[1] )                           if $name eq 'ptr_sub';
-        return $builder->build_icmp( 'sgt', $args[0], $args[1] )                   if $name eq 'ptr_cmp_gt';
-        return $builder->build_icmp( 'slt', $args[0], $args[1] )                   if $name eq 'ptr_cmp_lt';
-        return $builder->build_icmp( 'eq', $args[0], $args[1] )                    if $name eq 'ptr_cmp_eq';
-        return $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $args[0] ) if $name eq 'load_i64';
-        $builder->build_store( $args[1], $args[0] );
-        return undef                                                               if $name eq 'store_i64';
-        return $builder->build_load( Brocken::Lindsay::IR::Type::i32(), $args[0] ) if $name eq 'load_i32';
-        $builder->build_store( $args[1], $args[0] );
+        return $builder->build_add( $args[0], $args[1], undef, $line, $col )                           if $name eq 'ptr_add';
+        return $builder->build_sub( $args[0], $args[1], undef, $line, $col )                           if $name eq 'ptr_sub';
+        return $builder->build_icmp( 'sgt', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_gt';
+        return $builder->build_icmp( 'slt', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_lt';
+        return $builder->build_icmp( 'eq', $args[0], $args[1], undef, $line, $col )                    if $name eq 'ptr_cmp_eq';
+        return $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $args[0], undef, $line, $col ) if $name eq 'load_i64';
+        $builder->build_store( $args[1], $args[0], $line, $col );
+        return undef                                                                                   if $name eq 'store_i64';
+        return $builder->build_load( Brocken::Lindsay::IR::Type::i32(), $args[0], undef, $line, $col ) if $name eq 'load_i32';
+        $builder->build_store( $args[1], $args[0], $line, $col );
         return undef if $name eq 'store_i32';
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }
 
     # === Condition conversion ===
-    method as_condition($val) {
+    method as_condition( $val, $line = 0, $col = 0 ) {
         return $val if $val->type->bits == 1;
 
         # Unbox dynamic to i64 before comparing against zero
         if ( $val->type->kind eq 'dynamic' ) {
-            $val = $self->maybe_convert_type( $val, Brocken::Lindsay::IR::Type::i64() );
+            $val = $self->maybe_convert_type( $val, Brocken::Lindsay::IR::Type::i64(), $line, $col );
         }
         my $zero = Brocken::Lindsay::IR::Constant->new( type => $val->type, value => 0 );
-        return $builder->build_icmp( 'ne', $val, $zero );
+        return $builder->build_icmp( 'ne', $val, $zero, undef, $line, $col );
     }
 
     # === Type conversion helper ===
-    method maybe_convert_type( $val, $target_type ) {
+    method maybe_convert_type( $val, $target_type, $line = 0, $col = 0 ) {
         return $val if $val->type->kind eq $target_type->kind && $val->type->bits == $target_type->bits;
 
         # Box: native -> dynamic
         if ( $target_type->kind eq 'dynamic' && $val->type->kind ne 'dynamic' ) {
-            return $builder->build_box($val);
+            return $builder->build_box( $val, undef, $line, $col );
         }
 
         # Unbox: dynamic -> native
         if ( $val->type->kind eq 'dynamic' && $target_type->kind ne 'dynamic' ) {
-            return $builder->build_unbox( $val, $target_type );
+            return $builder->build_unbox( $val, $target_type, undef, $line, $col );
         }
 
         # Integer widening: zero-extend for unsigned, sign-extend for signed
         if ( $val->type->kind eq 'int' && $target_type->kind eq 'int' ) {
             if ( $val->type->bits < $target_type->bits ) {
-                return $val->type->is_signed ? $builder->build_sext( $val, $target_type ) : $builder->build_zext( $val, $target_type );
+                return $val->type->is_signed ? $builder->build_sext( $val, $target_type, undef, $line, $col ) :
+                    $builder->build_zext( $val, $target_type, undef, $line, $col );
             }
         }
         $val;
@@ -769,17 +802,20 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method lower_field_addr($ast) {
-        my $obj_ptr    = $self->lower_expression( $ast->obj );
-        my $class_name = $self->resolve_class_name($ast);
-        my $cd         = $classes->{$class_name};
-        my ($field)    = grep { $_->{name} eq $ast->field } $cd->{fields}->@*;
-        Carp::croak( "Unknown field '" . $ast->field . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $field;
-        return $builder->build_gep(
-            Brocken::Lindsay::IR::Type::i8(),
-            $obj_ptr,
-            [ Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $field->{offset} ) ],
-            '%' . $ast->field . '.addr'
-        );
+        my $obj_ptr     = $self->lower_expression( $ast->obj );
+        my $class_name  = $self->resolve_class_name($ast);
+        my $cd          = $classes->{$class_name};
+        my $struct_type = $cd->{struct_type};
+        my $field_idx;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
+            if ( $cd->{fields}[$i]{name} eq $ast->field ) {
+                $field_idx = $i;
+                last;
+            }
+        }
+        Carp::croak( "Unknown field '" . $ast->field . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless defined $field_idx;
+        return $builder->build_struct_gep( $struct_type, $obj_ptr, $field_idx, '%' . $ast->field . '.addr', $line, $col );
     }
 
     method lower_field_access($ast) {
@@ -787,7 +823,7 @@ class Brocken::Katsuro::Lowerer {
         my $class_name = $self->resolve_class_name($ast);
         my $cd         = $classes->{$class_name};
         my ($field)    = grep { $_->{name} eq $ast->field } $cd->{fields}->@*;
-        return $builder->build_load( $field->{ir_type}, $field_ptr );
+        return $builder->build_load( $field->{ir_type}, $field_ptr, undef, $ast->line, $ast->col );
     }
 
     method lower_method_call($ast) {
@@ -795,6 +831,7 @@ class Brocken::Katsuro::Lowerer {
         my $obj_is_class = $ast->obj->isa('Brocken::Katsuro::AST::Expr::Ident');
         my $full_name    = $class_name . '::' . $ast->method;
         my $callee       = $functions->{$full_name};
+        my ( $line, $col ) = ( $ast->line, $ast->col );
         Carp::croak( "Undefined method '" . $ast->method . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $callee;
         if ( $obj_is_class && $ast->method eq 'new' ) {
             my $cd         = $classes->{$class_name};
@@ -803,13 +840,13 @@ class Brocken::Katsuro::Lowerer {
             if ( exists $symbols->{'__heap_base'} ) {
                 my $bump_alloc_fn = $functions->{'Brocken::Runtime::bump_alloc'};
                 Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
-                my $heap_base  = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+                my $heap_base  = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
                 my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $total_size );
-                $self_ptr = $builder->build_call( $bump_alloc_fn, [ $heap_base, $size_const ], '%obj' );
+                $self_ptr = $builder->build_call( $bump_alloc_fn, [ $heap_base, $size_const ], '%obj', $line, $col );
             }
             else {
                 my $struct_type = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => $total_size * 8 );
-                $self_ptr = $builder->build_alloca( $struct_type, '%obj' );
+                $self_ptr = $builder->build_alloca( $struct_type, '%obj', undef, $line, $col );
             }
             my @args       = ($self_ptr);
             my $ctor_p_idx = 1;
@@ -821,7 +858,7 @@ class Brocken::Katsuro::Lowerer {
                 push @args, $val;
                 $ctor_p_idx++;
             }
-            $builder->build_call( $callee, \@args, undef );
+            $builder->build_call( $callee, \@args, undef, $line, $col );
             return $self_ptr;
         }
         my $obj_ptr = $obj_is_class ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) :
@@ -837,7 +874,7 @@ class Brocken::Katsuro::Lowerer {
             $param_idx++;
         }
         my $ret_is_void = $callee->return_type->kind eq 'void';
-        return $builder->build_call( $callee, \@args, $ret_is_void ? undef : '%' . $ast->method . '_res' );
+        return $builder->build_call( $callee, \@args, $ret_is_void ? undef : '%' . $ast->method . '_res', $line, $col );
     }
 
     method lower_class_const($ast) {
@@ -867,7 +904,8 @@ class Brocken::Katsuro::Lowerer {
         for my $i ( 0 .. $method_ast->params->@* - 1 ) {
             my $p      = $current_func->params->[ $i + 1 ];
             my $pname  = $method_ast->params->[$i]{name};
-            my $alloca = $builder->build_alloca( $p->type, '%' . $pname . '.addr' );
+            my $ptype  = $method_ast->params->[$i]{type} // 'Any';
+            my $alloca = $builder->build_alloca( $p->type, '%' . $pname . '.addr', undef, 0, 0, $pname, $ptype );
             $builder->build_store( $p, $alloca );
             $symbols->{$pname} = $alloca;
         }
@@ -906,13 +944,10 @@ class Brocken::Katsuro::Lowerer {
     method populate_field_geps( $class_name, $self_val ) {
         my $cd = $classes->{$class_name};
         return unless $cd;
-        for my $fd ( $cd->{fields}->@* ) {
-            my $field_ptr = $builder->build_gep(
-                Brocken::Lindsay::IR::Type::i8(),
-                $self_val,
-                [ Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $fd->{offset} ) ],
-                '%' . $fd->{name} . '.addr'
-            );
+        my $struct_type = $cd->{struct_type};
+        for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
+            my $fd        = $cd->{fields}[$i];
+            my $field_ptr = $builder->build_struct_gep( $struct_type, $self_val, $i, '%' . $fd->{name} . '.addr' );
             $symbols->{ $fd->{name} } = $field_ptr;
         }
     }
@@ -926,16 +961,20 @@ class Brocken::Katsuro::Lowerer {
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
         $current_block = $entry;
-        my $self_val  = $current_func->params->[0];
-        my $cd        = $classes->{$class_name};
+        my $self_val    = $current_func->params->[0];
+        my $cd          = $classes->{$class_name};
+        my $struct_type = $cd->{struct_type};
+        my $field_idx;
+
+        for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
+            if ( $cd->{fields}[$i]{name} eq $field_ast->name ) {
+                $field_idx = $i;
+                last;
+            }
+        }
         my ($fd)      = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
-        my $field_ptr = $builder->build_gep(
-            Brocken::Lindsay::IR::Type::i8(),
-            $self_val,
-            [ Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $fd->{offset} ) ],
-            '%' . $fd->{name} . '.addr'
-        );
-        my $loaded = $builder->build_load( $fd->{ir_type}, $field_ptr );
+        my $field_ptr = $builder->build_struct_gep( $struct_type, $self_val, $field_idx, '%' . $fd->{name} . '.addr' );
+        my $loaded    = $builder->build_load( $fd->{ir_type}, $field_ptr );
         $builder->build_ret($loaded);
     }
 
@@ -947,16 +986,20 @@ class Brocken::Katsuro::Lowerer {
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
         $current_block = $entry;
-        my $self_val  = $current_func->params->[0];
-        my $value_val = $current_func->params->[1];
-        my $cd        = $classes->{$class_name};
-        my ($fd)      = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
-        my $field_ptr = $builder->build_gep(
-            Brocken::Lindsay::IR::Type::i8(),
-            $self_val,
-            [ Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $fd->{offset} ) ],
-            '%' . $fd->{name} . '.addr'
-        );
+        my $self_val    = $current_func->params->[0];
+        my $value_val   = $current_func->params->[1];
+        my $cd          = $classes->{$class_name};
+        my $struct_type = $cd->{struct_type};
+        my $field_idx;
+
+        for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
+            if ( $cd->{fields}[$i]{name} eq $field_ast->name ) {
+                $field_idx = $i;
+                last;
+            }
+        }
+        my ($fd) = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
+        my $field_ptr = $builder->build_struct_gep( $struct_type, $self_val, $field_idx, '%' . $fd->{name} . '.addr' );
         $builder->build_store( $value_val, $field_ptr );
         $builder->build_ret();
     }
@@ -969,20 +1012,17 @@ class Brocken::Katsuro::Lowerer {
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
         $current_block = $entry;
-        my $cd       = $classes->{$class_name};
-        my $self_ptr = $current_func->params->[0];
+        my $cd          = $classes->{$class_name};
+        my $struct_type = $cd->{struct_type};
+        my $self_ptr    = $current_func->params->[0];
 
         # Initialize fields: defaults first, then params override
         my $param_idx = 0;
-        for my $f ( $all_fields->@* ) {
-            my ($fd) = grep { $_->{name} eq $f->name } $cd->{fields}->@*;
-            my $field_ptr = $builder->build_gep(
-                Brocken::Lindsay::IR::Type::i8(),
-                $self_ptr,
-                [ Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $fd->{offset} ) ],
-                '%' . $f->name . '.init'
-            );
-            my $is_param = grep { $_ eq 'param' } $f->attrs->@*;
+        for my $i ( 0 .. $all_fields->@* - 1 ) {
+            my $f         = $all_fields->[$i];
+            my ($fd)      = grep { $_->{name} eq $f->name } $cd->{fields}->@*;
+            my $field_ptr = $builder->build_struct_gep( $struct_type, $self_ptr, $i, '%' . $f->name . '.init' );
+            my $is_param  = grep { $_ eq 'param' } $f->attrs->@*;
             if ($is_param) {
                 my $param_val = $current_func->params->[ $param_idx + 1 ];
                 my $converted = $self->maybe_convert_type( $param_val, $fd->{ir_type} );
@@ -1006,4 +1046,39 @@ class Brocken::Katsuro::Lowerer {
         $builder->build_ret();
     }
 }
+
+=head1 NAME
+
+Brocken::Katsuro::Lowerer - AST-to-IR lowering pass
+
+=head1 DESCRIPTION
+
+Walks the Katsuro AST produced by the parser and emits Lindsay IR instructions. Handles variable declarations (with
+debug name/type tagging), function definitions, control flow (if/while/return), operator lowering, class registration
+(building B<class_info> struct metadata), and runtime integration.
+
+=head1 FIELDS
+
+=over
+
+=item C<$classes :reader>
+
+Hashref of class definitions populated during lowering. Each key is a class name; each value is a hashref with
+C<fields> (array of C<< { name, type } >>). Attached to the IR Module via C<set_class_info> after lowering completes.
+
+=item C<$functions :reader>
+
+Hashref of lowered IR functions keyed by name. Used internally for call resolution.
+
+=back
+
+=head1 METHODS
+
+=head2 lower_program( $ast )
+
+Accepts a L<Brocken::Katsuro::AST::Program> and returns a L<Brocken::Lindsay::IR::Module> containing all lowered
+functions, global variables, and class metadata.
+
+=cut
+
 1;

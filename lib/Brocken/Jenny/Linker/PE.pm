@@ -8,7 +8,6 @@ use Brocken::Katsuro::Platform;
 class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
     use Brocken::Jenny::Codegen::ARM64::Inst;
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
-    field $ENABLE_COFF = 0;
 
 =pod
 
@@ -18,7 +17,54 @@ Brocken::Jenny::Linker::PE - 64-bit Portable Executable (PE32+) Generator
 
 =head1 DESCRIPTION
 
-Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
+Generates PE32+ binaries for 64-bit Windows (x86_64 and ARM64). Produces standard PE headers (DOS header, COFF header,
+optional header with subsystem/entry point), section table, and raw section data. Supports DWARF debug sections,
+relocations, and import directories.
+
+=head2 Sections Produced
+
+=over
+
+=item C<.text> - Executable code (RVA rounded to page alignment)
+
+=item C<.rdata> - Read-only data (import directory, strings)
+
+=item C<.pdata> - Exception handler data
+
+=item DWARF v5 debug sections (controlled by C<debug_level>)
+
+=back
+
+=head2 Debug Levels
+
+All debug features (DWARF sections, COFF symbols) are controlled by the C<debug_level> setter on the linker object
+(inherited from L<Brocken::Jenny::Linker>):
+
+    0  No debug output (no DWARF, no COFF)
+    1  .debug_line only (line numbers)
+    2  + .debug_info, .debug_abbrev (variable info)
+    3  + .debug_frame, .debug_aranges (unwind tables)
+    4  + .debug_names, .debug_str, struct DIEs (full DWARF)
+    5  + COFF symbols, ASLR disabled (GDB breakpoint support)
+
+=over
+
+=item COFF Symbols (level >= 5)
+
+A COFF symbol table including a C<.text> section-definition symbol (with one auxiliary record) and one
+C<IMAGE_SYM_CLASS_EXTERNAL> symbol per function. Long section names and function names share a single combined string
+table after the symbol table. This makes GDB's C<break E<lt>funcnameE<gt>> work on PE.
+
+Without COFF symbols (level < 5), GDB can still enumerate functions via C<info functions> using DWARF C<.debug_names>
+but cannot resolve breakpoints by name.
+
+=item ASLR (level >= 5)
+
+At level 5, the C<IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE> bit (0x0020) is cleared in the DLL characteristics, disabling
+ASLR so breakpoints set from COFF symbols resolve to the correct address at runtime. At levels < 5, ASLR remains
+enabled.
+
+=back
 
 =cut
 
@@ -97,11 +143,12 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
         # Snapshot text before stubs for exports (edata RVA), then compute exports
         my $text_bytes     = $text;
         my $has_data       = length($data_bytes) > 0;
-        my $has_debug      = defined $debug_bytes ? 1 : 0;
-        my $has_reloc      = 1;
-        my $has_exports    = ( ref $self->exported_funcs eq 'ARRAY' && scalar( @{ $self->exported_funcs } ) > 0 ) ? 1 : 0;
-        my $edata_bytes    = '';
-        my $edata_rva      = 0;
+        my $debug_sections = $self->debug_data;
+        my $has_debug   = ( $self->debug_level >= 1 ) && ( ( defined $debug_bytes && length($debug_bytes) > 0 ) || ( keys $debug_sections->%* ) > 0 );
+        my $has_reloc   = 1;
+        my $has_exports = ( ref $self->exported_funcs eq 'ARRAY' && scalar( @{ $self->exported_funcs } ) > 0 ) ? 1 : 0;
+        my $edata_bytes = '';
+        my $edata_rva   = 0;
         my @sorted_exports = ();
 
         if ($has_exports) {
@@ -291,15 +338,32 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
         $text_bytes = $text;
 
         # Layout sections
-        my $brk_sym_size = $self->brk_sym_size();
-        my $has_brk_sym  = $brk_sym_size > 0;
+        my $brk_sym_size       = $self->brk_sym_size();
+        my $has_brk_sym        = $brk_sym_size > 0;
+        my $num_debug_sections = 0;
+        my @debug_sec_names;
+        my %debug_sec_data;
+        if ($has_debug) {
+            if ( keys $debug_sections->%* ) {
+                @debug_sec_names    = sort keys $debug_sections->%*;
+                $num_debug_sections = scalar @debug_sec_names;
+                for my $name (@debug_sec_names) {
+                    $debug_sec_data{$name} = $debug_sections->{$name};
+                }
+            }
+            elsif ( defined $debug_bytes ) {
+                $num_debug_sections         = 1;
+                @debug_sec_names            = ('.debug_l');
+                $debug_sec_data{'.debug_l'} = $debug_bytes;
+            }
+        }
         my $num_sections
             = 1 + ( $has_brk_sym ? 1 : 0 )
             + ( $has_data    ? 1 : 0 )
             + ( $has_exports ? 1 : 0 )
             + ( $has_idata   ? 1 : 0 )
             + $has_reloc
-            + ( $has_debug ? 1 : 0 );
+            + $num_debug_sections;
         sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die "Cannot open $output_file for writing: $!";
         binmode $fh;
 
@@ -382,43 +446,70 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
         $sec_rva     += ( length($reloc_bytes) + 4095 ) & ~4095;
         $sec_raw_ptr += $sec_raw_reloc_size;
 
-        # .debug_l (Simplified debug section for Windows)
-        my $sec_raw_debug_size = 0;
-        if ($has_debug) {
-            $sec_raw_debug_size = ( length($debug_bytes) + 511 ) & ~511;
-            $section_table
-                .= pack( 'a8 V2 V2 V2 v2 V', '.debug_l', length($debug_bytes), $sec_rva, $sec_raw_debug_size, $sec_raw_ptr, 0, 0, 0, 0, 0x42000040 );
-            $sec_rva     += ( length($debug_bytes) + 4095 ) & ~4095;
-            $sec_raw_ptr += $sec_raw_debug_size;
+        # Collect function names from code_data for COFF symbols
+        my @func_names;
+        if ( ref $code_data eq 'ARRAY' ) {
+            push @func_names, $_->{name} for $code_data->@*;
         }
+
+        # Build combined string table: long section names + long function names
+        my %strtab_offsets;
+        my $strtab_data = '';
+        for my $name ( @debug_sec_names, @func_names ) {
+            next unless length($name) > 8;
+            next if exists $strtab_offsets{$name};
+            $strtab_offsets{$name} = 4 + length($strtab_data);
+            $strtab_data .= $name . "\0";
+        }
+        my $has_strtab         = length($strtab_data) > 0;
+        my $strtab_payload     = $has_strtab ? pack( 'V', 4 + length($strtab_data) ) . $strtab_data : '';
+        my $has_long_sec_names = scalar( grep { length($_) > 8 } @debug_sec_names ) > 0;
+
+        # Build section table with long-name support via string table offsets
+        my %debug_raw_sizes;
+        for my $name (@debug_sec_names) {
+            my $data     = $debug_sec_data{$name};
+            my $raw_size = ( length($data) + 511 ) & ~511;
+            $debug_raw_sizes{$name} = $raw_size;
+            my $name_field;
+            if ( exists $strtab_offsets{$name} ) {
+                $name_field = sprintf( "/%d\x00\x00\x00\x00\x00", $strtab_offsets{$name} );
+                $name_field = substr( $name_field . ( "\x00" x 8 ), 0, 8 );
+            }
+            else {
+                $name_field = pack( 'a8', $name );
+            }
+            $section_table .= pack( 'a8 V2 V2 V2 v2 V', $name_field, length($data), $sec_rva, $raw_size, $sec_raw_ptr, 0, 0, 0, 0, 0x42000040 );
+            $sec_rva     += ( length($data) + 4095 ) & ~4095;
+            $sec_raw_ptr += $raw_size;
+        }
+
+        # COFF symbol table (only at debug_level >= 5 for GDB breakpoint support)
         my $coff_symtab             = '';
-        my $coff_strtab             = '';
         my $num_coff_symbols        = 0;
         my $pointer_to_symbol_table = 0;
-        if ( $ENABLE_COFF && $has_exports && scalar(@sorted_exports) > 0 ) {
-            my $str_payload = '';
-            my %coff_str_offsets;
-            for my $name (@sorted_exports) {
-                $coff_str_offsets{$name} = 4 + length($str_payload);
-                $str_payload .= $name . "\0";
-            }
-            for my $name (@sorted_exports) {
-                my $label_val = $self->labels->{"E_$name"} // $self->labels->{$name} // 0;
-                my $func_rva  = 0x1000 + $label_val;
-                my $entry_name_field;
+        if ( $self->debug_level >= 5 && ( @func_names || $has_strtab ) ) {
+            $pointer_to_symbol_table = $sec_raw_ptr;
+
+            # .text section symbol (1 aux entry = 2 symbol-table entries)
+            my $sec_name_field = pack( 'a8', '.text' );
+            $coff_symtab .= pack( 'a8 V v v C2', $sec_name_field, 0, 1, 0, 0x68, 1 );
+            $coff_symtab .= pack( 'V v v V v C C3', $sec_raw_code_size, 0, 0, 0, 1, 0, 0, 0, 0 );
+            $num_coff_symbols += 2;
+
+            # One symbol per function (no aux entries)
+            for my $name (@func_names) {
+                my $name_field;
                 if ( length($name) <= 8 ) {
-                    $entry_name_field = pack( 'a8', $name );
+                    $name_field = pack( 'a8', $name );
                 }
                 else {
-                    $entry_name_field = pack( 'V2', 0, $coff_str_offsets{$name} );
+                    $name_field = pack( 'V V', 0, $strtab_offsets{$name} );
                 }
-                $coff_symtab .= pack( 'a8 V v v C2', $entry_name_field, $func_rva, 1, 0x20, 2, 0 );
+                my $rva = 0x1000 + $entry_size + ( $func_offsets{$name} // 0 );
+                $coff_symtab .= pack( 'a8 V v v C2', $name_field, $rva, 1, 0x20, 2, 0 );
                 $num_coff_symbols++;
             }
-            if ( length($str_payload) > 0 ) {
-                $coff_strtab = pack( 'V', 4 + length($str_payload) ) . $str_payload;
-            }
-            $pointer_to_symbol_table = $sec_raw_ptr;
         }
 
         # COFF characteristics: 0x0022 = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE
@@ -427,14 +518,17 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
         # PE32+ Optional Header (Magic=0x020b): fields include entry, image base 0x140000000, section alignment 0x1000, file alignment 0x200,
         # subsystem=3 (CONSOLE), DLL characteristics=0x8160 (NX compatible + TSA aware + DYNAMIC_BASE),
         # stack reserve 0x400000 (4MB), stack commit 0x200000 (2MB covers 1MB entry-stub heap), heap reserve 0x100000, heap commit 0x1000
+        my $init_debug_size = 0;
+        $init_debug_size += $_ for values %debug_raw_sizes;
         my $size_of_image = $sec_rva;
         my $size_of_code  = $sec_raw_code_size;
         my $init_data_size
-            = $sec_raw_data_size + $sec_raw_edata_size + $sec_raw_reloc_size + $sec_raw_debug_size + $sec_raw_brk_sym_size + $sec_raw_idata_size;
+            = $sec_raw_data_size + $sec_raw_edata_size + $sec_raw_reloc_size + $init_debug_size + $sec_raw_brk_sym_size + $sec_raw_idata_size;
         my $os_ver     = 6;
+        my $dll_chars  = $self->debug_level >= 5 ? 0x8140 : 0x8160;          # Clear DYNAMIC_BASE at debug >= 5
         my $opt_header = pack( 'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2',
             0x020b,         14, 10, $size_of_code, $init_data_size, 0, 0x1000, 0x1000, 0x140000000, 4096, 512, $os_ver, 0, 0, 0, $os_ver, 0, 0,
-            $size_of_image, $size_of_headers, 0, 3, 0x8160, 0x400000, 0x200000, 0x100000, 0x1000, 0, 16 );
+            $size_of_image, $size_of_headers, 0, 3, $dll_chars, 0x400000, 0x200000, 0x100000, 0x1000, 0, 16 );
 
         # Data directories (128 bytes = 16 entries x 8 bytes each):
         #   [0]=export, [1]=import, [5]=reloc
@@ -484,12 +578,15 @@ Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
             print $fh ( "\x00" x ( $sec_raw_reloc_size - length($reloc_bytes) ) );
         }
         if ($has_debug) {
-            print $fh $debug_bytes;
-            print $fh ( "\x00" x ( $sec_raw_debug_size - length($debug_bytes) ) );
+            for my $name (@debug_sec_names) {
+                my $data = $debug_sec_data{$name};
+                print $fh $data;
+                print $fh ( "\x00" x ( $debug_raw_sizes{$name} - length($data) ) );
+            }
         }
         if ( $pointer_to_symbol_table > 0 ) {
             print $fh $coff_symtab;
-            print $fh $coff_strtab;
+            print $fh $strtab_payload;
         }
         close $fh;
         chmod 0755, $output_file;

@@ -6,9 +6,13 @@ no warnings qw[experimental::class];
 # Types
 # ============================================================
 class Brocken::Lindsay::IR::Type {
-    field $kind   : reader : param;        # 'int', 'float', 'ptr', 'void', 'dynamic'
-    field $bits   : reader : param = 0;    # 8, 16, 32, 64, ...
-    field $signed : reader : param = 1;    # 1=signed, 0=unsigned (only for 'int' kind)
+    field $kind           : reader : param;            # 'int', 'float', 'ptr', 'void', 'dynamic', 'struct'
+    field $bits           : reader : param = 0;        # 8, 16, 32, 64, ... (struct: total bits)
+    field $signed         : reader : param = 1;        # 1=signed, 0=unsigned (only for 'int' kind)
+    field $struct_name    : reader : param = undef;    # struct type name
+    field $field_types    : reader : param = [];       # struct: [Type, ...]
+    field $field_names    : reader : param = [];       # struct: [name, ...]
+    field $_field_offsets : reader : param = [];       # computed byte offsets
 
     # Singletons for common types to save memory and allow `==` comparison
     sub i1               { state $t //= __PACKAGE__->new( kind => 'int', bits => 1,   signed => 1 ); $t }
@@ -30,7 +34,25 @@ class Brocken::Lindsay::IR::Type {
     method is_signed()   { $kind eq 'int' ? $signed  : 1 }
     method is_unsigned() { $kind eq 'int' ? !$signed : 0 }
 
+    method struct_size() {
+        return 0 unless $kind eq 'struct';
+        return $bits / 8;
+    }
+
+    method byte_size() {
+        return 0                  if $kind eq 'void';
+        return 8                  if $kind eq 'ptr' || $kind eq 'dynamic';
+        return $bits / 8          if $kind eq 'int' || $kind eq 'float';
+        return $self->struct_size if $kind eq 'struct';
+        return 8;
+    }
+
+    method field_offset($idx) {
+        return $_field_offsets->[$idx] // 0;
+    }
+
     method as_string() {
+        return "%$struct_name"               if $kind eq 'struct';
         return $signed ? "i$bits" : "u$bits" if $kind eq 'int';
         return "f$bits"                      if $kind eq 'float';
         return $kind;
@@ -54,6 +76,8 @@ class Brocken::Lindsay::IR::Instruction : isa(Brocken::Lindsay::IR::Value) {
     field $opcode   : reader : param;
     field $operands : reader : param = [];
     field $parent   : reader : param = undef;    # The Basic Block
+    field $line     : reader : param = 0;
+    field $col      : reader : param = 0;
 
     method render() {
         my $res = $self->type->kind eq 'void' ? '' : ( $self->name // '%<anon>' ) . ' = ';
@@ -301,22 +325,34 @@ class Brocken::Lindsay::IR::Instruction::Select : isa(Brocken::Lindsay::IR::Inst
 
 class Brocken::Lindsay::IR::Instruction::GetElementPtr : isa(Brocken::Lindsay::IR::Instruction) {
     field $base_type : reader : param;
+    field $struct_field_idx : reader : param = undef;
 
     method render() {
         my ( $ptr, @indices ) = $self->operands->@*;
-        my $idx_str = join ', ', map { $_->type->as_string . ' ' . $_->as_string } @indices;
+        my $idx_str;
+        if ( defined $struct_field_idx && $base_type->kind eq 'struct' ) {
+            $idx_str = 'i64 0, i32 ' . $struct_field_idx;
+        }
+        else {
+            $idx_str = join ', ', map { $_->type->as_string . ' ' . $_->as_string } @indices;
+        }
         return sprintf '  %s = getelementptr %s, %s %s, %s', ( $self->name // '%<anon>' ), $base_type->as_string, $ptr->type->as_string,
             $ptr->as_string, $idx_str;
     }
 }
 
 class Brocken::Lindsay::IR::Instruction::Alloca : isa(Brocken::Lindsay::IR::Instruction) {
-    field $allocated_type : reader : param;
-    field $count : reader : param = undef;
+    field $allocated_type  : reader : param;
+    field $count           : reader : param = undef;
+    field $debug_name      : reader : param = undef;
+    field $debug_type_name : reader : param = undef;
 
     method render() {
         my $str = sprintf '  %s = alloca %s', ( $self->name // '%<anon>' ), $allocated_type->as_string;
         $str .= sprintf ', i64 %s', $count->value if $count;
+        if ($debug_name) {
+            $str .= ', !dbg name="' . $debug_name . '"' . ( defined $debug_type_name ? ' type="' . $debug_type_name . '"' : '' );
+        }
         return $str;
     }
 }
@@ -424,6 +460,9 @@ class Brocken::Lindsay::IR::Function {
 class Brocken::Lindsay::IR::Module {
     field $name : reader : param = 'main';
     field $functions : reader = [];
+    field $_class_info = {};
+    method class_info         { return $_class_info }
+    method set_class_info($v) { $_class_info = $v }
 
     method add_function($func) {
         push $functions->@*, $func;
@@ -490,6 +529,101 @@ f32, f64, ptr, void, dynamic) are created once and cached.
 =item L<Brocken::Lindsay::IR::Function> - Function with params, return type, and blocks
 
 =item L<Brocken::Lindsay::IR::Block> - Basic block containing a sequence of instructions
+
+=back
+
+=head1 METHODS
+
+=head2 Brocken::Lindsay::IR::Type
+
+=over
+
+=item C<is_signed>, C<is_unsigned>
+
+Returns 1 if the type is a signed/unsigned integer respectively; always 1 for non-integer types (C<is_signed>).
+
+=item C<byte_size>
+
+Returns the size in bytes of the type (0 for void, 8 for ptr/dynamic, bits/8 for int/float, struct_size for struct).
+
+=item C<struct_size>
+
+Returns the total size of a struct type in bytes, or 0 for non-struct types.
+
+=item C<field_offset($idx)>
+
+Returns the byte offset of field index C<$idx> in a struct type.
+
+=item C<as_string>
+
+Returns a human-readable type name (e.g. C<i32>, C<%Foo>, C<ptr>).
+
+=back
+
+=head2 Brocken::Lindsay::IR::Value
+
+Base class for all IR SSA values. Fields: C<type> (Type), C<name> (optional string).
+
+=head2 Brocken::Lindsay::IR::Constant
+
+Constant literal value. Adds C<value> field to Value.
+
+=head2 Brocken::Lindsay::IR::Instruction
+
+Base instruction. Fields: C<opcode>, C<operands> (array ref of Values), C<parent> (Block), C<line>, C<col> (source
+coordinates).
+
+=head2 Brocken::Lindsay::IR::Block
+
+=over
+
+=item C<append_inst($inst)>
+
+Appends an instruction to the block and returns it.
+
+=item C<insert_before($target, $new_inst)>
+
+Inserts C<$new_inst> just before C<$target> in the instruction list.
+
+=item C<remove_inst($inst)>
+
+Removes the given instruction from the block.
+
+=item C<replace_inst($old, $new)>
+
+Replaces C<$old> with C<$new> in-place.
+
+=item C<terminator>
+
+Returns the block's terminator instruction (Ret, Br, or CondBr) or undef.
+
+=back
+
+=head2 Brocken::Lindsay::IR::Function
+
+=over
+
+=item C<append_block($name)>, C<prepend_block($name)>
+
+Creates and adds a new basic block to the function. Returns the new block.
+
+=item C<set_return_type($t)>, C<set_blocks($b)>
+
+Mutators for return type and blocks array.
+
+=back
+
+=head2 Brocken::Lindsay::IR::Module
+
+=over
+
+=item C<add_function($func)>
+
+Appends a function to the module and returns it.
+
+=item C<class_info>, C<set_class_info($v)>
+
+Get/set the class metadata hashref generated by the AST lowerer.
 
 =back
 

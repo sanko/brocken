@@ -13,27 +13,149 @@ Brocken::Jenny::Linker::DWARF - Debug Information Generator
 
 =head1 DESCRIPTION
 
-Generates DWARF v5 compliant debug sections.
+Generates DWARF v5 compliant debug sections for source-level debugging with
+GDB (ELF) and integrated debuggers (PE). Accepts source-location entries
+(machine code offset to source line/col), function ranges, and variable/struct
+type metadata via C<class_info>.
 
 =head2 Sections Generated:
 
 =over 4
 
-=item * B<.debug_line>: Maps machine code offsets to source lines.
+=item * B<.debug_line>: Maps machine code offsets to source lines. Uses DWARF
+v5 line number program header with file entries and address/line opcodes.
 
-=item * B<.debug_info>: The main Debug Information Entry (DIE) tree.
+=item * B<.debug_info>: The main Debug Information Entry (DIE) tree. Includes
+compile unit, base types (Int, Bool, String, Any, ptr, Array), subprogram DIEs
+for each function, variable/parameter DIEs (with decl_line/decl_column/
+artificial attributes), and structure-type DIEs for user-defined classes.
 
-=item * B<.debug_abbrev>: Definitions of DIE abbreviations.
+=item * B<.debug_abbrev>: Definitions of DIE abbreviations. Abbrev codes: 1
+(compile_unit), 2 (base_type), 3 (subprogram), 4 (formal_parameter), 5
+(variable), 6 (structure_type), 7 (member).
 
-=item * B<.debug_frame>: Stack unwinding and frame pointer recovery data.
+=item * B<.debug_frame>: Stack unwinding and frame pointer recovery data. Uses
+platform-specific CFA (x64/RSP, ARM64/SP, RISCV64/SP) and frame-pointer
+registers (x64/RBP, ARM64/X29, RISCV64/S0).
 
-=item * B<.debug_aranges>: Rapid lookup table for address ranges.
+=item * B<.debug_aranges>: Rapid lookup table mapping text-section address
+ranges to compile units.
 
-=item * B<.debug_names>: Fast, hashed symbol lookup table (new in DWARF 5).
+=item * B<.debug_names>: Fast, hashed symbol lookup table (DWARF v5). Uses
+case-folding DJB hash. Generated when function pubnames are non-empty.
 
-=item * B<.debug_str>: String table for DWARF 5 symbol references.
+=item * B<.debug_str>: Dedicated string table referenced by .debug_names.
 
-=item * B<.eh_frame>: Exception handling frame data (LSDA compatible).
+=item * B<.eh_frame>: Exception handling frame data (LSDA compatible). Uses
+'zR' augmentation with pcrel FDE encoding. Only generated when
+C<eh_frame_base> is non-zero.
+
+=back
+
+=head1 FIELDS
+
+=over
+
+=item C<source_locs>
+
+ArrayRef of hashrefs: C<{ offset, line }>. Machine code byte offsets relative
+to C<text_base> mapped to source line numbers. Used by C<build_debug_line>.
+
+=item C<text_base>
+
+Base address (file offset) of the .text section in the output binary.
+
+=item C<source_file>, C<source_files>
+
+Primary source filename (string) or list of filenames (arrayref). Referenced
+by DW_AT_name and directory/file entries in .debug_line.
+
+=item C<func_ranges>
+
+ArrayRef of hashrefs: C<{ name, start, end, source_file, params, locals }>.
+Each entry becomes a DW_TAG_subprogram DIE with child variable/parameter DIEs.
+
+=item C<class_info>
+
+Hashref from class name to C<{ fields, total_size }>. Used to emit
+DW_TAG_structure_type and DW_TAG_member DIEs (only at debug level >= 4).
+
+=item C<debug>
+
+Debug level (0-5). Controls which DWARF sections are built:
+
+    0  No sections
+    1  .debug_line only
+    2  + .debug_info, .debug_abbrev
+    3  + .debug_frame, .debug_aranges
+    4  + .debug_names, .debug_str
+    5  (same as 4)
+
+=item C<arch>
+
+Target architecture string: C<x64>, C<aarch64>, C<arm64>, or C<riscv64>.
+Determines DWARF register numbers, frame pointer, and return address.
+
+=item C<preserved_regs>
+
+List of register names preserved across calls. Used by C<build_debug_frame>
+to emit DW_CFA_offset instructions.
+
+=item C<platform>
+
+Optional L<Brocken::Katsuro::Platform> instance. If defined, used for DWARF
+register number resolution via C<< platform->abi->dwarf_reg_num >>.
+
+=back
+
+=head1 METHODS
+
+=head2 build_all
+
+Produces all requested debug sections as a hashref keyed by section name
+(e.g. C<{ '.debug_line' => ..., '.debug_info' => ... }>). Conditionally
+includes C<.debug_names>/.debug_str, C<.debug_frame>/.debug_aranges,
+and C<.eh_frame> when their data sources are non-empty.
+
+=head2 build_debug_line
+
+Builds the .debug_line section using DWARF v5 header format. For each
+source-location entry, emits Set Address (0x02) + Advance Line (0x03) + Copy
+(0x01) opcodes. Ends the sequence with a terminating entry.
+
+=head2 build_debug_abbrev
+
+Builds the .debug_abbrev section defining DIE abbreviations used by
+.debug_info. Abbrev 4 (formal_parameter) and 5 (variable) include
+DW_AT_decl_line, DW_AT_decl_column, and DW_AT_artificial attributes.
+
+=head2 build_debug_info
+
+Builds the .debug_info section: a DWARF v5 compile unit header followed by
+base-type DIEs, structure-type DIEs (from class_info), and subprogram DIEs
+with variable/parameter child DIEs. Each variable DIE carries source
+coordinates and artificial flag.
+
+=head2 build_debug_names
+
+Builds the .debug_names accelerated-lookup section (DWARF v5). Returns
+C<($names_data, $str_data)> or empty list if no pubnames exist. Uses
+case-folding DJB hashing for case-insensitive lookups.
+
+=head2 build_debug_aranges
+
+Builds a minimal .debug_aranges table covering the full text section range.
+
+=head2 build_debug_frame
+
+Builds .debug_frame: CIE (Common Information Entry) defining CFA rules for
+the target ABI, followed by one FDE (Frame Description Entry) per function
+with register preservation and frame-pointer setup instructions.
+
+=head2 build_eh_frame
+
+Builds .eh_frame for exception handling. Uses 'zR' augmentation with pcrel
+absolute-address FDE encoding. Only emitted when C<eh_frame_base> is non-zero.
 
 =back
 
@@ -42,6 +164,7 @@ Generates DWARF v5 compliant debug sections.
     field $source_locs    : param : reader;
     field $text_base      : param : reader;
     field $source_file    : param : reader //= 'source.brocken';
+    field $source_files   : param : reader = undef;
     field $func_ranges    : param : reader = [];
     field $context_size   : param : reader = 64;
     field $class_info     : param : reader = {};
@@ -66,17 +189,29 @@ Generates DWARF v5 compliant debug sections.
     method build_all () {
         @$func_ranges    = @$func_ranges[ 0 .. 999 ]   if @$func_ranges > 1000;
         @$preserved_regs = @$preserved_regs[ 0 .. 63 ] if @$preserved_regs > 64;
-        my $info = $self->build_debug_info;
-        my ( $names, $str ) = $self->build_debug_names;
-        my $sections = { '.debug_line' => $self->build_debug_line, '.debug_info' => $info, '.debug_abbrev' => $self->build_debug_abbrev, };
-        if ($names) {
-            $sections->{'.debug_names'} = $names;
-            $sections->{'.debug_str'}   = $str;
+        my $sections = {};
+        if ( $self->debug >= 1 ) {
+            $sections->{'.debug_line'} = $self->build_debug_line;
         }
-        if (@$func_ranges) {
+        if ( $self->debug >= 2 ) {
+            $sections->{'.debug_info'}   = $self->build_debug_info;
+            $sections->{'.debug_abbrev'} = $self->build_debug_abbrev;
+        }
+        if ( $self->debug >= 3 && @$func_ranges ) {
             $sections->{'.debug_frame'}   = $self->build_debug_frame;
             $sections->{'.debug_aranges'} = $self->build_debug_aranges;
-            $sections->{'.eh_frame'}      = $self->build_eh_frame if $self->eh_frame_base;
+            if ( $self->eh_frame_base ) {
+                my ( $eh_frame, $fde_offsets ) = $self->build_eh_frame;
+                $sections->{'.eh_frame'}      = $eh_frame;
+                $sections->{'.eh_frame_hdr'}  = $self->build_eh_frame_hdr($fde_offsets);
+            }
+        }
+        if ( $self->debug >= 4 ) {
+            my ( $names, $str ) = $self->build_debug_names;
+            if ($names) {
+                $sections->{'.debug_names'} = $names;
+                $sections->{'.debug_str'}   = $str;
+            }
         }
         return $sections;
     }
@@ -119,13 +254,17 @@ Generates DWARF v5 compliant debug sections.
 
         # Directory entry format count = 1 (DW_LNCT_path = 1, DW_FORM_string = 0x08)
         $prologue .= pack( 'C', 1 ) . $self->_uleb(1) . $self->_uleb(0x08);
-        $prologue .= $self->_uleb(1) . ".\0";                                 # 1 directory: "."
+        $prologue .= $self->_uleb(1) . ".\0";
 
         # File entry format count = 2 (DW_LNCT_path=1/string, DW_LNCT_directory_index=2/udata)
+        my $sf = $self->source_files // [$source_file];
         $prologue .= pack( 'C', 2 );
         $prologue .= $self->_uleb(1) . $self->_uleb(0x08);
         $prologue .= $self->_uleb(2) . $self->_uleb(0x0F);
-        $prologue .= $self->_uleb(1) . "$source_file\0" . pack( 'C', 0 );
+        $prologue .= $self->_uleb( scalar @$sf );
+        for my $f (@$sf) {
+            $prologue .= "$f\0" . pack( 'C', 0 );
+        }
         $prologue = pack( 'L<', length($prologue) ) . $prologue;
         my $total_len = length($header) + length($prologue) + length($program);
         return pack( 'L<', $total_len + 2 ) . pack( 'S<', 5 ) . $header . $prologue . $program;    # Version 5
@@ -142,6 +281,8 @@ Generates DWARF v5 compliant debug sections.
         $abbrev .= $self->_uleb(0x13) . $self->_uleb(0x0B);                                        # DW_AT_language -> data1
         $abbrev .= $self->_uleb(0x11) . $self->_uleb(0x01);                                        # DW_AT_low_pc -> addr
         $abbrev .= $self->_uleb(0x12) . $self->_uleb(0x01);                                        # DW_AT_high_pc -> addr
+        $abbrev .= $self->_uleb(0x25) . $self->_uleb(0x08);                                        # DW_AT_producer -> string
+        $abbrev .= $self->_uleb(0x1B) . $self->_uleb(0x08);                                        # DW_AT_comp_dir -> string
         $abbrev .= pack( 'CC', 0, 0 );
 
         # Abbrev 2: DW_TAG_base_type (0x24)
@@ -157,6 +298,8 @@ Generates DWARF v5 compliant debug sections.
         $abbrev .= $self->_uleb(0x11) . $self->_uleb(0x01);                                        # low_pc
         $abbrev .= $self->_uleb(0x12) . $self->_uleb(0x01);                                        # high_pc
         $abbrev .= $self->_uleb(0x40) . $self->_uleb(0x18);                                        # DW_AT_frame_base -> exprloc
+        $abbrev .= $self->_uleb(0x38) . $self->_uleb(0x0B);                                        # DW_AT_decl_file -> data1
+        $abbrev .= $self->_uleb(0x6E) . $self->_uleb(0x08);                                        # DW_AT_linkage_name -> string
         $abbrev .= pack( 'CC', 0, 0 );
 
         # Abbrev 4: DW_TAG_formal_parameter (0x05) / Abbrev 5: DW_TAG_variable (0x34)
@@ -165,8 +308,24 @@ Generates DWARF v5 compliant debug sections.
             $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                      # name -> string
             $abbrev .= $self->_uleb(0x02) . $self->_uleb(0x18);                                      # location -> exprloc
             $abbrev .= $self->_uleb(0x49) . $self->_uleb(0x13);                                      # type -> ref4
+            $abbrev .= $self->_uleb(0x38) . $self->_uleb(0x0B);                                      # DW_AT_decl_file -> data1
+            $abbrev .= $self->_uleb(0x39) . $self->_uleb(0x05);                                      # DW_AT_decl_line -> data2
+            $abbrev .= $self->_uleb(0x3D) . $self->_uleb(0x0B);                                      # DW_AT_decl_column -> data1
+            $abbrev .= $self->_uleb(0x34) . $self->_uleb(0x0B);                                      # DW_AT_artificial -> data1
             $abbrev .= pack( 'CC', 0, 0 );
         }
+        # Abbrev 6: DW_TAG_structure_type (0x13) with children
+        $abbrev .= $self->_uleb(6) . $self->_uleb(0x13) . $self->_uleb(1);
+        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                        # DW_AT_name -> string
+        $abbrev .= $self->_uleb(0x0B) . $self->_uleb(0x0B);                                        # DW_AT_byte_size -> data1
+        $abbrev .= pack( 'CC', 0, 0 );
+
+        # Abbrev 7: DW_TAG_member (0x0D) no children
+        $abbrev .= $self->_uleb(7) . $self->_uleb(0x0D) . $self->_uleb(0);
+        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                        # DW_AT_name -> string
+        $abbrev .= $self->_uleb(0x49) . $self->_uleb(0x13);                                        # DW_AT_type -> ref4
+        $abbrev .= $self->_uleb(0x38) . $self->_uleb(0x0B);                                        # DW_AT_data_member_location -> data1
+        $abbrev .= pack( 'CC', 0, 0 );
         $abbrev .= "\x00";
         return $abbrev;
     }
@@ -176,13 +335,39 @@ Generates DWARF v5 compliant debug sections.
         for my $fn (@$func_ranges) { $max_pc = $fn->{end} if ( $fn->{end} // 0 ) > $max_pc; }
         my $cu_body = '';
         $cu_body
-            .= $self->_uleb(1) . pack( 'L<', 0 ) . "$source_file\0" . pack( 'C', 12 ) . pack( 'Q<', $text_base ) . pack( 'Q<', $text_base + $max_pc );
+            .= $self->_uleb(1) . pack( 'L<', 0 ) . "$source_file\0" . pack( 'C', 2 ) . pack( 'Q<', $text_base ) . pack( 'Q<', $text_base + $max_pc );
+        $cu_body .= "Brocken v0.1\0";                                                                          # DW_AT_producer
+        $cu_body .= ".\0";                                                                                      # DW_AT_comp_dir
         my $CU_HEADER_SIZE = 12;
         my $type_off       = {};
         for my $t ( [ 'Int', 5 ], [ 'Bool', 2 ], [ 'String', 1 ], [ 'Any', 1 ], [ 'ptr', 1 ], [ 'Array', 1 ] ) {
             $type_off->{ $t->[0] } = $CU_HEADER_SIZE + length($cu_body);
             $cu_body .= $self->_uleb(2) . "$t->[0]\0" . pack( 'CC', 8, $t->[1] );
         }
+
+        # Emit DW_TAG_structure_type DIEs for each class in class_info (level >= 4)
+        if ( $self->debug >= 4 ) {
+            for my $cn ( sort keys %$class_info ) {
+            my $cd = $class_info->{$cn};
+            next unless ref $cd eq 'HASH' && exists $cd->{fields};
+            $type_off->{$cn} = $CU_HEADER_SIZE + length($cu_body);
+            $cu_body .= $self->_uleb(6);                                 # abbrev 6: structure_type
+            $cu_body .= "$cn\0";
+            $cu_body .= pack( 'C', $cd->{total_size} // 8 );             # DW_AT_byte_size
+            for my $fd ( $cd->{fields}->@* ) {
+                my $ftype = $type_off->{ $fd->{type} } // $type_off->{Any};
+                $cu_body .= $self->_uleb(7);                             # abbrev 7: member
+                $cu_body .= "$fd->{name}\0";
+                $cu_body .= pack( 'L<', $ftype );                        # DW_AT_type -> ref4
+                $cu_body .= pack( 'C', $fd->{offset} // 0 );             # DW_AT_data_member_location
+            }
+                $cu_body .= "\x00";                                           # end children
+            }
+        }
+
+        my $sf = $self->source_files // [$source_file];
+        my %file_idx = map { $sf->[$_] => $_ + 1 } 0 .. $#$sf;
+
         for my $fn ( sort { $a->{start} <=> $b->{start} } @$func_ranges ) {
             my $die_off = $CU_HEADER_SIZE + length($cu_body);
             push @pubnames, { offset => $die_off, name => ( $fn->{name} =~ s/^M_//r ) };
@@ -195,6 +380,13 @@ Generates DWARF v5 compliant debug sections.
             my $fb = pack( 'C', 0x70 + ( $arch =~ /aarch64|arm64/i ? 29 : ( $arch =~ /riscv/i ? 8 : 6 ) ) ) . "\x00";
             $cu_body .= $self->_uleb( length($fb) ) . $fb;
 
+            # DW_AT_decl_file
+            my $f_idx = $file_idx{ $fn->{source_file} // $source_file } // 1;
+            $cu_body .= pack( 'C', $f_idx );
+
+            # DW_AT_linkage_name
+            $cu_body .= "$fn->{name}\0";
+
             # Parameter and Local Variable DIEs
             for my $v ( @{ $fn->{params} // [] }, @{ $fn->{locals} // [] } ) {
                 $cu_body .= $self->_uleb( exists $v->{slot} ? 5 : 4 );
@@ -205,6 +397,10 @@ Generates DWARF v5 compliant debug sections.
                 my $loc = "\x91" . $self->_sleb( -$v->{slot} );
                 $cu_body .= $self->_uleb( length($loc) ) . $loc;
                 $cu_body .= pack( 'L<', $type_off->{ $v->{type} } // $type_off->{Any} );
+                $cu_body .= pack( 'C', $f_idx );    # DW_AT_decl_file
+                $cu_body .= pack( 'S<', $v->{line} // 0 );    # DW_AT_decl_line
+                $cu_body .= pack( 'C', $v->{col} // 0 );      # DW_AT_decl_column
+                $cu_body .= pack( 'C', $v->{artificial} // 0 ); # DW_AT_artificial
             }
             $cu_body .= "\x00";    # end subprogram
         }
@@ -397,8 +593,9 @@ Generates DWARF v5 compliant debug sections.
 
     # Exception Handling frame (LSDA compatible).
     # Similar to .debug_frame but used at runtime for stack walking.
+    # Returns ($data, \@fde_offsets) where fde_offsets are byte offsets within .eh_frame.
     method build_eh_frame () {
-        return '' unless $eh_frame_base;
+        return ( '', [] ) unless $eh_frame_base;
         my $reg = $arch =~ /aarch64|arm64/i ? 30 : ( $arch eq 'riscv64' ? 1 : 16 );
         my $cfa = $arch =~ /aarch64|arm64/i ? 31 : ( $arch eq 'riscv64' ? 2 : 7 );
         my $fpr = $arch =~ /aarch64|arm64/i ? 29 : ( $arch eq 'riscv64' ? 8 : 6 );
@@ -416,6 +613,7 @@ Generates DWARF v5 compliant debug sections.
         my $cie_pad = ( 4 - ( ( length($cie_body) + 4 ) % 4 ) ) % 4;
         $cie_body .= "\0" x $cie_pad;
         my $data = pack( 'L<', length($cie_body) + 4 ) . pack( 'L<', 0 ) . $cie_body;
+        my @fde_offsets;
         for my $fn (@$func_ranges) {
             my $fn_start = $fn->{start};
             my $fn_len   = ( $fn->{end} // $fn->{start} + 1 ) - $fn->{start};
@@ -433,9 +631,30 @@ Generates DWARF v5 compliant debug sections.
 
             # CIE_pointer = offset of CIE_pointer_field - CIE_offset
             my $fde_offset = length($data);
+            push @fde_offsets, $fde_offset;
             $data .= pack( 'L<', length($fde_body) + 4 ) . pack( 'L<', $fde_offset + 4 ) . $fde_body;
         }
-        return $data;
+        return ( $data, \@fde_offsets );
+    }
+
+    # .eh_frame_hdr: binary search index for .eh_frame FDEs.
+    # Uses absolute-pointer encoding (DW_EH_PE_absptr) for all pointers.
+    method build_eh_frame_hdr ($fde_offsets) {
+        return '' unless $eh_frame_base;
+        my @table;
+        for my $i ( 0 .. $#$func_ranges ) {
+            my $fn = $func_ranges->[$i];
+            push @table, {
+                initial_loc => $text_base + $fn->{start},
+                fde_addr    => $eh_frame_base + $fde_offsets->[$i],
+            };
+        }
+        @table = sort { $a->{initial_loc} <=> $b->{initial_loc} } @table;
+        my $hdr = pack( 'C4', 1, 0x00, 0x03, 0x00 );
+        $hdr .= pack( 'Q<', $eh_frame_base );
+        $hdr .= pack( 'L<', scalar @table );
+        $hdr .= pack( 'Q< Q<', $_->{initial_loc}, $_->{fde_addr} ) for @table;
+        return $hdr;
     }
 };
 1;

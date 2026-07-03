@@ -50,7 +50,8 @@ class Brocken::Jenny::Codegen::Wasm {
                     }
                 }
             }
-            my ( $result, $fixups ) = $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type );
+            my %source_map;
+            my ( $result, $fixups ) = $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type, \%source_map );
             my @param_valtypes;
             for my $p ( $ir_func->params->@* ) {
                 push @param_valtypes, $self->_wasm_valtype( $p->type );
@@ -65,6 +66,7 @@ class Brocken::Jenny::Codegen::Wasm {
                 name           => $ir_func->name,
                 bytes          => $result->{locals} . $result->{body},
                 fixups         => \@adjusted_fixups,
+                source_map     => \%source_map,
                 return_valtype => $result->{return_valtype},
                 param_valtypes => \@param_valtypes,
                 };
@@ -72,7 +74,7 @@ class Brocken::Jenny::Codegen::Wasm {
         return \@funcs;
     }
 
-    method _encode( $mf, $ir_params, $ir_types, $return_type ) {
+    method _encode( $mf, $ir_params, $ir_types, $return_type, $source_map = undef ) {
         my $bytes       = '';
         my %vreg_map    = ();
         my $next_local  = scalar( $ir_params->@* );
@@ -95,10 +97,14 @@ class Brocken::Jenny::Codegen::Wasm {
         my $num_non_entry = $#blocks;
         my $entry_bytes   = '';
         my @non_entry_bytes;
+        my %raw_offsets;
         for my $bi ( 0 .. $#blocks ) {
             my $mbb = $blocks[$bi];
             my $buf = $bi == 0 ? \$entry_bytes : \( $non_entry_bytes[ $bi - 1 ] = '' );
             for my $inst ( $mbb->instructions->@* ) {
+                if ( $source_map && $inst->ir_inst_idx >= 0 && !exists $raw_offsets{ $inst->ir_inst_idx } ) {
+                    $raw_offsets{ $inst->ir_inst_idx } = [ $bi, length($$buf) ];
+                }
                 next if $bi > 0 && $inst->opcode eq 'label';
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
@@ -268,6 +274,25 @@ class Brocken::Jenny::Codegen::Wasm {
             $bytes .= pack( 'C', 0x0B );
             $bytes .= $non_entry_bytes[ $bi - 1 ];
         }
+        if ($source_map) {
+            my @block_sizes;
+            my @block_start;
+            $block_sizes[0] = length($entry_bytes);
+            for my $bi ( 1 .. $num_non_entry ) {
+                $block_sizes[$bi] = length( $non_entry_bytes[ $bi - 1 ] );
+            }
+            my $pos = $num_non_entry * 2;
+            $block_start[0] = $pos;
+            $pos += $block_sizes[0];
+            for my $bi ( reverse 1 .. $num_non_entry ) {
+                $block_start[$bi] = $pos + 1;
+                $pos += 1 + $block_sizes[$bi];
+            }
+            for my $idx ( keys %raw_offsets ) {
+                my ( $bi, $buf_off ) = $raw_offsets{$idx}->@*;
+                $source_map->{$idx} = $block_start[$bi] + $buf_off;
+            }
+        }
         my $num_params       = scalar( $ir_params->@* );
         my $num_extra_locals = $next_local - $num_params;
         my $locals_block     = '';
@@ -342,6 +367,48 @@ class Brocken::Jenny::Codegen::Wasm {
             $out .= pack( 'C', $byte | 0x80 );
         }
         return $out;
+    }
+
+    method build_debug_data( $ir_funcs, $func_blobs, $source_file = 'source.brocken', $text_base = 0, $class_info = {}, $debug_level = 0 ) {
+        require Brocken::Jenny::Linker::DWARF;
+        my @func_ranges;
+        my @source_locs;
+        my $text_offset = 0;
+        for my $i ( 0 .. $#$ir_funcs ) {
+            my $ir_fn  = $ir_funcs->[$i];
+            my $blob   = $func_blobs->[$i];
+            my $fname  = $blob->{name};
+            my $fstart = $text_offset;
+            my $fend   = $text_offset + length( $blob->{bytes} );
+            push @func_ranges, { name => $fname, start => $fstart, end => $fend, params => [], locals => [], source_file => $source_file };
+            my $source_map = $blob->{source_map} // {};
+            my $inst_idx   = 0;
+
+            for my $block ( $ir_fn->blocks->@* ) {
+                for my $inst ( $block->instructions->@* ) {
+                    if ( $inst->line ) {
+                        my $offset = defined( $source_map->{$inst_idx} ) ? $fstart + $source_map->{$inst_idx} : $fstart;
+                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col };
+                    }
+                    $inst_idx++;
+                }
+            }
+            $text_offset = $fend;
+        }
+        my %seen;
+        my @uniq_files = grep { !$seen{$_}++ } map { $_->{source_file} // $source_file } @func_ranges;
+        my $dwarf      = Brocken::Jenny::Linker::DWARF->new(
+            source_locs  => \@source_locs,
+            text_base    => $text_base,
+            source_file  => $source_file,
+            source_files => \@uniq_files,
+            func_ranges  => \@func_ranges,
+            class_info   => $class_info,
+            arch         => 'wasm64',
+            platform     => $platform,
+            debug        => $debug_level,
+        );
+        return $dwarf->build_all;
     }
 }
 

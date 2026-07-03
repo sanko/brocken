@@ -10,7 +10,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
     method _abi() { $platform->abi }
 
     method lower($ir_func) {
-        my $mf = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        my $inst_idx = 0;
         for my $block ( $ir_func->blocks->@* ) {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
             if ( $ir_func->blocks->[0] != $block ) {
@@ -130,7 +131,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 }
             }
             for my $inst ( $block->instructions->@* ) {
-                my $opcode = $inst->opcode;
+                my $before_mir = scalar $mbb->instructions->@*;
+                my $opcode     = $inst->opcode;
                 if ( $opcode eq 'add' ||
                     $opcode eq 'sub'  ||
                     $opcode eq 'mul'  ||
@@ -2823,11 +2825,10 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
                     my ( $ptr, @indices ) = $inst->operands->@*;
-                    my $scale = $inst->base_type->bits / 8;
-                    my $idx   = $indices[0];
-                    my $dst   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    if ( $idx->isa('Brocken::Lindsay::IR::Constant') ) {
-                        my $offset = $idx->value * $scale;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    if ( $inst->base_type->kind eq 'struct' ) {
+                        my $field_idx = $indices[1]->value;
+                        my $offset    = $inst->base_type->field_offset($field_idx);
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'lea',
@@ -2839,25 +2840,46 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                         type  => $ptr->type
                                     )
                                 ],
-                                comment => 'gep: lea const offset ' . $offset
+                                comment => 'gep: struct field offset ' . $offset
                             )
                         );
                     }
                     else {
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'lea',
-                                operands => [
-                                    $dst,
-                                    Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'mem',
-                                        value => { base => $ptr->name, index => $idx->name, scale => $scale, disp => 0 },
-                                        type  => $ptr->type
-                                    )
-                                ],
-                                comment => 'gep: lea indexed'
-                            )
-                        );
+                        my $scale = $inst->base_type->bits / 8;
+                        my $idx   = $indices[0];
+                        if ( $idx->isa('Brocken::Lindsay::IR::Constant') ) {
+                            my $offset = $idx->value * $scale;
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'lea',
+                                    operands => [
+                                        $dst,
+                                        Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'mem',
+                                            value => { base => $ptr->name, disp => $offset },
+                                            type  => $ptr->type
+                                        )
+                                    ],
+                                    comment => 'gep: lea const offset ' . $offset
+                                )
+                            );
+                        }
+                        else {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'lea',
+                                    operands => [
+                                        $dst,
+                                        Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'mem',
+                                            value => { base => $ptr->name, index => $idx->name, scale => $scale, disp => 0 },
+                                            type  => $ptr->type
+                                        )
+                                    ],
+                                    comment => 'gep: lea indexed'
+                                )
+                            );
+                        }
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
@@ -3887,6 +3909,11 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
                 }
+                my $after_mir = scalar $mbb->instructions->@*;
+                for my $mi_idx ( $before_mir .. $after_mir - 1 ) {
+                    $mbb->instructions->[$mi_idx]->set_ir_inst_idx($inst_idx);
+                }
+                $inst_idx++;
             }
             $mf->add_block($mbb);
         }

@@ -41,7 +41,9 @@ class Brocken::Compiler {
         push @all_stmts, $user_ast->statements->@*;
         my $merged_ast = Brocken::Katsuro::AST::Program->new( statements => \@all_stmts );
         my $lowerer    = Brocken::Katsuro::Lowerer->new();
-        return $lowerer->lower_program($merged_ast);
+        my $module     = $lowerer->lower_program($merged_ast);
+        $module->set_class_info( $lowerer->classes );
+        return $module;
     }
 
     method parse_only( $source, $filename = '(eval)' ) {
@@ -51,4 +53,28 @@ class Brocken::Compiler {
         return $parser->parse_program();
     }
 }
+
+=head1 NAME
+
+Brocken::Compiler - Frontend compilation driver
+
+=head1 DESCRIPTION
+
+Orchestrates the frontend compilation pipeline: reads the runtime C<core.brocken>, parses both runtime and user source,
+merges their ASTs, lowers to Lindsay IR, and attaches class metadata.
+
+=head1 METHODS
+
+=head2 compile( $source, $filename )
+
+Parses and lowers Brocken source C<$source> (scalar string) with optional C<$filename> (default C<(eval)>). Returns a
+L<Brocken::Lindsay::IR::Module> with class_info attached.
+
+=head2 parse_only( $source, $filename )
+
+Like C<compile> but returns the raw AST (L<Brocken::Katsuro::AST::Program>) without lowering to IR. Useful for
+introspection and testing.
+
+=cut
+
 1;

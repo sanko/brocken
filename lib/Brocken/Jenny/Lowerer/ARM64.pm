@@ -9,7 +9,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
     method _abi() { $platform->abi }
 
     method lower($ir_func) {
-        my $mf = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        my $inst_idx = 0;
         for my $block ( $ir_func->blocks->@* ) {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
             if ( $ir_func->blocks->[0] != $block ) {
@@ -75,7 +76,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
                 }
             }
             for my $inst ( $block->instructions->@* ) {
-                my $opcode = $inst->opcode;
+                my $before_mir = scalar $mbb->instructions->@*;
+                my $opcode     = $inst->opcode;
                 if ( $opcode eq 'add' ||
                     $opcode eq 'sub'  ||
                     $opcode eq 'mul'  ||
@@ -2495,9 +2497,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
                     my ( $ptr, @indices ) = $inst->operands->@*;
-                    my $scale = $inst->base_type->bits / 8;
-                    my $idx   = $indices[0];
-                    my $dst   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
 
                     # mv dst, ptr  (copy base pointer to result)
                     $mbb->add_instruction(
@@ -2507,8 +2507,20 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             comment  => 'gep: mv ptr'
                         )
                     );
-                    if ( $idx->isa('Brocken::Lindsay::IR::Constant') ) {
-                        my $offset = $idx->value * $scale;
+                    if ( $inst->base_type->kind eq 'struct' ) {
+                        my $field_idx = $indices[1]->value;
+                        my $offset    = $inst->base_type->field_offset($field_idx);
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'add',
+                                operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $offset ) ],
+                                comment  => 'gep: struct field offset ' . $offset
+                            )
+                        );
+                    }
+                    elsif ( $indices[0]->isa('Brocken::Lindsay::IR::Constant') ) {
+                        my $scale  = $inst->base_type->bits / 8;
+                        my $offset = $indices[0]->value * $scale;
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'add',
@@ -2521,7 +2533,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'add',
-                                operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $idx->name ) ],
+                                operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $indices[0]->name ) ],
                                 comment  => 'gep: add index'
                             )
                         );
@@ -4070,6 +4082,11 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         )
                     );
                 }
+                my $after_mir = scalar $mbb->instructions->@*;
+                for my $mi_idx ( $before_mir .. $after_mir - 1 ) {
+                    $mbb->instructions->[$mi_idx]->set_ir_inst_idx($inst_idx);
+                }
+                $inst_idx++;
             }
             $mf->add_block($mbb);
         }
@@ -4141,4 +4158,50 @@ class Brocken::Jenny::Lowerer::ARM64 {
 
 # ---------------------------------------------------------------------------
 # Lowerer: Lindsay IR -> Machine IR (RISC-V 64)
+
+=head1 NAME
+
+Brocken::Jenny::Lowerer::ARM64 - ARM64 MIR lowering pass
+
+=head1 DESCRIPTION
+
+Lowers Lindsay IR instructions to ARM64 Machine IR (MIR). Each IR instruction is dispatched to an C<emit_op> handler
+that emits zero or more MIR C<MachineInstruction> entries.
+
+Key responsibilities:
+
+=over
+
+=item *
+
+Maps generic IR opcodes (add, sub, load, store, etc.) to ARM64 MIR opcodes
+
+=item *
+
+Tags each emitted MIR instruction with the originating IR instruction index (C<ir_inst_idx>) for DWARF source-location
+tracking
+
+=item *
+
+Handles AArch64-specific calling conventions (register usage, stack layout)
+
+=item *
+
+Emits frame setup/teardown (stp/ldp of x29/x30, stack pointer adjustment)
+
+=back
+
+=head1 METHODS
+
+=head2 emit_op( $builder, $ir_inst, $ir_idx )
+
+Dispatches C<$ir_inst> (a L<Brocken::Lindsay::IR::Instruction>) to the appropriate lowering handler. C<$ir_idx> is the
+instruction index used for DWARF source-map tracking.
+
+=head2 lower_function( $ir_function, $mir_builder )
+
+Lowers an entire IR function to MIR by iterating its blocks and calling C<emit_op> for each instruction.
+
+=cut
+
 1;
