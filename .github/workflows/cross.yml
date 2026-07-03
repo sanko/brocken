@@ -19,6 +19,14 @@ jobs:
           memory: 5G
           operating_system: '${{ inputs.os }}'
           version: '${{ inputs.version }}'
+      - name: Set env vars from tag
+        run: |
+          if [ -n "${{ inputs.env_settings }}" ]; then
+            for pair in ${{ inputs.env_settings }}; do
+              echo "$pair" >> "$GITHUB_ENV"
+            done
+          fi
+        shell: bash
       - name: 'Test on ${{ inputs.os }}'
         run: |
           uname -a
@@ -34,14 +42,14 @@ jobs:
           curl -L https://cpanmin.us | LC_ALL=C sudo perl - --notest App::cpanminus Module::Build::Tiny
           # Add perl's site bin to PATH (needed on e.g. OmniOS where cpanm installs outside default PATH)
           export PATH="$PATH:$(perl -MConfig -e 'print $Config{installsitebin}' 2>/dev/null):$(perl -MConfig -e 'print $Config{installscript}' 2>/dev/null)"
-          sudo env PATH="$PATH" LC_ALL=C cpanm --installdeps --notest .
+          sudo -E PATH="$PATH" LC_ALL=C cpanm --installdeps --notest .
           ${{ inputs.diag }}
           if [ -n "${{ inputs.test_files }}" ]; then
             perl Build.PL
             ./Build
-            sudo env PATH="$PATH" LC_ALL=C prove -Ilib -lv ${{ inputs.test_files }}
+            sudo -E PATH="$PATH" LC_ALL=C prove -Ilib -lv ${{ inputs.test_files }}
           else
-            sudo env PATH="$PATH" LC_ALL=C cpanm --test-only -v .
+            sudo -E PATH="$PATH" LC_ALL=C cpanm --test-only -v .
           fi
           command1_exit_code=$?
           if [ $command1_exit_code -eq 0 ]; then
@@ -70,6 +78,10 @@ on:
         required: true
         type: string
       diag:
+        default: ''
+        required: false
+        type: string
+      env_settings:
         default: ''
         required: false
         type: string

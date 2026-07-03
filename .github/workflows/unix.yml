@@ -44,6 +44,14 @@ jobs:
           perlbrew switch cache-${{ inputs.os }}-${{ inputs.perl }}${{ inputs.flags }}
           cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
         shell: bash
+      - name: Set env vars from tag
+        run: |
+          if [ -n "${{ inputs.env_settings }}" ]; then
+            for pair in ${{ inputs.env_settings }}; do
+              export "$pair"
+            done
+          fi
+        shell: bash
       - env:
           AUTHOR_TESTING: 0
           AUTOMATED_TESTING: 1
@@ -82,6 +90,10 @@ name: inputs module
 on:
   workflow_call:
     inputs:
+      env_settings:
+        default: ''
+        required: false
+        type: string
       flags:
         required: false
         type: string
