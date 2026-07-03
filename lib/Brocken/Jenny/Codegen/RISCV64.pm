@@ -1110,15 +1110,16 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         };
                 }
             }
+            my $func_source_file = $fname =~ /^Brocken::Runtime::/ ? '<runtime>' : $source_file;
             push @func_ranges,
-                { name => $fname, start => $fstart, end => $fend, params => \@params, locals => \@locals, source_file => $source_file };
+                { name => $fname, start => $fstart, end => $fend, params => \@params, locals => \@locals, source_file => $func_source_file };
             my $source_map = $blob->{source_map} // {};
             my $inst_idx   = 0;
             for my $block ( $ir_fn->blocks->@* ) {
                 for my $inst ( $block->instructions->@* ) {
                     if ( $inst->line ) {
                         my $offset = defined( $source_map->{$inst_idx} ) ? $fstart + $source_map->{$inst_idx} : $fstart;
-                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col, file => $source_file };
+                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col, file => $func_source_file };
                     }
                     $inst_idx++;
                 }

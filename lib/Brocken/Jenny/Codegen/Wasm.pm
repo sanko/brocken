@@ -375,7 +375,8 @@ class Brocken::Jenny::Codegen::Wasm {
             my $fname  = $blob->{name};
             my $fstart = $text_offset;
             my $fend   = $text_offset + length( $blob->{bytes} );
-            push @func_ranges, { name => $fname, start => $fstart, end => $fend, params => [], locals => [], source_file => $source_file };
+            my $func_source_file = $fname =~ /^Brocken::Runtime::/ ? '<runtime>' : $source_file;
+            push @func_ranges, { name => $fname, start => $fstart, end => $fend, params => [], locals => [], source_file => $func_source_file };
             my $source_map = $blob->{source_map} // {};
             my $inst_idx   = 0;
 
@@ -383,7 +384,7 @@ class Brocken::Jenny::Codegen::Wasm {
                 for my $inst ( $block->instructions->@* ) {
                     if ( $inst->line ) {
                         my $offset = defined( $source_map->{$inst_idx} ) ? $fstart + $source_map->{$inst_idx} : $fstart;
-                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col, file => $source_file };
+                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col, file => $func_source_file };
                     }
                     $inst_idx++;
                 }

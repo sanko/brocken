@@ -1254,8 +1254,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                         };
                 }
             }
+            my $func_source_file = $fname =~ /^Brocken::Runtime::/ ? '<runtime>' : $source_file;
             push @func_ranges,
-                { name => $fname, start => $fstart, end => $fend, params => \@params, locals => \@locals, source_file => $source_file, };
+                { name => $fname, start => $fstart, end => $fend, params => \@params, locals => \@locals, source_file => $func_source_file, };
 
             # Collect source_locs from IR instructions using precise byte offsets from source_map
             my $source_map = $blob->{source_map} // {};
@@ -1264,7 +1265,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                 for my $inst ( $block->instructions->@* ) {
                     if ( $inst->line ) {
                         my $offset = defined( $source_map->{$inst_idx} ) ? $fstart + $source_map->{$inst_idx} : $fstart;
-                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col, file => $source_file };
+                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col, file => $func_source_file };
                     }
                     $inst_idx++;
                 }
