@@ -48,9 +48,19 @@ jobs:
           if ('${{ inputs.test_files }}' -ne '') {
             perl Build.PL
             perl Build
-            prove -Ilib -lv ${{ inputs.test_files }}
+            if (${{ inputs.verbose_level }} -ge 1) {
+              prove -Ilib -lv ${{ inputs.test_files }}
+            } else {
+              prove -Ilib -l ${{ inputs.test_files }}
+            }
           } else {
-            cpanm --test-only -v .
+            perl Build.PL
+            perl Build
+            if (${{ inputs.verbose_level }} -ge 1) {
+              perl Build test --v
+            } else {
+              perl Build test
+            }
           }
           
           if ($LASTEXITCODE -eq 0) {
@@ -89,5 +99,9 @@ on:
         type: string
       title:
         default: ''
+        required: false
+        type: string
+      verbose_level:
+        default: 0
         required: false
         type: string

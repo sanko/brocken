@@ -47,9 +47,17 @@ jobs:
           if [ -n "${{ inputs.test_files }}" ]; then
             perl Build.PL
             ./Build
-            sudo -E PATH="$PATH" LC_ALL=C prove -Ilib -lv ${{ inputs.test_files }}
+            if [ "${{ inputs.verbose_level }}" -ge 1 ] 2>/dev/null; then
+              sudo -E PATH="$PATH" LC_ALL=C prove -Ilib -lv ${{ inputs.test_files }}
+            else
+              sudo -E PATH="$PATH" LC_ALL=C prove -Ilib -l ${{ inputs.test_files }}
+            fi
           else
-            sudo -E PATH="$PATH" LC_ALL=C cpanm --test-only -v .
+            if [ "${{ inputs.verbose_level }}" -ge 1 ] 2>/dev/null; then
+              sudo -E PATH="$PATH" LC_ALL=C cpanm --test-only -v .
+            else
+              sudo -E PATH="$PATH" LC_ALL=C cpanm --test-only .
+            fi
           fi
           command1_exit_code=$?
           if [ $command1_exit_code -eq 0 ]; then
@@ -111,6 +119,10 @@ on:
         type: string
       test_files:
         default: ''
+        required: false
+        type: string
+      verbose_level:
+        default: '0'
         required: false
         type: string
       version:
