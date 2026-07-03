@@ -543,6 +543,26 @@ Pod6 nodes are attached directly to the AST as metadata on each `Brocken::Katsur
 
 Every AST node carries `file`, `line`, and `col` from the token that introduces the construct (its start token, not its closing token). The position is set during parsing and propagates through to error messages.
 
+#### 2.15.1 Line Directives (`# line`)
+
+A `# line` directive overrides the reported source file, line, and column for all
+subsequent tokens, allowing generated code or macros to attribute themselves to
+their origin source. The directive is lexed and applied by the parser's position
+tracking; the overridden position replaces the actual one in both error messages
+and DWARF debug output.
+
+```
+# line "original.brocken" 42
+$x = 1;         # reported as original.brocken:42
+# line "original.brocken" 42 5
+$x = 1;         # reported as original.brocken:42:5
+```
+
+The parser maintains a position stack so that included or inlined code can
+restore the caller's position after its scope ends. Runtime functions compiled
+from `core.brocken` are always attributed to `<runtime>` as their source file,
+enforced by the codegen backends (see §7.2).
+
 | AST Node | Position Source Token |
 |---|---|
 | `Expr::Const` | NUM / STRING / KEYWORD token |
@@ -1073,6 +1093,9 @@ the final binary by the PE/ELF/Mach-O linker.
 
 5. **DWARF Assembly:** `build_debug_data` in each backend uses `source_map`
    entries for per-instruction byte-offset precision in `.debug_line`.
+   Functions whose name starts with `Brocken::Runtime::` (runtime helpers) are
+   attributed to `<runtime>` as their source file; user functions use the
+   compiled source file.
 
 ### 7.3 Variable Debug Info
 
