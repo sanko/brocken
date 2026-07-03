@@ -1,8 +1,8 @@
 # Security Policy
 
-This document outlines the security policy for `infix`.
+This document outlines the security policy for Brocken.
 
-The `infix` FFI library was designed with a security-first philosophy. Interfacing with C and generating executable code at runtime are inherently sensitive operations. This document outlines our threat model and the specific mitigations implemented to ensure the library is as safe and robust as possible.
+Brocken was designed with a security-first philosophy. Interfacing with C and generating executable code at runtime are inherently sensitive operations. This document outlines our threat model and the specific mitigations implemented to ensure the library is as safe and robust as possible.
 
 ## Supported Versions
 
@@ -20,9 +20,9 @@ I take all security vulnerabilities seriously. To protect the project's users, I
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-The preferred and most secure method for reporting is through **[GitHub's private vulnerability reporting feature](https://github.com/sanko/infix/security/advisories/new)**. This creates a private advisory and opens a direct, secure line of communication.
+The preferred and most secure method for reporting is through **[GitHub's private vulnerability reporting feature](https://github.com/sanko/brocken/security/advisories/new)**. This creates a private advisory and opens a direct, secure line of communication.
 
-If you are unable to use GitHub's reporting feature, you may send an email to [sanko@cpan.org](mailto:sanko@cpan.org).
+If you are unable to use GitHub's reporting feature, find a friend who can.
 
 Please include the following information in your report:
 
@@ -44,11 +44,11 @@ We consider the following to be the primary security threats for an FFI library:
 
 ## Mitigations
 
-`infix` employs several layers of defense to mitigate these threats.
+Brocken employs several layers of defense to mitigate these threats.
 
 ### 1. W^X (Write XOR Execute) Memory Policy
 
-**The most critical security feature of `infix` is its strict enforcement of a W^X memory policy.** Memory that is used for JIT-compiled trampolines is **never writable and executable at the same time**. This is a fundamental defense against code injection attacks.
+**The most critical security feature of Brocken is its strict enforcement of a W^X memory policy.** Memory that is used for JIT-compiled trampolines is **never writable and executable at the same time**. This is a fundamental defense against code injection attacks.
 
 This policy is implemented in `executor.c` using platform-specific, hardened techniques:
 
@@ -77,7 +77,7 @@ After `generate_reverse_trampoline` successfully initializes the context, the me
 
 The type creation API (`types.c`) is a potential attack surface. An attacker could provide malicious `size`, `offset`, or `num_elements` values to functions like `ffi_type_create_struct` and `ffi_type_create_array` in an attempt to trigger an integer overflow during layout calculations.
 
-All such calculations in the `infix` library are hardened with checks against `SIZE_MAX` to prevent wrap-around. If a potential overflow is detected, the function will immediately fail with `INFIX_ERROR_INVALID_ARGUMENT`, preventing the creation of a malformed `ffi_type` that could lead to memory corruption in later stages.
+All such calculations in the Brocken are hardened with checks against `SIZE_MAX` to prevent wrap-around. If a potential overflow is detected, the function will immediately fail with `BROCKEN_ERROR_INVALID_ARGUMENT`, preventing the creation of a malformed `ffi_type` that could lead to memory corruption in later stages.
 
 ### 5. Continuous Security Validation (Fuzzing)
 
