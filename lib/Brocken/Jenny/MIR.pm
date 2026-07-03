@@ -9,9 +9,10 @@ class Brocken::Jenny::MIR::MachineOperand {
 }
 
 class Brocken::Jenny::MIR::MachineInstruction {
-    field $opcode   : param : reader;
-    field $operands : param : reader = [];
-    field $comment  : param : reader = '';
+    field $opcode      : param : reader;
+    field $operands    : param : reader = [];
+    field $comment     : param : reader = '';
+    field $ir_inst_idx : param : reader : writer = -1;
 }
 
 class Brocken::Jenny::MIR::MachineBasicBlock {
@@ -109,7 +110,9 @@ physical reg, immediate value, or memory address). Memory operands use a
 hashref with C<base>, C<index>, C<scale>, and C<disp> keys.
 
 =item L<Brocken::Jenny::MIR::MachineInstruction> - A single instruction with an
-opcode string, an array of operands, and an optional comment.
+opcode string, an array of operands, and an optional comment. Carries
+C<ir_inst_idx> for DWARF source-location mapping back to the originating IR
+instruction.
 
 =item L<Brocken::Jenny::MIR::MachineBasicBlock> - A basic block of MIR
 instructions with control-flow successor/predecessor tracking.
@@ -117,6 +120,45 @@ instructions with control-flow successor/predecessor tracking.
 =item L<Brocken::Jenny::MIR::MachineFunction> - A function containing an array
 of basic blocks and a frame size. Provides CFG computation (compute_cfg) and
 block lookup (find_block).
+
+=back
+
+=head1 METHODS
+
+=head2 Brocken::Jenny::MIR::MachineBasicBlock
+
+=over
+
+=item C<add_successor($block)>, C<add_predecessor($block)>
+
+Record CFG edges. Duplicates are silently ignored.
+
+=item C<is_terminated>
+
+Returns 1 if the last instruction is a terminator (jmp, beq, bne, br, ret, ctx_restore, ctx_swap).
+
+=item C<terminator>
+
+Returns the terminator instruction or undef.
+
+=back
+
+=head2 Brocken::Jenny::MIR::MachineFunction
+
+=over
+
+=item C<compute_cfg>
+
+Walks all blocks and their terminators to build successor/predecessor edges. Handles jmp (unconditional), beq/bne
+(conditional), and ret (no successor).
+
+=item C<find_block($name)>
+
+Returns the block with the given name, or undef.
+
+=item C<entry_block>
+
+Returns the first block (entry) or undef.
 
 =back
 

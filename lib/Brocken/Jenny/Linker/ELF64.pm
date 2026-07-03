@@ -43,16 +43,21 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         # Non-alloc symbol and string tables for static linking/debugging (nm)
         $layout->add_section( '.symtab',   4096, 0 );
         $layout->add_section( '.strtab',   4096, 0 );
-        $layout->add_section( '.eh_frame', 4096, 0 );
+        $layout->add_section( '.eh_frame',     4096, 0 );
+        $layout->add_section( '.eh_frame_hdr', 4096, 0 );
         #
-        if ( $dbg >= 1 ) {
-            $layout->add_section( '.debug_line',     4096, 0 );
-            $layout->add_section( '.debug_info',     4096, 0 );
-            $layout->add_section( '.debug_abbrev',   4096, 0 );
-            $layout->add_section( '.debug_aranges',  4096, 0 );
-            $layout->add_section( '.debug_pubnames', 4096, 0 );
-            $layout->add_section( '.debug_names',    4096, 0 );
-            $layout->add_section( '.debug_str',      4096, 0 );
+        if ( $dbg >= 1 ) { $layout->add_section( '.debug_line', 4096, 0 ); }
+        if ( $dbg >= 2 ) {
+            $layout->add_section( '.debug_info',   4096, 0 );
+            $layout->add_section( '.debug_abbrev', 4096, 0 );
+        }
+        if ( $dbg >= 3 ) {
+            $layout->add_section( '.debug_frame',   4096, 0 );
+            $layout->add_section( '.debug_aranges', 4096, 0 );
+        }
+        if ( $dbg >= 4 ) {
+            $layout->add_section( '.debug_names', 4096, 0 );
+            $layout->add_section( '.debug_str',   4096, 0 );
         }
     }
 
@@ -291,7 +296,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $entry_stub_len = $self->entry_stub_len($platform);
         if ( !defined $self->layout ) {
             my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
-            $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform );
+            $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform, $self->debug_level );
         }
         else {
             # Update text size and recalculate layout so all subsequent RVA
@@ -590,9 +595,23 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $str_off{'_gSharedObjectHaikuVersion'} = length($dynstr);
             $dynstr .= "_gSharedObjectHaikuVersion\0";
         }
+
+        # Add function names to string table for .symtab entries
+        for my $name ( sort keys %func_offsets ) {
+            next if exists $str_off{$name};
+            $str_off{$name} = length($dynstr);
+            $dynstr .= $name . "\0";
+        }
         $self->layout->get('.dynstr')->{size} = length($dynstr);
         my $dynsym  = pack( 'L< C C S< Q< Q<', 0, 0, 0, 0, 0, 0 );
         my $sym_idx = 1;
+
+        # Add function symbols to .symtab (STB_GLOBAL | STT_FUNC = 0x12)
+        for my $name ( sort keys %func_offsets ) {
+            $sym_idx++;
+            my $rva = $self->layout->get('.text')->{rva} + $entry_size + $func_offsets{$name};
+            $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 1, $base + $rva, 0 );
+        }
         my %sym_indices;
         for my $name (@imports) {
             $sym_indices{$name} = $sym_idx++;
@@ -914,13 +933,19 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             if ( length($payload) > $s->{size} ) {
                 die sprintf "Internal error: %s payload (%d B) exceeds section size (%d B)", $s->{name}, length($payload), $s->{size};
             }
+            my $actual_len = length($payload);
             $payload .= ( "\0" x ( $s->{size} - length($payload) ) ) if length($payload) < $s->{size};
             seek( $fh, $s->{off}, 0 );
             print $fh $payload;
+            $s->{size} = $actual_len if $s->{name} =~ /^\.(debug|eh_frame)/;
         }
         my $shstrtab_off = tell($fh);
         print $fh $shstrtab;
         my $shoff = tell($fh);
+        if ( my $align = 64 - ( $shoff % 64 ) ) {
+            print $fh "\0" x $align;
+            $shoff += $align;
+        }
         my @shdrs = ();
         push @shdrs, pack( 'L< L< Q< Q< Q< Q< L< L< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
         for my $s ( $self->layout->sections ) {
@@ -1018,8 +1043,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $num_ph++ if $note_data;
         $num_ph++ if $pintable_data;
         $num_ph++ if $is_pie;
-        my $eh_frame_sec = $self->layout->get('.eh_frame');
-        $num_ph++ if $eh_frame_sec;
+        my $eh_frame_hdr_sec = $self->layout->get('.eh_frame_hdr');
+        $num_ph++ if $eh_frame_hdr_sec;
         $num_ph++ if $platform->is_freebsd;
         my @phdrs     = ();
         my $extra_off = 64 + ( $num_ph * 56 );
@@ -1097,16 +1122,16 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 );
             $extra_off += length($pintable_data);
         }
-        if ($eh_frame_sec) {
+        if ($eh_frame_hdr_sec) {
 
-            # PT_GNU_EH_FRAME=0x6474e550: exception handling frame (matches GCC)
+            # PT_GNU_EH_FRAME=0x6474e550: points to .eh_frame_hdr index for binary FDE lookup
             push @phdrs,
                 pack(
                 'L< L< Q< Q< Q< Q< Q< Q<',
-                0x6474e550, 4, $eh_frame_sec->{off},
-                $base + $eh_frame_sec->{rva},
-                $base + $eh_frame_sec->{rva},
-                $eh_frame_sec->{size}, $eh_frame_sec->{size}, 4
+                0x6474e550, 4, $eh_frame_hdr_sec->{off},
+                $base + $eh_frame_hdr_sec->{rva},
+                $base + $eh_frame_hdr_sec->{rva},
+                $eh_frame_hdr_sec->{size}, $eh_frame_hdr_sec->{size}, 4
                 );
         }
         if ( $platform->is_freebsd ) {

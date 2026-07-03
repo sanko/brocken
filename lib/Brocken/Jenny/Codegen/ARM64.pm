@@ -165,8 +165,10 @@ class Brocken::Jenny::Codegen::ARM64 {
                 $callee_seen{ $platform->fiber_reg } = 1;
             }
             my @used_callee = sort keys %callee_seen;
-            my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
-            push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups };
+            my %alloca_map;
+            my %source_map;
+            my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
+            push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
         }
         if ($emit_init) {
             my $init_mf = $self->_build_fiber_init_mf;
@@ -430,7 +432,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         return $mf;
     }
 
-    method _encode( $mf, $assignment, $used_callee ) {
+    method _encode( $mf, $assignment, $used_callee, $alloca_map = undef, $source_map = undef ) {
         my $bytes        = '';
         my $alloca_frame = 0;
         my $total_alloca = 0;
@@ -547,6 +549,9 @@ class Brocken::Jenny::Codegen::ARM64 {
         my $current_offset = sub { return length $bytes };
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
+                if ( $source_map && $inst->ir_inst_idx >= 0 && !exists $source_map->{ $inst->ir_inst_idx } ) {
+                    $source_map->{ $inst->ir_inst_idx } = length($bytes);
+                }
                 my $opcode = $inst->opcode;
                 my ( $dst, $src ) = $inst->operands->@*;
                 if ( $opcode eq 'label' ) {
@@ -696,6 +701,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
                     my $off   = $alloca_frame;
+                    $alloca_map->{ $dst->value } = $off if $alloca_map;
                     if ( $off <= 0xFFF ) {
                         $bytes .= pack( 'V', MOV_SP | ( $off << 10 ) | $did );
                     }
@@ -1103,6 +1109,73 @@ class Brocken::Jenny::Codegen::ARM64 {
         for my $off ( values $gp_spill->%* ) { $max_off = $off if $off > $max_off; }
         for my $off ( values $fp_spill->%* ) { $max_off = $off if $off > $max_off; }
         return $max_off ? int( $max_off / 8 ) + 1 : 0;
+    }
+
+    method build_debug_data( $ir_funcs, $func_blobs, $source_file = 'source.brocken', $text_base = 0, $class_info = {}, $debug_level = 0 ) {
+        require Brocken::Jenny::Linker::DWARF;
+        my @func_ranges;
+        my @source_locs;
+        my $text_offset = 0;
+        for my $i ( 0 .. $#$ir_funcs ) {
+            my $ir_fn      = $ir_funcs->[$i];
+            my $blob       = $func_blobs->[$i];
+            my $fname      = $blob->{name};
+            my $fstart     = $text_offset;
+            my $fend       = $text_offset + length( $blob->{bytes} );
+            my $alloca_map = $blob->{alloca_map} // {};
+            my @params;
+            for my $p ( $ir_fn->params->@* ) {
+                next if $p->name && $p->name eq '%__heap_base';
+                my $vreg = '%' . $p->name . '.addr';
+                my $slot = $alloca_map->{$vreg};
+                push @params,
+                    { name => ( $p->name =~ s/^%//r ), type => 'Int', slot => defined $slot ? $slot : 0, line => 0, col => 0, artificial => 0, };
+            }
+            my @locals;
+            for my $block ( $ir_fn->blocks->@* ) {
+                for my $inst ( $block->instructions->@* ) {
+                    next unless $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') && $inst->debug_name;
+                    my $slot = $alloca_map->{ $inst->name };
+                    push @locals,
+                        {
+                        name       => $inst->debug_name,
+                        type       => $inst->debug_type_name // 'Int',
+                        slot       => defined $slot ? $slot : 0,
+                        line       => $inst->line // 0,
+                        col        => $inst->col  // 0,
+                        artificial => 0,
+                        };
+                }
+            }
+            push @func_ranges,
+                { name => $fname, start => $fstart, end => $fend, params => \@params, locals => \@locals, source_file => $source_file };
+            my $source_map = $blob->{source_map} // {};
+            my $inst_idx   = 0;
+            for my $block ( $ir_fn->blocks->@* ) {
+                for my $inst ( $block->instructions->@* ) {
+                    if ( $inst->line ) {
+                        my $offset = defined( $source_map->{$inst_idx} ) ? $fstart + $source_map->{$inst_idx} : $fstart;
+                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col };
+                    }
+                    $inst_idx++;
+                }
+            }
+            $text_offset = $fend;
+        }
+        my %seen;
+        my @uniq_files = grep { !$seen{$_}++ } map { $_->{source_file} // $source_file } @func_ranges;
+        my $dwarf      = Brocken::Jenny::Linker::DWARF->new(
+            source_locs  => \@source_locs,
+            text_base    => $text_base,
+            source_file  => $source_file,
+            source_files => \@uniq_files,
+            func_ranges  => \@func_ranges,
+            class_info   => $class_info,
+            arch         => 'arm64',
+            platform     => $platform,
+            debug        => $debug_level,
+        );
+        return $dwarf->build_all;
     }
 }
 

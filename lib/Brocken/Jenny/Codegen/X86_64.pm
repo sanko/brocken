@@ -113,8 +113,10 @@ class Brocken::Jenny::Codegen::X86_64 {
                 $callee_seen{ $platform->fiber_reg } = 1;
             }
             my @used_callee = sort keys %callee_seen;
-            my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
-            push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups };
+            my %alloca_map;
+            my %source_map;
+            my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
+            push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
         }
 
         # Prepend the init wrapper
@@ -407,7 +409,9 @@ class Brocken::Jenny::Codegen::X86_64 {
     }
 
     # Encode MIR to x86_64 machine code bytes (registers pre-allocated)
-    method _encode( $mf, $assignment, $used_callee ) {
+    # Optional $alloca_map hashref is populated with {vreg_name => stack_offset} for debug info
+    # Optional $source_map hashref is populated with {ir_inst_idx => byte_offset} for source location tracking
+    method _encode( $mf, $assignment, $used_callee, $alloca_map = undef, $source_map = undef ) {
         my $bytes        = '';
         my $alloca_frame = 0;
         my %reg_id_map   = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
@@ -542,6 +546,9 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $alloca_top = $shadow_space;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
+                if ( $source_map && $inst->ir_inst_idx >= 0 && !exists $source_map->{ $inst->ir_inst_idx } ) {
+                    $source_map->{ $inst->ir_inst_idx } = length($bytes);
+                }
                 my $opcode = $inst->opcode;
                 my ( $dst, $src ) = $inst->operands->@*;
                 if ( $opcode eq 'mov' ) {
@@ -778,6 +785,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     }
                 }
                 elsif ( $opcode eq 'alloca' ) {
+                    $alloca_map->{ $dst->value } = ( $alloca_top + 15 ) & ~15 if $alloca_map;
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
@@ -1202,6 +1210,81 @@ class Brocken::Jenny::Codegen::X86_64 {
         for my $off ( values $gp_spill->%* ) { $max_off = $off if $off > $max_off; }
         for my $off ( values $fp_spill->%* ) { $max_off = $off if $off > $max_off; }
         return $max_off ? int( $max_off / 8 ) + 1 : 0;
+    }
+
+    # Builds DWARF debug sections from IR functions and emitted code.
+    # Returns a hashref of section_name => bytes suitable for Linker::set_debug_data.
+    method build_debug_data( $ir_funcs, $func_blobs, $source_file = 'source.brocken', $text_base = 0, $class_info = {}, $debug_level = 0 ) {
+        require Brocken::Jenny::Linker::DWARF;
+        my @func_ranges;
+        my @source_locs;
+        my $text_offset = 0;
+        for my $i ( 0 .. $#$ir_funcs ) {
+            my $ir_fn      = $ir_funcs->[$i];
+            my $blob       = $func_blobs->[$i];
+            my $fname      = $blob->{name};
+            my $fstart     = $text_offset;
+            my $fend       = $text_offset + length( $blob->{bytes} );
+            my $alloca_map = $blob->{alloca_map} // {};
+
+            # Collect params from IR function
+            my @params;
+            for my $p ( $ir_fn->params->@* ) {
+                next if $p->name && $p->name eq '%__heap_base';
+                my $vreg = '%' . $p->name . '.addr';
+                my $slot = $alloca_map->{$vreg};
+                push @params,
+                    { name => ( $p->name =~ s/^%//r ), type => 'Int', slot => defined $slot ? $slot : 0, line => 0, col => 0, artificial => 0, };
+            }
+
+            # Collect locals from IR alloca instructions with debug metadata
+            my @locals;
+            for my $block ( $ir_fn->blocks->@* ) {
+                for my $inst ( $block->instructions->@* ) {
+                    next unless $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') && $inst->debug_name;
+                    my $slot = $alloca_map->{ $inst->name };
+                    push @locals,
+                        {
+                        name       => $inst->debug_name,
+                        type       => $inst->debug_type_name // 'Int',
+                        slot       => defined $slot ? $slot : 0,
+                        line       => $inst->line // 0,
+                        col        => $inst->col  // 0,
+                        artificial => 0,
+                        };
+                }
+            }
+            push @func_ranges,
+                { name => $fname, start => $fstart, end => $fend, params => \@params, locals => \@locals, source_file => $source_file, };
+
+            # Collect source_locs from IR instructions using precise byte offsets from source_map
+            my $source_map = $blob->{source_map} // {};
+            my $inst_idx   = 0;
+            for my $block ( $ir_fn->blocks->@* ) {
+                for my $inst ( $block->instructions->@* ) {
+                    if ( $inst->line ) {
+                        my $offset = defined( $source_map->{$inst_idx} ) ? $fstart + $source_map->{$inst_idx} : $fstart;
+                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col };
+                    }
+                    $inst_idx++;
+                }
+            }
+            $text_offset = $fend;
+        }
+        my %seen;
+        my @uniq_files = grep { !$seen{$_}++ } map { $_->{source_file} // $source_file } @func_ranges;
+        my $dwarf      = Brocken::Jenny::Linker::DWARF->new(
+            source_locs  => \@source_locs,
+            text_base    => $text_base,
+            source_file  => $source_file,
+            source_files => \@uniq_files,
+            func_ranges  => \@func_ranges,
+            class_info   => $class_info,
+            arch         => 'x64',
+            platform     => $platform,
+            debug        => $debug_level,
+        );
+        return $dwarf->build_all;
     }
 }
 

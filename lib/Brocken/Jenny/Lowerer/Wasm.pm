@@ -8,7 +8,8 @@ use List::Util qw[min max];
 class Brocken::Jenny::Lowerer::Wasm {
 
     method lower($ir_func) {
-        my $mf = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        my $inst_idx = 0;
         for my $block ( $ir_func->blocks->@* ) {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
             if ( $ir_func->blocks->[0] != $block ) {
@@ -21,7 +22,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                 );
             }
             for my $inst ( $block->instructions->@* ) {
-                my $opcode = $inst->opcode;
+                my $before_mir = scalar $mbb->instructions->@*;
+                my $opcode     = $inst->opcode;
                 if ( $opcode eq 'add' ||
                     $opcode eq 'sub'  ||
                     $opcode eq 'mul'  ||
@@ -2018,33 +2020,50 @@ class Brocken::Jenny::Lowerer::Wasm {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
                     my ( $ptr, @indices ) = $inst->operands->@*;
-                    my $scale = $inst->base_type->bits / 8;
-                    my $idx   = $indices[0];
                     $mbb->add_instruction( $self->_wasm_push( $ptr, 'gep: ptr' ) );
-                    if ( $idx->isa('Brocken::Lindsay::IR::Constant') ) {
-                        my $offset = $idx->value * $scale;
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'i32_const',
-                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $offset ) ],
-                                comment  => "gep: const offset $offset"
-                            )
-                        );
+                    my $offset;
+                    if ( $inst->base_type->kind eq 'struct' ) {
+                        my $field_idx = $indices[1]->value;
+                        $offset = $inst->base_type->field_offset($field_idx);
                     }
                     else {
-                        $mbb->add_instruction( $self->_wasm_push( $idx, 'gep: idx' ) );
-                        if ( $scale > 1 ) {
+                        my $scale = $inst->base_type->bits / 8;
+                        my $idx   = $indices[0];
+                        if ( $idx->isa('Brocken::Lindsay::IR::Constant') ) {
+                            $offset = $idx->value * $scale;
+                        }
+                        else {
+                            $mbb->add_instruction( $self->_wasm_push( $idx, 'gep: idx' ) );
+                            if ( $scale > 1 ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'i32_const',
+                                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $scale ) ],
+                                        comment  => "gep: scale $scale"
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_mul', operands => [], comment => 'gep: mul' ) );
+                            }
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'gep: add' ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'i32_const',
-                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $scale ) ],
-                                    comment  => "gep: scale $scale"
+                                    opcode   => 'local_set',
+                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                                    comment  => 'gep: save to ' . $inst->name
                                 )
                             );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_mul', operands => [], comment => 'gep: mul' ) );
+                            next;
                         }
                     }
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i32_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $offset ) ],
+                            comment  => "gep: const offset $offset"
+                        )
+                    );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'gep: add' ) );
                     $mbb->add_instruction(
@@ -2478,6 +2497,11 @@ class Brocken::Jenny::Lowerer::Wasm {
                     }
                     $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => '' ) );
                 }
+                my $after_mir = scalar $mbb->instructions->@*;
+                for my $mi_idx ( $before_mir .. $after_mir - 1 ) {
+                    $mbb->instructions->[$mi_idx]->set_ir_inst_idx($inst_idx);
+                }
+                $inst_idx++;
             }
             $mf->add_block($mbb);
         }

@@ -137,7 +137,13 @@ Signedness is encoded in the type name (`i` prefix = signed, `u` prefix = unsign
 | Extension (widening) | `sext` (sign-extend) | `zext` (zero-extend) |
 | Comparison predicates | `sgt`, `slt`, `sge`, `sle` | `ugt`, `ult`, `uge`, `ule` |
 
-Addition, subtraction, multiplication, left shift, and bitwise logical ops (`and`, `or`, `xor`) are identical for signed and unsigned at the machine level — they produce the same bit pattern. Signedness only matters for the operations above.
+Addition, subtraction, multiplication, and bitwise logical ops (`and`, `or`, `xor`) are identical for signed and unsigned at the machine level — they produce the same bit pattern. Signedness only matters for the operations above.
+
+Left shift (`<<`) is also identical for signed and unsigned at the machine level
+— it maps to `shl` regardless. Right shift (`>>`) differs by signedness: signed
+right shift uses `ashr` (arithmetic, sign-extending), unsigned right shift uses
+`lshr` (logical, zero-extending). The IR records signedness on the `Type` object
+(`signed` field) and the lowerer selects the correct shift opcode based on it.
 
 The lowerer's `maybe_convert_type` (§3.4) uses signedness to choose the correct extension opcode when widening. The backend encoder selects the correct instruction form based on the IR opcode (e.g., x86_64 `idiv` vs `div`, `sar` vs `shr`).
 
@@ -150,9 +156,12 @@ my i64 $size = 32;
 my ptr $next = Brocken::ptr_add($heap_cursor, $size);
 ```
 
-#### 2.1.4 Struct Types (Planned)
+#### 2.1.4 Struct Types
 
-User-defined compound types with named fields, declared via the `struct` keyword:
+User-defined compound types with named fields, declared via the `class` keyword
+(or the `struct` keyword, planned). Struct layout is tracked at the IR level via
+a `struct` kind on the `Type` object with field names and offsets. Field access
+is lowered to `GetElementPtr` (GEP) with struct-aware offset computation.
 
 ```perl
 struct Point {
@@ -161,7 +170,7 @@ struct Point {
 }
 ```
 
-Struct types retain field names at the IR level for debug info and reflection. Field access uses named lookup (`$pt.x`), lowered to a compile-time byte offset computed from the struct layout. Layout respects alignment requirements:
+Struct types retain field names at the IR level for debug info and reflection. Field access uses named lookup (`$p->x`), lowered to a `GetElementPtr` instruction with struct-aware byte offset computation. The IR `Type` carries a `struct` kind with field metadata (name, type, offset). Layout respects alignment requirements:
 
 | Field Type | Alignment | Size |
 |------------|-----------|------|
@@ -214,6 +223,13 @@ my Point $pt = Point->new(x => 10, y => 20);  # heap-allocated, RC'd
 ##### Relation to Classes
 
 Classes (§2.6) are structs with methods, auto-generated accessors, constructors, and lifecycle hooks (`ADJUST`, `DESTROY`). A `class` without methods is structurally identical to a `struct`. The difference is semantic: classes are always heap-allocated and RC-managed; structs can live on the stack.
+
+During code generation (`emit_functions`), every `alloca` instruction associated
+with a struct type is annotated with field offsets. The four backends (X86_64,
+ARM64, RISCV64, Wasm) all support struct-aware GEP lowering.
+
+Classes (§2.6) are compiled to struct-typed memory regions with the same field
+layout, allocation, and access machinery.
 
 #### 2.1.5 Static Data & .rodata Section
 
@@ -330,8 +346,9 @@ my i64 @arr = [1,2,3];  # sized from literal count
 
 **Bitwise:** `&`, `|`, `^`, `~`
 
-String comparison (`eq`, `ne`, `lt`, `gt`, `le`, `ge`, `cmp`) and
-bitwise shift (`<<`, `>>`) are deferred — see §2.17.
+**Shift:** `<<` (left shift), `>>` (right shift — arithmetic for signed, logical for unsigned)
+
+String comparison (`eq`, `ne`, `lt`, `gt`, `le`, `ge`, `cmp`) is deferred — see §2.17.
 
 ### 2.4 Control Flow
 
@@ -639,7 +656,7 @@ use feature 'brocken_native_types';   # enables i128, u128
 | Feature | Reason |
 |---------|--------|
 | `%` hashes | Not needed for the runtime; can be built on top later |
-| `struct` keyword | Classes serve as structs in v0.1; dedicated struct syntax deferred |
+| `struct` keyword | Classes serve as structs in v0.1; struct IR types exist in the type system for field access/GEP, but dedicated `struct` syntax is deferred |
 | `ref(T)` references | RC decref/scope machinery not yet connected |
 | `ptr(T)` typed pointers | Source-level annotation only; lowering is identical to opaque `ptr` |
 | `.rodata` strings | String literals currently use stack alloca; `.rodata` section deferred |
@@ -656,6 +673,12 @@ use feature 'brocken_native_types';   # enables i128, u128
 | Operator overloading | Not needed |
 | `want` / context | Not needed |
 | Inheritance | Classes as flat structs only — no `:isa` |
+
+**Shift operators (`<<`, `>>`) are implemented** in the lexer (`>>` token),
+parser (`PREC_SHIFT` precedence level), and lowerer (maps to `build_shl`,
+`build_ashr`/`build_lshr` based on signedness). Signed right shift emits
+`ashr` (arithmetic, sign-extending), unsigned right shift emits `lshr`
+(logical, zero-extending). Left shift emits `shl` regardless of signedness.
 
 ---
 
@@ -1014,66 +1037,133 @@ The register pool is fetched dynamically via `Brocken::Katsuro::Platform::ABI`.
 
 ## 7. Debug Information
 
-Brocken can emit rich debug information for GDB, WinDbg, etc. There are two independent debug information systems, selected automatically by the target OS:
+Brocken emits DWARF v5 debug information in PE and ELF binaries for GDB/LLDB
+source-level debugging. Debug data is generated by `Brocken::Jenny::Linker::DWARF`,
+assembled during codegen via `build_debug_data` on each backend, and linked into
+the final binary by the PE/ELF/Mach-O linker.
 
-| System | Format | Target | Tools |
-|--------|--------|--------|-------|
-| DWARF | `.debug_*` sections | PE + ELF | GDB, LLDB, readelf |
-| SEH | `.pdata` / `.xdata` | PE (win64) | GDB, WinDbg, Xperf |
-| `.eh_frame` | DWARF variant | ELF (linux) | GDB, perf, libunwind |
+### 7.1 Enabled Debug Sections
 
-### 7.1 Debug Levels
+| Section | Purpose |
+|---------|---------|
+| `.debug_line` | Machine-code offset → source line/column mapping |
+| `.debug_info` | Compile unit, subprograms, base types, struct types, variables |
+| `.debug_abbrev` | DIE tag/attribute declarations (ULEB128-encoded) |
+| `.debug_frame` | Call frame information (CFA = RSP + 8) |
+| `.debug_aranges` | Address range table for fast debug info lookup |
+| `.debug_names` | DWARF v5 accelerated access index |
+| `.debug_str` | String pool for DIE name attributes |
 
-The `debug` parameter is an integer passed to `Brocken::Compiler->new()` or via the `--debug=N` flag.
+### 7.2 Source Location Pipeline
 
-| Level | Effect |
-|-------|--------|
-| 0 | No debug sections (default) |
-| 1 | Emit all debug sections (DWARF + SEH + `.eh_frame`) |
-| 2 | Level 1 + hex dumps of debug sections |
-| 4+ | Include class/struct type DIEs in `.debug_info` |
+1. **IR Level:** Every `Brocken::Lindsay::IR::Instruction` subclass carries
+   `$line` and `$col` fields (default 0). The IR `Builder`'s `build_*` methods
+   accept optional `$line, $col` parameters.
 
-### 7.2 Architecture
+2. **Lowerer:** `Brocken::Katsuro::Lowerer` passes `$ast->line, $ast->col`
+   through to each `build_*` call, linking AST source positions to IR instructions.
 
-**Source Location Tracking.** During lowering, every source-level IR instruction is annotated with its original line and column. An array of `{ offset, line, col }` hashes is consumed by the DWARF builder to generate `.debug_line` data.
+3. **MIR Level:** Each `MachineInstruction` (`Brocken::Jenny::MIR`) records
+   `$ir_inst_idx` — the index of the originating IR instruction. All four
+   lowerers (X86_64, ARM64, RISCV64, Wasm) tag MIR instructions during lowering.
 
-**Function Range Tracking.** Every function (named sub, anonymous sub, method, and the implicit main body) is tracked via `push_func_range` / `close_last_func_range`. Each range entry contains: `name`, `start`/`end` byte offsets in `.text`, `ctx_size`, `params`, `locals`.
+4. **Encoding:** Each encoder accepts a `$source_map` hashref and records
+   `ir_inst_idx ⇒ byte_offset` during encoding (first MIR instruction per IR
+   instruction wins). The `source_map` is stored in the encoder result blob.
 
-### 7.3 DWARF Sections
+5. **DWARF Assembly:** `build_debug_data` in each backend uses `source_map`
+   entries for per-instruction byte-offset precision in `.debug_line`.
 
-All DWARF sections are built by `Brocken::Target::Format::DWARF`.
+### 7.3 Variable Debug Info
 
-- **`.debug_line`** — Maps machine-code offsets to source lines (DWARF3 line number program).
-- **`.debug_info`** — Compilation unit, base types, optional class types (at debug >= 4), and subprogram entries for every function.
-- **`.debug_abbrev`** — Compact declaration of DIE tag/attribute layouts.
-- **`.debug_frame`** — Call frame information (DWARF3). CFA = RSP + 8, return address saved at CFA - 8.
-- **`.debug_aranges`** — Address range table for fast debug info lookup.
-- **`.debug_pubnames`** — Public names index.
+Every `alloca` instruction for a user-visible variable gets:
+- `debug_name` — source variable name (e.g., `x`, `y`, `z`)
+- `debug_type_name` — source type name (e.g., `Int`, `ptr`, `Point`)
 
-### 7.4 SEH (Windows PE)
+These fields are set by `Brocken::Katsuro::Lowerer` during variable declaration
+lowering. Parameters are tagged similarly. Each variable/parameter DIE carries:
+- `DW_AT_name` — variable name
+- `DW_AT_type` — reference to base type or struct type DIE
+- `DW_AT_location` — DW_OP_fbreg offset (stack slot)
+- `DW_AT_decl_file` — source file index
+- `DW_AT_decl_line` — source line (DW_FORM_data2, 16-bit)
+- `DW_AT_decl_column` — source column (DW_FORM_data1, 8-bit)
+- `DW_AT_artificial` — 0 for user variables, 1 for compiler-generated temps
 
-Each function gets one `RUNTIME_FUNCTION` entry (12 bytes) in `.pdata`, all pointing to a single shared `UNWIND_INFO` in `.xdata` (because every Brocken function has an identical prologue on win64).
+### 7.4 Struct/Class Type DIEs
 
-### 7.5 `.eh_frame` (Linux ELF)
+When `class_info` is provided (from `$module->class_info`), `.debug_info`
+emits `DW_TAG_structure_type` DIEs with `DW_TAG_member` children:
 
-ELF-specific variant of DWARF call frame information. Uses "zR" augmentation for position-independent PC-relative FDE encoding. Survives `strip`.
-
-### 7.6 GDB Usage
-
-```bash
-# Linux
-perl brocken.pl --debug=1
-gdb -ex "break source.brocken:9" -ex "run" -ex "bt" ./brocken_out
-
-# Windows
-gdb -ex "break *0x140001000" -ex "run" -ex "bt" --args brocken_out.exe
+```
+DW_TAG_structure_type
+  DW_AT_name: "Point"
+  DW_TAG_member
+    DW_AT_name: "x"
+    DW_AT_type: → Int base type
+    DW_AT_data_member_location: 0
+  DW_TAG_member
+    DW_AT_name: "y"
+    DW_AT_type: → Int base type
+    DW_AT_data_member_location: 8
 ```
 
-### 7.7 Section Layout
+The `class_info` hash is produced by `Brocken::Katsuro::Lowerer` during class
+registration and attached to the IR `Module` via `set_class_info`.
 
-**PE (Windows) with debug:** `.text`, `.data`, `.idata`, `.debug_line`, `.debug_info`, `.debug_abbrev`, `.debug_frame`, `.debug_aranges`, `.debug_pubnames`, `.pdata`, `.xdata`
+### 7.5 Subprogram DIEs
 
-**ELF (Linux) with debug:** `.text`, `.data`, `.debug_line`, `.debug_info`, `.debug_abbrev`, `.debug_frame`, `.eh_frame`
+Every function (including `_BROCKEN_ENTRY`) gets a `DW_TAG_subprogram` with:
+- `DW_AT_name` — function name
+- `DW_AT_linkage_name` — same as name (no C++ mangling)
+- `DW_AT_low_pc` / `DW_AT_high_pc` — code range
+- `DW_AT_decl_file` — source file index
+
+### 7.6 Compile Unit DIE
+
+The root `DW_TAG_compile_unit` carries:
+- `DW_AT_producer` — `"Brocken v0.1"`
+- `DW_AT_language` — `DW_LANG_C` (13)
+- `DW_AT_name` — source file name
+- `DW_AT_comp_dir` — `"."`
+- `DW_AT_stmt_list` — offset to `.debug_line`
+- `DW_AT_low_pc` / `DW_AT_high_pc` — address range
+
+### 7.7 Addresses
+
+DWARF addresses are absolute virtual addresses (e.g., `0x140001000` for PE).
+The `$text_base` parameter adjusts for the platform's image base:
+- PE (Windows): `0x140001000`
+- ELF (Linux, static): `0x400000`
+- ELF (Linux, PIE) / Mach-O: `0`
+
+### 7.8 PE-Specific Details
+
+On Windows PE, GDB uses the COFF symbol table for breakpoint resolution by
+function name. Without COFF symbols, GDB can still list functions via
+`info functions` (which reads DWARF partial symbol tables) but cannot set
+breakpoints with `break <function>`. The PE linker's long section name string
+table (for `.debug_line`, `.debug_info`, etc.) shares the COFF string table
+location at the end of the file.
+
+### 7.9 GDB Usage
+
+```bash
+# Linux (break from DWARF works)
+gdb -readnow -ex "break source.brocken:9" -ex run -ex bt ./brocken_out
+
+# Windows (use address or info functions)
+gdb -readnow -ex "info functions" ./brocken_out.exe
+```
+
+### 7.10 Section Layout
+
+**PE (Windows) with debug:** `.text`, `.data`, `.idata`, `.reloc`,
+`.debug_line`, `.debug_info`, `.debug_abbrev`, `.debug_frame`,
+`.debug_aranges`, `.debug_names`, `.debug_str` plus PE `.pdata`/`.xdata`
+
+**ELF (Linux) with debug:** `.text`, `.data`, `.debug_line`, `.debug_info`,
+`.debug_abbrev`, `.debug_frame`, `.debug_aranges`, `.debug_names`, `.debug_str`
 
 ---
 
@@ -1276,10 +1366,15 @@ Using `wasmtime_fiber::Fiber` for cooperative isolation was considered but rejec
 | Frontend (Katsuro v0.1) — Lexer + Parser + AST + Compiler | — | ✅ |
 | Source location tracking (file/line/col) in AST + errors | — | ✅ |
 | Lexer filename in errors | — | ✅ |
+| Shift operators (`<<`/`>>`) | — | ✅ |
+| Struct types at IR level (`struct` kind on Type, struct GEP) | — | ✅ |
+| DWARF v5 debug info (line/col, variable DIEs, struct DIEs) | — | ✅ |
+| Per-instruction byte offset tracking in DWARF | — | ✅ |
+| GDB backtrace testing with DWARF | — | ✅ |
 | Channels (data + native lower) | Post-frontend | ⏸ |
 | Immix allocator + ICB expansion | Post-frontend | 📝 |
 | Perceus RC elision | After allocator | 📝 |
-| AST→Lindsay IR Lowerer | Next | ✅ |
+| AST→Lindsay IR Lowerer | — | ✅ |
 | Self-hosting bootstrap | Q4 2026 | 📝 |
 | Transferable objects | After allocator + RC | 📝 |
 | SIMD auto-vectorization | Future | 📝 |
