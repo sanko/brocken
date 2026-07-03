@@ -337,6 +337,47 @@ enabled.
         }
         $text_bytes = $text;
 
+        # .pdata section for ARM64 exception/unwind data (required on ARM64 Windows)
+        my $pdata_bytes = '';
+        my $has_pdata   = 0;
+        if ( $platform->is_arm64 ) {
+            my @pdata_entries;
+
+            # Entry stub at RVA 0x1000 (stp x29,x30,[sp,#-16]! / mov x29,sp / bl / ldp / uxtb / ret)
+            if ( $self->type eq 'exe' && length($entry_stub) > 0 ) {
+                push @pdata_entries, { rva => 0x1000, size => length($entry_stub) };
+            }
+            if ( ref $code_data eq 'ARRAY' ) {
+                for my $fd ( $code_data->@* ) {
+                    my $rva = 0x1000 + $entry_size + ( $func_offsets{ $fd->{name} } // 0 );
+                    my $uw  = $fd->{unwind} // {};
+                    push @pdata_entries,
+                        { rva => $rva, size => length( $fd->{bytes} ), frame_size => $uw->{frame_size}, num_saved_int => $uw->{num_saved_int} };
+                }
+            }
+            elsif ( length($text_raw) > 0 ) {
+                push @pdata_entries, { rva => 0x1000 + $entry_size, size => length($text_raw) };
+            }
+            for my $e (@pdata_entries) {
+                my $func_len = int( $e->{size} / 4 ) - 1;
+                my $is_entry = $e->{rva} == 0x1000;
+                my ( $cr, $frame_sz, $regi );
+                if ($is_entry) {
+                    $cr       = 2;
+                    $frame_sz = 1;
+                    $regi     = 0;
+                }
+                else {
+                    $cr       = 1;
+                    $frame_sz = ( $e->{frame_size} // 0 ) / 16;
+                    $regi     = $e->{num_saved_int} // 0;
+                }
+                my $packed = 1 | ( $func_len << 2 ) | ( $cr << 22 ) | ( $frame_sz << 24 ) | ( $regi << 29 );
+                $pdata_bytes .= pack( 'V V', $e->{rva}, $packed );
+            }
+            $has_pdata = length($pdata_bytes) > 0;
+        }
+
         # Layout sections
         my $brk_sym_size       = $self->brk_sym_size();
         my $has_brk_sym        = $brk_sym_size > 0;
@@ -363,6 +404,7 @@ enabled.
             + ( $has_exports ? 1 : 0 )
             + ( $has_idata   ? 1 : 0 )
             + $has_reloc
+            + $has_pdata
             + $num_debug_sections;
         sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die "Cannot open $output_file for writing: $!";
         binmode $fh;
@@ -445,6 +487,17 @@ enabled.
             0x42000040 );
         $sec_rva     += ( length($reloc_bytes) + 4095 ) & ~4095;
         $sec_raw_ptr += $sec_raw_reloc_size;
+        my $pdata_vaddr        = 0;
+        my $sec_raw_pdata_size = 0;
+
+        if ($has_pdata) {
+            $pdata_vaddr        = $sec_rva;
+            $sec_raw_pdata_size = ( length($pdata_bytes) + 511 ) & ~511;
+            $section_table .= pack( 'a8 V2 V2 V2 v2 V',
+                ".pdata\x00\x00", length($pdata_bytes), $sec_rva, $sec_raw_pdata_size, $sec_raw_ptr, 0, 0, 0, 0, 0x40000040 );
+            $sec_rva     += ( length($pdata_bytes) + 4095 ) & ~4095;
+            $sec_raw_ptr += $sec_raw_pdata_size;
+        }
 
         # Collect function names from code_data for COFF symbols
         my @func_names;
@@ -523,7 +576,13 @@ enabled.
         my $size_of_image = $sec_rva;
         my $size_of_code  = $sec_raw_code_size;
         my $init_data_size
-            = $sec_raw_data_size + $sec_raw_edata_size + $sec_raw_reloc_size + $init_debug_size + $sec_raw_brk_sym_size + $sec_raw_idata_size;
+            = $sec_raw_data_size
+            + $sec_raw_edata_size
+            + $sec_raw_reloc_size
+            + $init_debug_size
+            + $sec_raw_brk_sym_size
+            + $sec_raw_idata_size
+            + $sec_raw_pdata_size;
         my $os_ver     = 6;
         my $dll_chars  = $self->debug_level >= 5 ? 0x8140 : 0x8160;          # Clear DYNAMIC_BASE at debug >= 5
         my $opt_header = pack( 'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2',
@@ -531,7 +590,7 @@ enabled.
             $size_of_image, $size_of_headers, 0, 3, $dll_chars, 0x400000, 0x200000, 0x100000, 0x1000, 0, 16 );
 
         # Data directories (128 bytes = 16 entries x 8 bytes each):
-        #   [0]=export, [1]=import, [5]=reloc
+        #   [0]=export, [1]=import, [3]=pdata, [5]=reloc
         my $data_dirs = "\x00" x 128;
         if ($has_idata) {
             substr $data_dirs, 8,  4, pack( 'V', $idata_rva );
@@ -547,6 +606,10 @@ enabled.
         }
         substr $data_dirs, 40, 4, pack( 'V', $reloc_rva );
         substr $data_dirs, 44, 4, pack( 'V', length($reloc_bytes) );
+        if ($has_pdata) {
+            substr $data_dirs, 24, 4, pack( 'V', $pdata_vaddr );
+            substr $data_dirs, 28, 4, pack( 'V', length($pdata_bytes) );
+        }
         $opt_header .= $data_dirs;
         print $fh $dos_header, $dos_stub, $pe_signature, $file_header, $opt_header, $section_table;
         my $headers_len
@@ -576,6 +639,10 @@ enabled.
         if ($has_reloc) {
             print $fh $reloc_bytes;
             print $fh ( "\x00" x ( $sec_raw_reloc_size - length($reloc_bytes) ) );
+        }
+        if ($has_pdata) {
+            print $fh $pdata_bytes;
+            print $fh ( "\x00" x ( $sec_raw_pdata_size - length($pdata_bytes) ) );
         }
         if ($has_debug) {
             for my $name (@debug_sec_names) {

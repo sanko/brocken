@@ -167,8 +167,16 @@ class Brocken::Jenny::Codegen::ARM64 {
             my @used_callee = sort keys %callee_seen;
             my %alloca_map;
             my %source_map;
-            my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
-            push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
+            my ( $bytes, $func_fixups, $unwind_info ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
+            push @result,
+                {
+                name       => $fname,
+                bytes      => $bytes,
+                fixups     => $func_fixups,
+                alloca_map => \%alloca_map,
+                source_map => \%source_map,
+                unwind     => $unwind_info
+                };
         }
         if ($emit_init) {
             my $init_mf = $self->_build_fiber_init_mf;
@@ -209,8 +217,8 @@ class Brocken::Jenny::Codegen::ARM64 {
             $callee_seen{ $platform->fiber_reg } = 1;
         }
         my @used_callee = sort keys %callee_seen;
-        my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
-        return { name => $mf->name, bytes => $bytes, fixups => $func_fixups };
+        my ( $bytes, $func_fixups, $unwind_info ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        return { name => $mf->name, bytes => $bytes, fixups => $func_fixups, unwind => $unwind_info };
     }
 
     method _has_fiber_ops_mf($mf) {
@@ -1084,7 +1092,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                 substr $bytes, $fixup->{offset}, 4, pack( 'V', $inst );
             }
         }
-        return ( $bytes, \@func_fixups );
+        my %unwind_info = ( frame_size => $total_frame, num_saved_int => scalar( grep { !/^x(29|30)$/ } @to_save ), saves_lr => !$is_leaf, );
+        return ( $bytes, \@func_fixups, \%unwind_info );
     }
 
     method _compute_spill_frame( $mf, $stack_reg ) {
