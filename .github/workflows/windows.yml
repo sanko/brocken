@@ -31,6 +31,17 @@ jobs:
           Write-Output "PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE"
           Write-Output "PROCESSOR_ARCHITECTUREW6432=$env:PROCESSOR_ARCHITECTUREW6432"
         shell: pwsh
+      - name: Set env vars from tag
+        run: |
+          $envSettings = "${{ inputs.env_settings }}".Trim()
+          if ($envSettings -ne '') {
+            foreach ($pair in $envSettings -split ' ') {
+              if ($pair -eq '') { continue }
+              $key, $value = $pair -split '=', 2
+              Set-Item -Path "env:$key" -Value $value
+            }
+          }
+        shell: pwsh
       - name: Run tests
         run: |
           perl -V
@@ -59,6 +70,10 @@ name: windows module
 on:
   workflow_call:
     inputs:
+      env_settings:
+        default: ''
+        required: false
+        type: string
       flags:
         required: false
         type: string

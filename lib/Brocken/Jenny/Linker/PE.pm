@@ -340,7 +340,7 @@ enabled.
         # .pdata section for ARM64 exception/unwind data (required on ARM64 Windows)
         my $pdata_bytes = '';
         my $has_pdata   = 0;
-        if ( $platform->is_arm64 ) {
+        if ( $platform->is_arm64 && !$ENV{BROCKEN_SKIP_PDATA} ) {
             my @pdata_entries;
 
             # Entry stub at RVA 0x1000 (stp x29,x30,[sp,#-16]! / mov x29,sp / bl / ldp / uxtb / ret)

@@ -8,6 +8,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: dragonflybsd
@@ -24,6 +25,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: freebsd
@@ -39,6 +41,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: freebsd
@@ -54,6 +57,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkgman install gcc || sudo pkgman install gcc_x86
       host: ubuntu-latest
       os: haiku
@@ -69,6 +73,7 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04-arm
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
@@ -81,6 +86,7 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
@@ -93,6 +99,7 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: macos-15
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
@@ -105,6 +112,7 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: macos-15-intel
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
@@ -118,6 +126,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo mport install gcc || true
       host: ubuntu-latest
       os: midnightbsd
@@ -133,6 +142,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: which gcc 2>/dev/null || sudo pkgin -y install gcc || true
       host: ubuntu-latest
       os: netbsd
@@ -148,6 +158,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: which gcc 2>/dev/null || sudo pkgin -y install gcc || true
       host: ubuntu-latest
       os: netbsd
@@ -164,6 +175,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkg install developer/gcc --accept || sudo pkg install developer/gcc11 --accept || sudo pkg install gcc --accept || sudo pkg install developer/gcc49 --accept || true
       host: ubuntu-latest
       os: omnios
@@ -179,6 +191,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: which gcc 2>/dev/null || true
       host: ubuntu-latest
       os: openbsd
@@ -195,6 +208,7 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: which gcc 2>/dev/null || true
       host: ubuntu-latest
       os: openbsd
@@ -359,6 +373,7 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04-riscv
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
@@ -367,6 +382,7 @@ jobs:
   setup:
     name: Generate Testing Matrix
     outputs:
+      env_settings: '${{ steps.parse_tags.outputs.env_settings }}'
       matrix: '${{ steps.matrix.outputs.matrix }}'
       runner: '${{ steps.parse_tags.outputs.runner }}'
       test_files: '${{ steps.parse_tags.outputs.test_files }}'
@@ -374,6 +390,7 @@ jobs:
     steps:
       - env:
           COMMIT_MSG: "${{ github.event.head_commit.message || github.event.pull_request.body || '' }}"
+          DISPATCH_ENV: '${{ github.event.inputs.env }}'
           DISPATCH_RUNNER: '${{ github.event.inputs.runner }}'
           DISPATCH_TEST: '${{ github.event.inputs.test_files }}'
         id: parse_tags
@@ -428,11 +445,14 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "runner=$(expand_runner "${DISPATCH_RUNNER:-all}")" >> "$GITHUB_OUTPUT"
             echo "test_files=${DISPATCH_TEST:-}" >> "$GITHUB_OUTPUT"
+            echo "env_settings=${DISPATCH_ENV:-}" >> "$GITHUB_OUTPUT"
           else
             RAW_RUNNER=$(echo "$COMMIT_MSG" | grep -oP '\[runner:\K[^\]]+' || echo "all")
             TEST=$(echo "$COMMIT_MSG" | grep -oP '\[test:\K[^\]]+' || echo "")
+            ENV_SETTINGS=$(echo "$COMMIT_MSG" | grep -oP '\[env:\K[^\]]+' | tr '\n' ' ')
             echo "runner=$(expand_runner "$RAW_RUNNER")" >> "$GITHUB_OUTPUT"
             echo "test_files=$TEST" >> "$GITHUB_OUTPUT"
+            echo "env_settings=${ENV_SETTINGS% }" >> "$GITHUB_OUTPUT"
           fi
       - env:
           DATA: |
@@ -449,6 +469,7 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
@@ -461,6 +482,7 @@ jobs:
       - setup
     uses: ./.github/workflows/windows.yml
     with:
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: -Dusethreads
       os: windows-11-arm
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
@@ -473,6 +495,7 @@ jobs:
       - setup
     uses: ./.github/workflows/windows.yml
     with:
+      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: -Dusethreads
       os: windows-2022
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
@@ -486,6 +509,10 @@ on:
     - cron: 42 5 * * 0
   workflow_dispatch:
     inputs:
+      env:
+        default: ''
+        description: 'Env vars for test run (space-separated KEY=VALUE, e.g. "BROCKEN_SKIP_PDATA=1"). See [env:...] commit tag.'
+        type: string
       runner:
         default: all
         description: 'Runner(s) to execute (comma-separated, e.g. "freebsd,linux" or "openbsd#arm,linux#riscv"). See [runner:...] commit tag docs.'
