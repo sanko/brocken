@@ -740,11 +740,21 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_icmp( 'slt', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_lt';
         return $builder->build_icmp( 'eq', $args[0], $args[1], undef, $line, $col )                    if $name eq 'ptr_cmp_eq';
         return $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $args[0], undef, $line, $col ) if $name eq 'load_i64';
-        $builder->build_store( $args[1], $args[0], $line, $col );
-        return undef                                                                                   if $name eq 'store_i64';
+        if ( $name eq 'store_i64' ) {
+            $builder->build_store( $args[1], $args[0], $line, $col );
+            return undef;
+        }
         return $builder->build_load( Brocken::Lindsay::IR::Type::i32(), $args[0], undef, $line, $col ) if $name eq 'load_i32';
-        $builder->build_store( $args[1], $args[0], $line, $col );
-        return undef if $name eq 'store_i32';
+        if ( $name eq 'store_i32' ) {
+            $builder->build_store( $args[1], $args[0], $line, $col );
+            return undef;
+        }
+        return $builder->build_and( $args[0], $args[1], undef, $line, $col )  if $name eq 'band';
+        return $builder->build_or( $args[0], $args[1], undef, $line, $col )   if $name eq 'bor';
+        return $builder->build_xor( $args[0], $args[1], undef, $line, $col )  if $name eq 'bxor';
+        return $builder->build_shl( $args[0], $args[1], undef, $line, $col )  if $name eq 'shl';
+        return $builder->build_lshr( $args[0], $args[1], undef, $line, $col ) if $name eq 'shr';
+        return $builder->build_syscall( \@args, undef, $line, $col )          if $name eq 'syscall';
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }
 

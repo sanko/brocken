@@ -399,4 +399,29 @@ BROCKEN
         unlink $file;
     }
 };
+subtest 'Bitwise intrinsics band, bor, bxor, shl, shr' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+    my $c       = Brocken::Compiler->new;
+SKIP: {
+        skip 'Native executable test requires native platform' unless $host->is_native;
+        my $module = $c->compile(<<'BROCKEN');
+my i64 $a = Brocken::band(15, 7);
+my i64 $b = Brocken::bor(8, 3);
+my i64 $c = Brocken::bxor(15, 7);
+my i64 $d = Brocken::shl(1, 3);
+my i64 $e = Brocken::shr(64, 3);
+return $a + $b + $c + $d + $e;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/e2e_bitwise' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+
+        # band(15, 7)=7, bor(8, 3)=11, bxor(15, 7)=8,
+        # shl(1, 3)=8, shr(64, 3)=8  => 7+11+8+8+8=42
+        is( $? >> 8, 42, 'bitwise intrinsics produce correct results' );
+        unlink $file;
+    }
+};
 done_testing;

@@ -37,29 +37,29 @@ SKIP: {
         sysopen my $pfh, $probe_src, O_WRONLY | O_CREAT | O_TRUNC or die $!;
         print $pfh "int main(void) { return 0; }\n";
         close $pfh;
-
         my @cc_candidates = (
-            [ 'aarch64-w64-mingw32-gcc',       [] ],
-            [ 'aarch64-w64-mingw32-gcc-14',    [] ],
-            [ 'aarch64-w64-mingw32-gcc-13',    [] ],
-            [ 'aarch64-w64-mingw32-gcc-12',    [] ],
-            [ 'aarch64-w64-mingw32-gcc-11',    [] ],
-            [ 'gcc',                           [] ],
-            [ 'x86_64-w64-mingw32-gcc',        [] ],
-            [ 'clang',                         [ '-target', 'aarch64-windows-msvc' ] ],
-            [ 'clang',                         [] ],
+            [ 'aarch64-w64-mingw32-gcc',    [] ],
+            [ 'aarch64-w64-mingw32-gcc-14', [] ],
+            [ 'aarch64-w64-mingw32-gcc-13', [] ],
+            [ 'aarch64-w64-mingw32-gcc-12', [] ],
+            [ 'aarch64-w64-mingw32-gcc-11', [] ],
+            [ 'gcc',                        [] ],
+            [ 'x86_64-w64-mingw32-gcc',     [] ],
+            [ 'clang',                      [ '-target', 'aarch64-windows-msvc' ] ],
+            [ 'clang',                      [] ],
         );
         my $cc;
-        CAND: for my $cand (@cc_candidates) {
+    CAND: for my $cand (@cc_candidates) {
             my ( $prog, $args ) = @$cand;
             next unless can_run($prog);
             system( $prog, '--version' );
-            next if $?;
+            next              if $?;
             unlink $probe_exe if -e $probe_exe;
             system( $prog, @$args, '-o', $probe_exe, $probe_src );
             next if $? || !-e $probe_exe;
             my $info = _binary_info($probe_exe);
             diag "$prog @$args produced: $info";
+
             if ( $info =~ /machine=ARM64/ ) {
                 $cc = "$prog @$args";
                 last CAND;

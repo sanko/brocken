@@ -2425,6 +2425,20 @@ class Brocken::Jenny::Lowerer::Wasm {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'isolate_join result' ) );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Syscall') ) {
+                    if ( defined $inst->name ) {
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                comment  => 'syscall stub (Wasm cannot raw syscall)'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'syscall stub' ) );
+                    }
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanCreate') ) {
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(

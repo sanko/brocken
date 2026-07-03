@@ -479,6 +479,11 @@ Known intrinsics:
 | `Brocken::store_i64(ptr, val)` | `store i64` |
 | `Brocken::load_i32(ptr)` | `load i32` |
 | `Brocken::store_i32(ptr, val)` | `store i32` |
+| `Brocken::band(a, b)` | `and` (bitwise AND) |
+| `Brocken::bor(a, b)` | `or` (bitwise OR) |
+| `Brocken::bxor(a, b)` | `xor` (bitwise XOR) |
+| `Brocken::shl(a, b)` | `shl` (shift left) |
+| `Brocken::shr(a, b)` | `lshr` (logical shift right) |
 | `Brocken::syscall(n, ...)` | syscall instruction |
 
 ### 2.8 Built-in Functions

@@ -264,6 +264,19 @@ class Brocken::Lindsay::IR::Builder {
         return $insert_block->append_inst($inst);
     }
 
+    method build_syscall( $args, $name = undef, $line = 0, $col = 0 ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::Syscall->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::i64(),
+            opcode   => 'syscall',
+            operands => $args,
+            parent   => $insert_block,
+            line     => $line,
+            col      => $col,
+        );
+        return $insert_block->append_inst($inst);
+    }
+
     method build_box( $val, $name = undef, $line = 0, $col = 0 ) {
         my $inst = Brocken::Lindsay::IR::Instruction::Box->new(
             name     => $name // $self->_next_id(),
