@@ -96,7 +96,7 @@ BROCKEN
 
 sub _gdb_works ($binary) {
     my $out = `gdb -readnow -batch -ex "file $binary" -ex quit 2>&1`;
-    if ($out =~ /No such file/i || $out =~ /not recognized/i || $out =~ /error/i) {
+    if ( $out =~ /No such file/i || $out =~ /not recognized/i || $out =~ /error/i ) {
         diag "GDB cannot load $binary:\n$out";
         return 0;
     }
@@ -109,7 +109,7 @@ sub _binary_info ($path) {
     binmode $fh;
     read $fh, my $mz, 2;
     return "size=$size (read error)" unless defined $mz;
-    return "size=$size no MZ magic" unless $mz eq "MZ";
+    return "size=$size no MZ magic"  unless $mz eq "MZ";
     seek $fh, 0x3C, 0;
     read $fh, my $pe_off_buf, 2;
     my $pe_off = unpack 'S<', $pe_off_buf;
@@ -244,6 +244,7 @@ BROCKEN
             $l->linker->write_executable( $file, $funcs, $host );
             ok( -e $file, "level $lv: binary written" );
             system $file;
+
             if ( $? >> 8 == 255 ) {
                 my $info = _binary_info($file);
                 diag "Spawn failed for '$file': \$!=$! \$^E=$^E $info";
