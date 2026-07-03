@@ -57,6 +57,9 @@ class Brocken::Jenny::Codegen::Wasm {
                 push @param_valtypes, $self->_wasm_valtype( $p->type );
             }
             my $locals_size = length( $result->{locals} );
+            for my $idx ( keys %source_map ) {
+                $source_map{$idx} += $locals_size;
+            }
             my @adjusted_fixups;
             for my $fx ( $fixups->@* ) {
                 push @adjusted_fixups, { %$fx, offset => $fx->{offset} + $locals_size };
@@ -261,33 +264,25 @@ class Brocken::Jenny::Codegen::Wasm {
             }
         }
 
-        # Open nested blocks (outermost first).  br N targets N levels out;
-        # after the matching `end`, control continues.  So each block's
-        # body must come *after* that block's `end`, not before it.
+        # Assemble final function body and track block positions for source_map in one pass.
+        # Block layout: outermost-first openers, entry body, then innermost-first closers.
+        my @block_start;
+        my $pos = 0;
         for my $bi ( 1 .. $num_non_entry ) {
             $bytes .= pack( 'C', 0x02 ) . pack( 'C', 0x40 );
+            $pos += 2;
         }
+        $block_start[0] = $pos;
         $bytes .= $entry_bytes;
-
-        # Close innermost first, emitting each block's code *after* its end
+        $pos += length($entry_bytes);
         for my $bi ( reverse 1 .. $num_non_entry ) {
             $bytes .= pack( 'C', 0x0B );
+            $pos += 1;
+            $block_start[$bi] = $pos;
             $bytes .= $non_entry_bytes[ $bi - 1 ];
+            $pos += length( $non_entry_bytes[ $bi - 1 ] );
         }
         if ($source_map) {
-            my @block_sizes;
-            my @block_start;
-            $block_sizes[0] = length($entry_bytes);
-            for my $bi ( 1 .. $num_non_entry ) {
-                $block_sizes[$bi] = length( $non_entry_bytes[ $bi - 1 ] );
-            }
-            my $pos = $num_non_entry * 2;
-            $block_start[0] = $pos;
-            $pos += $block_sizes[0];
-            for my $bi ( reverse 1 .. $num_non_entry ) {
-                $block_start[$bi] = $pos + 1;
-                $pos += 1 + $block_sizes[$bi];
-            }
             for my $idx ( keys %raw_offsets ) {
                 my ( $bi, $buf_off ) = $raw_offsets{$idx}->@*;
                 $source_map->{$idx} = $block_start[$bi] + $buf_off;
@@ -388,7 +383,7 @@ class Brocken::Jenny::Codegen::Wasm {
                 for my $inst ( $block->instructions->@* ) {
                     if ( $inst->line ) {
                         my $offset = defined( $source_map->{$inst_idx} ) ? $fstart + $source_map->{$inst_idx} : $fstart;
-                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col };
+                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col, file => $source_file };
                     }
                     $inst_idx++;
                 }

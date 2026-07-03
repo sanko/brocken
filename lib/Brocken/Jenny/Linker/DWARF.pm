@@ -226,9 +226,20 @@ absolute-address FDE encoding. Only emitted when C<eh_frame_base> is non-zero.
         my $program   = '';
         my $prev_line = 1;
         my $prev_addr = $text_base;
+        my $sf        = $self->source_files // [$source_file];
+        my %file_idx  = map { $sf->[$_] => $_ + 1 } 0 .. $#$sf;
+        my $prev_file = '';
         for my $e (@entries) {
             my $addr = $text_base + $e->{offset};
             my $line = $e->{line};
+            my $file = $e->{file} // $source_file;
+            my $fidx = $file_idx{$file} // 1;
+
+            # Emit DW_LNS_set_file when file changes
+            if ( $file ne $prev_file ) {
+                $program .= "\x04" . $self->_uleb($fidx);
+                $prev_file = $file;
+            }
 
             # Set Address (Opcode 0x02)
             $program .= "\x00" . $self->_uleb(9) . "\x02" . pack( 'Q<', $addr );
@@ -257,7 +268,7 @@ absolute-address FDE encoding. Only emitted when C<eh_frame_base> is non-zero.
         $prologue .= $self->_uleb(1) . ".\0";
 
         # File entry format count = 2 (DW_LNCT_path=1/string, DW_LNCT_directory_index=2/udata)
-        my $sf = $self->source_files // [$source_file];
+        $sf = $self->source_files // [$source_file];
         $prologue .= pack( 'C', 2 );
         $prologue .= $self->_uleb(1) . $self->_uleb(0x08);
         $prologue .= $self->_uleb(2) . $self->_uleb(0x0F);

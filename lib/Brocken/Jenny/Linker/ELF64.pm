@@ -41,8 +41,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $layout->add_section( '.got',     512,        6 );    # RW
 
         # Non-alloc symbol and string tables for static linking/debugging (nm)
-        $layout->add_section( '.symtab',   4096, 0 );
-        $layout->add_section( '.strtab',   4096, 0 );
+        $layout->add_section( '.symtab',       4096, 0 );
+        $layout->add_section( '.strtab',       4096, 0 );
         $layout->add_section( '.eh_frame',     4096, 0 );
         $layout->add_section( '.eh_frame_hdr', 4096, 0 );
         #
@@ -1128,10 +1128,12 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             push @phdrs,
                 pack(
                 'L< L< Q< Q< Q< Q< Q< Q<',
-                0x6474e550, 4, $eh_frame_hdr_sec->{off},
+                0x6474e550, 4,
+                $eh_frame_hdr_sec->{off},
                 $base + $eh_frame_hdr_sec->{rva},
                 $base + $eh_frame_hdr_sec->{rva},
-                $eh_frame_hdr_sec->{size}, $eh_frame_hdr_sec->{size}, 4
+                $eh_frame_hdr_sec->{size},
+                $eh_frame_hdr_sec->{size}, 4
                 );
         }
         if ( $platform->is_freebsd ) {
