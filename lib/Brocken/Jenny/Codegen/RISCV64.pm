@@ -1118,7 +1118,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 for my $inst ( $block->instructions->@* ) {
                     if ( $inst->line ) {
                         my $offset = defined( $source_map->{$inst_idx} ) ? $fstart + $source_map->{$inst_idx} : $fstart;
-                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col };
+                        push @source_locs, { offset => $offset, line => $inst->line, col => $inst->col, file => $source_file };
                     }
                     $inst_idx++;
                 }

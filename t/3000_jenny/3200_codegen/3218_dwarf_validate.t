@@ -140,49 +140,35 @@ BROCKEN
 };
 subtest '.eh_frame_hdr structure validation' => sub {
     my $dwarf = Brocken::Jenny::Linker::DWARF->new(
-        source_locs  => [
-            { offset => 0,  line => 1 },
-            { offset => 12, line => 2 },
-        ],
+        source_locs   => [ { offset => 0, line => 1 }, { offset => 12, line => 2 }, ],
         text_base     => 0x400000,
         source_file   => 'test_eh.brocken',
-        func_ranges   => [
-            { name => 'main',    start => 0,  end => 24 },
-            { name => 'helper',  start => 32, end => 64 },
-        ],
+        func_ranges   => [ { name => 'main', start => 0, end => 24 }, { name => 'helper', start => 32, end => 64 }, ],
         debug         => 3,
         eh_frame_base => 1,
         arch          => 'x64',
     );
     ok( 1, 'DWARF object created with eh_frame_base set' );
-
     my $sections = $dwarf->build_all;
     ok( exists $sections->{'.eh_frame_hdr'}, '.eh_frame_hdr present when eh_frame_base is non-zero' );
     ok( exists $sections->{'.eh_frame'},     '.eh_frame present when eh_frame_base is non-zero' );
-
     my $hdr = $sections->{'.eh_frame_hdr'};
     ok( length($hdr) > 16, '.eh_frame_hdr has size > 16' );
-
     my ( $ver, $ptr_enc, $cnt_enc, $tbl_enc ) = unpack 'C4', substr( $hdr, 0, 4 );
     is( $ver,     1,    'version == 1' );
     is( $ptr_enc, 0x00, 'eh_frame_ptr_enc == DW_EH_PE_absptr' );
     is( $cnt_enc, 0x03, 'fde_count_enc == DW_EH_PE_udata4' );
     is( $tbl_enc, 0x00, 'table_enc == DW_EH_PE_absptr' );
-
     my $eh_frame_ptr = unpack 'Q<', substr( $hdr, 4, 8 );
     is( $eh_frame_ptr, 1, 'eh_frame_ptr == eh_frame_base' );
-
     my $fde_count = unpack 'L<', substr( $hdr, 12, 4 );
     is( $fde_count, 2, 'FDE count == number of func_ranges' );
-
-    my $entry_size  = 16;
+    my $entry_size     = 16;
     my $total_expected = 16 + $fde_count * $entry_size;
     is( length($hdr), $total_expected, 'total size == header(16) + N*16 entries' );
-
     my ( $loc0, $fde0 ) = unpack 'Q< Q<', substr( $hdr, 16, $entry_size );
     is( $loc0, 0x400000, 'first entry initial_location == text_base + fn[0].start' );
     cmp_ok( $fde0, '>', 1, 'first entry fde_addr > eh_frame_base' );
-
     my ( $loc1, $fde1 ) = unpack 'Q< Q<', substr( $hdr, 16 + $entry_size, $entry_size );
     is( $loc1, 0x400020, 'second entry initial_location == text_base + fn[1].start' );
     cmp_ok( $loc0, '<', $loc1, 'entries sorted by initial_location' );
@@ -190,16 +176,71 @@ subtest '.eh_frame_hdr structure validation' => sub {
 };
 subtest '.eh_frame_hdr absent when eh_frame_base is 0' => sub {
     my $dwarf = Brocken::Jenny::Linker::DWARF->new(
-        source_locs  => [ { offset => 0, line => 1 } ],
-        text_base    => 0x400000,
-        source_file  => 'test_eh.brocken',
-        func_ranges  => [ { name => 'main', start => 0, end => 8 } ],
-        debug        => 3,
+        source_locs   => [ { offset => 0, line => 1 } ],
+        text_base     => 0x400000,
+        source_file   => 'test_eh.brocken',
+        func_ranges   => [ { name => 'main', start => 0, end => 8 } ],
+        debug         => 3,
         eh_frame_base => 0,
-        arch         => 'x64',
+        arch          => 'x64',
     );
     my $sections = $dwarf->build_all;
     ok( !exists $sections->{'.eh_frame_hdr'}, '.eh_frame_hdr absent when eh_frame_base is 0' );
     ok( !exists $sections->{'.eh_frame'},     '.eh_frame absent when eh_frame_base is 0' );
+};
+subtest 'Multi-file line program emits DW_LNS_set_file' => sub {
+    my $dwarf = Brocken::Jenny::Linker::DWARF->new(
+        source_locs => [
+            { offset => 0,  line => 1, file => 'a.brocken' },
+            { offset => 12, line => 2, file => 'a.brocken' },
+            { offset => 24, line => 1, file => 'b.brocken' },
+            { offset => 36, line => 2, file => 'b.brocken' },
+        ],
+        text_base    => 0x400000,
+        source_file  => 'a.brocken',
+        source_files => [ 'a.brocken', 'b.brocken' ],
+        func_ranges  => [
+            { name => 'fn_a', start => 0,  end => 20, source_file => 'a.brocken' },
+            { name => 'fn_b', start => 24, end => 48, source_file => 'b.brocken' },
+        ],
+        class_info => {},
+        arch       => 'x86_64',
+        platform   => 'linux',
+        debug      => 5,
+    );
+    my $sections = $dwarf->build_all;
+    ok( exists $sections->{'.debug_line'}, '.debug_line section present with multiple files' );
+    my $line_data     = $sections->{'.debug_line'};
+    my $prologue_len  = unpack( 'L<', substr( $line_data, 8, 4 ) );    # offset 8 = unit_length(4) + version(2) + addr_size(1) + seg_sel_size(1)
+    my $program_start = 12 + $prologue_len;                            # 12 = offset after prologue_length field
+    my $program       = substr( $line_data, $program_start );
+    my @set_file_ops;
+    my $pos = 0;
+
+    while ( $pos < length($program) ) {
+        my $byte = ord( substr( $program, $pos, 1 ) );
+        last if $byte == 0x00 && $pos + 1 < length($program) && ord( substr( $program, $pos + 1, 1 ) ) == 1;
+        if ( $byte == 0x00 ) {
+            last if $pos + 10 > length($program);
+            $pos += 1 + 1 + 9;    # extended op: len(1) + opcode(1) + addr(8)
+        }
+        elsif ( $byte == 0x04 ) {
+            push @set_file_ops, $pos;
+            $pos += 2;            # opcode(1) + index(1, small)
+        }
+        elsif ( $byte == 0x03 ) {
+            $pos += 1;
+            while ( $pos < length($program) && ( ord( substr( $program, $pos, 1 ) ) & 0x80 ) ) { $pos++ }
+            $pos++;
+        }
+        elsif ( $byte == 0x01 ) { $pos++ }
+        elsif ( $byte == 0x02 ) { $pos += 1 + 1 + 9 }
+        else                    { $pos++ }
+    }
+    cmp_ok( scalar @set_file_ops, '>=', 2, 'At least two DW_LNS_set_file ops: a.brocken(1) and b.brocken(2)' );
+    my $fidx1 = ord( substr( $program, $set_file_ops[0] + 1, 1 ) );
+    my $fidx2 = ord( substr( $program, $set_file_ops[1] + 1, 1 ) );
+    is( $fidx1, 1, 'First set_file = file index 1 (a.brocken)' );
+    is( $fidx2, 2, 'Second set_file = file index 2 (b.brocken)' );
 };
 done_testing;
