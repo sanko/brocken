@@ -203,9 +203,10 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [ ] Wire `say`/`print` to `.rodata` strings (replace alloca+store)
 
 ### Phase D: Struct Types (IR level)
-- [ ] Add structural type to IR: `Type::struct([field_types...], [field_names...])`
-- [ ] Extend GEP for struct field access (byte offset from struct layout)
-- [ ] Lower field access to struct-aware GEP
+- [x] Add structural type to IR: `Type::struct([field_types...], [field_names...])`
+- [x] Extend GEP for struct field access (byte offset from struct layout) via `struct_field_idx` on GetElementPtr
+- [x] Lower field access to struct-aware GEP: `build_struct_gep` in Builder; all field-access methods in Lowerer use it
+- [x] Update all 4 codegen lowerers (X86_64, ARM64, RISCV64, Wasm) to handle struct-typed GEP
 
 ### Phase E: Signedness in Binop Lowering
 - [x] Default signedness for `int` type (signed i64; same for `Int`)
@@ -213,4 +214,97 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
   - `/` → `div` (signed) or `udiv` (unsigned)
   - `%` → `rem` (signed) or `urem` (unsigned)
   - `<`/`>`/`<=`/`>=` → signed predicates (`slt`/`sgt`/`sle`/`sge`) or unsigned (`ult`/`ugt`/`ule`/`uge`)
-- [ ] Add `<<`/`>>` shift operators to parser + lexer; `>>` → `ashr` (signed) or `lshr` (unsigned)
+- [x] Add `<<`/`>>` shift operators to parser + lexer; `>>` → `ashr` (signed) or `lshr` (unsigned)
+
+## Debug Info / DWARF Gaps
+
+### What's Implemented
+- [x] DWARF v5 sections: `.debug_line`, `.debug_info`, `.debug_abbrev`, `.debug_frame`, `.debug_aranges`, `.debug_names`, `.debug_str`, `.eh_frame`, `.eh_frame_hdr`
+- [x] Per-instruction byte offset tracking (`ir_inst_idx` → `source_map`)
+- [x] Per-function `DW_AT_decl_file` attribute
+- [x] Variable/parameter DIEs with name, type (`DW_AT_type` ref4), location (`DW_AT_location` exprloc `DW_OP_fbreg`), decl_line, decl_column, artificial
+- [x] Struct type DIEs (`DW_TAG_structure_type` + `DW_TAG_member`) from `class_info`
+- [x] Line/col on IR instructions (passed through `build_*` methods)
+- [x] GDB backtrace end-to-end test (PE, `-readnow`)
+- [x] All 4 backends (X86_64, ARM64, RISCV64, Wasm) with consistent DWARF output
+- [x] Programmatic binary-structure validation test (`3218_dwarf_validate.t`)
+- [x] Debug levels (0–5) controlling which DWARF sections are emitted
+- [x] `DW_AT_producer` (`"Brocken v0.1"`) and `DW_AT_comp_dir` on compile_unit DIE
+- [x] `DW_AT_linkage_name` on subprogram DIEs (same as function name)
+- [x] `DW_AT_decl_line` (data2) and `DW_AT_decl_column` (data1) on variable/param DIEs
+- [x] `DW_AT_artificial` (data1) on variable/param DIEs
+- [x] `.eh_frame_hdr` generation with `DW_EH_PE_absptr` encoding (empty when `eh_frame_base` is 0)
+- [x] `PT_GNU_EH_FRAME` program header pointing to `.eh_frame_hdr`
+
+### Gap 9: No split DWARF / type units / DWARF compression
+**Description:** All debug data is emitted inline in the executable. No `.debug_types` (type units), `.debug_cu_index`, or DWARF compression (`.zdebug_*`). This increases binary size for projects with many types or large source files.
+**Impact:** Future optimization. Not relevant for current v0.1 subset.
+**Priority:** Future
+**Dependencies:** Would require linker changes (section name mapping for compressed sections) and structural changes to DWARF.pm to emit type units separately.
+
+### Gap 10: Wasm source_map translation is fragile [x] Fixed
+**Description:** The Wasm encoder records raw per-block offsets during encoding, but the flat `$bytes` buffer includes block headers (`0x02 0x40`), markers, and `0x0B` terminators that shift offsets. The translation in `build_debug_data` accounts for these, but the computation was complex and may not survive changes to Wasm block structure (e.g., adding new branch types).
+**Status:** Fixed. The block_start computation is now inline with the assembly phase (tracks `$pos` during byte emission) instead of a separate post-phase calculation. A locals_size offset bug was also fixed (source_map offsets in `emit_functions` now include the locals prefix length so they align with the blob's `bytes` field). A comprehensive test (`3219_wasm_debug.t`) validates source_map offsets are within function byte range and monotonically increasing.
+**Impact:** Low. Test provides regression coverage against block structure changes.
+**Priority:** Low
+**Dependencies:** Tied to Wasm encoder's block structure. Changing Wasm's structured control flow would require updating the inline offset tracking.
+
+### Gap 11: Runtime functions share user source file for `DW_AT_decl_file`
+**Description:** All functions (user code + runtime helpers like `Brocken::Runtime::_init`) currently get `source_file => $source_file` in `build_debug_data`, so `DW_AT_decl_file` points to the user's source file for everything. Runtime functions should ideally reference a different source file (e.g., `core.brocken` or `<runtime>`).
+**Impact:** Low. GDB will attribute runtime functions to the user's source file. Cosmetic for backtraces that include runtime frames.
+**Priority:** Low
+**Dependencies:** Need to identify runtime functions by name (e.g., prefix `Brocken::Runtime::`) and assign them a different source file. The infrastructure (per-function `source_file` in func_ranges, `source_files` array in DWARF constructor) is already in place — just need the distinguishing logic in each backend's `build_debug_data`.
+
+### Gap 12: All source_locs use implicit file index 0 [x] Fixed
+**Description:** The line number program entries (source_locs) don't carry a file index. All source locations implicitly refer to the first file in the file table (index 0 → DWARF file index 1). If we ever have multiple source files contributing to one compilation unit, line entries can't distinguish them.
+**Status:** Fixed. Added `file` field to source_locs entries in all 4 codegen backends. `build_debug_line` emits `DW_LNS_set_file` (opcode 0x04) when the file changes between consecutive entries, using a filename-to-index mapping built from the `source_files` list. A validation subtest in `3218_dwarf_validate.t` verifies multi-file line programs emit (0x04) with the correct file index. Entries without a `file` field default to `$source_file`.
+**Impact:** Low. Enables multiple source files per compilation unit with correct line attribution.
+**Priority:** Low
+**Dependencies:** None. `source_files` / `file_idx` infrastructure was already in place.
+
+### Gap 13: No GDB JIT interface for runtime-compiled (JIT) code
+**Description:** Brocken supports loading new source at runtime (JIT compilation), but there is no mechanism to inform the debugger about the new code. GDB will not know about JIT'd functions, cannot set breakpoints in them, and backtraces through them will be opaque (no source lines, no variables).
+
+The GDB JIT interface requires:
+1. A `__jit_debug_register_code()` function — a no-op that acts as a GDB breakpoint target. GDB sets a breakpoint here and catches SIGTRAP when new code is registered.
+2. A global `__jit_debug_descriptor` symbol of type `struct jit_descriptor`:
+   ```c
+   struct jit_code_entry {
+       struct jit_code_entry *next_entry;
+       struct jit_code_entry *prev_entry;
+       const char *symfile_addr;   // pointer to in-memory ELF/DWARF image
+       uint64_t    symfile_size;   // size of the image
+   };
+   struct jit_descriptor {
+       uint32_t version;           // must be 1
+       uint32_t action_flag;       // 0 = register, 1 = unregister
+       struct jit_code_entry *relevant_entry;
+       struct jit_code_entry *first_entry;
+   };
+   ```
+3. The in-memory ELF image (`symfile_addr`) must be a valid ELF that GDB's BFD loader can parse. At minimum it needs:
+   - ELF header (e_hdr) with correct e_machine, e_shoff pointing to section headers
+   - At least one `.debug_info` section with valid DWARF CU pointing to the JIT code's PC range
+   - `.debug_abbrev`, `.debug_line` sections referenced by the CU
+   - Section header string table (`.shstrtab`) so GDB can find sections by name
+   - `sh_size` must be actual data length (not padded allocation size) — see Gap 3 fix
+   - `e_shoff` aligned to `e_shentsize` (64 bytes for ELF64) — see Gap 3 fix
+4. Thread safety: the descriptor linked list must be updated under a lock (or atomically) since multiple threads may JIT simultaneously
+5. CIE/FDE in `.eh_frame` or `.debug_frame` must use absolute addresses (`DW_EH_PE_absptr`) since relocations are not available at runtime — our current `.eh_frame_hdr` already uses absptr encoding
+
+**Implementation plan:**
+- Add a runtime helper function `__jit_debug_register_code()` (no-op, called by GDB breakpoint)
+- Add a runtime global `__jit_descriptor` (initialized at program start)
+- Add a `Brocken::Runtime::jit_register(elf_data)` function that:
+  a. Allocates a `struct jit_code_entry`
+  b. Appends it to the descriptor linked list
+  c. Sets `action_flag = 0` (register)
+  d. Sets `relevant_entry` to the new entry
+  e. Calls `__jit_debug_register_code()`
+- Modify `Brocken::Jenny::Linker::ELF64` (or add a new method) to produce a minimal in-memory ELF image containing only the DWARF sections for a given JIT unit, using `build_debug_data` output. This ELF image does NOT need a text section — GDB uses PC ranges from `.debug_aranges` / `DW_AT_low_pc`/`high_pc` to map addresses.
+- The ELF image can be as small as the DWARF data plus minimal ELF/section headers (~4 KB typical for a small function)
+- Test: create a minimal JIT ELF, feed it to GDB's `add-symbol-file` or the JIT interface, verify GDB can set breakpoints and backtrace through JIT'd code
+- **Not required initially**: `.eh_frame` in the JIT ELF (runtime unwinding through JIT frames). `.debug_frame` is sufficient for GDB's `bt` command.
+
+**Priority:** Medium (enables interactive debugging of JIT code)
+**Dependencies:** All DWARF sections already JIT-ready (parameterized `text_base`, absolute encoding, proper section sizes). Needs a new ELF64 convenience method to wrap DWARF sections in a minimal in-memory ELF, plus the runtime glue (descriptor + registration function).

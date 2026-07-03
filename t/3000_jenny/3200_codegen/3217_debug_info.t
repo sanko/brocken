@@ -258,8 +258,8 @@ BROCKEN
     }
 };
 subtest 'COFF symbols and ASLR at debug level 5 on PE' => sub {
-note( `gdb --version`);
-note( `gdb --help`);
+    note(`gdb --version`);
+    note(`gdb --help`);
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
 SKIP: {

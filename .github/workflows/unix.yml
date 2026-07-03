@@ -64,9 +64,17 @@ jobs:
           perl Build.PL
           ./Build
           if [ -n "${{ inputs.test_files }}" ]; then
-            prove -Ilib -lv ${{ inputs.test_files }}
+            if [ "${{ inputs.verbose_level }}" -ge 1 ] 2>/dev/null; then
+              prove -Ilib -lv ${{ inputs.test_files }}
+            else
+              prove -Ilib -l ${{ inputs.test_files }}
+            fi
           else
-            ./Build test --v
+            if [ "${{ inputs.verbose_level }}" -ge 1 ] 2>/dev/null; then
+              ./Build test --v
+            else
+              ./Build test
+            fi
           fi
           command1_exit_code=$?
           if [ $command1_exit_code -eq 0 ]; then
@@ -109,5 +117,9 @@ on:
         type: string
       title:
         default: ''
+        required: false
+        type: string
+      verbose_level:
+        default: 0
         required: false
         type: string
