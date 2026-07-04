@@ -69,12 +69,13 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $has_isolate = 0;
         my $entry_index = -1;
         for my $i ( 0 .. $#$ir_funcs ) {
-            my $func    = $ir_funcs->[$i];
+            my $func = $ir_funcs->[$i];
+            $entry_index = $i if $func->name eq '_BROCKEN_ENTRY';
+            next unless $func->blocks->@*;    # skip external declarations
             my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
             my $mf      = $lowerer->lower($func);
             $has_fiber   ||= $self->_has_fiber_ops_mf($mf);
             $has_isolate ||= $self->_has_isolate_ops_ir($func);
-            $entry_index = $i if $func->name eq '_BROCKEN_ENTRY';
             push @mfs, $mf;
         }
 
@@ -1137,6 +1138,15 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $rex       = 0x48 | ( $did >= 8 ? 4 : 0 );
                     my $modrm     = 0x05 | ( ( $did & 7 ) << 3 );
                     push @func_fixups, { offset => $current_offset->() + 3, type => 'lea_rel32', target => $func_name };
+                    $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm ) . "\x00\x00\x00\x00";
+                }
+                elsif ( $opcode eq 'lea_rodata' ) {
+                    my $dst_r      = $resolve->($dst);
+                    my $did        = $reg_id->($dst_r);
+                    my $label_name = $src->value;
+                    my $rex        = 0x48 | ( $did >= 8 ? 4 : 0 );
+                    my $modrm      = 0x05 | ( ( $did & 7 ) << 3 );
+                    push @func_fixups, { offset => $current_offset->() + 3, type => 'lea_rodata_rel32', target => $label_name };
                     $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm ) . "\x00\x00\x00\x00";
                 }
                 elsif ( $opcode eq 'call_func' ) {

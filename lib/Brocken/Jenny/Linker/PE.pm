@@ -142,7 +142,10 @@ enabled.
 
         # Snapshot text before stubs for exports (edata RVA), then compute exports
         my $text_bytes     = $text;
+        my $text_size      = length($text);
         my $has_data       = length($data_bytes) > 0;
+        my $has_rodata     = scalar( keys $self->rodata->%* ) > 0;
+        my $rodata_bytes   = $has_rodata ? join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) : '';
         my $debug_sections = $self->debug_data;
         my $has_debug   = ( $self->debug_level >= 1 ) && ( ( defined $debug_bytes && length($debug_bytes) > 0 ) || ( keys $debug_sections->%* ) > 0 );
         my $has_reloc   = 1;
@@ -199,6 +202,7 @@ enabled.
         # Pre-scan fixups to discover extern functions not defined in compiled code
         my @extern_funcs;
         for my $ff (@func_fixups) {
+            next if $ff->{type} eq 'lea_rodata_rel32' || $ff->{type} eq 'lea_rodata_adr';
             next if exists $func_offsets{ $ff->{target} };
             push @extern_funcs, $ff->{target} unless grep { $_ eq $ff->{target} } @extern_funcs;
         }
@@ -231,13 +235,14 @@ enabled.
         # Pre-compute idata RVA (text + preceding sections, page-aligned)
         $idata_rva = 0x1000 + ( ( length($text) + 4095 ) & ~4095 );
         $idata_rva += ( $self->brk_sym_size() + 4095 ) & ~4095 if $self->brk_sym_size() > 0;
+        $idata_rva += ( length($rodata_bytes) + 4095 ) & ~4095 if $has_rodata;
         $idata_rva += ( length($data_bytes) + 4095 ) & ~4095   if length($data_bytes) > 0;
         $idata_rva += ( length($edata_bytes) + 4095 ) & ~4095  if $has_exports;
         my %iat_base;    # name => IAT RVA entry (populated below if has_idata)
         if ($has_idata) {
             my $desc_size = 20;
             my $num_idlls = ( @k32_list ? 1 : 0 ) + ( @mscrt_list ? 1 : 0 );
-            my $idir_size = $num_idlls * $desc_size + $desc_size;    # descriptors + null terminator
+            my $idir_size = $num_idlls * $desc_size + $desc_size;              # descriptors + null terminator
             my $idir      = '';
             my $dll_data  = '';
             my @iat_blobs;
@@ -252,6 +257,7 @@ enabled.
                 my $payload_base    = $idata_rva + $idir_size;
                 my $current_hnt_rva = $payload_base + $hnt_off;
                 my ( $ilt_bytes, $hnt_bytes, $iat_bytes ) = ( '', '', '' );
+
                 for my $fn ( $list->@* ) {
                     my $entry = pack( 'v', 0 ) . $fn . "\0";
                     $entry     .= "\0" if length($entry) % 2;
@@ -267,14 +273,12 @@ enabled.
                 my $iat_off = 0;
                 $iat_off += length($_) for @iat_blobs;
                 my $iat_rva = $payload_base + length($dll_data) + $iat_off;
-
-                my $desc
-                    = pack( 'V', $payload_base + $ilt_off ) .           # OriginalFirstThunk (ILT)
-                    pack( 'V', 0 ) .                                     # TimeDateStamp
-                    pack( 'V', 0 ) .                                     # ForwarderChain
-                    pack( 'V', $payload_base + $dll_name_off ) .         # Name
-                    pack( 'V', $iat_rva );                                # FirstThunk (IAT)
-                $idir .= $desc;
+                my $desc    = pack( 'V', $payload_base + $ilt_off ) .         # OriginalFirstThunk (ILT)
+                    pack( 'V', 0 ) .                                          # TimeDateStamp
+                    pack( 'V', 0 ) .                                          # ForwarderChain
+                    pack( 'V', $payload_base + $dll_name_off ) .              # Name
+                    pack( 'V', $iat_rva );                                    # FirstThunk (IAT)
+                $idir     .= $desc;
                 $dll_data .= $ilt_bytes . $dll_name . $hnt_bytes;
                 push @iat_blobs, $iat_bytes;
 
@@ -290,6 +294,23 @@ enabled.
         # Resolve cross-function call fixups at link time, with import stubs
         my $stubs_rva_start;
         for my $ff (@func_fixups) {
+            my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
+            die "fixup offset $src_pos out of bounds" if $src_pos + 4 > length($text);
+
+            # rodata-relocated fixups are resolved first (no function target needed)
+            if ( $ff->{type} eq 'lea_rodata_rel32' ) {
+                my $rdata_rva = 0x1000 + ( ( length($text_bytes) + 4095 ) & ~4095 );
+                my $label_off = 0;
+                for my $key ( sort keys $self->rodata->%* ) {
+                    last if $key eq $ff->{target};
+                    $label_off += length( $self->rodata->{$key} );
+                }
+                my $target_rva = $rdata_rva + $label_off;
+                my $src_rva    = 0x1000 + $src_pos;
+                my $rel        = $target_rva - ( $src_rva + 4 );
+                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+                next;
+            }
             my $target_off = $func_offsets{ $ff->{target} };
             if ( !defined $target_off && exists $iat_base{ $ff->{target} } ) {
                 my $stub_ofs      = length($text);
@@ -311,8 +332,6 @@ enabled.
                 $target_off = $stub_ofs - $entry_size;
             }
             die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
-            my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
-            die "fixup offset $src_pos out of bounds" if $src_pos + 4 > length($text);
             if ( $ff->{type} eq 'call_rel32' ) {
                 my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
                 substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
@@ -430,6 +449,7 @@ enabled.
         }
         my $num_sections
             = 1 + ( $has_brk_sym ? 1 : 0 )
+            + ( $has_rodata  ? 1 : 0 )
             + ( $has_data    ? 1 : 0 )
             + ( $has_exports ? 1 : 0 )
             + ( $has_idata   ? 1 : 0 )
@@ -467,6 +487,16 @@ enabled.
             0x60000020 );
         $sec_rva     += ( length($text_bytes) + 4095 ) & ~4095;
         $sec_raw_ptr += $sec_raw_code_size;
+
+        # .rdata section (Read-only data)
+        my $sec_raw_rodata_size = 0;
+        if ($has_rodata) {
+            $sec_raw_rodata_size = ( length($rodata_bytes) + 511 ) & ~511;
+            $section_table .= pack( 'a8 V2 V2 V2 v2 V',
+                ".rdata\x00\x00\x00", length($rodata_bytes), $sec_rva, $sec_raw_rodata_size, $sec_raw_ptr, 0, 0, 0, 0, 0x40000040 );
+            $sec_rva     += ( length($rodata_bytes) + 4095 ) & ~4095;
+            $sec_raw_ptr += $sec_raw_rodata_size;
+        }
 
         # .brk_sym section (Native Backtrace Info)
         my $sec_raw_brk_sym_size = 0;
@@ -611,6 +641,7 @@ enabled.
             + $sec_raw_reloc_size
             + $init_debug_size
             + $sec_raw_brk_sym_size
+            + $sec_raw_rodata_size
             + $sec_raw_idata_size
             + $sec_raw_pdata_size;
         my $os_ver     = 6;
@@ -623,9 +654,9 @@ enabled.
         #   [0]=export, [1]=import, [3]=pdata, [5]=reloc
         my $data_dirs = "\x00" x 128;
         if ($has_idata) {
-            substr $data_dirs, 8,  4, pack( 'V', $idata_rva );
+            substr $data_dirs, 8, 4, pack( 'V', $idata_rva );
             my $num_desc = ( @k32_list ? 1 : 0 ) + ( @mscrt_list ? 1 : 0 );
-            substr $data_dirs, 12, 4, pack( 'V', $num_desc * 20 + 20 );      # descriptors + null terminator
+            substr $data_dirs, 12, 4, pack( 'V', $num_desc * 20 + 20 );    # descriptors + null terminator
             my $k32_iat_entries   = scalar(@k32_list) > 0   ? scalar(@k32_list) + 1   : 0;
             my $mscrt_iat_entries = scalar(@mscrt_list) > 0 ? scalar(@mscrt_list) + 1 : 0;
             my $total_iat_entries = $k32_iat_entries + $mscrt_iat_entries;
@@ -653,6 +684,10 @@ enabled.
         # Write section payloads
         print $fh $text_bytes;
         print $fh ( "\x00" x ( $sec_raw_code_size - length($text_bytes) ) );
+        if ($has_rodata) {
+            print $fh $rodata_bytes;
+            print $fh ( "\x00" x ( $sec_raw_rodata_size - length($rodata_bytes) ) );
+        }
         if ($has_brk_sym) {
             my $brk_sym_bytes = $self->build_brk_sym();
             print $fh $brk_sym_bytes;

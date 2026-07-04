@@ -2686,13 +2686,37 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                         }
                         else {
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
-                                    operands => [ $mem, $self->_lower_opnd($val) ],
-                                    comment  => 'store'
-                                )
-                            );
+                            if ( $val->isa('Brocken::Lindsay::IR::RodataRef') ) {
+                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $val->label . '.rodata',
+                                    type  => Brocken::Lindsay::IR::Type::ptr()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'lea_rodata',
+                                        operands =>
+                                            [ $tmp, Brocken::Jenny::MIR::MachineOperand->new( kind => 'rodata_label', value => $val->label ) ],
+                                        comment => 'string addr'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'store',
+                                        operands => [ $mem, $tmp ],
+                                        comment  => 'store string'
+                                    )
+                                );
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
+                                        operands => [ $mem, $self->_lower_opnd($val) ],
+                                        comment  => 'store'
+                                    )
+                                );
+                            }
                         }
                     }
                 }
@@ -2934,14 +2958,26 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         else {
                             my $reg_name = $arg_regs[$i];
                             my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
-                            my $val      = $self->_lower_opnd( $args[$i] );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => $is_float ? 'fmov' : 'mov',
-                                    operands => [ $reg, $val ],
-                                    comment  => "arg $i to $reg_name"
-                                )
-                            );
+                            if ( $args[$i]->isa('Brocken::Lindsay::IR::RodataRef') ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'lea_rodata',
+                                        operands =>
+                                            [ $reg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'rodata_label', value => $args[$i]->label ) ],
+                                        comment => "arg $i (string) to $reg_name"
+                                    )
+                                );
+                            }
+                            else {
+                                my $val = $self->_lower_opnd( $args[$i] );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => $is_float ? 'fmov' : 'mov',
+                                        operands => [ $reg, $val ],
+                                        comment  => "arg $i to $reg_name"
+                                    )
+                                );
+                            }
                         }
                     }
                     $mbb->add_instruction(
@@ -3988,6 +4024,21 @@ class Brocken::Jenny::Lowerer::X86_64 {
 
     method _materialize( $mbb, $ir_val ) {
         state $fc = 0;
+        if ( $ir_val->isa('Brocken::Lindsay::IR::RodataRef') ) {
+            my $reg = Brocken::Jenny::MIR::MachineOperand->new(
+                kind  => 'virt_reg',
+                value => $ir_val->label . '.rodata',
+                type  => Brocken::Lindsay::IR::Type::ptr()
+            );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'lea_rodata',
+                    operands => [ $reg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'rodata_label', value => $ir_val->label ) ],
+                    comment  => 'load string addr'
+                )
+            );
+            return $reg;
+        }
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') && $ir_val->type && $ir_val->type->kind eq 'float' ) {
             my $bits        = $ir_val->type->bits;
             my $value       = $ir_val->value;

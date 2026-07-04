@@ -43,6 +43,7 @@ class Brocken::Compiler {
         my $lowerer    = Brocken::Katsuro::Lowerer->new( platform => $platform );
         my $module     = $lowerer->lower_program($merged_ast);
         $module->set_class_info( $lowerer->classes );
+        $module->set_rodata( $lowerer->rodata );
         return $module;
     }
 

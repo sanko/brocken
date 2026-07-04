@@ -6,18 +6,20 @@ use Brocken::Lindsay::IR::Builder;
 use Carp ();
 
 class Brocken::Katsuro::Lowerer {
-    field $module   : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
-    field $platform : param = undef;
+    field $module : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
+    field $platform : reader : param = undef;
     field $builder = Brocken::Lindsay::IR::Builder->new();
     field $current_func;
     field $current_block;
     field $current_class;                 # class name when inside a method/ADJUST
     field $symbols               = {};    # "name" -> ptr (alloca or GEP result)
     field $functions             = {};    # "name" -> Brocken::Lindsay::IR::Function
-    field $classes : reader      = {};    # "ClassName" -> {fields=>[...], total_size=>N, methods=>[...], adjust=>undef}
+    field $classes : reader      = {};    # "ClassName" -> { fields => [...], total_size => N, methods => [...], adjust => undef }
     field $block_id              = 0;
     field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
+    field $rodata : reader       = {};    # label -> bytes for string constants
+    field $_rodata_label_counter = 0;
 
     method unique_block_name($prefix) {
         return $prefix . '_' . $block_id++;
@@ -197,10 +199,15 @@ class Brocken::Katsuro::Lowerer {
     }
 
     # === Register built-in FFI functions ===
+    method _puts_name() {
+        return $self->platform && $self->platform->is_windows ? '_puts' : 'puts';
+    }
+
     method register_intrinsics() {
+        my $puts_name = $self->_puts_name;
         for my $name (qw(say print)) {
             my $fn = Brocken::Lindsay::IR::Function->new(
-                name        => $name,
+                name        => $puts_name,
                 return_type => Brocken::Lindsay::IR::Type::void(),
                 params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
             );
@@ -566,6 +573,11 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method lower_const($ast) {
+        if ( $ast->type eq 'String' ) {
+            my $label = '__str_' . $_rodata_label_counter++;
+            $rodata->{$label} = $ast->value . "\0";
+            return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $ast->value . "\0", type => Brocken::Lindsay::IR::Type::ptr(), );
+        }
         return Brocken::Lindsay::IR::Constant->new( type => $self->native_type_from_name( $ast->type ), value => $ast->value, );
     }
 
@@ -702,8 +714,9 @@ class Brocken::Katsuro::Lowerer {
         my ( $line, $col ) = ( $ast->line, $ast->col );
         unless ($callee) {
             if ( $name eq 'say' || $name eq 'print' ) {
+                my $puts_name = $self->_puts_name;
                 $callee = Brocken::Lindsay::IR::Function->new(
-                    name        => $name,
+                    name        => $puts_name,
                     return_type => Brocken::Lindsay::IR::Type::void(),
                     params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
                 );
