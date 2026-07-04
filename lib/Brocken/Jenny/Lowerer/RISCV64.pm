@@ -1982,7 +1982,10 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         my $mem = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $ptr->name, disp => 0 },
                             type => $val->type );
                         if ( $val->type && $val->type->kind eq 'float' ) {
-                            my $src = $val->isa('Brocken::Lindsay::IR::Constant') ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val);
+                            my $src
+                                = ( $val->isa('Brocken::Lindsay::IR::Constant') || $val->isa('Brocken::Lindsay::IR::RodataRef') ) ?
+                                $self->_materialize( $mbb, $val ) :
+                                $self->_lower_opnd($val);
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fstore', operands => [ $mem, $src ], comment => 'fstore' ) );
                         }
@@ -1990,8 +1993,13 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
-                                    operands => [ $mem, $self->_lower_opnd($val) ],
-                                    comment  => 'store'
+                                    operands => [
+                                        $mem, (
+                                            $val->isa('Brocken::Lindsay::IR::RodataRef') ? $self->_materialize( $mbb, $val ) :
+                                                $self->_lower_opnd($val)
+                                        )
+                                    ],
+                                    comment => 'store'
                                 )
                             );
                         }
@@ -2013,8 +2021,11 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
-                            operands => [ $payload_mem, $self->_lower_opnd($val) ],
-                            comment  => 'box: store payload'
+                            operands => [
+                                $payload_mem,
+                                ( $val->isa('Brocken::Lindsay::IR::RodataRef') ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val) )
+                            ],
+                            comment => 'box: store payload'
                         )
                     );
                     my $tag_mem = Brocken::Jenny::MIR::MachineOperand->new(
@@ -3446,6 +3457,21 @@ class Brocken::Jenny::Lowerer::RISCV64 {
 
     method _materialize( $mbb, $ir_val ) {
         state $fc = 0;
+        if ( $ir_val->isa('Brocken::Lindsay::IR::RodataRef') ) {
+            my $reg = Brocken::Jenny::MIR::MachineOperand->new(
+                kind  => 'virt_reg',
+                value => $ir_val->label . '.rodata',
+                type  => Brocken::Lindsay::IR::Type::ptr()
+            );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'lea_rodata',
+                    operands => [ $reg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'rodata_label', value => $ir_val->label ) ],
+                    comment  => 'lea_rodata ' . $ir_val->label
+                )
+            );
+            return $reg;
+        }
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') && $ir_val->type && $ir_val->type->kind eq 'float' ) {
             my $bits        = $ir_val->type->bits;
             my $value       = $ir_val->value;
