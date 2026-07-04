@@ -383,23 +383,11 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
         # Resolve cross-function call fixups at link time
         for my $ff (@func_fixups) {
-            my $target_off = $func_offsets{ $ff->{target} };
-            die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
             my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
             die "fixup offset $src_pos out of bounds" if $src_pos + 4 > length($text);
-            if ( $ff->{type} eq 'call_rel32' ) {
-                my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
-                substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
-            }
-            elsif ( $ff->{type} eq 'jmp_func_rel32' ) {
-                my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
-                substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
-            }
-            elsif ( $ff->{type} eq 'lea_rel32' ) {
-                my $rel = ( $entry_size + $target_off ) - ( $src_pos + 4 );
-                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
-            }
-            elsif ( $ff->{type} eq 'lea_rodata_rel32' ) {
+
+            # rodata-relocated fixups are resolved first (no function target needed)
+            if ( $ff->{type} eq 'lea_rodata_rel32' ) {
                 my $rodata_sec = $self->layout->get('.rodata') or die "no .rodata section for lea_rodata_rel32";
                 my $rodata_rva = $rodata_sec->{rva};
                 my $label_off  = 0;
@@ -410,6 +398,24 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 my $target_rva = $rodata_rva + $label_off;
                 my $text_rva   = $self->layout->get('.text')->{rva};
                 my $rel        = $target_rva - ( $text_rva + $src_pos + 4 );
+                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+                next;
+            }
+            if ( $ff->{type} eq 'lea_rodata_adr' ) {
+                next;    # not implemented on ELF64; ARM64 uses MachO
+            }
+            my $target_off = $func_offsets{ $ff->{target} };
+            die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
+            if ( $ff->{type} eq 'call_rel32' ) {
+                my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
+                substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+            }
+            elsif ( $ff->{type} eq 'jmp_func_rel32' ) {
+                my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
+                substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+            }
+            elsif ( $ff->{type} eq 'lea_rel32' ) {
+                my $rel = ( $entry_size + $target_off ) - ( $src_pos + 4 );
                 substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
             }
             elsif ( $ff->{type} eq 'call_bl' ) {
