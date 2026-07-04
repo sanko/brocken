@@ -999,6 +999,14 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $bytes .= pack( 'V', ( $did << 7 ) | 0x17 );
                     $bytes .= pack( 'V', ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                 }
+                elsif ( $opcode eq 'lea_rodata' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $label = $src->value;
+                    push @func_fixups, { offset => $current_offset->(), type => 'lea_rodata_adr', target => $label, rd => $did };
+                    $bytes .= pack( 'V', ( $did << 7 ) | 0x17 );
+                    $bytes .= pack( 'V', ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $dst->value;
                     push @func_fixups, { offset => $current_offset->(), type => 'call_jal', target => $func_name };
