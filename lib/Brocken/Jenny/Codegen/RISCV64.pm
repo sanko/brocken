@@ -67,12 +67,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my $has_isolate = 0;
         my $entry_index = -1;
         for my $i ( 0 .. $#$ir_funcs ) {
-            my $func    = $ir_funcs->[$i];
+            my $func = $ir_funcs->[$i];
+            $entry_index = $i if $func->name eq '_BROCKEN_ENTRY';
+            next unless $func->blocks->@*;    # skip external declarations
             my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new( platform => $platform );
             my $mf      = $lowerer->lower($func);
             $has_fiber   ||= $self->_has_fiber_ops_mf($mf);
             $has_isolate ||= $self->_has_isolate_ops_ir($func);
-            $entry_index = $i if $func->name eq '_BROCKEN_ENTRY';
             push @mfs, $mf;
         }
         my $emit_init = $has_fiber && $entry_index >= 0;

@@ -14,10 +14,14 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
     method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
         $layout->add_section( '.text', $text_size, 5 );                                      # Read + Execute
         my $brk_sym_size = $self->brk_sym_size();
-        $layout->add_section( '.brk_sym',  $brk_sym_size,        5 ) if $brk_sym_size > 0;
+        $layout->add_section( '.brk_sym', $brk_sym_size, 5 ) if $brk_sym_size > 0;
+        my $rodata_size = 0;
+        $rodata_size += length($_) for values $self->rodata->%*;
+        $layout->add_section( '.__const',  $rodata_size,         4 ) if $rodata_size > 0;    # Read-Only data
         $layout->add_section( '.data',     $data_size,           3 ) if $data_size > 0;      # Read + Write
         $layout->add_section( '.got',      512,                  3 ) if $has_ffi;            # Global Offset Table
         $layout->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );                        # Symbols, Strings, Dynamic linking info
+
         if ( $dbg >= 1 ) {
             $layout->add_section( '.debug_line',     4096, 0 );
             $layout->add_section( '.debug_info',     8192, 0 );
@@ -126,7 +130,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         if (@extern_names) {
             $self->set_has_ffi(1);
         }
-        if ($has_ffi && !@extern_names) {
+        if ( $has_ffi && !@extern_names ) {
             @extern_names = qw(dlopen dlsym pthread_create pthread_join
                 pthread_mutex_lock pthread_mutex_unlock pthread_cond_wait
                 pthread_cond_signal pthread_cond_broadcast);
@@ -155,6 +159,10 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
         else {
             $self->layout->get('.text')->{size} = length($text);
+            my $const_sec = $self->layout->get('.__const');
+            if ($const_sec) {
+                $const_sec->{size} = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
+            }
             my $data_sec = $self->layout->get('.data');
             if ($data_sec) {
                 $data_sec->{size} = length($data_bytes);
@@ -216,6 +224,18 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 my $rel = ( $entry_size + $target_off ) - ( $src_pos + 4 );
                 substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
             }
+            elsif ( $ff->{type} eq 'lea_rodata_rel32' ) {
+                my $const_sec  = $self->layout->get('.__const') or die "no .__const section for lea_rodata_rel32";
+                my $rodata_off = 0;
+                for my $key ( sort keys $self->rodata->%* ) {
+                    last if $key eq $ff->{target};
+                    $rodata_off += length( $self->rodata->{$key} );
+                }
+                my $target_rva = $const_sec->{rva} + $rodata_off;
+                my $src_rva    = $self->layout->get('.text')->{rva} + $src_pos;
+                my $rel        = $target_rva - ( $src_rva + 4 );
+                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+            }
             elsif ( $ff->{type} eq 'call_bl' ) {
                 my $rel  = ( $entry_size + $target_off ) - $src_pos;
                 my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
@@ -237,6 +257,23 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 my $rd   = $word & 0x1F;
                 my $lo   = $rel & 3;
                 my $hi   = ( $rel >> 2 ) & 0x7FFFF;
+                $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
+                substr( $text, $src_pos, 4, pack( 'V', $word ) );
+            }
+            elsif ( $ff->{type} eq 'lea_rodata_adr' ) {
+                my $const_sec  = $self->layout->get('.__const') or die "no .__const section for lea_rodata_adr";
+                my $rodata_off = 0;
+                for my $key ( sort keys $self->rodata->%* ) {
+                    last if $key eq $ff->{target};
+                    $rodata_off += length( $self->rodata->{$key} );
+                }
+                my $target_rva = $const_sec->{rva} + $rodata_off;
+                my $src_rva    = $self->layout->get('.text')->{rva} + $src_pos;
+                my $rel        = $target_rva - $src_rva;
+                my $word       = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                my $rd         = $word & 0x1F;
+                my $lo         = $rel & 3;
+                my $hi         = ( $rel >> 2 ) & 0x7FFFF;
                 $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
                 substr( $text, $src_pos, 4, pack( 'V', $word ) );
             }
@@ -449,8 +486,8 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 }
             }
         }
-        my %seg_names = ( '.text' => '__TEXT', '.data' => '__DATA', '.got' => '__DATA', '.brk_sym' => '__TEXT' );
-        my %sec_names = ( '.text' => '__text', '.data' => '__data', '.got' => '__got',  '.brk_sym' => '__brk_sym' );
+        my %seg_names = ( '.text' => '__TEXT', '.__const' => '__TEXT',  '.data' => '__DATA', '.got' => '__DATA', '.brk_sym' => '__TEXT' );
+        my %sec_names = ( '.text' => '__text', '.__const' => '__const', '.data' => '__data', '.got' => '__got',  '.brk_sym' => '__brk_sym' );
         for my $s ( $self->layout->sections ) {
             if ( $s->{name} =~ /^\.debug_/ ) {
                 $seg_names{ $s->{name} } = '__DWARF';
@@ -458,7 +495,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 $sec_names{ $s->{name} } = $macho_name;
             }
         }
-        my @text_sections = grep { $_->{name} eq '.text' || $_->{name} eq '.brk_sym' } $self->layout->sections;
+        my @text_sections = grep { $_->{name} eq '.text' || $_->{name} eq '.brk_sym' || $_->{name} eq '.__const' } $self->layout->sections;
         my $t_sec         = $self->layout->get('.text');
         my @data_sections = grep { $_->{name} eq '.data' || $_->{name} eq '.got' } $self->layout->sections;
         my $t_vmsize      = 0;
@@ -593,6 +630,9 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             }
             elsif ( $s->{name} eq '.brk_sym' ) {
                 $payload = $self->build_brk_sym();
+            }
+            elsif ( $s->{name} eq '.__const' ) {
+                $payload = join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* );
             }
             elsif ( $s->{name} eq '.data' ) {
                 $payload = $data_bytes // '';

@@ -29,9 +29,11 @@ into a final executable or shared library.
     field $frame_size     : reader = 0;
     field $timestamp      : reader = undef;
     field $debug_level    : reader = 0;
+    field $rodata         : reader = {};
     #
     method set_preserved_regs($r) { $preserved_regs = $r; }
     method set_frame_size($s)     { $frame_size     = $s; }
+    method set_rodata($r)         { $rodata         = $r; }
     method set_timestamp($t)      { $timestamp      = $t; }
     method effective_timestamp()  { $timestamp // time() }
     method set_debug_data($d)     { $debug_data = $d; }

@@ -72,6 +72,12 @@ class Brocken::Lindsay::IR::Constant : isa(Brocken::Lindsay::IR::Value) {
     method as_string() {$value}
 }
 
+class Brocken::Lindsay::IR::RodataRef : isa(Brocken::Lindsay::IR::Value) {
+    field $label : reader : param;
+    field $bytes : reader : param;
+    method as_string() {$label}
+}
+
 class Brocken::Lindsay::IR::Instruction : isa(Brocken::Lindsay::IR::Value) {
     field $opcode   : reader : param;
     field $operands : reader : param = [];
@@ -472,6 +478,9 @@ class Brocken::Lindsay::IR::Module {
     field $_class_info = {};
     method class_info         { return $_class_info }
     method set_class_info($v) { $_class_info = $v }
+    field $_rodata = {};
+    method rodata         { return $_rodata }
+    method set_rodata($v) { $_rodata = $v }
 
     method add_function($func) {
         push $functions->@*, $func;

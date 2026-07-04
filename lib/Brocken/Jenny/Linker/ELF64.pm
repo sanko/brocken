@@ -23,6 +23,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
 
         # Flags: 1=alloc, 2=write, 4=execute
         $layout->add_section( '.text', $text_size, 5 );    # RX (Alloc + Execute)
+        my $rodata_size = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
+        $layout->add_section( '.rodata', $rodata_size || 1, 2 ) if $rodata_size > 0;
         my $brk_sym_size = $self->brk_sym_size();
         $layout->add_section( '.brk_sym', $brk_sym_size, 2 ) if $brk_sym_size > 0;
 
@@ -334,6 +336,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         # Pre-scan fixups to discover extern functions not defined in compiled code
         my %extern_seen;
         for my $ff (@func_fixups) {
+            next if $ff->{type} eq 'lea_rodata_rel32' || $ff->{type} eq 'lea_rodata_adr';
             next if exists $func_offsets{ $ff->{target} };
             $extern_seen{ $ff->{target} } = 1;
         }
@@ -394,6 +397,19 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
             elsif ( $ff->{type} eq 'lea_rel32' ) {
                 my $rel = ( $entry_size + $target_off ) - ( $src_pos + 4 );
+                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+            }
+            elsif ( $ff->{type} eq 'lea_rodata_rel32' ) {
+                my $rodata_sec = $self->layout->get('.rodata') or die "no .rodata section for lea_rodata_rel32";
+                my $rodata_rva = $rodata_sec->{rva};
+                my $label_off  = 0;
+                for my $key ( sort keys $self->rodata->%* ) {
+                    last if $key eq $ff->{target};
+                    $label_off += length( $self->rodata->{$key} );
+                }
+                my $target_rva = $rodata_rva + $label_off;
+                my $text_rva   = $self->layout->get('.text')->{rva};
+                my $rel        = $target_rva - ( $text_rva + $src_pos + 4 );
                 substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
             }
             elsif ( $ff->{type} eq 'call_bl' ) {
@@ -919,6 +935,10 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             elsif ( $s->{name} eq '.init' || $s->{name} eq '.fini' ) {
                 $payload = "\xc3";
             }
+            elsif ( $s->{name} eq '.rodata' ) {
+                $payload = join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* );
+                $s->{size} = length($payload);
+            }
             elsif ( $s->{name} eq '.brk_sym' ) {
                 $payload = $self->build_brk_sym();
             }
@@ -991,6 +1011,10 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             }
             elsif ( $s->{name} eq '.init' || $s->{name} eq '.fini' ) {
                 $flags = 6;
+            }
+            elsif ( $s->{name} eq '.rodata' ) {
+                $type  = 1;
+                $flags = 2;
             }
             elsif ( $s->{name} eq '.brk_sym' ) {
                 $type  = 1;
