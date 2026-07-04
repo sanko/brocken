@@ -402,7 +402,36 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 next;
             }
             if ( $ff->{type} eq 'lea_rodata_adr' ) {
-                next;    # not implemented on ELF64; ARM64 uses MachO
+                my $rodata_sec  = $self->layout->get('.rodata') or die "no .rodata section for lea_rodata_adr";
+                my $rodata_rva  = $rodata_sec->{rva};
+                my $label_off   = 0;
+                for my $key ( sort keys $self->rodata->%* ) {
+                    last if $key eq $ff->{target};
+                    $label_off += length( $self->rodata->{$key} );
+                }
+                my $target_rva = $rodata_rva + $label_off;
+                my $text_rva   = $self->layout->get('.text')->{rva};
+                my $src_rva    = $text_rva + $src_pos;
+                my $rel        = $target_rva - $src_rva;
+                if ( $platform->is_arm64 ) {
+                    my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                    my $rd   = $word & 0x1F;
+                    my $lo   = $rel & 3;
+                    my $hi   = ( $rel >> 2 ) & 0x7FFFF;
+                    $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
+                    substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                }
+                elsif ( $platform->is_riscv64 ) {
+                    my $auipc = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                    my $rd    = ( $auipc >> 7 ) & 0x1F;
+                    my $hi    = ( ( $rel + 0x800 ) >> 12 ) & 0xFFFFF;
+                    $auipc = ( $hi << 12 ) | ( $rd << 7 ) | 0x17;
+                    substr( $text, $src_pos, 4, pack( 'V', $auipc ) );
+                    my $lo   = $rel & 0xFFF;
+                    my $addi = ( $lo << 20 ) | ( $rd << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13;
+                    substr( $text, $src_pos + 4, 4, pack( 'V', $addi ) );
+                }
+                next;
             }
             my $target_off = $func_offsets{ $ff->{target} };
             die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;

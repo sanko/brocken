@@ -37,8 +37,8 @@ BROCKEN
     ok( defined $rodata, 'module has rodata before codegen' );
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
     ok( scalar $funcs->@* > 0, 'at least one function emitted' );
-    my @rodata_fixups = grep { $_->{type} eq 'lea_rodata_rel32' } map { $_->{fixups}->@* } $funcs->@*;
-    ok scalar @rodata_fixups > 0, 'at least one lea_rodata_rel32 fixup generated';
+    my @rodata_fixups = grep { $_->{type} eq 'lea_rodata_rel32' || $_->{type} eq 'lea_rodata_adr' } map { $_->{fixups}->@* } $funcs->@*;
+    ok scalar @rodata_fixups > 0, 'at least one rodata fixup generated';
 SKIP: {
         if ( $host->is_native ) {
             $brocken->linker->set_rodata($rodata);

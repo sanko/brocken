@@ -311,6 +311,24 @@ enabled.
                 substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
                 next;
             }
+            if ( $ff->{type} eq 'lea_rodata_adr' ) {
+                my $rdata_rva = 0x1000 + ( ( length($text_bytes) + 4095 ) & ~4095 );
+                my $label_off = 0;
+                for my $key ( sort keys $self->rodata->%* ) {
+                    last if $key eq $ff->{target};
+                    $label_off += length( $self->rodata->{$key} );
+                }
+                my $target_rva = $rdata_rva + $label_off;
+                my $src_rva    = 0x1000 + $src_pos;
+                my $rel        = $target_rva - $src_rva;
+                my $word       = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                my $rd         = $word & 0x1F;
+                my $lo         = $rel & 3;
+                my $hi         = ( $rel >> 2 ) & 0x7FFFF;
+                $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
+                substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                next;
+            }
             my $target_off = $func_offsets{ $ff->{target} };
             if ( !defined $target_off && exists $iat_base{ $ff->{target} } ) {
                 my $stub_ofs      = length($text);
