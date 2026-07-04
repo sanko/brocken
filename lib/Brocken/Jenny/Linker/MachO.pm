@@ -10,17 +10,18 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
     field $has_ffi : reader = false;
     method set_has_ffi($v) { $has_ffi = $v; }
+    field $got_offsets : reader : writer;
 
     method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
-        $layout->add_section( '.text', $text_size, 5 );                                      # Read + Execute
+        $layout->add_section( '.text', $text_size, 5 );                              # Read + Execute
         my $brk_sym_size = $self->brk_sym_size();
         $layout->add_section( '.brk_sym', $brk_sym_size, 5 ) if $brk_sym_size > 0;
         my $rodata_size = 0;
         $rodata_size += length($_) for values $self->rodata->%*;
-        $layout->add_section( '.__const',  $rodata_size,         4 ) if $rodata_size > 0;    # Read-Only data
-        $layout->add_section( '.data',     $data_size,           3 ) if $data_size > 0;      # Read + Write
-        $layout->add_section( '.got',      512,                  3 );                        # Global Offset Table
-        $layout->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );                        # Symbols, Strings, Dynamic linking info
+        $layout->add_section( '.__const',  $rodata_size, 4 ) if $rodata_size > 0;    # Read-Only data
+        $layout->add_section( '.data',     $data_size,   3 ) if $data_size > 0;      # Read + Write
+        $layout->add_section( '.got',      512,          3 );                        # Global Offset Table
+        $layout->add_section( '.linkedit', 4096,         1 );                        # Symbols, Strings, Dynamic linking info
 
         if ( $dbg >= 1 ) {
             $layout->add_section( '.debug_line',     4096, 0 );
@@ -39,18 +40,25 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             my $sub  = 0xD1000000 | ( 1 << 22 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31;
             my $add  = add_imm( 0, 31, 0 );
             my $bl   = bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
-            my $adrp = adrp( 16, $got_exit, $text_rva + 12 );
-            my $ldr  = ldr_64( 16, 16, $got_exit & 0xFFF );
-            my $blr  = blr(16);
-            return pack( 'V7', $sub, $add, $bl, $adrp, $ldr, $blr, brk(0) );
+            my $adrp = adrp( 8, $got_exit, $text_rva + 12 );
+            my $ldr  = ldr_64( 8, 8, $got_exit & 0xFFF );
+            my $blr  = blr(8);
+            my $brk  = brk(0);
+            return pack( 'V7', $sub, $add, $bl, $adrp, $ldr, $blr, $brk );
         }
-        my $HEAP_SIZE   = 0x10_00_00;
-        my $call_target = 12 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
-        my $stub        = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );
-        $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );
-        $stub .= pack( 'C3',   0x48, 0x89, 0xE7 );
-        $stub .= pack( 'C V',  0xE8, $call_target );
-        $stub .= pack( 'C3',   0x48, 0x89, 0xC7 );
+        my $stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );
+        $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, 0x10_00_00 );
+        $stub .= pack( 'C3', 0x48, 0x89, 0xE7 );
+
+        # Calculate call main target dynamically
+        my $final_len      = length($stub) + 5 + 3 + 6 + 2;
+        my $main_target    = $text_rva + $final_len + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
+        my $rip_after_call = $text_rva + length($stub) + 5;
+        my $main_rel       = $main_target - $rip_after_call;
+        $stub .= pack( 'C l<', 0xE8, $main_rel );
+        $stub .= pack( 'C3', 0x48, 0x89, 0xC7 );
+
+        # Call exit() through GOT to flush stdio before process termination
         my $exit_rip = $text_rva + length($stub) + 6;
         my $exit_rel = $got_exit - $exit_rip;
         $stub .= pack( 'C2 l<', 0xFF, 0x15, $exit_rel );
@@ -64,19 +72,9 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
     }
 
     method import_rva($name) {
-        my $imports = {
-            exit                   => 0,
-            dlopen                 => 8,
-            dlsym                  => 16,
-            pthread_create         => 24,
-            pthread_join           => 32,
-            pthread_mutex_lock     => 40,
-            pthread_mutex_unlock   => 48,
-            pthread_cond_wait      => 56,
-            pthread_cond_signal    => 64,
-            pthread_cond_broadcast => 72,
-        };
-        return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown Mach-O import: ' . $name );
+        my $got_off = $got_offsets->{$name};
+        die "import_rva: '$name' not found in GOT offsets" unless defined $got_off;
+        return $self->layout->get('.got')->{rva} + $got_off;
     }
     method image_base () { return hex('100000000'); }    # 64-bit macOS default image base (4GB)
 
@@ -110,6 +108,8 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my $writable_off = ref $code_bytes eq 'HASH' ? ( $code_bytes->{writable_data_offset} // 0 ) : 0;
         my $text_raw     = $writable_off             ? substr( $full_code, 0, $writable_off )       : $full_code;
         my $data_bytes   = $writable_off             ? substr( $full_code, $writable_off )          : '';
+        my $text         = $text_raw;
+        my $entry_stub   = '';
         my $arch         = $platform->arch;
         my $os           = $platform->os;
 
@@ -121,7 +121,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             $extern_names{ $ff->{target} } = 1;
         }
 
-        # Always need exit in GOT for the executable's entry stub
+        # Ensure 'exit' is available for the entry stub to flush stdio buffers
         if ( $self->type eq 'exe' ) {
             $extern_names{'exit'} = 1;
         }
@@ -129,11 +129,12 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         if (@extern_names) {
             $self->set_has_ffi(1);
         }
-        if ( $has_ffi && !@extern_names ) {
-            @extern_names = qw(dlopen dlsym pthread_create pthread_join
+        if ($has_ffi) {
+            my %known = map { $_ => 1 } qw(dlopen dlsym pthread_create pthread_join
                 pthread_mutex_lock pthread_mutex_unlock pthread_cond_wait
                 pthread_cond_signal pthread_cond_broadcast);
-            %extern_names = map { $_ => 1 } @extern_names;
+            for my $k ( keys %known ) { $extern_names{$k} = 1; }
+            @extern_names = sort keys %extern_names;
         }
 
         # Build dynamic GOT offset table for all externs
@@ -141,24 +142,24 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         for my $i ( 0 .. $#extern_names ) {
             $got_offsets{ $extern_names[$i] } = $i * 8;
         }
+        $got_offsets = \%got_offsets;
         my $got_size = @extern_names * 8;
         $got_size = 512 if $got_size < 512;
-
-        # Set up layout - include entry stub size for accurate section placement
-        my $entry_stub_len = $self->type eq 'exe' ? $self->entry_stub_len($platform) : 0;
         if ( !defined $self->layout ) {
-            $self->pre_layout( length($text_raw) + $entry_stub_len, length($data_bytes), $platform );
-            my $got_sec = $self->layout->get('.got');
-            if ($got_sec) {
-                $got_sec->{size} = $got_size;
+            $self->pre_layout( length($text) + ( $self->type eq 'exe' ? $self->entry_stub_len($platform) : 0 ), length($data_bytes), $platform );
+            if (@extern_names) {
+                my $got_sec = $self->layout->get('.got');
+                if ($got_sec) {
+                    $got_sec->{size} = $got_size;
+                }
+                else {
+                    $self->layout->add_section( '.got', $got_size, 3 );
+                }
+                $self->layout->calculate( $self->layout->section_align );
             }
-            else {
-                $self->layout->add_section( '.got', $got_size, 3 );
-            }
-            $self->layout->calculate( $self->layout->section_align );
         }
         else {
-            $self->layout->get('.text')->{size} = length($text_raw) + $entry_stub_len;
+            $self->layout->get('.text')->{size} = length($text) + ( $self->type eq 'exe' ? $self->entry_stub_len($platform) : 0 );
             my $const_sec = $self->layout->get('.__const');
             if ($const_sec) {
                 $const_sec->{size} = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
@@ -167,21 +168,22 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             if ($data_sec) {
                 $data_sec->{size} = length($data_bytes);
             }
-            if ( $self->layout->get('.got') ) {
-                $self->layout->get('.got')->{size} = $got_size;
-            }
-            else {
-                $self->layout->add_section( '.got', $got_size, 3 );
+            if (@extern_names) {
+                if ( $self->layout->get('.got') ) {
+                    $self->layout->get('.got')->{size} = $got_size;
+                }
+                else {
+                    $self->layout->add_section( '.got', $got_size, 3 );
+                }
             }
             $self->layout->calculate( $self->layout->section_align );
         }
 
-        # Build entry stub now that layout and GOT are known
-        my $entry_stub = '';
-        my $text       = $text_raw;
+        # Build entry stub using GOT-based exit() call (flushes stdio buffers)
         if ( $self->type eq 'exe' ) {
-            my $got_exit = $self->import_rva('exit');
             my $text_rva = $self->layout->get('.text')->{rva};
+            my $got_base = $self->layout->get('.got')->{rva};
+            my $got_exit = $got_base + $got_offsets{'exit'};
             $entry_stub = $self->_build_entry_stub( $platform, \%func_offsets, $got_exit, $text_rva );
             $text       = $entry_stub . $text_raw;
         }
