@@ -402,9 +402,9 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
                 next;
             }
             if ( $ff->{type} eq 'lea_rodata_adr' ) {
-                my $rodata_sec  = $self->layout->get('.rodata') or die "no .rodata section for lea_rodata_adr";
-                my $rodata_rva  = $rodata_sec->{rva};
-                my $label_off   = 0;
+                my $rodata_sec = $self->layout->get('.rodata') or die "no .rodata section for lea_rodata_adr";
+                my $rodata_rva = $rodata_sec->{rva};
+                my $label_off  = 0;
                 for my $key ( sort keys $self->rodata->%* ) {
                     last if $key eq $ff->{target};
                     $label_off += length( $self->rodata->{$key} );

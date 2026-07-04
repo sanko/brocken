@@ -19,7 +19,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         $rodata_size += length($_) for values $self->rodata->%*;
         $layout->add_section( '.__const',  $rodata_size,         4 ) if $rodata_size > 0;    # Read-Only data
         $layout->add_section( '.data',     $data_size,           3 ) if $data_size > 0;      # Read + Write
-        $layout->add_section( '.got',      512,                  3 ) if $has_ffi;            # Global Offset Table
+        $layout->add_section( '.got',      512,                  3 );                        # Global Offset Table
         $layout->add_section( '.linkedit', $has_ffi ? 4096 : 64, 1 );                        # Symbols, Strings, Dynamic linking info
 
         if ( $dbg >= 1 ) {
@@ -34,14 +34,15 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
     }
 
-    method _build_entry_stub( $platform, $func_offsets, $exit_sys ) {
+    method _build_entry_stub( $platform, $func_offsets, $got_exit, $text_rva ) {
         if ( $platform->is_arm64 ) {
             my $sub  = 0xD1000000 | ( 1 << 22 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31;
             my $add  = add_imm( 0, 31, 0 );
             my $bl   = bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
-            my $movz = movz_64( 16, $exit_sys & 0xFFFF );
-            my $movk = movk_64( 16, ( $exit_sys >> 16 ) & 0xFFFF, 1 );
-            return pack( 'V7', $sub, $add, $bl, $movz, $movk, svc(0x80), brk(0) );
+            my $adrp = adrp( 16, $got_exit, $text_rva + 12 );
+            my $ldr  = ldr_64( 16, 16, $got_exit & 0xFFF );
+            my $blr  = blr(16);
+            return pack( 'V7', $sub, $add, $bl, $adrp, $ldr, $blr, brk(0) );
         }
         my $HEAP_SIZE   = 0x10_00_00;
         my $call_target = 12 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
@@ -50,29 +51,30 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         $stub .= pack( 'C3',   0x48, 0x89, 0xE7 );
         $stub .= pack( 'C V',  0xE8, $call_target );
         $stub .= pack( 'C3',   0x48, 0x89, 0xC7 );
-        $stub .= pack( 'C V',  0xB8, $exit_sys );
-        $stub .= pack( 'C2',   0x0F, 0x05 );
-        $stub .= pack( 'C2',   0x0F, 0x0B );
+        my $exit_rip = $text_rva + length($stub) + 6;
+        my $exit_rel = $got_exit - $exit_rip;
+        $stub .= pack( 'C2 l<', 0xFF, 0x15, $exit_rel );
+        $stub .= pack( 'C2', 0x0F, 0x0B );
         return $stub;
     }
 
     method entry_stub_len($platform) {
         return 0 unless $self->type eq 'exe';
-        my $exit_sys = $platform->syscall('exit') // 0x2000001;
-        return length( $self->_build_entry_stub( $platform, {}, $exit_sys ) );
+        return length( $self->_build_entry_stub( $platform, {}, 0, 0 ) );
     }
 
     method import_rva($name) {
         my $imports = {
-            dlopen                 => 0,
-            dlsym                  => 8,
-            pthread_create         => 16,
-            pthread_join           => 24,
-            pthread_mutex_lock     => 32,
-            pthread_mutex_unlock   => 40,
-            pthread_cond_wait      => 48,
-            pthread_cond_signal    => 56,
-            pthread_cond_broadcast => 64,
+            exit                   => 0,
+            dlopen                 => 8,
+            dlsym                  => 16,
+            pthread_create         => 24,
+            pthread_join           => 32,
+            pthread_mutex_lock     => 40,
+            pthread_mutex_unlock   => 48,
+            pthread_cond_wait      => 56,
+            pthread_cond_signal    => 64,
+            pthread_cond_broadcast => 72,
         };
         return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown Mach-O import: ' . $name );
     }
@@ -108,17 +110,8 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         my $writable_off = ref $code_bytes eq 'HASH' ? ( $code_bytes->{writable_data_offset} // 0 ) : 0;
         my $text_raw     = $writable_off             ? substr( $full_code, 0, $writable_off )       : $full_code;
         my $data_bytes   = $writable_off             ? substr( $full_code, $writable_off )          : '';
-        my $text         = $text_raw;
-        my $entry_stub   = '';
         my $arch         = $platform->arch;
         my $os           = $platform->os;
-
-        # Prepend platform-specific Mach-O entry stubs if compiling an executable
-        if ( $self->type eq 'exe' ) {
-            my $exit_sys = $platform->syscall('exit') // 0x2000001;
-            $entry_stub = $self->_build_entry_stub( $platform, \%func_offsets, $exit_sys );
-            $text       = $entry_stub . $text_raw;
-        }
 
         # Discover all extern functions from fixups (not just known imports)
         my %extern_names;
@@ -126,6 +119,11 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             next if $ff->{type} eq 'lea_rodata_rel32' || $ff->{type} eq 'lea_rodata_adr';
             next if exists $func_offsets{ $ff->{target} };
             $extern_names{ $ff->{target} } = 1;
+        }
+
+        # Always need exit in GOT for the executable's entry stub
+        if ( $self->type eq 'exe' ) {
+            $extern_names{'exit'} = 1;
         }
         my @extern_names = sort keys %extern_names;
         if (@extern_names) {
@@ -145,21 +143,22 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
         my $got_size = @extern_names * 8;
         $got_size = 512 if $got_size < 512;
+
+        # Set up layout - include entry stub size for accurate section placement
+        my $entry_stub_len = $self->type eq 'exe' ? $self->entry_stub_len($platform) : 0;
         if ( !defined $self->layout ) {
-            $self->pre_layout( length($text), length($data_bytes), $platform );
-            if (@extern_names) {
-                my $got_sec = $self->layout->get('.got');
-                if ($got_sec) {
-                    $got_sec->{size} = $got_size;
-                }
-                else {
-                    $self->layout->add_section( '.got', $got_size, 3 );
-                }
-                $self->layout->calculate( $self->layout->section_align );
+            $self->pre_layout( length($text_raw) + $entry_stub_len, length($data_bytes), $platform );
+            my $got_sec = $self->layout->get('.got');
+            if ($got_sec) {
+                $got_sec->{size} = $got_size;
             }
+            else {
+                $self->layout->add_section( '.got', $got_size, 3 );
+            }
+            $self->layout->calculate( $self->layout->section_align );
         }
         else {
-            $self->layout->get('.text')->{size} = length($text);
+            $self->layout->get('.text')->{size} = length($text_raw) + $entry_stub_len;
             my $const_sec = $self->layout->get('.__const');
             if ($const_sec) {
                 $const_sec->{size} = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
@@ -168,15 +167,23 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             if ($data_sec) {
                 $data_sec->{size} = length($data_bytes);
             }
-            if (@extern_names) {
-                if ( $self->layout->get('.got') ) {
-                    $self->layout->get('.got')->{size} = $got_size;
-                }
-                else {
-                    $self->layout->add_section( '.got', $got_size, 3 );
-                }
+            if ( $self->layout->get('.got') ) {
+                $self->layout->get('.got')->{size} = $got_size;
+            }
+            else {
+                $self->layout->add_section( '.got', $got_size, 3 );
             }
             $self->layout->calculate( $self->layout->section_align );
+        }
+
+        # Build entry stub now that layout and GOT are known
+        my $entry_stub = '';
+        my $text       = $text_raw;
+        if ( $self->type eq 'exe' ) {
+            my $got_exit = $self->import_rva('exit');
+            my $text_rva = $self->layout->get('.text')->{rva};
+            $entry_stub = $self->_build_entry_stub( $platform, \%func_offsets, $got_exit, $text_rva );
+            $text       = $entry_stub . $text_raw;
         }
 
         # Generate import stubs for all extern functions (not just known imports)
