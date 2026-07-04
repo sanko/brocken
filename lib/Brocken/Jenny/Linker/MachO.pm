@@ -123,6 +123,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         # Discover all extern functions from fixups (not just known imports)
         my %extern_names;
         for my $ff (@func_fixups) {
+            next if $ff->{type} eq 'lea_rodata_rel32' || $ff->{type} eq 'lea_rodata_adr';
             next if exists $func_offsets{ $ff->{target} };
             $extern_names{ $ff->{target} } = 1;
         }
@@ -208,10 +209,43 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
         # Resolve cross-function call fixups at link time
         for my $ff (@func_fixups) {
-            my $target_off = $func_offsets{ $ff->{target} };
-            die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
             my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
             die "fixup offset $src_pos out of bounds" if $src_pos + 4 > length($text);
+
+            # rodata-relocated fixups are resolved first (no function target needed)
+            if ( $ff->{type} eq 'lea_rodata_rel32' ) {
+                my $const_sec  = $self->layout->get('.__const') or die "no .__const section for lea_rodata_rel32";
+                my $rodata_off = 0;
+                for my $key ( sort keys $self->rodata->%* ) {
+                    last if $key eq $ff->{target};
+                    $rodata_off += length( $self->rodata->{$key} );
+                }
+                my $target_rva = $const_sec->{rva} + $rodata_off;
+                my $src_rva    = $self->layout->get('.text')->{rva} + $src_pos;
+                my $rel        = $target_rva - ( $src_rva + 4 );
+                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+                next;
+            }
+            if ( $ff->{type} eq 'lea_rodata_adr' ) {
+                my $const_sec  = $self->layout->get('.__const') or die "no .__const section for lea_rodata_adr";
+                my $rodata_off = 0;
+                for my $key ( sort keys $self->rodata->%* ) {
+                    last if $key eq $ff->{target};
+                    $rodata_off += length( $self->rodata->{$key} );
+                }
+                my $target_rva = $const_sec->{rva} + $rodata_off;
+                my $src_rva    = $self->layout->get('.text')->{rva} + $src_pos;
+                my $rel        = $target_rva - $src_rva;
+                my $word       = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                my $rd         = $word & 0x1F;
+                my $lo         = $rel & 3;
+                my $hi         = ( $rel >> 2 ) & 0x7FFFF;
+                $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
+                substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                next;
+            }
+            my $target_off = $func_offsets{ $ff->{target} };
+            die "write_executable: undefined function '$ff->{target}'" unless defined $target_off;
             if ( $ff->{type} eq 'call_rel32' ) {
                 my $rel = ( $entry_size + $target_off ) - ( $src_pos + 5 );
                 substr( $text, $src_pos + 1, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
@@ -222,18 +256,6 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             }
             elsif ( $ff->{type} eq 'lea_rel32' ) {
                 my $rel = ( $entry_size + $target_off ) - ( $src_pos + 4 );
-                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
-            }
-            elsif ( $ff->{type} eq 'lea_rodata_rel32' ) {
-                my $const_sec  = $self->layout->get('.__const') or die "no .__const section for lea_rodata_rel32";
-                my $rodata_off = 0;
-                for my $key ( sort keys $self->rodata->%* ) {
-                    last if $key eq $ff->{target};
-                    $rodata_off += length( $self->rodata->{$key} );
-                }
-                my $target_rva = $const_sec->{rva} + $rodata_off;
-                my $src_rva    = $self->layout->get('.text')->{rva} + $src_pos;
-                my $rel        = $target_rva - ( $src_rva + 4 );
                 substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
             }
             elsif ( $ff->{type} eq 'call_bl' ) {
@@ -257,23 +279,6 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 my $rd   = $word & 0x1F;
                 my $lo   = $rel & 3;
                 my $hi   = ( $rel >> 2 ) & 0x7FFFF;
-                $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
-                substr( $text, $src_pos, 4, pack( 'V', $word ) );
-            }
-            elsif ( $ff->{type} eq 'lea_rodata_adr' ) {
-                my $const_sec  = $self->layout->get('.__const') or die "no .__const section for lea_rodata_adr";
-                my $rodata_off = 0;
-                for my $key ( sort keys $self->rodata->%* ) {
-                    last if $key eq $ff->{target};
-                    $rodata_off += length( $self->rodata->{$key} );
-                }
-                my $target_rva = $const_sec->{rva} + $rodata_off;
-                my $src_rva    = $self->layout->get('.text')->{rva} + $src_pos;
-                my $rel        = $target_rva - $src_rva;
-                my $word       = unpack( 'V', substr( $text, $src_pos, 4 ) );
-                my $rd         = $word & 0x1F;
-                my $lo         = $rel & 3;
-                my $hi         = ( $rel >> 2 ) & 0x7FFFF;
                 $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
                 substr( $text, $src_pos, 4, pack( 'V', $word ) );
             }
