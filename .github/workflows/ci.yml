@@ -8,7 +8,6 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: dragonflybsd
@@ -16,7 +15,6 @@ jobs:
       pkg: sudo pkg install -y perl5-5.42 || (sudo sed -i '' 's|/quarterly|/latest|' /usr/local/etc/pkg/repos/Avalon.conf && sudo pkg update -f && sudo pkg install -y perl5-5.42) || (curl -sL https://www.cpan.org/src/5.0/perl-5.42.2.tar.gz | tar xz -C /tmp && cd /tmp/perl-5.42.2 && ./Configure -des -Dprefix=/usr/local -Dusedevel && make -j$(getconf NPROCESSORS_ONLN) && sudo make install && sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl)
       setup: export LC_ALL=C LANG=C LC_CTYPE=C LC_NUMERIC=C LC_COLLATE=C LC_TIME=C LC_MESSAGES=C LC_MONETARY=C; sudo pkg install -y gdb p5-Test-Harness || true
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: 6.4.2
   freebsd-arm64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'freebsd-arm64') || contains(needs.setup.outputs.runner, 'freebsd-x64') }}"
@@ -26,14 +24,12 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: freebsd
       perl: 5.42
       pkg: sudo pkg install -y perl5
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: 15.1
   freebsd-x64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'freebsd-arm64') || contains(needs.setup.outputs.runner, 'freebsd-x64') }}"
@@ -43,14 +39,12 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkg install -y gcc
       host: ubuntu-latest
       os: freebsd
       perl: 5.42
       pkg: sudo pkg install -y perl5
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: 15.1
   haiku:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'haiku') }}"
@@ -60,7 +54,6 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkgman install gcc || sudo pkgman install gcc_x86
       host: ubuntu-latest
       os: haiku
@@ -68,7 +61,6 @@ jobs:
       perl_subversion: 2
       pkg: sudo pkgman install "perl>=5.42.2" -y || echo "perl 5.42 not available"
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: r1beta5
   linux-arm64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'linux-x64') || contains(needs.setup.outputs.runner, 'linux-arm64') }}"
@@ -77,13 +69,11 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04-arm
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: ARM
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
   linux-x64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'linux-x64') || contains(needs.setup.outputs.runner, 'linux-arm64') }}"
     name: Linux
@@ -91,13 +81,11 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: Intel
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
   macos-arm:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'macos-intel') || contains(needs.setup.outputs.runner, 'macos-arm') }}"
     name: macOS
@@ -105,13 +93,11 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: macos-15
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: Apple Silicon
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
   macos-intel:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'macos-intel') || contains(needs.setup.outputs.runner, 'macos-arm') }}"
     name: macOS
@@ -119,13 +105,11 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: macos-15-intel
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: Intel
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
   midnightbsd:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'midnightbsd') }}"
     name: MidnightBSD
@@ -134,14 +118,12 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo mport install gcc || true
       host: ubuntu-latest
       os: midnightbsd
       perl: 5.42
       pkg: sudo mport install perl5.42-5.42.2 || true; sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: 4.0.4
   netbsd-arm64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'netbsd-x64') || contains(needs.setup.outputs.runner, 'netbsd-arm64') }}"
@@ -151,14 +133,12 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: which gcc 2>/dev/null || sudo pkgin -y install gcc || true
       host: ubuntu-latest
       os: netbsd
       perl: 5.42
       pkg: sudo pkgin -y install perl || true
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: 10.1
   netbsd-x64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'netbsd-x64') || contains(needs.setup.outputs.runner, 'netbsd-arm64') }}"
@@ -168,7 +148,6 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: which gcc 2>/dev/null || sudo pkgin -y install gcc || true
       host: ubuntu-latest
       os: netbsd
@@ -176,7 +155,6 @@ jobs:
       pkg: sudo pkgin -y install perl || true
       setup: sudo pkgin -y install gdb || true
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: 10.1
   omnios:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'omnios') }}"
@@ -186,14 +164,12 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: sudo pkg install developer/gcc --accept || sudo pkg install developer/gcc11 --accept || sudo pkg install gcc --accept || sudo pkg install developer/gcc49 --accept || true
       host: ubuntu-latest
       os: omnios
       perl: 5.42
       pkg: 'sudo pkg install perl || [ $? -eq 4 ]'
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: r151058
   openbsd-arm64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'openbsd-x64') || contains(needs.setup.outputs.runner, 'openbsd-arm64') }}"
@@ -203,7 +179,6 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: arm64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: which gcc 2>/dev/null || true
       host: ubuntu-latest
       os: openbsd
@@ -211,7 +186,6 @@ jobs:
       perl_subversion: 1
       pkg: echo "using system perl"
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: 7.9
   openbsd-x64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'openbsd-x64') || contains(needs.setup.outputs.runner, 'openbsd-arm64') }}"
@@ -221,7 +195,6 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: x86-64
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       gcc_pkg: which gcc 2>/dev/null || true
       host: ubuntu-latest
       os: openbsd
@@ -229,7 +202,6 @@ jobs:
       perl_subversion: 1
       pkg: echo "using system perl"
       test_files: '${{ needs.setup.outputs.test_files }}'
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
       version: 7.9
   publish-status:
     if: ( success() || failure() ) && github.ref == 'refs/heads/main'
@@ -387,29 +359,23 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04-riscv
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: RISC-V
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
   setup:
     name: Generate Testing Matrix
     outputs:
-      env_settings: '${{ steps.parse_tags.outputs.env_settings }}'
       matrix: '${{ steps.matrix.outputs.matrix }}'
       runner: '${{ steps.parse_tags.outputs.runner }}'
       test_files: '${{ steps.parse_tags.outputs.test_files }}'
-      verbose_level: '${{ steps.parse_tags.outputs.verbose_level }}'
     runs-on: ubuntu-22.04
     steps:
       - env:
           COMMIT_MSG: "${{ github.event.head_commit.message || github.event.pull_request.body || '' }}"
-          DISPATCH_ENV: '${{ github.event.inputs.env }}'
           DISPATCH_RUNNER: '${{ github.event.inputs.runner }}'
           DISPATCH_TEST: '${{ github.event.inputs.test_files }}'
-          DISPATCH_VERBOSE: '${{ github.event.inputs.verbose }}'
         id: parse_tags
         name: Parse commit message tags for runner/test filtering
         run: |
@@ -462,22 +428,11 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "runner=$(expand_runner "${DISPATCH_RUNNER:-all}")" >> "$GITHUB_OUTPUT"
             echo "test_files=${DISPATCH_TEST:-}" >> "$GITHUB_OUTPUT"
-            echo "env_settings=${DISPATCH_ENV:-}" >> "$GITHUB_OUTPUT"
-            echo "verbose_level=${DISPATCH_VERBOSE:-0}" >> "$GITHUB_OUTPUT"
           else
             RAW_RUNNER=$(echo "$COMMIT_MSG" | grep -oP '\[runner:\K[^\]]+' || echo "all")
             TEST=$(echo "$COMMIT_MSG" | grep -oP '\[test:\K[^\]]+' || echo "")
-            ENV_SETTINGS=$(echo "$COMMIT_MSG" | grep -oP '\[env:\K[^\]]+' | tr '\n' ' ')
-            VERBOSE_RAW=$(echo "$COMMIT_MSG" | grep -oP '\[verbose(:\d+)?\]' || echo "")
-            if [ -n "$VERBOSE_RAW" ]; then
-              VERBOSE_NUM=$(echo "$VERBOSE_RAW" | grep -oP '\d+' || echo 1)
-            else
-              VERBOSE_NUM=0
-            fi
             echo "runner=$(expand_runner "$RAW_RUNNER")" >> "$GITHUB_OUTPUT"
             echo "test_files=$TEST" >> "$GITHUB_OUTPUT"
-            echo "env_settings=${ENV_SETTINGS% }" >> "$GITHUB_OUTPUT"
-            echo "verbose_level=$VERBOSE_NUM" >> "$GITHUB_OUTPUT"
           fi
       - env:
           DATA: |
@@ -494,13 +449,11 @@ jobs:
       - setup
     uses: ./.github/workflows/unix.yml
     with:
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: WebAssembly
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
   win32-arm64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'win32-x64') || contains(needs.setup.outputs.runner, 'win32-arm64') }}"
     name: Windows
@@ -508,13 +461,11 @@ jobs:
       - setup
     uses: ./.github/workflows/windows.yml
     with:
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: -Dusethreads
       os: windows-11-arm
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: ARM
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
   win32-x64:
     if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'win32-x64') || contains(needs.setup.outputs.runner, 'win32-arm64') }}"
     name: Windows
@@ -522,13 +473,11 @@ jobs:
       - setup
     uses: ./.github/workflows/windows.yml
     with:
-      env_settings: '${{ needs.setup.outputs.env_settings }}'
       flags: -Dusethreads
       os: windows-2022
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: Intel
-      verbose_level: '${{ needs.setup.outputs.verbose_level }}'
 name: CI Matrix
 on:
   pull_request: ~
@@ -537,10 +486,6 @@ on:
     - cron: 42 5 * * 0
   workflow_dispatch:
     inputs:
-      env:
-        default: ''
-        description: 'Env vars for test run (space-separated KEY=VALUE, e.g. "BROCKEN_SKIP_PDATA=1"). See [env:...] commit tag.'
-        type: string
       runner:
         default: all
         description: 'Runner(s) to execute (comma-separated, e.g. "freebsd,linux" or "openbsd#arm,linux#riscv"). See [runner:...] commit tag docs.'
@@ -548,10 +493,6 @@ on:
       test_files:
         default: ''
         description: Test file pattern (e.g. t/3000_jenny/3500_isolate/*.t)
-        type: string
-      verbose:
-        default: 0
-        description: 'Verbosity level (0=silent, 1=verbose). See [verbose] commit tag.'
         type: string
 permissions:
   actions: read
