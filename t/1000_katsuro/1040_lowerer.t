@@ -610,4 +610,24 @@ subtest 'syscall_by_name errors on non-string first argument' => sub {
     ok( $@, 'error thrown for non-string argument' );
     like( $@, qr/string/, 'error mentions string literal requirement' );
 };
+subtest 'libc intrinsic produces call to named function' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub foo() -> i64 {
+    return Brocken::libc("write", 1, 0, 6);
+}
+BROCKEN
+    my $f = find_function( $mod, 'foo' );
+    ok( $f, 'found function foo' );
+    my $ir = $f->as_string;
+    like( $ir, qr/call\s+i64\s+\@write/, 'libc("write") produces call to @write' );
+    like( $ir, qr/i64\s+1/,              'first arg (fd=1) preserved' );
+    like( $ir, qr/i64\s+6/,              'third arg (count=6) preserved' );
+};
+subtest 'libc intrinsic errors on non-string first argument' => sub {
+    my $c = Brocken::Compiler->new;
+    eval { $c->compile( 'return Brocken::libc(42, 1, 0);', 'test.br' ) };
+    ok( $@, 'error thrown for non-string argument' );
+    like( $@, qr/string/, 'error mentions string literal requirement' );
+};
 done_testing;

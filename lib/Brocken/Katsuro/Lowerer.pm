@@ -770,6 +770,19 @@ class Brocken::Katsuro::Lowerer {
             }
             return $builder->build_syscall( \@syscall_args, undef, $line, $col );
         }
+        if ( $name eq 'libc' ) {
+            my $name_ast = $ast->args->[0];
+            Carp::croak( "First argument to libc must be a string literal at " . $self->_loc($ast) )
+                unless $name_ast->isa('Brocken::Katsuro::AST::Expr::Const') && $name_ast->type eq 'String';
+            my $func_name = $name_ast->value;
+            my $extern_fn
+                = Brocken::Lindsay::IR::Function->new( name => $func_name, return_type => Brocken::Lindsay::IR::Type::i64(), params => [], );
+            my @call_args;
+            for my $i ( 1 .. $#args ) {
+                push @call_args, $args[$i];
+            }
+            return $builder->build_call( $extern_fn, \@call_args, undef, $line, $col );
+        }
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }
 
