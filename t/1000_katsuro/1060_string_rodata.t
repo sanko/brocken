@@ -52,6 +52,7 @@ SKIP: {
                 $data;
             };
             ok( index( $peek, "Hello, world!\0" ) >= 0, 'linked binary contains the string constant with null terminator' );
+            chmod 0755, $file;
             like `$file`, qr[^Hello, world!$], 'say(...) works with static strings';
             unlink $file;
         }

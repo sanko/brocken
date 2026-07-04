@@ -258,7 +258,7 @@ class Brocken::Katsuro::Platform {
     method libc_name()               {'libc.so'}
     method libpthread_name()         {undef}
     method interpreter()             {undef}
-    method exit_name()               {'_exit'}
+    method exit_name()               {'exit'}
     method needs_sched_setaffinity() {0}
     #
     method is_arm64()   { $self->arch eq 'aarch64' }
