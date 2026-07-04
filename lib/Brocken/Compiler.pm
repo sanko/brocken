@@ -29,7 +29,7 @@ class Brocken::Compiler {
         return $parser->parse_program();
     }
 
-    method compile( $source, $filename = '(eval)' ) {
+    method compile( $source, $filename = '(eval)', $platform = undef ) {
         my @all_stmts;
         my $core_source = $self->_read_core_brocken();
         if ( length $core_source ) {
@@ -40,7 +40,7 @@ class Brocken::Compiler {
         my $user_ast = $self->_parse( $source, $filename );
         push @all_stmts, $user_ast->statements->@*;
         my $merged_ast = Brocken::Katsuro::AST::Program->new( statements => \@all_stmts );
-        my $lowerer    = Brocken::Katsuro::Lowerer->new();
+        my $lowerer    = Brocken::Katsuro::Lowerer->new( platform => $platform );
         my $module     = $lowerer->lower_program($merged_ast);
         $module->set_class_info( $lowerer->classes );
         return $module;

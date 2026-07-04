@@ -417,10 +417,71 @@ BROCKEN
         my $file  = $brocken->tmpdir . '/e2e_bitwise' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
+
         # band(255,15)=15, bor(240,15)=255, bxor(255,15)=240,
         # shl(1,4)=16, shr(255,4)=15
         # 15 + 255 - 240 + 16 + 15 = 61  (sum < 256 for 8-bit exit code)
         is( $? >> 8, 61, 'bitwise intrinsics produce correct results' );
+        unlink $file;
+    }
+};
+subtest 'Syscall intrinsic execution' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+    my $c       = Brocken::Compiler->new;
+SKIP: {
+        skip 'Native executable test requires native platform' unless $host->is_native;
+        if ( $host->is_freebsd || $host->is_macos || $host->is_openbsd || $host->is_dragonflybsd || $host->is_midnightbsd ) {
+            skip 'Raw syscall 0 not safe on this platform', 2;
+        }
+        subtest 'Syscall discarded result, program continues' => sub {
+            my $module = $c->compile(<<'BROCKEN');
+Brocken::syscall(0, 0, 0, 0, 0, 0, 0);
+return 42;
+BROCKEN
+            my $funcs = $brocken->codegen->emit_functions( $module->functions );
+            my $file  = $brocken->tmpdir . '/e2e_syscall_discard' . $brocken->ext;
+            $brocken->linker->write_executable( $file, $funcs, $host );
+            system $file;
+            is( $? >> 8, 42, 'syscall does not crash, program continues' );
+            unlink $file;
+        };
+        subtest 'Syscall return value captured' => sub {
+            my $module = $c->compile(<<'BROCKEN');
+my i64 $r = Brocken::syscall(0, 0, 0, 0, 0, 0, 0);
+return $r;
+BROCKEN
+            my $funcs = $brocken->codegen->emit_functions( $module->functions );
+            my $file  = $brocken->tmpdir . '/e2e_syscall_retval' . $brocken->ext;
+            $brocken->linker->write_executable( $file, $funcs, $host );
+            system $file;
+
+            # Cannot predict syscall return value (OS-specific), but it must
+            # complete without crashing and produce some exit code 0-255
+            like( $? >> 8, qr/\A\d+\z/, 'syscall return value captured' );
+            unlink $file;
+        };
+    }
+};
+subtest 'Syscall by name' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+    my $c       = Brocken::Compiler->new;
+SKIP: {
+        skip 'Native executable test requires native platform' unless $host->is_native;
+        skip 'Syscall numbers not resolved for Windows'            if $host->is_windows;
+        skip 'Detecting syscall numbers unreliable on Haiku in CI' if $host->is_haiku;
+        my $module = $c->compile( <<'BROCKEN', '(eval)', $host );
+return Brocken::syscall_by_name("exit", 42);
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/e2e_syscall_by_name' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+
+        # Platform resolves "exit" to the correct syscall number for this OS.
+        # The exit syscall terminates the process with the given code (42).
+        is( $? >> 8, 42, 'syscall_by_name("exit") exits with the right code' );
         unlink $file;
     }
 };
