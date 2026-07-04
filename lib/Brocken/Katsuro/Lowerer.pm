@@ -6,7 +6,8 @@ use Brocken::Lindsay::IR::Builder;
 use Carp ();
 
 class Brocken::Katsuro::Lowerer {
-    field $module : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
+    field $module   : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
+    field $platform : param = undef;
     field $builder = Brocken::Lindsay::IR::Builder->new();
     field $current_func;
     field $current_block;
@@ -755,6 +756,20 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_shl( $args[0], $args[1], undef, $line, $col )  if $name eq 'shl';
         return $builder->build_lshr( $args[0], $args[1], undef, $line, $col ) if $name eq 'shr';
         return $builder->build_syscall( \@args, undef, $line, $col )          if $name eq 'syscall';
+        if ( $name eq 'syscall_by_name' ) {
+            my $name_ast = $ast->args->[0];
+            Carp::croak( "First argument to syscall_by_name must be a string literal at " . $self->_loc($ast) )
+                unless $name_ast->isa('Brocken::Katsuro::AST::Expr::Const') && $name_ast->type eq 'String';
+            Carp::croak( "syscall_by_name requires a platform to resolve syscall names at " . $self->_loc($ast) ) unless $platform;
+            my $syscall_name = $name_ast->value;
+            my $syscall_num  = $platform->syscall($syscall_name);
+            Carp::croak( "Unknown syscall name '$syscall_name' at " . $self->_loc($ast) ) unless defined $syscall_num;
+            my @syscall_args = ( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $syscall_num, ) );
+            for my $i ( 1 .. $#args ) {
+                push @syscall_args, $args[$i];
+            }
+            return $builder->build_syscall( \@syscall_args, undef, $line, $col );
+        }
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }
 

@@ -4,6 +4,7 @@ use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as
 use lib 'lib', '../../lib', '../lib';
 use Brocken::Compiler;
 use Brocken::Lindsay::IR;
+use Brocken::Katsuro::Platform;
 
 sub find_function {
     my ( $mod, $name ) = @_;
@@ -572,5 +573,41 @@ subtest 'Unknown class error includes position' => sub {
     like( $@, qr/test\.br/,    'error mentions filename' );
     like( $@, qr/line 1/,      'error mentions line' );
     like( $@, qr/Nonexistent/, 'error mentions class name' );
+};
+subtest 'syscall_by_name resolves to correct syscall number' => sub {
+    my $platform = Brocken::Katsuro::Platform::parse();
+    my $exit_num = $platform->syscall('exit');
+    skip 'Platform does not resolve syscall names', 3 unless defined $exit_num;
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile( <<'BROCKEN', 'test.br', $platform );
+sub foo() -> i64 {
+    return Brocken::syscall_by_name("exit", 42);
+}
+BROCKEN
+    my $f = find_function( $mod, 'foo' );
+    ok( $f, 'found function foo' );
+    my $ir = $f->as_string;
+    like( $ir, qr/syscall\(i64 \Q$exit_num\E/, "syscall_by_name(\"exit\") resolves to $exit_num" );
+    like( $ir, qr/i64 42/,                     'syscall arguments are preserved' );
+};
+subtest 'syscall_by_name errors without platform' => sub {
+    my $c = Brocken::Compiler->new;
+    eval { $c->compile( 'return Brocken::syscall_by_name("exit", 0);', 'test.br' ) };
+    ok( $@, 'error thrown without platform' );
+    like( $@, qr/platform/, 'error mentions platform' );
+};
+subtest 'syscall_by_name errors on unknown syscall name' => sub {
+    my $platform = Brocken::Katsuro::Platform::parse();
+    my $c        = Brocken::Compiler->new;
+    eval { $c->compile( 'return Brocken::syscall_by_name("nonexistent", 0);', 'test.br', $platform ) };
+    ok( $@, 'error thrown for unknown syscall name' );
+    like( $@, qr/nonexistent/, 'error mentions unknown name' );
+};
+subtest 'syscall_by_name errors on non-string first argument' => sub {
+    my $platform = Brocken::Katsuro::Platform::parse();
+    my $c        = Brocken::Compiler->new;
+    eval { $c->compile( 'return Brocken::syscall_by_name(42, 0);', 'test.br', $platform ) };
+    ok( $@, 'error thrown for non-string argument' );
+    like( $@, qr/string/, 'error mentions string literal requirement' );
 };
 done_testing;
