@@ -469,8 +469,10 @@ subtest 'Syscall by name' => sub {
     my $c       = Brocken::Compiler->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
-        skip 'Syscall numbers not resolved for Windows'            if $host->is_windows;
+        skip 'Syscall numbers not resolved for Windows' if $host->is_windows;
         skip 'Detecting syscall numbers unreliable on Haiku in CI' if $host->is_haiku;
+        skip 'Exit syscall crashes or misbehaves on this platform' if $host->is_openbsd;
+        skip 'Exit syscall returns on NetBSD ARM64' if $host->is_netbsd && $host->is_arm64;
         my $module = $c->compile( <<'BROCKEN', '(eval)', $host );
 return Brocken::syscall_by_name("exit", 42);
 BROCKEN
