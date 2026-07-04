@@ -7,6 +7,7 @@ use Brocken::Katsuro::Platform;
 class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
     use Brocken::Jenny::Codegen::ARM64::Inst;
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
+    field $_extern_got_offsets : reader = {};
 
 =pod
 
@@ -152,7 +153,8 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         #   _init_tls            = +112 (offset 14, index 14)
         #   _rtld_call_init      = +120 (offset 15, index 15)
         # Slot 0-2 reserved (0, DYNAMIC, LINK_MAP).
-        my $imports = {
+        # Dynamically registered extern functions get slots starting at +128.
+        my $fixed_imports = {
             dlopen                 => 24,
             dlsym                  => 32,
             pthread_create         => 40,
@@ -168,7 +170,10 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             _init_tls              => 112,
             _rtld_call_init        => 120,
         };
-        return $self->layout->get('.got')->{rva} + ( $imports->{$name} // die 'Unknown ELF import: ' . $name );
+        my $got_base = $self->layout->get('.got')->{rva};
+        return $got_base + $fixed_imports->{$name}       if exists $fixed_imports->{$name};
+        return $got_base + $_extern_got_offsets->{$name} if exists $_extern_got_offsets->{$name};
+        die 'Unknown ELF import: ' . $name;
     }
 
     # Standard Linux x86_64 static image base; PIE/BSD use base 0 for ASLR.
@@ -326,20 +331,29 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $self->layout->get('.text')->{size} = length($text);
         }
 
-        # Generate import stubs for undefined external functions
-        my $entry_size    = $self->type eq 'exe' ? length($entry_stub) : 0;
-        my @known_imports = qw(pthread_create pthread_join dlopen dlsym sched_setaffinity
-            pthread_mutex_lock pthread_mutex_unlock pthread_cond_wait pthread_cond_signal pthread_cond_broadcast);
+        # Pre-scan fixups to discover extern functions not defined in compiled code
+        my %extern_seen;
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
-            next unless grep { $ff->{target} eq $_ } @known_imports;
+            $extern_seen{ $ff->{target} } = 1;
+        }
+
+        # Allocate GOT slots for extern functions starting at +128 (slot 16+)
+        my $next_got_offset = 128;
+        for my $name ( sort keys %extern_seen ) {
+            $_extern_got_offsets->{$name} = $next_got_offset;
+            $next_got_offset += 8;
+        }
+
+        # Generate import stubs for undefined external functions
+        my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
+        for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
             my $got_rva;
             eval { $got_rva = $self->import_rva( $ff->{target} ) };
             next if $@;
             my $stub_ofs = length($text);
             my $stub_bytes;
-
             if ( $platform->is_x64 ) {
                 my $disp32 = $got_rva - ( $text_rva + $stub_ofs + 6 );
                 $stub_bytes = pack( 'CC l<', 0xFF, 0x25, $disp32 );
@@ -489,6 +503,12 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
         if ( $platform->is_dragonflybsd ) {
             push @imports, '_init_tls', '_rtld_call_init';
+        }
+
+        # Merge dynamically discovered extern functions into @imports
+        for my $name ( sort keys %$_extern_got_offsets ) {
+            next if grep { $_ eq $name } @imports;
+            push @imports, $name;
         }
         my $libc = $platform->libc_name;
 
@@ -733,16 +753,28 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             my $rtld_call_sym_idx = $sym_indices{'_rtld_call_init'};
             $rela_dyn .= pack( 'Q< Q< q<', $rtld_call_slot, ( $rtld_call_sym_idx << 32 ) | $rel_type, 0 );
         }
+
+        # Relocation entries for dynamically discovered extern functions
+        for my $name ( sort keys %$_extern_got_offsets ) {
+            if ( !exists $sym_indices{$name} ) {
+                $sym_indices{$name} = $sym_idx++;
+                $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 0, 0, 0 );
+            }
+            my $slot = $base + $self->import_rva($name);
+            $rela_dyn .= pack( 'Q< Q< q<', $slot, ( $sym_indices{$name} << 32 ) | $rel_type, 0 );
+        }
         $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
-# GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join, [8]=sched_setaffinity, [9]=pthread_mutex_lock, [10]=pthread_mutex_unlock, [11]=pthread_cond_wait, [12]=pthread_cond_signal, [13]=pthread_cond_broadcast, [14]=_init_tls, [15]=_rtld_call_init
-        my $got;
-        if ( $platform->is_dragonflybsd ) {
-            $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
+# GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join, [8]=sched_setaffinity, [9]=pthread_mutex_lock, [10]=pthread_mutex_unlock, [11]=pthread_cond_wait, [12]=pthread_cond_signal, [13]=pthread_cond_broadcast, [14]=_init_tls, [15]=_rtld_call_init, [16+]=dynamic extern functions
+# Compute total GOT slots needed: 3 reserved + max slot index from all imports
+        my $max_got_offset = 0;
+        for my $name (@imports) {
+            my $off = $self->import_rva($name);
+            $max_got_offset = $off if $off > $max_got_offset;
         }
-        else {
-            $got = pack( 'Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q< Q<', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 );
-        }
+        my $got_slots = int( $max_got_offset / 8 ) + 1;
+        $got_slots = 64 if $got_slots < 64;    # minimum 512 bytes
+        my $got = pack( 'Q<*', (0) x $got_slots );
         $self->layout->get('.got')->{size} = length($got);
         my $elf_hash = sub {
             my $name = shift;

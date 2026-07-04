@@ -486,6 +486,7 @@ Known intrinsics:
 | `Brocken::shr(a, b)` | `lshr` (logical shift right) |
 | `Brocken::syscall(n, ...)` | syscall instruction |
 | `Brocken::syscall_by_name(name, ...)` | syscall instruction (number resolved from platform by name) |
+| `Brocken::libc(name, ...)` | call libc function by name (resolved at link time) |
 
 ### 2.8 Built-in Functions
 

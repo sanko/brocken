@@ -196,80 +196,106 @@ enabled.
             substr( $edata_bytes, 0, 40, $export_dir_table );
         }
 
-        # Generate import stubs for undefined external functions
-        my $entry_size    = $self->type eq 'exe' ? length($entry_stub) : 0;
-        my @known_imports = qw(CreateThread WaitForSingleObject CloseHandle SetThreadAffinityMask GetExitCodeThread
-            AcquireSRWLockExclusive ReleaseSRWLockExclusive InitializeConditionVariable
-            SleepConditionVariableSRW WakeConditionVariable WakeAllConditionVariable);
-        my %import_names;
+        # Pre-scan fixups to discover extern functions not defined in compiled code
+        my @extern_funcs;
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
-            next unless grep { $ff->{target} eq $_ } @known_imports;
-            $import_names{ $ff->{target} } = 1;
+            push @extern_funcs, $ff->{target} unless grep { $_ eq $ff->{target} } @extern_funcs;
+        }
+
+        # Generate import stubs for undefined external functions
+        my $entry_size       = $self->type eq 'exe' ? length($entry_stub) : 0;
+        my @kernel32_imports = qw(CreateThread WaitForSingleObject CloseHandle SetThreadAffinityMask GetExitCodeThread
+            AcquireSRWLockExclusive ReleaseSRWLockExclusive InitializeConditionVariable
+            SleepConditionVariableSRW WakeConditionVariable WakeAllConditionVariable);
+        my %kernel32_imports = map { $_ => 1 } @kernel32_imports;
+        my %import_names;
+        my ( %kernel32_names, %msvcrt_names );
+
+        for my $name (@extern_funcs) {
+            if ( $kernel32_imports{$name} ) {
+                $kernel32_names{$name} = 1;
+            }
+            else {
+                $msvcrt_names{$name} = 1;
+            }
+            $import_names{$name} = 1;
         }
         my @import_list = sort keys %import_names;
+        my @k32_list    = sort keys %kernel32_names;
+        my @mscrt_list  = sort keys %msvcrt_names;
         my $has_idata   = scalar @import_list > 0;
         my $idata_bytes = '';
         my $idata_rva   = 0;
-        my @iat_offsets;
 
         # Pre-compute idata RVA (text + preceding sections, page-aligned)
         $idata_rva = 0x1000 + ( ( length($text) + 4095 ) & ~4095 );
         $idata_rva += ( $self->brk_sym_size() + 4095 ) & ~4095 if $self->brk_sym_size() > 0;
         $idata_rva += ( length($data_bytes) + 4095 ) & ~4095   if length($data_bytes) > 0;
         $idata_rva += ( length($edata_bytes) + 4095 ) & ~4095  if $has_exports;
+        my %iat_base;    # name => IAT RVA entry (populated below if has_idata)
         if ($has_idata) {
-            my $ilt_bytes       = '';
-            my $hnt_bytes       = '';
-            my $iat_bytes       = '';
-            my $dll_name        = "kernel32.dll\0\0";
-            my $desc_size       = 20;
-            my $ilt_off         = $desc_size * 2;
-            my $dll_name_off    = $ilt_off + ( 8 * ( scalar(@import_list) + 1 ) );
-            my $hnt_off         = $dll_name_off + length($dll_name);
-            my $current_hnt_rva = $idata_rva + $hnt_off;
+            my $desc_size = 20;
+            my $num_idlls = ( @k32_list ? 1 : 0 ) + ( @mscrt_list ? 1 : 0 );
+            my $idir_size = $num_idlls * $desc_size + $desc_size;    # descriptors + null terminator
+            my $idir      = '';
+            my $dll_data  = '';
+            my @iat_blobs;
 
-            for my $i ( 0 .. $#import_list ) {
-                my $fn    = $import_list[$i];
-                my $entry = pack( 'v', 0 ) . $fn . "\0";
-                if ( length($entry) % 2 != 0 ) { $entry .= "\0"; }
-                $ilt_bytes .= pack( 'Q<', $current_hnt_rva );
-                $iat_bytes .= pack( 'Q<', $current_hnt_rva );
-                $hnt_bytes .= $entry;
-                $current_hnt_rva += length($entry);
+            # Pass 1: build DLL payload (ILT + names + hint/name entries) and IAT blobs
+            for my $dll ( [ kernel32 => \@k32_list, "kernel32.dll\0\0" ], [ msvcrt => \@mscrt_list, "msvcrt.dll\0\0" ] ) {
+                my ( $tag, $list, $dll_name ) = @$dll;
+                next unless @$list;
+                my $ilt_off         = length($dll_data);
+                my $dll_name_off    = $ilt_off + ( 8 * ( scalar( $list->@* ) + 1 ) );
+                my $hnt_off         = $dll_name_off + length($dll_name);
+                my $payload_base    = $idata_rva + $idir_size;
+                my $current_hnt_rva = $payload_base + $hnt_off;
+                my ( $ilt_bytes, $hnt_bytes, $iat_bytes ) = ( '', '', '' );
+                for my $fn ( $list->@* ) {
+                    my $entry = pack( 'v', 0 ) . $fn . "\0";
+                    $entry     .= "\0" if length($entry) % 2;
+                    $ilt_bytes .= pack( 'Q<', $current_hnt_rva );
+                    $iat_bytes .= pack( 'Q<', $current_hnt_rva );
+                    $hnt_bytes .= $entry;
+                    $current_hnt_rva += length($entry);
+                }
+                $ilt_bytes .= pack( 'Q<', 0 );
+                $iat_bytes .= pack( 'Q<', 0 );
+
+                # Descriptor for this DLL (appended to idir)
+                my $iat_off = 0;
+                $iat_off += length($_) for @iat_blobs;
+                my $iat_rva = $payload_base + length($dll_data) + $iat_off;
+
+                my $desc
+                    = pack( 'V', $payload_base + $ilt_off ) .           # OriginalFirstThunk (ILT)
+                    pack( 'V', 0 ) .                                     # TimeDateStamp
+                    pack( 'V', 0 ) .                                     # ForwarderChain
+                    pack( 'V', $payload_base + $dll_name_off ) .         # Name
+                    pack( 'V', $iat_rva );                                # FirstThunk (IAT)
+                $idir .= $desc;
+                $dll_data .= $ilt_bytes . $dll_name . $hnt_bytes;
+                push @iat_blobs, $iat_bytes;
+
+                # Record IAT base RVA for each function
+                for my $i ( 0 .. $#{$list} ) {
+                    $iat_base{ $list->[$i] } = $iat_rva + $i * 8;
+                }
             }
-
-            # Null terminators for ILT and IAT arrays
-            $ilt_bytes .= pack( 'Q<', 0 );
-            $iat_bytes .= pack( 'Q<', 0 );
-            my $term         = "\x00" x $desc_size;
-            my $desc_payload = pack( 'V5', 0, 0, 0, 0, 0 ) . $term . $ilt_bytes . $dll_name . $hnt_bytes;
-            my $hnt_pad      = ( 8 - ( length($desc_payload) % 8 ) ) % 8;
-            my $iat_off      = length($desc_payload) + $hnt_pad;
-            my $desc
-                = pack( 'V', $idata_rva + $ilt_off ) .
-                pack( 'V', 0 ) .
-                pack( 'V', 0 ) .
-                pack( 'V', $idata_rva + $dll_name_off ) .
-                pack( 'V', $idata_rva + $iat_off );
-            $idata_bytes = $desc . $term . $ilt_bytes . $dll_name . $hnt_bytes . ( "\x00" x $hnt_pad ) . $iat_bytes;
+            $idir .= "\x00" x $desc_size;    # null terminator
+            $idata_bytes = $idir . $dll_data . join( '', @iat_blobs );
         }
 
         # Resolve cross-function call fixups at link time, with import stubs
+        my $stubs_rva_start;
         for my $ff (@func_fixups) {
             my $target_off = $func_offsets{ $ff->{target} };
-            if ( !defined $target_off && $has_idata && exists $import_names{ $ff->{target} } ) {
-                my $stub_ofs = length($text);
-                my $text_rva = 0x1000;
-                my $iat_rva  = $idata_rva + length($idata_bytes) - ( 8 * ( scalar(@import_list) + 1 ) );
-                my $idx      = 0;
-                for my $fn (@import_list) {
-                    last if $fn eq $ff->{target};
-                    $idx++;
-                }
-                my $iat_entry_rva = $iat_rva + $idx * 8;
-                warn sprintf "STUB: target=%s idx=%d idata_rva=0x%X idata_len=%d iat_rva=0x%X iat_entry=0x%X\n", $ff->{target}, $idx, $idata_rva,
-                    length($idata_bytes), $iat_rva, $iat_entry_rva;
+            if ( !defined $target_off && exists $iat_base{ $ff->{target} } ) {
+                my $stub_ofs      = length($text);
+                my $text_rva      = 0x1000;
+                my $iat_entry_rva = $iat_base{ $ff->{target} };
+                $stubs_rva_start //= $text_rva + $stub_ofs;
                 if ( $platform->is_x64 ) {
                     my $disp32 = $iat_entry_rva - ( $text_rva + $stub_ofs + 6 );
                     $text .= pack( 'CC l<', 0xFF, 0x25, $disp32 );
@@ -357,6 +383,10 @@ enabled.
             }
             elsif ( length($text_raw) > 0 ) {
                 push @pdata_entries, { rva => 0x1000 + $entry_size, size => length($text_raw) };
+            }
+            if ( defined $stubs_rva_start ) {
+                my $stubs_size = length($text_bytes) - ( $stubs_rva_start - 0x1000 );
+                push @pdata_entries, { rva => $stubs_rva_start, size => $stubs_size };
             }
             for my $e (@pdata_entries) {
                 my $func_len = int( $e->{size} / 4 ) - 1;
@@ -594,9 +624,13 @@ enabled.
         my $data_dirs = "\x00" x 128;
         if ($has_idata) {
             substr $data_dirs, 8,  4, pack( 'V', $idata_rva );
-            substr $data_dirs, 12, 4, pack( 'V', 20 + 20 );      # IMAGE_IMPORT_DESCRIPTOR + zero terminator
-            my $iat_rva  = $idata_rva + length($idata_bytes) - ( 8 * ( scalar(@import_list) + 1 ) );
-            my $iat_size = 8 * ( scalar(@import_list) + 1 );
+            my $num_desc = ( @k32_list ? 1 : 0 ) + ( @mscrt_list ? 1 : 0 );
+            substr $data_dirs, 12, 4, pack( 'V', $num_desc * 20 + 20 );      # descriptors + null terminator
+            my $k32_iat_entries   = scalar(@k32_list) > 0   ? scalar(@k32_list) + 1   : 0;
+            my $mscrt_iat_entries = scalar(@mscrt_list) > 0 ? scalar(@mscrt_list) + 1 : 0;
+            my $total_iat_entries = $k32_iat_entries + $mscrt_iat_entries;
+            my $iat_rva           = $idata_rva + length($idata_bytes) - ( 8 * $total_iat_entries );
+            my $iat_size          = 8 * $total_iat_entries;
             substr $data_dirs, 96,  4, pack( 'V', $iat_rva );
             substr $data_dirs, 100, 4, pack( 'V', $iat_size );
         }

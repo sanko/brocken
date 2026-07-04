@@ -487,4 +487,42 @@ BROCKEN
         unlink $file;
     }
 };
+subtest 'Extern intrinsic calls libc function' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+    my $c       = Brocken::Compiler->new;
+SKIP: {
+        skip 'Native executable test requires native platform' unless $host->is_native;
+        skip 'MachO linker does not support libc yet' if $host->is_macos;
+        my $module = $c->compile(<<'BROCKEN');
+my i64 $neg = 100 - 142;
+my i64 $r = Brocken::libc("abs", $neg);
+return $r;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/e2e_libc_abs' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 42, 'libc("abs", -42) returns 42' );
+        unlink $file;
+    }
+};
+subtest 'Extern intrinsic exit' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+    my $c       = Brocken::Compiler->new;
+SKIP: {
+        skip 'Native executable test requires native platform' unless $host->is_native;
+        skip 'MachO linker does not support libc yet' if $host->is_macos;
+        my $module = $c->compile(<<'BROCKEN');
+Brocken::libc("_exit", 99);
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/e2e_libc_exit' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 99, 'libc("_exit", 99) exits with code 99' );
+        unlink $file;
+    }
+};
 done_testing;

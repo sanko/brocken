@@ -116,47 +116,72 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             $text       = $entry_stub . $text_raw;
         }
 
-        # Ensure layout is calculated (needed for GOT RVA in import stubs)
-        my @known_imports = qw(pthread_create pthread_join dlopen dlsym);
+        # Discover all extern functions from fixups (not just known imports)
+        my %extern_names;
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
-            if ( grep { $ff->{target} eq $_ } @known_imports ) {
-                $self->set_has_ffi(1);
-                last;
-            }
+            $extern_names{ $ff->{target} } = 1;
         }
+        my @extern_names = sort keys %extern_names;
+        if (@extern_names) {
+            $self->set_has_ffi(1);
+        }
+        if ($has_ffi && !@extern_names) {
+            @extern_names = qw(dlopen dlsym pthread_create pthread_join
+                pthread_mutex_lock pthread_mutex_unlock pthread_cond_wait
+                pthread_cond_signal pthread_cond_broadcast);
+            %extern_names = map { $_ => 1 } @extern_names;
+        }
+
+        # Build dynamic GOT offset table for all externs
+        my %got_offsets;
+        for my $i ( 0 .. $#extern_names ) {
+            $got_offsets{ $extern_names[$i] } = $i * 8;
+        }
+        my $got_size = @extern_names * 8;
+        $got_size = 512 if $got_size < 512;
         if ( !defined $self->layout ) {
             $self->pre_layout( length($text), length($data_bytes), $platform );
+            if (@extern_names) {
+                my $got_sec = $self->layout->get('.got');
+                if ($got_sec) {
+                    $got_sec->{size} = $got_size;
+                }
+                else {
+                    $self->layout->add_section( '.got', $got_size, 3 );
+                }
+                $self->layout->calculate( $self->layout->section_align );
+            }
         }
         else {
-            # Update section sizes and recalculate layout so all subsequent RVA
-            # lookups (text_rva, got_rva) reflect the current code/data sizes.
             $self->layout->get('.text')->{size} = length($text);
             my $data_sec = $self->layout->get('.data');
             if ($data_sec) {
                 $data_sec->{size} = length($data_bytes);
             }
-            if ( $has_ffi && !$self->layout->get('.got') ) {
-                $self->layout->add_section( '.got', 512, 3 );
+            if (@extern_names) {
+                if ( $self->layout->get('.got') ) {
+                    $self->layout->get('.got')->{size} = $got_size;
+                }
+                else {
+                    $self->layout->add_section( '.got', $got_size, 3 );
+                }
             }
             $self->layout->calculate( $self->layout->section_align );
         }
 
-        # Generate import stubs for undefined external functions
-        my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
-        my $text_rva   = $self->layout->get('.text')->{rva};
+        # Generate import stubs for all extern functions (not just known imports)
+        my $entry_size  = $self->type eq 'exe' ? length($entry_stub) : 0;
+        my $text_rva    = $self->layout->get('.text')->{rva};
+        my $got_rva_ref = $self->layout->get('.got');
+        my $got_base    = $got_rva_ref ? $got_rva_ref->{rva} : 0;
         my @stubs;
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
-            next unless grep { $ff->{target} eq $_ } @known_imports;
-            my $got_rva;
-            eval { $got_rva = $self->import_rva( $ff->{target} ) };
-            next if $@;
-            next if exists $func_offsets{ $ff->{target} };
+            next unless exists $got_offsets{ $ff->{target} };
+            my $got_rva  = $got_base + $got_offsets{ $ff->{target} };
             my $stub_ofs = length($text);
             my $stub_bytes;
-            my $got_base = $self->layout->get('.got')->{rva};
-
             if ( $platform->is_x64 ) {
                 my $disp32 = $got_rva - ( $text_rva + $stub_ofs + 6 );
                 $stub_bytes = pack( 'CC l<', 0xFF, 0x25, $disp32 );
@@ -291,14 +316,10 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             #   0x40 | trailing = BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM
             #   0x90 = BIND_OPCODE_DO_BIND
             $bind_info .= pack( 'C', 0x70 | $data_seg ) . $_uleb->($got_off);
-            for my $name (
-                '_dlopen',             '_dlsym',                '_pthread_create',    '_pthread_join',
-                '_pthread_mutex_lock', '_pthread_mutex_unlock', '_pthread_cond_wait', '_pthread_cond_signal',
-                '_pthread_cond_broadcast'
-            ) {
+            for my $name (@extern_names) {
                 $bind_info .= pack( 'C', 0x11 );
-                $bind_info .= pack( 'C', 0x51 );                 # BIND_TYPE_POINTER
-                $bind_info .= pack( 'C', 0x40 ) . "${name}\0";
+                $bind_info .= pack( 'C', 0x51 );                  # BIND_TYPE_POINTER
+                $bind_info .= pack( 'C', 0x40 ) . "_${name}\0";
                 $bind_info .= pack( 'C', 0x90 );
             }
             $bind_info .= pack( 'C', 0x00 );
@@ -316,14 +337,11 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
 
         # Undefined dynamic external imports
         if ($got_sec) {
-            for my $name (
-                '_dlopen',             '_dlsym',                '_pthread_create',    '_pthread_join',
-                '_pthread_mutex_lock', '_pthread_mutex_unlock', '_pthread_cond_wait', '_pthread_cond_signal',
-                '_pthread_cond_broadcast'
-            ) {
-                push @syms, $name;
-                $sym_types{$name} = 0x01;    # N_UNDF | N_EXT
-                $sym_rvas{$name}  = 0;
+            for my $name (@extern_names) {
+                my $mangled = '_' . $name;
+                push @syms, $mangled;
+                $sym_types{$mangled} = 0x01;    # N_UNDF | N_EXT
+                $sym_rvas{$mangled}  = 0;
             }
         }
 
@@ -580,7 +598,7 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
                 $payload = $data_bytes // '';
             }
             elsif ( $s->{name} eq '.got' ) {
-                $payload = pack( 'Q< Q< Q< Q<', 0, 0, 0, 0 );
+                $payload = "\0" x $got_size;
             }
             elsif ( $s->{name} eq '.linkedit' ) {
                 $payload = $bind_info . $trie . $symtab . $strtab;
