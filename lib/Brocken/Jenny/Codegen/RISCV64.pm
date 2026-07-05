@@ -377,6 +377,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         my $total_frame = $unified_frame + $aligned_alloca;
         $alloca_frame = $unified_frame;
         my $reg_id = sub ($r) {
+            return 0 unless defined $r;
             my %map = (
                 zero => 0,
                 ra   => 1,
@@ -418,6 +419,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
             return 0;
         };
         my $resolve = sub ($op) {
+            die "resolve: operand value is undef" unless defined $op->value;
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
             return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: " . $op->kind;
