@@ -1,20 +1,52 @@
 # core.brocken -- Brocken v0.1 Runtime Primitives
 # Automatically compiled alongside user code.
+#
+# Heap metadata layout (at heap_base):
+#   [heap_base + 0]:  cursor       (ptr — bump allocation pointer)
+#   [heap_base + 8]:  limit        (ptr — end of heap)
+#   [heap_base + 16]: free16_head  (ptr — segregated free list for 16-byte reclaimed objects)
+#   [heap_base + 24]: block_base   (ptr — start of first Immix block = heap_base + 32)
+#
+# Immix block layout (32 KB = 32768 bytes per block):
+#   [block + 0..15]:    bitmap (128-bit line bitmap, bit N = line N is available)
+#   [block + 16..255]:  Line 0  (240 usable bytes)
+#   [block + 256..511]: Line 1  (256 bytes)
+#   ...
+#   [block + 32512..32767]: Line 127 (256 bytes)
+#   Total per block: 16 + (128 * 256) - 16 = 32768 (the -16 is because line 0
+#   shares the bitmap's 16 bytes)
+#
+# Objects freed by decref (when RC reaches 0) are pushed onto free16_head.
+# The next pointer is stored at [obj + 8] (payload area of the freed object).
+# bump_alloc checks free16_head first (hot path), then falls back to bump
+# within the current Immix block (cold path).
 
-# Initialize heap metadata in the first 16 bytes of the heap buffer:
-#   [heap_base + 0] = cursor (ptr to next free byte, starts at heap_base + 16)
-#   [heap_base + 8] = limit (ptr past end of heap)
+# Initialize heap metadata:
+#   [heap_base + 0]  = cursor  (bump allocation pointer, starts at block_base)
+#   [heap_base + 8]  = limit   (ptr past end of heap)
+#   [heap_base + 16] = free16_head (segregated free list for reclaimed 16-byte objects)
+#   [heap_base + 24] = block_base (start of first Immix block = heap_base + 32)
 sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
-    my ptr $initial_cursor = Brocken::ptr_add($heap_base, 16);
-    Brocken::store_i64($heap_base, $initial_cursor);
-    my ptr $limit_addr = Brocken::ptr_add($heap_base, 8);
-    Brocken::store_i64($limit_addr, Brocken::ptr_add($heap_base, $heap_size));
+    my ptr $block_base = Brocken::ptr_add($heap_base, 32);
+    Brocken::store_i64($heap_base, $block_base);
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 8), Brocken::ptr_add($heap_base, $heap_size));
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 16), 0);
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 24), $block_base);
     return;
 }
 
-# Bump-allocate $size bytes from the heap at $heap_base.
+# Allocate $size bytes from the heap at $heap_base.
+# Checks the segregated free list first (hot path), then falls back to
+# bump allocation within the current Immix block (cold path).
 # Returns pointer to the allocated block, or 0 on out-of-memory.
 sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
+    my ptr $free16_ptr = Brocken::ptr_add($heap_base, 16);
+    my ptr $head = Brocken::load_i64($free16_ptr);
+    if (Brocken::ptr_cmp_eq($head, 0) == 0) {
+        my ptr $next = Brocken::load_i64(Brocken::ptr_add($head, 8));
+        Brocken::store_i64($free16_ptr, $next);
+        return $head;
+    }
     my ptr $cursor_ptr = $heap_base;
     my ptr $cursor = Brocken::load_i64($cursor_ptr);
     my ptr $limit = Brocken::load_i64(Brocken::ptr_add($heap_base, 8));
@@ -28,7 +60,7 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
 }
 
 # Increment the reference count of a fat scalar at $obj.
-# The refcount is a u16 at offset 0 of the 16-byte header.
+# The refcount is a u16 at offset 0 of the 8-byte header.
 sub Brocken::Runtime::incref(ptr $obj) {
     if (Brocken::ptr_cmp_eq($obj, 0)) {
         return;
@@ -44,8 +76,9 @@ sub Brocken::Runtime::incref(ptr $obj) {
 }
 
 # Decrement the reference count of a fat scalar at $obj.
-# If RC reaches 0, the memory will be reclaimed on the next Immix sweep.
-sub Brocken::Runtime::decref(ptr $obj) {
+# When RC reaches 0, pushes the object onto the segregated free list
+# at heap_base+16 for immediate reuse (hot path).
+sub Brocken::Runtime::decref(ptr $obj, ptr $heap_base) {
     if (Brocken::ptr_cmp_eq($obj, 0)) {
         return;
     }
@@ -53,5 +86,11 @@ sub Brocken::Runtime::decref(ptr $obj) {
     my i64 $old_rc = Brocken::band($header, 65535);
     my i64 $new_rc = Brocken::i64_sub($old_rc, 1);
     Brocken::store_i64($obj, Brocken::i64_add(Brocken::i64_sub($header, $old_rc), $new_rc));
+    if (Brocken::ptr_cmp_eq($new_rc, 0) && Brocken::ptr_cmp_eq($heap_base, 0) == 0) {
+        my ptr $free16_ptr = Brocken::ptr_add($heap_base, 16);
+        my ptr $head = Brocken::load_i64($free16_ptr);
+        Brocken::store_i64(Brocken::ptr_add($obj, 8), $head);
+        Brocken::store_i64($free16_ptr, $obj);
+    }
     return;
 }

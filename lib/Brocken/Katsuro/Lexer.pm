@@ -49,7 +49,12 @@ class Brocken::Katsuro::Lexer v0.0.1 {
                 next;
             }
 
-            # 3. Match Numbers
+            # 3. Match Numbers (decimal and hex)
+            if ( $remaining =~ /^(0x([0-9a-fA-F]+))/ ) {
+                push @tokens, $self->_token( 'NUM', hex($2) );
+                $self->_advance_pos( length($1) );
+                next;
+            }
             if ( $remaining =~ /^(\d+)/ ) {
                 my $val = $1;
                 push @tokens, $self->_token( 'NUM', $val );

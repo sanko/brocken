@@ -278,12 +278,14 @@ class Brocken::Lindsay::IR::Builder {
         return $insert_block->append_inst($inst);
     }
 
-    method build_box( $val, $name = undef, $line = 0, $col = 0 ) {
+    method build_box( $val, $name = undef, $line = 0, $col = 0, $heap_base = undef ) {
+        my @operands = ($val);
+        push @operands, $heap_base if $heap_base;
         my $inst = Brocken::Lindsay::IR::Instruction::Box->new(
             name     => $name // $self->_next_id(),
             type     => Brocken::Lindsay::IR::Type::dynamic(),
             opcode   => 'box',
-            operands => [$val],
+            operands => \@operands,
             parent   => $insert_block,
             line     => $line,
             col      => $col,
@@ -317,12 +319,13 @@ class Brocken::Lindsay::IR::Builder {
         return $insert_block->append_inst($inst);
     }
 
-    method build_decref( $val, $line = 0, $col = 0 ) {
-        my $inst = Brocken::Lindsay::IR::Instruction::Decref->new(
+    method build_decref( $val, $line = 0, $col = 0, $heap_base = undef ) {
+        my @operands = defined $heap_base ? ( $val, $heap_base ) : ($val);
+        my $inst     = Brocken::Lindsay::IR::Instruction::Decref->new(
             name     => undef,
             type     => Brocken::Lindsay::IR::Type::void(),
             opcode   => 'decref',
-            operands => [$val],
+            operands => \@operands,
             parent   => $insert_block,
             line     => $line,
             col      => $col,

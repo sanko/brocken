@@ -197,8 +197,11 @@ class Brocken::Lindsay::IR::Instruction::Incref : isa(Brocken::Lindsay::IR::Inst
 class Brocken::Lindsay::IR::Instruction::Decref : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
-        my $val = $self->operands->[0];
-        return sprintf '  decref %s %s', $val->type->as_string, $val->as_string;
+        my $val  = $self->operands->[0];
+        my $heap = $self->operands->[1];
+        my $s    = sprintf '  decref %s %s', $val->type->as_string, $val->as_string;
+        $s .= sprintf ' [heap_base=%s]', $heap->as_string if $heap;
+        return $s;
     }
 }
 

@@ -2156,6 +2156,9 @@ class Brocken::Jenny::Lowerer::Wasm {
                     my $op_name   = $inst->opcode;
                     my $func_name = 'Brocken::Runtime::' . $op_name;
                     $mbb->add_instruction( $self->_wasm_push( $val, "$op_name arg 0" ) );
+                    if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') && $inst->operands->[1] ) {
+                        $mbb->add_instruction( $self->_wasm_push( $inst->operands->[1], "$op_name arg 1 (heap_base)" ) );
+                    }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'call_func',

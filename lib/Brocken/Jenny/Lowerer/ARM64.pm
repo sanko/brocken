@@ -2447,16 +2447,61 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
-                    my $val  = $inst->operands->[0];
-                    my $size = 16;
-                    my $dyn  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'alloca',
-                            operands => [ $dyn, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
-                            comment  => 'box: alloca 16'
-                        )
-                    );
+                    my $val       = $inst->operands->[0];
+                    my $heap_base = $inst->operands->[1];
+                    my $size      = 16;
+                    my $dyn       = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    if ($heap_base) {
+                        my @arg_regs = $self->_abi->param_registers->@*;
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[0] ),
+                                    $self->_lower_opnd($heap_base)
+                                ],
+                                comment => 'box: arg 0 heap_base'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[1] ),
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'imm',
+                                        value => $size,
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    )
+                                ],
+                                comment => 'box: arg 1 size'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'Brocken::Runtime::bump_alloc' ) ],
+                                comment  => 'box: call bump_alloc'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands =>
+                                    [ $dyn, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $self->_abi->return_register ) ],
+                                comment => 'box: bump_alloc result'
+                            )
+                        );
+                    }
+                    else {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'alloca',
+                                operands => [ $dyn, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                                comment  => 'box: alloca 16'
+                            )
+                        );
+                    }
                     my $header_val = $self->_type_tag( $val->type ) << 24;
                     my $header_mem = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
@@ -2513,6 +2558,16 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             comment  => "$op_name arg 0"
                         )
                     );
+                    if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') && $inst->operands->[1] ) {
+                        my $reg1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[1] );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $reg1, $self->_lower_opnd( $inst->operands->[1] ) ],
+                                comment  => "$op_name arg 1 (heap_base)"
+                            )
+                        );
+                    }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'call_func',

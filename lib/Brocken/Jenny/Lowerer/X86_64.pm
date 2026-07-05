@@ -2711,13 +2711,54 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 );
                             }
                             else {
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
-                                        operands => [ $mem, $self->_lower_opnd($val) ],
-                                        comment  => 'store'
-                                    )
-                                );
+                                my $val_opnd = $self->_lower_opnd($val);
+                                if ( $val->isa('Brocken::Lindsay::IR::Constant') &&
+                                    $val->type &&
+                                    $val->type->kind eq 'int' &&
+                                    $val->type->bits >= 64 ) {
+                                    my $low32  = $val->value & 0xFFFFFFFF;
+                                    my $sext64 = $low32 >= 0x80000000 ? $low32 - 0x100000000 : $low32;
+                                    if ( $sext64 != $val->value ) {
+                                        state $ic = 0;
+                                        my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'virt_reg',
+                                            value => '%store_imm_' . $ic++,
+                                            type  => $val->type,
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $tmp, $val_opnd ],
+                                                comment  => 'load 64-bit imm for store'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'store',
+                                                operands => [ $mem, $tmp ],
+                                                comment  => 'store (reg)'
+                                            )
+                                        );
+                                    }
+                                    else {
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'store_imm',
+                                                operands => [ $mem, $val_opnd ],
+                                                comment  => 'store'
+                                            )
+                                        );
+                                    }
+                                }
+                                else {
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
+                                            operands => [ $mem, $val_opnd ],
+                                            comment  => 'store'
+                                        )
+                                    );
+                                }
                             }
                         }
                     }
@@ -2773,19 +2814,63 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
-                    my $val  = $inst->operands->[0];
-                    my $tag  = $self->_type_tag( $val->type );
-                    my $size = 16;                               # fat scalar: 16 bytes (8 header + 8 payload)
-                    my $dyn  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-
-                    # alloca %dyn, 16
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'alloca',
-                            operands => [ $dyn, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
-                            comment  => 'box: alloca 16'
-                        )
-                    );
+                    my $val       = $inst->operands->[0];
+                    my $heap_base = $inst->operands->[1];             # optional
+                    my $tag       = $self->_type_tag( $val->type );
+                    my $size      = 16;                               # fat scalar: 16 bytes (8 header + 8 payload)
+                    my $dyn       = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    if ($heap_base) {
+                        my @arg_regs = $self->_abi->param_registers->@*;
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[0] ),
+                                    $self->_lower_opnd($heap_base)
+                                ],
+                                comment => 'box: arg 0 heap_base'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[1] ),
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'imm',
+                                        value => $size,
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    )
+                                ],
+                                comment => 'box: arg 1 size'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'Brocken::Runtime::bump_alloc' ) ],
+                                comment  => 'box: call bump_alloc'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands =>
+                                    [ $dyn, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $self->_abi->return_register ) ],
+                                comment => 'box: bump_alloc result'
+                            )
+                        );
+                    }
+                    else {
+                        # alloca %dyn, 16
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'alloca',
+                                operands => [ $dyn, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                                comment  => 'box: alloca 16'
+                            )
+                        );
+                    }
 
                     # store [%dyn + 0], header (refcount|flags|tag|pad = tag << 24)
                     my $header_val = $tag << 24;
@@ -2846,6 +2931,16 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             comment  => "$op_name arg 0"
                         )
                     );
+                    if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Decref') && $inst->operands->[1] ) {
+                        my $reg1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $arg_regs[1] );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $reg1, $self->_lower_opnd( $inst->operands->[1] ) ],
+                                comment  => "$op_name arg 1 (heap_base)"
+                            )
+                        );
+                    }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'call_func',
