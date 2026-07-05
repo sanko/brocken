@@ -3105,10 +3105,20 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             }
                         }
                     }
+                    my @call_ops = ( Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $callee->name ) );
+                    if ( $platform->is_macos && $callee->params && scalar( $callee->params->@* ) > 0 ) {
+                        my $num_named   = scalar $callee->params->@*;
+                        my $num_unnamed = scalar @args - $num_named;
+                        $num_unnamed = 0 if $num_unnamed < 0;
+                        if ( $num_unnamed > 0 ) {
+                            push @call_ops, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $num_named );
+                            push @call_ops, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $num_unnamed );
+                        }
+                    }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'call_func',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $callee->name ) ],
+                            operands => \@call_ops,
                             comment  => "call @" . $callee->name
                         )
                     );
