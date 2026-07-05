@@ -439,7 +439,21 @@ enabled.
                     $frame_sz = ( $e->{frame_size} // 0 ) / 16;
                     $regi     = $e->{num_saved_int} // 0;
                 }
-                my $packed = 1 | ( $func_len << 2 ) | ( $cr << 22 ) | ( $frame_sz << 24 ) | ( $regi << 29 );
+                # ARM64 packed unwind data format (Microsoft PE spec):
+                #   Bits  0-17: FunctionLength  (size/4 - 1, 18 bits)
+                #   Bit      18: Version (1 for packed format)
+                #   Bit      19: Frag (0 for non-frag)
+                #   Bits 20-21: CR (0=None, 1=LR, 2=LR+FP)
+                #   Bits 22-26: FrameSize (in 16-byte units, 5 bits)
+                #   Bits 27-29: RegI (number of x19-x28 saved, 3 bits)
+                #   Bits 30-31: RegF (number of v8-v15 saved, 2 bits)
+                my $packed = ( $func_len & 0x3FFFF )       # Bits 0-17
+                           | ( 1 << 18 )                    # Bit 18: Version
+                           | ( 0 << 19 )                    # Bit 19: Frag
+                           | ( ( $cr & 3 ) << 20 )          # Bits 20-21: CR
+                           | ( ( $frame_sz & 0x1F ) << 22 ) # Bits 22-26: FrameSize
+                           | ( ( $regi & 7 ) << 27 )        # Bits 27-29: RegI
+                           | ( 0 << 30 );                   # Bits 30-31: RegF = 0
                 $pdata_bytes .= pack( 'V V', $e->{rva}, $packed );
             }
             $has_pdata = length($pdata_bytes) > 0;
