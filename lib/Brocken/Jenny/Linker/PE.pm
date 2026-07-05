@@ -106,15 +106,27 @@ enabled.
         if ( $self->type eq 'exe' ) {
             if ( $platform->is_arm64 ) {
 
-                # Windows ARM64 Entry Stub:
-                # - stp x29, x30, [sp, #-16]!
-                # - mov x29, sp
-                # - bl main (relative call offset +16 bytes -> 4 instructions)
-                # - ldp x29, x30, [sp], #16
-                # - uxtb w0, w0  (truncate exit code to 8 bits)
-                # - ret
-                my $bl = bl( 16 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
-                $entry_stub = pack( 'V6', stp_pre( 29, 30, 31, -16 ), add_imm( 29, 31, 0 ), $bl, ldp_post( 29, 30, 31, 16 ), uxtb( 0, 0 ), ret(), );
+                # Windows ARM64 Entry Stub with heap:
+                # Layout (36 bytes total):
+                #   0:  sub sp, sp, #0x100000   (1 MB heap allocation)
+                #   4:  mov x0, sp               (heap base in x0, first param)
+                #   8:  stp x29, x30, [sp, #-16]!
+                #  12:  mov x29, sp
+                #  16:  bl _BROCKEN_ENTRY
+                #  20:  ldp x29, x30, [sp], #16  (restore frame)
+                #  24:  add sp, sp, #0x100000    (deallocate heap)
+                #  28:  uxtb w0, w0              (truncate exit code to 8 bits)
+                #  32:  ret
+                my $bl = bl( 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
+                $entry_stub = pack( 'V', 0xD14403FF )     # sub sp, sp, #0x100000
+                            . pack( 'V', 0x910003E0 )     # mov x0, sp
+                            . pack( 'V', stp_pre( 29, 30, 31, -16 ) )
+                            . pack( 'V', add_imm( 29, 31, 0 ) )
+                            . pack( 'V', $bl )
+                            . pack( 'V', ldp_post( 29, 30, 31, 16 ) )
+                            . pack( 'V', 0x914403FF )     # add sp, sp, #0x100000
+                            . pack( 'V', uxtb( 0, 0 ) )
+                            . pack( 'V', ret() );
             }
             else {
                 # Windows x86_64 Entry Stub with heap:
