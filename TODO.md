@@ -2,7 +2,21 @@
 
 Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in place, we need to bridge the gap between abstract SSA and executable machine code.
 
-## Active Sprint
+## Active Sprint: Memory Management Runtime (R0–R1)
+
+### R0: Fix Fat Scalar Box Layout
+- [ ] Change `box` in all 4 MIR lowerers: store header word (packed refcount+flags+tag+pad) at `[ptr+0]`, payload at `[ptr+8]` instead of payload at `[ptr+0]` and tag at `[ptr+8]`
+- [ ] Change `unbox` to load payload from `[ptr+8]` instead of `[ptr+0]`
+- [ ] Update `_type_tag` and related metadata
+- [ ] Tests in `t/4000_runtime/`
+
+### R1: Immediate Reference Counting
+- [ ] Implement `Brocken::Runtime::incref`/`decref` in `core.brocken` (load u16 at `[ptr+0]`, inc/dec, store; decref to 0 → free)
+- [ ] Wire RC injection in frontend Lowerer (`Katsuro/Lowerer.pm`) — `build_incref` on assignment, `build_decref` on scope exit
+- [ ] Change `box` from `alloca` to heap allocation via `bump_alloc`
+- [ ] Tests in `t/4000_runtime/`
+
+## Earlier Completed Sprints
 
 ### Brocken Class Refactoring
 - [x] `Brocken->new()` constructor auto-selects codegen, linker, and ext based on platform
@@ -134,7 +148,15 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] **All codegen/linker paths** — replaced `main` references with `_BROCKEN_ENTRY`
 - [x] **Parser filters `use feature`** — returns `undef` statements filtered in `parse_program`
 
+### Known Issues (Remaining)
+
+- [ ] **ARM64 macOS: int-to-string via `sprintf` varargs** — ARM64 AAPCS requires 64-byte register save area for variadic calls. Fixed in Codegen/ARM64.pm (`sub sp, #64` / `add sp, #64` around `call_func`/`call_indirect`). Needs testing on Apple Silicon.
+
 ### Known Issues (Resolved)
+- [x] **RISC-V `3125_rodata.t` failure — undef param name:** Entry param handler in all three lowerers (`X86_64.pm`, `ARM64.pm`, `RISCV64.pm`) used `$param->name` directly as the `virt_reg` value. When `Value->new(type => ptr())` is created without a name (as in test `3125_rodata.t`), `$param->name` is undef, creating a MIR operand with undef value. Fixed: all three lowerers now declare `$param_name` with a synthetic fallback (`%pN`) when name is undef, and use it consistently for all virt_reg creations (i128 split, entry temps, main virt_reg).
+- [x] **RISC-V RodataRef routing:** Call handler, box-store, and incref/decref in Lowerer/RISCV64.pm now route `RodataRef` through `_materialize` instead of `_lower_opnd`, preventing undef virt_regs.
+- [x] **RISC-V codegen defensive guards:** Codegen/RISCV64.pm added undef-value checks — `$reg_id` returns `0` if `$r` is undef; `$resolve` dies with `"resolve: operand value is undef"` if `$op->value` is undef. This caught the param_name bug above.
+- [x] **macOS ARM unnamed-arg stack passing:** Lowerer/ARM64.pm passes `num_named`+`num_unnamed` as extra `call_func` operands on macOS ARM; Codegen/ARM64.pm emits `sub sp, #(N*8)`, `str` for each unnamed arg, BL, `add sp, #(N*8)` — only on macOS ARM. Non-macOS keeps original `sub sp, #64` / `add sp, #64`.
 - [x] **Duplicate block names in MIR codegen:** Fixed — Lowerer now generates unique block names via `$block_id` counter.
 - [x] **`terminator` returned last instruction regardless of type:** Fixed — now checks `isa` for Ret/Br/CondBr.
 - [x] **SSA name collisions on var ref:** Fixed — `lower_var_ref` no longer passes explicit names to `build_load`.
@@ -143,7 +165,7 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 
 ### Upcoming
 - [ ] **Dynamic (boxed) types at top level:** `my Int $x = 10` currently lowers like `i64`; needs actual box allocation
-- [ ] **String support:** String literals, `say("hello")` with runtime string data, string concatenation
+- [x] **String support:** String literals, `say("hello")`, `.` concatenation (RodataRef fold + runtime CRT)
 - [ ] **Debug info:** Source location tracking through the pipeline (line numbers in errors)
 - [ ] **Better error messages:** Report source line + column for parse/lower/codegen errors
 - [ ] **Hash support:** `%` hashes, basic key-value storage
@@ -161,23 +183,113 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [ ] **Lowering (X86_64/ARM64/RISCV64):** Inline pthread_mutex/pthread_cond sequences
 - [ ] **Runtime tests:** Two-isolate send/recv (native, compiled execution)
 
-## Phase 4: Self-Hosted Runtime & Memory Management (`core.brocken`)
+## Phase 4: Self-Hosted Memory Management (`core.brocken`)
 *Architecture Note: Brocken uses "Isolates" (share-nothing OS threads) and cooperative fibers. Because heaps are entirely thread-local, Garbage Collection and Reference Counting require **zero atomic locks**.*
 
-- [x] **Fat Scalar Layout:** 16-byte dynamic value struct (refcount + gc_flags + type_tag + aux_data + payload). Implemented via `box`/`unbox` IR (stack-allocated for now).
-- [ ] **Immediate RC:** Build the `Brocken::Runtime::incref`/`decref` module (currently placeholders in lowering).
-- [ ] **Immix Cycle Detector:** Mark-region trace of the isolate's Immix heap to reclaim cyclic garbage. Replaces trial deletion.
-- [ ] **RC Immix Allocator:** Implement 32KB block / 256-byte line bump-pointer allocation in the Perl subset. Replace the current `box`→`alloca` approach.
-- [ ] **Perceus RC Elision:** Static analysis pass cancels redundant incref/decref pairs; enables in-place mutation when refcount==1.
-- [ ] **Fiber Stack Scanning:** Walk stacks of suspended fibers to find live GC roots.
-- [ ] **UTF-8 Everywhere Strings:** Native string operations assuming pure UTF-8 payloads.
-- [ ] **Self-Hosted PerlIO:** Vtable-based layered I/O system (e.g., `:unix` raw bytes → `:utf8` validation).
+### Overview: Three-Layer Memory Architecture
 
-## Phase 5: Optimization & GC Lowering (Lindsay Middle-end)
-- [ ] **RC Insertion Pass:** Automatically insert `incref` and `decref` IR instructions around variable assignments. Utilize the Defer Stack to emit `decref` operations at scope exits.
-- [ ] **RC Elision & Reuse (Perceus-lite):** Optimize away redundant `incref`/`decref` pairs. If an object is uniquely owned (RC==1), mutate it in place rather than allocating a copy.
-- [ ] Constant Folding & Dead Code Elimination (DCE).
-- [ ] **Stack Map Generation:** Update `Jenny::Linker` to emit a `.brocken_stackmaps` section so the GC knows exactly which physical registers and stack slots hold pointers during a fiber yield.
+```
+┌──────────────────────────────────────────────┐
+│  Layer 3: Perceus (RC Elision + Reuse)       │  Lindsay Optimizer
+│  - Cancel redundant incref/decref pairs      │  (compile-time IR pass)
+│  - In-place mutation when refcount == 1      │
+│  - Borrow inference                          │
+├──────────────────────────────────────────────┤
+│  Layer 2: Bacon/Rajan Trial Deletion         │  runtime + ICB
+│  - Suspect buffer in ICB (ptrs 48-56)        │
+│  - Mark/Scan/Collect cycle detection         │
+│  - Recovers cyclic garbage                   │
+├──────────────────────────────────────────────┤
+│  Layer 1: Immediate RC + Immix Allocator     │  core.brocken + ICB
+│  - incref/decref on fat scalar refcount      │
+│  - Immix: 32KB blocks / 256-byte lines       │
+│  - Bump allocation within current line       │
+└──────────────────────────────────────────────┘
+```
+
+### Fat Scalar Layout (Revised — MUST match spec)
+
+The 16-byte dynamic value (`Any` type) layout, enforced by `box` lowering:
+
+```
+Offset  Size  Field
+0       2     Reference Count (u16, max 65535; overflow pins object)
+2       1     GC Flags (Bit 0: Cycle Suspect, Bit 1: Buffered, Bit 2: Leaf)
+3       1     Type Tag (0=Int, 1=String, 2=Array, 3=Class, 4=Ptr, 5=Dynamic, 6=i128)
+4       4     Padding / Aux (e.g., String cached char length)
+8       8     Payload (Raw u64/i64/f64/ptr)
+```
+
+Total: 16 bytes. The current `box` lowering stores payload at offset 0 and tag at offset 8 — this must be changed to match the spec layout above before RC can work.
+
+### Phase Plan
+
+#### R0: Fix Fat Scalar Layout (prerequisite for all RC work)
+- [ ] Change `box` lowering in all 4 MIR lowerers:
+  - `alloca 16` stays the same
+  - Instead of `store payload at [ptr+0]` and `store tag at [ptr+8]`:
+    - `store_imm 0 at [ptr+0]` (zero-initialize refcount + flags + tag + padding as u64)
+    - `store payload at [ptr+8]`
+    - `store_imm tag at [ptr+3]` (tag byte at offset 3)
+  - Wait: storing individual bytes is complex in MIR. Simpler approach:
+    - Pack the header: `((padding << 32) | (tag << 24) | (flags << 16) | refcount)` as one u64
+    - `store_imm header at [ptr+0]` (zero header = all zeros initially)
+    - `store payload at [ptr+8]`
+- [ ] Change `unbox` lowering to load from `[ptr+8]` instead of `[ptr+0]`
+- [ ] All 4 backends: X86_64, ARM64, RISCV64, Wasm
+
+#### R1: Immediate Reference Counting (IR → Runtime)
+- [x] `incref`/`decref` IR instructions defined in Lindsay IR
+- [x] `build_incref`/`build_decref` in Builder API
+- [x] All 4 MIR lowerers already handle `Incref`/`Decref` → emit `call_func @Brocken::Runtime::incref`/`decref`
+- [ ] **NEW:** Implement `Brocken::Runtime::incref(ptr)` and `Brocken::Runtime::decref(ptr)` in `core.brocken`:
+  - `incref`: load u16 from `[ptr+0]`, if < 65535, increment by 1, store back
+  - `decref`: load u16 from `[ptr+0]`, decrement by 1, store back; if result == 0, add to free list (or call DESTROY + free)
+- [ ] **NEW:** Wire RC injection in frontend Lowerer (`Katsuro/Lowerer.pm`):
+  - On variable assignment (`lower_assign`): emit `build_incref` on the new value
+  - On scope exit (block end): emit `build_decref` for each local variable
+  - On function return: emit `build_decref` for the return value's old binding
+- [ ] **NEW:** Change `box` lowering to use heap allocation (via `Brocken::Runtime::bump_alloc`) instead of `alloca` so RC-managed objects live on the heap
+
+#### R2: Immix Allocator
+- [ ] Implement Immix allocator in `core.brocken`:
+  - `BLOCK_SIZE = 32768` (32KB), `LINE_SIZE = 256` bytes, `LINES_PER_BLOCK = 128`
+  - Line header in each block: 128-bit bitmap tracking which lines are available
+  - `alloc_block(size)` → allocate or reuse a 32KB block from the ICB free list
+  - `alloc_line(block)` → find next free line, mark as used, return line address
+  - `alloc(size)` → bump-allocate within current line; if insufficient space, allocate a new line (or block if all lines full)
+  - Block recycling: when all lines in a block are freed (via RC), return block to ICB free list
+- [ ] Update ICB layout to track Immix state:
+  - `immix_cursor` at ICB offset 24 (current bump pointer within current line)
+  - `immix_limit` at ICB offset 32 (end of current block)
+  - `free_blocks` at ICB offset 40 (linked list of free blocks)
+  - `suspect_buffer_head/tail` at ICB offsets 48/56 (for trial deletion)
+- [ ] Update entry stub and `_init` to initialize ICB fields
+- [ ] Replace `Brocken::Runtime::bump_alloc` with Immix `alloc`
+- [ ] Wire `box` → Immix allocator (instead of `alloca`)
+
+#### R3: Bacon/Rajan Trial Deletion (Cycle Detection)
+- [ ] Suspect buffer operations:
+  - On `decref` where RC > 0 after decrement: push pointer to suspect buffer
+  - `suspect_buffer_push(ptr)`: store ptr at ICB suspect_buffer_head, advance
+  - `suspect_buffer_drain()`: called periodically, processes all suspects
+- [ ] Mark phase: for each suspect, increment an internal "gc_mark" counter
+- [ ] Scan phase: trace references from each suspect, decrement marks
+- [ ] Collect phase: objects with mark == 0 are confirmed cyclic garbage — free them
+- [ ] All implemented in `core.brocken`
+
+#### R4: Perceus RC Elision & Reuse (Lindsay Optimizer Pass)
+- [ ] **Borrow inference**: analyze function parameters to determine ownership (borrowed vs owned)
+- [ ] **RC elision**: cancel redundant incref/decref pairs when a value is immediately used and dropped
+- [ ] **Reuse analysis**: when constructing a new object, if the input is uniquely owned (RC==1), mutate in place instead of allocating
+- [ ] **FBIP (Functional But In-Place)** fragment: linear type analysis guaranteeing no allocation at all for pure data transformations
+- [ ] All implemented as Lindsay IR → IR optimization passes (no runtime changes)
+
+#### R5: Future Runtime Work
+- [ ] **Fiber Stack Scanning:** Walk stacks of suspended fibers to find live GC roots for accurate cycle detection
+- [ ] **UTF-8 Everywhere Strings:** Native string operations assuming pure UTF-8 payloads
+- [ ] **Self-Hosted PerlIO:** Vtable-based layered I/O system (e.g., `:unix` raw bytes → `:utf8` validation)
+- [ ] **Stack Map Generation:** `.brocken_stackmaps` section for GC root enumeration
 
 ## Active Sprint: Type System Expansion
 
@@ -197,10 +309,13 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] Parser: add `int`, `bool`, `u8`..`u128` keywords
 
 ### Phase C: String Constants & .rodata
-- [ ] Add `.rodata` section to linkers (ELF64, PE, MachO, Wasm)
-- [ ] Lower string literals to `.rodata` (length-prefixed, null-terminated)
-- [ ] Emit `lea`/ADRP+ADD to reference `.rodata` addresses
-- [ ] Wire `say`/`print` to `.rodata` strings (replace alloca+store)
+- [x] Add `.rodata` section to linkers (ELF64, PE, MachO, Wasm)
+- [x] Lower string literals to `.rodata` (length-prefixed, null-terminated)
+- [x] Emit `lea`/ADRP+ADD to reference `.rodata` addresses
+- [x] Wire `say`/`print` to `.rodata` strings (replace alloca+store)
+- [x] `.` operator for compile-time string concat (RodataRef folding) + runtime concat (CRT calls via linker)
+- [x] `.` operator with int/float operands — `_stringify` converts via `sprintf` with platform-appropriate format specifiers (`%lld`/`%I64d`)
+- [x] `build_alloca` count wrapping — bare integer `$count` wrapped in `Constant` object (Builder.pm:226, fixes `"value" via package "64"` on ARM64/RISCV64/Wasm)
 
 ### Phase D: Struct Types (IR level)
 - [x] Add structural type to IR: `Type::struct([field_types...], [field_names...])`

@@ -2101,13 +2101,20 @@ class Brocken::Jenny::Lowerer::Wasm {
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'box: add' ) );
                     $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'box: save heap' ) );
 
-                    # store payload at [%dyn + 0]
+                    # store header (tag << 24) at [%dyn + 0]
+                    my $header_val = $tag << 24;
                     $mbb->add_instruction( $self->_wasm_push_vreg( $inst->name, 'box: push dyn' ) );
-                    $mbb->add_instruction( $self->_wasm_push( $val, 'box: push val' ) );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store payload' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i32_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $header_val ) ],
+                            comment  => 'box: header'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store header' ) );
 
-                    # store tag at [%dyn + 8]
+                    # store payload at [%dyn + 8]
                     $mbb->add_instruction( $self->_wasm_push_vreg( $inst->name, 'box: push dyn' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2118,19 +2125,22 @@ class Brocken::Jenny::Lowerer::Wasm {
                     );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'box: add offset' ) );
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'box: push val' ) );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $tag ) ],
-                            comment  => 'box: tag'
-                        )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store tag' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store payload' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
                     my $dyn = $inst->operands->[0];
                     $mbb->add_instruction( $self->_wasm_push( $dyn, 'unbox: push dyn' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i32_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8 ) ],
+                            comment  => 'unbox: offset 8'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'unbox: add offset' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_load', operands => [], comment => 'unbox: load payload' ) );
                     $mbb->add_instruction(

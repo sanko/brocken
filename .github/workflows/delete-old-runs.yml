@@ -85,7 +85,7 @@ on:
         required: false
         type: number
       dry-run:
-        default: true
+        default: false
         description: Set to false to actually delete
         required: false
         type: boolean

@@ -26,3 +26,32 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
     Brocken::store_i64($cursor_ptr, $new_cursor);
     return $result;
 }
+
+# Increment the reference count of a fat scalar at $obj.
+# The refcount is a u16 at offset 0 of the 16-byte header.
+sub Brocken::Runtime::incref(ptr $obj) {
+    if (Brocken::ptr_cmp_eq($obj, 0)) {
+        return;
+    }
+    my i64 $header = Brocken::load_i64($obj);
+    my i64 $old_rc = Brocken::band($header, 65535);
+    my i64 $new_rc = Brocken::i64_add($old_rc, 1);
+    if (Brocken::ptr_cmp_gt($new_rc, 65535)) {
+        $new_rc = 65535;
+    }
+    Brocken::store_i64($obj, Brocken::i64_add(Brocken::i64_sub($header, $old_rc), $new_rc));
+    return;
+}
+
+# Decrement the reference count of a fat scalar at $obj.
+# If RC reaches 0, the memory will be reclaimed on the next Immix sweep.
+sub Brocken::Runtime::decref(ptr $obj) {
+    if (Brocken::ptr_cmp_eq($obj, 0)) {
+        return;
+    }
+    my i64 $header = Brocken::load_i64($obj);
+    my i64 $old_rc = Brocken::band($header, 65535);
+    my i64 $new_rc = Brocken::i64_sub($old_rc, 1);
+    Brocken::store_i64($obj, Brocken::i64_add(Brocken::i64_sub($header, $old_rc), $new_rc));
+    return;
+}

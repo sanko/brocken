@@ -2775,7 +2775,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
                     my $val  = $inst->operands->[0];
                     my $tag  = $self->_type_tag( $val->type );
-                    my $size = 16;                               # fat scalar: 16 bytes (8 payload + 8 tag)
+                    my $size = 16;                               # fat scalar: 16 bytes (8 header + 8 payload)
                     my $dyn  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
 
                     # alloca %dyn, 16
@@ -2787,9 +2787,31 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
 
-                    # store [%dyn + 0], %val
+                    # store [%dyn + 0], header (refcount|flags|tag|pad = tag << 24)
+                    my $header_val = $tag << 24;
+                    my $mem_header = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'mem',
+                        value => { base => $inst->name, disp => 0 },
+                        type  => Brocken::Lindsay::IR::Type::i64()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store_imm',
+                            operands => [
+                                $mem_header,
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $header_val,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
+                            ],
+                            comment => 'box: store header'
+                        )
+                    );
+
+                    # store [%dyn + 8], %val
                     my $mem_val
-                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 0 }, type => $val->type );
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 8 }, type => $val->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
@@ -2797,28 +2819,11 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             comment  => 'box: store payload'
                         )
                     );
-
-                    # store [%dyn + 8], tag
-                    my $mem_tag = Brocken::Jenny::MIR::MachineOperand->new(
-                        kind  => 'mem',
-                        value => { base => $inst->name, disp => 8 },
-                        type  => Brocken::Lindsay::IR::Type::i64()
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'store_imm',
-                            operands => [
-                                $mem_tag,
-                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $tag, type => Brocken::Lindsay::IR::Type::i64() )
-                            ],
-                            comment => 'box: store tag'
-                        )
-                    );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
                     my $dyn = $inst->operands->[0];
                     my $mem
-                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $dyn->name, disp => 0 }, type => $inst->type );
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $dyn->name, disp => 8 }, type => $inst->type );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
