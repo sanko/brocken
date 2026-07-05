@@ -1058,10 +1058,27 @@ class Brocken::Jenny::Codegen::ARM64 {
                 }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $dst->value;
-                    $bytes .= pack( 'V', SUB_SP | ( 64 << 10 ) );
-                    push @func_fixups, { offset => $current_offset->(), type => 'call_bl', target => $func_name };
-                    $bytes .= pack( 'V', BL );
-                    $bytes .= pack( 'V', ADD_SP | ( 64 << 10 ) );
+                    my $num_extra = scalar( $inst->operands->@* ) - 1;
+                    if ( $num_extra >= 2 && $platform->is_macos ) {
+                        my $num_named   = $inst->operands->[1]->value;
+                        my $num_unnamed = $inst->operands->[2]->value;
+                        my $raw_size    = $num_unnamed * 8;
+                        my $save_size   = ( $raw_size + 15 ) & ~15;
+                        $bytes .= pack( 'V', SUB_SP | ( $save_size << 10 ) );
+                        for my $j ( 0 .. $num_unnamed - 1 ) {
+                            my $reg_num = $num_named + $j;
+                            $bytes .= pack( 'V', STR_64 | ( $j << 10 ) | ( 31 << 5 ) | $reg_num );
+                        }
+                        push @func_fixups, { offset => $current_offset->(), type => 'call_bl', target => $func_name };
+                        $bytes .= pack( 'V', BL );
+                        $bytes .= pack( 'V', ADD_SP | ( $save_size << 10 ) );
+                    }
+                    else {
+                        $bytes .= pack( 'V', SUB_SP | ( 64 << 10 ) );
+                        push @func_fixups, { offset => $current_offset->(), type => 'call_bl', target => $func_name };
+                        $bytes .= pack( 'V', BL );
+                        $bytes .= pack( 'V', ADD_SP | ( 64 << 10 ) );
+                    }
                 }
                 elsif ( $opcode eq 'call_indirect' ) {
                     $bytes .= pack( 'V', SUB_SP | ( 64 << 10 ) );
