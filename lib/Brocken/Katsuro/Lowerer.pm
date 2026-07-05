@@ -18,6 +18,7 @@ class Brocken::Katsuro::Lowerer {
     field $block_id              = 0;
     field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
+    field $needs_rc              = {};    # var_name -> 1 (Any-typed variable needing refcounting)
     field $rodata : reader       = {};    # label -> bytes for string constants
     field $_rodata_label_counter = 0;
 
@@ -328,10 +329,12 @@ class Brocken::Katsuro::Lowerer {
         return if $ast->body->statements->@* == 0;
         $current_func = $functions->{ $ast->name };
         $symbols      = {};
+        $needs_rc     = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
         $current_block = $entry;
+
         if ( $current_func->name eq '_BROCKEN_ENTRY' ) {
             my $heap_base_param  = $current_func->params->[0];
             my $heap_base_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::ptr(), '%__heap_base.addr' );
@@ -351,9 +354,17 @@ class Brocken::Katsuro::Lowerer {
             my $alloca = $builder->build_alloca( $p->type, '%' . $pname . '.addr', undef, 0, 0, $pname, $ptype );
             $builder->build_store( $p, $alloca );
             $symbols->{$pname} = $alloca;
+            if ( $ptype eq 'Any' ) {
+                $needs_rc->{$pname} = 1;
+            }
         }
         $self->lower_block_body( $ast->body );
         unless ( $current_block && $current_block->terminator ) {
+            for my $name ( sort keys %$needs_rc ) {
+                my $addr   = $symbols->{$name} or next;
+                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+                $builder->build_decref($loaded);
+            }
             if ( $current_func->return_type->kind eq 'void' ) {
                 $builder->build_ret();
             }
@@ -406,6 +417,9 @@ class Brocken::Katsuro::Lowerer {
         my ( $line, $col ) = ( $ast->line, $ast->col );
         my $alloca = $builder->build_alloca( $ir_type, '%' . $ast->name . '.addr', undef, $line, $col, $ast->name, $ast->type );
         $symbols->{ $ast->name } = $alloca;
+        if ( $ast->type eq 'Any' ) {
+            $needs_rc->{ $ast->name } = 1;
+        }
         if ( defined $ast->init ) {
             if ( $ast->init->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
                 $ast->init->method eq 'new' &&
@@ -414,6 +428,9 @@ class Brocken::Katsuro::Lowerer {
             }
             my $val = $self->lower_expression( $ast->init );
             $val = $self->maybe_convert_type( $val, $ir_type );
+            if ( $needs_rc->{ $ast->name } ) {
+                $builder->build_incref( $val, $line, $col );
+            }
             $builder->build_store( $val, $alloca, $line, $col );
         }
     }
@@ -466,7 +483,16 @@ class Brocken::Katsuro::Lowerer {
             $builder->build_store( $new_val, $addr, $line, $col );
         }
         else {
-            $builder->build_store( $val, $addr, $line, $col );
+            my $is_rc = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
+            if ($is_rc) {
+                my $old = $builder->build_load( $stored_type, $addr, undef, $line, $col );
+                $builder->build_incref( $val, $line, $col );
+                $builder->build_store( $val, $addr, $line, $col );
+                $builder->build_decref( $old, $line, $col );
+            }
+            else {
+                $builder->build_store( $val, $addr, $line, $col );
+            }
         }
     }
 
@@ -854,12 +880,20 @@ class Brocken::Katsuro::Lowerer {
             $builder->build_store( $args[1], $args[0], $line, $col );
             return undef;
         }
+        return $builder->build_load( Brocken::Lindsay::IR::Type::i16(), $args[0], undef, $line, $col ) if $name eq 'load_u16';
+        if ( $name eq 'store_u16' ) {
+            $builder->build_store( $args[1], $args[0], $line, $col );
+            return undef;
+        }
+        return $builder->build_add( $args[0], $args[1], undef, $line, $col )  if $name eq 'i64_add';
+        return $builder->build_sub( $args[0], $args[1], undef, $line, $col )  if $name eq 'i64_sub';
         return $builder->build_and( $args[0], $args[1], undef, $line, $col )  if $name eq 'band';
         return $builder->build_or( $args[0], $args[1], undef, $line, $col )   if $name eq 'bor';
         return $builder->build_xor( $args[0], $args[1], undef, $line, $col )  if $name eq 'bxor';
         return $builder->build_shl( $args[0], $args[1], undef, $line, $col )  if $name eq 'shl';
         return $builder->build_lshr( $args[0], $args[1], undef, $line, $col ) if $name eq 'shr';
         return $builder->build_syscall( \@args, undef, $line, $col )          if $name eq 'syscall';
+
         if ( $name eq 'syscall_by_name' ) {
             my $name_ast = $ast->args->[0];
             Carp::croak( "First argument to syscall_by_name must be a string literal at " . $self->_loc($ast) )

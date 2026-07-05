@@ -789,52 +789,400 @@ Packages the raw machine code + data into an executable binary (PE, ELF, Mach-O,
 
 Brocken does not link against an external C runtime. The runtime (`libbrocken`) is written in a subset of Brocken itself (`core.brocken`). The Katsuro frontend silently parses this file and combines it with your code during compilation.
 
-### 4.1 Allocation
+### 4.0 Architecture Overview
 
-Memory allocation is currently handled in two ways:
-
-- **Stack (`alloca`):** All local variables, fiber stacks (64KB), isolate stacks (64KB), and boxed fat scalars (16 bytes) are allocated via `alloca` in the current function's frame.
-- **ICB.heap_cursor (offset 0):** Each isolate has a heap cursor field in its ICB. It is initialized to NULL and reserved for the future Immix allocator.
-
-### 4.2 The `Any` Type (Fat Scalar)
-
-A dynamically typed variable (`my $x;`) is represented as a 16-byte value:
+Memory management is a three-layer system:
 
 ```
-Offset  Size    Purpose
-0       2       Reference Count (max 65535, overflows pin the object)
-2       1       GC Flags (Bit 0: Cycle Suspect, Bit 1: Buffered, Bit 2: Leaf)
-3       1       Type Tag (0=Int, 1=String, 2=Array, 3=Class...)
-4       4       Padding / Aux (e.g., String cached char length)
-8       8       Payload (Raw 64-bit Int/Float, or Pointer to Heap Data)
+┌──────────────────────────────────────────────────┐
+│  Layer 3: Perceus (Compile-Time Optimization)    │
+│  ┌──────────────────────────────────────────────┐│
+│  │  RC Elision: cancel redundant incref/decref  ││
+│  │  Reuse Analysis: in-place mutation @ RC==1   ││
+│  │  Borrow Inference: avoid ownership transfer  ││
+│  └──────────────────────────────────────────────┘│
+├──────────────────────────────────────────────────┤
+│  Layer 2: Bacon/Rajan Trial Deletion (Runtime)   │
+│  ┌──────────────────────────────────────────────┐│
+│  │  Suspect Buffer in ICB (offsets 48-56)       ││
+│  │  Mark → Scan → Collect cycle detection       ││
+│  └──────────────────────────────────────────────┘│
+├──────────────────────────────────────────────────┤
+│  Layer 1: Immediate RC + Immix (Runtime)         │
+│  ┌──────────────────────────────────────────────┐│
+│  │  incref/decref on fat scalar refcount field  ││
+│  │  Immix: 32KB blocks, 256-byte lines, bump    ││
+│  │  alloc_line → alloc_block free list          ││
+│  └──────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────┘
 ```
 
-Currently, `box` allocates this 16-byte struct via `alloca`. The payload and tag are stored as adjacent 8-byte fields. `unbox` reads them back.
+**Key invariant:** Because Isolates are share-nothing OS threads, each heap is entirely thread-local. All RC operations, Immix allocation, and trial deletion require **zero atomic locks** — a massive performance advantage over shared-heap GCs.
 
-### 4.3 Reference Counting
+### 4.1 The `Any` Type (Fat Scalar)
 
-When a variable is assigned, the Lindsay middle-end injects an `incref` instruction. When a variable goes out of scope, a `decref` instruction is fired.
+A dynamically typed variable (`my $x;`) is a 16-byte value allocated on the heap (via the Immix allocator). The layout is fixed and verified at compile time:
 
-- **Deterministic Destruction:** If `RC == 0`, the object's `DESTROY` block runs immediately, and its memory is reclaimed.
-- `incref` and `decref` IR instructions are lowered to calls to `Brocken::Runtime::incref` and `Brocken::Runtime::decref`. (Currently placeholders — the runtime module does not yet exist.)
+```
+Offset  Size  Field                     Description
+0       2     Reference Count (u16)     Max 65535; overflow pins the object forever
+2       1     GC Flags (u8)             Bit 0: Cycle Suspect, Bit 1: Buffered, Bit 2: Leaf
+3       1     Type Tag (u8)             0=Int, 1=String, 2=Array, 3=Class, 4=Ptr, 5=Dynamic, 6=i128
+4       4     Padding / Aux (u32)       Reserved (e.g., cached string byte length)
+8       8     Payload (u64)             Raw value (i64/u64/f64/ptr — type determines interpretation)
+```
 
-### 4.4 Cycle Collection (Bacon & Rajan Trial Deletion)
+The first 8 bytes (refcount + flags + tag + padding) are called the **header word** and are packed into a single `u64` for efficient load/store. The `box` IR instruction stores the header word as a 64-bit zero (all fields initialized to 0) at `[ptr+0]` and the payload at `[ptr+8]`. The `unbox` IR instruction loads the payload from `[ptr+8]`.
 
-Standard RC leaks memory when objects form circular references. Brocken solves this using Trial Deletion:
+#### 4.1.1 Type Tag Encoding
 
-- If `RC > 0` after a decrement, the object might be part of an isolated cycle. The runtime pushes the pointer to the Isolate's Suspect Buffer.
-- Periodically, the runtime scans the Suspect Buffer to identify and delete true circular references.
+| Tag | Type       |
+|-----|------------|
+| 0   | Int        |
+| 1   | String     |
+| 2   | Array      |
+| 3   | Class      |
+| 4   | Ptr        |
+| 5   | Dynamic    |
+| 6   | i128       |
 
-### 4.5 Immix Allocator (Planned)
+Tags are assigned by `_type_tag()` in each backend's MIR lowerer and stored as `store_imm` at offset 3 of the fat scalar at `box` time.
 
-To avoid the overhead of `malloc`, Brocken uses the Immix algorithm for allocating heap data (arrays, strings, objects).
+#### 4.1.2 GC Flags
 
-- The OS provides 32KB Blocks.
-- Blocks are divided into 256-byte Lines.
-- Allocation is a simple pointer bump (`cursor += size`).
-- When a block is full, the runtime finds a partially empty block or requests a new one.
+| Bit | Name     | Meaning                              |
+|-----|----------|--------------------------------------|
+| 0   | Suspect  | Object may be part of a cycle        |
+| 1   | Buffered | Object is in the suspect buffer      |
+| 2   | Leaf     | Object has no outgoing references    |
+| 3   | BRC_0    | Bacon & Rajan color (low bit)        |
+| 4   | BRC_1    | Bacon & Rajan color (high bit)       |
 
-*Not yet implemented. See §12.*
+Bacon & Rajan color encoding (see §4.4.2):
+
+| BRC_1 | BRC_0 | Color  | Meaning |
+|-------|-------|--------|---------|
+| 0     | 0     | White  | Candidate for collection |
+| 0     | 1     | Gray   | Reachable, not yet scanned |
+| 1     | 0     | Purple | Potentially cyclic (suspect) |
+| 1     | 1     | Black  | Reachable and fully scanned |
+
+The color is stored directly in the object header's GC Flags byte, eliminating the need for a separate hash table during trial deletion. This guarantees O(1), cache-friendly color reads/writes because the header is already in the CPU cache after the `decref` load.
+
+#### 4.1.3 Unified Object Header (All RC-Managed Allocations)
+
+Not every heap object is an `Any` fat scalar. Class instances (`Point->new(...)`) and arrays are also managed by RC/Immix. All such allocations share a common 8-byte header so that `incref`/`decref` can operate blindly on any heap pointer without knowing the allocation's concrete type:
+
+```
+Offset  Size  Field                     Description
+0       2     Reference Count (u16)     Max 65535; overflow pins the object forever
+2       1     GC Flags (u8)             See §4.1.2
+3       1     Type Tag (u8)             Type discriminator for debug/trace
+4       4     Aux Size (u32)            Payload size in bytes (not used by `Any`; see §4.1 padding)
+```
+
+The first 8 bytes of EVERY Immix allocation are this header. The layout of the bytes following the header depends on the allocation kind:
+
+- **`Any` fat scalar**: header + 8-byte payload (16 bytes total). Type tag identifies the payload's interpretation.
+- **Class instance**: header + struct fields (8 + N bytes total). `new` allocates `8 + total_field_size` bytes.
+- **Array**: header + length prefix + element data (8 + 8 + N×elem_size bytes total).
+
+This means `incref(ptr)` and `decref(ptr)` always read/write `refcount` at `[ptr + 0]` regardless of whether `ptr` points to an `Any`, a class instance, or an array.
+
+### 4.2 Reference Counting (Layer 1)
+
+Reference counting is deterministic, immediate, and non-atomic (thread-local heaps).
+
+#### 4.2.1 RC Operations
+
+Implemented in `core.brocken` as `Brocken::Runtime::incref` and `Brocken::Runtime::decref`:
+
+```
+incref(ptr):
+  refcount = load_u16(ptr + 0)
+  if refcount < 65535:
+    refcount += 1
+    store_u16(ptr + 0, refcount)
+
+decref(ptr):
+  refcount = load_u16(ptr + 0)
+  refcount -= 1
+  store_u16(ptr + 0, refcount)
+  if refcount == 0:
+    if has DESTROY:
+      call DESTROY(ptr)
+    add_to_free_list(ptr)            // Immix: mark line as free
+  elsif refcount > 0 && !is_leaf(ptr):
+    push_suspect_buffer(ptr)         // might be in a cycle (see §4.3)
+```
+
+| Condition | Action |
+|-----------|--------|
+| RC decrements to 0 | Run `DESTROY` (if any), free memory immediately |
+| RC > 0 after decrement, not a leaf | Push to suspect buffer (cycle detection) |
+| RC overflows (stays at 65535) | Object is pinned; never freed |
+
+#### 4.2.2 RC Injection (Compiler Pass)
+
+The `Lowerer.pm` (frontend) injects `build_incref` / `build_decref` IR instructions:
+
+- **Variable assignment** (`$x = $y`): emit `build_incref($y_val)` before the store
+- **Scope exit** (end of block): emit `build_decref($var)` for each local variable that goes out of scope
+- **Function return**: emit `build_decref($old_val)` for the return slot's previous binding
+- **Implicit `decref` for return values**: the caller gets ownership of the returned value (no decref needed at the call site)
+
+All four MIR lowerers (X86_64, ARM64, RISCV64, Wasm) handle `Incref`/`Decref` IR instructions by emitting `mov arg0, val` + `call_func @Brocken::Runtime::incref` (or `decref`).
+
+#### 4.2.3 `box` Heap Allocation
+
+The `box` IR instruction does not use stack `alloca`. Instead, it calls `Brocken::Runtime::bump_alloc(heap_base, 16)` to allocate the 16-byte fat scalar on the Immix heap. This ensures RC-managed objects live in heap memory that can be freed and reused.
+
+### 4.3 Immix Allocator (Layer 1)
+
+The Immix allocator replaces general-purpose `malloc`. It uses a block/line architecture for bump-pointer allocation with efficient reclamation.
+
+#### 4.3.1 Constants
+
+| Constant     | Value   |
+|--------------|---------|
+| BLOCK_SIZE   | 32768   |
+| LINE_SIZE    | 256     |
+| LINES_PER_BLOCK | 128 |
+| BLOCK_SIZE = LINES_PER_BLOCK × LINE_SIZE |
+
+#### 4.3.2 Block Structure
+
+Each block is exactly 32768 bytes for fast block-base computation via `ptr & ~0x7FFF`. The 128-bit line bitmap is embedded inside Line 0, which has only 240 usable bytes:
+
+```
+Offset  Size    Field
+0       32768   Block (exactly 32KB — aligned to 32KB boundary)
+```
+
+The first 128 bits (16 bytes) of the block are the line availability bitmap (1 = free, 0 = used). This bitmap overlaps with the **first 16 bytes of Line 0**:
+
+```
+Line 0:  [ 16 bytes bitmap header ][ 240 bytes usable data ]
+Line 1:  [ 256 bytes usable data ]
+...
+Line 127: [ 256 bytes usable data ]
+```
+
+Total usable data: 240 + 127×256 = 32752 bytes. The bitmap occupies 16 bytes which is only 0.05% of the 32768-byte block.
+
+#### 4.3.3 Allocation Algorithm
+
+```
+alloc(size):
+  // Round up to 8-byte alignment; minimum 16 bytes (header + 8-byte payload)
+  size = align8(max(size, 16))
+
+  // Try bump allocation in current line
+  if immix_cursor + size <= immix_limit:
+    result = immix_cursor
+    immix_cursor += size
+    return result
+
+  // Current line is full; try segregated free list (see §4.3.4)
+  result = pop_free16_list()
+  if result != 0:
+    return result
+
+  // Find next free line in current block
+  block = block_containing(immix_cursor)
+  line_idx = find_next_free_line(block)
+  if line_idx is not None:
+    mark_line_used(block, line_idx)
+    line_start = line_data_start(block, line_idx)
+    immix_cursor = line_start + size
+    immix_limit = line_start + line_size(line_idx)
+    return line_start
+
+  // No free lines in current block; get a new block
+  block = alloc_block_from_icb()
+  if block is None:
+    // Out of memory; request more from OS (future: mmap)
+    return 0
+  immix_cursor = block + 16 + size    // skip bitmap header, start of Line 0 data
+  immix_limit = block + 256           // Line 0 ends at 256 (240 usable + 16 bitmap)
+  return block + 16
+
+line_data_start(block, line_idx):
+  if line_idx == 0:
+    return block + 16                  // skip bitmap header
+  return block + line_idx * LINE_SIZE  // lines 1..127: full 256-byte alignment
+
+line_size(line_idx):
+  if line_idx == 0:
+    return 240                         // line 0: 16 bytes lost to bitmap
+  return LINE_SIZE                     // lines 1..127: full 256 bytes
+```
+
+#### 4.3.4 Reclamation
+
+Reclamation uses a **two-tier** strategy: segregated free lists for the hot (decref) path, and full Immix tracing as a cold fallback.
+
+##### Tier 1: Segregated Free Lists (Hot Path)
+
+Maintaining per-line live-object counters on every `decref` is too expensive. Instead, when `decref` frees an object (RC reaches 0):
+
+1. Run `DESTROY` if the object has one (it may free its own children, recursively triggering more decrefs).
+2. Push the pointer onto the ICB's **16-byte free list** (`free16_head`). This is a singly-linked list threaded through the freed object's own payload area (bytes 8–15 of the freed fat scalar store the `next` pointer).
+
+```c
+push_free16_list(ptr):
+  next = ICB.free16_head
+  store_i64(ptr + 8, next)      // thread list through payload area
+  ICB.free16_head = ptr
+
+pop_free16_list():
+  head = ICB.free16_head
+  if head == 0:
+    return 0                     // empty
+  ICB.free16_head = load_i64(head + 8)
+  return head
+```
+
+Because 100% of Immix allocations in the hot path are 16-byte fat scalars (`Any` variables), this single free list handles the vast majority of reclamation. No line bitmap manipulation is needed on the hot path.
+
+##### Tier 2: Immix Tracing (Cold Path)
+
+When `immix_cursor` reaches `immix_limit` and the free list is empty (no recycled 16-byte slots available), the runtime triggers an Immix mark-region trace:
+
+1. **Mark phase**: walk the object graph starting from the roots (ICB's root set), clearing the line bitmap for every live object's line.
+2. **Sweep phase**: iterate all lines in the current block. Any line whose bitmap bit is still set is completely empty — reclaim it.
+3. **Free list rebuild**: scan the freed lines, building new 16-byte free list entries from each freed fat scalar location.
+4. **Block reclamation**: if all 128 lines of a block are empty, return the entire block to the ICB `free_blocks` list instead of rebuilding its free list.
+
+The trace runs incrementally (a few roots per allocation) to avoid long pauses. A full trace runs only when:
+- The block is completely marked (all lines used)
+- The free list is empty
+- No free blocks are available in `free_blocks`
+
+#### 4.3.5 ICB Integration
+
+The Isolate Control Block (see §4.6) holds Immix state:
+
+| ICB Offset | Field           | Role                                  |
+|------------|-----------------|---------------------------------------|
+| 24         | immix_cursor    | Current bump pointer within line      |
+| 32         | immix_limit     | End of current line / block           |
+| 40         | free_blocks     | Linked list head of free 32KB blocks  |
+| 48         | free16_head     | Head of 16-byte segregated free list  |
+
+### 4.4 Trial Deletion (Layer 2 — Bacon & Rajan)
+
+Standard reference counting cannot collect cyclic garbage. Brocken uses the Bacon & Rajan Trial Deletion algorithm to detect and reclaim cycles.
+
+#### 4.4.1 Suspect Buffer
+
+When `decref` leaves an object with RC > 0 and the object is not a leaf (has outgoing references), the object is a **suspect** — it might be part of an isolated cycle. The runtime pushes the suspect to the ICB's suspect buffer:
+
+```
+ICB offset 48: suspect_buffer_head (pointer to ring buffer)
+ICB offset 56: suspect_buffer_tail (pointer to ring buffer)
+```
+
+The suspect buffer is a fixed-size ring buffer. When it reaches capacity, draining triggers automatically.
+
+#### 4.4.2 Trial Deletion Algorithm (Per-Suspect)
+
+Color is stored in the **GC Flags** byte (bits 3–4, see §4.1.2), eliminating the need for an external hash table. Each object carries its own Bacon & Rajan color in its cache-friendly header.
+
+For each suspect in the buffer:
+
+1. **Mark (Purple → Gray → White)**: set the suspect's BRC flags to Gray. Recursively traverse outgoing references, decrementing RC counts and marking reachable nodes:
+   - If descendants have RC > 0 after decrement, mark them Gray and recurse
+   - If descendants have RC == 0, they are not part of a cycle; mark them White
+2. **Scan (Gray → Black)**: for each Gray node, trace outgoing references and increment their RC back. Mark the node Black.
+3. **Collect**: nodes still marked Gray or White after scanning are confirmed cyclic garbage:
+   - Set their RC to 0
+   - Run `DESTROY`
+   - Push to the segregated free list (see §4.3.4)
+4. **Restore**: nodes marked Black are not garbage — reset their BRC flags to Purple (return to suspect state if still referenced) or White (if no longer a suspect).
+
+The algorithm runs incrementally (a few suspects per allocation) to avoid long pauses. The full drain runs only when the suspect buffer is full.
+
+#### 4.4.3 Leaf Optimization
+
+Objects flagged as `Leaf` (GC Flag bit 2) have no outgoing references and cannot be part of a cycle. They are never pushed to the suspect buffer, saving buffer space and scan time. The compiler sets the Leaf flag when:
+- The object's type is `Int` (no references)
+- The object's type is immutable and contains no reference fields
+- After `DESTROY` runs, the object is implicitly a leaf
+
+### 4.5 Perceus Optimization (Layer 3 — Compile-Time)
+
+Perceus is a set of Lindsay IR optimization passes that make RC more efficient. It operates entirely at compile time with zero runtime overhead.
+
+#### 4.5.1 RC Elision
+
+Cancels redundant `incref`/`decref` pairs:
+
+```perl
+# Without elision:
+my $y = $x;     # incref $x  (new reference)
+...             # ...
+                # decref $y  ($y goes out of scope)
+                # decref $x  ($x goes out of scope)
+
+# With elision:
+my $y = $x;     # no-op: $x and $y are never aliased
+```
+
+The optimizer analyzes value liveness and reference graph to determine when an incref is immediately followed by a decref on the same object with no intervening aliasing operations.
+
+#### 4.5.2 Reuse Analysis (FBIP)
+
+When a function constructs a new heap object from an existing one, and the input is uniquely owned (RC == 1), Perceus rewrites the allocation as an in-place mutation:
+
+```perl
+# Without reuse:
+sub increment_all(@arr) {
+    my @result = [];            # allocate new array
+    for my $i (0..@arr) {
+        @result[$i] = @arr[$i] + 1;
+    }
+    return @result;
+}
+
+# With reuse (when @arr is uniquely owned):
+sub increment_all(@arr) {
+    for my $i (0..@arr) {
+        @arr[$i] = @arr[$i] + 1;   # mutate in place
+    }
+    return @arr;
+}
+```
+
+The optimizer:
+1. Detects that the input array is consumed (its RC drops to 0 after the call completes)
+2. Detects that the output array has the same shape and size
+3. Rewrites to mutate the input directly, eliminating the allocation
+
+#### 4.5.3 Borrow Inference
+
+Analyzes function signatures to determine which parameters are borrowed (no ownership transfer) vs owned (callee takes ownership). This reduces unnecessary RC operations at call sites:
+
+```perl
+sub print_array(@arr) {       # @arr is borrowed
+    for my $i (0..@arr) {
+        say(@arr[$i]);
+    }
+}
+# No incref/decref at the call site — @arr stays owned by the caller
+```
+
+The inference is conservative: if the callee stores the parameter (escaping it), ownership is transferred. Otherwise, the parameter is borrowed.
+
+### 4.6 Allocation (Legacy / Transition)
+
+During the transition from stack-based allocation to full Immix, the following scheme applies:
+
+- **Stack (`alloca`):** Local native-type variables, fiber stacks (64KB), isolate stacks (64KB) remain on the stack.
+- **Heap (Immix):** All `box`ed fat scalars, class instances, arrays, and dynamic values are allocated on the Immix heap via `bump_alloc` / `immix_alloc`.
+- **ICB fields:** `heap_cursor` (offset 0) is the legacy simple-bump cursor; `immix_cursor`/`immix_limit`/`free_blocks` (offsets 24-40) are the Immix allocator state.
+
+Once the Immix allocator is fully deployed, `heap_cursor` is no longer used and `_init` initializes only the Immix fields.
 
 ### 4.6 Isolate Control Block (ICB)
 
@@ -854,11 +1202,15 @@ Offset  Size    Field
 24      8       immix_cursor (Current bump-allocation pointer)
 32      8       immix_limit (End of current Immix block)
 40      8       free_blocks (Free 32KB block list)
-48      8       suspect_buffer_head
-56      8       suspect_buffer_tail
+48      8       free16_head  (Head of 16-byte segregated free list)
+56      8       suspect_buffer_head / free16_tail
 ```
 
-Only `heap_cursor` (offset 0) is currently initialized. The full ICB is planned.
+The `free16_head` field (offset 48) replaces the original `suspect_buffer_head`. The suspect buffer now shares offset 56 with the free list tail (they are never needed simultaneously: the free list is operated during the Immix cold trace, the suspect buffer during normal RC execution).
+
+Only `heap_cursor` (offset 0) is currently initialized by `_init`. The Immix fields (offsets 24–48) and suspect buffer (offset 56) are initialized lazily during the first allocation that requires them.
+
+Fiber stacks are currently unprotected — deep recursion overflows silently into adjacent memory. A future Lindsay IR pass will inject a **stack probe** at every non-leaf function prologue, comparing `rsp` (or the arch equivalent) against a limit field in the FCB. On overflow, the runtime throws a catchable `Brocken::Exception::StackOverflow` instead of corrupting memory.
 
 ### 4.7 Fiber Control Block (FCB)
 
@@ -960,6 +1312,10 @@ Brocken implements concurrency via OS-level Isolates. Because an Isolate shares 
 ### 5.3 Channels (Cross-Isolate Communication)
 
 Channels provide CSP-style communication between Isolates (and Fibers). They are bounded ring buffers protected by a mutex + condition variable. Values sent are currently limited to `i64`; transferable objects (fat scalars with RC ownership transfer) are future work.
+
+**Future: Transferable Objects.** Because Isolate heaps are thread-local, passing heap pointers across channels would let one Isolate free another's memory. Two approaches are planned (§12.3):
+1. **Deep copy**: serialize the object graph into the receiver's heap. Safe but slow.
+2. **Zero-copy ownership transfer**: allocate transferable objects in a global, lock-managed heap (e.g., `mmap`'d shared pages). Perceus guarantees `RC == 1` for sent objects, so ownership transfers cleanly without copying. The receiver's `decref` must recognize global-heap pointers and use a different free path.
 
 #### 5.3.1 Channel Data Structure
 
