@@ -496,7 +496,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         }
     }
 
-    method fix_entry_shuffle( $mf, $assignment, $temp_reg ) {
+    method fix_entry_shuffle( $mf, $assignment, $param_regs, @temp_regs ) {
         my $entry = $mf->entry_block;
         return unless $entry;
 
@@ -511,6 +511,12 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             next unless $inst->opcode eq 'mov';
             my ( $dst, $src ) = $inst->operands->@*;
             next unless $src->kind eq 'phys_reg';
+
+            # Only consider MOVs that read from a calling-convention
+            # parameter register -- internal spill/fill MOVs (e.g. saving
+            # the div128_64 remainder from rdx) are not parameter saves
+            # and must not be processed here.
+            next unless grep { $_ eq $src->value } $param_regs->@*;
             my $dst_reg;
             if ( $dst->kind eq 'phys_reg' ) {
                 $dst_reg = $dst->value;
@@ -522,21 +528,44 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             push @saves, { idx => $i, dst => $dst_reg, src => $src->value };
         }
 
+        # Returns true if a given temp register is safe to use at a given
+        # instruction position (i.e., no pending patched read of that temp
+        # lies after the position).
+        my $temp_available = sub ( $t, $pos ) {
+            for my $s (@saves) {
+                return 0 if defined $s->{patched_temp} && $s->{patched_temp} eq $t && $s->{idx} > $pos;
+            }
+            return 1;
+        };
+
         # Detect hazard: dst_i == src_j for i < j  (save MOV i overwrites
         # a register whose original value save MOV j still needs to read).
-        # Break cycles using the platform-specific spill-temp register.
+        # Break cycles using the available temp registers.
         for my $i ( 0 .. $#saves ) {
             for my $j ( $i + 1 .. $#saves ) {
                 if ( $saves[$i]{dst} eq $saves[$j]{src} ) {
 
                     # MOV i writes to a register that MOV j subsequently reads
                     # as its original caller-set value.  Insert a save before
-                    # MOV i and redirect MOV j to read from the temp register.
+                    # MOV i and redirect MOV j to read from a temp register.
                     my $hazard_reg = $saves[$i]{dst};
-                    my $save_inst  = Brocken::Jenny::MIR::MachineInstruction->new(
+
+                    # Pick a temp register that won't be clobbered by another
+                    # pending patched read.
+                    my $temp;
+                    for my $t (@temp_regs) {
+                        if ( $temp_available->( $t, $saves[$i]{idx} ) ) {
+                            $temp = $t;
+                            last;
+                        }
+                    }
+
+                    # Fallback: reuse the first temp even if unavailable
+                    $temp //= $temp_regs[0];
+                    my $save_inst = Brocken::Jenny::MIR::MachineInstruction->new(
                         opcode   => 'mov',
                         operands => [
-                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_reg ),
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp ),
                             Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hazard_reg ),
                         ],
                         comment => 'entry-shuffle save ' . $hazard_reg,
@@ -550,13 +579,14 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                         $saves[$k]{idx}++;
                     }
 
-                    # Patch MOV j's source to r11
+                    # Patch MOV j's source to the chosen temp register
                     my $j_inst = $entry->instructions->[ $saves[$j]{idx} ];
                     $j_inst->operands->[1]
-                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_reg, type => $j_inst->operands->[1]->type, );
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp, type => $j_inst->operands->[1]->type, );
 
                     # Mark this hazard as resolved so we don't re-process it
-                    $saves[$j]{src} = $temp_reg;
+                    $saves[$j]{src}          = $temp;
+                    $saves[$j]{patched_temp} = $temp;
                 }
             }
         }
