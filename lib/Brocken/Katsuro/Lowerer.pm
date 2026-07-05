@@ -203,6 +203,52 @@ class Brocken::Katsuro::Lowerer {
         return $self->platform && $self->platform->is_windows ? '_puts' : 'puts';
     }
 
+    method _crt_name($name) {
+        return $self->platform && $self->platform->is_windows ? '_' . $name : $name;
+    }
+
+    method _stringify( $val, $line, $col ) {
+        return $val if $val->type->kind eq 'ptr';
+        my $type        = $val->type;
+        my $kind        = $type->kind;
+        my $buf         = $builder->build_alloca( Brocken::Lindsay::IR::Type::i8(), undef, 64, $line, $col );
+        my $sprintf_arg = $val;
+        my $fmt_str;
+        if ( $kind eq 'int' ) {
+            if ( $type->is_signed ) {
+                if ( $type->bits < 64 ) {
+                    $sprintf_arg = $builder->build_sext( $val, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
+                }
+                $fmt_str = $self->platform && $self->platform->is_windows ? "%I64d\0" : "%lld\0";
+            }
+            else {
+                if ( $type->bits < 64 ) {
+                    $sprintf_arg = $builder->build_zext( $val, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
+                }
+                $fmt_str = $self->platform && $self->platform->is_windows ? "%I64u\0" : "%llu\0";
+            }
+        }
+        elsif ( $kind eq 'float' ) {
+            $fmt_str = "%f\0";
+        }
+        else {
+            Carp::croak("Cannot concatenate value of type '$kind' at line $line, col $col");
+        }
+        my $fmt_label = '__fmt_' . $_rodata_label_counter++;
+        $rodata->{$fmt_label} = $fmt_str;
+        my $fmt_ref    = Brocken::Lindsay::IR::RodataRef->new( label => $fmt_label, bytes => $fmt_str, type => Brocken::Lindsay::IR::Type::ptr(), );
+        my $sprintf_fn = Brocken::Lindsay::IR::Function->new(
+            name        => $self->_crt_name('sprintf'),
+            return_type => Brocken::Lindsay::IR::Type::i32(),
+            params      => [
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+            ],
+        );
+        $builder->build_call( $sprintf_fn, [ $buf, $fmt_ref, $sprintf_arg ], undef, $line, $col );
+        return $buf;
+    }
+
     method register_intrinsics() {
         my $puts_name = $self->_puts_name;
         for my $name (qw(say print)) {
@@ -687,6 +733,51 @@ class Brocken::Katsuro::Lowerer {
         }
         if ( $op eq '>=' ) {
             return $builder->build_icmp( $lhs->type->is_signed ? 'sge' : 'uge', $lhs, $rhs, undef, $line, $col );
+        }
+        if ( $op eq '.' ) {
+            $lhs = $self->_stringify( $lhs, $line, $col );
+            $rhs = $self->_stringify( $rhs, $line, $col );
+            if ( $lhs->isa('Brocken::Lindsay::IR::RodataRef') && $rhs->isa('Brocken::Lindsay::IR::RodataRef') ) {
+                my $combined = substr( $lhs->bytes, 0, -1 ) . $rhs->bytes;
+                my $label    = '__str_' . $_rodata_label_counter++;
+                $rodata->{$label} = $combined;
+                return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $combined, type => Brocken::Lindsay::IR::Type::ptr(), );
+            }
+            my $strlen_fn = Brocken::Lindsay::IR::Function->new(
+                name        => $self->_crt_name('strlen'),
+                return_type => Brocken::Lindsay::IR::Type::i64(),
+                params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
+            );
+            my $len_l      = $builder->build_call( $strlen_fn, [$lhs], undef, $line, $col );
+            my $len_r      = $builder->build_call( $strlen_fn, [$rhs], undef, $line, $col );
+            my $total      = $builder->build_add( $len_l, $len_r, undef, $line, $col );
+            my $one        = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
+            my $alloc_size = $builder->build_add( $total, $one, undef, $line, $col );
+            my $malloc_fn  = Brocken::Lindsay::IR::Function->new(
+                name        => $self->_crt_name('malloc'),
+                return_type => Brocken::Lindsay::IR::Type::ptr(),
+                params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64() ) ],
+            );
+            my $buf       = $builder->build_call( $malloc_fn, [$alloc_size], undef, $line, $col );
+            my $strcpy_fn = Brocken::Lindsay::IR::Function->new(
+                name        => $self->_crt_name('strcpy'),
+                return_type => Brocken::Lindsay::IR::Type::ptr(),
+                params      => [
+                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                ],
+            );
+            $builder->build_call( $strcpy_fn, [ $buf, $lhs ], undef, $line, $col );
+            my $strcat_fn = Brocken::Lindsay::IR::Function->new(
+                name        => $self->_crt_name('strcat'),
+                return_type => Brocken::Lindsay::IR::Type::ptr(),
+                params      => [
+                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                ],
+            );
+            $builder->build_call( $strcat_fn, [ $buf, $rhs ], undef, $line, $col );
+            return $buf;
         }
         Carp::croak( "Unknown binary operator '$op' at " . $self->_loc($ast) );
     }

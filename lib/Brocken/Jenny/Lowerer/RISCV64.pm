@@ -2553,14 +2553,26 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         else {
                             my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
                             my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
-                            my $val      = $self->_lower_opnd( $args[$i] );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => $is_float ? 'fmov' : 'mv',
-                                    operands => [ $reg, $val ],
-                                    comment  => "arg $i to $reg_name"
-                                )
-                            );
+                            if ( $args[$i]->isa('Brocken::Lindsay::IR::RodataRef') ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'lea_rodata',
+                                        operands =>
+                                            [ $reg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'rodata_label', value => $args[$i]->label ) ],
+                                        comment => "arg $i (string) to $reg_name"
+                                    )
+                                );
+                            }
+                            else {
+                                my $val = $self->_lower_opnd( $args[$i] );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => $is_float ? 'fmov' : 'mv',
+                                        operands => [ $reg, $val ],
+                                        comment  => "arg $i to $reg_name"
+                                    )
+                                );
+                            }
                         }
                     }
                     $mbb->add_instruction(

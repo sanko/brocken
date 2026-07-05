@@ -1058,13 +1058,17 @@ class Brocken::Jenny::Codegen::ARM64 {
                 }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $dst->value;
+                    $bytes .= pack( 'V', SUB_SP | ( 64 << 10 ) );
                     push @func_fixups, { offset => $current_offset->(), type => 'call_bl', target => $func_name };
                     $bytes .= pack( 'V', BL );
+                    $bytes .= pack( 'V', ADD_SP | ( 64 << 10 ) );
                 }
                 elsif ( $opcode eq 'call_indirect' ) {
+                    $bytes .= pack( 'V', SUB_SP | ( 64 << 10 ) );
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
                     $bytes .= pack( 'V', BLR | ( $sid << 5 ) );
+                    $bytes .= pack( 'V', ADD_SP | ( 64 << 10 ) );
                 }
                 elsif ( $opcode eq 'ret' ) {
                     if ( $callee_size > 0 ) {
