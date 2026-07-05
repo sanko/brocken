@@ -492,7 +492,7 @@ class Brocken::Katsuro::Parser {
                     rhs => $self->parse_expression(PREC_SHIFT)
                 );
             }
-            if ( $op eq '+' || $op eq '-' ) {
+            if ( $op eq '+' || $op eq '-' || $op eq '.' ) {
                 return Brocken::Katsuro::AST::Expr::BinOp->new(
                     $self->_pos_token($token),
                     op  => $op,
@@ -555,7 +555,7 @@ class Brocken::Katsuro::Parser {
             return PREC_AND     if $op eq '&&';
             return PREC_COMPARE if $op eq '==' || $op eq '!=' || $op eq '<' || $op eq '>' || $op eq '<=' || $op eq '>=';
             return PREC_SHIFT   if $op eq '<<' || $op eq '>>';
-            return PREC_SUM     if $op eq '+'  || $op eq '-';
+            return PREC_SUM     if $op eq '+'  || $op eq '-' || $op eq '.';
             return PREC_PRODUCT if $op eq '*'  || $op eq '/' || $op eq '%';
             return 0;
         }

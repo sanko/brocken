@@ -223,6 +223,7 @@ class Brocken::Lindsay::IR::Builder {
     }
 
     method build_alloca( $type, $name = undef, $count = undef, $line = 0, $col = 0, $debug_name = undef, $debug_type_name = undef ) {
+        $count = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $count ) if defined $count && !ref $count;
         my $inst = Brocken::Lindsay::IR::Instruction::Alloca->new(
             name            => $name // $self->_next_id(),
             type            => Brocken::Lindsay::IR::Type::ptr(),

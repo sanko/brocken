@@ -188,7 +188,7 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] Add `zext`/`sext` IR instructions to `IR.pm` + `Builder.pm`
 - [x] Backend: lower `zext`/`sext` on all 4 targets
 - [x] Add signed/unsigned div/rem IR instructions (`udiv`/`urem`)
-- [ ] Backend: proper `movzx`/`movsx`/`UXTB`/`SXTB` encoding for zext/sext (currently plain `mov`)
+- [x] Backend: proper `movzx`/`movsx`/`UXTB`/`SXTB` encoding for zext/sext
 
 ### Phase B: Int/Bool native alias support
 - [x] Lower `Int` and `Bool` as native types (i64/i1)
