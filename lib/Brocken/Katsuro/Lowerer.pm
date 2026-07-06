@@ -428,6 +428,10 @@ class Brocken::Katsuro::Lowerer {
         if ( $ast->type eq 'Any' ) {
             $needs_rc->{ $ast->name } = 1;
         }
+        if ( !defined $ast->init && $ast->type eq 'Any' ) {
+            my $zero = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+            $builder->build_store( $zero, $alloca, $line, $col );
+        }
         if ( defined $ast->init ) {
             if ( $ast->init->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
                 $ast->init->method eq 'new' &&
