@@ -1894,19 +1894,9 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'xor',
-                                    operands => [ $dst, $tmp ],
-                                    comment  => 'abs xor'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $dst, $tmp ], comment => 'abs xor' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'sub',
-                                    operands => [ $dst, $tmp ],
-                                    comment  => 'abs sub'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $tmp ], comment => 'abs sub' ) );
                         }
                     }
                 }

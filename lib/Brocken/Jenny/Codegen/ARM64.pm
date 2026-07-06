@@ -32,7 +32,9 @@ class Brocken::Jenny::Codegen::ARM64 {
         MUL_X          => 0x9B007C00,
         UMULH_X        => 0x9BC07C00,
         SDIV_X         => 0x9AC00C00,
+        SDIV_W         => 0x1AC00C00,
         UDIV_X         => 0x9AC00800,
+        UDIV_W         => 0x1AC00800,
         ADD_IMM        => 0x11000000,
         ADD_IMM_64     => 0x91000000,    # ADD_IMM | SF
         SUB_IMM        => 0x51000000,
@@ -642,12 +644,12 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     elsif ( $src_bits >= 16 ) {
 
-                        # UXTH Wd, Wn
-                        $bytes .= pack( 'V', 0x53003C00 | ( $sid << 16 ) | $did );
+                        # UXTH Wd, Wn (UBFM Wd, Wn, #0, #15; Rn at bits 9:5)
+                        $bytes .= pack( 'V', 0x53003C00 | ( $sid << 5 ) | $did );
                     }
                     else {
-                        # UXTB Wd, Wn
-                        $bytes .= pack( 'V', 0x53001C00 | ( $sid << 16 ) | $did );
+                        # UXTB Wd, Wn (UBFM Wd, Wn, #0, #7; Rn at bits 9:5)
+                        $bytes .= pack( 'V', 0x53001C00 | ( $sid << 5 ) | $did );
                     }
                 }
                 elsif ( $opcode eq 'movsx' ) {
@@ -658,17 +660,17 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $sid      = $reg_id->($src_r);
                     if ( $src_bits >= 32 ) {
 
-                        # SXTW Xd, Wn
-                        $bytes .= pack( 'V', 0x93407C00 | ( $sid << 16 ) | $did );
+                        # SXTW Xd, Wn (SBFM Xd, Xn, #0, #31; Rn at bits 9:5)
+                        $bytes .= pack( 'V', 0x93407C00 | ( $sid << 5 ) | $did );
                     }
                     elsif ( $src_bits >= 16 ) {
 
-                        # SXTH Wd, Wn
-                        $bytes .= pack( 'V', 0x13003C00 | ( $sid << 16 ) | $did );
+                        # SXTH Wd, Wn (SBFM Wd, Wn, #0, #15; Rn at bits 9:5)
+                        $bytes .= pack( 'V', 0x13003C00 | ( $sid << 5 ) | $did );
                     }
                     else {
-                        # SXTB Wd, Wn
-                        $bytes .= pack( 'V', 0x13001C00 | ( $sid << 16 ) | $did );
+                        # SXTB Wd, Wn (SBFM Wd, Wn, #0, #7; Rn at bits 9:5)
+                        $bytes .= pack( 'V', 0x13001C00 | ( $sid << 5 ) | $did );
                     }
                 }
                 elsif ( $opcode eq 'add' ||
@@ -693,8 +695,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                         xor   => ( $bits >= 64 ? EOR_X : EOR_W ),
                         mul   => ( $bits >= 64 ? MUL_X : MUL_W ),
                         umulh => UMULH_X,
-                        udiv  => UDIV_X,
-                        sdiv  => SDIV_X,
+                        udiv  => ( $bits >= 64 ? UDIV_X : UDIV_W ),
+                        sdiv  => ( $bits >= 64 ? SDIV_X : SDIV_W ),
                         adc   => ADCS_X,
                         sbb   => SBCS_X,
                     );

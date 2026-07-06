@@ -2298,12 +2298,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             )
                         );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'sub',
-                                operands => [ $dst, $src ],
-                                comment  => 'neg (0 - val)'
-                            )
-                        );
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $src ], comment => 'neg (0 - val)' ) );
                     }
                     elsif ( $opcode eq 'abs' ) {
                         my $src = $self->_materialize( $mbb, $val );
@@ -2334,19 +2329,9 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             )
                         );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'xor',
-                                operands => [ $dst, $tmp ],
-                                comment  => 'abs xor'
-                            )
-                        );
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $dst, $tmp ], comment => 'abs xor' ) );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'sub',
-                                operands => [ $dst, $tmp ],
-                                comment  => 'abs sub'
-                            )
-                        );
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $tmp ], comment => 'abs sub' ) );
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
