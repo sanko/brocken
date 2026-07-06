@@ -376,7 +376,7 @@ BROCKEN
     }
 };
 
-# Subtest: Array with feature flag (i128 type) — implicit main
+# Subtest: Array with feature flag (i128 type) - implicit main
 subtest 'Array with i128 native type' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;

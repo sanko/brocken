@@ -181,4 +181,87 @@ $v3 = $v2 % $v3;
 return $v4;
 PROG
 };
+
+# Bug: shift opcode codegen (shl/lshr/ashr) uses %cl for the shift count
+# inline (MOV src->ecx; SHL dst,%cl) without the register allocator
+# knowing. If the allocator assigned a live virtual register to rcx,
+# its value would be silently corrupted by the MOV to ecx. This is
+# the same class of bug as the rax/rdx clobber for div.
+# Fix: exclude rcx from allocation when shl/lshr/ashr are present.
+subtest 'register clobber (rcx) regressions' => sub {
+
+    # Many live values across a shift to exhaust registers, forcing
+    # some value into rcx before the fix. Return $h=8 which must
+    # survive the shift.
+    test_prog( 'many live values across shift', <<'PROG', 8 );
+my i64 $a = 1;
+my i64 $b = 2;
+my i64 $c = 3;
+my i64 $d = 4;
+my i64 $e = 5;
+my i64 $f = 6;
+my i64 $g = 7;
+my i64 $h = 8;
+my i64 $i = 9;
+my i64 $j = 10;
+my i64 $k = 11;
+my i64 $l = 12;
+my i64 $m = 13;
+my i64 $n = 14;
+$j = $j << $i;
+return $h;
+PROG
+
+    # Shift right with variable count, from fuzzer seed 1943945120.
+    test_prog( 'ashr with many live values', <<'PROG', 8 );
+my i64 $v1 = 4;
+my i64 $v2 = -64;
+my i64 $v3 = 0;
+my i64 $v4 = 73;
+my i64 $v5 = 8;
+my i64 $v6 = -40;
+$v6 = $v6 & $v3;
+$v2 = $v5 - $v2;
+if ($v3 != $v2) {
+    $v6 = $v4 | $v2;
+} else {
+    $v6 = $v4 * $v6;
+}
+if ($v4 != $v4) {
+    $v1 = $v4 << $v1;
+} else {
+    $v1 = $v4 | $v2;
+}
+$v2 = $v3 << $v3;
+if ($v3 > $v1) {
+    $v1 = $v1 << $v2;
+} else {
+    $v1 = $v3 & $v4;
+}
+$v3 = $v6 << $v2;
+$v3 = $v2 & $v5;
+$v6 = $v6 | $v1;
+$v1 = $v6 - $v1;
+$v6 = -$v2;
+return $v5;
+PROG
+
+    # Shifts with multiple live ranges - return value is never shifted.
+    test_prog( 'return value untouhed by shift chain', <<'PROG', 42 );
+my i64 $a = 1;
+my i64 $b = 2;
+my i64 $c = 3;
+my i64 $d = 4;
+my i64 $e = 5;
+my i64 $f = 6;
+my i64 $g = 7;
+my i64 $h = 8;
+my i64 $i = 42;
+$b = $a << $b;
+$c = $c >> $d;
+$e = $f << $a;
+$h = $g >> $a;
+return $i;
+PROG
+};
 done_testing;

@@ -306,6 +306,22 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 }
             }
         }
+
+        # Exclude rcx when the function contains shl, lshr, or ashr.
+        # Variable-count shift codegen (D3 /ext rm) emits MOV src -> ecx
+        # then SHL/ SHR /SAR dst, %cl. The MOV to ecx silently clobbers
+        # whatever was in rcx, but the MIR operands (dst, src) do not
+        # expose this fixed-register usage. Any virtual register assigned
+        # to rcx would be silently corrupted.
+        if ( !$is_float && $mf && $mf->blocks->@* ) {
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    if ( $inst->opcode =~ /^(?:shl|lshr|ashr)$/ ) {
+                        $defined_phys{rcx} = 1;
+                    }
+                }
+            }
+        }
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         my $spill_temp = pop @caller_regs;
         my @regs       = ( @caller_regs, @callee_regs );

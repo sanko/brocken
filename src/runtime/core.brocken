@@ -2,10 +2,10 @@
 # Automatically compiled alongside user code.
 #
 # Heap metadata layout (at heap_base):
-#   [heap_base + 0]:  cursor       (ptr — bump allocation pointer)
-#   [heap_base + 8]:  limit        (ptr — end of heap)
-#   [heap_base + 16]: free16_head  (ptr — segregated free list for 16-byte reclaimed objects)
-#   [heap_base + 24]: block_base   (ptr — start of first Immix block = heap_base + 32)
+#   [heap_base + 0]:  cursor       (ptr - bump allocation pointer)
+#   [heap_base + 8]:  limit        (ptr - end of heap)
+#   [heap_base + 16]: free16_head  (ptr - segregated free list for 16-byte reclaimed objects)
+#   [heap_base + 24]: block_base   (ptr - start of first Immix block = heap_base + 32)
 #
 # Immix block layout (32 KB = 32768 bytes per block):
 #   [block + 0..15]:    bitmap (128-bit line bitmap, bit N = line N is available)

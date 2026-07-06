@@ -9,7 +9,7 @@ use feature qw[class];
 # ──────────────────────────────────────────────────────
 # Leaf function optimization test
 # A leaf function (no calls) with no frame should skip
-# all prologue/epilogue — just mov + ret.
+# all prologue/epilogue - just mov + ret.
 # ──────────────────────────────────────────────────────
 my $brocken  = Brocken->new();
 my $platform = $brocken->platform;

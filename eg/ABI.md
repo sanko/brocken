@@ -83,7 +83,7 @@ A recurring challenge across binary platforms is making sure symbols are visible
 * **The Solution**: Brocken hand-assembles both types of representation for ELF64 and Mach-O. The static tables are written with non-allocable markers to ensure they do not take up runtime memory space, keeping execution fast while remaining fully debuggable offline.
 
 ### 2.7 Windows ARM64 Loader Strictness & COFF Zeroing
-Modern 64-bit Windows execution environments (PE32+)—particularly strict ones like Windows 11 on ARM64 (`aarch64-pc-windows-msvc`)—enforce rigid format validation checks on dynamic libraries and executables.
+Modern 64-bit Windows execution environments (PE32+)-particularly strict ones like Windows 11 on ARM64 (`aarch64-pc-windows-msvc`)-enforce rigid format validation checks on dynamic libraries and executables.
 * **Quirk**: If a fully linked PE image file designates a non-zero value for `PointerToSymbolTable` or `NumberOfSymbols` inside the `IMAGE_FILE_HEADER` [1.2.1], the strict OS dynamic loader rejects the file as a malformed image or deprecated debug layout. The application fails to load with error codes such as `ERROR_BAD_EXE_FORMAT` [1.1.9], and static inspect tools on Windows ARM64 (like simulated GNU `nm` or `objdump`) report "file format not recognized".
 * **Workaround**: For fully linked PE images, we zero out the legacy COFF symbol table fields:
   ```perl
@@ -240,7 +240,7 @@ Modern Windows PE loaders and dynamic resolvers (such as `DynaLoader` / `GetProc
 To ensure complete compatibility with third-party tools like standard GNU `objdump` or `llvm-readobj` [1.1.9], Brocken structures `.edata` strictly following MSVC-compiler alignment specifications:
 
 1. **Alignment Offset 0**: The 40-byte `IMAGE_EXPORT_DIRECTORY` header resides at the **very beginning** of the `.edata` section (RVA `$edata_rva`, e.g., `0x2000`).
-2. **Sub-Tables and Strings**: All auxiliary tables—the Export Address Table (EAT), Export Name Pointer Table (ENPT), and Export Ordinal Table (EOT)—together with raw ASCII string names, are appended at offsets following this 40-byte header.
+2. **Sub-Tables and Strings**: All auxiliary tables-the Export Address Table (EAT), Export Name Pointer Table (ENPT), and Export Ordinal Table (EOT)-together with raw ASCII string names, are appended at offsets following this 40-byte header.
 3. **Contiguous Directory Registration**: The optional header Data Directory Index 0 (`IMAGE_DIRECTORY_ENTRY_EXPORT`) registers:
    * **`VirtualAddress`**: `$edata_rva` (the start of the entire `.edata` section, e.g., `0x2000`).
    * **`Size`**: The total byte length of the compiled `.edata` payload (`length($edata_bytes)`).
