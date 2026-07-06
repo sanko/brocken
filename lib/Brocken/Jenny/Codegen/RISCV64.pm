@@ -62,6 +62,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         }
         my @used_callee = sort keys %callee_seen;
         my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
+        $mf->release;
         return $bytes;
     }
 
@@ -119,6 +120,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
             my %alloca_map;
             my %source_map;
             my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
+            $mf->release;
             push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
         }
         if ($emit_init) {
@@ -157,6 +159,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         }
         my @used_callee = sort keys %callee_seen;
         my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        $mf->release;
         return { name => $mf->name, bytes => $bytes, fixups => $func_fixups };
     }
 

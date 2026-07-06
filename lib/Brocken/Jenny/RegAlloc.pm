@@ -289,6 +289,23 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             $defined_phys{r10} = 1;
             $defined_phys{r11} = 1;
         }
+
+        # Exclude rax/rdx when the function contains udiv, sdiv, umulh,
+        # div128_64, or rem128_64. Their codegen emits inline assembly that
+        # clobbers rax and rdx (e.g. MOV RAX,dst; XOR RDX,RDX; DIV src;
+        # MOV dst,RAX) without exposing those registers in the MIR operand
+        # list. Any virtual register assigned to rax or rdx would be silently
+        # corrupted at the inline asm boundary.
+        if ( !$is_float && $mf && $mf->blocks->@* ) {
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    if ( $inst->opcode =~ /^(?:udiv|sdiv|umulh|div128_64|rem128_64)$/ ) {
+                        $defined_phys{rax} = 1;
+                        $defined_phys{rdx} = 1;
+                    }
+                }
+            }
+        }
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         my $spill_temp = pop @caller_regs;
         my @regs       = ( @caller_regs, @callee_regs );

@@ -120,6 +120,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         }
         my @used_callee = sort keys %callee_seen;
         my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
+        $mf->release;
         return $bytes;
     }
 
@@ -177,6 +178,7 @@ class Brocken::Jenny::Codegen::ARM64 {
             my %alloca_map;
             my %source_map;
             my ( $bytes, $func_fixups, $unwind_info ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
+            $mf->release;
             push @result,
                 {
                 name       => $fname,
@@ -231,6 +233,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         }
         my @used_callee = sort keys %callee_seen;
         my ( $bytes, $func_fixups, $unwind_info ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        $mf->release;
         return { name => $mf->name, bytes => $bytes, fixups => $func_fixups, unwind => $unwind_info };
     }
 

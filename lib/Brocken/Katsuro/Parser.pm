@@ -16,11 +16,14 @@ class Brocken::Katsuro::Parser {
         PREC_ASSIGN  => 10,
         PREC_OR      => 15,
         PREC_AND     => 17,
-        PREC_COMPARE => 20,
-        PREC_SHIFT   => 25,
-        PREC_SUM     => 30,
-        PREC_PRODUCT => 40,
-        PREC_UNARY   => 50,
+        PREC_BITOR   => 18,
+        PREC_BITXOR  => 19,
+        PREC_BITAND  => 20,
+        PREC_COMPARE => 25,
+        PREC_SHIFT   => 30,
+        PREC_SUM     => 35,
+        PREC_PRODUCT => 45,
+        PREC_UNARY   => 55,
         PREC_CALL    => 60,
         PREC_DEREF   => 65,
     };
@@ -492,6 +495,30 @@ class Brocken::Katsuro::Parser {
                     rhs => $self->parse_expression(PREC_SHIFT)
                 );
             }
+            if ( $op eq '&' ) {
+                return Brocken::Katsuro::AST::Expr::BinOp->new(
+                    $self->_pos_token($token),
+                    op  => $op,
+                    lhs => $left,
+                    rhs => $self->parse_expression(PREC_BITAND)
+                );
+            }
+            if ( $op eq '^' ) {
+                return Brocken::Katsuro::AST::Expr::BinOp->new(
+                    $self->_pos_token($token),
+                    op  => $op,
+                    lhs => $left,
+                    rhs => $self->parse_expression(PREC_BITXOR)
+                );
+            }
+            if ( $op eq '|' ) {
+                return Brocken::Katsuro::AST::Expr::BinOp->new(
+                    $self->_pos_token($token),
+                    op  => $op,
+                    lhs => $left,
+                    rhs => $self->parse_expression(PREC_BITOR)
+                );
+            }
             if ( $op eq '+' || $op eq '-' || $op eq '.' ) {
                 return Brocken::Katsuro::AST::Expr::BinOp->new(
                     $self->_pos_token($token),
@@ -553,6 +580,9 @@ class Brocken::Katsuro::Parser {
             return PREC_DEREF   if $op eq '->';
             return PREC_OR      if $op eq '||';
             return PREC_AND     if $op eq '&&';
+            return PREC_BITOR   if $op eq '|';
+            return PREC_BITXOR  if $op eq '^';
+            return PREC_BITAND  if $op eq '&';
             return PREC_COMPARE if $op eq '==' || $op eq '!=' || $op eq '<' || $op eq '>' || $op eq '<=' || $op eq '>=';
             return PREC_SHIFT   if $op eq '<<' || $op eq '>>';
             return PREC_SUM     if $op eq '+'  || $op eq '-' || $op eq '.';
