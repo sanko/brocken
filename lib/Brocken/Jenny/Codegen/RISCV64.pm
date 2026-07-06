@@ -661,8 +661,10 @@ class Brocken::Jenny::Codegen::RISCV64 {
                             $src_r = $resolve->($src);
                             $sid   = $reg_id->($src_r);
                         }
+                        my $r_op = OP;
+                        $r_op = 0x3B if ( ( $opcode eq 'div' || $opcode eq 'mul' ) && $dst->type && $dst->type->bits < 64 );
                         $bytes .= pack( 'V',
-                            ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
+                            ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | $r_op );
                     }
                 }
                 elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
