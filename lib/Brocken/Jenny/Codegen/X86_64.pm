@@ -649,7 +649,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my %imm_ext = ( add => 0,    sub => 5,    and => 4,    or => 1,    xor => 6,    adc => 2,    sbb => 3 );
                     my %reg_op  = ( add => 0x01, sub => 0x29, and => 0x21, or => 0x09, xor => 0x31, adc => 0x11, sbb => 0x19 );
                     my %reg_mem = ( add => 0x03, sub => 0x2B, and => 0x23, or => 0x0B, xor => 0x33, adc => 0x13, sbb => 0x1B );
-                    my $rex_w   = ( $bits >= 64 ) ? REX_W : 0;
+                    my $rex_w   = $bits >= 64 ? REX_W : 0;
                     if ( $src->kind eq 'imm' ) {
                         my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                         my $ext   = $imm_ext{$opcode};
@@ -675,8 +675,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                 elsif ( $opcode eq 'mul' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $bits  = $dst->type      ? $dst->type->bits : 64;
-                    my $rex_w = ( $bits >= 64 ) ? REX_W            : 0;
+                    my $bits  = $dst->type  ? $dst->type->bits : 64;
+                    my $rex_w = $bits >= 64 ? REX_W            : 0;
                     if ( $src->kind eq 'imm' ) {
 
                         # imul dst, dst, imm32  => REX.W 69 /r
@@ -803,7 +803,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $did    = $reg_id->($dst_r);
                     my $bits   = $dst->type ? $dst->type->bits : 64;
                     my %ext    = ( shl => 4, lshr => 5, ashr => 7 );
-                    my $rex_w  = ( $bits >= 64 ) ? REX_W : 0;
+                    my $rex_w  = $bits >= 64 ? REX_W : 0;
                     my $rex    = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $extval = $ext{$opcode};
                     if ( $src->kind eq 'imm' ) {
@@ -1056,8 +1056,16 @@ class Brocken::Jenny::Codegen::X86_64 {
                 elsif ( $opcode eq 'cmp' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $bits  = $src->type      ? $src->type->bits : 64;
-                    my $rex_w = ( $bits >= 64 ) ? REX_W            : 0;
+
+                    # Use operand type width: 64-bit for i64, 32-bit for narrower
+                    # types.  Narrow signed values are loaded with movsx (sign-
+                    # extending to 64 bits), but 32-bit cmp on the lower 32 bits
+                    # is still correct because the sign bit is preserved at bit 31.
+                    # Using 64-bit cmp for i32 would be wrong because 32-bit mov
+                    # zero-extends, making negative values appear as large 64-bit
+                    # positive numbers.
+                    my $bits  = $dst->type  ? $dst->type->bits : 32;
+                    my $rex_w = $bits >= 64 ? REX_W            : 0;
                     if ( $src->kind eq 'imm' ) {
                         my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                         my $modrm = 0xC0 | ( 7 << 3 ) | ( $did & 7 );
