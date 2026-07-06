@@ -1909,7 +1909,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
-                    my $size = ( $inst->allocated_type->bits / 8 ) * ( $inst->count ? $inst->count->value : 1 );
+                    my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 ) || 1;
+                    $size *= ( $inst->count ? $inst->count->value : 1 );
 
                     # save current heap_ptr as result
                     $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap' ) );
@@ -1964,8 +1965,17 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $op = $inst->type->bits >= 64 ? 'f64_load' : 'f32_load';
                         }
                         else {
-                            my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
-                            $op = $bits >= 64 ? 'i64_load' : 'i32_load';
+                            my $mem_ty   = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $inst->type;
+                            my $mem_bits = $mem_ty->bits;
+                            my $dst_bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
+                            if ( $dst_bits >= 64 ) {
+                                $op = $mem_bits > 32 ? 'i64_load' :
+                                    ( $mem_bits > 16 ? 'i64_load32_u' : ( $mem_bits > 8 ? 'i64_load16_u' : 'i64_load8_u' ) );
+                            }
+                            else {
+                                $op = $mem_bits > 32 ? 'i32_load' :
+                                    ( $mem_bits > 16 ? 'i32_load' : ( $mem_bits > 8 ? 'i32_load16_u' : 'i32_load8_u' ) );
+                            }
                         }
                         $mbb->add_instruction( $self->_wasm_push( $ptr, 'load: ptr' ) );
                         $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'load' ) );
@@ -2010,8 +2020,17 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $op = $val->type->bits >= 64 ? 'f64_store' : 'f32_store';
                         }
                         else {
-                            my $bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 32;
-                            $op = $bits >= 64 ? 'i64_store' : 'i32_store';
+                            my $mem_ty   = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $val->type;
+                            my $mem_bits = $mem_ty->bits;
+                            my $val_bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 32;
+                            if ( $val_bits >= 64 ) {
+                                $op = $mem_bits > 32 ? 'i64_store' :
+                                    ( $mem_bits > 16 ? 'i64_store32' : ( $mem_bits > 8 ? 'i64_store16' : 'i64_store8' ) );
+                            }
+                            else {
+                                $op = $mem_bits > 32 ? 'i32_store' :
+                                    ( $mem_bits > 16 ? 'i32_store' : ( $mem_bits > 8 ? 'i32_store16' : 'i32_store8' ) );
+                            }
                         }
                         $mbb->add_instruction( $self->_wasm_push( $ptr, 'store: ptr' ) );
                         $mbb->add_instruction( $self->_wasm_push( $val, 'store: val' ) );
@@ -2610,6 +2629,17 @@ class Brocken::Jenny::Lowerer::Wasm {
             Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
             Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
         );
+    }
+
+    method _find_alloca_stored_type( $ir_func, $ptr_name ) {
+        for my $block ( $ir_func->blocks->@* ) {
+            for my $inst ( $block->instructions->@* ) {
+                next unless $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca');
+                next unless defined $inst->name && $inst->name eq $ptr_name;
+                return $inst->allocated_type;
+            }
+        }
+        return undef;
     }
 }
 

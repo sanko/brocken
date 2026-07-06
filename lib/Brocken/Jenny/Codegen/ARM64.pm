@@ -45,12 +45,20 @@ class Brocken::Jenny::Codegen::ARM64 {
         SUB_SP         => 0xD10003FF,
         ADD_SP         => 0x910003FF,
         MOV_SP         => 0x910003E0,
+        LDRB           => 0x39400000,
+        LDRH           => 0x79400000,
         LDR_32         => 0xB9400000,
         LDR_64         => 0xF9400000,
+        STRB           => 0x39000000,
+        STRH           => 0x79000000,
         STR_32         => 0xB9000000,
         STR_64         => 0xF9000000,
+        LDRB_REG       => 0x38408000,
+        LDRH_REG       => 0x78408000,
         LDR_32_REG     => 0xB8408000,
         LDR_64_REG     => 0xF8408000,
+        STRB_REG       => 0x38208000,
+        STRH_REG       => 0x78208000,
         STR_32_REG     => 0xB8208000,
         STR_64_REG     => 0xF8208000,
         FLDR_32        => 0xBD400000,
@@ -756,17 +764,18 @@ class Brocken::Jenny::Codegen::ARM64 {
                         )
                     );
                     my $bid  = $reg_id->($base_r);
-                    my $bits = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
+                    my $bits = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
-                        my $reg_op  = $bits == 32 ? LDR_32_REG : LDR_64_REG;
+                        my $reg_op  = $bits >= 64 ? LDR_64_REG : ( $bits >= 32 ? LDR_32_REG : ( $bits >= 16 ? LDRH_REG : LDRB_REG ) );
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $did );
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
-                        my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $base  = $bits == 32 ? LDR_32 : LDR_64;
+                        my $scale = $bits >= 64 ? 3 : ( $bits >= 32 ? 2 : ( $bits >= 16 ? 1 : 0 ) );
+                        my $imm12 = $disp >> $scale;
+                        my $base  = $bits >= 64 ? LDR_64 : ( $bits >= 32 ? LDR_32 : ( $bits >= 16 ? LDRH : LDRB ) );
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
                     }
                 }
@@ -781,17 +790,18 @@ class Brocken::Jenny::Codegen::ARM64 {
                         )
                     );
                     my $bid  = $reg_id->($base_r);
-                    my $bits = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
+                    my $bits = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
-                        my $reg_op  = $bits == 32 ? STR_32_REG : STR_64_REG;
+                        my $reg_op  = $bits >= 64 ? STR_64_REG : ( $bits >= 32 ? STR_32_REG : ( $bits >= 16 ? STRH_REG : STRB_REG ) );
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $sid );
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
-                        my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $base  = $bits == 32 ? STR_32 : STR_64;
+                        my $scale = $bits >= 64 ? 3 : ( $bits >= 32 ? 2 : ( $bits >= 16 ? 1 : 0 ) );
+                        my $imm12 = $disp >> $scale;
+                        my $base  = $bits >= 64 ? STR_64 : ( $bits >= 32 ? STR_32 : ( $bits >= 16 ? STRH : STRB ) );
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
                     }
                 }
@@ -805,7 +815,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         )
                     );
                     my $bid  = $reg_id->($base_r);
-                    my $bits = ( $imm->type && $imm->type->kind eq 'int' ) ? $imm->type->bits : 64;
+                    my $bits = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits : 64;
 
                     # find a temporary register not in use
                     my %used;
@@ -827,13 +837,14 @@ class Brocken::Jenny::Codegen::ARM64 {
                     if ( defined $addr->{index} ) {
                         my $index_r  = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid      = $reg_id->($index_r);
-                        my $str_base = $bits >= 64 ? STR_64_REG : STR_32_REG;
+                        my $str_base = $bits >= 64 ? STR_64_REG : ( $bits >= 32 ? STR_32_REG : ( $bits >= 16 ? STRH_REG : STRB_REG ) );
                         $bytes .= pack( 'V', $str_base | ( $iid << 16 ) | ( $bid << 5 ) | $tid );
                     }
                     else {
                         my $disp     = $addr->{disp} // 0;
-                        my $imm12    = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $str_base = $bits >= 64 ? STR_64 : STR_32;
+                        my $scale    = $bits >= 64 ? 3 : ( $bits >= 32 ? 2 : ( $bits >= 16 ? 1 : 0 ) );
+                        my $imm12    = $disp >> $scale;
+                        my $str_base = $bits >= 64 ? STR_64 : ( $bits >= 32 ? STR_32 : ( $bits >= 16 ? STRH : STRB ) );
                         $bytes .= pack( 'V', $str_base | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
                     }
                 }

@@ -166,11 +166,41 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i64_load' ) {
                     $$buf .= pack( 'C', 0x29 ) . $self->_uleb(3) . $self->_uleb(0);
                 }
+                elsif ( $opcode eq 'i32_load8_u' ) {
+                    $$buf .= pack( 'C', 0x2D ) . $self->_uleb(0) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i32_load16_u' ) {
+                    $$buf .= pack( 'C', 0x2F ) . $self->_uleb(1) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i64_load8_u' ) {
+                    $$buf .= pack( 'C', 0x31 ) . $self->_uleb(0) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i64_load16_u' ) {
+                    $$buf .= pack( 'C', 0x33 ) . $self->_uleb(1) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i64_load32_u' ) {
+                    $$buf .= pack( 'C', 0x35 ) . $self->_uleb(2) . $self->_uleb(0);
+                }
                 elsif ( $opcode eq 'i32_store' ) {
                     $$buf .= pack( 'C', 0x36 ) . $self->_uleb(2) . $self->_uleb(0);
                 }
                 elsif ( $opcode eq 'i64_store' ) {
                     $$buf .= pack( 'C', 0x37 ) . $self->_uleb(3) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i32_store8' ) {
+                    $$buf .= pack( 'C', 0x3A ) . $self->_uleb(0) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i32_store16' ) {
+                    $$buf .= pack( 'C', 0x3B ) . $self->_uleb(1) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i64_store8' ) {
+                    $$buf .= pack( 'C', 0x3C ) . $self->_uleb(0) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i64_store16' ) {
+                    $$buf .= pack( 'C', 0x3D ) . $self->_uleb(1) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i64_store32' ) {
+                    $$buf .= pack( 'C', 0x3E ) . $self->_uleb(2) . $self->_uleb(0);
                 }
                 elsif ( $opcode eq 'i32_eqz' )          { $$buf .= pack( 'C', 0x45 ) }
                 elsif ( $opcode eq 'i32_eq' )           { $$buf .= pack( 'C', 0x46 ) }

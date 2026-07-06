@@ -711,8 +711,10 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $addr   = $src->value;
                     my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
-                    my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
-                    my $funct3 = $bits == 32                                 ? 2                : 3;
+                    my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
+                    my $signed = $src->type && $src->type->kind eq 'int'     ? $src->type->signed : 1;
+                    my $funct3 = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
+
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -737,8 +739,8 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $addr   = $dst->value;
                     my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
-                    my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
-                    my $funct3 = $bits == 32                                 ? 2                : 3;
+                    my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
+                    my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -766,8 +768,8 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $addr   = $mem->value;
                     my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
-                    my $bits   = ( $imm->type && $imm->type->kind eq 'int' ) ? $imm->type->bits : 64;
-                    my $funct3 = $bits == 32                                 ? 2                : 3;
+                    my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits : 64;
+                    my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
 
                     # find a temporary register not in use
                     my %used;
