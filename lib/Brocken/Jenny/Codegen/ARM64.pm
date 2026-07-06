@@ -31,8 +31,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         EOR_X          => 0xCA000000,
         MUL_X          => 0x9B007C00,
         UMULH_X        => 0x9BC07C00,
-        SDIV_X         => 0x9AC00800,
-        UDIV_X         => 0x9AC00C00,
+        SDIV_X         => 0x9AC00C00,
+        UDIV_X         => 0x9AC00800,
         ADD_IMM        => 0x11000000,
         ADD_IMM_64     => 0x91000000,    # ADD_IMM | SF
         SUB_IMM        => 0x51000000,
@@ -47,7 +47,9 @@ class Brocken::Jenny::Codegen::ARM64 {
         ADD_SP         => 0x910003FF,
         MOV_SP         => 0x910003E0,
         LDRB           => 0x39400000,
+        LDRSB          => 0x39800000,
         LDRH           => 0x79400000,
+        LDRSH          => 0x79800000,
         LDR_32         => 0xB9400000,
         LDR_64         => 0xF9400000,
         STRB           => 0x39000000,
@@ -55,7 +57,9 @@ class Brocken::Jenny::Codegen::ARM64 {
         STR_32         => 0xB9000000,
         STR_64         => 0xF9000000,
         LDRB_REG       => 0x38408000,
+        LDRSB_REG      => 0x38C08000,
         LDRH_REG       => 0x78408000,
+        LDRSH_REG      => 0x78C08000,
         LDR_32_REG     => 0xB8408000,
         LDR_64_REG     => 0xF8408000,
         STRB_REG       => 0x38208000,
@@ -675,6 +679,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $opcode eq 'mul'   ||
                     $opcode eq 'umulh' ||
                     $opcode eq 'udiv'  ||
+                    $opcode eq 'sdiv'  ||
                     $opcode eq 'adc'   ||
                     $opcode eq 'sbb' ) {
                     my $dst_r  = $resolve->($dst);
@@ -689,6 +694,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         mul   => ( $bits >= 64 ? MUL_X : MUL_W ),
                         umulh => UMULH_X,
                         udiv  => UDIV_X,
+                        sdiv  => SDIV_X,
                         adc   => ADCS_X,
                         sbb   => SBCS_X,
                     );
@@ -764,19 +770,22 @@ class Brocken::Jenny::Codegen::ARM64 {
                             value => $addr->{base}
                         )
                     );
-                    my $bid  = $reg_id->($base_r);
-                    my $bits = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
+                    my $bid    = $reg_id->($base_r);
+                    my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
+                    my $signed = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->signed : 1;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
-                        my $reg_op  = $bits >= 64 ? LDR_64_REG : ( $bits >= 32 ? LDR_32_REG : ( $bits >= 16 ? LDRH_REG : LDRB_REG ) );
+                        my $reg_op  = $bits >= 64 ? LDR_64_REG :
+                            ( $bits >= 32 ? LDR_32_REG : ( $bits >= 16 ? ( $signed ? LDRSH_REG : LDRH_REG ) : ( $signed ? LDRSB_REG : LDRB_REG ) ) );
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $did );
                     }
                     else {
                         my $disp  = $addr->{disp} // 0;
                         my $scale = $bits >= 64 ? 3 : ( $bits >= 32 ? 2 : ( $bits >= 16 ? 1 : 0 ) );
                         my $imm12 = $disp >> $scale;
-                        my $base  = $bits >= 64 ? LDR_64 : ( $bits >= 32 ? LDR_32 : ( $bits >= 16 ? LDRH : LDRB ) );
+                        my $base  = $bits >= 64 ? LDR_64 :
+                            ( $bits >= 32 ? LDR_32 : ( $bits >= 16 ? ( $signed ? LDRSH : LDRH ) : ( $signed ? LDRSB : LDRB ) ) );
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
                     }
                 }
