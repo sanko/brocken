@@ -31,7 +31,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         EOR_X          => 0xCA000000,
         MUL_X          => 0x9B007C00,
         UMULH_X        => 0x9BC07C00,
-        UDIV_X         => 0x9AC00800,
+        SDIV_X         => 0x9AC00800,
+        UDIV_X         => 0x9AC00C00,
         ADD_IMM        => 0x11000000,
         ADD_IMM_64     => 0x91000000,    # ADD_IMM | SF
         SUB_IMM        => 0x51000000,
