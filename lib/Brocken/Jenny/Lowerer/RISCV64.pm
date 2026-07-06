@@ -1891,7 +1891,8 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
                     my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    my $size = ( $inst->allocated_type->bits / 8 ) * ( $inst->count ? $inst->count->value : 1 );
+                    my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 ) || 1;
+                    $size *= ( $inst->count ? $inst->count->value : 1 );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'alloca',
@@ -1939,11 +1940,9 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         );
                     }
                     else {
-                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => 'mem',
-                            value => { base => $ptr->name, disp => 0 },
-                            type  => $inst->type
-                        );
+                        my $mem_type = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $inst->type;
+                        my $mem      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $ptr->name, disp => 0 },
+                            type => $mem_type );
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         my $lop = ( $inst->type && $inst->type->kind eq 'float' ) ? 'fload' : 'load';
                         $mbb->add_instruction(
@@ -1980,8 +1979,12 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         );
                     }
                     else {
-                        my $mem = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $ptr->name, disp => 0 },
-                            type => $val->type );
+                        my $store_type = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $val->type;
+                        my $mem        = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $ptr->name, disp => 0 },
+                            type  => $store_type
+                        );
                         if ( $val->type && $val->type->kind eq 'float' ) {
                             my $src
                                 = ( $val->isa('Brocken::Lindsay::IR::Constant') || $val->isa('Brocken::Lindsay::IR::RodataRef') ) ?
@@ -3583,6 +3586,17 @@ class Brocken::Jenny::Lowerer::RISCV64 {
         return 4 if $type->kind eq 'ptr';
         return 5 if $type->kind eq 'dynamic';
         return 0;
+    }
+
+    method _find_alloca_stored_type( $ir_func, $ptr_name ) {
+        for my $block ( $ir_func->blocks->@* ) {
+            for my $inst ( $block->instructions->@* ) {
+                next unless $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca');
+                next unless defined $inst->name && $inst->name eq $ptr_name;
+                return $inst->allocated_type;
+            }
+        }
+        return undef;
     }
 }
 

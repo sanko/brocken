@@ -855,30 +855,71 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $did   = $reg_id->($dst_r);
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did );
                     my $bits = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
-                    my $rex  = ( $bits == 64 ? 0x48 : 0 ) | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
-                    if ($rex) { $bytes .= pack( 'C', $rex ) }
-                    $bytes .= pack( 'C', MOV_RM_R ) . pack( 'C', $modrm );
+                    if ( $bits < 32 ) {
+                        my $signed = $dst->type && $dst->type->kind eq 'int' ? $dst->type->signed : 1;
+                        my $rex    = 0x40 | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+                        if ($signed) {
+
+                            # movsx r32, r/m8 (0x0F 0xBE) or movsx r32, r/m16 (0x0F 0xBF)
+                            my $op2 = ( $bits <= 8 ) ? 0xBE : 0xBF;
+                            $bytes .= pack( 'C', $rex ) . pack( 'CCC', 0x0F, $op2, $modrm );
+                        }
+                        else {
+                            # movzx r32, r/m8 (0x0F 0xB6) or movzx r32, r/m16 (0x0F 0xB7)
+                            my $op2 = ( $bits <= 8 ) ? 0xB6 : 0xB7;
+                            $bytes .= pack( 'C', $rex ) . pack( 'CCC', 0x0F, $op2, $modrm );
+                        }
+                    }
+                    else {
+                        my $rex = 0x40 | ( $bits >= 64 ? 0x08 : 0 ) | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+                        if ($rex) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'C', MOV_RM_R ) . pack( 'C', $modrm );
+                    }
                     $bytes .= join '', $extra->@*;
                 }
                 elsif ( $opcode eq 'store' ) {
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $dst, $sid );
-                    my $bits = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
-                    my $rex  = ( $bits == 64 ? 0x48 : 0 ) | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
-                    if ($rex) { $bytes .= pack( 'C', $rex ) }
-                    $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
+                    my $bits = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
+                    if ( $bits <= 8 ) {
+                        my $rex = 0x40 | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
+                        $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x88, $modrm );
+                    }
+                    elsif ( $bits <= 16 ) {
+                        my $rex = 0x40 | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
+                        $bytes .= pack( 'C', 0x66 ) . pack( 'C', $rex ) . pack( 'CC', MOV_R_RM, $modrm );
+                    }
+                    else {
+                        my $rex = 0x40 | ( $bits >= 64 ? 0x08 : 0 ) | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
+                        if ($rex) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
+                    }
                     $bytes .= join '', $extra->@*;
                 }
                 elsif ( $opcode eq 'store_imm' ) {
                     my ( $mem, $imm ) = $inst->operands->@*;
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $mem, 0 );    # /0 ext = mov
-                    my $bits = ( $imm->type && $imm->type->kind eq 'int' ) ? $imm->type->bits : 64;
-                    my $rex  = ( $bits == 64 ? 0x48 : 0 ) | $rex_x | $rex_b;
-                    if ($rex) { $bytes .= pack( 'C', $rex ) }
-                    $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
-                    $bytes .= join '', $extra->@*;
-                    $bytes .= pack( 'V', $imm->value );
+                    my $bits = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits : 64;
+                    if ( $bits <= 8 ) {
+                        my $rex = 0x40 | $rex_x | $rex_b;
+                        $bytes .= pack( 'C', $rex ) . pack( 'CC', 0xC6, $modrm );
+                        $bytes .= join '', $extra->@*;
+                        $bytes .= pack( 'C', $imm->value & 0xFF );
+                    }
+                    elsif ( $bits <= 16 ) {
+                        my $rex = 0x40 | $rex_x | $rex_b;
+                        $bytes .= pack( 'C', 0x66 ) . pack( 'C', $rex ) . pack( 'CC', MOV_IMM_RM, $modrm );
+                        $bytes .= join '', $extra->@*;
+                        $bytes .= pack( 'v', $imm->value & 0xFFFF );
+                    }
+                    else {
+                        my $rex = 0x40 | ( $bits >= 64 ? 0x08 : 0 ) | $rex_x | $rex_b;
+                        if ($rex) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
+                        $bytes .= join '', $extra->@*;
+                        $bytes .= pack( 'V', $imm->value );
+                    }
                 }
 
                 # SSE float opcodes

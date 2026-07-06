@@ -131,26 +131,30 @@ package Brocken::Fuzz {
             return;
         }
 
-        # Generate a random Brocken program returning i64
+        # Generate a random Brocken program with typed variables
         method generate_program( $max_ops = 15, $max_vars = 5 ) {
-            my $vars = {};
+            my $vars      = {};
+            my $var_types = {};
             my @stmts;
             my $n_vars = $self->_rand_int($max_vars) + 1;
 
-            # Declare variables with random initial values
+            # Declare variables with random types and initial values
             my @var_names;
             for my $vi ( 1 .. $n_vars ) {
                 my $name = 'v' . $vi;
-                my $init = $self->_rand_i64_val();
                 push @var_names, $name;
+                my ( $bits, $signed ) = $self->_rand_type();
+                $var_types->{$name} = { bits => $bits, signed => $signed };
+                my $init = $self->_rand_typed_val( $bits, $signed );
                 $vars->{$name} = $init;
-                push @stmts, "my i64 \$$name = $init;";
+                my $keyword = $self->_type_keyword( $bits, $signed );
+                push @stmts, "my $keyword \$$name = $init;";
             }
 
             # Generate random operations
             my $n_ops = $self->_rand_int($max_ops) + 1;
             for my $oi ( 1 .. $n_ops ) {
-                my $stmt = $self->_random_stmt( $vars, \@var_names, $oi == $n_ops );
+                my $stmt = $self->_random_stmt( $vars, $var_types, \@var_names, $oi == $n_ops );
                 push @stmts, $stmt->{code} if $stmt->{code};
             }
             my $result_var = $var_names[ $self->_rand_int($#var_names) ];
@@ -161,23 +165,34 @@ package Brocken::Fuzz {
         }
 
         # Generate a single random statement
-        method _random_stmt( $vars, $var_names, $is_last ) {
-            my $type = $self->_rand_int(4);
-            if ( $type == 0 && scalar( $var_names->@* ) >= 2 ) {
-                return $self->_gen_binop_assign( $vars, $var_names );
+        method _random_stmt( $vars, $var_types, $var_names, $is_last ) {
+            my $n_vars  = scalar( $var_names->@* );
+            my @i1_vars = grep { $var_types->{$_}{bits} == 1 } $var_names->@*;
+            my $type    = $self->_rand_int(6);
+            if ( $type == 0 ) {
+                return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
             elsif ( $type == 1 ) {
-                return $self->_gen_unop_assign( $vars, $var_names );
+                return $self->_gen_unop_assign( $vars, $var_types, $var_names );
             }
-            elsif ( $type == 2 && scalar( $var_names->@* ) >= 2 && !$is_last ) {
-                return $self->_gen_if_else( $vars, $var_names );
+            elsif ( $type == 2 && $n_vars >= 2 ) {
+                return $self->_gen_cmp_assign( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 3 && $n_vars >= 2 && !$is_last ) {
+                return $self->_gen_if_else( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 4 && scalar(@i1_vars) >= 2 ) {
+                return $self->_gen_bool_binop( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 5 && scalar(@i1_vars) >= 1 ) {
+                return $self->_gen_bool_unop( $vars, $var_types, $var_names );
             }
             else {
-                return $self->_gen_binop_assign( $vars, $var_names );
+                return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
         }
 
-        method _gen_binop_assign( $vars, $var_names ) {
+        method _gen_binop_assign( $vars, $var_types, $var_names ) {
             my $dst = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
             my $lhs = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
             my $rhs = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
@@ -196,20 +211,24 @@ package Brocken::Fuzz {
             }
             return { code => "\$$dst = \$$lhs $op \$$rhs;" } unless defined $lv && defined $rv;
             my $result = $self->_eval_i64( $op, $lv, $rv );
-            $vars->{$dst} = $result if defined $result;
+            if ( defined $result ) {
+                my $t = $var_types->{$dst};
+                $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
+            }
             return { code => "\$$dst = \$$lhs $op \$$rhs;" };
         }
 
-        method _gen_unop_assign( $vars, $var_names ) {
+        method _gen_unop_assign( $vars, $var_types, $var_names ) {
             my $dst = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
             my $src = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
             my $sv  = $vars->{$src};
             return { code => "\$$dst = -\$$src;" } unless defined $sv;
-            $vars->{$dst} = -$sv;
+            my $t = $var_types->{$dst};
+            $vars->{$dst} = $self->_clamp_to_type( -$sv, $t->{bits}, $t->{signed} );
             return { code => "\$$dst = -\$$src;" };
         }
 
-        method _gen_if_else( $vars, $var_names ) {
+        method _gen_if_else( $vars, $var_types, $var_names ) {
             my $lhs     = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
             my $rhs     = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
             my $cmp     = $self->_rand_cmpop();
@@ -244,12 +263,65 @@ package Brocken::Fuzz {
             $else_op = '+' if ( $else_op eq '<<' || $else_op eq '>>' ) && ( $else_rv < 0 || $else_rv >= 64 );
             my $then_v = $self->_eval_i64( $then_op, $vars->{$then_l} // 0, $then_rv );
             my $else_v = $self->_eval_i64( $else_op, $vars->{$else_l} // 0, $else_rv );
-            $vars->{$var} = $cond ? $then_v : $else_v;
+            my $t      = $var_types->{$var};
+            $vars->{$var} = $self->_clamp_to_type( $cond ? $then_v : $else_v, $t->{bits}, $t->{signed} );
             return {
                 code => join "\n",
                 "if (\$$lhs $cmp \$$rhs) {", "    \$$var = \$$then_l $then_op \$$then_r;", "} else {", "    \$$var = \$$else_l $else_op \$$else_r;",
                 "}"
             };
+        }
+
+        # Compare two variables and assign the boolean (1/0) result to a destination.
+        method _gen_cmp_assign( $vars, $var_types, $var_names ) {
+            my $dst  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $lhs  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $rhs  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $cmp  = $self->_rand_cmpop();
+            my $lv   = $vars->{$lhs} // 0;
+            my $rv   = $vars->{$rhs} // 0;
+            my $cond = $self->_eval_cmp( $cmp, $lv, $rv );
+            my $t    = $var_types->{$dst};
+            $vars->{$dst} = $self->_clamp_to_type( $cond ? 1 : 0, $t->{bits}, $t->{signed} );
+            return { code => join( "\n", "if (\$$lhs $cmp \$$rhs) {", "    \$$dst = 1;", "} else {", "    \$$dst = 0;", "}" ), };
+        }
+
+        # Generate a boolean binary operation (and/or/xor) on i1-typed variables.
+        method _gen_bool_binop( $vars, $var_types, $var_names ) {
+            my @i1_vars = grep { $var_types->{$_}{bits} == 1 } $var_names->@*;
+            my $dst     = $i1_vars[ $self->_rand_int($#i1_vars) ];
+            my $lhs     = $i1_vars[ $self->_rand_int($#i1_vars) ];
+            my $rhs     = $i1_vars[ $self->_rand_int($#i1_vars) ];
+            my @bops    = qw[and or xor];
+            my $bop     = $bops[ $self->_rand_int($#bops) ];
+            my $lv      = $vars->{$lhs} ? 1 : 0;
+            my $rv      = $vars->{$rhs} ? 1 : 0;
+            my ( $sim_val, $code );
+
+            if ( $bop eq 'and' ) {
+                $sim_val = $lv && $rv;
+                $code    = join( "\n", "if (\$$lhs) {", "    \$$dst = \$$rhs;", "} else {", "    \$$dst = 0;", "}" );
+            }
+            elsif ( $bop eq 'or' ) {
+                $sim_val = $lv || $rv;
+                $code    = join( "\n", "if (\$$lhs) {", "    \$$dst = 1;", "} else {", "    \$$dst = \$$rhs;", "}" );
+            }
+            else {    # xor
+                $sim_val = $lv ^ $rv;
+                $code    = "\$$dst = \$$lhs ^ \$$rhs;";
+            }
+            $vars->{$dst} = $self->_clamp_to_type( $sim_val, 1, 1 );
+            return { code => $code };
+        }
+
+        # Generate a boolean unary operation (not) on i1-typed variables.
+        method _gen_bool_unop( $vars, $var_types, $var_names ) {
+            my @i1_vars = grep { $var_types->{$_}{bits} == 1 } $var_names->@*;
+            my $dst     = $i1_vars[ $self->_rand_int($#i1_vars) ];
+            my $src     = $i1_vars[ $self->_rand_int($#i1_vars) ];
+            my $sv      = $vars->{$src} ? 1 : 0;
+            $vars->{$dst} = $self->_clamp_to_type( $sv ? 0 : 1, 1, 1 );
+            return { code => join( "\n", "if (\$$src) {", "    \$$dst = 0;", "} else {", "    \$$dst = 1;", "}" ), };
         }
 
         method _rand_binop() {
@@ -295,6 +367,53 @@ package Brocken::Fuzz {
 
         method _rand_int($max) {
             return int( rand( $max + 1 ) );
+        }
+
+        # Return a random integer type as (bits, signed) tuple.
+        # Weighted toward wider types so clamping doesn't dominate early.
+        method _rand_type() {
+            my @types = (
+                [ 1,  1 ],    # i1  (bool)
+                [ 8,  1 ],    # i8
+                [ 16, 1 ],    # i16
+                [ 32, 1 ],    # i32
+                [ 64, 1 ],    # i64
+            );
+            my @weights = ( 1, 2, 2, 3, 4 );
+            my $total   = 0;
+            $total += $_ for @weights;
+            my $r = $self->_rand_int( $total - 1 );
+            for my $i ( 0 .. $#types ) {
+                $r -= $weights[$i];
+                return $types[$i]->@* if $r < 0;
+            }
+            return ( 64, 1 );
+        }
+
+        # Return the Brocken source-level type keyword for a (bits, signed) pair.
+        method _type_keyword( $bits, $signed ) {
+            return 'bool' if $bits == 1;
+            return $signed ? "i$bits" : "u$bits";
+        }
+
+        # Clamp a Perl integer value to the range of a given integer type.
+        # i1 returns 0 or 1.  Signed types use two's-complement wrapping.
+        method _clamp_to_type( $val, $bits, $signed ) {
+            return $val ? 1 : 0 if $bits == 1;
+            return $val         if $bits >= 64;
+            use integer;
+            my $mask    = ( 1 << $bits ) - 1;
+            my $clamped = $val & $mask;
+            if ( $signed && ( $clamped & ( 1 << ( $bits - 1 ) ) ) ) {
+                $clamped -= ( 1 << $bits );
+            }
+            return $clamped;
+        }
+
+        # Generate a random value appropriate for the given type.
+        method _rand_typed_val( $bits, $signed ) {
+            return int( rand(2) ) if $bits == 1;
+            return $self->_clamp_to_type( $self->_rand_i64_val(), $bits, $signed );
         }
 
         # Break reference cycles in an IR Module to allow Perl GC to free it.

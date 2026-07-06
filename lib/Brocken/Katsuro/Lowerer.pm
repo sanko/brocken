@@ -979,7 +979,7 @@ class Brocken::Katsuro::Lowerer {
         # Integer widening: zero-extend for unsigned, sign-extend for signed
         if ( $val->type->kind eq 'int' && $target_type->kind eq 'int' ) {
             if ( $val->type->bits < $target_type->bits ) {
-                return $val->type->is_signed ? $builder->build_sext( $val, $target_type, undef, $line, $col ) :
+                return ( $val->type->is_signed && $val->type->bits > 1 ) ? $builder->build_sext( $val, $target_type, undef, $line, $col ) :
                     $builder->build_zext( $val, $target_type, undef, $line, $col );
             }
         }

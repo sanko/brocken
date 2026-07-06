@@ -2619,7 +2619,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
                     my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    my $size = $inst->allocated_type->bits / 8;
+                    my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 );
+                    $size ||= 1;    # i1 rounds up from 0 to 1 byte
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'alloca',
@@ -2710,8 +2711,12 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         );
                     }
                     else {
-                        my $mem = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $ptr->name, disp => 0 },
-                            type => $val->type );
+                        my $store_type = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $val->type;
+                        my $mem        = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $ptr->name, disp => 0 },
+                            type  => $store_type
+                        );
                         if ( $val->type && $val->type->kind eq 'float' ) {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4219,6 +4224,21 @@ class Brocken::Jenny::Lowerer::X86_64 {
             return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value, type => $ir_val->type );
         }
         return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type );
+    }
+
+    # Find the IR Alloca that produces the given pointer name and return its
+    # allocated_type.  Used by Store lowering to determine the correct memory
+    # access width (the value being stored may have a wider IR type than the
+    # variable, e.g., i64 constant stored into a u16 slot).
+    method _find_alloca_stored_type( $ir_func, $ptr_name ) {
+        for my $block ( $ir_func->blocks->@* ) {
+            for my $inst ( $block->instructions->@* ) {
+                next unless $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca');
+                next unless defined $inst->name && $inst->name eq $ptr_name;
+                return $inst->allocated_type;
+            }
+        }
+        return undef;
     }
 }
 

@@ -11,9 +11,9 @@ my $ptr  = Brocken::Lindsay::IR::Type::ptr();
 my $void = Brocken::Lindsay::IR::Type::void();
 my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
 
-# ──────────────────────────────────────────────────────
+
 # 1. Fiber IR instruction rendering
-# ──────────────────────────────────────────────────────
+
 {
     my $b    = Brocken::Lindsay::IR::Builder->new();
     my $func = Brocken::Lindsay::IR::Function->new(
@@ -43,9 +43,9 @@ my $dyn  = Brocken::Lindsay::IR::Type::dynamic();
     pass 'All fiber IR instructions built successfully';
 }
 
-# ──────────────────────────────────────────────────────
+
 # 2. Instruction type checks
-# ──────────────────────────────────────────────────────
+
 {
     my $b    = Brocken::Lindsay::IR::Builder->new();
     my $func = Brocken::Lindsay::IR::Function->new( name => 't', return_type => $void );

@@ -514,6 +514,18 @@ BROCKEN
     my $text = $f->as_string();
     like( $text, qr/zext\s+u8/, 'unsigned widening uses zext' );
 };
+subtest 'bool widening emits zext (not sext)' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my bool $flag = 1;
+return $flag;
+BROCKEN
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry' );
+    my $text = $f->as_string();
+    like( $text, qr/zext\s+i1/,     'bool widening uses zext (not sext)' );
+    unlike( $text, qr/sext\s+i1/,   'bool widening does NOT use sext' );
+};
 subtest 'Shift operators << and >>' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
