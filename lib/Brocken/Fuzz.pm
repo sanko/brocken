@@ -474,7 +474,7 @@ package Brocken::Fuzz {
             return $val ? 1 : 0 if $bits == 1;
             return $val         if $bits >= 64 && $signed;
             if ( $bits >= 64 && !$signed ) {
-                return $val < 0 ? 0 : $val;
+                return $val & ~0;
             }
             use integer;
             my $mask    = ( 1 << $bits ) - 1;

@@ -264,4 +264,40 @@ $h = $g >> $a;
 return $i;
 PROG
 };
+
+# Bug: mixed-sign-width division/comparison (fuzzer seed 20260705, case #7).
+#   RISC-V backend used 64-bit DIV for signed division on <64-bit types and
+#   zero-extended u32 values via LWU in signed slt comparisons.  This program
+#   has u64 LHS and i64 RHS with negative values, exercising the cross-type
+#   eval and codegen paths.
+#   Fix: DIVW/MULW for <64-bit signed types; movsx before slt for signed cmp.
+subtest 'mixed-sign-width div/cmp (seed 20260705 case 7)' => sub {
+    test_prog( 'u64|i64 mixed ops with negatives', <<'PROG', 255 );
+my u64 $v1 = 1116444021;
+my i64 $v2 = -3;
+$v1 = $v2 | $v2;
+if ($v2 < $v2) {
+    $v2 = $v1 + $v2;
+} else {
+    $v2 = $v1 ^ $v2;
+}
+$v1 = -$v1;
+$v2 = $v2 - $v1;
+if ($v1 != $v2) {
+    $v2 = $v1 | $v2;
+} else {
+    $v2 = $v1 * $v2;
+}
+$v2 = $v2 >> $v1;
+$v1 = $v1 * $v2;
+$v1 = $v2 | $v2;
+$v2 = $v2 | $v2;
+$v1 = $v2 | $v1;
+$v2 = $v2 / $v2;
+$v2 = $v1 | $v2;
+$v2 = $v2 | $v2;
+return $v2;
+PROG
+};
+
 done_testing;
