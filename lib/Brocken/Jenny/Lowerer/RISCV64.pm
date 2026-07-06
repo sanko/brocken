@@ -1848,6 +1848,66 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                 )
                             );
                         }
+                        elsif ( $opcode eq 'neg' ) {
+                            my $src = $self->_materialize( $mbb, $ops[0] );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mv',
+                                    operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                    comment  => 'neg load 0'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'sub',
+                                    operands => [ $dst, $src ],
+                                    comment  => 'neg (0 - val)'
+                                )
+                            );
+                        }
+                        elsif ( $opcode eq 'abs' ) {
+                            my $src = $self->_materialize( $mbb, $ops[0] );
+                            my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_abs_tmp',
+                                type  => Brocken::Lindsay::IR::Type::i64()
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mv',
+                                    operands => [ $tmp, $src ],
+                                    comment  => 'abs copy src to tmp'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'ashr',
+                                    operands => [ $tmp, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ],
+                                    comment  => 'abs srai 63'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mv',
+                                    operands => [ $dst, $src ],
+                                    comment  => 'abs copy src to dst'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'xor',
+                                    operands => [ $dst, $tmp ],
+                                    comment  => 'abs xor'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'sub',
+                                    operands => [ $dst, $tmp ],
+                                    comment  => 'abs sub'
+                                )
+                            );
+                        }
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
