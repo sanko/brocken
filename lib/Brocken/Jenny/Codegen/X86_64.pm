@@ -63,6 +63,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         }
         my @used_callee = sort keys %callee_seen;
         my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
+        $mf->release;
         return $bytes;
     }
 
@@ -125,6 +126,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             my %alloca_map;
             my %source_map;
             my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
+            $mf->release;
             push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
         }
 
@@ -178,6 +180,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         }
         my @used_callee = sort keys %callee_seen;
         my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        $mf->release;
         return { name => $mf->name, bytes => $bytes, fixups => $func_fixups };
     }
 
@@ -698,8 +701,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $sid   = $reg_id->($src_r);
                     my $rex_w = REX_W;
 
-                    # MOV RAX, dst  (RAX = dst, first operand)
-                    my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 );
+                    # MOV RAX, dst  (RAX = dst, first operand; 0x8B: MOV r64, r/m64; reg=dest=RAX, r/m=src=dst)
+                    my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $rax_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rax_rex, 0x8B, $rax_modrm );
 
@@ -708,33 +711,58 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $mul_modrm = 0xC0 | ( 4 << 3 ) | ( $sid & 7 );
                     $bytes .= pack( 'CCC', $mul_rex, 0xF7, $mul_modrm );
 
-                    # MOV dst, RDX  (dst = high 64 bits)
-                    my $rdx_rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 );
+                    # MOV dst, RDX  (dst = high 64 bits; 0x89: MOV r/m64, r64; reg=src=RDX, r/m=dest=dst)
+                    my $rdx_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $rdx_modrm = 0xC0 | ( 2 << 3 ) | ( $did & 7 );
-                    $bytes .= pack( 'CCC', $rdx_rex, 0x8B, $rdx_modrm );
+                    $bytes .= pack( 'CCC', $rdx_rex, 0x89, $rdx_modrm );
                 }
                 elsif ( $opcode eq 'udiv' ) {
                     my $dst_r = $resolve->($dst);
                     my $src_r = $resolve->($src);
                     my $did   = $reg_id->($dst_r);
                     my $sid   = $reg_id->($src_r);
-                    my $rex_w = REX_W;
+                    my $rex_w = ( $dst->type && $dst->type->bits >= 64 ) ? REX_W : 0;
 
-                    # MOV RAX, dst  (RAX = low 64 bits of dividend)
-                    my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 );
+                    # MOV RAX/EAX, dst
+                    my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $rax_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rax_rex, 0x8B, $rax_modrm );
 
-                    # XOR RDX, RDX  (RDX = 0 = high 64 bits of dividend)
-                    my $rdx_rex = 0x40 | $rex_w;
-                    $bytes .= pack( 'CCC', $rdx_rex, 0x31, 0xD2 );
+                    # XOR EDX/RDX, EDX/RDX  (zero high part of dividend)
+                    my $xor_rex = 0x40 | $rex_w;
+                    $bytes .= pack( 'CCC', $xor_rex, 0x31, 0xD2 );
 
-                    # DIV src  (RDX:RAX / src -> RAX = quotient, RDX = remainder; /6 = DIV)
+                    # DIV src  (EDX:EAX or RDX:RAX / src -> quotient; /6 = DIV)
                     my $div_rex   = 0x40 | $rex_w | ( $sid >= 8 ? 1 : 0 );
                     my $div_modrm = 0xC0 | ( 6 << 3 ) | ( $sid & 7 );
                     $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
 
-                    # MOV dst, RAX  (dst = quotient)
+                    # MOV dst, RAX/EAX  (dst = quotient)
+                    my $mov_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                    my $mov_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
+                    $bytes .= pack( 'CCC', $mov_rex, 0x89, $mov_modrm );
+                }
+                elsif ( $opcode eq 'sdiv' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $src_r = $resolve->($src);
+                    my $did   = $reg_id->($dst_r);
+                    my $sid   = $reg_id->($src_r);
+                    my $rex_w = ( $dst->type && $dst->type->bits >= 64 ) ? REX_W : 0;
+
+                    # MOV RAX/EAX, dst
+                    my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                    my $rax_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
+                    $bytes .= pack( 'CCC', $rax_rex, 0x8B, $rax_modrm );
+
+                    # CDQ/CQO  (sign-extend EAX/RAX into EDX/RDX:EAX/RAX)
+                    $bytes .= $rex_w ? pack( 'CC', 0x48, 0x99 ) : pack( 'C', 0x99 );
+
+                    # IDIV src  (EDX:EAX or RDX:RAX / src -> quotient, remainder; /7 = IDIV)
+                    my $div_rex   = 0x40 | $rex_w | ( $sid >= 8 ? 1 : 0 );
+                    my $div_modrm = 0xC0 | ( 7 << 3 ) | ( $sid & 7 );
+                    $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
+
+                    # MOV dst, RAX/EAX  (dst = quotient)
                     my $mov_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $mov_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $mov_rex, 0x89, $mov_modrm );

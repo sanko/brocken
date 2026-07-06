@@ -758,10 +758,14 @@ class Brocken::Katsuro::Lowerer {
             return $lhs->type->is_signed ? $builder->build_ashr( $lhs, $rhs, undef, $line, $col ) :
                 $builder->build_lshr( $lhs, $rhs, undef, $line, $col );
         }
+        return $builder->build_and( $lhs, $rhs, undef, $line, $col )        if $op eq '&';
+        return $builder->build_or( $lhs, $rhs, undef, $line, $col )         if $op eq '|';
+        return $builder->build_xor( $lhs, $rhs, undef, $line, $col )        if $op eq '^';
         return $builder->build_and( $lhs, $rhs, undef, $line, $col )        if $op eq '&&';
         return $builder->build_or( $lhs, $rhs, undef, $line, $col )         if $op eq '||';
         return $builder->build_icmp( 'eq', $lhs, $rhs, undef, $line, $col ) if $op eq '==';
         return $builder->build_icmp( 'ne', $lhs, $rhs, undef, $line, $col ) if $op eq '!=';
+
         if ( $op eq '<' ) {
             return $builder->build_icmp( $lhs->type->is_signed ? 'slt' : 'ult', $lhs, $rhs, undef, $line, $col );
         }

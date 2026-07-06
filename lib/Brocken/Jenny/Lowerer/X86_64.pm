@@ -1834,6 +1834,23 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                         }
                         elsif ( $opcode eq 'div' || $opcode eq 'udiv' ) {
+                            my $mir_op   = $opcode eq 'div' ? 'sdiv' : 'udiv';
+                            my $rhs_opnd = $self->_lower_opnd($rhs);
+                            if ( $rhs_opnd->kind eq 'imm' ) {
+                                my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_divisor',
+                                    type  => $inst->type
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $tmp, $rhs_opnd ],
+                                        comment  => 'divisor const'
+                                    )
+                                );
+                                $rhs_opnd = $tmp;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -1843,15 +1860,32 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'udiv',
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                    comment  => 'udiv'
+                                    opcode   => $mir_op,
+                                    operands => [ $dst, $rhs_opnd ],
+                                    comment  => $mir_op
                                 )
                             );
                         }
                         elsif ( $opcode eq 'rem' || $opcode eq 'urem' ) {
+                            my $mir_op = $opcode eq 'rem' ? 'sdiv' : 'udiv';
                             my $tmp
                                 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type );
+                            my $rhs_opnd = $self->_lower_opnd($rhs);
+                            if ( $rhs_opnd->kind eq 'imm' ) {
+                                my $tmp_rhs = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_divisor',
+                                    type  => $inst->type
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $tmp_rhs, $rhs_opnd ],
+                                        comment  => 'divisor const'
+                                    )
+                                );
+                                $rhs_opnd = $tmp_rhs;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -1861,15 +1895,15 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'udiv',
-                                    operands => [ $tmp, $self->_lower_opnd($rhs) ],
-                                    comment  => 'udiv (rem)'
+                                    opcode   => $mir_op,
+                                    operands => [ $tmp, $rhs_opnd ],
+                                    comment  => $mir_op . ' (rem)'
                                 )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mul',
-                                    operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                    operands => [ $tmp, $rhs_opnd ],
                                     comment  => 'mul (rem)'
                                 )
                             );
@@ -2808,6 +2842,22 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => $fop, operands => [ $dst, $mask_fp ], comment => $fop ) );
                         }
+                    }
+                    elsif ( $opcode eq 'neg' ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                comment  => 'neg load 0'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'sub',
+                                operands => [ $dst, $self->_lower_opnd($val) ],
+                                comment  => 'neg (0 - val)'
+                            )
+                        );
                     }
                     else {
                         die "Unsupported unary op $opcode for non-float type";

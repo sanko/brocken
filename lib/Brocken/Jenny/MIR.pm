@@ -88,6 +88,16 @@ class Brocken::Jenny::MIR::MachineFunction {
         }
         return undef;
     }
+
+    # Break reference cycles (successors/predecessors) so Perl GC can free the MIR.
+    method release() {
+        for my $bb ( $self->blocks->@* ) {
+            my $succ = $bb->successors;
+            @$succ = ();
+            my $pred = $bb->predecessors;
+            @$pred = ();
+        }
+    }
 }
 
 =encoding utf-8

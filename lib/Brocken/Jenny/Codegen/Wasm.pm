@@ -27,6 +27,7 @@ class Brocken::Jenny::Codegen::Wasm {
             }
         }
         my ( $result, $fixups ) = $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type );
+        $mf->release;
         $result->{fixups} = $fixups if @$fixups;
         $result->{name}   = $ir_func->name;
         return $result;
@@ -52,6 +53,7 @@ class Brocken::Jenny::Codegen::Wasm {
             }
             my %source_map;
             my ( $result, $fixups ) = $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type, \%source_map );
+            $mf->release;
             my @param_valtypes;
             for my $p ( $ir_func->params->@* ) {
                 push @param_valtypes, $self->_wasm_valtype( $p->type );
