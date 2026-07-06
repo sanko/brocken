@@ -1556,6 +1556,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             }
                         }
                         elsif ( $opcode eq 'div' || $opcode eq 'udiv' ) {
+                            my $div_op = $opcode eq 'div' ? 'div' : 'divu';
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -1565,13 +1566,14 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'divu',
+                                    opcode   => $div_op,
                                     operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                    comment  => 'divu'
+                                    comment  => $div_op
                                 )
                             );
                         }
                         elsif ( $opcode eq 'rem' || $opcode eq 'urem' ) {
+                            my $div_op = $opcode eq 'rem' ? 'div' : 'divu';
                             my $tmp
                                 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type );
                             $mbb->add_instruction(
@@ -1583,9 +1585,9 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'divu',
+                                    opcode   => $div_op,
                                     operands => [ $tmp, $self->_lower_opnd($rhs) ],
-                                    comment  => 'divu (rem)'
+                                    comment  => $div_op . ' (rem)'
                                 )
                             );
                             $mbb->add_instruction(

@@ -2147,6 +2147,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             }
                         }
                         elsif ( $opcode eq 'div' || $opcode eq 'udiv' ) {
+                            my $div_op   = $opcode eq 'div' ? 'sdiv' : 'udiv';
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' ) {
                                 my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_dv',
@@ -2168,10 +2169,15 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'udiv', operands => [ $dst, $rhs_opnd ], comment => 'udiv' )
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $div_op,
+                                    operands => [ $dst, $rhs_opnd ],
+                                    comment  => $div_op
+                                )
                             );
                         }
                         elsif ( $opcode eq 'rem' || $opcode eq 'urem' ) {
+                            my $div_op   = $opcode eq 'rem' ? 'sdiv' : 'udiv';
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' ) {
                                 my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rm',
@@ -2196,9 +2202,9 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'udiv',
+                                    opcode   => $div_op,
                                     operands => [ $tmp, $rhs_opnd ],
-                                    comment  => 'udiv (rem)'
+                                    comment  => $div_op . ' (rem)'
                                 )
                             );
                             $mbb->add_instruction(
