@@ -193,24 +193,25 @@ package Brocken::Fuzz {
         }
 
         method _gen_binop_assign( $vars, $var_types, $var_names ) {
-            my $dst = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $lhs = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $rhs = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $lv  = $vars->{$lhs};
-            my $rv  = $vars->{$rhs};
+            my $dst      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $lhs      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $rhs      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $lv       = $vars->{$lhs};
+            my $rv       = $vars->{$rhs};
+            my $dst_bits = $var_types->{$dst}{bits} // 64;
             my $op;
             for my $try ( 0 .. 9 ) {
                 $op = $self->_rand_binop();
                 last
                     unless defined $rv &&
-                    ( ( $rv == 0 && ( $op eq '/' || $op eq '%' ) ) || ( ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= 64 ) ) );
+                    ( ( $rv == 0 && ( $op eq '/' || $op eq '%' ) ) || ( ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= $dst_bits ) ) );
             }
             if ( defined $rv ) {
                 $op = '+' if $rv == 0 && ( $op eq '/' || $op eq '%' );
-                $op = '+' if ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= 64 );
+                $op = '+' if ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= $dst_bits );
             }
             return { code => "\$$dst = \$$lhs $op \$$rhs;" } unless defined $lv && defined $rv;
-            my $result = $self->_eval_i64( $op, $lv, $rv );
+            my $result = $self->_eval_i64_typed( $op, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
             if ( defined $result ) {
                 my $t = $var_types->{$dst};
                 $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
@@ -229,40 +230,41 @@ package Brocken::Fuzz {
         }
 
         method _gen_if_else( $vars, $var_types, $var_names ) {
-            my $lhs     = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $rhs     = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $cmp     = $self->_rand_cmpop();
-            my $lv      = $vars->{$lhs} // 0;
-            my $rv      = $vars->{$rhs} // 0;
-            my $cond    = $self->_eval_cmp( $cmp, $lv, $rv );
-            my $var     = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $then_l  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $then_r  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $else_l  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $else_r  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $then_rv = $vars->{$then_r} // 0;
+            my $lhs      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $rhs      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $cmp      = $self->_rand_cmpop();
+            my $lv       = $vars->{$lhs} // 0;
+            my $rv       = $vars->{$rhs} // 0;
+            my $cond     = $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
+            my $var      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $var_bits = $var_types->{$var}{bits} // 64;
+            my $then_l   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $then_r   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $else_l   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $else_r   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $then_rv  = $vars->{$then_r} // 0;
             my $then_op;
 
             for my $try ( 0 .. 9 ) {
                 $then_op = $self->_rand_binop();
                 last
                     unless $then_rv == 0 && ( $then_op eq '/' || $then_op eq '%' ) ||
-                    ( ( $then_op eq '<<' || $then_op eq '>>' ) && ( $then_rv < 0 || $then_rv >= 64 ) );
+                    ( ( $then_op eq '<<' || $then_op eq '>>' ) && ( $then_rv < 0 || $then_rv >= $var_bits ) );
             }
             $then_op = '+' if $then_rv == 0 && ( $then_op eq '/' || $then_op eq '%' );
-            $then_op = '+' if ( $then_op eq '<<' || $then_op eq '>>' ) && ( $then_rv < 0 || $then_rv >= 64 );
+            $then_op = '+' if ( $then_op eq '<<' || $then_op eq '>>' ) && ( $then_rv < 0 || $then_rv >= $var_bits );
             my $else_rv = $vars->{$else_r} // 0;
             my $else_op;
             for my $try ( 0 .. 9 ) {
                 $else_op = $self->_rand_binop();
                 last
                     unless $else_rv == 0 && ( $else_op eq '/' || $else_op eq '%' ) ||
-                    ( ( $else_op eq '<<' || $else_op eq '>>' ) && ( $else_rv < 0 || $else_rv >= 64 ) );
+                    ( ( $else_op eq '<<' || $else_op eq '>>' ) && ( $else_rv < 0 || $else_rv >= $var_bits ) );
             }
             $else_op = '+' if $else_rv == 0 && ( $else_op eq '/' || $else_op eq '%' );
-            $else_op = '+' if ( $else_op eq '<<' || $else_op eq '>>' ) && ( $else_rv < 0 || $else_rv >= 64 );
-            my $then_v = $self->_eval_i64( $then_op, $vars->{$then_l} // 0, $then_rv );
-            my $else_v = $self->_eval_i64( $else_op, $vars->{$else_l} // 0, $else_rv );
+            $else_op = '+' if ( $else_op eq '<<' || $else_op eq '>>' ) && ( $else_rv < 0 || $else_rv >= $var_bits );
+            my $then_v = $self->_eval_i64_typed( $then_op, $vars->{$then_l} // 0, $then_rv, $var_types->{$then_l}, $var_types->{$then_r} );
+            my $else_v = $self->_eval_i64_typed( $else_op, $vars->{$else_l} // 0, $else_rv, $var_types->{$else_l}, $var_types->{$else_r} );
             my $t      = $var_types->{$var};
             $vars->{$var} = $self->_clamp_to_type( $cond ? $then_v : $else_v, $t->{bits}, $t->{signed} );
             return {
@@ -280,7 +282,7 @@ package Brocken::Fuzz {
             my $cmp  = $self->_rand_cmpop();
             my $lv   = $vars->{$lhs} // 0;
             my $rv   = $vars->{$rhs} // 0;
-            my $cond = $self->_eval_cmp( $cmp, $lv, $rv );
+            my $cond = $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
             my $t    = $var_types->{$dst};
             $vars->{$dst} = $self->_clamp_to_type( $cond ? 1 : 0, $t->{bits}, $t->{signed} );
             return { code => join( "\n", "if (\$$lhs $cmp \$$rhs) {", "    \$$dst = 1;", "} else {", "    \$$dst = 0;", "}" ), };
@@ -351,6 +353,43 @@ package Brocken::Fuzz {
             return undef;
         }
 
+        # Reinterpret an unsigned value as signed of the given bit width.
+        # This matches Brocken's codegen behavior: an unsigned value with the
+        # high bit set, when loaded at its native width and used in a signed
+        # operation (sdiv/idiv/setCC with signed condition), has its bit pattern
+        # interpreted as a negative signed value.
+        method _reinterpret_to_signed( $val, $bits ) {
+            return $val if $bits >= 64;
+            my $sign_bit = 1 << ( $bits - 1 );
+            my $mask     = ( 1 << $bits ) - 1;
+            my $wrapped  = $val & $mask;
+            return $wrapped & $sign_bit ? $wrapped - ( 1 << $bits ) : $wrapped;
+        }
+
+        # Evaluate binary operation matching Brocken's semantics:
+        # signed/unsigned choice from LHS type only; no common-type promotion.
+        method _eval_i64_typed( $op, $lv, $rv, $lt, $rt ) {
+            my $lsig = $lt->{signed} // 1;
+            my $rsig = $rt->{signed} // 1;
+
+            # When LHS is signed and RHS is unsigned, the RHS bit pattern
+            # is used directly in the signed operation.  If the RHS's high
+            # bit is set, reinterpret it as a signed negative value.
+            if ( $lsig && !$rsig && ( $op eq '/' || $op eq '%' ) ) {
+                my $signed_rv = $self->_reinterpret_to_signed( $rv, $rt->{bits} // 64 );
+                return $self->_eval_i64( $op, $lv, $signed_rv );
+            }
+
+            # When LHS is unsigned and RHS is signed negative: unsigned op
+            # treats the negative RHS as a huge positive (>= 2^63), so div
+            # yields 0 and rem yields the LHS.
+            if ( !$lsig && $rsig && $rv < 0 && ( $op eq '/' || $op eq '%' ) ) {
+                return 0   if $op eq '/';
+                return $lv if $op eq '%';
+            }
+            return $self->_eval_i64( $op, $lv, $rv );
+        }
+
         method _eval_cmp( $cmp, $l, $r ) {
             if ( $cmp eq '==' ) { return $l == $r }
             if ( $cmp eq '!=' ) { return $l != $r }
@@ -359,6 +398,34 @@ package Brocken::Fuzz {
             if ( $cmp eq '<=' ) { return $l <= $r }
             if ( $cmp eq '>=' ) { return $l >= $r }
             return 0;
+        }
+
+        # Evaluate comparison matching Brocken's semantics:
+        # signed/unsigned choice from LHS type only; no common-type promotion.
+        # When LHS is unsigned and RHS is signed negative, the RHS sign-extends
+        # to >= 2^63 in unsigned interpretation, so comparisons with unsigned LHS
+        # (< 2^63) have fixed outcomes.
+        # When LHS is signed and RHS is unsigned with high bit set, the unsigned
+        # RHS bit pattern is interpreted as signed negative (matching x86 codegen).
+        method _eval_cmp_typed( $cmp, $lv, $rv, $lt, $rt ) {
+            my $lsig = $lt->{signed} // 1;
+            my $rsig = $rt->{signed} // 1;
+
+            # LHS signed, RHS unsigned: reinterpret RHS as signed of its width
+            if ( $lsig && !$rsig ) {
+                my $signed_rv = $self->_reinterpret_to_signed( $rv, $rt->{bits} // 64 );
+                return $self->_eval_cmp( $cmp, $lv, $signed_rv );
+            }
+
+            # LHS unsigned, RHS signed negative: unsigned comparison treats
+            # negative RHS as >= 2^63, giving fixed outcomes for small LHS
+            if ( !$lsig && $rsig && $rv < 0 ) {
+                if ( $cmp eq '<' || $cmp eq '<=' ) { return 1 }
+                if ( $cmp eq '>' || $cmp eq '>=' ) { return 0 }
+                if ( $cmp eq '==' )                { return 0 }
+                if ( $cmp eq '!=' )                { return 1 }
+            }
+            return $self->_eval_cmp( $cmp, $lv, $rv );
         }
 
         method _rand_i64_val() {
@@ -371,15 +438,20 @@ package Brocken::Fuzz {
 
         # Return a random integer type as (bits, signed) tuple.
         # Weighted toward wider types so clamping doesn't dominate early.
+        # Unsigned types have lower weight than their signed counterparts.
         method _rand_type() {
             my @types = (
                 [ 1,  1 ],    # i1  (bool)
                 [ 8,  1 ],    # i8
+                [ 8,  0 ],    # u8
                 [ 16, 1 ],    # i16
+                [ 16, 0 ],    # u16
                 [ 32, 1 ],    # i32
+                [ 32, 0 ],    # u32
                 [ 64, 1 ],    # i64
+                [ 64, 0 ],    # u64
             );
-            my @weights = ( 1, 2, 2, 3, 4 );
+            my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2 );
             my $total   = 0;
             $total += $_ for @weights;
             my $r = $self->_rand_int( $total - 1 );
@@ -400,7 +472,10 @@ package Brocken::Fuzz {
         # i1 returns 0 or 1.  Signed types use two's-complement wrapping.
         method _clamp_to_type( $val, $bits, $signed ) {
             return $val ? 1 : 0 if $bits == 1;
-            return $val         if $bits >= 64;
+            return $val         if $bits >= 64 && $signed;
+            if ( $bits >= 64 && !$signed ) {
+                return $val < 0 ? 0 : $val;
+            }
             use integer;
             my $mask    = ( 1 << $bits ) - 1;
             my $clamped = $val & $mask;
@@ -413,6 +488,9 @@ package Brocken::Fuzz {
         # Generate a random value appropriate for the given type.
         method _rand_typed_val( $bits, $signed ) {
             return int( rand(2) ) if $bits == 1;
+            if ( $bits >= 64 && !$signed ) {
+                return int( rand( 2**31 - 1 ) ) + int( rand( 2**31 - 1 ) );
+            }
             return $self->_clamp_to_type( $self->_rand_i64_val(), $bits, $signed );
         }
 
