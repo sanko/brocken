@@ -11,7 +11,8 @@ for my $i ( 1 .. $iterations ) {
     my $program = $fuzz->generate_program( 10, 4 );
     my $result  = $fuzz->test_program($program);
     $summary{ $result->{status} }++;
-    ok $result->{status} eq 'pass', "Fuzz #$i" or diag "Seed: " . $fuzz->seed . "\nReason: $result->{reason}\nSource:\n$result->{source}";
+    ok $result->{status} eq 'pass', "Fuzz #$i" or
+        diag "Seed: $result->{seed}, Case: $result->{case_num}, Reason: $result->{reason}\nSource:\n$result->{source}";
 }
 diag "Summary: " . ( join ', ', map {"$_=$summary{$_}"} sort keys %summary );
 done_testing;

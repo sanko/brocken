@@ -29,7 +29,7 @@ This project serves two kinds of readers:
 - **AOT Compilation:** Compile Perl-like syntax directly to zero-dependency standalone native executables.
 - **Self-Hosted Runtime:** The GC, fiber scheduler, I/O layers, and channel runtime are written in Brocken, using compiler intrinsics.
 - **Modern Concurrency:** M:N concurrency using Fibers (green threads) multiplexed across Isolates (OS threads with independent heaps), communicating safely via Channels.
-- **Memory Management:** RC Immix system — deterministic reference counting backed by a tracing cycle-detector.
+- **Memory Management:** RC Immix system - deterministic reference counting backed by a tracing cycle-detector.
 - **Modernization:** UTF-8 by default, zero-cost exceptions (`try/catch/finally`), `defer` blocks, `match` statement, native SIMD via typed arrays.
 
 ### 1.3 Non-Goals
@@ -68,11 +68,11 @@ This project serves two kinds of readers:
 
 | Sigil | Meaning | Example |
 |-------|---------|---------|
-| `$` | Scalar/Object — a single value, reference, or object | `my $x = 42` |
-| `@` | Array/List — indexed as `@items[0]` | `my @arr` |
-| `%` | Hash/Dictionary — accessed as `%map{"key"}` | `my %map` |
+| `$` | Scalar/Object - a single value, reference, or object | `my $x = 42` |
+| `@` | Array/List - indexed as `@items[0]` | `my @arr` |
+| `%` | Hash/Dictionary - accessed as `%map{"key"}` | `my %map` |
 
-Sigils are invariant — they never change based on context (unlike Perl 5).
+Sigils are invariant - they never change based on context (unlike Perl 5).
 
 #### 2.1.2 Built-in Types (Gradual Typing)
 
@@ -84,11 +84,11 @@ If a type is omitted, it defaults to `Any` (a 16-byte Fat Scalar).
 | `Int` | `int` | Shorthand for the native `int` type (alias) |
 | `Bool` | `bool` | Shorthand for the native `bool` type (alias) |
 | `String` | `ptr` | Immutable, UTF-8 encoded text (pointer to bytes) |
-| `Array` | — | Collection (planned) |
-| `Hash` | — | Key-value dictionary (planned) |
-| `Class` | — | Object blueprint |
+| `Array` | - | Collection (planned) |
+| `Hash` | - | Key-value dictionary (planned) |
+| `Class` | - | Object blueprint |
 
-`Int` and `Bool` are not dynamic types — they are aliases for the native `int` and `bool` types declared in §2.1.3. A variable written as `my Int $x` or `my Bool $flag` gets a raw, unboxed machine value with no fat-scalar overhead.
+`Int` and `Bool` are not dynamic types - they are aliases for the native `int` and `bool` types declared in §2.1.3. A variable written as `my Int $x` or `my Bool $flag` gets a raw, unboxed machine value with no fat-scalar overhead.
 
 Valid type keywords: `Any`, `Int`, `Bool`, `String`, `int`, `bool`,
 `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `i128`, `u128`,
@@ -137,10 +137,10 @@ Signedness is encoded in the type name (`i` prefix = signed, `u` prefix = unsign
 | Extension (widening) | `sext` (sign-extend) | `zext` (zero-extend) |
 | Comparison predicates | `sgt`, `slt`, `sge`, `sle` | `ugt`, `ult`, `uge`, `ule` |
 
-Addition, subtraction, multiplication, and bitwise logical ops (`and`, `or`, `xor`) are identical for signed and unsigned at the machine level — they produce the same bit pattern. Signedness only matters for the operations above.
+Addition, subtraction, multiplication, and bitwise logical ops (`and`, `or`, `xor`) are identical for signed and unsigned at the machine level - they produce the same bit pattern. Signedness only matters for the operations above.
 
 Left shift (`<<`) is also identical for signed and unsigned at the machine level
-— it maps to `shl` regardless. Right shift (`>>`) differs by signedness: signed
+- it maps to `shl` regardless. Right shift (`>>`) differs by signedness: signed
 right shift uses `ashr` (arithmetic, sign-extending), unsigned right shift uses
 `lshr` (logical, zero-extending). The IR records signedness on the `Type` object
 (`signed` field) and the lowerer selects the correct shift opcode based on it.
@@ -210,7 +210,7 @@ A struct variable declared without `new` lives on the stack:
 ```perl
 my Point $pt;           # 16 bytes on stack, zero-initialized
 my Point $pt = { x: 10, y: 20 };  # struct literal
-my i64 $x = $pt.x;      # field read — compile-time offset
+my i64 $x = $pt.x;      # field read - compile-time offset
 $pt.y = 30;             # field write
 ```
 
@@ -260,8 +260,8 @@ The linker places `.rodata` after `.text` but before `.data`:
 
 ```
 .text      (code)
-.rodata    (read-only data — strings, const arrays)
-.data      (read-write data — mutable globals)
+.rodata    (read-only data - strings, const arrays)
+.data      (read-write data - mutable globals)
 ```
 
 On ELF64 this maps to `PT_LOAD` segments with appropriate page permissions (R-X for text, R-- for rodata, RW- for data).
@@ -280,7 +280,7 @@ References are lowered to `ptr` in the IR but carry additional semantics:
 
 - **Non-null**: A reference always points to a valid object. No null-check needed before dereference.
 - **RC participation**: Creating a reference increments the target's refcount. Dropping a reference decrements it.
-- **No ownership**: The referent is not deallocated when the reference goes out of scope — only when all owning pointers do.
+- **No ownership**: The referent is not deallocated when the reference goes out of scope - only when all owning pointers do.
 
 The optimizer can use the non-null guarantee to elide null checks and the RC guarantee to elide early frees.
 
@@ -292,7 +292,7 @@ A typed pointer carries the type of the pointed-to value at the source level, bu
 
 ```perl
 my ptr(i64) $p = ...;       # pointer to an i64
-my i64 $val = $p[0];        # load i64 through typed pointer — no cast needed
+my i64 $val = $p[0];        # load i64 through typed pointer - no cast needed
 $p[0] = 42;                 # store i64 through typed pointer
 ```
 
@@ -325,11 +325,11 @@ Type aliases are resolved at parse time and do not create new types. They are pu
 
 ### 2.2 Variable Scoping & Declarations
 
-- `my` — lexical variable declaration
-- `our` — package-scoped variable
-- `state` — persistent lexical variable
-- `const` — compile-time constant
-- `type` — type alias declaration
+- `my` - lexical variable declaration
+- `our` - package-scoped variable
+- `state` - persistent lexical variable
+- `const` - compile-time constant
+- `type` - type alias declaration
 
 Array declarations use the syntax `my [TYPE; SIZE] @name`:
 
@@ -346,9 +346,9 @@ my i64 @arr = [1,2,3];  # sized from literal count
 
 **Bitwise:** `&`, `|`, `^`, `~`
 
-**Shift:** `<<` (left shift), `>>` (right shift — arithmetic for signed, logical for unsigned)
+**Shift:** `<<` (left shift), `>>` (right shift - arithmetic for signed, logical for unsigned)
 
-String comparison (`eq`, `ne`, `lt`, `gt`, `le`, `ge`, `cmp`) is deferred — see §2.17.
+String comparison (`eq`, `ne`, `lt`, `gt`, `le`, `ge`, `cmp`) is deferred - see §2.17.
 
 ### 2.4 Control Flow
 
@@ -391,7 +391,7 @@ sub greet(i64 $n) {
 
 - Parameters are `(TYPE $name, ...)`
 - Return type is `-> TYPE`; omitted means void
-- Last expression is NOT implicitly returned — must use `return`
+- Last expression is NOT implicitly returned - must use `return`
 
 ### 2.6 Object-Oriented Programming
 
@@ -451,9 +451,9 @@ $p->x = 42;
 
 #### 2.6.5 Lifecycle Hooks
 
-- `new` — constructor
-- `ADJUST` — post-construction invariant enforcement
-- `DESTROY` — deterministic destructor (due to Immediate RC)
+- `new` - constructor
+- `ADJUST` - post-construction invariant enforcement
+- `DESTROY` - deterministic destructor (due to Immediate RC)
 
 ### 2.7 Intrinsics (`Brocken::*`)
 
@@ -492,8 +492,8 @@ Known intrinsics:
 
 | Function | Behaviour |
 |----------|-----------|
-| `say(...)` | Print (newline-terminated) — lowered to `write(1)` syscall |
-| `print(...)` | Print (no newline) — lowered to `write(1)` syscall |
+| `say(...)` | Print (newline-terminated) - lowered to `write(1)` syscall |
+| `print(...)` | Print (no newline) - lowered to `write(1)` syscall |
 
 ### 2.9 Entry Point
 
@@ -521,7 +521,7 @@ use feature 'brocken_native_types';   # enables i128, i16, f32, f64 types
 
 ### 2.11 `match` Statement (Planned)
 
-`match` lowers to a sequence of type-tag checks + conditional branches + unbox operations. (Not yet implemented — the parser/frontend is still being built.)
+`match` lowers to a sequence of type-tag checks + conditional branches + unbox operations. (Not yet implemented - the parser/frontend is still being built.)
 
 ### 2.12 `defer` Blocks (Planned)
 
@@ -535,14 +535,14 @@ Uses DWARF `.eh_frame` for zero-cost exception unwinding. The `die` intrinsic un
 
 Raku-style Pod6 is built natively into the parser. Two forms:
 
-**Declarator blocks** — attached to the subsequent definition via `#|`:
+**Declarator blocks** - attached to the subsequent definition via `#|`:
 
 ```perl
 #| Creates a new User with the given name and age.
 sub create_user ($name, $age) { ... }
 ```
 
-**Paragraph blocks** — standalone `=begin` / `=end` sections.
+**Paragraph blocks** - standalone `=begin` / `=end` sections.
 
 Pod6 nodes are attached directly to the AST as metadata on each `Brocken::Katsuro::Node`. The compiler exposes them via LSP server (hover tooltips, go-to-definition) and `bkn doc` CLI (renders as HTML/man/terminal).
 
@@ -601,11 +601,11 @@ The minimum viable Brocken subset needed to write `core.brocken` (the Immix allo
 #### 2.16.1 Variables & Arrays
 
 ```perl
-my $dynamic_var;              # Any (Fat Scalar) — default
+my $dynamic_var;              # Any (Fat Scalar) - default
 my int $count = 0;            # Native integer (i64 on all current targets)
-my Int $age = 30;             # Same as `int` — capitalized alias
+my Int $age = 30;             # Same as `int` - capitalized alias
 my bool $flag = true;         # Native boolean
-my Bool $done = false;        # Same as `bool` — capitalized alias
+my Bool $done = false;        # Same as `bool` - capitalized alias
 my ptr $cursor;               # Raw pointer
 my i32 $slot;                 # 32-bit signed
 my u32 $index;                # 32-bit unsigned
@@ -634,7 +634,7 @@ sub allocate_block(i64 $size) -> ptr {
 
 - Parameters are `(TYPE $name, ...)`
 - Return type is `-> TYPE`; omitted means void
-- Last expression is NOT implicitly returned — must use `return`
+- Last expression is NOT implicitly returned - must use `return`
 
 #### 2.16.3 Control Flow
 
@@ -670,7 +670,7 @@ See §2.7 for the full table of `Brocken::` intrinsics.
 
 #### 2.16.6 Built-in Functions
 
-`say(...)` and `print(...)` — lowered to `write(1)` syscall.
+`say(...)` and `print(...)` - lowered to `write(1)` syscall.
 
 #### 2.16.7 Feature Flags
 
@@ -692,14 +692,14 @@ use feature 'brocken_native_types';   # enables i128, u128
 | Regex | Deferred entirely |
 | `map`/`grep` | Defer until list primitives exist |
 | `eval` | Blocks on dynamic codegen |
-| `match` | Pattern matching sugar — defer |
-| `defer` | Scope guard — defer |
-| `try`/`catch` | Defer — unwinding is complex |
-| Pod6 | Documentation — defer |
+| `match` | Pattern matching sugar - defer |
+| `defer` | Scope guard - defer |
+| `try`/`catch` | Defer - unwinding is complex |
+| Pod6 | Documentation - defer |
 | Multiple dispatch | Not needed |
 | Operator overloading | Not needed |
 | `want` / context | Not needed |
-| Inheritance | Classes as flat structs only — no `:isa` |
+| Inheritance | Classes as flat structs only - no `:isa` |
 
 **Shift operators (`<<`, `>>`) are implemented** in the lexer (`>>` token),
 parser (`PREC_SHIFT` precedence level), and lowerer (maps to `build_shl`,
@@ -817,7 +817,7 @@ Memory management is a three-layer system:
 └──────────────────────────────────────────────────┘
 ```
 
-**Key invariant:** Because Isolates are share-nothing OS threads, each heap is entirely thread-local. All RC operations, Immix allocation, and trial deletion require **zero atomic locks** — a massive performance advantage over shared-heap GCs.
+**Key invariant:** Because Isolates are share-nothing OS threads, each heap is entirely thread-local. All RC operations, Immix allocation, and trial deletion require **zero atomic locks** - a massive performance advantage over shared-heap GCs.
 
 ### 4.1 The `Any` Type (Fat Scalar)
 
@@ -829,7 +829,7 @@ Offset  Size  Field                     Description
 2       1     GC Flags (u8)             Bit 0: Cycle Suspect, Bit 1: Buffered, Bit 2: Leaf
 3       1     Type Tag (u8)             0=Int, 1=String, 2=Array, 3=Class, 4=Ptr, 5=Dynamic, 6=i128
 4       4     Padding / Aux (u32)       Reserved (e.g., cached string byte length)
-8       8     Payload (u64)             Raw value (i64/u64/f64/ptr — type determines interpretation)
+8       8     Payload (u64)             Raw value (i64/u64/f64/ptr - type determines interpretation)
 ```
 
 The first 8 bytes (refcount + flags + tag + padding) are called the **header word** and are packed into a single `u64` for efficient load/store. The `box` IR instruction stores the header word as a 64-bit zero (all fields initialized to 0) at `[ptr+0]` and the payload at `[ptr+8]`. The `unbox` IR instruction loads the payload from `[ptr+8]`.
@@ -956,7 +956,7 @@ Each block is exactly 32768 bytes for fast block-base computation via `ptr & ~0x
 
 ```
 Offset  Size    Field
-0       32768   Block (exactly 32KB — aligned to 32KB boundary)
+0       32768   Block (exactly 32KB - aligned to 32KB boundary)
 ```
 
 The first 128 bits (16 bytes) of the block are the line availability bitmap (1 = free, 0 = used). This bitmap overlaps with the **first 16 bytes of Line 0**:
@@ -1050,7 +1050,7 @@ Because 100% of Immix allocations in the hot path are 16-byte fat scalars (`Any`
 When `immix_cursor` reaches `immix_limit` and the free list is empty (no recycled 16-byte slots available), the runtime triggers an Immix mark-region trace:
 
 1. **Mark phase**: walk the object graph starting from the roots (ICB's root set), clearing the line bitmap for every live object's line.
-2. **Sweep phase**: iterate all lines in the current block. Any line whose bitmap bit is still set is completely empty — reclaim it.
+2. **Sweep phase**: iterate all lines in the current block. Any line whose bitmap bit is still set is completely empty - reclaim it.
 3. **Free list rebuild**: scan the freed lines, building new 16-byte free list entries from each freed fat scalar location.
 4. **Block reclamation**: if all 128 lines of a block are empty, return the entire block to the ICB `free_blocks` list instead of rebuilding its free list.
 
@@ -1070,13 +1070,13 @@ The Isolate Control Block (see §4.6) holds Immix state:
 | 40         | free_blocks     | Linked list head of free 32KB blocks  |
 | 48         | free16_head     | Head of 16-byte segregated free list  |
 
-### 4.4 Trial Deletion (Layer 2 — Bacon & Rajan)
+### 4.4 Trial Deletion (Layer 2 - Bacon & Rajan)
 
 Standard reference counting cannot collect cyclic garbage. Brocken uses the Bacon & Rajan Trial Deletion algorithm to detect and reclaim cycles.
 
 #### 4.4.1 Suspect Buffer
 
-When `decref` leaves an object with RC > 0 and the object is not a leaf (has outgoing references), the object is a **suspect** — it might be part of an isolated cycle. The runtime pushes the suspect to the ICB's suspect buffer:
+When `decref` leaves an object with RC > 0 and the object is not a leaf (has outgoing references), the object is a **suspect** - it might be part of an isolated cycle. The runtime pushes the suspect to the ICB's suspect buffer:
 
 ```
 ICB offset 48: suspect_buffer_head (pointer to ring buffer)
@@ -1099,7 +1099,7 @@ For each suspect in the buffer:
    - Set their RC to 0
    - Run `DESTROY`
    - Push to the segregated free list (see §4.3.4)
-4. **Restore**: nodes marked Black are not garbage — reset their BRC flags to Purple (return to suspect state if still referenced) or White (if no longer a suspect).
+4. **Restore**: nodes marked Black are not garbage - reset their BRC flags to Purple (return to suspect state if still referenced) or White (if no longer a suspect).
 
 The algorithm runs incrementally (a few suspects per allocation) to avoid long pauses. The full drain runs only when the suspect buffer is full.
 
@@ -1110,7 +1110,7 @@ Objects flagged as `Leaf` (GC Flag bit 2) have no outgoing references and cannot
 - The object's type is immutable and contains no reference fields
 - After `DESTROY` runs, the object is implicitly a leaf
 
-### 4.5 Perceus Optimization (Layer 3 — Compile-Time)
+### 4.5 Perceus Optimization (Layer 3 - Compile-Time)
 
 Perceus is a set of Lindsay IR optimization passes that make RC more efficient. It operates entirely at compile time with zero runtime overhead.
 
@@ -1169,7 +1169,7 @@ sub print_array(@arr) {       # @arr is borrowed
         say(@arr[$i]);
     }
 }
-# No incref/decref at the call site — @arr stays owned by the caller
+# No incref/decref at the call site - @arr stays owned by the caller
 ```
 
 The inference is conservative: if the callee stores the parameter (escaping it), ownership is transferred. Otherwise, the parameter is borrowed.
@@ -1210,7 +1210,7 @@ The `free16_head` field (offset 48) replaces the original `suspect_buffer_head`.
 
 Only `heap_cursor` (offset 0) is currently initialized by `_init`. The Immix fields (offsets 24–48) and suspect buffer (offset 56) are initialized lazily during the first allocation that requires them.
 
-Fiber stacks are currently unprotected — deep recursion overflows silently into adjacent memory. A future Lindsay IR pass will inject a **stack probe** at every non-leaf function prologue, comparing `rsp` (or the arch equivalent) against a limit field in the FCB. On overflow, the runtime throws a catchable `Brocken::Exception::StackOverflow` instead of corrupting memory.
+Fiber stacks are currently unprotected - deep recursion overflows silently into adjacent memory. A future Lindsay IR pass will inject a **stack probe** at every non-leaf function prologue, comparing `rsp` (or the arch equivalent) against a limit field in the FCB. On overflow, the runtime throws a catchable `Brocken::Exception::StackOverflow` instead of corrupting memory.
 
 ### 4.7 Fiber Control Block (FCB)
 
@@ -1255,9 +1255,9 @@ Fibers are M:N cooperative coroutines. Each has a 64KB or 128KB machine stack an
 
 Three operations use context switching:
 
-1. **Fiber transfer** — save current FCB, load target FCB, branch to resume_pc.
-2. **Fiber yield** — save current FCB, load `parent` FCB.
-3. **Isolate trampoline** — entry point called by `pthread_create` on a new OS thread. Loads FCB from arg struct, sets fiber register, loads args, `call_indirect` to the user function.
+1. **Fiber transfer** - save current FCB, load target FCB, branch to resume_pc.
+2. **Fiber yield** - save current FCB, load `parent` FCB.
+3. **Isolate trampoline** - entry point called by `pthread_create` on a new OS thread. Loads FCB from arg struct, sets fiber register, loads args, `call_indirect` to the user function.
 
 ### 4.9 The Unsafe Subset (Self-Hosting)
 
@@ -1358,37 +1358,37 @@ On Wasm, all channel operations are stubs (no-op or return 0).
 ## 6. Code Generation & Backends (Jenny)
 
 The backend pipeline consists of three layers:
-- `Brocken::Jenny::Codegen` — Orchestrates lowering, register allocation, and encoding.
-- `Brocken::Jenny::Lowerer` — Lowers Lindsay IR to Machine IR (MIR) for a specific target.
-- `Brocken::Jenny::RegAlloc` — Linear scan register allocator.
+- `Brocken::Jenny::Codegen` - Orchestrates lowering, register allocation, and encoding.
+- `Brocken::Jenny::Lowerer` - Lowers Lindsay IR to Machine IR (MIR) for a specific target.
+- `Brocken::Jenny::RegAlloc` - Linear scan register allocator.
 
 ### 6.1 Intermediate Representation (Lindsay IR)
 
 Each instruction is an object with an `opcode`, `type`, `dest`, and `operands`.
 
 #### Memory & GC Lifecycle
-- `incref` / `decref` — Reference count operations
-- `alloca` — Stack memory allocation
-- `load` / `store` — Memory read/write
-- `store_imm` — Store immediate directly to memory
-- `getelementptr` — Compute memory address (base + index * scale + disp)
+- `incref` / `decref` - Reference count operations
+- `alloca` - Stack memory allocation
+- `load` / `store` - Memory read/write
+- `store_imm` - Store immediate directly to memory
+- `getelementptr` - Compute memory address (base + index * scale + disp)
 
 #### Control Flow
-- `label` — Code location marker
-- `jmp` — Unconditional jump
-- `cond_br` — Conditional branch
-- `call` — Call a function (handles arguments via ABI registers)
-- `ret` — Return from a function
+- `label` - Code location marker
+- `jmp` - Unconditional jump
+- `cond_br` - Conditional branch
+- `call` - Call a function (handles arguments via ABI registers)
+- `ret` - Return from a function
 
 #### Arithmetic / Logic
-- `add`, `sub`, `mul`, `div`, `rem` — Integer math
-- `fadd`, `fsub`, `fmul`, `fdiv` — Floating-point math
-- `and`, `or`, `xor`, `shl`, `lshr`, `ashr` — Bitwise operations
-- `icmp` — Integer comparisons (`eq`, `ne`, `slt`, `ult`, etc.)
+- `add`, `sub`, `mul`, `div`, `rem` - Integer math
+- `fadd`, `fsub`, `fmul`, `fdiv` - Floating-point math
+- `and`, `or`, `xor`, `shl`, `lshr`, `ashr` - Bitwise operations
+- `icmp` - Integer comparisons (`eq`, `ne`, `slt`, `ult`, etc.)
 
 #### Fat Scalars
-- `box` — Wraps a native type into a 16-byte dynamic Fat Scalar
-- `unbox` — Extracts a native type from a Fat Scalar
+- `box` - Wraps a native type into a 16-byte dynamic Fat Scalar
+- `unbox` - Extracts a native type from a Fat Scalar
 
 ### 6.2 Register Allocator (`Jenny::RegAlloc`)
 
@@ -1412,9 +1412,9 @@ The register pool is fetched dynamically via `Brocken::Katsuro::Platform::ABI`.
 
 ### 6.4 Adding a New Architecture
 
-1. Create `Brocken::Katsuro::Platform::ABI::YourArch.pm` — register mapping and calling conventions.
-2. Create `Brocken::Jenny::Lowerer::YourArch.pm` — map Lindsay IR to MIR.
-3. Create `Brocken::Jenny::Codegen::YourArch.pm` — encode MIR to raw machine bytes.
+1. Create `Brocken::Katsuro::Platform::ABI::YourArch.pm` - register mapping and calling conventions.
+2. Create `Brocken::Jenny::Lowerer::YourArch.pm` - map Lindsay IR to MIR.
+3. Create `Brocken::Jenny::Codegen::YourArch.pm` - encode MIR to raw machine bytes.
 
 ---
 
@@ -1447,7 +1447,7 @@ the final binary by the PE/ELF/Mach-O linker.
    through to each `build_*` call, linking AST source positions to IR instructions.
 
 3. **MIR Level:** Each `MachineInstruction` (`Brocken::Jenny::MIR`) records
-   `$ir_inst_idx` — the index of the originating IR instruction. All four
+   `$ir_inst_idx` - the index of the originating IR instruction. All four
    lowerers (X86_64, ARM64, RISCV64, Wasm) tag MIR instructions during lowering.
 
 4. **Encoding:** Each encoder accepts a `$source_map` hashref and records
@@ -1463,18 +1463,18 @@ the final binary by the PE/ELF/Mach-O linker.
 ### 7.3 Variable Debug Info
 
 Every `alloca` instruction for a user-visible variable gets:
-- `debug_name` — source variable name (e.g., `x`, `y`, `z`)
-- `debug_type_name` — source type name (e.g., `Int`, `ptr`, `Point`)
+- `debug_name` - source variable name (e.g., `x`, `y`, `z`)
+- `debug_type_name` - source type name (e.g., `Int`, `ptr`, `Point`)
 
 These fields are set by `Brocken::Katsuro::Lowerer` during variable declaration
 lowering. Parameters are tagged similarly. Each variable/parameter DIE carries:
-- `DW_AT_name` — variable name
-- `DW_AT_type` — reference to base type or struct type DIE
-- `DW_AT_location` — DW_OP_fbreg offset (stack slot)
-- `DW_AT_decl_file` — source file index
-- `DW_AT_decl_line` — source line (DW_FORM_data2, 16-bit)
-- `DW_AT_decl_column` — source column (DW_FORM_data1, 8-bit)
-- `DW_AT_artificial` — 0 for user variables, 1 for compiler-generated temps
+- `DW_AT_name` - variable name
+- `DW_AT_type` - reference to base type or struct type DIE
+- `DW_AT_location` - DW_OP_fbreg offset (stack slot)
+- `DW_AT_decl_file` - source file index
+- `DW_AT_decl_line` - source line (DW_FORM_data2, 16-bit)
+- `DW_AT_decl_column` - source column (DW_FORM_data1, 8-bit)
+- `DW_AT_artificial` - 0 for user variables, 1 for compiler-generated temps
 
 ### 7.4 Struct/Class Type DIEs
 
@@ -1500,20 +1500,20 @@ registration and attached to the IR `Module` via `set_class_info`.
 ### 7.5 Subprogram DIEs
 
 Every function (including `_BROCKEN_ENTRY`) gets a `DW_TAG_subprogram` with:
-- `DW_AT_name` — function name
-- `DW_AT_linkage_name` — same as name (no C++ mangling)
-- `DW_AT_low_pc` / `DW_AT_high_pc` — code range
-- `DW_AT_decl_file` — source file index
+- `DW_AT_name` - function name
+- `DW_AT_linkage_name` - same as name (no C++ mangling)
+- `DW_AT_low_pc` / `DW_AT_high_pc` - code range
+- `DW_AT_decl_file` - source file index
 
 ### 7.6 Compile Unit DIE
 
 The root `DW_TAG_compile_unit` carries:
-- `DW_AT_producer` — `"Brocken v0.1"`
-- `DW_AT_language` — `DW_LANG_C` (13)
-- `DW_AT_name` — source file name
-- `DW_AT_comp_dir` — `"."`
-- `DW_AT_stmt_list` — offset to `.debug_line`
-- `DW_AT_low_pc` / `DW_AT_high_pc` — address range
+- `DW_AT_producer` - `"Brocken v0.1"`
+- `DW_AT_language` - `DW_LANG_C` (13)
+- `DW_AT_name` - source file name
+- `DW_AT_comp_dir` - `"."`
+- `DW_AT_stmt_list` - offset to `.debug_line`
+- `DW_AT_low_pc` / `DW_AT_high_pc` - address range
 
 ### 7.7 Addresses
 
@@ -1592,7 +1592,7 @@ Built-in formatter with no configuration options (opinionated, one true style):
 - No trailing whitespace
 - One blank line between top-level definitions
 
-The formatter operates on the AST, not text — it always produces valid code and never changes semantics.
+The formatter operates on the AST, not text - it always produces valid code and never changes semantics.
 
 ### 8.5 Native Unit Testing (Planned)
 
@@ -1617,7 +1617,7 @@ Running `bkn --test file.brocken` will produce TAP output.
 
 ### 9.1 ICB-Pinned Sandboxing
 
-Because the ICB is pinned to a hardware register (`r14`/`x28`/`s11`), sandbox state checks are a single load + test — no memory indirection penalty.
+Because the ICB is pinned to a hardware register (`r14`/`x28`/`s11`), sandbox state checks are a single load + test - no memory indirection penalty.
 
 ### 9.2 Fuel Injection (Planned)
 
@@ -1739,28 +1739,28 @@ Using `wasmtime_fiber::Fiber` for cooperative isolation was considered but rejec
 
 | Milestone | Target | Status |
 |-----------|--------|--------|
-| Lindsay IR + Jenny MIR | — | ✅ |
-| X86_64 codegen + linker | — | ✅ |
-| ARM64 codegen + linker | — | ✅ |
-| RISCV64 codegen + linker | — | ✅ |
-| Wasm codegen + linker | — | ✅ |
-| Regalloc + spilling | — | ✅ |
-| Fibers + ctx_swap | — | ✅ |
-| i128 arithmetic | — | ✅ |
-| Isolates (pthread/CreateThread) | — | ✅ |
-| Channels (IR, lower stubs, linker imports) | — | ✅ |
-| Frontend (Katsuro v0.1) — Lexer + Parser + AST + Compiler | — | ✅ |
-| Source location tracking (file/line/col) in AST + errors | — | ✅ |
-| Lexer filename in errors | — | ✅ |
-| Shift operators (`<<`/`>>`) | — | ✅ |
-| Struct types at IR level (`struct` kind on Type, struct GEP) | — | ✅ |
-| DWARF v5 debug info (line/col, variable DIEs, struct DIEs) | — | ✅ |
-| Per-instruction byte offset tracking in DWARF | — | ✅ |
-| GDB backtrace testing with DWARF | — | ✅ |
+| Lindsay IR + Jenny MIR | - | ✅ |
+| X86_64 codegen + linker | - | ✅ |
+| ARM64 codegen + linker | - | ✅ |
+| RISCV64 codegen + linker | - | ✅ |
+| Wasm codegen + linker | - | ✅ |
+| Regalloc + spilling | - | ✅ |
+| Fibers + ctx_swap | - | ✅ |
+| i128 arithmetic | - | ✅ |
+| Isolates (pthread/CreateThread) | - | ✅ |
+| Channels (IR, lower stubs, linker imports) | - | ✅ |
+| Frontend (Katsuro v0.1) - Lexer + Parser + AST + Compiler | - | ✅ |
+| Source location tracking (file/line/col) in AST + errors | - | ✅ |
+| Lexer filename in errors | - | ✅ |
+| Shift operators (`<<`/`>>`) | - | ✅ |
+| Struct types at IR level (`struct` kind on Type, struct GEP) | - | ✅ |
+| DWARF v5 debug info (line/col, variable DIEs, struct DIEs) | - | ✅ |
+| Per-instruction byte offset tracking in DWARF | - | ✅ |
+| GDB backtrace testing with DWARF | - | ✅ |
 | Channels (data + native lower) | Post-frontend | ⏸ |
 | Immix allocator + ICB expansion | Post-frontend | 📝 |
 | Perceus RC elision | After allocator | 📝 |
-| AST→Lindsay IR Lowerer | — | ✅ |
+| AST→Lindsay IR Lowerer | - | ✅ |
 | Self-hosting bootstrap | Q4 2026 | 📝 |
 | Transferable objects | After allocator + RC | 📝 |
 | SIMD auto-vectorization | Future | 📝 |
@@ -1784,16 +1784,16 @@ Using `wasmtime_fiber::Fiber` for cooperative isolation was considered but rejec
 |------|------------|
 | **Isolate** | An OS thread with its own independent heap and GC. No shared mutable state between isolates. |
 | **Fiber** | A cooperative green thread within an isolate. Fibers share the isolate's heap and are scheduled via explicit `ctx_swap`. |
-| **FCB** | Fiber Control Block — per-fiber struct holding saved callee registers, stack pointer, resume PC, and metadata. |
-| **ICB** | Isolate Control Block — per-isolate struct pinned to a dedicated register (r14/x28/s11). |
-| **CCB** | Channel Control Block — shared ring buffer with mutex/condvar for cross-isolate message passing. |
+| **FCB** | Fiber Control Block - per-fiber struct holding saved callee registers, stack pointer, resume PC, and metadata. |
+| **ICB** | Isolate Control Block - per-isolate struct pinned to a dedicated register (r14/x28/s11). |
+| **CCB** | Channel Control Block - shared ring buffer with mutex/condvar for cross-isolate message passing. |
 | **Fat Scalar** | 16-byte dynamic value representation: refcount + gc_flags + type_tag + aux_data + payload. |
 | **Immix** | Bump-pointer allocator using 32KB blocks divided into 256-byte lines. Mark-region tracing for cycle collection. |
 | **Perceus** | Compile-time RC optimization that cancels redundant incref/decref pairs and enables in-place mutation when refcount == 1. |
-| **MIR** | Machine IR — the post-lowering, architecture-specific instruction representation used by the codegen. |
+| **MIR** | Machine IR - the post-lowering, architecture-specific instruction representation used by the codegen. |
 | **ctx_swap** | MIR instruction that saves current register state to the active FCB and restores a target FCB's state. |
 | **Lindsay** | The middle-end SSA IR. Architecture-agnostic, in static single-assignment form. |
-| **Jenny** | The backend — MIR lowering, register allocation, and binary linking. |
-| **Katsuro** | The frontend — platform abstraction, lexer, parser, AST. |
+| **Jenny** | The backend - MIR lowering, register allocation, and binary linking. |
+| **Katsuro** | The frontend - platform abstraction, lexer, parser, AST. |
 | **DWARF** | Debug information format used for source-level debugging (`.debug_line`, `.debug_info`, etc.). |
-| **SEH** | Structured Exception Handling — Windows unwind tables (`.pdata`/`.xdata`). |
+| **SEH** | Structured Exception Handling - Windows unwind tables (`.pdata`/`.xdata`). |
