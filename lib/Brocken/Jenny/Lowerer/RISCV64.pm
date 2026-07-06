@@ -2587,36 +2587,103 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     }
                     else {
                         # slt/sgt/sle/sge: slt rd, rs1, rs2
+                        # Sign-extend operands with <64-bit type for correct signed comparison
+                        # (u32 values loaded via LWU are zero-extended, need sign-extension
+                        #  before slt to match x86 32-bit signed comparison semantics)
                         if ( $pred eq 'sgt' || $pred eq 'sle' ) {
 
                             # slt dst, rhs, lhs  ->  mv dst, rhs; slt dst, lhs
+                            my $rhs_op = $self->_lower_opnd($rhs);
+                            if ( $rhs->type->bits < 64 ) {
+                                my $sext_rhs = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $rhs->name . '_sext_' . $pred,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'movsx',
+                                        operands => [ $sext_rhs, $rhs_op ],
+                                        comment  => 'sext rhs for signed cmp'
+                                    )
+                                );
+                                $rhs_op = $sext_rhs;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mv',
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    operands => [ $dst, $rhs_op ],
                                     comment  => 'icmp ' . $pred . ': mv rhs'
                                 )
                             );
+                            my $lhs_op = $self->_lower_opnd($lhs);
+                            if ( $lhs->type->bits < 64 ) {
+                                my $sext_lhs = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $lhs->name . '_sext_' . $pred,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'movsx',
+                                        operands => [ $sext_lhs, $lhs_op ],
+                                        comment  => 'sext lhs for signed cmp'
+                                    )
+                                );
+                                $lhs_op = $sext_lhs;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'slt',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    operands => [ $dst, $lhs_op ],
                                     comment  => 'icmp ' . $pred . ': slt'
                                 )
                             );
                         }
                         else {
+                            my $lhs_op = $self->_lower_opnd($lhs);
+                            if ( $lhs->type->bits < 64 ) {
+                                my $sext_lhs = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $lhs->name . '_sext_' . $pred,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'movsx',
+                                        operands => [ $sext_lhs, $lhs_op ],
+                                        comment  => 'sext lhs for signed cmp'
+                                    )
+                                );
+                                $lhs_op = $sext_lhs;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mv',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    operands => [ $dst, $lhs_op ],
                                     comment  => 'icmp ' . $pred . ': mv lhs'
                                 )
                             );
+                            my $rhs_op = $self->_lower_opnd($rhs);
+                            if ( $rhs->type->bits < 64 ) {
+                                my $sext_rhs = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $rhs->name . '_sext_' . $pred,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'movsx',
+                                        operands => [ $sext_rhs, $rhs_op ],
+                                        comment  => 'sext rhs for signed cmp'
+                                    )
+                                );
+                                $rhs_op = $sext_rhs;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'slt',
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    operands => [ $dst, $rhs_op ],
                                     comment  => 'icmp ' . $pred . ': slt'
                                 )
                             );
