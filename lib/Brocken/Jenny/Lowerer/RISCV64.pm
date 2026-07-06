@@ -2595,9 +2595,10 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             # slt dst, rhs, lhs  ->  mv dst, rhs; slt dst, lhs
                             my $rhs_op = $self->_lower_opnd($rhs);
                             if ( $rhs->type->bits < 64 ) {
+                                my $rhs_name = $rhs->name // 'icmp_rhs';
                                 my $sext_rhs = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'virt_reg',
-                                    value => $rhs->name . '_sext_' . $pred,
+                                    value => $rhs_name . '_sext_' . $pred,
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 );
                                 $mbb->add_instruction(
@@ -2618,9 +2619,10 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             );
                             my $lhs_op = $self->_lower_opnd($lhs);
                             if ( $lhs->type->bits < 64 ) {
+                                my $lhs_name = $lhs->name // 'icmp_lhs';
                                 my $sext_lhs = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'virt_reg',
-                                    value => $lhs->name . '_sext_' . $pred,
+                                    value => $lhs_name . '_sext_' . $pred,
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 );
                                 $mbb->add_instruction(
@@ -2643,9 +2645,10 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         else {
                             my $lhs_op = $self->_lower_opnd($lhs);
                             if ( $lhs->type->bits < 64 ) {
+                                my $lhs_name = $lhs->name // 'icmp_lhs';
                                 my $sext_lhs = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'virt_reg',
-                                    value => $lhs->name . '_sext_' . $pred,
+                                    value => $lhs_name . '_sext_' . $pred,
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 );
                                 $mbb->add_instruction(
@@ -2666,9 +2669,10 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             );
                             my $rhs_op = $self->_lower_opnd($rhs);
                             if ( $rhs->type->bits < 64 ) {
+                                my $rhs_name = $rhs->name // 'icmp_rhs';
                                 my $sext_rhs = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'virt_reg',
-                                    value => $rhs->name . '_sext_' . $pred,
+                                    value => $rhs_name . '_sext_' . $pred,
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 );
                                 $mbb->add_instruction(
