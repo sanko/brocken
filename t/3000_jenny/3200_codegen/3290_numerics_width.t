@@ -67,7 +67,7 @@ subtest 'Lowerer: store memory operand type matches alloca type' => sub {
 };
 
 
-# Execution tests (compile → run → verify exit code)
+# Execution tests (compile -> run -> verify exit code)
 
 subtest 'i8 alloca / store / load / zext / return' => sub {
     SKIP: {

@@ -41,7 +41,7 @@ SKIP: {
     };
 
     # 2. Isolate chain of depth 3
-    #    Main → Outer → Middle → Inner, each joins the next.
+    #    Main -> Outer -> Middle -> Inner, each joins the next.
     subtest 'Isolate chain depth 3' => sub {
         my $inner = Brocken::Lindsay::IR::Function->new( name => 'inner_fn', return_type => $i32 );
         my $ib    = Brocken::Lindsay::IR::Builder->new();

@@ -7,6 +7,7 @@ use Brocken::Lindsay;
 use Brocken::Jenny::Codegen::ARM64;
 use Brocken::Jenny::Linker::ELF64;
 use Brocken::Jenny::Linker::MachO;
+use Brocken::Jenny::Linker::PE;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -19,8 +20,9 @@ SKIP: {
     sub make_binary($func) {
         my $codegen = Brocken::Jenny::Codegen::ARM64->new(platform => $host);
         my $bytes   = $codegen->emit_function($func);
-        my $linker  = $host->is_macos ? Brocken::Jenny::Linker::MachO->new() :
-                                       Brocken::Jenny::Linker::ELF64->new();
+        my $linker  = $host->is_macos  ? Brocken::Jenny::Linker::MachO->new() :
+                      $host->is_windows ? Brocken::Jenny::Linker::PE->new() :
+                                          Brocken::Jenny::Linker::ELF64->new();
         my $file    = $brocken->tmpdir . '/float_diag_' . $$ . $brocken->ext;
         $linker->write_executable($file, $bytes, $host);
         return $file;
