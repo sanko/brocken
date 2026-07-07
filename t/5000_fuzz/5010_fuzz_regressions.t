@@ -300,4 +300,99 @@ return $v2;
 PROG
 };
 
+# Bug: i128 negation produced wrong value on ARM64 (and RISCV64)
+#   The 64-bit `neg` handler (0 - val) was used instead of 128-bit
+#   negation with borrow propagation (subs lo, 0, val; sbc hi, 0, val).
+#   Fix: added i128 dispatch in the `neg` handler for both ARM64 and RISCV64.
+subtest 'i128 negation (arm64/riscv64 fix)' => sub {
+    test_prog( 'neg -50 => 50', <<'PROG', 50 );
+use feature 'brocken_native_types';
+my i128 $v = -50;
+$v = -$v;
+return $v;
+PROG
+    test_prog( 'neg -1 => 1', <<'PROG', 1 );
+use feature 'brocken_native_types';
+my i128 $v = -1;
+$v = -$v;
+return $v;
+PROG
+    test_prog( 'neg 42 => -42 masked', <<'PROG', 214 );
+use feature 'brocken_native_types';
+my i128 $v = 42;
+$v = -$v;
+return $v;
+PROG
+};
+
+# Bug: int→int constant widening created zext/sext instructions with `imm`
+#   operands, causing ARM64 codegen crash in `$resolve` (line 521).
+#   Fix: fold constants in `maybe_convert_type` before creating zext/sext.
+subtest 'int-to-int constant widening (all backends)' => sub {
+    test_prog( 'u32 const widened to u128 for AND', <<'PROG', 73 );
+use feature 'brocken_native_types';
+my u128 $v1 = 77;
+my u32 $v2 = 89;
+$v2 = $v1 & $v2;
+return $v2;
+PROG
+};
+
+# Bug: same constant-widening crash triggered by mixed f64/i128 operations
+#   where the int→float or float→int constant folding happens, preventing
+#   zext/sext of intermediate constants from reaching the backend.
+subtest 'mixed f64/i128 with constants (all backends)' => sub {
+    test_prog( 'f64 / i128 constant => i64', <<'PROG', 0 );
+use feature 'brocken_native_types';
+my i128 $v1 = 90;
+my f64 $v2 = 87.0;
+$v1 = $v2 / $v1;
+my i64 $r = $v1;
+return $r;
+PROG
+};
+
+# Bug: binop with LHS narrower than RHS (e.g. u32 - u128) produced mixed-type
+#   IR. The backend checked only the result type (from LHS) for i128 detection.
+#   A u128 operand split into _lo/_hi registers was referenced by its unsplit
+#   name in the non-i128 code path, getting an undefined register (value 0).
+#   Fix: promote the narrower operand to match the wider type in lower_binop.
+subtest 'narrow-LHS wide-RHS binop type promotion (all backends)' => sub {
+    test_prog( 'u32 - u128', <<'PROG', 12 );
+use feature 'brocken_native_types';
+my u128 $v1 = 77;
+my u32 $v2 = 89;
+$v2 = $v2 - $v1;
+return $v2;
+PROG
+    test_prog( 'u32 + u128', <<'PROG', 166 );
+use feature 'brocken_native_types';
+my u128 $v1 = 77;
+my u32 $v2 = 89;
+$v2 = $v2 + $v1;
+return $v2;
+PROG
+    test_prog( 'u32 & u128', <<'PROG', 73 );
+use feature 'brocken_native_types';
+my u128 $v1 = 77;
+my u32 $v2 = 89;
+$v2 = $v2 & $v1;
+return $v2;
+PROG
+    test_prog( 'u32 | u128', <<'PROG', 93 );
+use feature 'brocken_native_types';
+my u128 $v1 = 77;
+my u32 $v2 = 89;
+$v2 = $v2 | $v1;
+return $v2;
+PROG
+    test_prog( 'u32 ^ u128', <<'PROG', 20 );
+use feature 'brocken_native_types';
+my u128 $v1 = 77;
+my u32 $v2 = 89;
+$v2 = $v2 ^ $v1;
+return $v2;
+PROG
+};
+
 done_testing;

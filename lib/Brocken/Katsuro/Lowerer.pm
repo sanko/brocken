@@ -752,10 +752,23 @@ class Brocken::Katsuro::Lowerer {
             $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
         }
 
-        # Widen narrower integer/float operand to match LHS type width so the
-        # MIR lowerer sees consistent operand widths (critical for i128/halving).
+        # Shift operations use LHS type for result width regardless of RHS.
+        # Dispatch them before width-promotion to avoid widening LHS.
+        return $builder->build_shl( $lhs, $rhs, undef, $line, $col ) if $op eq '<<';
+        if ( $op eq '>>' ) {
+            return $lhs->type->is_signed ? $builder->build_ashr( $lhs, $rhs, undef, $line, $col ) :
+                $builder->build_lshr( $lhs, $rhs, undef, $line, $col );
+        }
+
+        # Promote narrower operand to match wider type width so the MIR
+        # lowerer sees consistent operand widths (critical for i128/halving).
         if ( $lhs->type->kind eq $rhs->type->kind && $lhs->type->bits != $rhs->type->bits && $lhs->type->kind ne 'dynamic' ) {
-            $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
+            if ( $lhs->type->bits < $rhs->type->bits ) {
+                $lhs = $self->maybe_convert_type( $lhs, $rhs->type );
+            }
+            else {
+                $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
+            }
         }
         return $builder->build_add( $lhs, $rhs, undef, $line, $col ) if $op eq '+';
         return $builder->build_sub( $lhs, $rhs, undef, $line, $col ) if $op eq '-';
@@ -767,11 +780,6 @@ class Brocken::Katsuro::Lowerer {
         if ( $op eq '%' ) {
             return $lhs->type->is_signed ? $builder->build_rem( $lhs, $rhs, undef, $line, $col ) :
                 $builder->build_urem( $lhs, $rhs, undef, $line, $col );
-        }
-        return $builder->build_shl( $lhs, $rhs, undef, $line, $col ) if $op eq '<<';
-        if ( $op eq '>>' ) {
-            return $lhs->type->is_signed ? $builder->build_ashr( $lhs, $rhs, undef, $line, $col ) :
-                $builder->build_lshr( $lhs, $rhs, undef, $line, $col );
         }
         return $builder->build_and( $lhs, $rhs, undef, $line, $col )        if $op eq '&';
         return $builder->build_or( $lhs, $rhs, undef, $line, $col )         if $op eq '|';
@@ -994,6 +1002,9 @@ class Brocken::Katsuro::Lowerer {
         # Integer widening: zero-extend for unsigned, sign-extend for signed
         if ( $val->type->kind eq 'int' && $target_type->kind eq 'int' ) {
             if ( $val->type->bits < $target_type->bits ) {
+                if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                    return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value );
+                }
                 return ( $val->type->is_signed && $val->type->bits > 1 ) ? $builder->build_sext( $val, $target_type, undef, $line, $col ) :
                     $builder->build_zext( $val, $target_type, undef, $line, $col );
             }
