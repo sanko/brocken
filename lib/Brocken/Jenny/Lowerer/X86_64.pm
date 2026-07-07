@@ -1957,6 +1957,41 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::SIToFP') ) {
+                    my ($val) = $inst->operands->@*;
+                    my $dst   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $src   = $self->_lower_opnd($val);
+                    if ( $src->kind eq 'imm' ) {
+                        my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_tmp', type => $val->type );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $tmp, $src ],
+                                comment  => 'sitofp imm into gp'
+                            )
+                        );
+                        $src = $tmp;
+                    }
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'cvtsi2sd',
+                            operands => [ $dst, $src ],
+                            comment  => 'sitofp ' . ( $val->name || $val->value )
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FPToSI') ) {
+                    my ($val) = $inst->operands->@*;
+                    my $dst   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $src   = $self->_materialize( $mbb, $val );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'cvttsd2si',
+                            operands => [ $dst, $src ],
+                            comment  => 'fptosi ' . ( $val->name || $val->value )
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4296,6 +4331,5 @@ Sanko Robinson <sanko@cpan.org>
 
 =cut
 
-# ---------------------------------------------------------------------------
 # Lowerer: Lindsay IR -> Machine IR (ARM64 / AArch64)
 1;

@@ -94,6 +94,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         FDIV           => 0x1E201800,
         FMIN           => 0x1E205800,
         FMAX           => 0x1E204800,
+        SCVTF_D_X      => 0x9E224000,
+        FCVTZS_X_D     => 0x9EF80000,
         SF             => 0x80000000,
         BR             => 0xD61F0000,
         ADR            => 0x10000000,
@@ -1004,6 +1006,20 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $base  = $fop{$opcode};
                     $base = $bits == 32 ? $base : ( $base | FP_SZ );
                     $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
+                }
+                elsif ( $opcode eq 'scvtf' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $src_r = $resolve->($src);
+                    my $did   = $reg_id->($dst_r);
+                    my $sid   = $reg_id->($src_r);
+                    $bytes .= pack( 'V', SCVTF_D_X | ( $sid << 5 ) | $did );
+                }
+                elsif ( $opcode eq 'fcvtzs' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $src_r = $resolve->($src);
+                    my $did   = $reg_id->($dst_r);
+                    my $sid   = $reg_id->($src_r);
+                    $bytes .= pack( 'V', FCVTZS_X_D | ( $sid << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'fcmp' ) {
                     my $lhs_r = $resolve->($dst);

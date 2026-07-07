@@ -44,6 +44,7 @@ class Brocken::Katsuro::Lowerer {
         int    => Brocken::Lindsay::IR::Type::i64(),
         bool   => Brocken::Lindsay::IR::Type::i1(),
         Int    => Brocken::Lindsay::IR::Type::i64(),
+        Float  => Brocken::Lindsay::IR::Type::f64(),
         Bool   => Brocken::Lindsay::IR::Type::i1(),
         Any    => Brocken::Lindsay::IR::Type::dynamic(),
         String => Brocken::Lindsay::IR::Type::ptr(),
@@ -982,6 +983,22 @@ class Brocken::Katsuro::Lowerer {
                 return ( $val->type->is_signed && $val->type->bits > 1 ) ? $builder->build_sext( $val, $target_type, undef, $line, $col ) :
                     $builder->build_zext( $val, $target_type, undef, $line, $col );
             }
+        }
+
+        # Integer -> float (sitofp)
+        if ( $val->type->kind eq 'int' && $target_type->kind eq 'float' ) {
+            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => 0.0 + $val->value );
+            }
+            return $builder->build_sitofp( $val, $target_type, undef, $line, $col );
+        }
+
+        # Float -> integer (fptosi)
+        if ( $val->type->kind eq 'float' && $target_type->kind eq 'int' ) {
+            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => int( $val->value ) );
+            }
+            return $builder->build_fptosi( $val, $target_type, undef, $line, $col );
         }
         $val;
     }

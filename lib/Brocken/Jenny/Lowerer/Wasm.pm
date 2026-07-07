@@ -1837,6 +1837,26 @@ class Brocken::Jenny::Lowerer::Wasm {
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
                     );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::SIToFP') ) {
+                    my ($val) = $inst->operands->@*;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'sitofp val' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'f64_convert_i64_s', operands => [], comment => 'sitofp' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FPToSI') ) {
+                    my ($val) = $inst->operands->@*;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'fptosi val' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_trunc_f64_s', operands => [], comment => 'fptosi' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
                     my ($val)    = $inst->operands->@*;
                     my $src_bits = $val->type ? $val->type->bits : 64;
