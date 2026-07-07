@@ -395,4 +395,63 @@ return $v2;
 PROG
 };
 
+# Bug: _gen_while could corrupt $vars when returning { code => undef }
+# after detecting a non-terminating loop. The simulation ran body closures
+# that modified $vars, but $vars was not restored when the loop was skipped.
+# Subsequent statements computed expected values against corrupted state.
+# Fix: save/restore $vars in _gen_while before/after simulation.
+subtest 'ghost while loop does not corrupt fuzzer state' => sub {
+    my $f = Brocken::Fuzz->new(seed => 20260705);
+    # Case 10 with this seed triggered a ghost while loop. Before the fix,
+    # the corrupted $vars caused expected=18 (wrong). Correct expected is
+    # 238 (= 2205418478 & 0xFF).
+    my $result = $f->run_case(10, 10, 4);
+    ok $result->{status} eq 'pass', 'case 10 passes (expected=238)'
+        or diag "got $result->{status}: $result->{reason}";
+};
+
+# Bug: _eval_i64_typed returned $lv for unsigned % signed_negative when RHS
+# is wider, but the compiler promotes the narrow LHS to the wider signed type
+# and does a signed remainder.  Same issue in _eval_cmp_typed for comparisons.
+# Fix: width-guard in both methods -- when RHS is wider, do a signed op/comparison;
+# otherwise (RHS same/narrower) treat the negative RHS as huge unsigned.
+subtest 'unsigned LHS vs wider signed RHS (div/rem/cmp)' => sub {
+    # u8 % i64: compiler promotes u8 to i64 (zext), does signed remainder.
+    # 50 % (-5) = 0.
+    test_prog( 'u8 % i64 (50 % -5)', <<'PROG', 0 );
+my u8 $v1 = 50;
+my i64 $v2 = -5;
+$v2 = $v1 % $v2;
+return $v2;
+PROG
+    # u8 / i64: 50 / (-5) = -10, exit code -10 & 0xFF = 246.
+    test_prog( 'u8 / i64 (50 / -5)', <<'PROG', 246 );
+my u8 $v1 = 50;
+my i64 $v2 = -5;
+$v2 = $v1 / $v2;
+return $v2;
+PROG
+    # u8 <= i64(-5): signed comparison, 50 <= -5 is FALSE.
+    test_prog( 'u8 <= i64 (50 <= -5=F)', <<'PROG', 3 );
+my u8 $v1 = 50;
+my i64 $v2 = -5;
+if ($v1 <= $v2) { return 2; } else { return 3; }
+PROG
+    # u64 % i8(-5): LHS wider, compiler promotes i8 to u64 (unsigned).
+    # 50 % (2^64-5) = 50 (since 50 < huge).
+    test_prog( 'u64 % i8 (50 % -5, LHS wider)', <<'PROG', 50 );
+my u64 $v1 = 50;
+my i8 $v2 = -5;
+$v2 = $v1 % $v2;
+return $v2;
+PROG
+    # u16 % i64(-3): 50000 % (-3) signed = 50000 - (-16556)*(-3) = 2.
+    test_prog( 'u16 % i64 (50000 % -3)', <<'PROG', 2 );
+my u16 $v1 = 50000;
+my i64 $v2 = -3;
+$v2 = $v1 % $v2;
+return $v2;
+PROG
+};
+
 done_testing;

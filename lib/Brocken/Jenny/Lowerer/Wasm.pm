@@ -1841,7 +1841,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                     my ($val) = $inst->operands->@*;
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     if ( $val->type && $val->type->bits == 128 && !$val->isa('Brocken::Lindsay::IR::Constant') ) {
-                        my ($lo_src, $hi_src) = $self->_split_i128($val);
+                        my ( $lo_src, $hi_src ) = $self->_split_i128($val);
                         $mbb->add_instruction( $self->_wasm_push_opnd( $lo_src, 'sitofp lo' ) );
                     }
                     else {
@@ -1856,32 +1856,64 @@ class Brocken::Jenny::Lowerer::Wasm {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FPToSI') ) {
                     my ($val) = $inst->operands->@*;
                     if ( $inst->type && $inst->type->bits == 128 ) {
-                        my $lo = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() );
-                        my $hi = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() );
+                        my $lo = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'virt_reg',
+                            value => $inst->name . '_lo',
+                            type  => Brocken::Lindsay::IR::Type::i64()
+                        );
+                        my $hi = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'virt_reg',
+                            value => $inst->name . '_hi',
+                            type  => Brocken::Lindsay::IR::Type::i64()
+                        );
                         $mbb->add_instruction( $self->_wasm_push( $val, 'fptosi val' ) );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_trunc_f64_s', operands => [], comment => 'fptosi' ) );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$lo], comment => 'store ' . $inst->name . '_lo' )
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'local_set',
+                                operands => [$lo],
+                                comment  => 'store ' . $inst->name . '_lo'
+                            )
                         );
                         if ( $inst->type->is_signed ) {
                             $mbb->add_instruction( $self->_wasm_push_opnd( $lo, 'fptosi hi' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_const', operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ], comment => 'shift 63' )
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i64_const',
+                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ],
+                                    comment  => 'shift 63'
+                                )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_shr_s', operands => [], comment => 'fptosi hi = sign-ext' )
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i64_shr_s',
+                                    operands => [],
+                                    comment  => 'fptosi hi = sign-ext'
+                                )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi], comment => 'store ' . $inst->name . '_hi' )
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'local_set',
+                                    operands => [$hi],
+                                    comment  => 'store ' . $inst->name . '_hi'
+                                )
                             );
                         }
                         else {
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_const', operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ], comment => 'hi = 0' )
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i64_const',
+                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                    comment  => 'hi = 0'
+                                )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$hi], comment => 'store ' . $inst->name . '_hi' )
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'local_set',
+                                    operands => [$hi],
+                                    comment  => 'store ' . $inst->name . '_hi'
+                                )
                             );
                         }
                     }
@@ -1891,7 +1923,11 @@ class Brocken::Jenny::Lowerer::Wasm {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_trunc_f64_s', operands => [], comment => 'fptosi' ) );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'local_set',
+                                operands => [$dst],
+                                comment  => 'store ' . $inst->name
+                            )
                         );
                     }
                 }

@@ -2278,11 +2278,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             )
                         );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mv',
-                                operands => [ $lo_dst, $tmp ],
-                                comment  => 'zext i128 lo'
-                            )
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $lo_dst, $tmp ], comment => 'zext i128 lo' )
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2330,29 +2326,17 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             )
                         );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mv',
-                                operands => [ $lo_dst, $tmp ],
-                                comment  => 'sext i128 lo'
-                            )
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $lo_dst, $tmp ], comment => 'sext i128 lo' )
                         );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mv',
-                                operands => [ $hi_dst, $tmp ],
-                                comment  => 'sext i128 hi'
-                            )
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $hi_dst, $tmp ], comment => 'sext i128 hi' )
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'ashr',
                                 operands => [
                                     $hi_dst,
-                                    Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'imm',
-                                        value => 63,
-                                        type  => Brocken::Lindsay::IR::Type::i64()
-                                    )
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63, type => Brocken::Lindsay::IR::Type::i64() )
                                 ],
                                 comment => 'sext i128 hi = sign extend'
                             )
@@ -2371,7 +2355,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::SIToFP') ) {
                     my ($val) = $inst->operands->@*;
-                    my $dst   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     my $src;
                     if ( $val->type && $val->type->bits == 128 && !$val->isa('Brocken::Lindsay::IR::Constant') ) {
                         $src = Brocken::Jenny::MIR::MachineOperand->new(
@@ -2752,7 +2736,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     }
                     else {
                         $store_type //= $val->type;
-                        my $mem        = Brocken::Jenny::MIR::MachineOperand->new(
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'mem',
                             value => { base => $ptr->name, disp => 0 },
                             type  => $store_type

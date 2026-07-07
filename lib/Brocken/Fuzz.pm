@@ -180,7 +180,7 @@ package Brocken::Fuzz {
             my @f64_vars   = grep { $var_types->{$_}{signed} eq 'f' } $var_names->@*;
             my $n_f64_vars = scalar(@f64_vars);
             my $n_int_vars = $n_vars - $n_f64_vars;
-            my $type       = $self->_rand_int(9);
+            my $type       = $self->_rand_int(12);
             if ( $type == 0 ) {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
@@ -207,6 +207,15 @@ package Brocken::Fuzz {
             }
             elsif ( $type == 8 && $n_f64_vars >= 1 && $n_int_vars >= 1 ) {
                 return $self->_gen_mixed_binop_assign( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 9 && $n_vars >= 2 && !$is_last ) {
+                return $self->_gen_while( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 10 && $n_vars >= 2 && !$is_last ) {
+                return $self->_gen_nested_if( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 11 && $n_vars >= 2 && !$is_last ) {
+                return $self->_gen_multi_cmp( $vars, $var_types, $var_names );
             }
             else {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
@@ -354,6 +363,189 @@ package Brocken::Fuzz {
             my $sv      = $vars->{$src} ? 1 : 0;
             $vars->{$dst} = $self->_clamp_to_type( $sv ? 0 : 1, 1, 1 );
             return { code => join( "\n", "if (\$$src) {", "    \$$dst = 0;", "} else {", "    \$$dst = 1;", "}" ), };
+        }
+
+        # Generate a while loop with tracked expected values.
+        # The condition compares two different int vars; the body contains
+        # 1-3 simple assignments.  Simulation detects non-terminating
+        # loops (max 1000 iterations) and skips generation.
+        method _gen_while( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 2;
+
+            # Pick two DIFFERENT variables for the condition (same-var
+            # comparison like $v >= $v is always true / non-terminating).
+            my $cond_lhs = $int_names[ $self->_rand_int($#int_names) ];
+            my $cond_rhs = $cond_lhs;
+            for my $try ( 0 .. 9 ) {
+                $cond_rhs = $int_names[ $self->_rand_int($#int_names) ];
+                last if $cond_rhs ne $cond_lhs;
+            }
+            return { code => undef } if $cond_rhs eq $cond_lhs;
+            my $cmp = $self->_rand_cmpop();
+
+            # Generate 1-3 body statements
+            my $n_body = $self->_rand_int(3) + 1;
+            my @body_items;
+            for my $bi ( 1 .. $n_body ) {
+                my $item = $self->_gen_body_assign( $vars, $var_types, $var_names );
+                push @body_items, $item if $item->{code};
+            }
+            return { code => undef } if @body_items == 0;
+
+            # Snapshot $vars so we can roll back if we skip the loop.
+            my @saved_vars_keys = keys %$vars;
+            my %saved_vars;
+            @saved_vars{@saved_vars_keys} = @$vars{@saved_vars_keys};
+
+            # Simulate the loop to update expected variable values.
+            # If we hit max_iter without the condition becoming false,
+            # this is probably a non-terminating loop -- skip it.
+            my $max_iter = 1000;
+            my $n_sim    = 0;
+            for my $iter ( 1 .. $max_iter ) {
+                my $lv = $vars->{$cond_lhs} // 0;
+                my $rv = $vars->{$cond_rhs} // 0;
+                last unless $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$cond_lhs}, $var_types->{$cond_rhs} );
+                $n_sim = $iter;
+                for my $item (@body_items) {
+                    $item->{apply}->();
+                }
+            }
+
+            # If simulation ran all max_iter iterations without the
+            # condition becoming false, skip (infinite loop in binary).
+            if ( $n_sim == $max_iter ) {
+                my $lv_end = $vars->{$cond_lhs} // 0;
+                my $rv_end = $vars->{$cond_rhs} // 0;
+                if ( $self->_eval_cmp_typed( $cmp, $lv_end, $rv_end, $var_types->{$cond_lhs}, $var_types->{$cond_rhs} ) ) {
+                    @$vars{@saved_vars_keys} = @saved_vars{@saved_vars_keys};
+                    return { code => undef };
+                }
+            }
+            my $body_code = join "\n", map { "    " . $_->{code} } @body_items;
+            return { code => "while (\$$cond_lhs $cmp \$$cond_rhs) {\n$body_code\n}" };
+        }
+
+        # Generate a single replayable body statement for use inside while/nested
+        # blocks.  Returns { code => '...', apply => sub { ... } } where apply()
+        # updates $vars to match the Brocken compiler's effect.
+        method _gen_body_assign( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 1;
+            my $kind = $self->_rand_int(2);
+            if ( $kind == 0 && @int_names >= 2 ) {
+
+                # Binop: $dst = $lhs op $rhs
+                my $dst      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+                my $lhs      = $int_names[ $self->_rand_int($#int_names) ];
+                my $rhs      = $int_names[ $self->_rand_int($#int_names) ];
+                my $lv       = $vars->{$lhs};
+                my $rv       = $vars->{$rhs};
+                my $dst_bits = $var_types->{$dst}{bits} // 64;
+                my $op;
+
+                for my $try ( 0 .. 9 ) {
+                    $op = $self->_rand_binop();
+                    last
+                        unless defined $rv &&
+                        ( ( $rv == 0 && ( $op eq '/' || $op eq '%' ) ) || ( ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= $dst_bits ) ) );
+                }
+                $op = '+' if defined $rv && $rv == 0 && ( $op eq '/' || $op eq '%' );
+                $op = '+' if ( $op eq '<<' || $op eq '>>' ) && defined $rv && ( $rv < 0 || $rv >= $dst_bits );
+                my $code  = "\$$dst = \$$lhs $op \$$rhs;";
+                my $apply = sub {
+                    my $lv2 = $vars->{$lhs};
+                    my $rv2 = $vars->{$rhs};
+                    return unless defined $lv2 && defined $rv2;
+                    my $result = $self->_eval_i64_typed( $op, $lv2, $rv2, $var_types->{$lhs}, $var_types->{$rhs} );
+                    if ( defined $result ) {
+                        my $t = $var_types->{$dst};
+                        $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
+                    }
+                };
+                return { code => $code, apply => $apply };
+            }
+            else {
+                # Unop: $dst = -$src
+                my $dst   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+                my $src   = $int_names[ $self->_rand_int($#int_names) ];
+                my $code  = "\$$dst = -\$$src;";
+                my $apply = sub {
+                    my $sv = $vars->{$src};
+                    return unless defined $sv;
+                    my $t = $var_types->{$dst};
+                    $vars->{$dst} = $self->_clamp_to_type( -$sv, $t->{bits}, $t->{signed} );
+                };
+                return { code => $code, apply => $apply };
+            }
+        }
+
+        # Generate an if/else whose branches contain 1-2 body statements
+        # instead of a single assignment.  Uses _gen_body_assign for
+        # simulation and replay, same as _gen_while.
+        method _gen_nested_if( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 2;
+            my $cond_lhs = $int_names[ $self->_rand_int($#int_names) ];
+            my $cond_rhs = $int_names[ $self->_rand_int($#int_names) ];
+            my $cmp      = $self->_rand_cmpop();
+            my $lv       = $vars->{$cond_lhs} // 0;
+            my $rv       = $vars->{$cond_rhs} // 0;
+            my $cond     = $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$cond_lhs}, $var_types->{$cond_rhs} );
+            my $n_then   = $self->_rand_int(2) + 1;
+            my @then_items;
+
+            for ( 1 .. $n_then ) {
+                my $item = $self->_gen_body_assign( $vars, $var_types, $var_names );
+                push @then_items, $item if $item->{code};
+            }
+            return { code => undef } if @then_items == 0;
+            my @else_items;
+            my $has_else = $self->_rand_int(1);
+            if ($has_else) {
+                my $n_else = $self->_rand_int(2) + 1;
+                for ( 1 .. $n_else ) {
+                    my $item = $self->_gen_body_assign( $vars, $var_types, $var_names );
+                    push @else_items, $item if $item->{code};
+                }
+            }
+            if ($cond) {
+                for my $item (@then_items) { $item->{apply}->() }
+            }
+            elsif ($has_else) {
+                for my $item (@else_items) { $item->{apply}->() }
+            }
+            my $then_code = join "\n", map { "    " . $_->{code} } @then_items;
+            if ( $has_else && @else_items > 0 ) {
+                my $else_code = join "\n", map { "    " . $_->{code} } @else_items;
+                return { code => "if (\$$cond_lhs $cmp \$$cond_rhs) {\n$then_code\n} else {\n$else_code\n}" };
+            }
+            return { code => "if (\$$cond_lhs $cmp \$$cond_rhs) {\n$then_code\n}" };
+        }
+
+        # Generate a chained comparison condition:
+        #   if ($v < $w && $x > $y) { $dst = 1; } else { $dst = 0; }
+        # Uses && or || to combine two comparisons.
+        method _gen_multi_cmp( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 2;
+            my $lhs1  = $int_names[ $self->_rand_int($#int_names) ];
+            my $rhs1  = $int_names[ $self->_rand_int($#int_names) ];
+            my $cmp1  = $self->_rand_cmpop();
+            my $lhs2  = $int_names[ $self->_rand_int($#int_names) ];
+            my $rhs2  = $int_names[ $self->_rand_int($#int_names) ];
+            my $cmp2  = $self->_rand_cmpop();
+            my $logic = $self->_rand_int(1) ? '&&' : '||';
+            my $c1    = $self->_eval_cmp_typed( $cmp1, $vars->{$lhs1} // 0, $vars->{$rhs1} // 0, $var_types->{$lhs1}, $var_types->{$rhs1} );
+            my $c2    = $self->_eval_cmp_typed( $cmp2, $vars->{$lhs2} // 0, $vars->{$rhs2} // 0, $var_types->{$lhs2}, $var_types->{$rhs2} );
+            my $cond  = $logic eq '&&' ? ( $c1 && $c2 ) : ( $c1 || $c2 );
+            my $dst   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $t     = $var_types->{$dst};
+            $vars->{$dst} = $self->_clamp_to_type( $cond ? 1 : 0, $t->{bits}, $t->{signed} );
+            return { code =>
+                    join( "\n", "if (\$$lhs1 $cmp1 \$$rhs1 $logic \$$lhs2 $cmp2 \$$rhs2) {", "    \$$dst = 1;", "} else {", "    \$$dst = 0;", "}" ),
+            };
         }
 
         # Float binary ops (+, -, *, / only; no shift/bitwise for float)
@@ -533,17 +725,23 @@ package Brocken::Fuzz {
             my $rsig = $rt->{signed} // 1;
 
             # When LHS is signed and RHS is unsigned, the RHS bit pattern
-            # is used directly in the signed operation.  If the RHS's high
-            # bit is set, reinterpret it as a signed negative value.
-            if ( $lsig && !$rsig && ( $op eq '/' || $op eq '%' ) ) {
+            # is used directly in the signed operation.  Only when RHS is
+            # same width or wider -- narrower types are zero-extended
+            # (unsigned widen) by the compiler before division.
+            if ( $lsig && !$rsig && ( $op eq '/' || $op eq '%' ) && $rt->{bits} >= $bits ) {
                 my $signed_rv = $self->_reinterpret_to_signed( $rv, $rt->{bits} // 64 );
                 return $self->_eval_i64( $op, $lv, $signed_rv );
             }
 
-            # When LHS is unsigned and RHS is signed negative: unsigned op
-            # treats the negative RHS as a huge positive (>= 2^63), so div
-            # yields 0 and rem yields the LHS.
+            # When LHS is unsigned and RHS is signed negative:
+            # - If RHS is wider, the compiler promotes LHS to RHS type
+            #   (signed) and performs a signed operation.
+            # - Otherwise, the unsigned op treats negative RHS as a
+            #   huge positive (>= 2^63), so div yields 0, rem yields LHS.
             if ( !$lsig && $rsig && $rv < 0 && ( $op eq '/' || $op eq '%' ) ) {
+                if ( ( $rt->{bits} // 64 ) > $bits ) {
+                    return $self->_eval_i64( $op, $lv, $rv );
+                }
                 return 0   if $op eq '/';
                 return $lv if $op eq '%';
             }
@@ -590,17 +788,24 @@ package Brocken::Fuzz {
             my $lbits = $lt->{bits}   // 64;
             return $self->_eval_cmp_i128( $cmp, $lv, $rv, $lt, $rt ) if $lbits >= 128;
 
-            # LHS signed, RHS unsigned: reinterpret RHS as signed of its width
-            if ( $lsig && !$rsig ) {
+            # LHS signed, RHS unsigned: reinterpret RHS as signed of its width.
+            # Only when RHS is same width or wider -- narrower types are
+            # zero-extended (unsigned widen) by the compiler before comparison.
+            if ( $lsig && !$rsig && $rt->{bits} >= $lbits ) {
                 my $signed_rv = $self->_reinterpret_to_signed( $rv, $rt->{bits} // 64 );
                 return $self->_eval_cmp( $cmp, $lv, $signed_rv );
             }
 
-            # LHS unsigned, RHS signed negative: x86_64 sign-extends the RHS,
-            # but the cmp instruction runs at LHS width (32-bit for bits < 64,
-            # 64-bit otherwise), so we truncate both operands to LHS width.
+            # LHS unsigned, RHS signed negative:
+            # - If RHS is wider, the compiler promotes LHS to RHS type
+            #   (signed) and does a signed comparison.
+            # - Otherwise, the compiler promotes RHS to LHS type (unsigned)
+            #   and does an unsigned comparison at LHS width.
             if ( !$lsig && $rsig && $rv < 0 && $lbits < 128 ) {
-                my $mask = $lbits < 64 ? 0xFFFFFFFF : ~0;
+                if ( ( $rt->{bits} // 64 ) > $lbits ) {
+                    return $self->_eval_cmp( $cmp, $lv, $rv );
+                }
+                my $mask = $lbits >= 64 ? ~0 : ( 1 << $lbits ) - 1;
                 return $self->_eval_cmp( $cmp, $lv & $mask, $rv & $mask );
             }
             return $self->_eval_cmp( $cmp, $lv, $rv );
