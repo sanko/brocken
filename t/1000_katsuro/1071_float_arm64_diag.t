@@ -30,8 +30,12 @@ SKIP: {
     sub run_check($name, $expected, $func) {
         my $file = make_binary($func);
         system $file;
+        my $exit = $? >> 8;
+        my $sig  = $? & 127;
         unlink $file;
-        is($? >> 8, $expected, $name);
+        note "RAW STATUS: \$?=$? (exit=$exit, sig=$sig) for $name";
+        is($sig, 0, "$name — no crash (signal=0)");
+        is($exit, $expected, "$name — exit code $expected");
     }
 
     # ------------------------------------------------------------------
