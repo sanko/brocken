@@ -751,6 +751,12 @@ class Brocken::Katsuro::Lowerer {
         if ( $lhs->type->kind ne $rhs->type->kind && $lhs->type->kind ne 'dynamic' && $rhs->type->kind ne 'dynamic' ) {
             $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
         }
+
+        # Widen narrower integer/float operand to match LHS type width so the
+        # MIR lowerer sees consistent operand widths (critical for i128/halving).
+        if ( $lhs->type->kind eq $rhs->type->kind && $lhs->type->bits != $rhs->type->bits && $lhs->type->kind ne 'dynamic' ) {
+            $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
+        }
         return $builder->build_add( $lhs, $rhs, undef, $line, $col ) if $op eq '+';
         return $builder->build_sub( $lhs, $rhs, undef, $line, $col ) if $op eq '-';
         return $builder->build_mul( $lhs, $rhs, undef, $line, $col ) if $op eq '*';

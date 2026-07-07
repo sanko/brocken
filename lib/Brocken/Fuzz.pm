@@ -166,7 +166,9 @@ package Brocken::Fuzz {
             else {
                 push @stmts, "return \$$result_var;";
             }
-            my $source   = join "\n", @stmts;
+            my $uses_big = scalar( grep { $var_types->{$_}{bits} >= 128 } keys $var_types->%* );
+            my $header   = $uses_big ? q{use feature 'brocken_native_types';} . "\n" : '';
+            my $source   = $header . join "\n", @stmts;
             my $expected = $vars->{$result_var} & 0xFF;
             return { source => $source, expected => $expected, vars => $vars };
         }
@@ -405,18 +407,18 @@ package Brocken::Fuzz {
             my @int_vars = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
             return { code => undef } if @f64_vars < 1 || @int_vars < 1;
             my $flip = $self->_rand_int(1);
-            my $lhs  = $flip ? $int_vars[ $self->_rand_int($#int_vars) ]
-                : $f64_vars[ $self->_rand_int($#f64_vars) ];
-            my $rhs  = $flip ? $f64_vars[ $self->_rand_int($#f64_vars) ]
-                : $int_vars[ $self->_rand_int($#int_vars) ];
+            my $lhs  = $flip ? $int_vars[ $self->_rand_int($#int_vars) ] : $f64_vars[ $self->_rand_int($#f64_vars) ];
+            my $rhs  = $flip ? $f64_vars[ $self->_rand_int($#f64_vars) ] : $int_vars[ $self->_rand_int($#int_vars) ];
             my $dst  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
             my $lv   = $vars->{$lhs};
             my $rv   = $vars->{$rhs};
             my $op   = $self->_rand_fbinop();
+
             if ( defined $lv && defined $rv ) {
                 if ( $op eq '/' && $rv == 0 ) { $op = '+' }
                 my $result;
                 if ($flip) {
+
                     # LHS is int, RHS is float: fptosi RHS, then int op
                     my $t   = $var_types->{$lhs};
                     my $irv = int($rv);
@@ -473,6 +475,41 @@ package Brocken::Fuzz {
             return undef;
         }
 
+        # Evaluate a binary operation on 128-bit values using Math::BigInt.
+        # Matches Brocken's i128 semantics (truncate-toward-zero division).
+        method _eval_i128_binop( $op, $lv, $rv ) {
+            require Math::BigInt;
+            return undef if ( $op eq '/' || $op eq '%' ) && ( ref($rv) ? $rv->is_zero : $rv == 0 );
+            my $l = ref($lv) && $lv->isa('Math::BigInt') ? $lv : Math::BigInt->new($lv);
+            my $r = ref($rv) && $rv->isa('Math::BigInt') ? $rv : Math::BigInt->new($rv);
+            if ( $op eq '+' ) { return $l + $r }
+            if ( $op eq '-' ) { return $l - $r }
+            if ( $op eq '*' ) { return $l * $r }
+            if ( $op eq '/' ) {
+                my ( $q, $rem ) = $l->copy->bdiv($r);
+                return $q + 1 if $q < 0 && !$rem->is_zero;
+                return $q;
+            }
+            if ( $op eq '%' )  { return $l->copy->bmod($r) }
+            if ( $op eq '&' )  { return $l & $r }
+            if ( $op eq '|' )  { return $l | $r }
+            if ( $op eq '^' )  { return $l ^ $r }
+            if ( $op eq '<<' ) { return $l << $r }
+            if ( $op eq '>>' ) { return $l >> $r }
+            return undef;
+        }
+
+        # Reinterpret an unsigned i128 value as signed two's complement.
+        method _reinterpret_i128_to_signed($val) {
+            require Math::BigInt;
+            my $n    = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new($val);
+            my $sign = Math::BigInt->new(1) << 127;
+            if ( $n >= $sign ) {
+                $n = $n - ( Math::BigInt->new(1) << 128 );
+            }
+            return $n;
+        }
+
         # Reinterpret an unsigned value as signed of the given bit width.
         # This matches Brocken's codegen behavior: an unsigned value with the
         # high bit set, when loaded at its native width and used in a signed
@@ -488,7 +525,10 @@ package Brocken::Fuzz {
 
         # Evaluate binary operation matching Brocken's semantics:
         # signed/unsigned choice from LHS type only; no common-type promotion.
+        # Delegates to i128 methods when operand width >= 128.
         method _eval_i64_typed( $op, $lv, $rv, $lt, $rt ) {
+            my $bits = $lt->{bits} // 64;
+            return $self->_eval_i128_typed( $op, $lv, $rv, $lt, $rt ) if $bits >= 128;
             my $lsig = $lt->{signed} // 1;
             my $rsig = $rt->{signed} // 1;
 
@@ -508,6 +548,22 @@ package Brocken::Fuzz {
                 return $lv if $op eq '%';
             }
             return $self->_eval_i64( $op, $lv, $rv );
+        }
+
+        # Evaluate binary operation for 128-bit types using Math::BigInt.
+        # Handles signed/unsigned reinterpretation matching Brocken's codegen.
+        method _eval_i128_typed( $op, $lv, $rv, $lt, $rt ) {
+            my $lsig = $lt->{signed} // 1;
+            my $rsig = $rt->{signed} // 1;
+            if ( $lsig && !$rsig && ( $op eq '/' || $op eq '%' ) ) {
+                my $signed_rv = $self->_reinterpret_i128_to_signed($rv);
+                return $self->_eval_i128_binop( $op, $lv, $signed_rv );
+            }
+            if ( !$lsig && $rsig && ( $op eq '/' || $op eq '%' ) && $rv < 0 ) {
+                return 0   if $op eq '/';
+                return $lv if $op eq '%';
+            }
+            return $self->_eval_i128_binop( $op, $lv, $rv );
         }
 
         method _eval_cmp( $cmp, $l, $r ) {
@@ -532,6 +588,7 @@ package Brocken::Fuzz {
             my $lsig  = $lt->{signed} // 1;
             my $rsig  = $rt->{signed} // 1;
             my $lbits = $lt->{bits}   // 64;
+            return $self->_eval_cmp_i128( $cmp, $lv, $rv, $lt, $rt ) if $lbits >= 128;
 
             # LHS signed, RHS unsigned: reinterpret RHS as signed of its width
             if ( $lsig && !$rsig ) {
@@ -542,11 +599,28 @@ package Brocken::Fuzz {
             # LHS unsigned, RHS signed negative: x86_64 sign-extends the RHS,
             # but the cmp instruction runs at LHS width (32-bit for bits < 64,
             # 64-bit otherwise), so we truncate both operands to LHS width.
-            if ( !$lsig && $rsig && $rv < 0 ) {
+            if ( !$lsig && $rsig && $rv < 0 && $lbits < 128 ) {
                 my $mask = $lbits < 64 ? 0xFFFFFFFF : ~0;
                 return $self->_eval_cmp( $cmp, $lv & $mask, $rv & $mask );
             }
             return $self->_eval_cmp( $cmp, $lv, $rv );
+        }
+
+        # Evaluate comparison for 128-bit types using Math::BigInt.
+        method _eval_cmp_i128( $cmp, $lv, $rv, $lt, $rt ) {
+            my $lsig = $lt->{signed} // 1;
+            my $rsig = $rt->{signed} // 1;
+            require Math::BigInt;
+            my $l = ref($lv) && $lv->isa('Math::BigInt') ? $lv : Math::BigInt->new($lv);
+            my $r = ref($rv) && $rv->isa('Math::BigInt') ? $rv : Math::BigInt->new($rv);
+            if ( $lsig && !$rsig ) {
+                $r = $self->_reinterpret_i128_to_signed($r);
+                return $self->_eval_cmp( $cmp, $l, $r );
+            }
+            if ( !$lsig && $rsig && $r < 0 ) {
+                return $self->_eval_cmp( $cmp, $l, $r );
+            }
+            return $self->_eval_cmp( $cmp, $l, $r );
         }
 
         method _rand_i64_val() {
@@ -561,18 +635,20 @@ package Brocken::Fuzz {
         # 'f' in signed field means f64.  Weighted toward wider int types.
         method _rand_type() {
             my @types = (
-                [ 1,  1 ],      # i1  (bool)
-                [ 8,  1 ],      # i8
-                [ 8,  0 ],      # u8
-                [ 16, 1 ],      # i16
-                [ 16, 0 ],      # u16
-                [ 32, 1 ],      # i32
-                [ 32, 0 ],      # u32
-                [ 64, 1 ],      # i64
-                [ 64, 0 ],      # u64
-                [ 64, 'f' ],    # f64
+                [ 1,   1 ],      # i1  (bool)
+                [ 8,   1 ],      # i8
+                [ 8,   0 ],      # u8
+                [ 16,  1 ],      # i16
+                [ 16,  0 ],      # u16
+                [ 32,  1 ],      # i32
+                [ 32,  0 ],      # u32
+                [ 64,  1 ],      # i64
+                [ 64,  0 ],      # u64
+                [ 64,  'f' ],    # f64
+                [ 128, 1 ],      # i128
+                [ 128, 0 ],      # u128
             );
-            my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2, 2 );
+            my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2, 2, 1, 1 );
             my $total   = 0;
             $total += $_ for @weights;
             my $r = $self->_rand_int( $total - 1 );
@@ -606,9 +682,10 @@ package Brocken::Fuzz {
         # Signed types additionally apply two's-complement wrapping.
         # f64 values are stored as-is (full float precision for cascading ops).
         method _clamp_to_type( $val, $bits, $signed ) {
-            return $val & 0xFF if $bits == 1;
-            return $val        if $signed eq 'f';
-            return $val        if $bits >= 64 && $signed;
+            return $val & 0xFF                         if $bits == 1;
+            return $val                                if $signed eq 'f';
+            return $self->_clamp_i128( $val, $signed ) if $bits >= 128;
+            return $val                                if $bits >= 64 && $signed;
             if ( $bits >= 64 && !$signed ) {
                 return $val & ~0;
             }
@@ -621,14 +698,35 @@ package Brocken::Fuzz {
             return $clamped;
         }
 
+        # Clamp a value to signed/unsigned 128-bit range using Math::BigInt.
+        method _clamp_i128( $val, $signed ) {
+            require Math::BigInt;
+            my $n    = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new($val);
+            my $max  = ( Math::BigInt->new(1) << 128 );
+            my $mask = $max - 1;
+            $n = $n & $mask;
+            if ( $signed && $n >= ( Math::BigInt->new(1) << 127 ) ) {
+                $n = $n - $max;
+            }
+            return $n;
+        }
+
         # Generate a random value appropriate for the given type.
         method _rand_typed_val( $bits, $signed ) {
-            return int( rand(2) )         if $bits == 1;
-            return $self->_rand_f64_val() if $signed eq 'f';
+            return int( rand(2) )          if $bits == 1;
+            return $self->_rand_f64_val()  if $signed eq 'f';
+            return $self->_rand_i128_val() if $bits >= 128;
             if ( $bits >= 64 && !$signed ) {
                 return int( rand( 2**31 - 1 ) ) + int( rand( 2**31 - 1 ) );
             }
             return $self->_clamp_to_type( $self->_rand_i64_val(), $bits, $signed );
+        }
+
+        # Generate a random i128 value (small range for initial testing).
+        # Returns a Math::BigInt object.
+        method _rand_i128_val() {
+            require Math::BigInt;
+            return Math::BigInt->new( int( rand(200) ) - 100 );
         }
 
         # Generate a random f64-compatible value (non-negative integer stored as

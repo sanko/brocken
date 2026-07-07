@@ -1789,7 +1789,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                             add  => "${p}_add",
                             sub  => "${p}_sub",
                             mul  => "${p}_mul",
-                            div  => "${p}_div_u",
+                            div  => $p =~ /^f/ ? "${p}_div" : "${p}_div_u",
                             rem  => "${p}_rem_u",
                             udiv => "${p}_div_u",
                             urem => "${p}_rem_u",
