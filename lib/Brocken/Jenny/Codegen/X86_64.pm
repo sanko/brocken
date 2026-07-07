@@ -930,8 +930,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $bits = $dst->type  ? $dst->type->bits     : 32;
                     my $op   = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                     my $rex  = 0x40 | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+                    $bytes .= pack( 'C', $op->[0] );
                     if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
-                    $bytes .= pack( 'CCC', $op->@* ) . pack( 'C', $modrm );
+                    $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                     $bytes .= join '', $extra->@*;
                 }
                 elsif ( $opcode eq 'fstore' ) {
@@ -941,8 +942,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $bits = $src->type  ? $src->type->bits     : 32;
                     my $op   = $bits >= 64 ? [ 0xF2, 0x0F, 0x11 ] : [ 0xF3, 0x0F, 0x11 ];
                     my $rex  = 0x40 | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
+                    $bytes .= pack( 'C', $op->[0] );
                     if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
-                    $bytes .= pack( 'CCC', $op->@* ) . pack( 'C', $modrm );
+                    $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                     $bytes .= join '', $extra->@*;
                 }
                 elsif ( $opcode eq 'fmov' ) {
@@ -954,7 +956,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $op    = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
+                    $bytes .= pack( 'C', $op->[0] );
+                    if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
+                    $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'fmov_gp2f' ) {
                     my $dst_r = $resolve->($dst);
@@ -976,15 +980,17 @@ class Brocken::Jenny::Codegen::X86_64 {
                         my $op_load  = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                         my $rex_load = 0x40 | ( $did >= 8 ? 4 : 0 );
                         my $modrm_ld = 0x44 | ( ( $did & 7 ) << 3 );
-                        $bytes .= pack( 'C', $rex_load ) if $rex_load > 0x40;
-                        $bytes .= pack( 'CCCC', $op_load->[0], $op_load->[1], $op_load->[2], $modrm_ld ) . pack( 'CC', 0x24, 0x20 );
+                        $bytes .= pack( 'C', $op_load->[0] );
+                        if ( $rex_load > 0x40 ) { $bytes .= pack( 'C', $rex_load ) }
+                        $bytes .= pack( 'CC', $op_load->[1], $op_load->[2] ) . pack( 'C', $modrm_ld ) . pack( 'CC', 0x24, 0x20 );
                     }
                     else {
                         my $rex = $bits >= 64 ? 0x48 : 0x40;
                         $rex |= ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                         my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                        $bytes .= pack( 'C', $rex ) if $rex > 0x40;
-                        $bytes .= pack( 'CCC', 0x66, 0x0F, 0x6E ) . pack( 'C', $modrm );
+                        $bytes .= pack( 'C',  0x66 );
+                        $bytes .= pack( 'C',  $rex ) if $rex > 0x40;
+                        $bytes .= pack( 'CC', 0x0F, 0x6E ) . pack( 'C', $modrm );
                     }
                 }
                 elsif ( $opcode eq 'fadd' ||
@@ -1003,7 +1009,35 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $op    = $bits >= 64 ? [ 0xF2, 0x0F, $ss_op{$opcode} ] : [ 0xF3, 0x0F, $ss_op{$opcode} ];
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
+                    $bytes .= pack( 'C', $op->[0] );
+                    if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
+                    $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
+                }
+                elsif ( $opcode eq 'cvtsi2sd' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $src_r = $resolve->($src);
+                    my $did   = $reg_id->($dst_r);
+                    my $sid   = $reg_id->($src_r);
+                    my $bits  = $src->type ? $src->type->bits : 64;
+                    my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                    $rex |= 0x48 if $bits >= 64;
+                    my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                    $bytes .= pack( 'C', 0xF2 );
+                    if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
+                    $bytes .= pack( 'CCC', 0x0F, 0x2A, $modrm );
+                }
+                elsif ( $opcode eq 'cvttsd2si' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $src_r = $resolve->($src);
+                    my $did   = $reg_id->($dst_r);
+                    my $sid   = $reg_id->($src_r);
+                    my $bits  = $dst->type ? $dst->type->bits : 64;
+                    my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                    $rex |= 0x48 if $bits >= 64;
+                    my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                    $bytes .= pack( 'C', 0xF2 );
+                    if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
+                    $bytes .= pack( 'CCC', 0x0F, 0x2C, $modrm );
                 }
                 elsif ( $opcode eq 'fxor' || $opcode eq 'fand' ) {
                     my $dst_r = $resolve->($dst);
@@ -1017,7 +1051,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
 
                     if ( $bits >= 64 ) {
-                        $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
+                        $bytes .= pack( 'C', $op->[0] );
+                        if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                     }
                     else {
                         $bytes .= pack( 'CCC', $rex, $op->[0], $op->[1] ) . pack( 'C', $modrm );
@@ -1032,7 +1068,15 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $op    = $bits >= 64 ? [ 0x66, 0x0F, 0x2E ] : [ 0x0F, 0x2E ];
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'C' x ( $bits >= 64 ? 4 : 3 ), $rex, $op->@* ) . pack( 'C', $modrm );
+
+                    if ( $bits >= 64 ) {
+                        $bytes .= pack( 'C', $op->[0] );
+                        if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
+                        $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
+                    }
+                    else {
+                        $bytes .= pack( 'CCC', $rex, $op->[0], $op->[1] ) . pack( 'C', $modrm );
+                    }
                 }
                 elsif ( $opcode eq 'label' ) {
                     $labels{ $dst->value } = $current_offset->();

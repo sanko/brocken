@@ -404,6 +404,9 @@ class Brocken::Katsuro::Parser {
     }
 
     method nud($token) {
+        if ( $token->{type} eq 'FLOAT' ) {
+            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => $token->{value}, type => 'Float' );
+        }
         if ( $token->{type} eq 'NUM' ) {
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => $token->{value}, type => 'Int' );
         }

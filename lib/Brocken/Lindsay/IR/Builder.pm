@@ -78,6 +78,34 @@ class Brocken::Lindsay::IR::Builder {
         );
         return $insert_block->append_inst($inst);
     }
+
+    method build_sitofp( $val, $target_type, $name = undef, $line = 0, $col = 0 ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::SIToFP->new(
+            name        => $name // $self->_next_id(),
+            type        => $target_type,
+            opcode      => 'sitofp',
+            target_type => $target_type,
+            operands    => [$val],
+            parent      => $insert_block,
+            line        => $line,
+            col         => $col,
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_fptosi( $val, $target_type, $name = undef, $line = 0, $col = 0 ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::FPToSI->new(
+            name        => $name // $self->_next_id(),
+            type        => $target_type,
+            opcode      => 'fptosi',
+            target_type => $target_type,
+            operands    => [$val],
+            parent      => $insert_block,
+            line        => $line,
+            col         => $col,
+        );
+        return $insert_block->append_inst($inst);
+    }
     method build_udiv( $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) { $self->build_binop( 'udiv', $lhs, $rhs, $name, $line, $col ) }
     method build_urem( $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) { $self->build_binop( 'urem', $lhs, $rhs, $name, $line, $col ) }
 

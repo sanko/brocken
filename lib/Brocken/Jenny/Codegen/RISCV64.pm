@@ -18,6 +18,8 @@ class Brocken::Jenny::Codegen::RISCV64 {
         FSQRT          => 0x58000000,
         FMV_W_X        => 0xF0000000,
         FMV_D_X        => 0xF2000000,
+        FCVT_D_L       => 0xD2201000,
+        FCVT_L_D       => 0xC2201000,
         FP_FMT         => 0x02000000,
         OP_IMM         => 0x13,
         OP             => 0x33,
@@ -973,6 +975,20 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $enc   = FSQRT | ( $sid << 15 ) | ( $did << 7 ) | FP_OP;
                     $enc |= FP_FMT if $bits > 32;
                     $bytes .= pack( 'V', $enc );
+                }
+                elsif ( $opcode eq 'scvtf' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    $bytes .= pack( 'V', FCVT_D_L | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
+                }
+                elsif ( $opcode eq 'fcvtzs' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    $bytes .= pack( 'V', FCVT_L_D | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                 }
                 elsif ( $opcode eq 'ctx_swap' ) {
                     my $ctx_r    = $resolve->($dst);                                  # fiber register (s11)
