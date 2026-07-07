@@ -1014,9 +1014,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $sid   = $reg_id->($src_r);
                     my $fbits = $dst->type ? $dst->type->bits : 64;
                     my $ibits = $src->type ? $src->type->bits : 64;
-                    my $base  = 0x1E224000;
-                    $base |= 0x80000000 if $fbits == 64;
-                    $base |= 0x200000   if $ibits == 64;
+                    my $base  = 0x1E220000;
+                    $base |= 0x400000   if $fbits == 64;
+                    $base |= 0x80000000 if $ibits == 64;
                     $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'fcvtzs' ) {
@@ -1026,9 +1026,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $sid   = $reg_id->($src_r);
                     my $fbits = $src->type ? $src->type->bits : 64;
                     my $ibits = $dst->type ? $dst->type->bits : 64;
-                    my $base  = 0x9E880000;
-                    $base |= 0x400000 if $fbits == 64;
-                    $base |= 0x200000 if $ibits == 64;
+                    my $base  = 0x1E380000;
+                    $base |= 0x400000   if $fbits == 64;
+                    $base |= 0x80000000 if $ibits == 64;
                     $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'fcmp' ) {
