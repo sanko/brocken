@@ -9,9 +9,7 @@ use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# ---------------------------------------------------------------------------
 # x86_64: SIToFP -> cvtsi2sd, FPToSI -> cvttsd2si
-# ---------------------------------------------------------------------------
 subtest 'x86_64 SIToFP and FPToSI lowering' => sub {
     my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu') );
 
@@ -72,9 +70,7 @@ subtest 'x86_64 SIToFP and FPToSI lowering' => sub {
     }
 };
 
-# ---------------------------------------------------------------------------
 # ARM64: SIToFP -> scvtf, FPToSI -> fcvtzs
-# ---------------------------------------------------------------------------
 subtest 'ARM64 SIToFP and FPToSI lowering' => sub {
     my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu') );
 
@@ -133,9 +129,7 @@ subtest 'ARM64 SIToFP and FPToSI lowering' => sub {
     }
 };
 
-# ---------------------------------------------------------------------------
 # RISCV64: SIToFP -> scvtf (FCVT.D.L), FPToSI -> fcvtzs (FCVT.L.D)
-# ---------------------------------------------------------------------------
 subtest 'RISCV64 SIToFP and FPToSI lowering' => sub {
     my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new( platform => Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu') );
 
@@ -194,9 +188,7 @@ subtest 'RISCV64 SIToFP and FPToSI lowering' => sub {
     }
 };
 
-# ---------------------------------------------------------------------------
 # Wasm: SIToFP -> f64_convert_i64_s, FPToSI -> i64_trunc_f64_s
-# ---------------------------------------------------------------------------
 subtest 'Wasm SIToFP and FPToSI lowering' => sub {
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
 

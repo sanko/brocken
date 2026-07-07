@@ -94,8 +94,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         FDIV           => 0x1E201800,
         FMIN           => 0x1E205800,
         FMAX           => 0x1E204800,
-        SCVTF_D_X      => 0x9E224000,
-        FCVTZS_X_D     => 0x9EF80000,
+        SCVTF_D_X      => 0x9E244000,    # unused (type-aware now)
+        FCVTZS_X_D     => 0x9EE80000,    # unused (type-aware now)
         SF             => 0x80000000,
         BR             => 0xD61F0000,
         ADR            => 0x10000000,
@@ -1012,14 +1012,24 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $src_r = $resolve->($src);
                     my $did   = $reg_id->($dst_r);
                     my $sid   = $reg_id->($src_r);
-                    $bytes .= pack( 'V', SCVTF_D_X | ( $sid << 5 ) | $did );
+                    my $fbits = $dst->type ? $dst->type->bits : 64;
+                    my $ibits = $src->type ? $src->type->bits : 64;
+                    my $base  = 0x1E224000;
+                    $base |= 0x80000000 if $fbits == 64;
+                    $base |= 0x200000   if $ibits == 64;
+                    $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'fcvtzs' ) {
                     my $dst_r = $resolve->($dst);
                     my $src_r = $resolve->($src);
                     my $did   = $reg_id->($dst_r);
                     my $sid   = $reg_id->($src_r);
-                    $bytes .= pack( 'V', FCVTZS_X_D | ( $sid << 5 ) | $did );
+                    my $fbits = $src->type ? $src->type->bits : 64;
+                    my $ibits = $dst->type ? $dst->type->bits : 64;
+                    my $base  = 0x9E880000;
+                    $base |= 0x400000 if $fbits == 64;
+                    $base |= 0x200000 if $ibits == 64;
+                    $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'fcmp' ) {
                     my $lhs_r = $resolve->($dst);

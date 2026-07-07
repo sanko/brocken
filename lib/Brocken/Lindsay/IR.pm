@@ -2,9 +2,7 @@ use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
 
-# ============================================================
 # Types
-# ============================================================
 class Brocken::Lindsay::IR::Type {
     field $kind           : reader : param;            # 'int', 'float', 'ptr', 'void', 'dynamic', 'struct'
     field $bits           : reader : param = 0;        # 8, 16, 32, 64, ... (struct: total bits)
