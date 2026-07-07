@@ -145,10 +145,11 @@ package Brocken::Fuzz {
                 push @var_names, $name;
                 my ( $bits, $signed ) = $self->_rand_type();
                 $var_types->{$name} = { bits => $bits, signed => $signed };
-                my $init = $self->_rand_typed_val( $bits, $signed );
-                $vars->{$name} = $init;
+                my $init_val = $self->_rand_typed_val( $bits, $signed );
+                $vars->{$name} = $init_val;
                 my $keyword = $self->_type_keyword( $bits, $signed );
-                push @stmts, "my $keyword \$$name = $init;";
+                my $fmt     = $self->_fmt_val( $init_val, $bits, $signed );
+                push @stmts, "my $keyword \$$name = $fmt;";
             }
 
             # Generate random operations
@@ -158,7 +159,13 @@ package Brocken::Fuzz {
                 push @stmts, $stmt->{code} if $stmt->{code};
             }
             my $result_var = $var_names[ $self->_rand_int($#var_names) ];
-            push @stmts, "return \$$result_var;";
+            if ( $var_types->{$result_var}{signed} eq 'f' ) {
+                push @stmts, "my i64 \$__r0 = \$$result_var;";
+                push @stmts, "return \$__r0;";
+            }
+            else {
+                push @stmts, "return \$$result_var;";
+            }
             my $source   = join "\n", @stmts;
             my $expected = $vars->{$result_var} & 0xFF;
             return { source => $source, expected => $expected, vars => $vars };
@@ -166,9 +173,12 @@ package Brocken::Fuzz {
 
         # Generate a single random statement
         method _random_stmt( $vars, $var_types, $var_names, $is_last ) {
-            my $n_vars  = scalar( $var_names->@* );
-            my @i1_vars = grep { $var_types->{$_}{bits} == 1 } $var_names->@*;
-            my $type    = $self->_rand_int(6);
+            my $n_vars     = scalar( $var_names->@* );
+            my @i1_vars    = grep { $var_types->{$_}{bits} == 1 } $var_names->@*;
+            my @f64_vars   = grep { $var_types->{$_}{signed} eq 'f' } $var_names->@*;
+            my $n_f64_vars = scalar(@f64_vars);
+            my $n_int_vars = $n_vars - $n_f64_vars;
+            my $type       = $self->_rand_int(9);
             if ( $type == 0 ) {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
@@ -187,19 +197,31 @@ package Brocken::Fuzz {
             elsif ( $type == 5 && scalar(@i1_vars) >= 1 ) {
                 return $self->_gen_bool_unop( $vars, $var_types, $var_names );
             }
+            elsif ( $type == 6 && $n_f64_vars >= 2 ) {
+                return $self->_gen_fbinop_assign( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 7 && $n_f64_vars >= 1 && $n_int_vars >= 1 ) {
+                return $self->_gen_f2i_assign( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 8 && $n_f64_vars >= 1 && $n_int_vars >= 1 ) {
+                return $self->_gen_mixed_binop_assign( $vars, $var_types, $var_names );
+            }
             else {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
         }
 
         method _gen_binop_assign( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 2;
             my $dst      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $lhs      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $rhs      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $lhs      = $int_names[ $self->_rand_int($#int_names) ];
+            my $rhs      = $int_names[ $self->_rand_int($#int_names) ];
             my $lv       = $vars->{$lhs};
             my $rv       = $vars->{$rhs};
             my $dst_bits = $var_types->{$dst}{bits} // 64;
             my $op;
+
             for my $try ( 0 .. 9 ) {
                 $op = $self->_rand_binop();
                 last
@@ -220,8 +242,10 @@ package Brocken::Fuzz {
         }
 
         method _gen_unop_assign( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 1;
             my $dst = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $src = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $src = $int_names[ $self->_rand_int($#int_names) ];
             my $sv  = $vars->{$src};
             return { code => "\$$dst = -\$$src;" } unless defined $sv;
             my $t = $var_types->{$dst};
@@ -230,18 +254,20 @@ package Brocken::Fuzz {
         }
 
         method _gen_if_else( $vars, $var_types, $var_names ) {
-            my $lhs      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $rhs      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 2;
+            my $lhs      = $int_names[ $self->_rand_int($#int_names) ];
+            my $rhs      = $int_names[ $self->_rand_int($#int_names) ];
             my $cmp      = $self->_rand_cmpop();
             my $lv       = $vars->{$lhs} // 0;
             my $rv       = $vars->{$rhs} // 0;
             my $cond     = $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
             my $var      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
             my $var_bits = $var_types->{$var}{bits} // 64;
-            my $then_l   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $then_r   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $else_l   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $else_r   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $then_l   = $int_names[ $self->_rand_int($#int_names) ];
+            my $then_r   = $int_names[ $self->_rand_int($#int_names) ];
+            my $else_l   = $int_names[ $self->_rand_int($#int_names) ];
+            my $else_r   = $int_names[ $self->_rand_int($#int_names) ];
             my $then_rv  = $vars->{$then_r} // 0;
             my $then_op;
 
@@ -276,9 +302,11 @@ package Brocken::Fuzz {
 
         # Compare two variables and assign the boolean (1/0) result to a destination.
         method _gen_cmp_assign( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 2;
             my $dst  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $lhs  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $rhs  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $lhs  = $int_names[ $self->_rand_int($#int_names) ];
+            my $rhs  = $int_names[ $self->_rand_int($#int_names) ];
             my $cmp  = $self->_rand_cmpop();
             my $lv   = $vars->{$lhs} // 0;
             my $rv   = $vars->{$rhs} // 0;
@@ -326,6 +354,12 @@ package Brocken::Fuzz {
             return { code => join( "\n", "if (\$$src) {", "    \$$dst = 0;", "} else {", "    \$$dst = 1;", "}" ), };
         }
 
+        # Float binary ops (+, -, *, / only; no shift/bitwise for float)
+        method _rand_fbinop() {
+            my @ops = qw[+ - * /];
+            return $ops[ $self->_rand_int($#ops) ];
+        }
+
         method _rand_binop() {
             my @ops = qw[+ - * / % & | ^ << >>];
             return $ops[ $self->_rand_int($#ops) ];
@@ -334,6 +368,92 @@ package Brocken::Fuzz {
         method _rand_cmpop() {
             my @ops = qw[== != < > <= >=];
             return $ops[ $self->_rand_int($#ops) ];
+        }
+
+        # Evaluate a float binop using Perl's native float arithmetic.
+        # Division by zero yields 0 (matches Brocken's defined behavior).
+        method _eval_f64_binop( $op, $l, $r ) {
+            if ( $op eq '+' ) { return $l + $r }
+            if ( $op eq '-' ) { return $l - $r }
+            if ( $op eq '*' ) { return $l * $r }
+            if ( $op eq '/' ) { return $r != 0 ? $l / $r : 0 }
+            return undef;
+        }
+
+        # Generate a float-to-int assignment (fptosi via maybe_convert_type).
+        # Source is f64, destination is any int type.
+        method _gen_f2i_assign( $vars, $var_types, $var_names ) {
+            my @f64_vars = grep { $var_types->{$_}{signed} eq 'f' } $var_names->@*;
+            my @int_vars = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @f64_vars < 1 || @int_vars < 1;
+            my $src = $f64_vars[ $self->_rand_int($#f64_vars) ];
+            my $dst = $int_vars[ $self->_rand_int($#int_vars) ];
+            my $sv  = $vars->{$src};
+            if ( defined $sv ) {
+                my $t = $var_types->{$dst};
+                $vars->{$dst} = $self->_clamp_to_type( int($sv), $t->{bits}, $t->{signed} );
+            }
+            return { code => "\$$dst = \$$src;" };
+        }
+
+        # Generate a mixed int/float binop assignment.
+        # One operand is int, the other is f64.  The LHS determines the result
+        # type; the Brocken compiler converts RHS to match via maybe_convert_type
+        # (sitofp for int->float, fptosi for float->int).
+        method _gen_mixed_binop_assign( $vars, $var_types, $var_names ) {
+            my @f64_vars = grep { $var_types->{$_}{signed} eq 'f' } $var_names->@*;
+            my @int_vars = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @f64_vars < 1 || @int_vars < 1;
+            my $flip = $self->_rand_int(1);
+            my $lhs  = $flip ? $int_vars[ $self->_rand_int($#int_vars) ]
+                : $f64_vars[ $self->_rand_int($#f64_vars) ];
+            my $rhs  = $flip ? $f64_vars[ $self->_rand_int($#f64_vars) ]
+                : $int_vars[ $self->_rand_int($#int_vars) ];
+            my $dst  = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $lv   = $vars->{$lhs};
+            my $rv   = $vars->{$rhs};
+            my $op   = $self->_rand_fbinop();
+            if ( defined $lv && defined $rv ) {
+                if ( $op eq '/' && $rv == 0 ) { $op = '+' }
+                my $result;
+                if ($flip) {
+                    # LHS is int, RHS is float: fptosi RHS, then int op
+                    my $t   = $var_types->{$lhs};
+                    my $irv = int($rv);
+                    $result = $self->_eval_i64_typed( $op, $lv, $irv, $t, $t );
+                }
+                else {
+                    # LHS is float, RHS is int: sitofp RHS, then float op
+                    $result = $self->_eval_f64_binop( $op, $lv, $rv );
+                }
+                if ( defined $result ) {
+                    my $t = $var_types->{$dst};
+                    $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
+                }
+            }
+            return { code => "\$$dst = \$$lhs $op \$$rhs;" };
+        }
+
+        # Generate a float binop assignment between two f64 vars.
+        # Dst is also f64; all three operands must be f64-typed.
+        method _gen_fbinop_assign( $vars, $var_types, $var_names ) {
+            my @f64_vars = grep { $var_types->{$_}{signed} eq 'f' } $var_names->@*;
+            return { code => undef } if @f64_vars < 2;
+            my $dst = $f64_vars[ $self->_rand_int($#f64_vars) ];
+            my $lhs = $f64_vars[ $self->_rand_int($#f64_vars) ];
+            my $rhs = $f64_vars[ $self->_rand_int($#f64_vars) ];
+            my $lv  = $vars->{$lhs};
+            my $rv  = $vars->{$rhs};
+            my $op  = $self->_rand_fbinop();
+
+            if ( defined $lv && defined $rv ) {
+                if ( $op eq '/' && $rv == 0 ) { $op = '+' }
+                my $result = $self->_eval_f64_binop( $op, $lv, $rv );
+                if ( defined $result ) {
+                    $vars->{$dst} = $self->_clamp_to_type( $result, 64, 'f' );
+                }
+            }
+            return { code => "\$$dst = \$$lhs $op \$$rhs;" };
         }
 
         method _eval_i64( $op, $l, $r ) {
@@ -403,13 +523,15 @@ package Brocken::Fuzz {
         # Evaluate comparison matching Brocken's semantics:
         # signed/unsigned choice from LHS type only; no common-type promotion.
         # When LHS is unsigned and RHS is signed negative, the RHS sign-extends
-        # to >= 2^63 in unsigned interpretation, so comparisons with unsigned LHS
-        # (< 2^63) have fixed outcomes.
+        # to >= 2^63 in unsigned interpretation.
+        # Comparison width is the LHS type width (x86_64 uses 32-bit for types
+        # with bits < 64, 64-bit otherwise).
         # When LHS is signed and RHS is unsigned with high bit set, the unsigned
         # RHS bit pattern is interpreted as signed negative (matching x86 codegen).
         method _eval_cmp_typed( $cmp, $lv, $rv, $lt, $rt ) {
-            my $lsig = $lt->{signed} // 1;
-            my $rsig = $rt->{signed} // 1;
+            my $lsig  = $lt->{signed} // 1;
+            my $rsig  = $rt->{signed} // 1;
+            my $lbits = $lt->{bits}   // 64;
 
             # LHS signed, RHS unsigned: reinterpret RHS as signed of its width
             if ( $lsig && !$rsig ) {
@@ -417,13 +539,12 @@ package Brocken::Fuzz {
                 return $self->_eval_cmp( $cmp, $lv, $signed_rv );
             }
 
-            # LHS unsigned, RHS signed negative: unsigned comparison treats
-            # negative RHS as >= 2^63, giving fixed outcomes for small LHS
+            # LHS unsigned, RHS signed negative: x86_64 sign-extends the RHS,
+            # but the cmp instruction runs at LHS width (32-bit for bits < 64,
+            # 64-bit otherwise), so we truncate both operands to LHS width.
             if ( !$lsig && $rsig && $rv < 0 ) {
-                if ( $cmp eq '<' || $cmp eq '<=' ) { return 1 }
-                if ( $cmp eq '>' || $cmp eq '>=' ) { return 0 }
-                if ( $cmp eq '==' )                { return 0 }
-                if ( $cmp eq '!=' )                { return 1 }
+                my $mask = $lbits < 64 ? 0xFFFFFFFF : ~0;
+                return $self->_eval_cmp( $cmp, $lv & $mask, $rv & $mask );
             }
             return $self->_eval_cmp( $cmp, $lv, $rv );
         }
@@ -436,22 +557,22 @@ package Brocken::Fuzz {
             return int( rand( $max + 1 ) );
         }
 
-        # Return a random integer type as (bits, signed) tuple.
-        # Weighted toward wider types so clamping doesn't dominate early.
-        # Unsigned types have lower weight than their signed counterparts.
+        # Return a random type as (bits, signed) tuple.
+        # 'f' in signed field means f64.  Weighted toward wider int types.
         method _rand_type() {
             my @types = (
-                [ 1,  1 ],    # i1  (bool)
-                [ 8,  1 ],    # i8
-                [ 8,  0 ],    # u8
-                [ 16, 1 ],    # i16
-                [ 16, 0 ],    # u16
-                [ 32, 1 ],    # i32
-                [ 32, 0 ],    # u32
-                [ 64, 1 ],    # i64
-                [ 64, 0 ],    # u64
+                [ 1,  1 ],      # i1  (bool)
+                [ 8,  1 ],      # i8
+                [ 8,  0 ],      # u8
+                [ 16, 1 ],      # i16
+                [ 16, 0 ],      # u16
+                [ 32, 1 ],      # i32
+                [ 32, 0 ],      # u32
+                [ 64, 1 ],      # i64
+                [ 64, 0 ],      # u64
+                [ 64, 'f' ],    # f64
             );
-            my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2 );
+            my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2, 2 );
             my $total   = 0;
             $total += $_ for @weights;
             my $r = $self->_rand_int( $total - 1 );
@@ -465,14 +586,29 @@ package Brocken::Fuzz {
         # Return the Brocken source-level type keyword for a (bits, signed) pair.
         method _type_keyword( $bits, $signed ) {
             return 'bool' if $bits == 1;
+            return 'f64'  if $signed eq 'f';
             return $signed ? "i$bits" : "u$bits";
         }
 
-        # Clamp a Perl integer value to the range of a given integer type.
-        # i1 returns 0 or 1.  Signed types use two's-complement wrapping.
+        # Format a typed value for embedding in Brocken source code.
+        method _fmt_val( $val, $bits, $signed ) {
+            return 'true'        if $bits == 1 && $val;
+            return 'false'       if $bits == 1 && !$val;
+            return "$val" . '.0' if $signed eq 'f';
+            return "$val";
+        }
+
+        # Clamp a Perl value to the range of a given type.
+        # For all integer types, the alloca is byte-granular and Store truncates
+        # to the alloca byte width, so i1/i8 clamp to a single byte (0xFF),
+        # i16 to 0xFFFF, etc.  This matches Brocken's maybe_convert_type behavior
+        # which does NOT narrow int-to-int (full lower bytes are retained).
+        # Signed types additionally apply two's-complement wrapping.
+        # f64 values are stored as-is (full float precision for cascading ops).
         method _clamp_to_type( $val, $bits, $signed ) {
-            return $val ? 1 : 0 if $bits == 1;
-            return $val         if $bits >= 64 && $signed;
+            return $val & 0xFF if $bits == 1;
+            return $val        if $signed eq 'f';
+            return $val        if $bits >= 64 && $signed;
             if ( $bits >= 64 && !$signed ) {
                 return $val & ~0;
             }
@@ -487,11 +623,18 @@ package Brocken::Fuzz {
 
         # Generate a random value appropriate for the given type.
         method _rand_typed_val( $bits, $signed ) {
-            return int( rand(2) ) if $bits == 1;
+            return int( rand(2) )         if $bits == 1;
+            return $self->_rand_f64_val() if $signed eq 'f';
             if ( $bits >= 64 && !$signed ) {
                 return int( rand( 2**31 - 1 ) ) + int( rand( 2**31 - 1 ) );
             }
             return $self->_clamp_to_type( $self->_rand_i64_val(), $bits, $signed );
+        }
+
+        # Generate a random f64-compatible value (non-negative integer stored as
+        # Perl float; avoids negative-literal parse concerns in declarations).
+        method _rand_f64_val() {
+            return int( rand(100) );
         }
 
         # Break reference cycles in an IR Module to allow Perl GC to free it.

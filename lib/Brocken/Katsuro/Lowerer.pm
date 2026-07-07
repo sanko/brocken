@@ -743,6 +743,14 @@ class Brocken::Katsuro::Lowerer {
             $lhs = $self->maybe_convert_type( $lhs, $native );
             $rhs = $self->maybe_convert_type( $rhs, $native );
         }
+
+        # Unify types for mixed int/float operations: convert RHS to match LHS
+        # type.  This ensures the MIR lowerer sees two operands of the same
+        # type kind (both float or both int) and can emit the correct opcode
+        # (fadd vs add, fcmp vs icmp, etc.).
+        if ( $lhs->type->kind ne $rhs->type->kind && $lhs->type->kind ne 'dynamic' && $rhs->type->kind ne 'dynamic' ) {
+            $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
+        }
         return $builder->build_add( $lhs, $rhs, undef, $line, $col ) if $op eq '+';
         return $builder->build_sub( $lhs, $rhs, undef, $line, $col ) if $op eq '-';
         return $builder->build_mul( $lhs, $rhs, undef, $line, $col ) if $op eq '*';
