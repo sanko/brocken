@@ -502,7 +502,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $resolve = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
             return $op->value                                if $op->kind eq 'phys_reg';
-            die "Unexpected operand kind: ${\$op->kind}";
+            die "Unexpected operand kind: ${\$op->kind} (op_value=${\$op->value})";
         };
         my %labels;
         my @fixups;
@@ -567,6 +567,12 @@ class Brocken::Jenny::Codegen::X86_64 {
                 }
                 my $opcode = $inst->opcode;
                 my ( $dst, $src ) = $inst->operands->@*;
+                for my $o ( $inst->operands->@* ) {
+                    if ( $o->kind eq 'imm' && $o->value == 90 ) {
+                        warn "imm 90 in opcode=$opcode operands=" .
+                            ( join ", ", map { $_->kind . "=" . ( $_->value // "undef" ) } $inst->operands->@* ) . "\n";
+                    }
+                }
                 if ( $opcode eq 'mov' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
