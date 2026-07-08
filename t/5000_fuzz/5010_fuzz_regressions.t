@@ -545,7 +545,7 @@ PROG
 #   comparison results.
 #   Fix: added AND mask in maybe_convert_type for val->bits > target->bits.
 #   Fuzzer seed 20260705, case 10.
-subtest 'int→int narrowing in maybe_convert_type (seed 20260705 case 10)' => sub {
+subtest 'int->int narrowing in maybe_convert_type (seed 20260705 case 10)' => sub {
     test_prog( 'i16^u8 to bool then f64 cmp', <<'PROG', 175 );
 my i64 $v1 = -99;
 my bool $v2 = true;
