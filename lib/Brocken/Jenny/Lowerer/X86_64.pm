@@ -4422,9 +4422,13 @@ class Brocken::Jenny::Lowerer::X86_64 {
     method _split_i128($ir_val) {
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
             my $val = $ir_val->value;
-            my $lo  = $val & 0xFFFFFFFFFFFFFFFF;
-            my $hi  = ( $val >> 64 ) & 0xFFFFFFFFFFFFFFFF;
-            $hi = 0xFFFFFFFFFFFFFFFF                 if $val < 0;
+            my $lo;
+            my $hi;
+            require Math::BigInt;
+            my $n = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new($val);
+            my $mask64 = ( Math::BigInt->new(1) << 64 ) - 1;
+            $lo = ( $n & $mask64 )->numify;
+            $hi = ( ( $n >> 64 ) & $mask64 )->numify;
             $hi = -( ~$hi & 0xFFFFFFFFFFFFFFFF ) - 1 if $hi >= 0x8000000000000000;
             $lo = -( ~$lo & 0xFFFFFFFFFFFFFFFF ) - 1 if $lo >= 0x8000000000000000;
             return (
