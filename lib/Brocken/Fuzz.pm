@@ -26,7 +26,6 @@ package Brocken::Fuzz {
         field $ext          : reader;
         ADJUST {
             $seed //= int( rand(2147483647) );
-            srand($seed);
             require Brocken;
             require Brocken::Compiler;
             my $b = Brocken->new();
@@ -37,6 +36,7 @@ package Brocken::Fuzz {
             $host_str = ref( $b->platform ) ? $b->platform->friendly : $b->platform;
             $tmpdir   = $b->tmpdir;
             $ext      = $b->ext;
+            srand($seed);
         }
         method seed() { return $seed }
 
@@ -183,6 +183,7 @@ package Brocken::Fuzz {
             my $uses_big = scalar( grep { $var_types->{$_}{bits} >= 128 } keys $var_types->%* );
             if ( !$uses_big ) {
                 for my $sub (@subs_meta) {
+                    if ( $sub->{return_type}{bits} >= 128 ) { $uses_big = 1; last }
                     for my $p ( $sub->{params}->@* ) {
                         if ( $p->{bits} >= 128 ) { $uses_big = 1; last }
                     }
@@ -291,8 +292,10 @@ package Brocken::Fuzz {
             my $src = $int_names[ $self->_rand_int($#int_names) ];
             my $sv  = $vars->{$src};
             return { code => "\$$dst = -\$$src;" } unless defined $sv;
-            my $t = $var_types->{$dst};
-            $vars->{$dst} = $self->_clamp_to_type( -$sv, $t->{bits}, $t->{signed} );
+            my $t         = $var_types->{$dst};
+            my $st        = $var_types->{$src};
+            my $converted = $self->_clamp_to_type( $sv, $t->{bits}, $t->{signed} );
+            $vars->{$dst} = $self->_clamp_to_type( -$converted, $t->{bits}, $t->{signed} );
             return { code => "\$$dst = -\$$src;" };
         }
 
@@ -509,8 +512,10 @@ package Brocken::Fuzz {
                 my $apply = sub {
                     my $sv = $vars->{$src};
                     return unless defined $sv;
-                    my $t = $var_types->{$dst};
-                    $vars->{$dst} = $self->_clamp_to_type( -$sv, $t->{bits}, $t->{signed} );
+                    my $t         = $var_types->{$dst};
+                    my $st        = $var_types->{$src};
+                    my $converted = $self->_clamp_to_type( $sv, $t->{bits}, $t->{signed} );
+                    $vars->{$dst} = $self->_clamp_to_type( -$converted, $t->{bits}, $t->{signed} );
                 };
                 return { code => $code, apply => $apply };
             }
@@ -743,7 +748,10 @@ package Brocken::Fuzz {
         # operation (sdiv/idiv/setCC with signed condition), has its bit pattern
         # interpreted as a negative signed value.
         method _reinterpret_to_signed( $val, $bits ) {
-            return $val if $bits >= 64;
+            return $val if $bits > 64;
+            if ( $bits == 64 ) {
+                return $val < 9223372036854775808 ? $val : -( ~$val ) - 1;
+            }
             my $sign_bit = 1 << ( $bits - 1 );
             my $mask     = ( 1 << $bits ) - 1;
             my $wrapped  = $val & $mask;
@@ -923,7 +931,7 @@ package Brocken::Fuzz {
         # f64 values force float conversion (0.0 + $val) to match sitofp semantics
         # when int results are stored to f64 destinations by _gen_binop_assign etc.
         method _clamp_to_type( $val, $bits, $signed ) {
-            return $val ? 1 : 0                        if $bits == 1;
+            return $val & 1                            if $bits == 1;
             return 0.0 + $val                          if $signed eq 'f';
             return $self->_clamp_i128( $val, $signed ) if $bits >= 128;
             return $val                                if $bits >= 64 && $signed;
@@ -1061,6 +1069,9 @@ package Brocken::Fuzz {
             unless ($error) {
                 $exit_code = $? >> 8;
                 $exit_code = undef if $? == -1;
+                if ( $? & 127 ) {
+                    $error = "signal " . ( $? & 127 );
+                }
             }
             return { exit_code => $exit_code, stdout => $stdout, stderr => $stderr, error => $error };
         }

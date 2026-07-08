@@ -1212,10 +1212,10 @@ class Brocken::Jenny::Codegen::ARM64 {
     }
 
     method _caller_save_base( $gp_spill, $fp_spill ) {
-        my $max_off = 0;
+        my $max_off = -1;
         for my $off ( values $gp_spill->%* ) { $max_off = $off if $off > $max_off; }
         for my $off ( values $fp_spill->%* ) { $max_off = $off if $off > $max_off; }
-        return $max_off ? int( $max_off / 8 ) + 1 : 0;
+        return $max_off >= 0 ? int( $max_off / 8 ) + 1 : 0;
     }
 
     method build_debug_data( $ir_funcs, $func_blobs, $source_file = 'source.brocken', $text_base = 0, $class_info = {}, $debug_level = 0 ) {

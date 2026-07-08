@@ -4645,7 +4645,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
             my $lo;
             my $hi;
             require Math::BigInt;
-            my $n = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new($val);
+            my $n      = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new($val);
             my $mask64 = ( Math::BigInt->new(1) << 64 ) - 1;
             $lo = ( $n & $mask64 )->numify;
             $hi = ( ( $n >> 64 ) & $mask64 )->numify;

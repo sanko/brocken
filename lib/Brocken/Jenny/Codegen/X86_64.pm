@@ -42,6 +42,22 @@ class Brocken::Jenny::Codegen::X86_64 {
         # Caller-save: save/restore caller regs around call_func (exclude return registers)
         my %skip;
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+
+        # i128 return uses rax:rdx -- rdx must also be excluded from caller-save
+        # or the post-call restore overwrites the hi return value before the
+        # Lowerer reads it.  Detect call_func whose next instr reads from rdx.
+        for my $bb ( $mf->blocks->@* ) {
+            for my $i ( 0 .. $#{ $bb->instructions } ) {
+                my $inst = $bb->instructions->[$i];
+                next unless $inst->opcode eq 'call_func';
+                my $next = $bb->instructions->[ $i + 1 ];
+                if ( $next && $next->opcode eq 'mov' && $next->operands->[1]->kind eq 'phys_reg' && $next->operands->[1]->value eq 'rdx' ) {
+                    $skip{rdx} = 1;
+                    last;
+                }
+            }
+            last if $skip{rdx};
+        }
         my @gp_caller   = grep { !$skip{$_} } $platform->registers('caller')->@*;
         my @fp_caller   = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
         my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
@@ -103,6 +119,30 @@ class Brocken::Jenny::Codegen::X86_64 {
             my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
             my %skip;
             @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+
+            # i128 return: exclude rdx from caller-save (same pattern as above)
+            for my $bb ( $mf->blocks->@* ) {
+                my @insts = $bb->instructions->@*;
+                for my $i ( 0 .. $#insts ) {
+                    my $inst = $insts[$i];
+                    next unless $inst->opcode eq 'call_func';
+
+                    # Scan subsequent instructions for mov %vreg, rdx (i128 hi return)
+                    for my $j ( $i + 1 .. $#insts ) {
+                        last if $insts[$j]->opcode eq 'call_func';
+                        my $n = $insts[$j];
+                        if ( $n->opcode eq 'mov' &&
+                            scalar( $n->operands->@* ) >= 2 &&
+                            $n->operands->[1]->kind eq 'phys_reg' &&
+                            $n->operands->[1]->value eq 'rdx' ) {
+                            $skip{rdx} = 1;
+                            last;
+                        }
+                    }
+                    last if $skip{rdx};
+                }
+                last if $skip{rdx};
+            }
             my @gp_caller   = grep { !$skip{$_} } $platform->registers('caller')->@*;
             my @fp_caller   = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
             my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
@@ -159,6 +199,20 @@ class Brocken::Jenny::Codegen::X86_64 {
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
         my %skip;
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
+
+        # i128 return: exclude rdx from caller-save (same as emit_one_function)
+        for my $bb ( $mf->blocks->@* ) {
+            for my $i ( 0 .. $#{ $bb->instructions } ) {
+                my $inst = $bb->instructions->[$i];
+                next unless $inst->opcode eq 'call_func';
+                my $next = $bb->instructions->[ $i + 1 ];
+                if ( $next && $next->opcode eq 'mov' && $next->operands->[1]->kind eq 'phys_reg' && $next->operands->[1]->value eq 'rdx' ) {
+                    $skip{rdx} = 1;
+                    last;
+                }
+            }
+            last if $skip{rdx};
+        }
         my @gp_caller   = grep { !$skip{$_} } $platform->registers('caller')->@*;
         my @fp_caller   = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
         my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
@@ -826,7 +880,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                     }
                 }
                 elsif ( $opcode eq 'alloca' ) {
-                    $alloca_map->{ $dst->value } = ( $alloca_top + 15 ) & ~15 if $alloca_map;
+                    my $asan_off = ( $alloca_top + 15 ) & ~15;
+                    $alloca_map->{ $dst->value } = $asan_off if $alloca_map;
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my $size  = $src->value;
@@ -1354,10 +1409,10 @@ class Brocken::Jenny::Codegen::X86_64 {
     }
 
     method _caller_save_base( $gp_spill, $fp_spill ) {
-        my $max_off = 0;
+        my $max_off = -1;
         for my $off ( values $gp_spill->%* ) { $max_off = $off if $off > $max_off; }
         for my $off ( values $fp_spill->%* ) { $max_off = $off if $off > $max_off; }
-        return $max_off ? int( $max_off / 8 ) + 1 : 0;
+        return $max_off >= 0 ? int( $max_off / 8 ) + 1 : 0;
     }
 
     # Builds DWARF debug sections from IR functions and emitted code.
