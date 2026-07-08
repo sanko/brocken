@@ -1000,6 +1000,7 @@ class Brocken::Katsuro::Lowerer {
         }
 
         # Integer widening: zero-extend for unsigned, sign-extend for signed
+        # Integer narrowing: mask to target bit width (AND with mask)
         if ( $val->type->kind eq 'int' && $target_type->kind eq 'int' ) {
             if ( $val->type->bits < $target_type->bits ) {
                 if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
@@ -1007,6 +1008,14 @@ class Brocken::Katsuro::Lowerer {
                 }
                 return ( $val->type->is_signed && $val->type->bits > 1 ) ? $builder->build_sext( $val, $target_type, undef, $line, $col ) :
                     $builder->build_zext( $val, $target_type, undef, $line, $col );
+            }
+            if ( $val->type->bits > $target_type->bits ) {
+                my $mask = ( 1 << $target_type->bits ) - 1;
+                if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                    return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value & $mask );
+                }
+                my $mask_val = Brocken::Lindsay::IR::Constant->new( type => $val->type, value => $mask );
+                return $builder->build_and( $val, $mask_val, undef, $line, $col );
             }
         }
 

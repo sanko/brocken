@@ -567,12 +567,6 @@ class Brocken::Jenny::Codegen::X86_64 {
                 }
                 my $opcode = $inst->opcode;
                 my ( $dst, $src ) = $inst->operands->@*;
-                for my $o ( $inst->operands->@* ) {
-                    if ( $o->kind eq 'imm' && $o->value == 90 ) {
-                        warn "imm 90 in opcode=$opcode operands=" .
-                            ( join ", ", map { $_->kind . "=" . ( $_->value // "undef" ) } $inst->operands->@* ) . "\n";
-                    }
-                }
                 if ( $opcode eq 'mov' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
@@ -860,9 +854,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did );
-                    my $bits = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
+                    my $bits = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
                     if ( $bits < 32 ) {
-                        my $signed = $dst->type && $dst->type->kind eq 'int' ? $dst->type->signed : 1;
+                        my $signed = $src->type && $src->type->kind eq 'int' ? $src->type->signed : 1;
                         my $rex    = 0x40 | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
                         if ($signed) {
 
@@ -933,8 +927,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did );
-                    my $bits = $dst->type  ? $dst->type->bits     : 32;
-                    my $op   = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
+                    my $bits = $src->type && $src->type->kind eq 'float' ? $src->type->bits     : 64;
+                    my $op   = $bits >= 64                               ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                     my $rex  = 0x40 | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
                     $bytes .= pack( 'C', $op->[0] );
                     if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
@@ -945,8 +939,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $dst, $sid );
-                    my $bits = $src->type  ? $src->type->bits     : 32;
-                    my $op   = $bits >= 64 ? [ 0xF2, 0x0F, 0x11 ] : [ 0xF3, 0x0F, 0x11 ];
+                    my $bits = $src->type && $src->type->kind eq 'float' ? $src->type->bits     : 64;
+                    my $op   = $bits >= 64                               ? [ 0xF2, 0x0F, 0x11 ] : [ 0xF3, 0x0F, 0x11 ];
                     my $rex  = 0x40 | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
                     $bytes .= pack( 'C', $op->[0] );
                     if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
@@ -958,8 +952,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $src_r = $resolve->($src);
                     my $did   = $reg_id->($dst_r);
                     my $sid   = $reg_id->($src_r);
-                    my $bits  = $dst->type  ? $dst->type->bits     : 32;
-                    my $op    = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
+                    my $bits  = $src->type && $src->type->kind eq 'float' ? $src->type->bits     : 64;
+                    my $op    = $bits >= 64                               ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
                     $bytes .= pack( 'C', $op->[0] );
@@ -975,20 +969,22 @@ class Brocken::Jenny::Codegen::X86_64 {
                     if ( $sid >= 8 ) {
 
                         # AMD Zen 4 erratum: MOVD/MOVQ from R8-R15 to XMM
-                        # produces wrong results.  Work around by storing the
-                        # GPR to [rsp+0x20] and loading into XMM from memory.
-                        # The +0x20 offset avoids the return address that
-                        # the entry-stub call placed at [rsp].
-                        my $rex_store = 0x40 | ( $bits >= 64 ? 8 : 0 ) | ( $sid >= 8 ? 4 : 0 );
-                        my $modrm_st  = 0x44 | ( ( $sid & 7 ) << 3 );
-                        $bytes .= pack( 'C', $rex_store ) if $rex_store > 0x40;
-                        $bytes .= pack( 'CC', 0x89, $modrm_st ) . pack( 'CC', 0x24, 0x20 );
-                        my $op_load  = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
-                        my $rex_load = 0x40 | ( $did >= 8 ? 4 : 0 );
-                        my $modrm_ld = 0x44 | ( ( $did & 7 ) << 3 );
-                        $bytes .= pack( 'C', $op_load->[0] );
-                        if ( $rex_load > 0x40 ) { $bytes .= pack( 'C', $rex_load ) }
-                        $bytes .= pack( 'CC', $op_load->[1], $op_load->[2] ) . pack( 'C', $modrm_ld ) . pack( 'CC', 0x24, 0x20 );
+                        # produces wrong results.  Work around by moving
+                        # through RAX, which the register allocator reserves
+                        # for fmov_gp2f instructions.
+                        # mov src, rax   (0x89 /r: reg=src, r/m=rax)
+                        my $rex_mov = 0x40 | 0x08 | ( $sid >= 8 ? 0x04 : 0 );
+                        my $modrm_m = 0xC0 | ( ( $sid & 7 ) << 3 ) | 0;
+                        $bytes .= pack( 'C', $rex_mov ) if $rex_mov > 0x40;
+                        $bytes .= pack( 'CC', 0x89, $modrm_m );
+
+                        # movq rax, xmm  (same as normal path with sid=0)
+                        my $rex = $bits >= 64 ? 0x48 : 0x40;
+                        $rex |= ( $did >= 8 ? 0x04 : 0 ) | ( 0 >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | 0;
+                        $bytes .= pack( 'C',  0x66 );
+                        $bytes .= pack( 'C',  $rex ) if $rex > 0x40;
+                        $bytes .= pack( 'CC', 0x0F, 0x6E ) . pack( 'C', $modrm );
                     }
                     else {
                         my $rex = $bits >= 64 ? 0x48 : 0x40;
