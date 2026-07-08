@@ -131,7 +131,8 @@ package Brocken::Fuzz {
             return;
         }
 
-        # Generate a random Brocken program with typed variables
+        # Generate a random Brocken program with typed variables.
+        # May include sub declarations and inter-procedural calls (Phase F2).
         method generate_program( $max_ops = 15, $max_vars = 5 ) {
             my $vars      = {};
             my $var_types = {};
@@ -152,10 +153,20 @@ package Brocken::Fuzz {
                 push @stmts, "my $keyword \$$name = $fmt;";
             }
 
-            # Generate random operations
+            # Optionally generate sub definitions (0-3)
+            my @subs_meta;
+            my $n_subs = $self->_rand_int(3);
+            my %used_sub_names;
+            for my $si ( 1 .. $n_subs ) {
+                my $sub = $self->_gen_sub_decl( \%used_sub_names );
+                next unless $sub && $sub->{code};
+                push @subs_meta, $sub;
+            }
+
+            # Generate random operations (now with call support)
             my $n_ops = $self->_rand_int($max_ops) + 1;
             for my $oi ( 1 .. $n_ops ) {
-                my $stmt = $self->_random_stmt( $vars, $var_types, \@var_names, $oi == $n_ops );
+                my $stmt = $self->_random_stmt( $vars, $var_types, \@var_names, $oi == $n_ops, \@subs_meta );
                 push @stmts, $stmt->{code} if $stmt->{code};
             }
             my $result_var = $var_names[ $self->_rand_int($#var_names) ];
@@ -166,21 +177,39 @@ package Brocken::Fuzz {
             else {
                 push @stmts, "return \$$result_var;";
             }
+
+            # Compute whether we need 'brocken_native_types' for 128-bit types.
+            # Check both top-level vars and sub body/param types.
             my $uses_big = scalar( grep { $var_types->{$_}{bits} >= 128 } keys $var_types->%* );
+            if ( !$uses_big ) {
+                for my $sub (@subs_meta) {
+                    for my $p ( $sub->{params}->@* ) {
+                        if ( $p->{bits} >= 128 ) { $uses_big = 1; last }
+                    }
+                    last if $uses_big;
+                    for my $v ( values $sub->{body_var_types}->%* ) {
+                        if ( $v->{bits} >= 128 ) { $uses_big = 1; last }
+                    }
+                    last if $uses_big;
+                }
+            }
             my $header   = $uses_big ? q{use feature 'brocken_native_types';} . "\n" : '';
-            my $source   = $header . join "\n", @stmts;
+            my $sub_code = join "\n\n", map { $_->{code} } @subs_meta;
+            my $source   = $header . ( $sub_code ? "$sub_code\n\n" : '' ) . join "\n", @stmts;
             my $expected = $vars->{$result_var} & 0xFF;
-            return { source => $source, expected => $expected, vars => $vars };
+            return { source => $source, expected => $expected, vars => $vars, subs => \@subs_meta };
         }
 
-        # Generate a single random statement
-        method _random_stmt( $vars, $var_types, $var_names, $is_last ) {
+        # Generate a single random statement (optionally including function calls
+        # when $subs_meta is non-empty).
+        method _random_stmt( $vars, $var_types, $var_names, $is_last, $subs_meta = [] ) {
             my $n_vars     = scalar( $var_names->@* );
             my @i1_vars    = grep { $var_types->{$_}{bits} == 1 } $var_names->@*;
             my @f64_vars   = grep { $var_types->{$_}{signed} eq 'f' } $var_names->@*;
             my $n_f64_vars = scalar(@f64_vars);
             my $n_int_vars = $n_vars - $n_f64_vars;
-            my $type       = $self->_rand_int(12);
+            my $n_subs     = scalar( $subs_meta->@* );
+            my $type       = $self->_rand_int( $n_subs >= 1 ? 13 : 12 );
             if ( $type == 0 ) {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
@@ -216,6 +245,9 @@ package Brocken::Fuzz {
             }
             elsif ( $type == 11 && $n_vars >= 2 && !$is_last ) {
                 return $self->_gen_multi_cmp( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 12 && $n_subs >= 1 ) {
+                return $self->_gen_call_assign( $vars, $var_types, $var_names, $subs_meta );
             }
             else {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
@@ -926,8 +958,8 @@ package Brocken::Fuzz {
 
         # Generate a random value appropriate for the given type.
         method _rand_typed_val( $bits, $signed ) {
-            return int( rand(2) )          if $bits == 1;
-            return $self->_rand_f64_val()  if $signed eq 'f';
+            return int( rand(2) )                                                   if $bits == 1;
+            return $self->_rand_f64_val()                                           if $signed eq 'f';
             return $self->_clamp_to_type( $self->_rand_i128_val(), $bits, $signed ) if $bits >= 128;
             if ( $bits >= 64 && !$signed ) {
                 return int( rand( 2**31 - 1 ) ) + int( rand( 2**31 - 1 ) );
@@ -1099,6 +1131,144 @@ package Brocken::Fuzz {
                 };
             }
             return $result;
+        }
+
+        # -- Phase F2: Multi-function program support --
+        # Generate a random sub declaration with typed params, local vars,
+        # body statements, and a return statement.
+        # Returns a metadata hashref suitable for _gen_call_assign / _simulate_call,
+        # or undef if generation failed (e.g. no valid body statements).
+        method _gen_sub_decl($used_names) {
+            my @POOL  = qw[helper adder getval compute transform fold double triple];
+            my @avail = grep { !$used_names->{$_} } @POOL;
+            return undef if @avail == 0;
+            my $name = $avail[ $self->_rand_int($#avail) ];
+            $used_names->{$name} = 1;
+            my $n_params = $self->_rand_int(3);    # 0-2 params
+            my @params;
+            my @param_names;
+
+            for my $pi ( 1 .. $n_params ) {
+                my ( $bits, $signed ) = $self->_gen_sub_body_type();
+                my $pname = 'p' . $pi;
+                push @params, { name => $pname, bits => $bits, signed => $signed };
+                push @param_names, $pname;
+            }
+            my ( $ret_bits, $ret_signed ) = $self->_gen_sub_body_type();
+            my $ret_keyword = $self->_type_keyword( $ret_bits, $ret_signed );
+
+            # Body scope: params + local vars
+            my $body_vars      = {};
+            my $body_var_types = {};
+            for my $p (@params) {
+                $body_var_types->{ $p->{name} } = { bits => $p->{bits}, signed => $p->{signed} };
+            }
+            my $n_locals = $self->_rand_int(3) + 1;    # 1-3 locals, always at least 1
+            my @local_names;
+            my @local_decls;
+            for my $li ( 1 .. $n_locals ) {
+                my $lname = 'l' . $li;
+                push @local_names, $lname;
+                my ( $bits, $signed ) = $self->_gen_sub_body_type();
+                $body_var_types->{$lname} = { bits => $bits, signed => $signed };
+                my $init_val = $self->_rand_typed_val( $bits, $signed );
+                $body_vars->{$lname} = $init_val;
+                my $keyword = $self->_type_keyword( $bits, $signed );
+                my $fmt     = $self->_fmt_val( $init_val, $bits, $signed );
+                push @local_decls, "my $keyword \$$lname = $fmt;";
+            }
+            my @all_body_var_names = ( @param_names, @local_names );
+            my $n_body             = $self->_rand_int(4) + 1;          # 1-4 body statements
+            my @body_items;
+            for my $bi ( 1 .. $n_body ) {
+                my $item = $self->_gen_body_assign( $body_vars, $body_var_types, \@all_body_var_names );
+                push @body_items, $item if $item->{code};
+            }
+            return undef if @body_items == 0;
+            my $ret_var    = $all_body_var_names[ $self->_rand_int($#all_body_var_names) ];
+            my $param_code = join ', ',     map { $self->_type_keyword( $_->{bits}, $_->{signed} ) . ' $' . $_->{name} } @params;
+            my $body_code  = join "\n    ", @local_decls, map { $_->{code} } @body_items;
+            my $code       = "sub $name($param_code) -> $ret_keyword {\n    $body_code\n    return \$$ret_var;\n}";
+            return {
+                name           => $name,
+                params         => \@params,
+                param_names    => \@param_names,
+                return_type    => { bits => $ret_bits, signed => $ret_signed },
+                return_var     => $ret_var,
+                body_items     => \@body_items,
+                body_vars      => $body_vars,
+                body_var_types => $body_var_types,
+                code           => $code,
+            };
+        }
+
+        # Generate a function-call assignment: $dst = funcname($arg1, ...).
+        # Picks a random previously-defined sub, matches args to param types
+        # (preferring compatible existing vars, falling back to literals),
+        # and simulates the call for expected-value tracking.
+        method _gen_call_assign( $vars, $var_types, $var_names, $subs_meta ) {
+            return { code => undef } if scalar( $subs_meta->@* ) < 1;
+            my $dst = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $sub = $subs_meta->[ $self->_rand_int( $#{$subs_meta} ) ];
+            my @args;
+            my @arg_codes;
+            for my $p ( $sub->{params}->@* ) {
+                my @compat = grep { $var_types->{$_}{bits} == $p->{bits} && $var_types->{$_}{signed} eq $p->{signed} } $var_names->@*;
+                if (@compat) {
+                    my $arg = $compat[ $self->_rand_int($#compat) ];
+                    push @args,      $vars->{$arg};
+                    push @arg_codes, '$' . $arg;
+                }
+                else {
+                    my $val = $self->_rand_typed_val( $p->{bits}, $p->{signed} );
+                    push @args,      $val;
+                    push @arg_codes, $self->_fmt_val( $val, $p->{bits}, $p->{signed} );
+                }
+            }
+            my $result;
+            eval { $result = $self->_simulate_call( $sub, \@args ); };
+            if ( defined $result && !$@ ) {
+                my $t = $var_types->{$dst};
+                $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
+            }
+            my $code = "\$$dst = " . $sub->{name} . '(' . join( ', ', @arg_codes ) . ');';
+            return { code => $code };
+        }
+
+        # Simulate a call to a sub defined by _gen_sub_decl.
+        # Snapshots the sub's body_vars, binds params to arg values, applies all
+        # body_items, reads the return variable, then restores the snapshot.
+        # The snapshot/restore pattern keeps the sub's body_vars pristine for
+        # subsequent calls in the same top-level program.
+        method _simulate_call( $sub_meta, $args_av ) {
+            my $body_vars = $sub_meta->{body_vars};
+            my %snapshot  = %$body_vars;
+            for my $i ( 0 .. $#{ $sub_meta->{params} } ) {
+                my $p = $sub_meta->{params}[$i];
+                $body_vars->{ $p->{name} } = $self->_clamp_to_type( $args_av->[$i], $p->{bits}, $p->{signed} );
+            }
+            for my $item ( $sub_meta->{body_items}->@* ) {
+                $item->{apply}->();
+            }
+            my $result = $body_vars->{ $sub_meta->{return_var} };
+            @{$body_vars}{ keys %snapshot } = values %snapshot;
+            return $result;
+        }
+
+        # Return a random integer type (no float) suitable for sub body variables.
+        # This keeps sub body operations simple (int-only binop/unop from
+        # _gen_body_assign).
+        method _gen_sub_body_type() {
+            my @types   = ( [ 1, 1 ], [ 8, 1 ], [ 8, 0 ], [ 16, 1 ], [ 16, 0 ], [ 32, 1 ], [ 32, 0 ], [ 64, 1 ], [ 64, 0 ], [ 128, 1 ], [ 128, 0 ], );
+            my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2, 1, 1 );
+            my $total   = 0;
+            $total += $_ for @weights;
+            my $r = $self->_rand_int( $total - 1 );
+            for my $i ( 0 .. $#types ) {
+                $r -= $weights[$i];
+                return $types[$i]->@* if $r < 0;
+            }
+            return ( 64, 1 );
         }
     }
 
