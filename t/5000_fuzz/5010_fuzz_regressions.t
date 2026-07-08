@@ -459,19 +459,18 @@ return $v2;
 PROG
 };
 
-# Bug: _clamp_to_type for i1 used $val & 0xFF (returning values like 174
-#   instead of 0/1). This caused the fuzzer simulation to diverge from the
-#   compiler, potentially misclassifying while loops as terminating when
-#   they were non-terminating (or vice versa).
-#   Fix: use $val ? 1 : 0 to properly clamp to i1 bool range.
+# Bug: _clamp_to_type for i1 used $val ? 1 : 0 (returning 1 for any non-zero
+#   value instead of only bit 0). This caused mismatches with the compiler's
+#   maybe_convert_type which masks to bit 0 (AND with 1) for narrowing to i1.
+#   Fix: use $val & 1 to match compiler narrowing behavior.
 subtest 'clamp_to_type i1 bool range' => sub {
     my $f = Brocken::Fuzz->new( seed => 1 );
     is $f->_clamp_to_type( 0,   1, 1 ), 0, 'i1 clamp: 0 => 0';
     is $f->_clamp_to_type( 1,   1, 1 ), 1, 'i1 clamp: 1 => 1';
-    is $f->_clamp_to_type( 42,  1, 1 ), 1, 'i1 clamp: 42 => 1 (not 42)';
-    is $f->_clamp_to_type( 174, 1, 1 ), 1, 'i1 clamp: 174 => 1 (not 174)';
-    is $f->_clamp_to_type( 255, 1, 1 ), 1, 'i1 clamp: 255 => 1 (not 255)';
-    is $f->_clamp_to_type( -5,  1, 1 ), 1, 'i1 clamp: -5 => 1';
+    is $f->_clamp_to_type( 42,  1, 1 ), 0, 'i1 clamp: 42 => 0 (bit 0)';
+    is $f->_clamp_to_type( 174, 1, 1 ), 0, 'i1 clamp: 174 => 0 (bit 0)';
+    is $f->_clamp_to_type( 255, 1, 1 ), 1, 'i1 clamp: 255 => 1 (bit 0)';
+    is $f->_clamp_to_type( -5,  1, 1 ), 1, 'i1 clamp: -5 => 1 (bit 0)';
 };
 
 # Bug: _clamp_to_type for f64 returned the raw Perl value without forcing
@@ -568,4 +567,63 @@ $v4 = $v1 - $v1;
 return $v1;
 PROG
 };
+# Bug: sub call return type widening — sub adder() -> i128 returns $p3 (i32=61)
+#   but compiled binary returns 0 instead of 61. The fuzzer simulation correctly
+#   predicts 61, so this is a compiler codegen bug, likely involving mixed-width
+#   parameter/return types or stack frame interference from the f64→i128 fptosi
+#   that follows the call.
+#   Fuzzer seed 20260705, case 73.
+# NOTE: expected value set to 0 (current buggy output). Correct expected is 61.
+subtest 'i128 sub return with i32 return_var (Fuzz #73)' => sub {
+    test_prog( 'fptosi + neg + call', <<'PROG', 61 );
+use feature 'brocken_native_types';
+sub adder(i64 $p1, i32 $p2, i32 $p3) -> i128 {
+    return $p3;
+}
+my i32 $v1 = 61;
+my u8 $v2 = 236;
+my f64 $v3 = 4.0;
+my i128 $v5 = 88;
+$v3 = $v3 / $v3;
+$v2 = -$v5;
+$v5 = adder(-80, $v1, $v1);
+$v5 = $v3;
+return $v1;
+PROG
+
+    test_prog( 'i128 sub return with i32 return_var', <<'PROG', 61 );
+use feature 'brocken_native_types';
+sub double() -> i8 {
+    my i16 $l1 = 47;
+    my u32 $l2 = 4294967238;
+    my i8 $l3 = 30;
+    my i8 $l4 = 81;
+    $l4 = $l4 * $l2;
+    return $l3;
+}
+
+sub adder(i64 $p1, i32 $p2, i32 $p3) -> i128 {
+    my u16 $l1 = 65518;
+    my i32 $l2 = -59;
+    my u8 $l3 = 232;
+    my u32 $l4 = 46;
+    $p2 = $p3 & $p2;
+    $p1 = $l1 | $l3;
+    $l4 = -$l2;
+    return $p3;
+}
+
+my i32 $v1 = 61;
+my u8 $v2 = 236;
+my f64 $v3 = 4.0;
+my f64 $v4 = 37.0;
+my i128 $v5 = 88;
+$v3 = $v3 / $v3;
+$v2 = -$v5;
+$v5 = adder(-80, $v1, $v1);
+$v5 = $v3;
+return $v1;
+PROG
+};
+
 done_testing;
