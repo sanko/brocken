@@ -401,9 +401,14 @@ package Brocken::Fuzz {
             # Simulate the loop to update expected variable values.
             # If we hit max_iter without the condition becoming false,
             # this is probably a non-terminating loop -- skip it.
-            my $max_iter = 1000;
-            my $n_sim    = 0;
+            # A wall-clock timeout prevents pathological BigInt iterations
+            # from hanging the simulation (e.g. on slow CI hardware).
+            my $max_iter    = 1000;
+            my $n_sim       = 0;
+            my $sim_start   = time;
+            my $sim_timeout = 2;
             for my $iter ( 1 .. $max_iter ) {
+                last if time - $sim_start > $sim_timeout;
                 my $lv = $vars->{$cond_lhs} // 0;
                 my $rv = $vars->{$cond_rhs} // 0;
                 last unless $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$cond_lhs}, $var_types->{$cond_rhs} );
@@ -413,15 +418,13 @@ package Brocken::Fuzz {
                 }
             }
 
-            # If simulation ran all max_iter iterations without the
-            # condition becoming false, skip (infinite loop in binary).
-            if ( $n_sim == $max_iter ) {
-                my $lv_end = $vars->{$cond_lhs} // 0;
-                my $rv_end = $vars->{$cond_rhs} // 0;
-                if ( $self->_eval_cmp_typed( $cmp, $lv_end, $rv_end, $var_types->{$cond_lhs}, $var_types->{$cond_rhs} ) ) {
-                    @$vars{@saved_vars_keys} = @saved_vars{@saved_vars_keys};
-                    return { code => undef };
-                }
+            # If simulation ended with the condition still true (whether
+            # by max_iter or wall-clock timeout), skip (non-terminating).
+            my $lv_end = $vars->{$cond_lhs} // 0;
+            my $rv_end = $vars->{$cond_rhs} // 0;
+            if ( $n_sim > 0 && $self->_eval_cmp_typed( $cmp, $lv_end, $rv_end, $var_types->{$cond_lhs}, $var_types->{$cond_rhs} ) ) {
+                @$vars{@saved_vars_keys} = @saved_vars{@saved_vars_keys};
+                return { code => undef };
             }
             my $body_code = join "\n", map { "    " . $_->{code} } @body_items;
             return { code => "while (\$$cond_lhs $cmp \$$cond_rhs) {\n$body_code\n}" };
@@ -905,11 +908,15 @@ package Brocken::Fuzz {
         }
 
         # Clamp a value to signed/unsigned 128-bit range using Math::BigInt.
+        # Defensively adds max to negative values before AND so that older
+        # BigInt versions (pre-2.x) that don't two's-complement & on negatives
+        # still produce the correct unsigned representation.
         method _clamp_i128( $val, $signed ) {
             require Math::BigInt;
             my $n    = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new($val);
             my $max  = ( Math::BigInt->new(1) << 128 );
             my $mask = $max - 1;
+            if ( $n < 0 ) { $n = $n + $max }
             $n = $n & $mask;
             if ( $signed && $n >= ( Math::BigInt->new(1) << 127 ) ) {
                 $n = $n - $max;
@@ -921,7 +928,7 @@ package Brocken::Fuzz {
         method _rand_typed_val( $bits, $signed ) {
             return int( rand(2) )          if $bits == 1;
             return $self->_rand_f64_val()  if $signed eq 'f';
-            return $self->_rand_i128_val() if $bits >= 128;
+            return $self->_clamp_to_type( $self->_rand_i128_val(), $bits, $signed ) if $bits >= 128;
             if ( $bits >= 64 && !$signed ) {
                 return int( rand( 2**31 - 1 ) ) + int( rand( 2**31 - 1 ) );
             }
@@ -963,7 +970,76 @@ package Brocken::Fuzz {
             }
         }
 
-        # Compile and run a generated program, return test result
+        # Run a compiled executable, optionally with args and output capture.
+        # Returns { exit_code, stdout, stderr, error }.
+        # When capture is not requested, uses the no-shell system($file, @$argv)
+        # path for reliable exit-code propagation on all platforms.
+        method _exec_program( $file, %opts ) {
+            my $timeout        = $opts{timeout}        // 10;
+            my $argv           = $opts{args}           // [];
+            my $capture_stdout = $opts{capture_stdout} // 0;
+            my $capture_stderr = $opts{capture_stderr} // 0;
+            my $exit_code;
+            my $stdout;
+            my $stderr;
+            my $error;
+
+            if ( $capture_stdout || $capture_stderr ) {
+                my $out_file;
+                my $err_file;
+                $out_file = $self->tmpdir . '/fuzz_stdout_' . $$ . '.tmp' if $capture_stdout;
+                $err_file = $self->tmpdir . '/fuzz_stderr_' . $$ . '.tmp' if $capture_stderr;
+                my $qfile = $file;
+                $qfile = qq{"$qfile"} if $qfile =~ /\s/;
+                my $cmd = $qfile;
+                $cmd .= ' ' . join ' ', map { /\s/ ? qq{"$_"} : $_ } @$argv if @$argv;
+                $cmd .= ' > ' . qq{"$out_file"}  if defined $out_file;
+                $cmd .= ' 2> ' . qq{"$err_file"} if defined $err_file;
+                eval {
+                    local $SIG{ALRM} = sub { die "fuzz_timeout\n" };
+                    alarm($timeout);
+                    system $cmd;
+                    alarm(0);
+                };
+                $error = $@;
+                if ( defined $out_file && -e $out_file ) {
+                    open my $fh, '<', $out_file or die "Cannot read $out_file: $!";
+                    local $/;
+                    $stdout = <$fh> // '';
+                    close $fh;
+                    unlink $out_file;
+                }
+                if ( defined $err_file && -e $err_file ) {
+                    open my $fh, '<', $err_file or die "Cannot read $err_file: $!";
+                    local $/;
+                    $stderr = <$fh> // '';
+                    close $fh;
+                    unlink $err_file;
+                }
+            }
+            else {
+                eval {
+                    local $SIG{ALRM} = sub { die "fuzz_timeout\n" };
+                    alarm($timeout);
+                    system( $file, @$argv );
+                    alarm(0);
+                };
+                $error = $@;
+            }
+            unless ($error) {
+                $exit_code = $? >> 8;
+                $exit_code = undef if $? == -1;
+            }
+            return { exit_code => $exit_code, stdout => $stdout, stderr => $stderr, error => $error };
+        }
+
+        # Compile and run a generated program, return test result.
+        # The program hash may include:
+        #   source          - Brocken source code (required)
+        #   expected        - expected integer return value (required)
+        #   args            - arrayref of command-line arguments (optional)
+        #   capture_stdout  - boolean, capture stdout into result (optional)
+        #   capture_stderr  - boolean, capture stderr into result (optional)
         method test_program($program) {
             my $result
                 = { source => $program->{source}, status => 'pass', expected => $program->{expected}, host => $self->host_str, seed => $self->seed };
@@ -993,25 +1069,26 @@ package Brocken::Fuzz {
                 unlink $file if $file;
                 return { %$result, status => 'link_fail', reason => "Link: $err" };
             }
-            my $exit_code;
-            eval {
-                local $SIG{ALRM} = sub { die "fuzz_timeout\n" };
-                alarm(10);
-                system $file;
-                alarm(0);
-                $exit_code = $? >> 8;
-                $exit_code = undef if $? == -1;
-            };
-            if ( my $err = $@ ) {
+            my $exec_result = $self->_exec_program(
+                $file,
+                args           => $program->{args}           // [],
+                capture_stdout => $program->{capture_stdout} // 0,
+                capture_stderr => $program->{capture_stderr} // 0,
+                timeout        => 10,
+            );
+            if ( $exec_result->{error} ) {
                 unlink $file if $file;
-                my $reason = $err =~ /fuzz_timeout/ ? "Exec: timeout" : "Exec: $err";
+                my $reason = $exec_result->{error} =~ /fuzz_timeout/ ? "Exec: timeout" : "Exec: $exec_result->{error}";
                 return { %$result, status => 'exec_fail', reason => $reason };
             }
-            unless ( defined $exit_code ) {
+            unless ( defined $exec_result->{exit_code} ) {
                 unlink $file if $file;
                 return { %$result, status => 'exec_fail', reason => 'System could not spawn process' };
             }
             unlink $file if $file;
+            if ( $program->{capture_stdout} ) { $result->{stdout} = $exec_result->{stdout} }
+            if ( $program->{capture_stderr} ) { $result->{stderr} = $exec_result->{stderr} }
+            my $exit_code       = $exec_result->{exit_code};
             my $masked_expected = $program->{expected} & 0xFF;
             if ( $exit_code != $masked_expected ) {
                 return {
