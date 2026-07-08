@@ -885,10 +885,11 @@ package Brocken::Fuzz {
         # i16 to 0xFFFF, etc.  This matches Brocken's maybe_convert_type behavior
         # which does NOT narrow int-to-int (full lower bytes are retained).
         # Signed types additionally apply two's-complement wrapping.
-        # f64 values are stored as-is (full float precision for cascading ops).
+        # f64 values force float conversion (0.0 + $val) to match sitofp semantics
+        # when int results are stored to f64 destinations by _gen_binop_assign etc.
         method _clamp_to_type( $val, $bits, $signed ) {
-            return $val & 0xFF                         if $bits == 1;
-            return $val                                if $signed eq 'f';
+            return $val ? 1 : 0                        if $bits == 1;
+            return 0.0 + $val                          if $signed eq 'f';
             return $self->_clamp_i128( $val, $signed ) if $bits >= 128;
             return $val                                if $bits >= 64 && $signed;
             if ( $bits >= 64 && !$signed ) {
@@ -994,13 +995,17 @@ package Brocken::Fuzz {
             }
             my $exit_code;
             eval {
+                local $SIG{ALRM} = sub { die "fuzz_timeout\n" };
+                alarm(10);
                 system $file;
+                alarm(0);
                 $exit_code = $? >> 8;
                 $exit_code = undef if $? == -1;
             };
             if ( my $err = $@ ) {
                 unlink $file if $file;
-                return { %$result, status => 'exec_fail', reason => "Exec: $err" };
+                my $reason = $err =~ /fuzz_timeout/ ? "Exec: timeout" : "Exec: $err";
+                return { %$result, status => 'exec_fail', reason => $reason };
             }
             unless ( defined $exit_code ) {
                 unlink $file if $file;

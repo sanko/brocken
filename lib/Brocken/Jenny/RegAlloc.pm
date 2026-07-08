@@ -307,6 +307,21 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             }
         }
 
+        # Exclude rax when the function contains fmov_gp2f.
+        # The AMD Zen 4 erratum workaround in X86_64 codegen (fmov_gp2f with
+        # source in R8-R15) moves the GP source through RAX via inline
+        # assembly bytes not visible in the MIR operand list. Any virtual
+        # register assigned to rax would be silently corrupted.
+        if ( !$is_float && $mf && $mf->blocks->@* ) {
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    if ( $inst->opcode eq 'fmov_gp2f' ) {
+                        $defined_phys{rax} = 1;
+                    }
+                }
+            }
+        }
+
         # Exclude rcx when the function contains shl, lshr, or ashr.
         # Variable-count shift codegen (D3 /ext rm) emits MOV src -> ecx
         # then SHL/ SHR /SAR dst, %cl. The MOV to ecx silently clobbers
