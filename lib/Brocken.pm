@@ -20,7 +20,12 @@ package Brocken v0.0.1 {
         field $linker;
         field $ext;
         field $tmpdir_obj;
-        method tmpdir () { return $tmpdir_obj->dirname }
+
+        method tmpdir () {
+            my $dir = $tmpdir_obj->dirname;
+            $dir =~ tr{/}{\\} if $^O eq 'MSWin32';
+            return $dir;
+        }
         ADJUST {
             $tmpdir_obj = File::Temp->newdir( CLEANUP => 1 );
             $platform //= Brocken::Katsuro::Platform::parse();

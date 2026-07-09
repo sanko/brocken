@@ -613,9 +613,29 @@ class Brocken::Katsuro::Lowerer {
             my $val      = $self->lower_expression( $ast->expr );
             my $ret_type = $current_func->return_type;
             $val = $self->maybe_convert_type( $val, $ret_type );
+            my @rc_names = sort keys %$needs_rc;
+            if (@rc_names) {
+                my $decref_hb
+                    = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+                for my $name (@rc_names) {
+                    my $addr   = $symbols->{$name} or next;
+                    my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+                    $builder->build_decref( $loaded, 0, 0, $decref_hb );
+                }
+            }
             $builder->build_ret( $val, $line, $col );
         }
         else {
+            my @rc_names = sort keys %$needs_rc;
+            if (@rc_names) {
+                my $decref_hb
+                    = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+                for my $name (@rc_names) {
+                    my $addr   = $symbols->{$name} or next;
+                    my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+                    $builder->build_decref( $loaded, 0, 0, $decref_hb );
+                }
+            }
             $builder->build_ret( undef, $line, $col );
         }
     }
@@ -1257,7 +1277,8 @@ class Brocken::Katsuro::Lowerer {
         my $full_name = $class_name . '::' . $method_ast->name;
         $current_func = $functions->{$full_name};
         return unless $current_func;
-        $symbols = {};
+        $symbols  = {};
+        $needs_rc = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -1294,9 +1315,18 @@ class Brocken::Katsuro::Lowerer {
             my $alloca = $builder->build_alloca( $p->type, '%' . $pname . '.addr', undef, 0, 0, $pname, $ptype );
             $builder->build_store( $p, $alloca );
             $symbols->{$pname} = $alloca;
+            if ( $ptype eq 'Any' ) {
+                $needs_rc->{$pname} = 1;
+            }
         }
         $self->lower_block_body( $method_ast->body );
         unless ( $current_block && $current_block->terminator ) {
+            my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+            for my $name ( sort keys %$needs_rc ) {
+                my $addr   = $symbols->{$name} or next;
+                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+                $builder->build_decref( $loaded, 0, 0, $decref_hb );
+            }
             if ( $current_func->return_type->kind eq 'void' ) {
                 $builder->build_ret();
             }
@@ -1311,7 +1341,8 @@ class Brocken::Katsuro::Lowerer {
         my $full_name = $class_name . '::ADJUST';
         $current_func = $functions->{$full_name};
         return unless $current_func;
-        $symbols = {};
+        $symbols  = {};
+        $needs_rc = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -1339,6 +1370,12 @@ class Brocken::Katsuro::Lowerer {
         $self->populate_field_geps( $class_name, $self_val );
         $self->lower_block_body( $adjust_ast->body );
         unless ( $current_block && $current_block->terminator ) {
+            my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+            for my $name ( sort keys %$needs_rc ) {
+                my $addr   = $symbols->{$name} or next;
+                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+                $builder->build_decref( $loaded, 0, 0, $decref_hb );
+            }
             $builder->build_ret();
         }
     }

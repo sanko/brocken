@@ -275,6 +275,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     my $is_dst_float = $dst->type ? ( $dst->type->kind eq 'float' ? 1 : 0 ) : 0;
                     next if $is_float != $is_dst_float;
                     next if $inst->opcode eq 'store' || $inst->opcode eq 'store_imm';
+                    next unless defined $dst->value;
                     $defined_phys{ $dst->value } = 1;
                 }
             }
@@ -558,7 +559,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             my $inst = $insts[$i];
             next unless $inst->opcode eq 'mov';
             my ( $dst, $src ) = $inst->operands->@*;
-            next unless $src->kind eq 'phys_reg';
+            next unless $src->kind eq 'phys_reg' && defined $src->value;
 
             # Only consider MOVs that read from a calling-convention
             # parameter register -- internal spill/fill MOVs (e.g. saving
