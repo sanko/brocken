@@ -237,20 +237,12 @@ sub Brocken::Runtime::mem_status(ptr $heap_base) -> i64 {
     my i64 $result = 0;
     my ptr $cursor = Brocken::load_i64(Brocken::ptr_add($heap_base, 24));
     my ptr $limit  = Brocken::load_i64(Brocken::ptr_add($heap_base, 32));
-    # cursor >= limit → bit 0 set
-    if (Brocken::ptr_cmp_eq($cursor, $limit)) {
-        $result = Brocken::bor($result, 1);
-    }
-    if (Brocken::ptr_cmp_gt($cursor, $limit)) {
+    if (Brocken::ptr_cmp_ge($cursor, $limit)) {
         $result = Brocken::bor($result, 1);
     }
     my ptr $block_base = Brocken::ptr_add($heap_base, 64);
     my ptr $block_end  = Brocken::ptr_add($block_base, 32768);
-    # cursor >= block_end → bit 1 set
-    if (Brocken::ptr_cmp_eq($cursor, $block_end)) {
-        $result = Brocken::bor($result, 2);
-    }
-    if (Brocken::ptr_cmp_gt($cursor, $block_end)) {
+    if (Brocken::ptr_cmp_ge($cursor, $block_end)) {
         $result = Brocken::bor($result, 2);
     }
     my ptr $free16 = Brocken::load_i64(Brocken::ptr_add($heap_base, 48));
