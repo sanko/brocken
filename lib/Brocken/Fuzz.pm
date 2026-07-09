@@ -35,7 +35,8 @@ package Brocken::Fuzz {
             $host     = $b->platform;
             $host_str = ref( $b->platform ) ? $b->platform->friendly : $b->platform;
             $tmpdir   = $b->tmpdir;
-            $ext      = $b->ext;
+            $tmpdir =~ tr{/}{\\} if $^O eq 'MSWin32';
+            $ext = $b->ext;
             srand($seed);
         }
         method seed() { return $seed }
@@ -1058,10 +1059,12 @@ package Brocken::Fuzz {
                 }
             }
             else {
+                my $native_file = $file;
+                $native_file =~ tr{/}{\\} if $^O eq 'MSWin32';
                 eval {
                     local $SIG{ALRM} = sub { die "fuzz_timeout\n" };
                     alarm($timeout);
-                    system( $file, @$argv );
+                    system( $native_file, @$argv );
                     alarm(0);
                 };
                 $error = $@;
