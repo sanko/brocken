@@ -619,12 +619,19 @@ class Brocken::Katsuro::Lowerer {
             $val = $self->maybe_convert_type( $val, $ret_type );
             my @rc_names = sort keys %$needs_rc;
             if (@rc_names) {
-                my $decref_hb
-                    = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+
+                # Incref the return value so it survives the decref of all RC locals below.
+                # If $val refers to the same object as one of the locals, this bump keeps RC >= 1
+                # across the cleanup, preventing a premature free + dangling pointer.
+                # Only applies when $val is an Any type (heap-allocated with RC).
+                if ( $val->type && $val->type->kind eq 'any' ) {
+                    $builder->build_incref( $val, $line, $col );
+                }
+                my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
                 for my $name (@rc_names) {
                     my $addr   = $symbols->{$name} or next;
                     my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-                    $builder->build_decref( $loaded, 0, 0, $decref_hb );
+                    $builder->build_decref( $loaded, 0, 0, $hb );
                 }
             }
             $builder->build_ret( $val, $line, $col );
