@@ -374,8 +374,8 @@ jobs:
     steps:
       - env:
           COMMIT_MSG: "${{ github.event.head_commit.message || github.event.pull_request.body || '' }}"
-          DISPATCH_OS: '${{ github.event.inputs.os }}'
           DISPATCH_ARCH: '${{ github.event.inputs.arch }}'
+          DISPATCH_OS: '${{ github.event.inputs.os }}'
           DISPATCH_TEST: '${{ github.event.inputs.test_files }}'
         id: parse_tags
         name: Parse commit message tags for os/arch/test filtering
@@ -499,13 +499,13 @@ on:
     - cron: 42 5 * * 0
   workflow_dispatch:
     inputs:
-      os:
-        default: all
-        description: 'OS(es) to test (comma-separated, e.g. "linux" or "linux,macos"). See [os:...] commit tag docs.'
-        type: string
       arch:
         default: all
         description: 'Architecture(s) to test (comma-separated, e.g. "x64,arm" or "wasm,risc"). See [arch:...] commit tag docs.'
+        type: string
+      os:
+        default: all
+        description: 'OS(es) to test (comma-separated, e.g. "linux" or "linux,macos"). See [os:...] commit tag docs.'
         type: string
       test_files:
         default: ''

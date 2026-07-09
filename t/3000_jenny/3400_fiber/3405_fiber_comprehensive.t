@@ -14,10 +14,8 @@ SKIP: {
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 
-
     # 1. Multi-yield from a single fiber
     #    Worker yields 3 different values; main collects the last.
-
     subtest 'Multi-yield from single fiber' => sub {
         my $worker = Brocken::Lindsay::IR::Function->new( name => 'worker_fn', return_type => $i32 );
         my $wb     = Brocken::Lindsay::IR::Builder->new();
@@ -41,10 +39,8 @@ SKIP: {
         run_exec( $file, expected_exit => 77, name => 'multi-yield fiber exit 77', platform => $host );
     };
 
-
     # 2. Two independent fibers
     #    Main creates 2 workers, transfers to each, gets distinct values.
-
     subtest 'Two independent fibers' => sub {
         my $worker1 = Brocken::Lindsay::IR::Function->new( name => 'worker_one', return_type => $i32 );
         my $wb1     = Brocken::Lindsay::IR::Builder->new();
@@ -75,11 +71,9 @@ SKIP: {
         run_exec( $file, expected_exit => 111, name => 'two-fiber resume worker1 yields 111', platform => $host );
     };
 
-
     # 3. Stack stress test
     #    Worker alloca's a large buffer (~16KB) to stress stack
     #    probing in the worker's own frame, then yields a value.
-
     subtest 'Stack stress with large frame' => sub {
         my $worker = Brocken::Lindsay::IR::Function->new( name => 'worker_fn', return_type => $i32 );
         my $wb     = Brocken::Lindsay::IR::Builder->new();
@@ -103,10 +97,8 @@ SKIP: {
         run_exec( $file, expected_exit => 55, name => 'stack stress fiber exit 55', platform => $host );
     };
 
-
     # 4. Chain: worker yields multiple times then returns
     #    Main does 4 transfers, gets 4 different values.
-
     subtest 'Multi-transfer chain' => sub {
         my $worker = Brocken::Lindsay::IR::Function->new( name => 'worker_fn', return_type => $i32 );
         my $wb     = Brocken::Lindsay::IR::Builder->new();
@@ -133,10 +125,8 @@ SKIP: {
         run_exec( $file, expected_exit => 42, name => 'chain fiber last yield 42', platform => $host, keep => 1, gdb => $dbg );
     };
 
-
     # 5. Interleaved transfers between three fibers
     #    Main -> W1 (yields) -> Main -> W2 (yields) -> Main -> W1 again
-
     subtest 'Interleaved three-fiber transfer' => sub {
         my $worker1 = Brocken::Lindsay::IR::Function->new( name => 'worker_one', return_type => $i32 );
         my $wb1     = Brocken::Lindsay::IR::Builder->new();

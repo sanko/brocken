@@ -6,11 +6,10 @@ use Brocken::Lindsay;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-
 # Leaf function optimization test
 # A leaf function (no calls) with no frame should skip
 # all prologue/epilogue - just mov + ret.
- my $brocken  = Brocken->new();
+my $brocken  = Brocken->new();
 my $platform = $brocken->platform;
 SKIP: {
     skip 'Leaf optimization only tested on X86_64', 5 unless $platform->is_x64;

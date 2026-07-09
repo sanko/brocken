@@ -567,6 +567,7 @@ $v4 = $v1 - $v1;
 return $v1;
 PROG
 };
+
 # Bug: sub call return type widening — sub adder() -> i128 returns $p3 (i32=61)
 #   but compiled binary returns 0 instead of 61. The fuzzer simulation correctly
 #   predicts 61, so this is a compiler codegen bug, likely involving mixed-width
@@ -590,7 +591,6 @@ $v5 = adder(-80, $v1, $v1);
 $v5 = $v3;
 return $v1;
 PROG
-
     test_prog( 'i128 sub return with i32 return_var', <<'PROG', 61 );
 use feature 'brocken_native_types';
 sub double() -> i8 {
@@ -625,5 +625,4 @@ $v5 = $v3;
 return $v1;
 PROG
 };
-
 done_testing;

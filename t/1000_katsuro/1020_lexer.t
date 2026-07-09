@@ -61,21 +61,21 @@ subtest 'Lexer error default filename' => sub {
 subtest 'FLOAT token for float literals' => sub {
     my $lexer  = Brocken::Katsuro::Lexer->new( source => '42.5 + 3.0' );
     my $tokens = $lexer->lex();
-    my @floats  = grep { $_->{type} eq 'FLOAT' } @$tokens;
-    my @nums    = grep { $_->{type} eq 'NUM' } @$tokens;
-    is( scalar @floats, 2, 'two FLOAT tokens found' );
+    my @floats = grep { $_->{type} eq 'FLOAT' } @$tokens;
+    my @nums   = grep { $_->{type} eq 'NUM' } @$tokens;
+    is( scalar @floats,      2,    'two FLOAT tokens found' );
     is( $floats[0]->{value}, 42.5, 'first FLOAT value is 42.5' );
     is( $floats[1]->{value}, 3.0,  'second FLOAT value is 3.0' );
-    is( scalar @nums,   0, 'no NUM tokens from float literals' );
+    is( scalar @nums,        0,    'no NUM tokens from float literals' );
 };
 subtest 'FLOAT/NUM disambiguation: integer after float' => sub {
     my $lexer  = Brocken::Katsuro::Lexer->new( source => '3.14 99' );
     my $tokens = $lexer->lex();
     my @floats = grep { $_->{type} eq 'FLOAT' } @$tokens;
     my @nums   = grep { $_->{type} eq 'NUM' } @$tokens;
-    is( scalar @floats, 1, 'one FLOAT token' );
+    is( scalar @floats,      1,    'one FLOAT token' );
     is( $floats[0]->{value}, 3.14, 'FLOAT value is 3.14' );
-    is( scalar @nums,   1, 'one NUM token' );
-    is( $nums[0]->{value}, 99, 'NUM value is 99' );
+    is( scalar @nums,        1,    'one NUM token' );
+    is( $nums[0]->{value},   99,   'NUM value is 99' );
 };
 done_testing;

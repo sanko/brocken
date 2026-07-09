@@ -27,8 +27,8 @@ subtest 'Function with no body becomes declare' => sub {
     is( $f->name,                   'foo' );
     is( $f->return_type->as_string, 'i64' );
     is( $f->params->@*,             2 );
-    is( $f->params->[0]->name, '%__heap_base' );
-    is( $f->params->[1]->name, '%__want' );
+    is( $f->params->[0]->name,      '%__heap_base' );
+    is( $f->params->[1]->name,      '%__want' );
 };
 subtest 'Function with parameters' => sub {
     my $c   = Brocken::Compiler->new;
@@ -43,13 +43,13 @@ BROCKEN
     is( $f->return_type->as_string,       'i64' );
     is( $f->params->@*,                   4 );
     is( $f->params->[0]->type->as_string, 'ptr' );
-    is( $f->params->[0]->name, '%__heap_base' );
+    is( $f->params->[0]->name,            '%__heap_base' );
     is( $f->params->[1]->type->as_string, 'i64' );
-    is( $f->params->[1]->name, '%__want' );
+    is( $f->params->[1]->name,            '%__want' );
     is( $f->params->[2]->type->as_string, 'i64' );
-    is( $f->params->[2]->name, '%a' );
+    is( $f->params->[2]->name,            '%a' );
     is( $f->params->[3]->type->as_string, 'i64' );
-    is( $f->params->[3]->name, '%b' );
+    is( $f->params->[3]->name,            '%b' );
 };
 subtest 'Return constant' => sub {
     my $c   = Brocken::Compiler->new;
@@ -534,8 +534,8 @@ BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry' );
     my $text = $f->as_string();
-    like( $text, qr/zext\s+i1/,     'bool widening uses zext (not sext)' );
-    unlike( $text, qr/sext\s+i1/,   'bool widening does NOT use sext' );
+    like( $text, qr/zext\s+i1/, 'bool widening uses zext (not sext)' );
+    unlike( $text, qr/sext\s+i1/, 'bool widening does NOT use sext' );
 };
 subtest 'Shift operators << and >>' => sub {
     my $c   = Brocken::Compiler->new;

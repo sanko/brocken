@@ -4,23 +4,18 @@ use Brocken;
 use Brocken::Lindsay;
 use Test2::V0;
 use Test2::Tools::Brocken qw[run_exec temp_path];
-
 my $p    = Brocken->new();
 my $plat = $p->platform;
 note 'Platform: ' . $plat->friendly;
-
-my $i32 = Brocken::Lindsay::IR::Type::i32();
-
+my $i32  = Brocken::Lindsay::IR::Type::i32();
 my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
 my $mb   = Brocken::Lindsay::IR::Builder->new();
 $mb->position_at_end( $main->append_block('entry') );
 $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 42 ) );
-
 my $codegen = $p->codegen;
 my $linker  = $p->linker;
 my $funcs   = $codegen->emit_functions( [$main] );
 my $out     = temp_path('pulse_output');
 $linker->write_executable( $out, $funcs, $plat );
-
 run_exec( $out, expected_exit => 42, name => "init smoke test on " . $plat->friendly, platform => $plat );
 done_testing;

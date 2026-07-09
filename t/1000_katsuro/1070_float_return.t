@@ -6,7 +6,6 @@ use Brocken;
 use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-
 subtest 'Float literal return truncates to i64' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
@@ -21,7 +20,6 @@ SKIP: {
         unlink $file;
     }
 };
-
 subtest 'Float arithmetic with fptosi return' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
@@ -33,15 +31,14 @@ my f64 $y = 20.5;
 my f64 $z = $x + $y;
 return $z;
 BROCKEN
-        my $funcs  = $brocken->codegen->emit_functions( $module->functions );
-        my $file   = $brocken->tmpdir . '/float_add' . $brocken->ext;
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/float_add' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
         is( $? >> 8, 31, '10.5 + 20.5 = 31.0 -> 31' );
         unlink $file;
     }
 };
-
 subtest 'Float constant folding returns int via maybe_convert_type' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
@@ -56,5 +53,4 @@ SKIP: {
         unlink $file;
     }
 };
-
 done_testing;
