@@ -292,7 +292,7 @@ sub helper() -> i64 {
 }
 return helper();
 BROCKEN
-    is( $mod->functions->@*, 9, 'nine functions (7 runtime + helper + entry)' );
+    is( $mod->functions->@*, 18, '18 functions (16 runtime + helper + entry)' );
     my $text = $mod->as_string();
     like( $text, qr/call\s+i64\s+\@helper/, 'call to helper' );
 };

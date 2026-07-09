@@ -1135,6 +1135,10 @@ class Brocken::Katsuro::Lowerer {
             }
             return $builder->build_call( $extern_fn, \@call_args, undef, $line, $col );
         }
+        if ( $name eq 'heap_base' ) {
+            my $hb = $symbols->{'__heap_base'} or Carp::croak( "heap_base intrinsic requires __heap_base symbol at " . $self->_loc($ast) );
+            return $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb, undef, $line, $col );
+        }
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }
 
