@@ -98,6 +98,75 @@ class Brocken::Katsuro::Lowerer {
         return 8;
     }
 
+    # === Return type inference ===
+    method _infer_return_type($ast) {
+        my $body = $ast->body;
+        my %var_types;
+        for my $p ( $ast->params->@* ) {
+            $var_types{ $p->{name} } = $p->{type} // 'Any';
+        }
+        my @types = $self->_walk_return_types( $body, \%var_types );
+        return 'void' unless @types;
+        my $acc = shift @types;
+        for my $t (@types) { $acc = $self->_lub( $acc, $t ); }
+        return $acc;
+    }
+
+    method _walk_return_types( $block, $var_types ) {
+        my @types;
+        for my $stmt ( $block->statements->@* ) {
+            if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') ) {
+                $var_types->{ $stmt->name } = $stmt->type // 'Any';
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') ) {
+                if ( defined $stmt->expr ) {
+                    push @types, $self->_infer_expr_type( $stmt->expr, $var_types );
+                }
+                else {
+                    push @types, 'void';
+                }
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') ) {
+                my %t = %$var_types;
+                push @types, $self->_walk_return_types( $stmt->then, \%t );
+                for my $e ( $stmt->elsif->@* ) {
+                    my %e = %$var_types;
+                    push @types, $self->_walk_return_types( $e->[1], \%e );
+                }
+                if ( defined $stmt->else ) {
+                    my %e = %$var_types;
+                    push @types, $self->_walk_return_types( $stmt->else, \%e );
+                }
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') ) {
+                my %t = %$var_types;
+                push @types, $self->_walk_return_types( $stmt->body, \%t );
+            }
+        }
+        return @types;
+    }
+
+    method _infer_expr_type( $expr, $var_types ) {
+        return undef unless defined $expr;
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Const') ) {
+            return 'i64'    if $expr->type eq 'Int';
+            return 'f64'    if $expr->type eq 'Float';
+            return 'String' if $expr->type eq 'String';
+            return 'Bool'   if $expr->type eq 'Bool';
+            return 'Any';
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            return $var_types->{ $expr->name } // 'Any';
+        }
+        return 'Any';
+    }
+
+    method _lub( $a, $b ) {
+        return $b unless defined $a;
+        return $a if $a eq $b;
+        return 'Any';
+    }
+
     # === Main entry point ===
     method lower_program($ast) {
         my @all_stmts = $ast->statements->@*;
@@ -159,7 +228,11 @@ class Brocken::Katsuro::Lowerer {
 
         # Lower explicit methods
         for my $m ( $ast->methods->@* ) {
-            $self->register_method( $class_name, $m->name, $m->return_type, $m->params );
+            my $ret_type = $m->return_type;
+            if ( !defined $ret_type ) {
+                $ret_type = $self->_infer_return_type($m);
+            }
+            $self->register_method( $class_name, $m->name, $ret_type, $m->params );
             $self->lower_method( $class_name, $m );
         }
 
@@ -292,12 +365,20 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method register_function($ast) {
-        my $ret_type_name = $classes->{ $ast->return_type } ? 'ptr' : $ast->return_type;
-        $function_return_class->{ $ast->name } = $classes->{ $ast->return_type } ? $ast->return_type : undef;
+        my $ret_type_name = $ast->return_type;
+        if ( !defined $ret_type_name ) {
+            $ret_type_name = $self->_infer_return_type($ast);
+        }
+        my $ret_class = $classes->{$ret_type_name} ? $ret_type_name : undef;
+        $ret_type_name = $classes->{$ret_type_name} ? 'ptr' : $ret_type_name;
+        $function_return_class->{ $ast->name } = $ret_class;
         my $ret_type = $self->type_from_name($ret_type_name);
         my @params;
         unless ( $ast->name =~ /^Brocken::Runtime::/ ) {
             push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%__heap_base', );
+            unless ( $ast->name eq '_BROCKEN_ENTRY' ) {
+                push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64(), name => '%__want', );
+            }
         }
         for my $p ( $ast->params->@* ) {
             push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
@@ -318,6 +399,7 @@ class Brocken::Katsuro::Lowerer {
         my $ret_type = $self->type_from_name($ir_ret_type_name);
         my @params   = (
             Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%__heap_base', ),
+            Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64(), name => '%__want', ),
             Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%self', ),
         );
         for my $p ( $params_ast->@* ) {
@@ -339,6 +421,8 @@ class Brocken::Katsuro::Lowerer {
         $builder->position_at_end($entry);
         $current_block = $entry;
         my $has_hidden_heap_base = $current_func->params->@* && $current_func->params->[0]->name eq '%__heap_base';
+        my $has_hidden_want = $current_func->params->@* >= 2 && defined $current_func->params->[1] && $current_func->params->[1]->name eq '%__want';
+        my $hidden_count    = ( $has_hidden_heap_base ? 1 : 0 ) + ( $has_hidden_want ? 1 : 0 );
         {
             if ($has_hidden_heap_base) {
                 my $heap_base_param  = $current_func->params->[0];
@@ -346,6 +430,18 @@ class Brocken::Katsuro::Lowerer {
                 $builder->build_store( $heap_base_param, $heap_base_alloca );
                 $symbols->{'__heap_base'} = $heap_base_alloca;
             }
+        }
+        {
+            my $want_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%__want.addr' );
+            if ($has_hidden_want) {
+                my $want_param = $current_func->params->[ $has_hidden_heap_base ? 1 : 0 ];
+                $builder->build_store( $want_param, $want_alloca );
+            }
+            else {
+                my $default_want = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
+                $builder->build_store( $default_want, $want_alloca );
+            }
+            $symbols->{'__want'} = $want_alloca;
         }
         if ( $current_func->name eq '_BROCKEN_ENTRY' ) {
             my $heap_base = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
@@ -356,7 +452,7 @@ class Brocken::Katsuro::Lowerer {
             }
         }
         for my $i ( 0 .. $ast->params->@* - 1 ) {
-            my $p      = $current_func->params->[ $i + ( $has_hidden_heap_base ? 1 : 0 ) ];
+            my $p      = $current_func->params->[ $i + $hidden_count ];
             my $pname  = $ast->params->[$i]{name};
             my $ptype  = $ast->params->[$i]{type} // 'Any';
             my $alloca = $builder->build_alloca( $p->type, '%' . $pname . '.addr', undef, 0, 0, $pname, $ptype );
@@ -656,6 +752,9 @@ class Brocken::Katsuro::Lowerer {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::ClassConst') ) {
             return $self->lower_class_const($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Want') ) {
+            return $self->lower_want($expr);
+        }
         Carp::croak( "Unknown expression type: " . ref($expr) . " at " . $self->_loc($expr) );
     }
 
@@ -891,7 +990,13 @@ class Brocken::Katsuro::Lowerer {
             my $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
             push @args, $hb;
         }
-        my $param_idx = $callee_has_heap_base ? 1 : 0;
+        my $callee_has_want
+            = $callee_has_heap_base && $callee->params->@* >= 2 && defined $callee->params->[1]->name && $callee->params->[1]->name eq '%__want';
+        if ($callee_has_want) {
+            my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'}, undef, $line, $col );
+            push @args, $want_val;
+        }
+        my $param_idx = ( $callee_has_heap_base ? 1 : 0 ) + ( $callee_has_want ? 1 : 0 );
         for my $arg ( $ast->args->@* ) {
             my $val = $self->lower_expression($arg);
             if ( $param_idx < $callee->params->@* ) {
@@ -1086,7 +1191,9 @@ class Brocken::Katsuro::Lowerer {
         my $callee       = $functions->{$full_name};
         my ( $line, $col ) = ( $ast->line, $ast->col );
         Carp::croak( "Undefined method '" . $ast->method . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $callee;
-        my $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
+        my $hb       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
+        my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'},      undef, $line, $col );
+
         if ( $obj_is_class && $ast->method eq 'new' ) {
             my $cd            = $classes->{$class_name};
             my $total_size    = $cd->{total_size};
@@ -1094,8 +1201,8 @@ class Brocken::Katsuro::Lowerer {
             Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
             my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $total_size );
             my $self_ptr   = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
-            my @args       = ( $hb, $self_ptr );
-            my $ctor_p_idx = 2;
+            my @args       = ( $hb, $want_val, $self_ptr );
+            my $ctor_p_idx = 3;
 
             for my $arg ( $ast->args->@* ) {
                 my $val = $self->lower_expression($arg);
@@ -1110,8 +1217,8 @@ class Brocken::Katsuro::Lowerer {
         }
         my $obj_ptr = $obj_is_class ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) :
             $self->lower_expression( $ast->obj );
-        my @args      = ( $hb, $obj_ptr );
-        my $param_idx = 2;
+        my @args      = ( $hb, $want_val, $obj_ptr );
+        my $param_idx = 3;
         for my $arg ( $ast->args->@* ) {
             my $val = $self->lower_expression($arg);
             if ( $param_idx < $callee->params->@* ) {
@@ -1121,6 +1228,23 @@ class Brocken::Katsuro::Lowerer {
             $param_idx++;
         }
         return $builder->build_call( $callee, \@args, undef, $line, $col );
+    }
+
+    method lower_want($ast) {
+        my $context = $ast->context;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        if ( $context eq 'scalar' || $context eq 'list' || $context eq 'void' ) {
+            my $rt_fn_name = 'Brocken::Runtime::want_is_' . $context;
+            my $rt_fn      = $functions->{$rt_fn_name};
+            Carp::croak( "Runtime function '$rt_fn_name' not found at " . $self->_loc($ast) ) unless $rt_fn;
+            my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'}, undef, $line, $col );
+            return $builder->build_call( $rt_fn, [$want_val], undef, $line, $col );
+        }
+        my $return_type_name = $current_func->return_type->kind ne 'void' ? $current_func->return_type->as_string() : 'void';
+        if ( $context eq $return_type_name ) {
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
+        }
+        return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
     }
 
     method lower_class_const($ast) {
@@ -1147,16 +1271,24 @@ class Brocken::Katsuro::Lowerer {
             $symbols->{'__heap_base'} = $heap_base_alloca;
         }
 
-        # $self is the second param (ptr) at index 1
-        my $self_val = $current_func->params->[1];
+        # %__want is the second param (i64) at index 1
+        {
+            my $want_param  = $current_func->params->[1];
+            my $want_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%__want.addr' );
+            $builder->build_store( $want_param, $want_alloca );
+            $symbols->{'__want'} = $want_alloca;
+        }
+
+        # $self is the third param (ptr) at index 2
+        my $self_val = $current_func->params->[2];
         $symbols->{self} = $self_val;
 
         # Pre-populate symbol table with field GEPs for direct field name access
         $self->populate_field_geps( $class_name, $self_val );
 
-        # Lower explicit method params (params start at index 2)
+        # Lower explicit method params (params start at index 3)
         for my $i ( 0 .. $method_ast->params->@* - 1 ) {
-            my $p      = $current_func->params->[ $i + 2 ];
+            my $p      = $current_func->params->[ $i + 3 ];
             my $pname  = $method_ast->params->[$i]{name};
             my $ptype  = $method_ast->params->[$i]{type} // 'Any';
             my $alloca = $builder->build_alloca( $p->type, '%' . $pname . '.addr', undef, 0, 0, $pname, $ptype );
@@ -1193,8 +1325,16 @@ class Brocken::Katsuro::Lowerer {
             $symbols->{'__heap_base'} = $heap_base_alloca;
         }
 
-        # $self is the second param (ptr) at index 1
-        my $self_val = $current_func->params->[1];
+        # %__want is the second param (i64) at index 1
+        {
+            my $want_param  = $current_func->params->[1];
+            my $want_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%__want.addr' );
+            $builder->build_store( $want_param, $want_alloca );
+            $symbols->{'__want'} = $want_alloca;
+        }
+
+        # $self is the third param (ptr) at index 2
+        my $self_val = $current_func->params->[2];
         $symbols->{self} = $self_val;
         $self->populate_field_geps( $class_name, $self_val );
         $self->lower_block_body( $adjust_ast->body );
@@ -1223,7 +1363,7 @@ class Brocken::Katsuro::Lowerer {
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
         $current_block = $entry;
-        my $self_val    = $current_func->params->[1];
+        my $self_val    = $current_func->params->[2];
         my $cd          = $classes->{$class_name};
         my $struct_type = $cd->{struct_type};
         my $field_idx;
@@ -1248,8 +1388,8 @@ class Brocken::Katsuro::Lowerer {
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
         $current_block = $entry;
-        my $self_val    = $current_func->params->[1];
-        my $value_val   = $current_func->params->[2];
+        my $self_val    = $current_func->params->[2];
+        my $value_val   = $current_func->params->[3];
         my $cd          = $classes->{$class_name};
         my $struct_type = $cd->{struct_type};
         my $field_idx;
@@ -1280,9 +1420,15 @@ class Brocken::Katsuro::Lowerer {
         my $heap_base_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::ptr(), '%__heap_base.addr' );
         $builder->build_store( $heap_base_param, $heap_base_alloca );
         $symbols->{'__heap_base'} = $heap_base_alloca;
+        {
+            my $want_param  = $current_func->params->[1];
+            my $want_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%__want.addr' );
+            $builder->build_store( $want_param, $want_alloca );
+            $symbols->{'__want'} = $want_alloca;
+        }
         my $cd          = $classes->{$class_name};
         my $struct_type = $cd->{struct_type};
-        my $self_ptr    = $current_func->params->[1];
+        my $self_ptr    = $current_func->params->[2];
 
         # Initialize fields: defaults first, then params override
         my $param_idx = 0;
@@ -1292,7 +1438,7 @@ class Brocken::Katsuro::Lowerer {
             my $field_ptr = $builder->build_struct_gep( $struct_type, $self_ptr, $i, '%' . $f->name . '.init' );
             my $is_param  = grep { $_ eq 'param' } $f->attrs->@*;
             if ($is_param) {
-                my $param_val = $current_func->params->[ $param_idx + 2 ];
+                my $param_val = $current_func->params->[ $param_idx + 3 ];
                 my $converted = $self->maybe_convert_type( $param_val, $fd->{ir_type} );
                 $builder->build_store( $converted, $field_ptr );
                 $param_idx++;
@@ -1308,8 +1454,9 @@ class Brocken::Katsuro::Lowerer {
         if ( defined $adjust_ast ) {
             my $adjust_fn = $functions->{ $class_name . '::ADJUST' };
             if ($adjust_fn) {
-                my $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
-                $builder->build_call( $adjust_fn, [ $hb, $self_ptr ], undef );
+                my $hb       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+                my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'} );
+                $builder->build_call( $adjust_fn, [ $hb, $want_val, $self_ptr ], undef );
             }
         }
         $builder->build_ret();

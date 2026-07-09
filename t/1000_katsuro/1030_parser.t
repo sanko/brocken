@@ -270,7 +270,7 @@ BROCKEN
     my $m0 = $s->methods->[0];
     is( $m0->name,        'increment' );
     is( $m0->params->@*,  0 );
-    is( $m0->return_type, 'void' );
+    ok( !defined $m0->return_type, 'return_type undef (no -> TYPE)' );
     isa_ok( $m0->body, ['Brocken::Katsuro::AST::Stmt::Block'] );
     my $m1 = $s->methods->[1];
     is( $m1->name,        'get_value' );
