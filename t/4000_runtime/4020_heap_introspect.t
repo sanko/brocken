@@ -221,6 +221,32 @@ BROCKEN
         unlink $file;
     }
 };
+subtest 'Block-scoped decref via bare block' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my ptr $hb = Brocken::heap_base();
+my i64 $before = Brocken::Runtime::free16_count($hb);
+# Declare Any in a bare block — block-scoped RC decref cleans it up at block exit
+{
+    my $x = 42;
+}
+my i64 $after = Brocken::Runtime::free16_count($hb);
+# free16_count should increase by 1 (the box(42) was freed)
+my i64 $diff = Brocken::i64_sub($after, $before);
+if ($diff != 1) { return 1; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_block_decref' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, 'block-scoped decref frees block-local Any' );
+        unlink $file;
+    }
+};
 subtest 'mem_status sets bit 2 after decref (free16 nonempty)' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
@@ -228,10 +254,10 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-# Allocate an Any, then reassign → decref fires on the old value
-my $x = 42;
+# Reassign to an existing Any variable to trigger decref of old value
+my $x = 10;
 $x = 99;
-# After reassignment, the old box (for 42) was decref'd → pushed to free16_head
+# After reassignment, the old value (10) was decref'd and pushed to free16_head
 my i64 $s = Brocken::Runtime::mem_status($hb);
 # bit 2 (value 4) should be set
 if (Brocken::band($s, 4) == 0) { return 1; }
@@ -241,7 +267,7 @@ BROCKEN
         my $file  = $brocken->tmpdir . '/r_gc_mem_status_free16' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 0, 'mem_status: bit 2 set after decref (free16 nonempty)' );
+        is( $? >> 8, 0, 'mem_status: bit 2 set after Any reassignment' );
         unlink $file;
     }
 };

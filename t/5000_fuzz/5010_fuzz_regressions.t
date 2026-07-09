@@ -625,4 +625,60 @@ $v5 = $v3;
 return $v1;
 PROG
 };
+
+# Bug: _gen_logic_assign evaluated ||/&& as Perl logical (truthy→0/1),
+# but Brocken lowers them to bitwise MIR or/and (X86_64 Lowerer.pm:226-227).
+# These tests verify the bitwise semantics.
+# Fuzzer seed 20260702, cases 6/8/15.
+subtest '|| and && are bitwise (not logical) in Brocken' => sub {
+
+    # Case 6 pattern: 0 || -26 → bitwise OR = -26 → bool truncates to 0
+    test_prog( '0 || -26 stored to bool gives 0', <<'PROG', 0 );
+my bool $b = false;
+$b = $b || -26;
+my i64 $r = $b;
+return $r;
+PROG
+
+    # || on ints returns bitwise OR value
+    test_prog( '0 || -26 stored to i64 gives -26', <<'PROG', 230 );
+my i64 $a = 0;
+my i64 $b = -26;
+$a = $a || $b;
+return $a;
+PROG
+
+    # Case 8 pattern: -34 && -34 → bitwise AND = -34 → f64 sitofp → i16 fptosi
+    test_prog( '-34 && -34 via f64 and i16 gives -34', <<'PROG', 222 );
+my f64 $f = 63.0;
+my i64 $n = -34;
+$f = $n && $n;
+my i16 $z = $f;
+return $z;
+PROG
+
+    # Case 15 pattern: -82 && 8 → bitwise AND = 8
+    test_prog( '-82 && 8 gives 8 (bitwise, not logical)', <<'PROG', 8 );
+my i64 $a = -82;
+my i32 $b = 8;
+$b = $a && $b;
+return $b;
+PROG
+
+    # && on unsigned values preserves bitwise semantics
+    test_prog( '42 && 7 gives 2 (42 & 7 = 2)', <<'PROG', 2 );
+my i64 $a = 42;
+my i64 $b = 7;
+$a = $a && $b;
+return $a;
+PROG
+
+    # || on negative values preserves sign
+    test_prog( '-1 || -2 gives -1 (-1 | -2 = -1)', <<'PROG', 255 );
+my i64 $a = -1;
+my i64 $b = -2;
+$a = $a || $b;
+return $a;
+PROG
+};
 done_testing;

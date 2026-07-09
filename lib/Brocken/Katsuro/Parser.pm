@@ -109,6 +109,7 @@ class Brocken::Katsuro::Parser {
             $self->advance();
             return undef;
         }
+        return $self->parse_block() if $self->check('{');
         my $expr = $self->parse_expression(0);
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
             Carp::croak( "Unexpected bare identifier '" . $expr->name . "' at " . $self->_loc() . ' -- did you forget parentheses?' );

@@ -211,7 +211,7 @@ package Brocken::Fuzz {
             my $n_f64_vars = scalar(@f64_vars);
             my $n_int_vars = $n_vars - $n_f64_vars;
             my $n_subs     = scalar( $subs_meta->@* );
-            my $type       = $self->_rand_int( $n_subs >= 1 ? 15 : 14 );
+            my $type       = $self->_rand_int( $n_subs >= 1 ? 16 : 15 );
             if ( $type == 0 ) {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
@@ -257,9 +257,29 @@ package Brocken::Fuzz {
             elsif ( $type == 14 && $n_vars >= 2 ) {
                 return $self->_gen_logic_assign( $vars, $var_types, $var_names );
             }
+            elsif ( $type == 15 && $n_vars >= 2 && !$is_last ) {
+                return $self->_gen_block( $vars, $var_types, $var_names, $subs_meta );
+            }
             else {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
+        }
+
+        # Generate a bare block { ... } containing 1-3 simple statements
+        # (assignments only, no next/last which require an enclosing loop).
+        method _gen_block( $vars, $var_types, $var_names, $subs_meta ) {
+            my $n_body = $self->_rand_int(3) + 1;
+            my @items;
+            for my $bi ( 1 .. $n_body ) {
+                my $item = $self->_gen_body_assign( $vars, $var_types, $var_names );
+                push @items, $item if $item->{code};
+            }
+            return { code => undef } if @items == 0;
+            for my $item (@items) {
+                $item->{apply}->() if $item->{apply};
+            }
+            my $body_code = join "\n", map { "    " . $_->{code} } @items;
+            return { code => "{\n$body_code\n}" };
         }
 
         method _gen_binop_assign( $vars, $var_types, $var_names ) {
@@ -659,11 +679,12 @@ package Brocken::Fuzz {
             my $lhs   = $int_names[ $self->_rand_int($#int_names) ];
             my $rhs   = $int_names[ $self->_rand_int($#int_names) ];
             my $logic = $self->_rand_int(1) ? '&&' : '||';
-            my $lv    = $vars->{$lhs}       ? 1    : 0;
-            my $rv    = $vars->{$rhs}       ? 1    : 0;
+            my $lv    = $vars->{$lhs} // 0;
+            my $rv    = $vars->{$rhs} // 0;
             my $result;
-            if ( $logic eq '&&' ) { $result = $lv && $rv }
-            else                  { $result = $lv || $rv }
+            use integer;
+            if   ( $logic eq '&&' ) { $result = $lv & $rv }
+            else                    { $result = $lv | $rv }
             my $t = $var_types->{$dst};
             $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
             return { code => "\$$dst = \$$lhs $logic \$$rhs;" };

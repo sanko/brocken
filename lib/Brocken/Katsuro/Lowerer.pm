@@ -489,6 +489,30 @@ class Brocken::Katsuro::Lowerer {
         }
     }
 
+    # Lower a block with block-scoped RC cleanup.
+    # Variables declared as `Any` inside the block are decref'd at block exit,
+    # not at function exit.  Early return, last, or next from inside the block
+    # bypasses this cleanup; those paths rely on the function-scoped decref loop.
+    method lower_block($block_ast) {
+        my @saved_keys = sort keys %$needs_rc;
+        $self->lower_block_body($block_ast);
+        my %saved;
+        @saved{@saved_keys} = (1) x @saved_keys;
+        my @to_clean;
+        for my $name ( sort keys %$needs_rc ) {
+            push @to_clean, $name unless exists $saved{$name};
+        }
+        return unless @to_clean;
+        return if $current_block->terminator;
+        my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+        for my $name (@to_clean) {
+            my $addr   = $symbols->{$name} or next;
+            my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+            $builder->build_decref( $loaded, 0, 0, $decref_hb );
+            delete $needs_rc->{$name};
+        }
+    }
+
     # === Statement lowering ===
     method lower_statement($stmt) {
         return unless defined $stmt;
@@ -500,7 +524,7 @@ class Brocken::Katsuro::Lowerer {
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') )         { return $self->lower_while($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Break') )         { return $self->lower_break($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Continue') )      { return $self->lower_continue($stmt); }
-        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Block') )         { return $self->lower_block_body($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Block') )         { return $self->lower_block($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Expr::Call') )          { $self->lower_call_expr($stmt); return; }
         if ( $stmt->isa('Brocken::Katsuro::AST::Expr::IntrinsicCall') ) { $self->lower_intrinsic($stmt); return; }
 
@@ -1083,8 +1107,11 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_sub( $args[0], $args[1], undef, $line, $col )                           if $name eq 'ptr_sub';
         return $builder->build_icmp( 'sgt', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_gt';
         return $builder->build_icmp( 'slt', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_lt';
+        return $builder->build_icmp( 'sge', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_ge';
+        return $builder->build_icmp( 'sle', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_le';
         return $builder->build_icmp( 'eq', $args[0], $args[1], undef, $line, $col )                    if $name eq 'ptr_cmp_eq';
         return $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $args[0], undef, $line, $col ) if $name eq 'load_i64';
+
         if ( $name eq 'store_i64' ) {
             $builder->build_store( $args[1], $args[0], $line, $col );
             return undef;
