@@ -1,11 +1,17 @@
 # core.brocken -- Brocken v0.1 Runtime Primitives
 # Automatically compiled alongside user code.
 #
-# Heap metadata layout (at heap_base):
-#   [heap_base + 0]:  cursor       (ptr - bump allocation pointer)
-#   [heap_base + 8]:  limit        (ptr - end of heap)
-#   [heap_base + 16]: free16_head  (ptr - segregated free list for 16-byte reclaimed objects)
-#   [heap_base + 24]: block_base   (ptr - start of first Immix block = heap_base + 32)
+# Isolate Control Block (ICB) layout (64 bytes at heap_base):
+#   [heap_base + 0]:  heap_cursor    (ptr - legacy simple-bump pointer, unused after Immix full deployment)
+#   [heap_base + 8]:  current_fcb    (ptr - active Fiber Control Block, 0 = no fiber)
+#   [heap_base + 16]: fiber_head     (ptr - head of fiber linked list)
+#   [heap_base + 24]: immix_cursor   (ptr - current bump-allocation pointer within current line)
+#   [heap_base + 32]: immix_limit    (ptr - end of current Immix line/block)
+#   [heap_base + 40]: free_blocks    (ptr - free 32KB block list)
+#   [heap_base + 48]: free16_head    (ptr - segregated free list for 16-byte reclaimed objects)
+#   [heap_base + 56]: free16_tail / suspect_buffer_head
+#
+# First Immix block starts at heap_base + 64.
 #
 # Immix block layout (32 KB = 32768 bytes per block):
 #   [block + 0..15]:    bitmap (128-bit line bitmap, bit N = line N is available)
@@ -16,47 +22,108 @@
 #   Total per block: 16 + (128 * 256) - 16 = 32768 (the -16 is because line 0
 #   shares the bitmap's 16 bytes)
 #
-# Objects freed by decref (when RC reaches 0) are pushed onto free16_head.
+# Objects freed by decref (when RC reaches 0) are pushed onto free16_head (offset 48).
 # The next pointer is stored at [obj + 8] (payload area of the freed object).
-# bump_alloc checks free16_head first (hot path), then falls back to bump
-# within the current Immix block (cold path).
+# bump_alloc checks free16_head first (hot path), then falls back to line-aware
+# bump allocation within the current Immix block (cold path).
+# When the current block is full, free_blocks (offset 40) is consulted for recycling.
 
-# Initialize heap metadata:
-#   [heap_base + 0]  = cursor  (bump allocation pointer, starts at block_base)
-#   [heap_base + 8]  = limit   (ptr past end of heap)
-#   [heap_base + 16] = free16_head (segregated free list for reclaimed 16-byte objects)
-#   [heap_base + 24] = block_base (start of first Immix block = heap_base + 32)
+# Initialize ICB and Immix heap metadata.
+# heap_base = address of ICB, first Immix block starts at heap_base + 64.
 sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
-    my ptr $block_base = Brocken::ptr_add($heap_base, 32);
-    Brocken::store_i64($heap_base, $block_base);
-    Brocken::store_i64(Brocken::ptr_add($heap_base, 8), Brocken::ptr_add($heap_base, $heap_size));
+    my ptr $block_base = Brocken::ptr_add($heap_base, 64);
+    my ptr $line0_data = Brocken::ptr_add($block_base, 16);
+    # legacy heap_cursor (offset 0)
+    Brocken::store_i64($heap_base, $line0_data);
+    # current_fcb (offset 8)
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 8), 0);
+    # fiber_head (offset 16)
     Brocken::store_i64(Brocken::ptr_add($heap_base, 16), 0);
-    Brocken::store_i64(Brocken::ptr_add($heap_base, 24), $block_base);
+    # immix_cursor (offset 24)
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 24), $line0_data);
+    # immix_limit (offset 32) = end of Line 0
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 32), Brocken::ptr_add($block_base, 256));
+    # free_blocks (offset 40)
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 40), 0);
+    # free16_head (offset 48)
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 48), 0);
+    # free16_tail (offset 56)
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 56), 0);
     return;
 }
 
-# Allocate $size bytes from the heap at $heap_base.
-# Checks the segregated free list first (hot path), then falls back to
-# bump allocation within the current Immix block (cold path).
-# Returns pointer to the allocated block, or 0 on out-of-memory.
+# Allocate $size bytes from the Immix-managed heap at $heap_base.
+# Hot path: check segregated free list (free16_head at offset 48).
+# Cold path: line-aware bump allocation within current Immix block.
+#   - bumps immix_cursor (offset 24) within current line
+#   - when line exhausted, advances to next 256-byte line
+#   - when block exhausted, checks free_blocks (offset 40)
+# Returns pointer to allocated memory, or 0 on out-of-memory.
 sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
-    my ptr $free16_ptr = Brocken::ptr_add($heap_base, 16);
+    # Hot path: free16_head at ICB offset 48
+    my ptr $free16_ptr = Brocken::ptr_add($heap_base, 48);
     my ptr $head = Brocken::load_i64($free16_ptr);
     if (Brocken::ptr_cmp_eq($head, 0) == 0) {
         my ptr $next = Brocken::load_i64(Brocken::ptr_add($head, 8));
         Brocken::store_i64($free16_ptr, $next);
         return $head;
     }
-    my ptr $cursor_ptr = $heap_base;
+
+    # Immix line-aware bump: load immix_cursor (offset 24) and immix_limit (offset 32)
+    my ptr $cursor_ptr = Brocken::ptr_add($heap_base, 24);
     my ptr $cursor = Brocken::load_i64($cursor_ptr);
-    my ptr $limit = Brocken::load_i64(Brocken::ptr_add($heap_base, 8));
-    my ptr $result = $cursor;
+    my ptr $limit = Brocken::load_i64(Brocken::ptr_add($heap_base, 32));
     my ptr $new_cursor = Brocken::ptr_add($cursor, $size);
+
+    # Does the allocation fit within the current line?
     if (Brocken::ptr_cmp_gt($new_cursor, $limit)) {
-        return 0;
+        # Current line exhausted. Advance to the next 256-byte line.
+        # block_base is always heap_base + 64 (single block for now)
+        my ptr $block_base = Brocken::ptr_add($heap_base, 64);
+        my i64 $offset_in_block = Brocken::ptr_sub($cursor, $block_base);
+        # Round up to next 256-byte line boundary: (offset + 255) - ((offset + 255) % 256)
+        my i64 $off_plus = Brocken::i64_add($offset_in_block, 255);
+        my i64 $next_line = Brocken::i64_sub($off_plus, Brocken::band($off_plus, 255));
+        # Clamp to >= 16 so we never allocate into the bitmap header of Line 0
+        if (Brocken::ptr_cmp_gt(16, $next_line)) {
+            $next_line = 16;
+        }
+        my ptr $line_start = Brocken::ptr_add($block_base, $next_line);
+        my ptr $after_alloc = Brocken::ptr_add($line_start, $size);
+        my ptr $block_end = Brocken::ptr_add($block_base, 32768);
+
+        if (Brocken::ptr_cmp_gt($after_alloc, $block_end)) {
+            # Block full. Try free_blocks (offset 40) for recycling.
+            my ptr $free_blocks_ptr = Brocken::ptr_add($heap_base, 40);
+            my ptr $fb = Brocken::load_i64($free_blocks_ptr);
+            if (Brocken::ptr_cmp_eq($fb, 0) == 0) {
+                # Free block available: pop it and switch to it
+                my ptr $fb_next = Brocken::load_i64($fb);
+                Brocken::store_i64($free_blocks_ptr, $fb_next);
+                my ptr $fb_line0 = Brocken::ptr_add($fb, 16);
+                Brocken::store_i64($cursor_ptr, $fb_line0);
+                Brocken::store_i64(Brocken::ptr_add($heap_base, 32), Brocken::ptr_add($fb, 256));
+                # Allocate from the new block
+                Brocken::store_i64($cursor_ptr, Brocken::ptr_add($fb_line0, $size));
+                return $fb_line0;
+            }
+            # No free block available. Fall back to legacy heap_cursor (offset 0).
+            my ptr $legacy_ptr = $heap_base;
+            my ptr $legacy_cursor = Brocken::load_i64($legacy_ptr);
+            Brocken::store_i64($legacy_ptr, Brocken::ptr_add($legacy_cursor, $size));
+            return $legacy_cursor;
+        }
+
+        # Allocate from the new line
+        Brocken::store_i64($cursor_ptr, $after_alloc);
+        my ptr $new_limit = Brocken::ptr_add($line_start, 256);
+        Brocken::store_i64(Brocken::ptr_add($heap_base, 32), $new_limit);
+        return $line_start;
     }
+
+    # Allocation fits in current line: bump cursor
     Brocken::store_i64($cursor_ptr, $new_cursor);
-    return $result;
+    return $cursor;
 }
 
 # Increment the reference count of a fat scalar at $obj.
@@ -77,7 +144,7 @@ sub Brocken::Runtime::incref(ptr $obj) {
 
 # Decrement the reference count of a fat scalar at $obj.
 # When RC reaches 0, pushes the object onto the segregated free list
-# at heap_base+16 for immediate reuse (hot path).
+# at heap_base+48 for immediate reuse (hot path).
 sub Brocken::Runtime::decref(ptr $obj, ptr $heap_base) {
     if (Brocken::ptr_cmp_eq($obj, 0)) {
         return;
@@ -87,7 +154,7 @@ sub Brocken::Runtime::decref(ptr $obj, ptr $heap_base) {
     my i64 $new_rc = Brocken::i64_sub($old_rc, 1);
     Brocken::store_i64($obj, Brocken::i64_add(Brocken::i64_sub($header, $old_rc), $new_rc));
     if (Brocken::ptr_cmp_eq($new_rc, 0) && Brocken::ptr_cmp_eq($heap_base, 0) == 0) {
-        my ptr $free16_ptr = Brocken::ptr_add($heap_base, 16);
+        my ptr $free16_ptr = Brocken::ptr_add($heap_base, 48);
         my ptr $head = Brocken::load_i64($free16_ptr);
         Brocken::store_i64(Brocken::ptr_add($obj, 8), $head);
         Brocken::store_i64($free16_ptr, $obj);
@@ -104,4 +171,104 @@ sub Brocken::Runtime::want_is_list(i64 $__want) -> i64 {
 }
 sub Brocken::Runtime::want_is_void(i64 $__want) -> i64 {
     return Brocken::band($__want, 4);
+}
+
+
+# Return the current legacy bump pointer at ICB offset 0.
+sub Brocken::Runtime::heap_cursor(ptr $heap_base) -> ptr {
+    return Brocken::load_i64($heap_base);
+}
+
+# Return the current Immix bump pointer at ICB offset 24.
+sub Brocken::Runtime::immix_cursor(ptr $heap_base) -> ptr {
+    return Brocken::load_i64(Brocken::ptr_add($heap_base, 24));
+}
+
+# Return the current Immix line limit at ICB offset 32.
+sub Brocken::Runtime::immix_limit(ptr $heap_base) -> ptr {
+    return Brocken::load_i64(Brocken::ptr_add($heap_base, 32));
+}
+
+# Return how many bytes remain in the current line (limit - cursor).
+sub Brocken::Runtime::line_remaining(ptr $heap_base) -> i64 {
+    my ptr $cursor = Brocken::load_i64(Brocken::ptr_add($heap_base, 24));
+    my ptr $limit = Brocken::load_i64(Brocken::ptr_add($heap_base, 32));
+    return Brocken::ptr_sub($limit, $cursor);
+}
+
+# Return how many bytes remain in the current Immix block ((block_base + 32768) - cursor).
+sub Brocken::Runtime::block_remaining(ptr $heap_base) -> i64 {
+    my ptr $block_base = Brocken::ptr_add($heap_base, 64);
+    my ptr $cursor = Brocken::load_i64(Brocken::ptr_add($heap_base, 24));
+    my ptr $block_end = Brocken::ptr_add($block_base, 32768);
+    return Brocken::ptr_sub($block_end, $cursor);
+}
+
+# Return the number of objects on the free16 segregated free list at ICB offset 48.
+sub Brocken::Runtime::free16_count(ptr $heap_base) -> i64 {
+    my ptr $p = Brocken::load_i64(Brocken::ptr_add($heap_base, 48));
+    my i64 $count = 0;
+    while (Brocken::ptr_cmp_eq($p, 0) == 0) {
+        $count = Brocken::i64_add($count, 1);
+        $p = Brocken::load_i64(Brocken::ptr_add($p, 8));
+    }
+    return $count;
+}
+
+# Return the number of free 32KB blocks on the free_blocks list at ICB offset 40.
+sub Brocken::Runtime::free_blocks_count(ptr $heap_base) -> i64 {
+    my ptr $p = Brocken::load_i64(Brocken::ptr_add($heap_base, 40));
+    my i64 $count = 0;
+    while (Brocken::ptr_cmp_eq($p, 0) == 0) {
+        $count = Brocken::i64_add($count, 1);
+        $p = Brocken::load_i64($p);
+    }
+    return $count;
+}
+
+
+# Return a packed bitmask of heap status:
+#   bit 0: line full (immix_cursor >= immix_limit)
+#   bit 1: block full (cursor >= block_end)
+#   bit 2: free16_head nonempty
+#   bit 3: free_blocks list nonempty
+#   bits 4+: reserved (0)
+sub Brocken::Runtime::mem_status(ptr $heap_base) -> i64 {
+    my i64 $result = 0;
+    my ptr $cursor = Brocken::load_i64(Brocken::ptr_add($heap_base, 24));
+    my ptr $limit  = Brocken::load_i64(Brocken::ptr_add($heap_base, 32));
+    # cursor >= limit → bit 0 set
+    if (Brocken::ptr_cmp_eq($cursor, $limit)) {
+        $result = Brocken::bor($result, 1);
+    }
+    if (Brocken::ptr_cmp_gt($cursor, $limit)) {
+        $result = Brocken::bor($result, 1);
+    }
+    my ptr $block_base = Brocken::ptr_add($heap_base, 64);
+    my ptr $block_end  = Brocken::ptr_add($block_base, 32768);
+    # cursor >= block_end → bit 1 set
+    if (Brocken::ptr_cmp_eq($cursor, $block_end)) {
+        $result = Brocken::bor($result, 2);
+    }
+    if (Brocken::ptr_cmp_gt($cursor, $block_end)) {
+        $result = Brocken::bor($result, 2);
+    }
+    my ptr $free16 = Brocken::load_i64(Brocken::ptr_add($heap_base, 48));
+    if (Brocken::ptr_cmp_eq($free16, 0) == 0) {
+        $result = Brocken::bor($result, 4);
+    }
+    my ptr $free_blocks = Brocken::load_i64(Brocken::ptr_add($heap_base, 40));
+    if (Brocken::ptr_cmp_eq($free_blocks, 0) == 0) {
+        $result = Brocken::bor($result, 8);
+    }
+    return $result;
+}
+
+# Return wasted bytes in the current Immix block (sum of unused space at end of
+# each line). For the current bump-only allocator this equals line_remaining;
+# will track fragmentation once mark-sweep line reclamation is added.
+sub Brocken::Runtime::line_waste(ptr $heap_base) -> i64 {
+    my ptr $cursor = Brocken::load_i64(Brocken::ptr_add($heap_base, 24));
+    my ptr $limit  = Brocken::load_i64(Brocken::ptr_add($heap_base, 32));
+    return Brocken::ptr_sub($limit, $cursor);
 }

@@ -49,18 +49,18 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $layout->add_section( '.eh_frame',     4096, 0 );
         $layout->add_section( '.eh_frame_hdr', 4096, 0 );
         #
-        if ( $dbg >= 1 ) { $layout->add_section( '.debug_line', 4096, 0 ); }
+        if ( $dbg >= 1 ) { $layout->add_section( '.debug_line', 16384, 0 ); }
         if ( $dbg >= 2 ) {
-            $layout->add_section( '.debug_info',   4096, 0 );
-            $layout->add_section( '.debug_abbrev', 4096, 0 );
+            $layout->add_section( '.debug_info',   16384, 0 );
+            $layout->add_section( '.debug_abbrev', 16384, 0 );
         }
         if ( $dbg >= 3 ) {
-            $layout->add_section( '.debug_frame',   4096, 0 );
-            $layout->add_section( '.debug_aranges', 4096, 0 );
+            $layout->add_section( '.debug_frame',   16384, 0 );
+            $layout->add_section( '.debug_aranges', 16384, 0 );
         }
         if ( $dbg >= 4 ) {
-            $layout->add_section( '.debug_names', 4096, 0 );
-            $layout->add_section( '.debug_str',   4096, 0 );
+            $layout->add_section( '.debug_names', 16384, 0 );
+            $layout->add_section( '.debug_str',   16384, 0 );
         }
     }
 
