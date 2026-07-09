@@ -215,6 +215,24 @@ class Brocken::Katsuro::Parser {
         return Brocken::Katsuro::AST::Stmt::Return->new( $self->_pos_token($ret_token), expr => $expr );
     }
 
+    method parse_want($token) {
+        $self->consume('(');
+        my $context;
+        if ( $self->check('STRING') ) {
+            $context = $self->advance()->{value};
+            Carp::croak( "want() context must be 'list', 'scalar', or 'void' at " . $self->_loc($token) )
+                unless $context eq 'list' || $context eq 'scalar' || $context eq 'void';
+        }
+        elsif ( $self->check('KEYWORD') || $self->check('IDENT') ) {
+            $context = $self->advance()->{value};
+        }
+        else {
+            Carp::croak( "want() expects a type name or context string at " . $self->_loc($token) );
+        }
+        $self->consume(')');
+        return Brocken::Katsuro::AST::Expr::Want->new( $self->_pos_token($token), context => $context );
+    }
+
     method parse_builtin_print() {
         my $tok  = $self->advance();
         my $name = $tok->{value};
@@ -256,7 +274,7 @@ class Brocken::Katsuro::Parser {
             push @params, { type => $ptype, sigil => $psigil, name => $pname };
         }
         $self->consume(')');
-        my $return_type = 'void';
+        my $return_type = undef;
         if ( $self->check( 'OP', '->' ) ) {
             $self->advance();
             if ( $self->is_type( $self->peek() ) ) {
@@ -371,7 +389,7 @@ class Brocken::Katsuro::Parser {
             push @params, { type => $ptype, sigil => $psigil, name => $pname };
         }
         $self->consume(')');
-        my $return_type = 'void';
+        my $return_type = undef;
         if ( $self->check( 'OP', '->' ) ) {
             $self->advance();
             if ( $self->is_type( $self->peek() ) ) {
@@ -430,6 +448,7 @@ class Brocken::Katsuro::Parser {
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 1, type => 'Bool' ) if $token->{value} =~ /^true$/i;
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 0, type => 'Bool' ) if $token->{value} =~ /^false$/i;
             return Brocken::Katsuro::AST::Expr::ClassConst->new( $self->_pos_token($token) ) if $token->{value} eq '__CLASS__';
+            return $self->parse_want($token)                                                 if $token->{value} eq 'want';
             Carp::croak( "Unexpected keyword '$token->{value}' in expression at " . $self->_loc($token) );
         }
         if ( $token->{type} eq 'OP' ) {

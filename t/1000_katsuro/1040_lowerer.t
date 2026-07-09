@@ -26,7 +26,9 @@ subtest 'Function with no body becomes declare' => sub {
     ok( $f, 'found function foo' );
     is( $f->name,                   'foo' );
     is( $f->return_type->as_string, 'i64' );
-    is( $f->params->@*,             1 );
+    is( $f->params->@*,             2 );
+    is( $f->params->[0]->name, '%__heap_base' );
+    is( $f->params->[1]->name, '%__want' );
 };
 subtest 'Function with parameters' => sub {
     my $c   = Brocken::Compiler->new;
@@ -39,10 +41,15 @@ BROCKEN
     ok( $f, 'found function add' );
     is( $f->name,                         'add' );
     is( $f->return_type->as_string,       'i64' );
-    is( $f->params->@*,                   3 );
+    is( $f->params->@*,                   4 );
     is( $f->params->[0]->type->as_string, 'ptr' );
+    is( $f->params->[0]->name, '%__heap_base' );
     is( $f->params->[1]->type->as_string, 'i64' );
+    is( $f->params->[1]->name, '%__want' );
     is( $f->params->[2]->type->as_string, 'i64' );
+    is( $f->params->[2]->name, '%a' );
+    is( $f->params->[3]->type->as_string, 'i64' );
+    is( $f->params->[3]->name, '%b' );
 };
 subtest 'Return constant' => sub {
     my $c   = Brocken::Compiler->new;
@@ -197,8 +204,8 @@ class Point {
 BROCKEN
     my $f = find_function( $mod, 'Point::get_x' );
     ok( $f, 'found method Point::get_x' );
-    is( $f->params->@*,                   2,     'two params (__heap_base, $self)' );
-    is( $f->params->[1]->type->as_string, 'ptr', '$self is ptr' );
+    is( $f->params->@*,                   3,     'three params (__heap_base, __want, $self)' );
+    is( $f->params->[2]->type->as_string, 'ptr', '$self is ptr' );
     my $text = $f->as_string();
     like( $text, qr/getelementptr/, 'GEP for field access' );
     like( $text, qr/load\s+i64/,    'load i64 from field' );
@@ -213,7 +220,7 @@ BROCKEN
     my $f = find_function( $mod, 'Point::x' );
     ok( $f, 'found auto-generated reader Point::x' );
     is( $f->return_type->as_string, 'i64', 'returns i64' );
-    is( $f->params->@*,             2,     'two params (__heap_base, $self)' );
+    is( $f->params->@*,             3,     'three params (__heap_base, __want, $self)' );
 };
 subtest 'Auto-generated :writer method' => sub {
     my $c   = Brocken::Compiler->new;
@@ -225,7 +232,7 @@ BROCKEN
     my $f = find_function( $mod, 'Point::set_x' );
     ok( $f, 'found auto-generated writer Point::set_x' );
     is( $f->return_type->as_string, 'void', 'returns void' );
-    is( $f->params->@*,             3,      'three params (__heap_base, $self, $value)' );
+    is( $f->params->@*,             4,      'four params (__heap_base, __want, $self, $value)' );
 };
 subtest 'Auto-generated constructor with :param' => sub {
     my $c   = Brocken::Compiler->new;
@@ -237,7 +244,7 @@ BROCKEN
     my $f = find_function( $mod, 'Point::new' );
     ok( $f, 'found auto-generated constructor Point::new' );
     is( $f->return_type->as_string, 'void', 'returns void' );
-    is( $f->params->@*,             3,      'three params (__heap_base, $self, $x)' );
+    is( $f->params->@*,             4,      'four params (__heap_base, __want, $self, $x)' );
     my $text = $f->as_string();
     like( $text, qr/__heap_base.*alloca/, 'alloca for __heap_base' );
     like( $text, qr/store/,               'store param to field' );
@@ -254,8 +261,8 @@ class Point {
 BROCKEN
     my $f = find_function( $mod, 'Point::ADJUST' );
     ok( $f, 'found ADJUST function' );
-    is( $f->params->@*,                   2,     'two params (__heap_base, $self)' );
-    is( $f->params->[1]->type->as_string, 'ptr', '$self is ptr' );
+    is( $f->params->@*,                   3,     'three params (__heap_base, __want, $self)' );
+    is( $f->params->[2]->type->as_string, 'ptr', '$self is ptr' );
     my $text = $f->as_string();
     like( $text, qr/icmp/, 'comparison in ADJUST' );
 };
@@ -270,9 +277,9 @@ BROCKEN
     my $f = find_function( $mod, 'Counter::add' );
     ok( $f, 'found method Counter::add' );
     is( $f->return_type->as_string,       'i64', 'returns i64' );
-    is( $f->params->@*,                   3,     'three params (__heap_base, $self, $n)' );
-    is( $f->params->[1]->type->as_string, 'ptr', '$self is ptr' );
-    is( $f->params->[2]->type->as_string, 'i64', '$n is i64' );
+    is( $f->params->@*,                   4,     'four params (__heap_base, __want, $self, $n)' );
+    is( $f->params->[2]->type->as_string, 'ptr', '$self is ptr' );
+    is( $f->params->[3]->type->as_string, 'i64', '$n is i64' );
     my $text = $f->as_string();
     like( $text, qr/alloca/,    'has alloca for $n' );
     like( $text, qr/add\s+i64/, 'arithmetic on $count' );
@@ -285,7 +292,7 @@ sub helper() -> i64 {
 }
 return helper();
 BROCKEN
-    is( $mod->functions->@*, 6, 'six functions (4 runtime + helper + entry)' );
+    is( $mod->functions->@*, 9, 'nine functions (7 runtime + helper + entry)' );
     my $text = $mod->as_string();
     like( $text, qr/call\s+i64\s+\@helper/, 'call to helper' );
 };
@@ -305,9 +312,13 @@ BROCKEN
     my $f = find_function( $mod, 'factorial' );
     ok( $f, 'found function factorial' );
     is( $f->name,                         'factorial' );
-    is( $f->params->@*,                   2 );
+    is( $f->params->@*,                   3 );
     is( $f->params->[0]->type->as_string, 'ptr' );
+    is( $f->params->[0]->name,            '%__heap_base' );
     is( $f->params->[1]->type->as_string, 'i64' );
+    is( $f->params->[1]->name,            '%__want' );
+    is( $f->params->[2]->type->as_string, 'i64' );
+    is( $f->params->[2]->name,            '%n' );
     my $text = $f->as_string();
     like( $text, qr/define\s+i64\s+\@factorial/, 'define factorial' );
     like( $text, qr/alloca/,                     'has allocas' );
@@ -344,7 +355,7 @@ return make()->x;
 BROCKEN
     my $make = find_function( $mod, 'make' );
     ok( $make, 'found function make' );
-    is( $make->params->@*,             1,     'make takes one param (__heap_base)' );
+    is( $make->params->@*,             2,     'make takes two params (__heap_base, __want)' );
     is( $make->return_type->as_string, 'ptr', 'make returns ptr' );
     my $entry = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $entry, 'found entry function' );

@@ -94,3 +94,14 @@ sub Brocken::Runtime::decref(ptr $obj, ptr $heap_base) {
     }
     return;
 }
+
+# Context helpers for want() (bitmask: bit0=scalar, bit1=list, bit2=void)
+sub Brocken::Runtime::want_is_scalar(i64 $__want) -> i64 {
+    return Brocken::band($__want, 1);
+}
+sub Brocken::Runtime::want_is_list(i64 $__want) -> i64 {
+    return Brocken::band($__want, 2);
+}
+sub Brocken::Runtime::want_is_void(i64 $__want) -> i64 {
+    return Brocken::band($__want, 4);
+}

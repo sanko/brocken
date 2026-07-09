@@ -79,7 +79,7 @@ class Brocken::Katsuro::AST::Expr::Var : isa(Brocken::Katsuro::AST::Node) {
 class Brocken::Katsuro::AST::Stmt::SubDecl : isa(Brocken::Katsuro::AST::Node) {
     field $name        : param : reader;            # subroutine name
     field $params      : param : reader = [];       # Array of {type, sigil, name}
-    field $return_type : param : reader = 'void';
+    field $return_type : param : reader = undef;    # undef -> infer from body
     field $body        : param : reader;            # AST::Stmt::Block
 }
 
@@ -101,7 +101,7 @@ class Brocken::Katsuro::AST::Stmt::FieldDecl : isa(Brocken::Katsuro::AST::Node) 
 class Brocken::Katsuro::AST::Stmt::MethodDecl : isa(Brocken::Katsuro::AST::Node) {
     field $name        : param : reader;
     field $params      : param : reader = [];       # Array of {type, sigil, name}; does NOT include $self
-    field $return_type : param : reader = 'void';
+    field $return_type : param : reader = undef;    # undef -> infer from body
     field $body        : param : reader;            # AST::Stmt::Block
 }
 
@@ -143,6 +143,10 @@ class Brocken::Katsuro::AST::Expr::ClassConst : isa(Brocken::Katsuro::AST::Node)
 class Brocken::Katsuro::AST::Expr::IntrinsicCall : isa(Brocken::Katsuro::AST::Node) {
     field $name : param : reader;                   # e.g. "load_i64"
     field $args : param : reader = [];              # Array of AST::Node
+}
+
+class Brocken::Katsuro::AST::Expr::Want : isa(Brocken::Katsuro::AST::Node) {
+    field $context : param : reader;                # type name, 'list', 'scalar', or 'void'
 }
 
 class Brocken::Katsuro::AST::Expr::Call : isa(Brocken::Katsuro::AST::Node) {
