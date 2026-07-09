@@ -525,4 +525,69 @@ BROCKEN
         unlink $file;
     }
 };
+subtest 'while loop with last' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my i64 $i = 0;
+my i64 $s = 0;
+while ($i < 100) {
+    $s = $s + 1;
+    if ($i >= 5) { last; }
+    $i = $i + 1;
+}
+return $s;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/e2e_break' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 6, 'last after 5 iterations (s=6)' );
+        unlink $file;
+    }
+};
+subtest 'while loop with next' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my i64 $i = 0;
+my i64 $s = 0;
+while ($i < 10) {
+    $i = $i + 1;
+    if ($i % 2 == 0) { next; }
+    $s = $s + $i;
+}
+return $s;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/e2e_continue' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 25, 'next skips even numbers (sum odds 1..9 = 25)' );
+        unlink $file;
+    }
+};
+subtest 'Ternary expression' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my i64 $a = 1;
+my i64 $b = 0;
+my i64 $r = $a ? 42 : 0;
+return $r + ($b ? 99 : 3);
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/e2e_ternary' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 45, 'ternary: $a?42:0 + $b?99:3 = 42+3 = 45' );
+        unlink $file;
+    }
+};
 done_testing;
