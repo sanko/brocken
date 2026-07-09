@@ -14,6 +14,7 @@ class Brocken::Katsuro::Parser {
     use constant {
         PREC_LOWEST  => 0,
         PREC_ASSIGN  => 10,
+        PREC_TERNARY => 12,
         PREC_OR      => 15,
         PREC_AND     => 17,
         PREC_BITOR   => 18,
@@ -96,10 +97,11 @@ class Brocken::Katsuro::Parser {
             $features->{ $name_tok->{value} } = 1;
             return undef;
         }
-        return $self->parse_var_decl() if $self->check( 'KEYWORD', 'my' );
-        return $self->parse_if()       if $self->check( 'KEYWORD', 'if' );
-        return $self->parse_while()    if $self->check( 'KEYWORD', 'while' );
-        return $self->parse_return()   if $self->check( 'KEYWORD', 'return' );
+        return $self->parse_var_decl()     if $self->check( 'KEYWORD', 'my' );
+        return $self->parse_if()           if $self->check( 'KEYWORD', 'if' );
+        return $self->parse_while()        if $self->check( 'KEYWORD', 'while' );
+        return $self->parse_return()       if $self->check( 'KEYWORD', 'return' );
+        return $self->parse_loop_control() if $self->check( 'KEYWORD', 'last' ) || $self->check( 'KEYWORD', 'next' );
         if ( $self->check( 'KEYWORD', 'say' ) || $self->check( 'KEYWORD', 'print' ) ) {
             return $self->parse_builtin_print();
         }
@@ -410,6 +412,15 @@ class Brocken::Katsuro::Parser {
         );
     }
 
+    method parse_loop_control() {
+        my $tok = $self->advance();
+        $self->consume( ';', undef, "Expected ';' after '$tok->{value}'" );
+        if ( $tok->{value} eq 'last' ) {
+            return Brocken::Katsuro::AST::Stmt::Break->new( $self->_pos_token($tok) );
+        }
+        return Brocken::Katsuro::AST::Stmt::Continue->new( $self->_pos_token($tok) );
+    }
+
     # === Expressions (Pratt Parser) ===
     method parse_expression($precedence) {
         my $token = $self->advance();
@@ -557,6 +568,12 @@ class Brocken::Katsuro::Parser {
                     rhs => $self->parse_expression(PREC_PRODUCT)
                 );
             }
+            if ( $op eq '?' ) {
+                my $then = $self->parse_expression(0);
+                $self->consume( 'OP', ':', "Expected ':' after ternary then-expression" );
+                my $else = $self->parse_expression(PREC_TERNARY);
+                return Brocken::Katsuro::AST::Expr::Ternary->new( $self->_pos_token($token), cond => $left, then => $then, else => $else, );
+            }
             Carp::croak( "Unknown operator '$op' at " . $self->_loc($token) );
         }
         if ( $token->{type} eq '[' ) {
@@ -600,6 +617,7 @@ class Brocken::Katsuro::Parser {
             my $op = $token->{value};
             return PREC_ASSIGN  if $op eq '=' || $op eq '//=';
             return PREC_DEREF   if $op eq '->';
+            return PREC_TERNARY if $op eq '?';
             return PREC_OR      if $op eq '||';
             return PREC_AND     if $op eq '&&';
             return PREC_BITOR   if $op eq '|';

@@ -49,25 +49,31 @@ class Brocken::Katsuro::AST::Stmt::While : isa(Brocken::Katsuro::AST::Node) {
     field $body : param : reader;                 # AST::Stmt::Block
 }
 
+class Brocken::Katsuro::AST::Stmt::Break : isa(Brocken::Katsuro::AST::Node) {
+}
+
+class Brocken::Katsuro::AST::Stmt::Continue : isa(Brocken::Katsuro::AST::Node) {
+}
+
 class Brocken::Katsuro::AST::Stmt::Return : isa(Brocken::Katsuro::AST::Node) {
     field $expr : param : reader = undef;
 }
 
 # Expressions
 class Brocken::Katsuro::AST::Expr::BinOp : isa(Brocken::Katsuro::AST::Node) {
-    field $op  : param : reader;                  # '+', '-', '==', etc.
-    field $lhs : param : reader;                  # AST::Node
-    field $rhs : param : reader;                  # AST::Node
+    field $op  : param : reader;    # '+', '-', '==', etc.
+    field $lhs : param : reader;    # AST::Node
+    field $rhs : param : reader;    # AST::Node
 }
 
 class Brocken::Katsuro::AST::Expr::UnOp : isa(Brocken::Katsuro::AST::Node) {
-    field $op   : param : reader;                 # '-', '!', 'not'
-    field $expr : param : reader;                 # AST::Node
+    field $op   : param : reader;    # '-', '!', 'not'
+    field $expr : param : reader;    # AST::Node
 }
 
 class Brocken::Katsuro::AST::Expr::Const : isa(Brocken::Katsuro::AST::Node) {
     field $value : param : reader;
-    field $type  : param : reader;                # 'Int', 'Float', 'String', 'Bool'
+    field $type  : param : reader;    # 'Int', 'Float', 'String', 'Bool'
 }
 
 class Brocken::Katsuro::AST::Expr::Var : isa(Brocken::Katsuro::AST::Node) {
@@ -143,6 +149,12 @@ class Brocken::Katsuro::AST::Expr::ClassConst : isa(Brocken::Katsuro::AST::Node)
 class Brocken::Katsuro::AST::Expr::IntrinsicCall : isa(Brocken::Katsuro::AST::Node) {
     field $name : param : reader;                   # e.g. "load_i64"
     field $args : param : reader = [];              # Array of AST::Node
+}
+
+class Brocken::Katsuro::AST::Expr::Ternary : isa(Brocken::Katsuro::AST::Node) {
+    field $cond : param : reader;
+    field $then : param : reader;
+    field $else : param : reader;
 }
 
 class Brocken::Katsuro::AST::Expr::Want : isa(Brocken::Katsuro::AST::Node) {

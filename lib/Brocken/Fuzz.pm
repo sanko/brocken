@@ -211,7 +211,7 @@ package Brocken::Fuzz {
             my $n_f64_vars = scalar(@f64_vars);
             my $n_int_vars = $n_vars - $n_f64_vars;
             my $n_subs     = scalar( $subs_meta->@* );
-            my $type       = $self->_rand_int( $n_subs >= 1 ? 13 : 12 );
+            my $type       = $self->_rand_int( $n_subs >= 1 ? 15 : 14 );
             if ( $type == 0 ) {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
@@ -250,6 +250,12 @@ package Brocken::Fuzz {
             }
             elsif ( $type == 12 && $n_subs >= 1 ) {
                 return $self->_gen_call_assign( $vars, $var_types, $var_names, $subs_meta );
+            }
+            elsif ( $type == 13 && $n_vars >= 3 ) {
+                return $self->_gen_ternary_assign( $vars, $var_types, $var_names );
+            }
+            elsif ( $type == 14 && $n_vars >= 2 ) {
+                return $self->_gen_logic_assign( $vars, $var_types, $var_names );
             }
             else {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
@@ -403,8 +409,8 @@ package Brocken::Fuzz {
 
         # Generate a while loop with tracked expected values.
         # The condition compares two different int vars; the body contains
-        # 1-3 simple assignments.  Simulation detects non-terminating
-        # loops (max 1000 iterations) and skips generation.
+        # 1-3 simple statements (assignments, last, or next).  Simulation
+        # detects non-terminating loops (max 1000 iterations) and skips.
         method _gen_while( $vars, $var_types, $var_names ) {
             my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
             return { code => undef } if @int_names < 2;
@@ -420,11 +426,11 @@ package Brocken::Fuzz {
             return { code => undef } if $cond_rhs eq $cond_lhs;
             my $cmp = $self->_rand_cmpop();
 
-            # Generate 1-3 body statements
+            # Generate 1-3 body statements (may include last/next)
             my $n_body = $self->_rand_int(3) + 1;
             my @body_items;
             for my $bi ( 1 .. $n_body ) {
-                my $item = $self->_gen_body_assign( $vars, $var_types, $var_names );
+                my $item = $self->_gen_loop_body_item( $vars, $var_types, $var_names );
                 push @body_items, $item if $item->{code};
             }
             return { code => undef } if @body_items == 0;
@@ -443,14 +449,26 @@ package Brocken::Fuzz {
             my $n_sim       = 0;
             my $sim_start   = time;
             my $sim_timeout = 2;
-            for my $iter ( 1 .. $max_iter ) {
+        LOOP: for my $iter ( 1 .. $max_iter ) {
                 last if time - $sim_start > $sim_timeout;
                 my $lv = $vars->{$cond_lhs} // 0;
                 my $rv = $vars->{$cond_rhs} // 0;
                 last unless $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$cond_lhs}, $var_types->{$cond_rhs} );
                 $n_sim = $iter;
                 for my $item (@body_items) {
-                    $item->{apply}->();
+                    if ( defined( $item->{type} ) && $item->{type} eq 'last' ) {
+                        next unless $item->{guard}->();    # guard false: continue to next body item
+                        $n_sim = $iter;                    # this iteration counts
+                        last LOOP;                         # exit loop
+                    }
+                    elsif ( defined( $item->{type} ) && $item->{type} eq 'next' ) {
+                        next unless $item->{guard}->();    # guard false: continue to next body item
+                        $n_sim = $iter;                    # this iteration counts
+                        last;                              # skip remaining body, re-check cond
+                    }
+                    else {
+                        $item->{apply}->();
+                    }
                 }
             }
 
@@ -464,6 +482,28 @@ package Brocken::Fuzz {
             }
             my $body_code = join "\n", map { "    " . $_->{code} } @body_items;
             return { code => "while (\$$cond_lhs $cmp \$$cond_rhs) {\n$body_code\n}" };
+        }
+
+        # Generate a single loop body item: assignment (via _gen_body_assign) or
+        # a conditional last/next.  Returns { code, type, apply/guard }.
+        method _gen_loop_body_item( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return $self->_gen_body_assign( $vars, $var_types, $var_names ) if @int_names < 2;
+            my $kind = $self->_rand_int(4);
+            if ( $kind < 2 ) {
+                return $self->_gen_body_assign( $vars, $var_types, $var_names );
+            }
+            my $lhs   = $int_names[ $self->_rand_int($#int_names) ];
+            my $rhs   = $int_names[ $self->_rand_int($#int_names) ];
+            my $cmp_c = $self->_rand_cmpop();
+            my $ctrl  = $kind == 2 ? 'last' : 'next';
+            my $code  = "if (\$$lhs $cmp_c \$$rhs) { $ctrl; }";
+            my $guard = sub {
+                my $lv = $vars->{$lhs} // 0;
+                my $rv = $vars->{$rhs} // 0;
+                return $self->_eval_cmp_typed( $cmp_c, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
+            };
+            return { type => $ctrl, guard => $guard, code => $code };
         }
 
         # Generate a single replayable body statement for use inside while/nested
@@ -587,6 +627,46 @@ package Brocken::Fuzz {
             return { code =>
                     join( "\n", "if (\$$lhs1 $cmp1 \$$rhs1 $logic \$$lhs2 $cmp2 \$$rhs2) {", "    \$$dst = 1;", "} else {", "    \$$dst = 0;", "}" ),
             };
+        }
+
+        # Generate a ternary expression: $dst = $cond ? $t_val : $f_val
+        # The condition compares two arbitrary int vars; the true/false branches
+        # are existing variable values.
+        method _gen_ternary_assign( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 3;
+            my $dst    = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $lhs    = $int_names[ $self->_rand_int($#int_names) ];
+            my $rhs    = $int_names[ $self->_rand_int($#int_names) ];
+            my $cmp    = $self->_rand_cmpop();
+            my $lv     = $vars->{$lhs} // 0;
+            my $rv     = $vars->{$rhs} // 0;
+            my $cond   = $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
+            my $t_val  = $int_names[ $self->_rand_int($#int_names) ];
+            my $f_val  = $int_names[ $self->_rand_int($#int_names) ];
+            my $result = $cond ? ( $vars->{$t_val} // 0 ) : ( $vars->{$f_val} // 0 );
+            my $t      = $var_types->{$dst};
+            $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
+            return { code => "\$$dst = \$$lhs $cmp \$$rhs ? \$$t_val : \$$f_val;" };
+        }
+
+        # Generate a logical expression: $dst = $lhs && $rhs or $dst = $lhs || $rhs
+        # Uses the &&/|| operators which lower to bitwise and/or on i1-equivalent values.
+        method _gen_logic_assign( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            return { code => undef } if @int_names < 2;
+            my $dst   = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $lhs   = $int_names[ $self->_rand_int($#int_names) ];
+            my $rhs   = $int_names[ $self->_rand_int($#int_names) ];
+            my $logic = $self->_rand_int(1) ? '&&' : '||';
+            my $lv    = $vars->{$lhs}       ? 1    : 0;
+            my $rv    = $vars->{$rhs}       ? 1    : 0;
+            my $result;
+            if ( $logic eq '&&' ) { $result = $lv && $rv }
+            else                  { $result = $lv || $rv }
+            my $t = $var_types->{$dst};
+            $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
+            return { code => "\$$dst = \$$lhs $logic \$$rhs;" };
         }
 
         # Float binary ops (+, -, *, / only; no shift/bitwise for float)
@@ -1152,16 +1232,20 @@ package Brocken::Fuzz {
         # body statements, and a return statement.
         # Returns a metadata hashref suitable for _gen_call_assign / _simulate_call,
         # or undef if generation failed (e.g. no valid body statements).
+        # The pool includes recursive names (factorial, sum_to) which are dispatched
+        # to _gen_recursive_sub_by_name instead of the regular body generator.
         method _gen_sub_decl($used_names) {
-            my @POOL  = qw[helper adder getval compute transform fold double triple];
+            my @POOL  = qw[helper adder getval compute transform fold double triple factorial sum_to];
             my @avail = grep { !$used_names->{$_} } @POOL;
             return undef if @avail == 0;
             my $name = $avail[ $self->_rand_int($#avail) ];
             $used_names->{$name} = 1;
+            if ( $name eq 'factorial' || $name eq 'sum_to' ) {
+                return $self->_gen_recursive_sub_by_name($name);
+            }
             my $n_params = $self->_rand_int(3);    # 0-2 params
             my @params;
             my @param_names;
-
             for my $pi ( 1 .. $n_params ) {
                 my ( $bits, $signed ) = $self->_gen_sub_body_type();
                 my $pname = 'p' . $pi;
@@ -1216,10 +1300,50 @@ package Brocken::Fuzz {
             };
         }
 
+        # Generate a recursive sub by name (factorial or sum_to).
+        # The name is already chosen and marked used by the caller.
+        # Returns metadata with recursive_sim coderef for simulation.
+        # Recursive subs are called with small literal values to avoid deep stacks.
+        method _gen_recursive_sub_by_name($name) {
+            my $code;
+            my $sim;
+            if ( $name eq 'factorial' ) {
+                $code = "sub factorial(i64 \$n) -> i64 {\n    if (\$n <= 1) { return 1; }\n    return \$n * factorial(\$n - 1);\n}";
+                $sim  = sub {
+                    my $n = shift;
+                    return 1 if $n <= 1;
+                    my $r = 1;
+                    for my $i ( 2 .. $n ) { $r *= $i }
+                    return $r;
+                };
+            }
+            else {
+                $code = "sub sum_to(i64 \$n) -> i64 {\n    if (\$n <= 0) { return 0; }\n    return \$n + sum_to(\$n - 1);\n}";
+                $sim  = sub {
+                    my $n = shift;
+                    return 0 if $n <= 0;
+                    return $n * ( $n + 1 ) / 2;
+                };
+            }
+            return {
+                name           => $name,
+                params         => [ { name => 'n', bits => 64, signed => 1 } ],
+                param_names    => ['n'],
+                return_type    => { bits => 64, signed => 1 },
+                body_items     => [],
+                body_vars      => {},
+                body_var_types => {},
+                code           => $code,
+                recursive_sim  => $sim,
+            };
+        }
+
         # Generate a function-call assignment: $dst = funcname($arg1, ...).
         # Picks a random previously-defined sub, matches args to param types
         # (preferring compatible existing vars, falling back to literals),
         # and simulates the call for expected-value tracking.
+        # Recursive subs always use small literal arguments (0-10) to avoid
+        # deep stack recursion in the compiled binary.
         method _gen_call_assign( $vars, $var_types, $var_names, $subs_meta ) {
             return { code => undef } if scalar( $subs_meta->@* ) < 1;
             my $dst = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
@@ -1227,16 +1351,23 @@ package Brocken::Fuzz {
             my @args;
             my @arg_codes;
             for my $p ( $sub->{params}->@* ) {
-                my @compat = grep { $var_types->{$_}{bits} == $p->{bits} && $var_types->{$_}{signed} eq $p->{signed} } $var_names->@*;
-                if (@compat) {
-                    my $arg = $compat[ $self->_rand_int($#compat) ];
-                    push @args,      $vars->{$arg};
-                    push @arg_codes, '$' . $arg;
-                }
-                else {
-                    my $val = $self->_rand_typed_val( $p->{bits}, $p->{signed} );
+                if ( $sub->{recursive_sim} ) {
+                    my $val = $self->_rand_int(10) + 1;
                     push @args,      $val;
                     push @arg_codes, $self->_fmt_val( $val, $p->{bits}, $p->{signed} );
+                }
+                else {
+                    my @compat = grep { $var_types->{$_}{bits} == $p->{bits} && $var_types->{$_}{signed} eq $p->{signed} } $var_names->@*;
+                    if (@compat) {
+                        my $arg = $compat[ $self->_rand_int($#compat) ];
+                        push @args,      $vars->{$arg};
+                        push @arg_codes, '$' . $arg;
+                    }
+                    else {
+                        my $val = $self->_rand_typed_val( $p->{bits}, $p->{signed} );
+                        push @args,      $val;
+                        push @arg_codes, $self->_fmt_val( $val, $p->{bits}, $p->{signed} );
+                    }
                 }
             }
             my $result;
@@ -1249,12 +1380,14 @@ package Brocken::Fuzz {
             return { code => $code };
         }
 
-        # Simulate a call to a sub defined by _gen_sub_decl.
-        # Snapshots the sub's body_vars, binds params to arg values, applies all
-        # body_items, reads the return variable, then restores the snapshot.
-        # The snapshot/restore pattern keeps the sub's body_vars pristine for
-        # subsequent calls in the same top-level program.
+        # Simulate a call to a sub defined by _gen_sub_decl or _gen_recursive_sub.
+        # For regular subs, snapshots body_vars, binds params, applies body_items,
+        # reads return_var, then restores snapshot.
+        # For recursive subs, delegates to the recursive_sim coderef.
         method _simulate_call( $sub_meta, $args_av ) {
+            if ( $sub_meta->{recursive_sim} ) {
+                return $sub_meta->{recursive_sim}( $args_av->[0] );
+            }
             my $body_vars = $sub_meta->{body_vars};
             my %snapshot  = %$body_vars;
             for my $i ( 0 .. $#{ $sub_meta->{params} } ) {

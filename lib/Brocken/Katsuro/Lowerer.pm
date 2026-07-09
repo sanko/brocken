@@ -21,6 +21,8 @@ class Brocken::Katsuro::Lowerer {
     field $needs_rc              = {};    # var_name -> 1 (Any-typed variable needing refcounting)
     field $rodata : reader       = {};    # label -> bytes for string constants
     field $_rodata_label_counter = 0;
+    field $_loop_header_blocks   = [];    # stack of header block labels for continue (next)
+    field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
 
     method unique_block_name($prefix) {
         return $prefix . '_' . $block_id++;
@@ -496,6 +498,8 @@ class Brocken::Katsuro::Lowerer {
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') )        { return $self->lower_return($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') )            { return $self->lower_if($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') )         { return $self->lower_while($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Break') )         { return $self->lower_break($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Continue') )      { return $self->lower_continue($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Block') )         { return $self->lower_block_body($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Expr::Call') )          { $self->lower_call_expr($stmt); return; }
         if ( $stmt->isa('Brocken::Katsuro::AST::Expr::IntrinsicCall') ) { $self->lower_intrinsic($stmt); return; }
@@ -720,6 +724,8 @@ class Brocken::Katsuro::Lowerer {
         my $header = $func->append_block( $self->unique_block_name('while_header') );
         my $body   = $func->append_block( $self->unique_block_name('while_body') );
         my $exit   = $func->append_block( $self->unique_block_name('while_end') );
+        push $_loop_header_blocks->@*, $header;
+        push $_loop_exit_blocks->@*,   $exit;
         $builder->position_at_end($current_block);
         $builder->build_br( $header, $line, $col );
         $builder->position_at_end($header);
@@ -733,8 +739,36 @@ class Brocken::Katsuro::Lowerer {
         unless ( $current_block->terminator ) {
             $builder->build_br( $header, $line, $col );
         }
+        pop $_loop_header_blocks->@*;
+        pop $_loop_exit_blocks->@*;
         $builder->position_at_end($exit);
         $current_block = $exit;
+    }
+
+    method lower_break($ast) {
+        my $exit = $_loop_exit_blocks->[-1] or Carp::croak( "'last' outside loop at " . $self->_loc($ast) );
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        $self->_emit_loop_cleanup();
+        $builder->build_br( $exit, $line, $col );
+    }
+
+    method lower_continue($ast) {
+        my $header = $_loop_header_blocks->[-1] or Carp::croak( "'next' outside loop at " . $self->_loc($ast) );
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        $self->_emit_loop_cleanup();
+        $builder->build_br( $header, $line, $col );
+    }
+
+    # Decref RC-tracked variables before leaving the current block via break/continue.
+    method _emit_loop_cleanup() {
+        my @rc_names = sort keys %$needs_rc;
+        return unless @rc_names;
+        my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+        for my $name (@rc_names) {
+            my $addr   = $symbols->{$name} or next;
+            my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+            $builder->build_decref( $loaded, 0, 0, $decref_hb );
+        }
     }
 
     # === Expression lowering ===
@@ -774,6 +808,9 @@ class Brocken::Katsuro::Lowerer {
         }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Want') ) {
             return $self->lower_want($expr);
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Ternary') ) {
+            return $self->lower_ternary($expr);
         }
         Carp::croak( "Unknown expression type: " . ref($expr) . " at " . $self->_loc($expr) );
     }
@@ -1248,6 +1285,16 @@ class Brocken::Katsuro::Lowerer {
             $param_idx++;
         }
         return $builder->build_call( $callee, \@args, undef, $line, $col );
+    }
+
+    method lower_ternary($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $cond = $self->as_condition( $self->lower_expression( $ast->cond ), $line, $col );
+        my $then = $self->lower_expression( $ast->then );
+        my $else = $self->lower_expression( $ast->else );
+        $then = $self->maybe_convert_type( $then, $else->type ) unless $then->type eq $else->type;
+        $else = $self->maybe_convert_type( $else, $then->type ) unless $else->type eq $then->type;
+        return $builder->build_select( $cond, $then, $else, undef, $line, $col );
     }
 
     method lower_want($ast) {

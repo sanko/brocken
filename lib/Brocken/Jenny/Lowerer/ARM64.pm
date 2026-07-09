@@ -3440,6 +3440,57 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => $cond{$pred}, operands => [$dst], comment => $pred ) );
                     }
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Select') ) {
+                    my ( $cond, $true_val, $false_val ) = $inst->operands->@*;
+                    my $cond_op     = $self->_lower_opnd($cond);
+                    my $true_op     = $self->_lower_opnd($true_val);
+                    my $false_op    = $self->_lower_opnd($false_val);
+                    my $result_type = $inst->type;
+                    my $is_i128     = $result_type && $result_type->kind eq 'int' && $result_type->bits == 128;
+                    if ($is_i128) {
+                        my ( $true_lo,  $true_hi )  = $self->_split_i128($true_val);
+                        my ( $false_lo, $false_hi ) = $self->_split_i128($false_val);
+                        my $dst_lo = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'virt_reg',
+                            value => $inst->name . '_lo',
+                            type  => Brocken::Lindsay::IR::Type::i64()
+                        );
+                        my $dst_hi = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'virt_reg',
+                            value => $inst->name . '_hi',
+                            type  => Brocken::Lindsay::IR::Type::i64()
+                        );
+                        my $else_lbl = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->name . '_sel_else' );
+                        my $end_lbl  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->name . '_sel_end' );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'beq',
+                                operands => [ $cond_op, $else_lbl ],
+                                comment  => 'select i128'
+                            )
+                        );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov',   operands => [ $dst_lo, $true_lo ] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov',   operands => [ $dst_hi, $true_hi ] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'jmp',   operands => [$end_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$else_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $dst_lo, $false_lo ] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $dst_hi, $false_hi ] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$end_lbl] ) );
+                    }
+                    else {
+                        my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $result_type );
+                        my $else_lbl = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label',    value => $inst->name . '_sel_else' );
+                        my $end_lbl  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label',    value => $inst->name . '_sel_end' );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'beq', operands => [ $cond_op, $else_lbl ], comment => 'select' )
+                        );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov',   operands => [ $dst, $true_op ] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'jmp',   operands => [$end_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$else_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov',   operands => [ $dst, $false_op ] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$end_lbl] ) );
+                    }
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {
                     my $callee  = $inst->callee;
                     my @args    = $inst->operands->@*;
