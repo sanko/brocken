@@ -85,4 +85,92 @@ BROCKEN
         unlink $file;
     }
 };
+subtest 'Return boxed Any survives decref cleanup' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+
+        # Regression: lower_return used to decref ALL RC locals before build_ret,
+        # which freed the returned object (RC 1 -> 0) and returned a dangling pointer.
+        # The fix adds build_incref($val) before the decref loop.
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+sub wrap(i64 $n) -> i64 {
+    my $inner = $n;
+    return $inner;
+}
+my $x = wrap(77);
+return $x;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_inc_retbox' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 77, 'returned boxed Any value survives decref of locals' );
+        unlink $file;
+    }
+};
+subtest 'Reassign Any var — incref new + decref old' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my $a = 10;
+my $b = 20;
+$a = $b;
+return $a;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_inc_reassign' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 20, 'reassign: incref new value, decref old value' );
+        unlink $file;
+    }
+};
+subtest 'Multiple Any vars survive scope cleanup' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my $a = 1;
+my $b = 2;
+my $c = 3;
+my $d = 4;
+return $a + $b + $c + $d;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_inc_multi' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 10, 'multiple RC vars — all decrefed without corruption' );
+        unlink $file;
+    }
+};
+subtest 'Call returning boxed Any — cross-function RC' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+sub make(i64 $n) -> i64 {
+    return $n * 2;
+}
+sub chain(i64 $n) -> i64 {
+    my $tmp = $n;
+    return make($tmp);
+}
+my $x = chain(21);
+return $x;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_inc_cross' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 42, 'cross-function RC — boxed Any passed and returned' );
+        unlink $file;
+    }
+};
 done_testing;
