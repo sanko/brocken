@@ -269,7 +269,6 @@ class Brocken::Katsuro::Lowerer {
                 $self->generate_writer( $class_name, $f );
             }
         }
-
         $current_class = undef;
     }
 
@@ -1424,7 +1423,6 @@ class Brocken::Katsuro::Lowerer {
         my ( $line, $col ) = ( $ast->line, $ast->col );
         my $hb       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
         my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'},      undef, $line, $col );
-
         if ( $obj_is_class && $ast->method eq 'new' ) {
             my $cd            = $classes->{$class_name};
             my $total_size    = $cd->{total_size};
@@ -1436,9 +1434,8 @@ class Brocken::Katsuro::Lowerer {
 
             # Only named constructors supported: new(x => 100, y => 150)
             my $args = $ast->args;
-            Carp::croak( "Positional constructors are not supported. Use named syntax: class->new(field => value)" )
+            Carp::croak("Positional constructors are not supported. Use named syntax: class->new(field => value)")
                 unless $args->@* == 1 && $args->[0]->isa('Brocken::Katsuro::AST::Expr::Hash');
-
             my $hash = $args->[0];
             my %field_idx;
             for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
@@ -1463,8 +1460,7 @@ class Brocken::Katsuro::Lowerer {
                 next unless defined $f->{default};
                 my $default_val = $self->lower_expression( $f->{default} );
                 $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
-                my $field_ptr
-                    = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{idx}, '%' . $f->{name} . '.default', $line, $col );
+                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{idx}, '%' . $f->{name} . '.default', $line, $col );
                 $builder->build_store( $default_val, $field_ptr, $line, $col );
             }
             my $adjust_fn = $functions->{ $class_name . '::ADJUST' };
@@ -1473,7 +1469,6 @@ class Brocken::Katsuro::Lowerer {
             }
             return $self_ptr;
         }
-
         my $callee = $functions->{$full_name};
         Carp::croak( "Undefined method '" . $ast->method . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $callee;
         my $obj_ptr = $obj_is_class ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) :
@@ -1756,8 +1751,6 @@ class Brocken::Katsuro::Lowerer {
         $builder->build_store( $value_val, $field_ptr );
         $builder->build_ret();
     }
-
-
 }
 
 =head1 NAME

@@ -78,7 +78,7 @@ subtest 'Direct field read and write' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 class Counter {
     field i64 $count :param :reader :writer;
 }

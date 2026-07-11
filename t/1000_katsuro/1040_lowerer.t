@@ -246,7 +246,7 @@ BROCKEN
     my $f = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $f, 'found entry function' );
     my $text = $f->as_string();
-    like( $text, qr/bump_alloc/,   'allocates object via bump_alloc' );
+    like( $text, qr/bump_alloc/,    'allocates object via bump_alloc' );
     like( $text, qr/getelementptr/, 'GEP for field access' );
     like( $text, qr/store/,         'stores field value' );
 };
