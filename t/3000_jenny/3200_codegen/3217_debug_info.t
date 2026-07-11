@@ -61,10 +61,15 @@ BROCKEN
         my $ir_funcs  = $module->functions;
         my $funcs     = $brocken->codegen->emit_functions($ir_funcs);
         my $text_base = 0;
-        if    ( $host->is_windows ) { $text_base = 0x140001000; }
-        elsif ( $host->is_linux )   { $text_base = 0x400000; }
-        elsif ( $host->is_macos )   { $text_base = 0; }
-
+        if ( $host->is_windows ) {
+            $text_base = 0x140001000;
+        }
+        elsif ( $host->is_linux ) {
+            $text_base = 0x400000 + $brocken->linker->rva_for('.text') + $brocken->linker->entry_stub_len($host);
+        }
+        elsif ( $host->is_macos ) {
+            $text_base = 0;
+        }
         for my $lv ( 0 .. 5 ) {
             my $debug_data = $brocken->codegen->build_debug_data( $ir_funcs, $funcs, 'test_levels.brocken', $text_base, $module->class_info, $lv );
             my $has_line   = exists $debug_data->{'.debug_line'};
@@ -135,9 +140,15 @@ BROCKEN
         my $ir_funcs  = $module->functions;
         my $funcs     = $brocken->codegen->emit_functions($ir_funcs);
         my $text_base = 0;
-        if    ( $host->is_windows ) { $text_base = 0x140001000; }
-        elsif ( $host->is_linux )   { $text_base = 0x400000; }
-        elsif ( $host->is_macos )   { $text_base = 0; }
+        if ( $host->is_windows ) {
+            $text_base = 0x140001000;
+        }
+        elsif ( $host->is_linux ) {
+            $text_base = 0x400000 + $brocken->linker->rva_for('.text') + $brocken->linker->entry_stub_len($host);
+        }
+        elsif ( $host->is_macos ) {
+            $text_base = 0;
+        }
         my $debug_data = $brocken->codegen->build_debug_data( $ir_funcs, $funcs, 'test_gdb.brocken', $text_base, {}, 5 );
         $brocken->linker->set_debug_data($debug_data);
         $brocken->linker->set_debug_level(5);
@@ -226,10 +237,15 @@ BROCKEN
         my $ir_funcs   = $module->functions;
         my $funcs      = $brocken->codegen->emit_functions($ir_funcs);
         my $text_base  = 0;
-        if    ( $host->is_windows ) { $text_base = 0x140001000; }
-        elsif ( $host->is_linux )   { $text_base = 0x400000; }
-        elsif ( $host->is_macos )   { $text_base = 0; }
-
+        if ( $host->is_windows ) {
+            $text_base = 0x140001000;
+        }
+        elsif ( $host->is_linux ) {
+            $text_base = 0x400000 + $brocken->linker->rva_for('.text') + $brocken->linker->entry_stub_len($host);
+        }
+        elsif ( $host->is_macos ) {
+            $text_base = 0;
+        }
         for my $lv ( 2, 4 ) {
             my $debug_data = $brocken->codegen->build_debug_data( $ir_funcs, $funcs, 'test_struct_die.brocken', $text_base, $class_info, $lv );
             my $info       = $debug_data->{'.debug_info'} // '';
