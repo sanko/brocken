@@ -21,7 +21,8 @@ class Brocken::Katsuro::Lowerer {
     field $needs_rc              = {};    # var_name -> 1 (Any-typed variable needing refcounting)
     field $rodata : reader       = {};    # label -> bytes for string constants
     field $_rodata_label_counter = 0;
-    field $_loop_header_blocks   = [];    # stack of header block labels for continue (next)
+    field $_loop_header_blocks   = [];    # stack of header block labels
+    field $_loop_check_blocks    = [];    # stack of iteration-check block labels (counter guard)
     field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
 
     method unique_block_name($prefix) {
@@ -753,16 +754,36 @@ class Brocken::Katsuro::Lowerer {
         my $func = $current_func;
         my ( $line, $col ) = ( $ast->line, $ast->col );
         my $header = $func->append_block( $self->unique_block_name('while_header') );
+        my $check  = $func->append_block( $self->unique_block_name('while_check') );
         my $body   = $func->append_block( $self->unique_block_name('while_body') );
         my $exit   = $func->append_block( $self->unique_block_name('while_end') );
         push $_loop_header_blocks->@*, $header;
+        push $_loop_check_blocks->@*,  $check;
         push $_loop_exit_blocks->@*,   $exit;
-        $builder->position_at_end($current_block);
+
+        # Pre-header: allocate and zero the per-loop iteration counter.
+        # Alloca lives in the pre-header block (not the function entry block),
+        # so it avoids the cross-block alloca liveness bug.
+        my $counter_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%while_counter' );
+        my $zero           = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+        $builder->build_store( $zero, $counter_alloca, $line, $col );
         $builder->build_br( $header, $line, $col );
         $builder->position_at_end($header);
         $current_block = $header;
         my $cond = $self->as_condition( $self->lower_expression( $ast->cond ), $line, $col );
-        $builder->build_cond_br( $cond, $body, $exit, $line, $col );
+        $builder->build_cond_br( $cond, $check, $exit, $line, $col );
+
+        # Check block: increment per-loop counter, bail if loop_limit exceeded.
+        $builder->position_at_end($check);
+        $current_block = $check;
+        my $lc  = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $counter_alloca, undef, $line, $col );
+        my $lc1 = $builder->build_add( $lc, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 ),
+            undef, $line, $col );
+        $builder->build_store( $lc1, $counter_alloca, $line, $col );
+        my $limit_val = $Brocken::loop_limit // 10000;
+        my $limit     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $limit_val );
+        my $over      = $builder->build_icmp( 'sgt', $lc1, $limit, undef, $line, $col );
+        $builder->build_cond_br( $over, $exit, $body, $line, $col );
         $builder->position_at_end($body);
         $current_block = $body;
         $self->lower_block_body( $ast->body );
@@ -771,6 +792,7 @@ class Brocken::Katsuro::Lowerer {
             $builder->build_br( $header, $line, $col );
         }
         pop $_loop_header_blocks->@*;
+        pop $_loop_check_blocks->@*;
         pop $_loop_exit_blocks->@*;
         $builder->position_at_end($exit);
         $current_block = $exit;
@@ -1210,9 +1232,24 @@ class Brocken::Katsuro::Lowerer {
                     $builder->build_zext( $val, $target_type, undef, $line, $col );
             }
             if ( $val->type->bits > $target_type->bits ) {
-                my $mask = ( 1 << $target_type->bits ) - 1;
+                my $bits = $target_type->bits;
+                my $mask;
+                if ( $bits >= 64 ) {
+                    require Math::BigInt;
+                    $mask = ( Math::BigInt->new(1) << $bits ) - 1;
+                }
+                else {
+                    $mask = ( 1 << $bits ) - 1;
+                }
                 if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
-                    return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value & $mask );
+                    my $cv = $val->value;
+                    if ( ref($cv) && $cv->isa('Math::BigInt') || ref($mask) && $mask->isa('Math::BigInt') ) {
+                        require Math::BigInt;
+                        my $bn = ref($cv)   && $cv->isa('Math::BigInt')   ? $cv->copy   : Math::BigInt->new($cv);
+                        my $bm = ref($mask) && $mask->isa('Math::BigInt') ? $mask->copy : Math::BigInt->new($mask);
+                        return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $bn & $bm );
+                    }
+                    return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $cv & $mask );
                 }
                 my $mask_val = Brocken::Lindsay::IR::Constant->new( type => $val->type, value => $mask );
                 return $builder->build_and( $val, $mask_val, undef, $line, $col );

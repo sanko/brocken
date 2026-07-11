@@ -22,18 +22,18 @@ my i64 $f16 = Brocken::Runtime::free16_count($hb);
 my i64 $fb = Brocken::Runtime::free_blocks_count($hb);
 
 # Expected: heap_cursor == immix_cursor == hb + 80 (block at hb+64, Line 0 data at block+16)
-my ptr $base = Brocken::ptr_add($hb, 64);
-my ptr $line0 = Brocken::ptr_add($base, 16);
-# hc should be line0
-if (Brocken::ptr_cmp_eq($hc, $line0) == 0) { return 1; }
-# ic should also be line0
-if (Brocken::ptr_cmp_eq($ic, $line0) == 0) { return 2; }
-# il should be base + 256
-if (Brocken::ptr_cmp_eq($il, Brocken::ptr_add($base, 256)) == 0) { return 3; }
-# line_remaining = 256 - 16 = 240
-if ($lr != 240) { return 4; }
-# block_remaining = 32768 - 16 = 32752
-if ($br != 32752) { return 5; }
+    my ptr $base = Brocken::ptr_add($hb, 64);
+    my ptr $line0 = Brocken::ptr_add($base, 16);
+    # hc should be line0
+    if (Brocken::ptr_cmp_eq($hc, $line0) == 0) { return 1; }
+    # ic should also be line0
+    if (Brocken::ptr_cmp_eq($ic, $line0) == 0) { return 2; }
+    # il should be base + 256
+    if (Brocken::ptr_cmp_eq($il, Brocken::ptr_add($base, 256)) == 0) { return 3; }
+    # line_remaining = 256 - 16 = 240
+    if ($lr != 240) { return 4; }
+    # block_remaining = 32752 - 16 = 32736 (last 16 bytes are metadata)
+    if ($br != 32736) { return 5; }
 # free16_count == 0
 if ($f16 != 0) { return 6; }
 # free_blocks_count == 0
@@ -141,6 +141,9 @@ my $y = 99;
 my i64 $br3 = Brocken::Runtime::block_remaining($hb);
 my i64 $expected_br3 = Brocken::i64_sub($expected_br2, 16);
 if ($br3 != $expected_br3) { return 2; }
+# Verify live_count matches allocation count
+my i64 $lc = Brocken::Runtime::live_count($hb);
+if ($lc != 2) { return 3; }
 return 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
@@ -304,6 +307,150 @@ BROCKEN
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
         is( $? >> 8, 0, 'line_waste: initial 240, 224 after 1 alloc, 0 at line fill, 240 on new line' );
+        unlink $file;
+    }
+};
+subtest 'live_count tracks allocation count' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my ptr $hb = Brocken::heap_base();
+my i64 $lc0 = Brocken::Runtime::live_count($hb);
+if ($lc0 != 0) { return 1; }
+my $a = 10;
+my i64 $lc1 = Brocken::Runtime::live_count($hb);
+if ($lc1 != 1) { return 2; }
+my $b = 20;
+my $c = 30;
+my i64 $lc3 = Brocken::Runtime::live_count($hb);
+if ($lc3 != 3) { return 3; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_live_count' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, 'live_count: 0→1→3 across allocations' );
+        unlink $file;
+    }
+};
+subtest 'live_count decrements on block-scoped decref' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my ptr $hb = Brocken::heap_base();
+# Check live_count initial and during block
+my i64 $lc0 = Brocken::Runtime::live_count($hb);
+if ($lc0 != 0) { return 1; }
+{
+    my $x = 42;
+    my i64 $lc_inside = Brocken::Runtime::live_count($hb);
+    # Inside the block, $x's value is live
+    if ($lc_inside != 1) { return 2; }
+}
+# After block exit, $x was decref'd → live_count back to 0
+my i64 $lc_after = Brocken::Runtime::live_count($hb);
+if ($lc_after != 0) { return 3; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_live_count_dec' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, 'live_count: 0→1→0 across block-scoped decref' );
+        unlink $file;
+    }
+};
+subtest 'mark_line and sweep_block' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my ptr $hb = Brocken::heap_base();
+my ptr $block = Brocken::ptr_add($hb, 64);
+# Initially no lines marked
+my i64 $s0 = Brocken::Runtime::sweep_block($block);
+if ($s0 != 0) { return 1; }
+# Mark line 0
+Brocken::Runtime::mark_line($block, 0);
+my i64 $s1 = Brocken::Runtime::sweep_block($block);
+if ($s1 != 1) { return 2; }
+# Mark line 1
+Brocken::Runtime::mark_line($block, 1);
+my i64 $s2 = Brocken::Runtime::sweep_block($block);
+if ($s2 != 2) { return 3; }
+# Mark line 63 (last bit of first i64 word)
+Brocken::Runtime::mark_line($block, 63);
+my i64 $s3 = Brocken::Runtime::sweep_block($block);
+if ($s3 != 3) { return 4; }
+# Mark line 64 (first bit of second i64 word)
+Brocken::Runtime::mark_line($block, 64);
+my i64 $s4 = Brocken::Runtime::sweep_block($block);
+if ($s4 != 4) { return 5; }
+# Mark line 127 (last bit)
+Brocken::Runtime::mark_line($block, 127);
+my i64 $s5 = Brocken::Runtime::sweep_block($block);
+if ($s5 != 5) { return 6; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_mark_sweep' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, 'mark_line and sweep_block: 0→1→2→3→4→5 marked lines' );
+        unlink $file;
+    }
+};
+subtest 'recycle_block pushes empty block to free_blocks' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my ptr $hb = Brocken::heap_base();
+my i64 $fb0 = Brocken::Runtime::free_blocks_count($hb);
+my ptr $block = Brocken::ptr_add($hb, 64);
+# Manually recycle the (currently empty) block
+Brocken::Runtime::recycle_block($hb, $block);
+my i64 $fb1 = Brocken::Runtime::free_blocks_count($hb);
+my i64 $expected = Brocken::i64_add($fb0, 1);
+if ($fb1 != $expected) { return 1; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_recycle_manual' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, 'recycle_block: free_blocks_count increments by 1' );
+        unlink $file;
+    }
+};
+subtest 'live_count reaching 0 auto-recycles block' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my ptr $hb = Brocken::heap_base();
+{
+    # Allocate inside block — it'll be freed at block exit via block-scoped RC
+    my $x = 42;
+}
+# The decref of $x's value should have recycled the block (live_count 1→0)
+my i64 $fb = Brocken::Runtime::free_blocks_count($hb);
+if ($fb == 0) { return 1; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_recycle_auto' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, 'live_count→0 triggers auto-recycle (free_blocks > 0)' );
         unlink $file;
     }
 };

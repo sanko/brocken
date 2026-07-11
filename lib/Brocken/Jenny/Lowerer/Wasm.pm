@@ -2710,10 +2710,16 @@ class Brocken::Jenny::Lowerer::Wasm {
                 my $bits = $ir_val->type && $ir_val->type->kind eq 'int' ? $ir_val->type->bits : 32;
                 $op = $bits >= 64 ? 'i64_const' : 'i32_const';
             }
+            my $value = $ir_val->value;
+            if ( ref($value) && $value->isa('Math::BigInt') ) {
+                my $mask64 = ( Math::BigInt->new(1) << 64 ) - 1;
+                $value = ( $value & $mask64 )->numify;
+                $value = -( ~$value & 0xFFFFFFFFFFFFFFFF ) - 1 if $value >= 0x8000000000000000;
+            }
             return Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => $op,
-                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value ) ],
-                comment  => "push $label=" . $ir_val->value
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value ) ],
+                comment  => "push $label=" . $value
             );
         }
         return Brocken::Jenny::MIR::MachineInstruction->new(

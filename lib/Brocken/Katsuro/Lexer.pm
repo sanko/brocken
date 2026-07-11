@@ -62,9 +62,10 @@ class Brocken::Katsuro::Lexer v0.0.1 {
                 next;
             }
             if ( $remaining =~ /^(\d+)/ ) {
-                my $val = $1;
+                my $raw = $1;
+                my $val = length($raw) > 18 ? do { require Math::BigInt; Math::BigInt->new($raw) } : $raw;
                 push @tokens, $self->_token( 'NUM', $val );
-                $self->_advance_pos( length($val) );
+                $self->_advance_pos( length($raw) );
                 next;
             }
 

@@ -70,6 +70,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
 
     method emit_functions($ir_funcs) {
         my @mfs;
+        my @func_idx;    # maps @mfs index to $ir_funcs index
         my $has_fiber   = 0;
         my $has_isolate = 0;
         my $entry_index = -1;
@@ -81,14 +82,16 @@ class Brocken::Jenny::Codegen::RISCV64 {
             my $mf      = $lowerer->lower($func);
             $has_fiber   ||= $self->_has_fiber_ops_mf($mf);
             $has_isolate ||= $self->_has_isolate_ops_ir($func);
-            push @mfs, $mf;
+            push @mfs,      $mf;
+            push @func_idx, $i;
         }
         my $emit_init = $has_fiber && $entry_index >= 0;
         my @result;
         for my $i ( 0 .. $#mfs ) {
             my $mf    = $mfs[$i];
-            my $fname = $ir_funcs->[$i]->name;
-            if ( $emit_init && $i == $entry_index ) {
+            my $fn_i  = $func_idx[$i];              # original index in $ir_funcs
+            my $fname = $ir_funcs->[$fn_i]->name;
+            if ( $emit_init && $fn_i == $entry_index ) {
                 $fname = '_real_main';
             }
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();

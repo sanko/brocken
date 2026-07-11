@@ -681,4 +681,37 @@ $a = $a || $b;
 return $a;
 PROG
 };
+
+# Phase F7: Loop iteration guard prevents infinite while loops.
+# Without the guard, a while loop whose body never modifies the
+# condition variables hangs the compiled binary indefinitely.
+subtest 'loop iteration guard prevents infinite while with next' => sub {
+    local $Brocken::loop_limit = 5;
+    test_prog( 'next-only loop exits via guard and returns constant', <<'PROG', 42 );
+my i64 $v1 = 999;
+while ($v1 > 0) {
+    next;
+}
+return 42;
+PROG
+    test_prog( 'infinite while (no next) exits via guard', <<'PROG', 7 );
+my i64 $a = 1;
+my i64 $b = 0;
+while ($a > $b) {
+    $a = $a;  # no progress toward exit
+}
+return 7;
+PROG
+};
+
+# Debug: u128 helper function to test entry shuffle
+subtest 'u128 helper entry shuffle debug' => sub {
+    test_prog( 'u128 param helper', <<'PROG', 0xEF );
+use feature 'brocken_native_types';
+sub helper(u128 $x) -> u64 {
+    return $x;
+}
+return helper(0xDEADBEEF);
+PROG
+};
 done_testing;
