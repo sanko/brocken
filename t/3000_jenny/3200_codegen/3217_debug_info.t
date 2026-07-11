@@ -229,7 +229,7 @@ class Point {
     field i64 $x :param;
     field i64 $y :param;
 }
-my ptr $p = Point->new(10, 20);
+my ptr $p = Point->new(x => 10, y => 20);
 return $p->x;
 BROCKEN
         my $module     = Brocken::Compiler->new->compile( $source, 'test_struct_die.brocken' );
