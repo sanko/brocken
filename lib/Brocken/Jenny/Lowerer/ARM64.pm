@@ -4661,16 +4661,28 @@ class Brocken::Jenny::Lowerer::ARM64 {
 
     method _lower_opnd($ir_val) {
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
-            return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value, type => $ir_val->type );
+            my $value = $ir_val->value;
+            if ( ref($value) && $value->isa('Math::BigInt') ) {
+                my $mask64 = ( Math::BigInt->new(1) << 64 ) - 1;
+                $value = ( $value & $mask64 )->numify;
+                $value = -( ~$value & 0xFFFFFFFFFFFFFFFF ) - 1 if $value >= 0x8000000000000000;
+            }
+            return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value, type => $ir_val->type );
         }
         return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type );
     }
 
     method _lower_opnd_wide( $ir_val, $op_type ) {
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
-            return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value, type => $ir_val->type );
+            my $value = $ir_val->value;
+            if ( ref($value) && $value->isa('Math::BigInt') ) {
+                my $mask64 = ( Math::BigInt->new(1) << 64 ) - 1;
+                $value = ( $value & $mask64 )->numify;
+                $value = -( ~$value & 0xFFFFFFFFFFFFFFFF ) - 1 if $value >= 0x8000000000000000;
+            }
+            return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value, type => $ir_val->type );
         }
-        if ( $ir_val->type && $ir_val->type->bits >= 128 && $op_type && $op_type->bits < 128 ) {
+        if ( $ir_val->type && $ir_val->type->kind eq 'int' && $ir_val->type->bits >= 128 ) {
             return Brocken::Jenny::MIR::MachineOperand->new(
                 kind  => 'virt_reg',
                 value => $ir_val->name . '_lo',

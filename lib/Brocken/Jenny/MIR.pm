@@ -55,29 +55,26 @@ class Brocken::Jenny::MIR::MachineFunction {
 
     method compute_cfg() {
         for my $bb ( $self->blocks->@* ) {
-            my $term = $bb->terminator;
-            next unless $term;
-            my $opcode = $term->opcode;
-            my @ops    = $term->operands->@*;
-            if ( $opcode eq 'jmp' || $opcode eq 'br' ) {
-                my $target = $ops[0]->value;
-                my $tblock = $self->find_block($target);
-                $bb->add_successor($tblock) if $tblock;
-            }
-            elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
-                my $target = $ops[1]->value;
-                my $tblock = $self->find_block($target);
-                $bb->add_successor($tblock) if $tblock;
-                my $idx = 0;
-                for my $b ( $self->blocks->@* ) {
-                    last if $b == $bb;
-                    $idx++;
+            my @insts = $bb->instructions->@*;
+            for my $inst (@insts) {
+                my $opcode = $inst->opcode;
+                next unless $opcode =~ /^(?:jmp|br|beq|bne)$/;
+                my @ops = $inst->operands->@*;
+                if ( $opcode eq 'jmp' || $opcode eq 'br' ) {
+                    my $target = $ops[0]->value;
+                    my $tblock = $self->find_block($target);
+                    $bb->add_successor($tblock) if $tblock;
                 }
-                if ( $idx + 1 < $self->blocks->@* ) {
-                    $bb->add_successor( $self->blocks->[ $idx + 1 ] );
+                elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
+
+                    # Wasm CondBr: bne has 1 operand (label only, condition on implicit stack)
+                    # x86_64/ARM64/RISCV64 CondBr: bne/beq have 2 operands (cond, label)
+                    # Wasm Select: beq has 2 operands (condition, label) - same as x86_64
+                    my $target_idx = @ops == 2 ? 1 : 0;
+                    my $target     = $ops[$target_idx]->value;
+                    my $tblock     = $self->find_block($target);
+                    $bb->add_successor($tblock) if $tblock;
                 }
-            }
-            elsif ( $opcode eq 'ret' ) {
             }
         }
     }

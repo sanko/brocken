@@ -4836,9 +4836,20 @@ class Brocken::Jenny::Lowerer::X86_64 {
     # when the operation expects a narrower width (e.g. u32 - u128: use u128 lo).
     method _lower_opnd_wide( $ir_val, $op_type ) {
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
-            return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value, type => $ir_val->type );
+            my $value = $ir_val->value;
+            if ( ref($value) && $value->isa('Math::BigInt') ) {
+                my $mask64 = ( Math::BigInt->new(1) << 64 ) - 1;
+                $value = ( $value & $mask64 )->numify;
+                $value = -( ~$value & 0xFFFFFFFFFFFFFFFF ) - 1 if $value >= 0x8000000000000000;
+            }
+            return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value, type => $ir_val->type );
         }
-        if ( $ir_val->type && $ir_val->type->bits >= 128 && $op_type && $op_type->bits < 128 ) {
+        if ( $ir_val->type && $ir_val->type->kind eq 'int' && $ir_val->type->bits >= 128 ) {
+
+            # Wide value used as a scalar operand: return the lo half.
+            # The $op_type check is not used because the operand is always
+            # consumed as a single 64-bit value (e.g., shift count, store to
+            # narrow alloca), never as a 128-bit pair.
             return Brocken::Jenny::MIR::MachineOperand->new(
                 kind  => 'virt_reg',
                 value => $ir_val->name . '_lo',
@@ -4850,7 +4861,13 @@ class Brocken::Jenny::Lowerer::X86_64 {
 
     method _lower_opnd($ir_val) {
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
-            return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value, type => $ir_val->type );
+            my $value = $ir_val->value;
+            if ( ref($value) && $value->isa('Math::BigInt') ) {
+                my $mask64 = ( Math::BigInt->new(1) << 64 ) - 1;
+                $value = ( $value & $mask64 )->numify;
+                $value = -( ~$value & 0xFFFFFFFFFFFFFFFF ) - 1 if $value >= 0x8000000000000000;
+            }
+            return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value, type => $ir_val->type );
         }
         return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type );
     }

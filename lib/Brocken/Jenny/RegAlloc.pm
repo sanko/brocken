@@ -109,7 +109,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     for my $op (@ops) {
                         my $name = $self->_vreg_name( $op, $is_float );
                         next unless defined $name;
-                        if ( $op == $ops[0] && $inst->opcode ne 'store' && $inst->opcode ne 'store_imm' ) {
+                        if ( $op == $ops[0] &&
+                            $inst->opcode ne 'store'     &&
+                            $inst->opcode ne 'store_imm' &&
+                            $inst->opcode ne 'bne'       &&
+                            $inst->opcode ne 'beq' ) {
                             $pre_defd{$name} = 1 unless exists $pre_used{$name};
                         }
                         else {
@@ -128,7 +132,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     for my $op (@ops) {
                         my $name = $self->_vreg_name( $op, $is_float );
                         next unless defined $name;
-                        if ( $op == $ops[0] && $inst->opcode ne 'store' && $inst->opcode ne 'store_imm' ) {
+                        if ( $op == $ops[0] &&
+                            $inst->opcode ne 'store'     &&
+                            $inst->opcode ne 'store_imm' &&
+                            $inst->opcode ne 'bne'       &&
+                            $inst->opcode ne 'beq' ) {
                             $post_defd{$name} = 1 unless exists $post_used{$name};
                         }
                         else {
@@ -162,7 +170,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     for my $op (@ops) {
                         my $name = $self->_vreg_name( $op, $is_float );
                         next unless defined $name;
-                        if ( $op == $ops[0] && $inst->opcode ne 'store' && $inst->opcode ne 'store_imm' ) {
+                        if ( $op == $ops[0] &&
+                            $inst->opcode ne 'store'     &&
+                            $inst->opcode ne 'store_imm' &&
+                            $inst->opcode ne 'bne'       &&
+                            $inst->opcode ne 'beq' ) {
                             $defd{$name} = 1 unless exists $used{$name};
                         }
                         else {
@@ -378,7 +390,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return unless $spill_slots && keys %$spill_slots;
         my $load_op     = $is_float ? 'fload'  : 'load';
         my $store_op    = $is_float ? 'fstore' : 'store';
-        my %reads_dst   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not);
+        my %reads_dst   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not bne beq);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
         my $mem_op
@@ -579,10 +591,12 @@ class Brocken::Jenny::RegAlloc::LinearScan {
 
         # Returns true if a given temp register is safe to use at a given
         # instruction position (i.e., no pending patched read of that temp
-        # lies after the position).
+        # lies after the position, and no unpatched save at or after the
+        # position reads from that temp as its source register).
         my $temp_available = sub ( $t, $pos ) {
             for my $s (@saves) {
                 return 0 if defined $s->{patched_temp} && $s->{patched_temp} eq $t && $s->{idx} > $pos;
+                return 0 if $s->{src} eq $t && $s->{idx} >= $pos;
             }
             return 1;
         };

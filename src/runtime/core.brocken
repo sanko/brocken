@@ -14,32 +14,40 @@
 # First Immix block starts at heap_base + 64.
 #
 # Immix block layout (32 KB = 32768 bytes per block):
-#   [block + 0..15]:    bitmap (128-bit line bitmap, bit N = line N is available)
-#   [block + 16..255]:  Line 0  (240 usable bytes)
-#   [block + 256..511]: Line 1  (256 bytes)
+#   [block + 0..15]:     bitmap (128-bit line bitmap, bit N = line N in use)
+#   [block + 16..255]:   Line 0  (240 usable bytes)
+#   [block + 256..511]:  Line 1  (256 bytes)
 #   ...
-#   [block + 32512..32767]: Line 127 (256 bytes)
-#   Total per block: 16 + (128 * 256) - 16 = 32768 (the -16 is because line 0
-#   shares the bitmap's 16 bytes)
+#   [block + 32512..32751]: Line 127 (240 usable bytes — last 16 bytes are metadata)
+#   [block + 32752..32759]:  live_count (i64) — number of live allocations in block
+#   [block + 32760..32767]:  reserved (i64) — future use
+#   Total per block: 16 + 240 + 126*256 + 240 + 16 = 32768
 #
 # Objects freed by decref (when RC reaches 0) are pushed onto free16_head (offset 48).
 # The next pointer is stored at [obj + 8] (payload area of the freed object).
 # bump_alloc checks free16_head first (hot path), then falls back to line-aware
 # bump allocation within the current Immix block (cold path).
 # When the current block is full, free_blocks (offset 40) is consulted for recycling.
+# When a block's live_count reaches 0, the entire block is recycled to free_blocks.
 
 # Initialize ICB and Immix heap metadata.
 # heap_base = address of ICB, first Immix block starts at heap_base + 64.
 sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
     my ptr $block_base = Brocken::ptr_add($heap_base, 64);
     my ptr $line0_data = Brocken::ptr_add($block_base, 16);
+    # Zero the block metadata: bitmap at [block+0..15], live_count at [block+32752],
+    # reserved at [block+32760].  The heap is stack-allocated and not zeroed.
+    Brocken::store_i64($block_base, 0);
+    Brocken::store_i64(Brocken::ptr_add($block_base, 8), 0);
+    Brocken::store_i64(Brocken::ptr_add($block_base, 32752), 0);
+    Brocken::store_i64(Brocken::ptr_add($block_base, 32760), 0);
     # legacy heap_cursor (offset 0)
     Brocken::store_i64($heap_base, $line0_data);
     # current_fcb (offset 8)
     Brocken::store_i64(Brocken::ptr_add($heap_base, 8), 0);
     # fiber_head (offset 16)
     Brocken::store_i64(Brocken::ptr_add($heap_base, 16), 0);
-    # immix_cursor (offset 24)
+    # immix_cursor (offset 24) — start at first usable byte of line 0
     Brocken::store_i64(Brocken::ptr_add($heap_base, 24), $line0_data);
     # immix_limit (offset 32) = end of Line 0
     Brocken::store_i64(Brocken::ptr_add($heap_base, 32), Brocken::ptr_add($block_base, 256));
@@ -90,7 +98,7 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
         }
         my ptr $line_start = Brocken::ptr_add($block_base, $next_line);
         my ptr $after_alloc = Brocken::ptr_add($line_start, $size);
-        my ptr $block_end = Brocken::ptr_add($block_base, 32768);
+        my ptr $block_end = Brocken::ptr_add($block_base, 32752);
 
         if (Brocken::ptr_cmp_gt($after_alloc, $block_end)) {
             # Block full. Try free_blocks (offset 40) for recycling.
@@ -103,6 +111,9 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
                 my ptr $fb_line0 = Brocken::ptr_add($fb, 16);
                 Brocken::store_i64($cursor_ptr, $fb_line0);
                 Brocken::store_i64(Brocken::ptr_add($heap_base, 32), Brocken::ptr_add($fb, 256));
+                # Reset live_count for the reused block and its reserved field
+                Brocken::store_i64(Brocken::ptr_add($fb, 32752), 1);
+                Brocken::store_i64(Brocken::ptr_add($fb, 32760), 0);
                 # Allocate from the new block
                 Brocken::store_i64($cursor_ptr, Brocken::ptr_add($fb_line0, $size));
                 return $fb_line0;
@@ -111,6 +122,7 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
             my ptr $legacy_ptr = $heap_base;
             my ptr $legacy_cursor = Brocken::load_i64($legacy_ptr);
             Brocken::store_i64($legacy_ptr, Brocken::ptr_add($legacy_cursor, $size));
+            # Live-count tracking not available for legacy heap — skip
             return $legacy_cursor;
         }
 
@@ -118,11 +130,18 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
         Brocken::store_i64($cursor_ptr, $after_alloc);
         my ptr $new_limit = Brocken::ptr_add($line_start, 256);
         Brocken::store_i64(Brocken::ptr_add($heap_base, 32), $new_limit);
+        # Increment live_count for this block
+        my i64 $lc = Brocken::load_i64(Brocken::ptr_add($block_base, 32752));
+        Brocken::store_i64(Brocken::ptr_add($block_base, 32752), Brocken::i64_add($lc, 1));
         return $line_start;
     }
 
     # Allocation fits in current line: bump cursor
     Brocken::store_i64($cursor_ptr, $new_cursor);
+    # Increment live_count for this block
+    my ptr $block_base2 = Brocken::ptr_add($heap_base, 64);
+    my i64 $lc2 = Brocken::load_i64(Brocken::ptr_add($block_base2, 32752));
+    Brocken::store_i64(Brocken::ptr_add($block_base2, 32752), Brocken::i64_add($lc2, 1));
     return $cursor;
 }
 
@@ -144,7 +163,9 @@ sub Brocken::Runtime::incref(ptr $obj) {
 
 # Decrement the reference count of a fat scalar at $obj.
 # When RC reaches 0, pushes the object onto the segregated free list
-# at heap_base+48 for immediate reuse (hot path).
+# at heap_base+48 for immediate reuse (hot path) AND decrements the
+# containing block's live_count. If live_count reaches 0, the entire
+# block is recycled to free_blocks.
 sub Brocken::Runtime::decref(ptr $obj, ptr $heap_base) {
     if (Brocken::ptr_cmp_eq($obj, 0)) {
         return;
@@ -154,10 +175,27 @@ sub Brocken::Runtime::decref(ptr $obj, ptr $heap_base) {
     my i64 $new_rc = Brocken::i64_sub($old_rc, 1);
     Brocken::store_i64($obj, Brocken::i64_add(Brocken::i64_sub($header, $old_rc), $new_rc));
     if (Brocken::ptr_cmp_eq($new_rc, 0) && Brocken::ptr_cmp_eq($heap_base, 0) == 0) {
+        # Push to free16 list for immediate reuse
         my ptr $free16_ptr = Brocken::ptr_add($heap_base, 48);
         my ptr $head = Brocken::load_i64($free16_ptr);
         Brocken::store_i64(Brocken::ptr_add($obj, 8), $head);
         Brocken::store_i64($free16_ptr, $obj);
+        # Decrement live_count for the containing block.
+        # With a single block at hb+64, block_base is always hb+64.
+        # TODO(R2.3): find block from obj address for multi-block support.
+        my ptr $block_base = Brocken::ptr_add($heap_base, 64);
+        my ptr $lc_ptr = Brocken::ptr_add($block_base, 32752);
+        my i64 $lc = Brocken::load_i64($lc_ptr);
+        $lc = Brocken::i64_sub($lc, 1);
+        Brocken::store_i64($lc_ptr, $lc);
+        if (Brocken::ptr_cmp_eq($lc, 0)) {
+            # Block fully empty — recycle to free_blocks
+            my ptr $fb_ptr = Brocken::ptr_add($heap_base, 40);
+            my ptr $fb_head = Brocken::load_i64($fb_ptr);
+            # Use [block+0] as next pointer in the free_blocks list
+            Brocken::store_i64($block_base, $fb_head);
+            Brocken::store_i64($fb_ptr, $block_base);
+        }
     }
     return;
 }
@@ -196,11 +234,12 @@ sub Brocken::Runtime::line_remaining(ptr $heap_base) -> i64 {
     return Brocken::ptr_sub($limit, $cursor);
 }
 
-# Return how many bytes remain in the current Immix block ((block_base + 32768) - cursor).
+# Return how many bytes remain in the current Immix block (block_base + 32752 - cursor).
+# 32752 = 32768 - 16 (the last 16 bytes are block metadata: live_count + reserved).
 sub Brocken::Runtime::block_remaining(ptr $heap_base) -> i64 {
     my ptr $block_base = Brocken::ptr_add($heap_base, 64);
     my ptr $cursor = Brocken::load_i64(Brocken::ptr_add($heap_base, 24));
-    my ptr $block_end = Brocken::ptr_add($block_base, 32768);
+    my ptr $block_end = Brocken::ptr_add($block_base, 32752);
     return Brocken::ptr_sub($block_end, $cursor);
 }
 
@@ -241,7 +280,7 @@ sub Brocken::Runtime::mem_status(ptr $heap_base) -> i64 {
         $result = Brocken::bor($result, 1);
     }
     my ptr $block_base = Brocken::ptr_add($heap_base, 64);
-    my ptr $block_end  = Brocken::ptr_add($block_base, 32768);
+    my ptr $block_end  = Brocken::ptr_add($block_base, 32752);
     if (Brocken::ptr_cmp_ge($cursor, $block_end)) {
         $result = Brocken::bor($result, 2);
     }
@@ -263,4 +302,70 @@ sub Brocken::Runtime::line_waste(ptr $heap_base) -> i64 {
     my ptr $cursor = Brocken::load_i64(Brocken::ptr_add($heap_base, 24));
     my ptr $limit  = Brocken::load_i64(Brocken::ptr_add($heap_base, 32));
     return Brocken::ptr_sub($limit, $cursor);
+}
+
+# ===== Group D — Immix bitmap operations =====
+# The block bitmap is 128 bits stored as two i64 words:
+#   [block + 0]: bits 0-63 (lines 0-63)
+#   [block + 8]: bits 64-127 (lines 64-127)
+# Bit N = 1 means line N has been used (allocated from).
+
+# Mark line N in the block's 128-bit line bitmap.
+sub Brocken::Runtime::mark_line(ptr $block, i64 $line_idx) {
+    if (Brocken::ptr_cmp_gt(64, $line_idx)) {
+        my i64 $old = Brocken::load_i64($block);
+        my i64 $mask = Brocken::shl(1, $line_idx);
+        Brocken::store_i64($block, Brocken::bor($old, $mask));
+    } else {
+        my i64 $bit = Brocken::i64_sub($line_idx, 64);
+        my i64 $old = Brocken::load_i64(Brocken::ptr_add($block, 8));
+        my i64 $mask = Brocken::shl(1, $bit);
+        Brocken::store_i64(Brocken::ptr_add($block, 8), Brocken::bor($old, $mask));
+    }
+    return;
+}
+
+# Count how many lines are marked (in use) in the block's bitmap.
+# Returns the number of lines with bit = 1.
+sub Brocken::Runtime::sweep_block(ptr $block) -> i64 {
+    my i64 $count = 0;
+    my i64 $word0 = Brocken::load_i64($block);
+    my i64 $word1 = Brocken::load_i64(Brocken::ptr_add($block, 8));
+    # Count bits in word0 (lines 0-63)
+    my i64 $i = 0;
+    while (Brocken::ptr_cmp_gt(64, $i)) {
+        my i64 $mask = Brocken::shl(1, $i);
+        if (Brocken::ptr_cmp_eq(Brocken::band($word0, $mask), 0) == 0) {
+            $count = Brocken::i64_add($count, 1);
+        }
+        $i = Brocken::i64_add($i, 1);
+    }
+    # Count bits in word1 (lines 64-127)
+    $i = 0;
+    while (Brocken::ptr_cmp_gt(64, $i)) {
+        my i64 $mask = Brocken::shl(1, $i);
+        if (Brocken::ptr_cmp_eq(Brocken::band($word1, $mask), 0) == 0) {
+            $count = Brocken::i64_add($count, 1);
+        }
+        $i = Brocken::i64_add($i, 1);
+    }
+    return $count;
+}
+
+# Push an empty block onto the free_blocks list at ICB offset 40.
+# The caller is responsible for ensuring the block is fully free
+# (live_count == 0 or all lines swept).
+sub Brocken::Runtime::recycle_block(ptr $heap_base, ptr $block) {
+    my ptr $fb_ptr = Brocken::ptr_add($heap_base, 40);
+    my ptr $fb_head = Brocken::load_i64($fb_ptr);
+    # Use [block+0] as next pointer in the free_blocks list
+    Brocken::store_i64($block, $fb_head);
+    Brocken::store_i64($fb_ptr, $block);
+    return;
+}
+
+# Return the live_count for the block at heap_base+64.
+sub Brocken::Runtime::live_count(ptr $heap_base) -> i64 {
+    my ptr $block_base = Brocken::ptr_add($heap_base, 64);
+    return Brocken::load_i64(Brocken::ptr_add($block_base, 32752));
 }

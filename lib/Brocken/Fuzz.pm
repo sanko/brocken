@@ -14,6 +14,11 @@ package Brocken::Fuzz {
         return unpack 'V V C C', pack 'H*', $id;
     }
 
+    # Flag set when simulation encounters a fatal error (div-by-zero)
+    # that would crash the real program.  Checked in generate_program
+    # to set expected=255 for programs that will crash.
+    my $expect_crash = 0;
+
     class Brocken::Fuzz {
         field $seed         : param = undef;
         field $bail_on_fail : param = 0;
@@ -135,6 +140,7 @@ package Brocken::Fuzz {
         # Generate a random Brocken program with typed variables.
         # May include sub declarations and inter-procedural calls (Phase F2).
         method generate_program( $max_ops = 15, $max_vars = 5 ) {
+            $expect_crash = 0;
             my $vars      = {};
             my $var_types = {};
             my @stmts;
@@ -198,7 +204,7 @@ package Brocken::Fuzz {
             my $header   = $uses_big ? q{use feature 'brocken_native_types';} . "\n" : '';
             my $sub_code = join "\n\n", map { $_->{code} } @subs_meta;
             my $source   = $header . ( $sub_code ? "$sub_code\n\n" : '' ) . join "\n", @stmts;
-            my $expected = $vars->{$result_var} & 0xFF;
+            my $expected = $expect_crash ? 255 : $vars->{$result_var} & 0xFF;
             return { source => $source, expected => $expected, vars => $vars, subs => \@subs_meta };
         }
 
@@ -290,24 +296,29 @@ package Brocken::Fuzz {
             my $rhs      = $int_names[ $self->_rand_int($#int_names) ];
             my $lv       = $vars->{$lhs};
             my $rv       = $vars->{$rhs};
-            my $dst_bits = $var_types->{$dst}{bits} // 64;
+            my $lhs_bits = $var_types->{$lhs}{bits} // 64;
             my $op;
 
             for my $try ( 0 .. 9 ) {
                 $op = $self->_rand_binop();
                 last
                     unless defined $rv &&
-                    ( ( $rv == 0 && ( $op eq '/' || $op eq '%' ) ) || ( ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= $dst_bits ) ) );
+                    ( ( $rv == 0 && ( $op eq '/' || $op eq '%' ) ) || ( ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= $lhs_bits ) ) );
             }
             if ( defined $rv ) {
                 $op = '+' if $rv == 0 && ( $op eq '/' || $op eq '%' );
-                $op = '+' if ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= $dst_bits );
+                $op = '+' if ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= $lhs_bits );
             }
             return { code => "\$$dst = \$$lhs $op \$$rhs;" } unless defined $lv && defined $rv;
             my $result = $self->_eval_i64_typed( $op, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
             if ( defined $result ) {
                 my $t = $var_types->{$dst};
                 $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
+            }
+            else {
+                $expect_crash = 1;
+                my $t = $var_types->{$dst};
+                $vars->{$dst} = $self->_clamp_to_type( 0, $t->{bits}, $t->{signed} );
             }
             return { code => "\$$dst = \$$lhs $op \$$rhs;" };
         }
@@ -329,39 +340,40 @@ package Brocken::Fuzz {
         method _gen_if_else( $vars, $var_types, $var_names ) {
             my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
             return { code => undef } if @int_names < 2;
-            my $lhs      = $int_names[ $self->_rand_int($#int_names) ];
-            my $rhs      = $int_names[ $self->_rand_int($#int_names) ];
-            my $cmp      = $self->_rand_cmpop();
-            my $lv       = $vars->{$lhs} // 0;
-            my $rv       = $vars->{$rhs} // 0;
-            my $cond     = $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
-            my $var      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
-            my $var_bits = $var_types->{$var}{bits} // 64;
-            my $then_l   = $int_names[ $self->_rand_int($#int_names) ];
-            my $then_r   = $int_names[ $self->_rand_int($#int_names) ];
-            my $else_l   = $int_names[ $self->_rand_int($#int_names) ];
-            my $else_r   = $int_names[ $self->_rand_int($#int_names) ];
-            my $then_rv  = $vars->{$then_r} // 0;
+            my $lhs        = $int_names[ $self->_rand_int($#int_names) ];
+            my $rhs        = $int_names[ $self->_rand_int($#int_names) ];
+            my $cmp        = $self->_rand_cmpop();
+            my $lv         = $vars->{$lhs} // 0;
+            my $rv         = $vars->{$rhs} // 0;
+            my $cond       = $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
+            my $var        = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
+            my $then_l     = $int_names[ $self->_rand_int($#int_names) ];
+            my $then_r     = $int_names[ $self->_rand_int($#int_names) ];
+            my $then_lbits = $var_types->{$then_l}{bits} // 64;
+            my $else_l     = $int_names[ $self->_rand_int($#int_names) ];
+            my $else_lbits = $var_types->{$else_l}{bits} // 64;
+            my $else_r     = $int_names[ $self->_rand_int($#int_names) ];
+            my $then_rv    = $vars->{$then_r} // 0;
             my $then_op;
 
             for my $try ( 0 .. 9 ) {
                 $then_op = $self->_rand_binop();
                 last
                     unless $then_rv == 0 && ( $then_op eq '/' || $then_op eq '%' ) ||
-                    ( ( $then_op eq '<<' || $then_op eq '>>' ) && ( $then_rv < 0 || $then_rv >= $var_bits ) );
+                    ( ( $then_op eq '<<' || $then_op eq '>>' ) && ( $then_rv < 0 || $then_rv >= $then_lbits ) );
             }
             $then_op = '+' if $then_rv == 0 && ( $then_op eq '/' || $then_op eq '%' );
-            $then_op = '+' if ( $then_op eq '<<' || $then_op eq '>>' ) && ( $then_rv < 0 || $then_rv >= $var_bits );
+            $then_op = '+' if ( $then_op eq '<<' || $then_op eq '>>' ) && ( $then_rv < 0 || $then_rv >= $then_lbits );
             my $else_rv = $vars->{$else_r} // 0;
             my $else_op;
             for my $try ( 0 .. 9 ) {
                 $else_op = $self->_rand_binop();
                 last
                     unless $else_rv == 0 && ( $else_op eq '/' || $else_op eq '%' ) ||
-                    ( ( $else_op eq '<<' || $else_op eq '>>' ) && ( $else_rv < 0 || $else_rv >= $var_bits ) );
+                    ( ( $else_op eq '<<' || $else_op eq '>>' ) && ( $else_rv < 0 || $else_rv >= $else_lbits ) );
             }
             $else_op = '+' if $else_rv == 0 && ( $else_op eq '/' || $else_op eq '%' );
-            $else_op = '+' if ( $else_op eq '<<' || $else_op eq '>>' ) && ( $else_rv < 0 || $else_rv >= $var_bits );
+            $else_op = '+' if ( $else_op eq '<<' || $else_op eq '>>' ) && ( $else_rv < 0 || $else_rv >= $else_lbits );
             my $then_v = $self->_eval_i64_typed( $then_op, $vars->{$then_l} // 0, $then_rv, $var_types->{$then_l}, $var_types->{$then_r} );
             my $else_v = $self->_eval_i64_typed( $else_op, $vars->{$else_l} // 0, $else_rv, $var_types->{$else_l}, $var_types->{$else_r} );
             my $t      = $var_types->{$var};
@@ -541,17 +553,17 @@ package Brocken::Fuzz {
                 my $rhs      = $int_names[ $self->_rand_int($#int_names) ];
                 my $lv       = $vars->{$lhs};
                 my $rv       = $vars->{$rhs};
-                my $dst_bits = $var_types->{$dst}{bits} // 64;
+                my $lhs_bits = $var_types->{$lhs}{bits} // 64;
                 my $op;
 
                 for my $try ( 0 .. 9 ) {
                     $op = $self->_rand_binop();
                     last
-                        unless defined $rv &&
-                        ( ( $rv == 0 && ( $op eq '/' || $op eq '%' ) ) || ( ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= $dst_bits ) ) );
+                        unless ( ( $op eq '/' || $op eq '%' ) && ( !defined $rv || $rv == 0 ) ) ||
+                        ( ( $op eq '<<' || $op eq '>>' ) && ( !defined $rv || $rv < 0 || $rv >= $lhs_bits ) );
                 }
-                $op = '+' if defined $rv && $rv == 0 && ( $op eq '/' || $op eq '%' );
-                $op = '+' if ( $op eq '<<' || $op eq '>>' ) && defined $rv && ( $rv < 0 || $rv >= $dst_bits );
+                $op = '+' if ( $op eq '/'  || $op eq '%' )  && ( !defined $rv || $rv == 0 );
+                $op = '+' if ( $op eq '<<' || $op eq '>>' ) && ( !defined $rv || $rv < 0 || $rv >= $lhs_bits );
                 my $code  = "\$$dst = \$$lhs $op \$$rhs;";
                 my $apply = sub {
                     my $lv2 = $vars->{$lhs};
@@ -561,6 +573,11 @@ package Brocken::Fuzz {
                     if ( defined $result ) {
                         my $t = $var_types->{$dst};
                         $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
+                    }
+                    else {
+                        $expect_crash = 1;
+                        my $t = $var_types->{$dst};
+                        $vars->{$dst} = $self->_clamp_to_type( 0, $t->{bits}, $t->{signed} );
                     }
                 };
                 return { code => $code, apply => $apply };
@@ -763,8 +780,9 @@ package Brocken::Fuzz {
                     $result = $self->_eval_f64_binop( $op, $lv, $rv );
                 }
                 if ( defined $result ) {
-                    my $t = $var_types->{$dst};
-                    $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
+                    my $t       = $var_types->{$dst};
+                    my $clamped = $t->{signed} eq 'f' ? $result : int($result);
+                    $vars->{$dst} = $self->_clamp_to_type( $clamped, $t->{bits}, $t->{signed} );
                 }
             }
             return { code => "\$$dst = \$$lhs $op \$$rhs;" };
@@ -804,8 +822,8 @@ package Brocken::Fuzz {
             if ( $op eq '&' )  { return $l & $r }
             if ( $op eq '|' )  { return $l | $r }
             if ( $op eq '^' )  { return $l ^ $r }
-            if ( $op eq '<<' ) { return $l << $r }
-            if ( $op eq '>>' ) { return $l >> $r }
+            if ( $op eq '<<' ) { return ( $r < 0 || $r >= 64 ) ? 0 : $l << $r }
+            if ( $op eq '>>' ) { return ( $r < 0 || $r >= 64 ) ? 0 : $l >> $r }
             return undef;
         }
 
@@ -828,8 +846,8 @@ package Brocken::Fuzz {
             if ( $op eq '&' )  { return $l & $r }
             if ( $op eq '|' )  { return $l | $r }
             if ( $op eq '^' )  { return $l ^ $r }
-            if ( $op eq '<<' ) { return $l << $r }
-            if ( $op eq '>>' ) { return $l >> $r }
+            if ( $op eq '<<' ) { return ( $r < 0 || $r >= 128 ) ? 0 : $l << $r }
+            if ( $op eq '>>' ) { return ( $r < 0 || $r >= 128 ) ? 0 : $l >> $r }
             return undef;
         }
 
@@ -852,7 +870,9 @@ package Brocken::Fuzz {
         method _reinterpret_to_signed( $val, $bits ) {
             return $val if $bits > 64;
             if ( $bits == 64 ) {
-                return $val < 9223372036854775808 ? $val : -( ~$val ) - 1;
+                return $val if $val >= 0 && $val < 9223372036854775808;
+                use integer;
+                return -( ~$val ) - 1;
             }
             my $sign_bit = 1 << ( $bits - 1 );
             my $mask     = ( 1 << $bits ) - 1;
@@ -865,7 +885,8 @@ package Brocken::Fuzz {
         # Delegates to i128 methods when operand width >= 128.
         method _eval_i64_typed( $op, $lv, $rv, $lt, $rt ) {
             my $bits = $lt->{bits} // 64;
-            return $self->_eval_i128_typed( $op, $lv, $rv, $lt, $rt ) if $bits >= 128;
+            return $self->_eval_i128_typed( $op, $lv, $rv, $lt, $rt )
+                if $bits >= 128 || ( ref($lv) && $lv->isa('Math::BigInt') ) || ( ref($rv) && $rv->isa('Math::BigInt') );
             my $lsig = $lt->{signed} // 1;
             my $rsig = $rt->{signed} // 1;
 
@@ -881,14 +902,39 @@ package Brocken::Fuzz {
             # When LHS is unsigned and RHS is signed negative:
             # - If RHS is wider, the compiler promotes LHS to RHS type
             #   (signed) and performs a signed operation.
-            # - Otherwise, the unsigned op treats negative RHS as a
-            #   huge positive (>= 2^63), so div yields 0, rem yields LHS.
+            # - Otherwise, the RHS is sign-extended to LHS width (unsigned
+            #   interpretation), producing a huge positive (>= 2^63).
+            #   The unsigned div/rem must be computed at the widened width.
             if ( !$lsig && $rsig && $rv < 0 && ( $op eq '/' || $op eq '%' ) ) {
                 if ( ( $rt->{bits} // 64 ) > $bits ) {
                     return $self->_eval_i64( $op, $lv, $rv );
                 }
-                return 0   if $op eq '/';
-                return $lv if $op eq '%';
+                require Math::BigInt;
+                my $ulv = Math::BigInt->new($lv);
+                my $urv = Math::BigInt->new($rv);
+                $urv += ( Math::BigInt->new(2)**64 ) if $urv < 0;
+                $ulv += ( Math::BigInt->new(2)**64 ) if $ulv < 0;
+                if ( $op eq '/' ) {
+                    my ( $q, $rem ) = $ulv->copy->bdiv($urv);
+                    return $q;
+                }
+                return $ulv->copy->bmod($urv);
+            }
+
+            # Both unsigned: for correct unsigned division/remainder when
+            # either operand has bit 63 set (Perl's signed IV division
+            # would give wrong results for unsigned semantics).
+            if ( !$lsig && !$rsig && ( $op eq '/' || $op eq '%' ) && ( $lv < 0 || $rv < 0 ) ) {
+                require Math::BigInt;
+                my $ulv = Math::BigInt->new($lv);
+                my $urv = Math::BigInt->new($rv);
+                $ulv += ( Math::BigInt->new(2)**64 ) if $ulv < 0;
+                $urv += ( Math::BigInt->new(2)**64 ) if $urv < 0;
+                if ( $op eq '/' ) {
+                    my ( $q, $rem ) = $ulv->copy->bdiv($urv);
+                    return $q;
+                }
+                return $ulv->copy->bmod($urv);
             }
             return $self->_eval_i64( $op, $lv, $rv );
         }
@@ -903,8 +949,15 @@ package Brocken::Fuzz {
                 return $self->_eval_i128_binop( $op, $lv, $signed_rv );
             }
             if ( !$lsig && $rsig && ( $op eq '/' || $op eq '%' ) && $rv < 0 ) {
-                return 0   if $op eq '/';
-                return $lv if $op eq '%';
+                my $ulv = Math::BigInt->new($lv);
+                my $urv = Math::BigInt->new($rv);
+                $urv += ( Math::BigInt->new(2)**64 ) if $urv < 0;
+                $ulv += ( Math::BigInt->new(2)**64 ) if $ulv < 0;
+                if ( $op eq '/' ) {
+                    my ( $q, $rem ) = $ulv->copy->bdiv($urv);
+                    return $q;
+                }
+                return $ulv->copy->bmod($urv);
             }
             return $self->_eval_i128_binop( $op, $lv, $rv );
         }
@@ -931,13 +984,27 @@ package Brocken::Fuzz {
             my $lsig  = $lt->{signed} // 1;
             my $rsig  = $rt->{signed} // 1;
             my $lbits = $lt->{bits}   // 64;
-            return $self->_eval_cmp_i128( $cmp, $lv, $rv, $lt, $rt ) if $lbits >= 128;
+            my $rbits = $rt->{bits}   // 64;
+            return $self->_eval_cmp_i128( $cmp, $lv, $rv, $lt, $rt )
+                if $lbits >= 128 || ( ref($lv) && $lv->isa('Math::BigInt') ) || ( ref($rv) && $rv->isa('Math::BigInt') );
 
-            # LHS signed, RHS unsigned: reinterpret RHS as signed of its width.
-            # Only when RHS is same width or wider -- narrower types are
-            # zero-extended (unsigned widen) by the compiler before comparison.
-            if ( $lsig && !$rsig && $rt->{bits} >= $lbits ) {
-                my $signed_rv = $self->_reinterpret_to_signed( $rv, $rt->{bits} // 64 );
+            # LHS signed, RHS unsigned: the compiler promotes to wider type,
+            # which determines comparison signedness.
+            if ( $lsig && !$rsig ) {
+                if ( $rbits > $lbits ) {
+
+                    # RHS is wider unsigned type: LHS is promoted to RHS type
+                    # (unsigned).  For i1 LHS uses zext; for i8+ signed uses sext
+                    # (but sext to unsigned means the sign-extended value is
+                    # compared at unsigned, which in Perl is just the raw bit
+                    # pattern).  Comparison is unsigned at RHS width.
+                    return $self->_eval_cmp( $cmp, $lv, $rv ) if $cmp eq '==' || $cmp eq '!=';
+                    my $mask = $rbits >= 64 ? ~0 : ( 1 << $rbits ) - 1;
+                    return $self->_eval_cmp( $cmp, $lv & $mask, $rv & $mask );
+                }
+
+                # Same width: reinterpret RHS bit pattern as signed
+                my $signed_rv = $self->_reinterpret_to_signed( $rv, $rbits );
                 return $self->_eval_cmp( $cmp, $lv, $signed_rv );
             }
 
@@ -947,11 +1014,26 @@ package Brocken::Fuzz {
             # - Otherwise, the compiler promotes RHS to LHS type (unsigned)
             #   and does an unsigned comparison at LHS width.
             if ( !$lsig && $rsig && $rv < 0 && $lbits < 128 ) {
-                if ( ( $rt->{bits} // 64 ) > $lbits ) {
+                if ( $rbits > $lbits ) {
                     return $self->_eval_cmp( $cmp, $lv, $rv );
                 }
                 my $mask = $lbits >= 64 ? ~0 : ( 1 << $lbits ) - 1;
                 return $self->_eval_cmp( $cmp, $lv & $mask, $rv & $mask );
+            }
+
+            # Unsigned comparison: handle values with bit 63 set that Perl
+            # stores as negative IVs (only relevant for 64-bit unsigned types).
+            if ( !$lsig && $lbits >= 64 ) {
+                my $l_high = $lv < 0;
+                my $r_high = $rv < 0;
+                if ( $l_high != $r_high ) {
+                    if ( $cmp eq '<' )  { return $l_high ? 0 : 1 }
+                    if ( $cmp eq '>' )  { return $l_high ? 1 : 0 }
+                    if ( $cmp eq '<=' ) { return $l_high ? 0 : 1 }
+                    if ( $cmp eq '>=' ) { return $l_high ? 1 : 0 }
+                    if ( $cmp eq '==' ) { return 0 }
+                    if ( $cmp eq '!=' ) { return 1 }
+                }
             }
             return $self->_eval_cmp( $cmp, $lv, $rv );
         }
@@ -964,10 +1046,18 @@ package Brocken::Fuzz {
             my $l = ref($lv) && $lv->isa('Math::BigInt') ? $lv : Math::BigInt->new($lv);
             my $r = ref($rv) && $rv->isa('Math::BigInt') ? $rv : Math::BigInt->new($rv);
             if ( $lsig && !$rsig ) {
-                $r = $self->_reinterpret_i128_to_signed($r);
+                my $rbits = $rt->{bits} // 128;
+                if ( $l < 0 ) {
+                    $l += Math::BigInt->new(2)**$rbits;
+                }
                 return $self->_eval_cmp( $cmp, $l, $r );
             }
             if ( !$lsig && $rsig && $r < 0 ) {
+
+                # Compiler zero-extends RHS to u128 (unsigned promotion),
+                # making negative values into large positive ones
+                my $max = Math::BigInt->new(1) << 128;
+                $r = $r + $max;
                 return $self->_eval_cmp( $cmp, $l, $r );
             }
             return $self->_eval_cmp( $cmp, $l, $r );
@@ -1033,12 +1123,17 @@ package Brocken::Fuzz {
         # f64 values force float conversion (0.0 + $val) to match sitofp semantics
         # when int results are stored to f64 destinations by _gen_binop_assign etc.
         method _clamp_to_type( $val, $bits, $signed ) {
-            return $val & 1                            if $bits == 1;
-            return 0.0 + $val                          if $signed eq 'f';
-            return $self->_clamp_i128( $val, $signed ) if $bits >= 128;
-            return $val                                if $bits >= 64 && $signed;
+            return $val & 1                                                  if $bits == 1;
+            return 0.0 + $val                                                if $signed eq 'f';
+            return $self->_clamp_i128( $val, $signed )                       if $bits >= 128;
+            return ref($val) && $val->isa('Math::BigInt') ? $val : int($val) if $bits >= 64 && $signed;
             if ( $bits >= 64 && !$signed ) {
-                return $val & ~0;
+                use integer;
+                my $r = $val & ~0;
+                if ( ref($r) && $r->isa('Math::BigInt') && $r < 0 ) {
+                    $r += Math::BigInt->new(2)**64;
+                }
+                return $r;
             }
             use integer;
             my $mask    = ( 1 << $bits ) - 1;
@@ -1055,7 +1150,7 @@ package Brocken::Fuzz {
         # still produce the correct unsigned representation.
         method _clamp_i128( $val, $signed ) {
             require Math::BigInt;
-            my $n    = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new($val);
+            my $n    = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new( int($val) );
             my $max  = ( Math::BigInt->new(1) << 128 );
             my $mask = $max - 1;
             if ( $n < 0 ) { $n = $n + $max }
