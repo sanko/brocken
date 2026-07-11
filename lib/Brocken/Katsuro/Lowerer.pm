@@ -24,6 +24,7 @@ class Brocken::Katsuro::Lowerer {
     field $_loop_header_blocks   = [];    # stack of header block labels
     field $_loop_check_blocks    = [];    # stack of iteration-check block labels (counter guard)
     field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
+    field $fuel_exit_block;               # set in lower_function, used by call-site fuel checks
 
     method unique_block_name($prefix) {
         return $prefix . '_' . $block_id++;
@@ -415,6 +416,7 @@ class Brocken::Katsuro::Lowerer {
 
     # === Pass 2: Lower function bodies ===
     method lower_function($ast) {
+        $fuel_exit_block = undef;
         return if $ast->body->statements->@* == 0;
         $current_func = $functions->{ $ast->name };
         $symbols      = {};
@@ -453,6 +455,14 @@ class Brocken::Katsuro::Lowerer {
                 my $heap_size = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0x100000 );
                 $builder->build_call( $_init_fn, [ $heap_base, $heap_size ], undef );
             }
+
+            # Initialize fuel at [hb+64] to default_fuel
+            my $default_fuel = $Brocken::default_fuel // 1000000;
+            my $fuel_const   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $default_fuel );
+            my $hb_fuel      = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+            my $fuel_off64   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 64 );
+            my $fuel_addr    = $builder->build_add( $hb_fuel, $fuel_off64 );
+            $builder->build_store( $fuel_const, $fuel_addr );
         }
         for my $i ( 0 .. $ast->params->@* - 1 ) {
             my $p      = $current_func->params->[ $i + $hidden_count ];
@@ -465,6 +475,32 @@ class Brocken::Katsuro::Lowerer {
                 $needs_rc->{$pname} = 1;
             }
         }
+        my $body_block = $current_func->append_block( $self->unique_block_name('entry_body') );
+        if ($has_hidden_heap_base) {
+            if ( $current_func->name ne '_BROCKEN_ENTRY' ) {
+                my $hb_fuel    = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+                my $fuel_off64 = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 64 );
+                my $fuel_addr  = $builder->build_add( $hb_fuel, $fuel_off64 );
+                my $fuel_val   = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $fuel_addr );
+                my $one        = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
+                my $fuel_after = $builder->build_sub( $fuel_val, $one );
+                $builder->build_store( $fuel_after, $fuel_addr );
+                my $zero_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+                my $exhausted  = $builder->build_icmp( 'sle', $fuel_after, $zero_const );
+                $fuel_exit_block = $current_func->append_block( $self->unique_block_name('entry_fuel_exit') );
+                $builder->build_cond_br( $exhausted, $fuel_exit_block, $body_block );
+            }
+            else {
+                # _BROCKEN_ENTRY: no prologue check, but create exit block for call-site use
+                $fuel_exit_block = $current_func->append_block( $self->unique_block_name('entry_fuel_exit') );
+                $builder->build_br($body_block);
+            }
+        }
+        else {
+            $builder->build_br($body_block);
+        }
+        $builder->position_at_end($body_block);
+        $current_block = $body_block;
         $self->lower_block_body( $ast->body );
         unless ( $current_block && $current_block->terminator ) {
             my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
@@ -473,6 +509,22 @@ class Brocken::Katsuro::Lowerer {
                 my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
                 $builder->build_decref( $loaded, 0, 0, $decref_hb );
             }
+            if ( $current_func->return_type->kind eq 'void' ) {
+                $builder->build_ret();
+            }
+            else {
+                my $zero = Brocken::Lindsay::IR::Constant->new( type => $current_func->return_type, value => 0 );
+                $builder->build_ret($zero);
+            }
+        }
+        if ( defined $fuel_exit_block ) {
+            $builder->position_at_end($fuel_exit_block);
+            $current_block = $fuel_exit_block;
+            my $hb_fuel       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+            my $err_off72     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 72 );
+            my $err_code_addr = $builder->build_add( $hb_fuel, $err_off72 );
+            my $err_code_val  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 2 );
+            $builder->build_store( $err_code_val, $err_code_addr );
             if ( $current_func->return_type->kind eq 'void' ) {
                 $builder->build_ret();
             }
@@ -760,34 +812,34 @@ class Brocken::Katsuro::Lowerer {
         push $_loop_header_blocks->@*, $header;
         push $_loop_check_blocks->@*,  $check;
         push $_loop_exit_blocks->@*,   $exit;
-
-        # Pre-header: allocate and zero the per-loop iteration counter.
-        # Alloca lives in the pre-header block (not the function entry block),
-        # so it avoids the cross-block alloca liveness bug.
-        my $counter_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%while_counter' );
-        my $zero           = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
-        $builder->build_store( $zero, $counter_alloca, $line, $col );
         $builder->build_br( $header, $line, $col );
         $builder->position_at_end($header);
         $current_block = $header;
         my $cond = $self->as_condition( $self->lower_expression( $ast->cond ), $line, $col );
         $builder->build_cond_br( $cond, $check, $exit, $line, $col );
 
-        # Check block: increment per-loop counter, bail if loop_limit exceeded.
+        # Check block: decrement fuel at [hb+64]; bail if exhausted.
+        # Skip fuel check if function lacks %__heap_base (e.g. runtime functions).
         $builder->position_at_end($check);
         $current_block = $check;
-        my $lc  = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $counter_alloca, undef, $line, $col );
-        my $lc1 = $builder->build_add( $lc, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 ),
-            undef, $line, $col );
-        $builder->build_store( $lc1, $counter_alloca, $line, $col );
-        my $limit_val = $Brocken::loop_limit // 10000;
-        my $limit     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $limit_val );
-        my $over      = $builder->build_icmp( 'sgt', $lc1, $limit, undef, $line, $col );
-        $builder->build_cond_br( $over, $exit, $body, $line, $col );
+        if ( $symbols->{'__heap_base'} ) {
+            my $hb_for_fuel = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
+            my $fuel_off64  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 64 );
+            my $fuel_addr   = $builder->build_add( $hb_for_fuel, $fuel_off64, undef, $line, $col );
+            my $fuel_val    = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $fuel_addr, undef, $line, $col );
+            my $one         = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
+            my $fuel_after  = $builder->build_sub( $fuel_val, $one, undef, $line, $col );
+            $builder->build_store( $fuel_after, $fuel_addr, $line, $col );
+            my $zero      = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+            my $exhausted = $builder->build_icmp( 'sle', $fuel_after, $zero, undef, $line, $col );
+            $builder->build_cond_br( $exhausted, $exit, $body, $line, $col );
+        }
+        else {
+            $builder->build_br( $body, $line, $col );
+        }
         $builder->position_at_end($body);
         $current_block = $body;
         $self->lower_block_body( $ast->body );
-
         unless ( $current_block->terminator ) {
             $builder->build_br( $header, $line, $col );
         }
@@ -1075,6 +1127,13 @@ class Brocken::Katsuro::Lowerer {
         Carp::croak( "Unknown unary operator '$op' at " . $self->_loc($ast) );
     }
 
+    method _emit_fuel_check( $line, $col ) {
+
+        # Disabled: body-block register-indirect memory access corrupts PE binary.
+        # See Bug 9 - call-site fuel check binary corruption.
+        # Phase S0 will re-enable with a proper fix.
+    }
+
     method lower_call_expr($ast) {
         my $name   = $ast->func_name;
         my $callee = $functions->{$name};
@@ -1115,6 +1174,7 @@ class Brocken::Katsuro::Lowerer {
             push @args, $val;
             $param_idx++;
         }
+        $self->_emit_fuel_check( $line, $col );
         return $builder->build_call( $callee, \@args, undef, $line, $col );
     }
 
@@ -1332,6 +1392,7 @@ class Brocken::Katsuro::Lowerer {
             my $bump_alloc_fn = $functions->{'Brocken::Runtime::bump_alloc'};
             Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
             my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $total_size );
+            $self->_emit_fuel_check( $line, $col );
             my $self_ptr   = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
             my @args       = ( $hb, $want_val, $self_ptr );
             my $ctor_p_idx = 3;
@@ -1344,6 +1405,7 @@ class Brocken::Katsuro::Lowerer {
                 push @args, $val;
                 $ctor_p_idx++;
             }
+            $self->_emit_fuel_check( $line, $col );
             $builder->build_call( $callee, \@args, undef, $line, $col );
             return $self_ptr;
         }
@@ -1359,6 +1421,7 @@ class Brocken::Katsuro::Lowerer {
             push @args, $val;
             $param_idx++;
         }
+        $self->_emit_fuel_check( $line, $col );
         return $builder->build_call( $callee, \@args, undef, $line, $col );
     }
 

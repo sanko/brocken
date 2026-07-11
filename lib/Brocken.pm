@@ -12,8 +12,7 @@ package Brocken v0.0.1 {
     use Brocken::Jenny::Linker::PE;
     use Brocken::Jenny::Linker::ELF64;
     use File::Temp;
-    our $loop_limit      = 10000;
-    our $recursion_limit = 200;
+    our $default_fuel = 1000000;    # initial fuel budget for entry function
 
     class Brocken {
         field $platform    : param = undef;

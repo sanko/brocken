@@ -686,7 +686,7 @@ PROG
 # Without the guard, a while loop whose body never modifies the
 # condition variables hangs the compiled binary indefinitely.
 subtest 'loop iteration guard prevents infinite while with next' => sub {
-    local $Brocken::loop_limit = 5;
+    local $Brocken::default_fuel = 6;
     test_prog( 'next-only loop exits via guard and returns constant', <<'PROG', 42 );
 my i64 $v1 = 999;
 while ($v1 > 0) {
