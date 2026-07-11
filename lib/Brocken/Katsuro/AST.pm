@@ -165,4 +165,18 @@ class Brocken::Katsuro::AST::Expr::Call : isa(Brocken::Katsuro::AST::Node) {
     field $func_name : param : reader;
     field $args : param : reader = [];
 }
+
+# List expressions and list assignment
+class Brocken::Katsuro::AST::Expr::List : isa(Brocken::Katsuro::AST::Node) {
+    field $elements : param : reader;               # Array of AST::Node
+}
+
+class Brocken::Katsuro::AST::Expr::Hash : isa(Brocken::Katsuro::AST::Node) {
+    field $pairs : param : reader;                  # Array of { key => AST::Node, value => AST::Node }
+}
+
+class Brocken::Katsuro::AST::Stmt::ListVarDecl : isa(Brocken::Katsuro::AST::Node) {
+    field $targets : param : reader;                # Array of { sigil, name, type } (type optional, inferred)
+    field $expr    : param : reader;                # AST::Node (RHS expression)
+}
 1;

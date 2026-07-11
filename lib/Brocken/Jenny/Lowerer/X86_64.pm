@@ -4766,6 +4766,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
         return 3 if $type->kind eq 'float';                       # f32, f64
         return 4 if $type->kind eq 'ptr';
         return 5 if $type->kind eq 'dynamic';
+        return 7 if $type->kind eq 'list';
+        return 8 if $type->kind eq 'hash';
         return 0;
     }
 

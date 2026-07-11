@@ -655,8 +655,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         sltu  => 3,
                         sltiu => 3
                     );
-                    if ( $src->kind eq 'imm' && exists $imm_f3{$opcode} ) {
-
+                    if (
+                        $src->kind eq 'imm' &&
+                        exists $imm_f3{$opcode} &&
+                        do { my $x = $src->value; $x = -$x if $opcode eq 'sub'; $x >= -2048 && $x <= 2047 }
+                    ) {
                         # I-type: opcode 0x13, funct3 from %imm_f3
                         my $imm = $src->value;
                         $imm = -$imm if $opcode eq 'sub';

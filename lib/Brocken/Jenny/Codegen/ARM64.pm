@@ -705,11 +705,21 @@ class Brocken::Jenny::Codegen::ARM64 {
                         adc   => ADCS_X,
                         sbb   => SBCS_X,
                     );
-                    if ( $src->kind eq 'imm' && ( $opcode eq 'add' || $opcode eq 'sub' ) ) {
+                    if (
+                        $src->kind eq 'imm' &&
+                        ( $opcode eq 'add' || $opcode eq 'sub' ) &&
+                        do { my $v = $src->value; ( $v >= 0 && $v <= 4095 ) || ( $v % 4096 == 0 && ( $v >> 12 ) <= 4095 ) }
+                    ) {
                         my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
                         my $op    = $sf | ( $opcode eq 'add' ? ADD_IMM : SUB_IMM );
-                        my $imm12 = $src->value & 0xFFF;
-                        $bytes .= pack( 'V', $op | ( $imm12 << 10 ) | ( $did << 5 ) | $did );
+                        my $imm12 = $src->value;
+                        my $shift = 0;
+                        if ( $imm12 > 4095 ) {
+                            $shift = 1 << 22;
+                            $imm12 >>= 12;
+                        }
+                        $imm12 &= 0xFFF;
+                        $bytes .= pack( 'V', $op | $shift | ( $imm12 << 10 ) | ( $did << 5 ) | $did );
                     }
                     else {
                         my $src_r = $resolve->($src);
