@@ -351,6 +351,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             }
         }
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
+        @callee_regs = grep { !$defined_phys{$_} } @callee_regs;
         my $spill_temp = pop @caller_regs;
         my @regs       = ( @caller_regs, @callee_regs );
         my %assignment;

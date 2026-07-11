@@ -122,6 +122,11 @@ class Brocken::Katsuro::Lowerer {
             if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') ) {
                 $var_types->{ $stmt->name } = $stmt->type // 'Any';
             }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ListVarDecl') ) {
+                for my $t ( $stmt->targets->@* ) {
+                    $var_types->{ $t->{name} } = $t->{type} // 'Any';
+                }
+            }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') ) {
                 if ( defined $stmt->expr ) {
                     push @types, $self->_infer_expr_type( $stmt->expr, $var_types );
@@ -161,6 +166,12 @@ class Brocken::Katsuro::Lowerer {
         }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
             return $var_types->{ $expr->name } // 'Any';
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::List') ) {
+            return 'ptr';    # list returns a pointer to heap-allocated list data
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Hash') ) {
+            return 'ptr';    # hash returns a pointer to heap-allocated hash data
         }
         return 'Any';
     }
@@ -353,7 +364,17 @@ class Brocken::Katsuro::Lowerer {
             push @field_types,   $ir_type;
             push @field_names,   $f->name;
             push @field_offsets, $offset;
-            push @fields, { name => $f->name, type => $f->type, ir_type => $ir_type, offset => $offset, size => $self->type_size($ir_type), };
+            push @fields,
+                {
+                name       => $f->name,
+                type       => $f->type,
+                ir_type    => $ir_type,
+                offset     => $offset,
+                size       => $self->type_size($ir_type),
+                idx        => $#fields + 1,
+                default    => $f->default,
+                default_op => $f->default_op,
+                };
             $offset += $self->type_size($ir_type);
         }
         my $struct_type = Brocken::Lindsay::IR::Type->new(
@@ -572,6 +593,7 @@ class Brocken::Katsuro::Lowerer {
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') )       { return $self->lower_var_decl($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ArrayDecl') )     { return $self->lower_array_decl($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Assign') )        { return $self->lower_assign($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ListVarDecl') )   { return $self->lower_list_var_decl($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') )        { return $self->lower_return($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') )            { return $self->lower_if($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') )         { return $self->lower_while($stmt); }
@@ -591,7 +613,10 @@ class Brocken::Katsuro::Lowerer {
             $stmt->isa('Brocken::Katsuro::AST::Expr::Paren')       ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::FieldAccess') ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::ArrayIndex')  ||
-            $stmt->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
+            $stmt->isa('Brocken::Katsuro::AST::Expr::MethodCall')  ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::List')        ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::Hash')        ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::Ternary') ) {
             $self->lower_expression($stmt);
             return;
         }
@@ -917,6 +942,12 @@ class Brocken::Katsuro::Lowerer {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Ternary') ) {
             return $self->lower_ternary($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::List') ) {
+            return $self->lower_list_expr($expr);
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Hash') ) {
+            return $self->lower_hash_expr($expr);
+        }
         Carp::croak( "Unknown expression type: " . ref($expr) . " at " . $self->_loc($expr) );
     }
 
@@ -965,6 +996,31 @@ class Brocken::Katsuro::Lowerer {
         my $key      = '@' . $ast->name;
         my $alloca   = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
         $symbols->{$key} = $alloca;
+    }
+
+    method lower_list_var_decl($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $i64_type = Brocken::Lindsay::IR::Type::i64();
+        my $ptr_type = Brocken::Lindsay::IR::Type::ptr();
+        my @targets  = $ast->targets->@*;
+        my $list_ptr = $self->lower_expression( $ast->expr );
+        for my $i ( 0 .. $#targets ) {
+            my $t       = $targets[$i];
+            my $ir_type = $self->type_from_name( $t->{type} );
+            my $alloca  = $builder->build_alloca( $ir_type, '%' . $t->{name} . '.addr', undef, $line, $col, $t->{name}, $t->{type} );
+            $symbols->{ $t->{name} } = $alloca;
+            if ( $t->{type} eq 'Any' ) {
+                $needs_rc->{ $t->{name} } = 1;
+            }
+            my $offset    = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $i * 8 );
+            my $elem_addr = $builder->build_add( $list_ptr, $offset, undef, $line, $col );
+            my $elem_raw  = $builder->build_load( $i64_type, $elem_addr, undef, $line, $col );
+            my $elem_val  = $self->maybe_convert_type( $elem_raw, $ir_type );
+            if ( $t->{type} eq 'Any' ) {
+                $builder->build_incref( $elem_val, $line, $col );
+            }
+            $builder->build_store( $elem_val, $alloca, $line, $col );
+        }
     }
 
     method lower_array_addr($ast) {
@@ -1393,20 +1449,58 @@ class Brocken::Katsuro::Lowerer {
             Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
             my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $total_size );
             $self->_emit_fuel_check( $line, $col );
-            my $self_ptr   = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
-            my @args       = ( $hb, $want_val, $self_ptr );
-            my $ctor_p_idx = 3;
+            my $self_ptr = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
 
-            for my $arg ( $ast->args->@* ) {
-                my $val = $self->lower_expression($arg);
-                if ( $ctor_p_idx < $callee->params->@* ) {
-                    $val = $self->maybe_convert_type( $val, $callee->params->[$ctor_p_idx]->type );
+            # Check for named-parameter style: new(x => 100, y => 150)
+            my $args = $ast->args;
+            if ( $args->@* == 1 && $args->[0]->isa('Brocken::Katsuro::AST::Expr::Hash') ) {
+                my $hash = $args->[0];
+                my %field_idx;
+                for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
+                    $field_idx{ $cd->{fields}[$i]{name} } = $i;
                 }
-                push @args, $val;
-                $ctor_p_idx++;
+                my %seen;
+                for my $pair ( $hash->pairs->@* ) {
+                    my $key_expr = $pair->{key};
+                    next unless $key_expr->isa('Brocken::Katsuro::AST::Expr::Const') && $key_expr->type eq 'String';
+                    my $field_name = $key_expr->value;
+                    my $fi         = $field_idx{$field_name};
+                    Carp::croak( "Unknown field '$field_name' in class '$class_name' at " . $self->_loc($ast) ) unless defined $fi;
+                    my $fd  = $cd->{fields}[$fi];
+                    my $val = $self->lower_expression( $pair->{value} );
+                    $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
+                    my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fi, '%' . $fd->{name} . '.init', $line, $col );
+                    $builder->build_store( $val, $field_ptr, $line, $col );
+                    $seen{$field_name} = 1;
+                }
+                for my $f ( $cd->{fields}->@* ) {
+                    next if $seen{ $f->{name} };
+                    next unless defined $f->{default};
+                    my $default_val = $self->lower_expression( $f->{default} );
+                    $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
+                    my $field_ptr
+                        = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{idx}, '%' . $f->{name} . '.default', $line, $col );
+                    $builder->build_store( $default_val, $field_ptr, $line, $col );
+                }
+                my $adjust_fn = $functions->{ $class_name . '::ADJUST' };
+                if ($adjust_fn) {
+                    $builder->build_call( $adjust_fn, [ $hb, $want_val, $self_ptr ], undef, $line, $col );
+                }
             }
-            $self->_emit_fuel_check( $line, $col );
-            $builder->build_call( $callee, \@args, undef, $line, $col );
+            else {
+                my @args       = ( $hb, $want_val, $self_ptr );
+                my $ctor_p_idx = 3;
+                for my $arg ( $args->@* ) {
+                    my $val = $self->lower_expression($arg);
+                    if ( $ctor_p_idx < $callee->params->@* ) {
+                        $val = $self->maybe_convert_type( $val, $callee->params->[$ctor_p_idx]->type );
+                    }
+                    push @args, $val;
+                    $ctor_p_idx++;
+                }
+                $self->_emit_fuel_check( $line, $col );
+                $builder->build_call( $callee, \@args, undef, $line, $col );
+            }
             return $self_ptr;
         }
         my $obj_ptr = $obj_is_class ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) :
@@ -1450,6 +1544,68 @@ class Brocken::Katsuro::Lowerer {
             return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
         }
         return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+    }
+
+    method lower_list_expr($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $i64_type = Brocken::Lindsay::IR::Type::i64();
+        my $ptr_type = Brocken::Lindsay::IR::Type::ptr();
+        my @elements;
+        for my $elem ( $ast->elements->@* ) {
+            push @elements, $self->lower_expression($elem);
+        }
+        my $count         = scalar @elements;
+        my $hb            = $builder->build_load( $ptr_type, $symbols->{'__heap_base'}, undef, $line, $col );
+        my $total_size    = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $count * 8 );
+        my $bump_alloc_fn = $functions->{'Brocken::Runtime::bump_alloc'};
+        Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
+        my $list_ptr   = $builder->build_call( $bump_alloc_fn, [ $hb, $total_size ], undef, $line, $col );
+        my $header_val = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 7 << 24 );
+        $builder->build_store( $header_val, $list_ptr, $line, $col );
+        my $count_val  = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => $count );
+        my $count_addr = $builder->build_add( $list_ptr, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 8 ), undef, $line, $col );
+        $builder->build_store( $count_val, $count_addr, $line, $col );
+
+        for my $i ( 0 .. $#elements ) {
+            my $offset    = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $i * 8 );
+            my $elem_addr = $builder->build_add( $list_ptr, $offset, undef, $line, $col );
+            $builder->build_store( $elements[$i], $elem_addr, $line, $col );
+        }
+        return $list_ptr;
+    }
+
+    method lower_hash_expr($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $i64_type   = Brocken::Lindsay::IR::Type::i64();
+        my $ptr_type   = Brocken::Lindsay::IR::Type::ptr();
+        my @pairs      = $ast->pairs->@*;
+        my $pair_count = scalar @pairs;
+        my @keys;
+        my @vals;
+        for my $pair (@pairs) {
+            push @keys, $self->lower_expression( $pair->{key} );
+            push @vals, $self->lower_expression( $pair->{value} );
+        }
+        my $hb            = $builder->build_load( $ptr_type, $symbols->{'__heap_base'}, undef, $line, $col );
+        my $total_size    = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $pair_count * 16 );
+        my $bump_alloc_fn = $functions->{'Brocken::Runtime::bump_alloc'};
+        Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
+        my $hash_ptr   = $builder->build_call( $bump_alloc_fn, [ $hb, $total_size ], undef, $line, $col );
+        my $header_val = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 8 << 24 );
+        $builder->build_store( $header_val, $hash_ptr, $line, $col );
+        my $count_val  = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => $pair_count );
+        my $count_addr = $builder->build_add( $hash_ptr, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 8 ), undef, $line, $col );
+        $builder->build_store( $count_val, $count_addr, $line, $col );
+
+        for my $i ( 0 .. $#pairs ) {
+            my $key_offset = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $i * 16 );
+            my $val_offset = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $i * 16 + 8 );
+            my $key_addr   = $builder->build_add( $hash_ptr, $key_offset, undef, $line, $col );
+            my $val_addr   = $builder->build_add( $hash_ptr, $val_offset, undef, $line, $col );
+            $builder->build_store( $keys[$i], $key_addr, $line, $col );
+            $builder->build_store( $vals[$i], $val_addr, $line, $col );
+        }
+        return $hash_ptr;
     }
 
     method lower_class_const($ast) {

@@ -129,6 +129,11 @@ class Brocken::Katsuro::Parser {
         if ( $self->check('[') ) {
             return $self->parse_array_decl();
         }
+
+        # my ($a, $b) = expr -- list destructuring
+        if ( $self->check('(') ) {
+            return $self->parse_list_var_decl();
+        }
         my $type = 'Any';
         if ( $self->is_type( $self->peek() ) ) {
             $type = $self->advance()->{value};
@@ -144,6 +149,34 @@ class Brocken::Katsuro::Parser {
         $self->consume( ';', undef, "Expected ';' after variable declaration" );
         return Brocken::Katsuro::AST::Stmt::VarDecl->new( $self->_pos_token($var_token), sigil => $sigil, name => $name, type => $type,
             init => $init );
+    }
+
+    # my ($a, $b) = expr
+    method parse_list_var_decl() {
+        $self->consume('(');
+        my @targets;
+        until ( $self->check(')') || $self->check('EOF') ) {
+            if (@targets) {
+                last if $self->check(')');
+                $self->consume(',');
+            }
+            my $type = 'Any';
+            if ( $self->is_type( $self->peek() ) ) {
+                $type = $self->advance()->{value};
+            }
+            my $var_token = $self->consume( 'VAR', undef, "Expected variable name" );
+            my $sigil     = substr( $var_token->{value}, 0, 1 );
+            my $name      = substr( $var_token->{value}, 1 );
+            push @targets, { sigil => $sigil, name => $name, type => $type };
+        }
+        $self->consume(')');
+        my $expr = undef;
+        if ( $self->check( 'OP', '=' ) ) {
+            $self->advance();
+            $expr = $self->parse_expression(0);
+        }
+        $self->consume( ';', undef, "Expected ';' after list variable declaration" );
+        return Brocken::Katsuro::AST::Stmt::ListVarDecl->new( $self->_pos_token(), targets => \@targets, expr => $expr );
     }
 
     method parse_array_decl() {
@@ -213,9 +246,27 @@ class Brocken::Katsuro::Parser {
         my $expr      = undef;
         unless ( $self->check(';') ) {
             $expr = $self->parse_expression(0);
+            if ( $expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
+                $expr = Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($ret_token), elements => [ $expr->expr ] );
+            }
         }
         $self->consume( ';', undef, "Expected ';' after return" );
         return Brocken::Katsuro::AST::Stmt::Return->new( $self->_pos_token($ret_token), expr => $expr );
+    }
+
+    # Parse (expr, expr, ...) as a list expression
+    method parse_paren_list_expr() {
+        $self->consume('(');
+        my @elements;
+        until ( $self->check(')') || $self->check('EOF') ) {
+            if (@elements) {
+                last if $self->check(')');
+                $self->consume(',');
+            }
+            push @elements, $self->parse_expression(0);
+        }
+        $self->consume(')');
+        return Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token(), elements => \@elements );
     }
 
     method parse_want($token) {
@@ -452,9 +503,46 @@ class Brocken::Katsuro::Parser {
             return Brocken::Katsuro::AST::Expr::Ident->new( $self->_pos_token($token), name => $token->{value} );
         }
         if ( $token->{type} eq '(' ) {
-            my $expr = $self->parse_expression(0);
+            my @elements;
+            my $has_fat_comma = 0;
+            until ( $self->check(')') || $self->check('EOF') ) {
+                if (@elements) {
+                    last if $self->check(')');
+                    $self->consume(',');
+                }
+                my $expr = $self->parse_expression(0);
+                if ( $self->check('OP') && $self->peek()->{value} eq '=>' ) {
+                    $has_fat_comma = 1;
+                    if ( $expr->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
+                        $expr = Brocken::Katsuro::AST::Expr::Const->new(
+                            file  => $expr->file,
+                            line  => $expr->line,
+                            col   => $expr->col,
+                            value => $expr->name,
+                            type  => 'String'
+                        );
+                    }
+                    $self->advance();
+                    my $rhs = $self->parse_expression(0);
+                    push @elements, { key => $expr, value => $rhs };
+                }
+                else {
+                    push @elements, { key => undef, value => $expr };
+                }
+            }
             $self->consume(')');
-            return Brocken::Katsuro::AST::Expr::Paren->new( $self->_pos_token($token), expr => $expr );
+            if ($has_fat_comma) {
+                my @pairs;
+                for my $e (@elements) { push @pairs, { key => $e->{key}, value => $e->{value} }; }
+                return Brocken::Katsuro::AST::Expr::Hash->new( $self->_pos_token($token), pairs => \@pairs );
+            }
+            if ( scalar @elements == 0 ) {
+                return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 0, type => 'Int' );
+            }
+            if ( scalar @elements == 1 ) {
+                return Brocken::Katsuro::AST::Expr::Paren->new( $self->_pos_token($token), expr => $elements[0]->{value} );
+            }
+            return Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($token), elements => [ map { $_->{value} } @elements ] );
         }
         if ( $token->{type} eq 'KEYWORD' ) {
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 1, type => 'Bool' ) if $token->{value} =~ /^true$/i;
@@ -600,16 +688,40 @@ class Brocken::Katsuro::Parser {
     }
 
     method parse_call_args_after_paren() {
-        my @args;
+        my @elements;
+        my $has_fat_comma = 0;
         until ( $self->check(')') || $self->check('EOF') ) {
-            if (@args) {
-                $self->consume(',');
+            if (@elements) {
                 last if $self->check(')');
+                $self->consume(',');
             }
-            push @args, $self->parse_expression(0);
+            my $expr = $self->parse_expression(0);
+            if ( $self->check('OP') && $self->peek()->{value} eq '=>' ) {
+                $has_fat_comma = 1;
+                if ( $expr->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
+                    $expr = Brocken::Katsuro::AST::Expr::Const->new(
+                        file  => $expr->file,
+                        line  => $expr->line,
+                        col   => $expr->col,
+                        value => $expr->name,
+                        type  => 'String'
+                    );
+                }
+                $self->advance();
+                my $rhs = $self->parse_expression(0);
+                push @elements, { key => $expr, value => $rhs };
+            }
+            else {
+                push @elements, { key => undef, value => $expr };
+            }
         }
         $self->consume(')');
-        return \@args;
+        if ($has_fat_comma) {
+            my @pairs;
+            for my $e (@elements) { push @pairs, { key => $e->{key}, value => $e->{value} }; }
+            return [ Brocken::Katsuro::AST::Expr::Hash->new( pairs => \@pairs ) ];
+        }
+        return [ map { $_->{value} } @elements ];
     }
 
     method get_precedence($token) {
