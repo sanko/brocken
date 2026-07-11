@@ -518,10 +518,11 @@ class Brocken::Jenny::Codegen::ARM64 {
             my $pat  = join '|', map quotemeta, @regs;
             qr/^($pat)$/;
         };
-        my $resolve = sub ($op) {
+        my $current_opcode = '';
+        my $resolve        = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
             return $op->value                                if $op->kind eq 'phys_reg';
-            die "Unexpected operand kind: ${$op->kind}";
+            die "Unexpected operand kind: " . $op->kind . " (value=" . ( $op->value // 'undef' ) . ") in opcode=$current_opcode";
         };
         if ( $total_frame > 0 ) {
 
@@ -597,6 +598,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $source_map->{ $inst->ir_inst_idx } = length($bytes);
                 }
                 my $opcode = $inst->opcode;
+                $current_opcode = $opcode;
                 my ( $dst, $src ) = $inst->operands->@*;
                 if ( $opcode eq 'label' ) {
                     $labels{ $dst->value } = $current_offset->();
@@ -705,21 +707,71 @@ class Brocken::Jenny::Codegen::ARM64 {
                         adc   => ADCS_X,
                         sbb   => SBCS_X,
                     );
-                    if (
-                        $src->kind eq 'imm' &&
-                        ( $opcode eq 'add' || $opcode eq 'sub' ) &&
-                        do { my $v = $src->value; ( $v >= 0 && $v <= 4095 ) || ( $v % 4096 == 0 && ( $v >> 12 ) <= 4095 ) }
-                    ) {
-                        my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
-                        my $op    = $sf | ( $opcode eq 'add' ? ADD_IMM : SUB_IMM );
-                        my $imm12 = $src->value;
-                        my $shift = 0;
-                        if ( $imm12 > 4095 ) {
-                            $shift = 1 << 22;
-                            $imm12 >>= 12;
+                    if ( $src->kind eq 'imm' && ( $opcode eq 'add' || $opcode eq 'sub' ) ) {
+                        my $v = $src->value;
+                        if ( ( $v >= 0 && $v <= 4095 ) || ( $v % 4096 == 0 && ( $v >> 12 ) <= 4095 ) ) {
+                            my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
+                            my $op    = $sf | ( $opcode eq 'add' ? ADD_IMM : SUB_IMM );
+                            my $imm12 = $v;
+                            my $shift = 0;
+                            if ( $imm12 > 4095 ) {
+                                $shift = 1 << 22;
+                                $imm12 >>= 12;
+                            }
+                            $imm12 &= 0xFFF;
+                            $bytes .= pack( 'V', $op | $shift | ( $imm12 << 10 ) | ( $did << 5 ) | $did );
                         }
-                        $imm12 &= 0xFFF;
-                        $bytes .= pack( 'V', $op | $shift | ( $imm12 << 10 ) | ( $did << 5 ) | $did );
+                        else {
+                            # Load large immediate into a temp register, then use register form
+                            my %used;
+                            @used{ values %$assignment } = ();
+                            my $tmp_r;
+                            for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
+                            die 'no temp register for imm operand' unless $tmp_r;
+                            my $sid = $reg_id->($tmp_r);
+                            if ( $v >= 0 && $v <= 65535 ) {
+                                $bytes .= pack( 'V', MOVZ_64 | ( ( $v & 0xFFFF ) << 5 ) | $sid );
+                            }
+                            else {
+                                $bytes .= pack( 'V', MOVZ_64 | ( ( $v & 0xFFFF ) << 5 ) | $sid );
+                                $v >>= 16;
+                                my $hw = 1;
+                                while ($v) {
+                                    $bytes .= pack( 'V', MOVK_64 | ( ( $v & 0xFFFF ) << 5 ) | ( $hw << 21 ) | $sid );
+                                    $v >>= 16;
+                                    $hw++;
+                                }
+                            }
+                            my $op = $reg_op{$opcode};
+                            $bytes .= pack( 'V', $op | ( $sid << 16 ) | ( $did << 5 ) | $did );
+                        }
+                    }
+                    elsif ( $src->kind eq 'imm' ) {
+
+                        # Non-add/sub opcode with imm: load into temp register
+                        my %used;
+                        @used{ values %$assignment } = ();
+                        my $tmp_r;
+                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
+                        die 'no temp register for imm operand' unless $tmp_r;
+                        my $sid = $reg_id->($tmp_r);
+                        my $v   = $src->value;
+
+                        if ( $v >= 0 && $v <= 65535 ) {
+                            $bytes .= pack( 'V', MOVZ_64 | ( ( $v & 0xFFFF ) << 5 ) | $sid );
+                        }
+                        else {
+                            $bytes .= pack( 'V', MOVZ_64 | ( ( $v & 0xFFFF ) << 5 ) | $sid );
+                            $v >>= 16;
+                            my $hw = 1;
+                            while ($v) {
+                                $bytes .= pack( 'V', MOVK_64 | ( ( $v & 0xFFFF ) << 5 ) | ( $hw << 21 ) | $sid );
+                                $v >>= 16;
+                                $hw++;
+                            }
+                        }
+                        my $op = $reg_op{$opcode};
+                        $bytes .= pack( 'V', $op | ( $sid << 16 ) | ( $did << 5 ) | $did );
                     }
                     else {
                         my $src_r = $resolve->($src);
@@ -881,8 +933,40 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $bits  = $dst->type      ? $dst->type->bits : 64;
                     my $sf    = ( $bits >= 64 ) ? SF               : 0x00000000;
                     if ( $src->kind eq 'imm' ) {
-                        my $imm12 = $src->value & 0xFFF;
-                        $bytes .= pack( 'V', $sf | CMP_IMM | ( $imm12 << 10 ) | ( $did << 5 ) );
+                        my $v = $src->value;
+                        if ( ( $v >= 0 && $v <= 4095 ) || ( $v % 4096 == 0 && ( $v >> 12 ) <= 4095 ) ) {
+                            my $imm12 = $v;
+                            my $shift = 0;
+                            if ( $imm12 > 4095 ) {
+                                $shift = 1 << 22;
+                                $imm12 >>= 12;
+                            }
+                            $imm12 &= 0xFFF;
+                            $bytes .= pack( 'V', $sf | CMP_IMM | $shift | ( $imm12 << 10 ) | ( $did << 5 ) );
+                        }
+                        else {
+                            # Load large immediate into temp register, then use register form
+                            my %used;
+                            @used{ values %$assignment } = ();
+                            my $tmp_r;
+                            for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
+                            die 'no temp register for imm operand' unless $tmp_r;
+                            my $sid = $reg_id->($tmp_r);
+                            if ( $v >= 0 && $v <= 65535 ) {
+                                $bytes .= pack( 'V', MOVZ_64 | ( ( $v & 0xFFFF ) << 5 ) | $sid );
+                            }
+                            else {
+                                $bytes .= pack( 'V', MOVZ_64 | ( ( $v & 0xFFFF ) << 5 ) | $sid );
+                                $v >>= 16;
+                                my $hw = 1;
+                                while ($v) {
+                                    $bytes .= pack( 'V', MOVK_64 | ( ( $v & 0xFFFF ) << 5 ) | ( $hw << 21 ) | $sid );
+                                    $v >>= 16;
+                                    $hw++;
+                                }
+                            }
+                            $bytes .= pack( 'V', $sf | CMP_REG | ( $sid << 16 ) | ( $did << 5 ) );
+                        }
                     }
                     else {
                         my $src_r = $resolve->($src);
