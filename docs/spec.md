@@ -698,7 +698,7 @@ use feature 'brocken_native_types';   # enables i128, u128
 | Pod6 | Documentation - defer |
 | Multiple dispatch | Not needed |
 | Operator overloading | Not needed |
-| `want` / context | Not needed |
+| `want` / context | Supported (P3) — `want(TypeName)` constant-folds, `want('scalar'\|'list'\|'void')` calls runtime |
 | Inheritance | Classes as flat structs only - no `:isa` |
 
 **Shift operators (`<<`, `>>`) are implemented** in the lexer (`>>` token),
@@ -827,7 +827,7 @@ A dynamically typed variable (`my $x;`) is a 16-byte value allocated on the heap
 Offset  Size  Field                     Description
 0       2     Reference Count (u16)     Max 65535; overflow pins the object forever
 2       1     GC Flags (u8)             Bit 0: Cycle Suspect, Bit 1: Buffered, Bit 2: Leaf
-3       1     Type Tag (u8)             0=Int, 1=String, 2=Array, 3=Class, 4=Ptr, 5=Dynamic, 6=i128
+3       1     Type Tag (u8)             0=Int, 1=String, 2=Array, 3=Class, 4=Ptr, 5=Dynamic, 6=i128, 7=List
 4       4     Padding / Aux (u32)       Reserved (e.g., cached string byte length)
 8       8     Payload (u64)             Raw value (i64/u64/f64/ptr - type determines interpretation)
 ```
@@ -845,6 +845,50 @@ The first 8 bytes (refcount + flags + tag + padding) are called the **header wor
 | 4   | Ptr        |
 | 5   | Dynamic    |
 | 6   | i128       |
+| 7   | List       |
+| 8   | Hash       |
+
+A **Hash** is a heap-allocated fat scalar (type tag 8). Like List, the payload at `[+8]` is a pointer to a hash data block allocated via `bump_alloc`:
+
+```
+Offset  Size  Content
+[+0]:    8    Header (tag = 8, refcount, flags)
+[+8]:    8    Pointer to hash data block
+```
+
+Hash data block layout (pointed to by `[+8]`):
+
+```
+[+0]:   8    i64 header = T_HASH << 24   (tag = 8)
+[+8]:   8    i64 count                    (number of key-value pairs)
+[+16]:  8    ptr key 0                   (String fat scalar pointer)
+[+24]:  8    i64 value 0                 (raw value)
+[+32]:  8    ptr key 1                   (String fat scalar pointer)
+[+40]:  8    i64 value 1
+...
+```
+
+Total data block size = `16 + count * 16`. Keys are stored as pointers to `String` fat scalars; values are raw i64. Pairs are stored in insertion order. Hash security (collision resistance) is deferred — see §8.1.
+
+A **List** is a heap-allocated fat scalar (type tag 7). Unlike other types, the payload at `[+8]` is not the value itself but a pointer to a list data block allocated via `bump_alloc`:
+
+```
+Offset  Size  Content
+[+0]:    8    Header (tag = 7, refcount, flags)
+[+8]:    8    Pointer to list data block
+```
+
+List data block layout (pointed to by `[+8]`):
+
+```
+[+0]:   8    i64 header = T_LIST << 24   (tag = 7)
+[+8]:   8    i64 count                    (number of elements)
+[+16]:  8    i64 element 0               (raw value)
+[+24]:  8    i64 element 1
+...
+```
+
+Total data block size = `16 + count * 8`. Elements are stored as raw i64 values; list variable declarations (`my ($a, $b) = expr`) convert each element to the declared type via `maybe_convert_type` at compile time.
 
 Tags are assigned by `_type_tag()` in each backend's MIR lowerer and stored as `store_imm` at offset 3 of the fat scalar at `box` time.
 
@@ -1778,7 +1822,75 @@ Using `wasmtime_fiber::Fiber` for cooperative isolation was considered but rejec
 
 ---
 
-## 13. Glossary
+## 13. Security Considerations
+
+### 13.1 Hash Collision Resistance
+
+Brocken V1 uses a simple linear-probe hash table that stores keys in insertion order. This is **not** secure against hash-collision denial-of-service attacks. An attacker who can control hash keys (e.g., via a web form or untrusted input) could force worst-case O(n) lookups by constructing many keys that collide under the identity hash.
+
+**V2 plan:** Replace the identity hash with **SipHash-2-4**, keyed with a per-process random seed:
+
+- SipHash-2-4 is a cryptographically keyed hash function optimized for short inputs (hash-table keys).
+- Per-process seed generated at process startup via OS CSPRNG (see §13.2).
+- Key is stored in the Isolate Control Block (ICB) at offset `hb+136`, initialized once by `_init`.
+- Hash function is an intrinsic (`siphash(key_str, seed) → i64`), lowered to a small inline sequence or a helper call.
+- Fixed overhead: ~1–2 cycles per byte on modern CPUs (negligible for typical hash-table workloads).
+
+Open questions for V2:
+
+1. **Rehashing strategy:** Do we expose rehash to user code or handle transparently when load factor exceeds threshold?
+2. **Iteration order:** Linear-probe insertion order vs. sorted order. V1 uses insertion order; V2 may need to preserve this guarantee to match Perl semantics.
+3. **Seed rotation:** Should the hash seed rotate periodically for long-running server processes? (Not recommended — would invalidate all in-flight hash tables.)
+
+### 13.2 CSPRNG (Cryptographically Secure Pseudorandom Number Generator)
+
+Brocken needs a `secure_rand()` / `srand()` facility for security-sensitive applications (session tokens, cryptographic nonces, hash seeds). V1 uses the OS syscall directly; V2 will add a built-in ChaCha20-based CSPRNG.
+
+**V1 approach (via `libc` intrinsic):**
+
+| OS | Syscall | Returns |
+|----|---------|---------|
+| Linux | `getrandom(buf, len, flags)` (syscall 318) | Bytes written (or error) |
+| Windows | `BCryptGenRandom(NULL, buf, len, BCRYPT_USE_SYSTEM_PREFERRED_RNG)` | STATUS_SUCCESS |
+| macOS/BSD | `getentropy(buf, len)` | 0 on success |
+
+Usage from Brocken code:
+
+```
+libc("getrandom", buf, 32, 0);             # Linux
+libc("BCryptGenRandom", 0, buf, 32, 0x00000002);  # Windows
+```
+
+**V2 plan — Built-in CSPRNG (ChaCha20):**
+
+```
+hb+136:  32 bytes  seed (from OS at init time)
+hb+168:  64 bytes  ChaCha20 state (4×16 words)
+hb+232:  i64       byte counter (total bytes generated from current seed)
+```
+
+- On first call to `secure_rand(buf, len)`, seed ChaCha20 with the OS-provided seed and a block counter of 0.
+- On subsequent calls, generate keystream blocks, XOR with output buffer, advance counter.
+- Re-seed after every 2^32 bytes (or on explicit user request) to prevent state compromise.
+- Exposed as `Brocken::Runtime::secure_rand` in `core.brocken`.
+
+Benefits over raw syscall:
+
+- **Performance:** No syscall overhead per random byte. ChaCha20 generates ~3 GB/s on modern hardware.
+- **Portability:** Single implementation across all targets.
+- **Determinism (optional):** For testing, the seed can be set to a known value via an undocumented flag.
+
+### 13.3 Bind Gate Security
+
+The bind gate (see §7) prevents guest code from forging gate IDs or escaping the heap:
+
+- **Gate ID validation:** The trampoline validates that the gate ID is within the table bounds and that the guest has the required capability bitmask set.
+- **Isolate pointer restoration:** Before entering any bound function, `r14` (the Isolate pointer) is restored to the guest's ICB, preventing host memory access.
+- **Stack guard:** A guard page is placed below the guest stack to catch runaway recursion.
+
+---
+
+## 14. Glossary
 
 | Term | Definition |
 |------|------------|
