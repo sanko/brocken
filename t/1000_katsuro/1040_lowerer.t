@@ -234,20 +234,21 @@ BROCKEN
     is( $f->return_type->as_string, 'void', 'returns void' );
     is( $f->params->@*,             4,      'four params (__heap_base, __want, $self, $value)' );
 };
-subtest 'Auto-generated constructor with :param' => sub {
+subtest 'Named constructor with fields' => sub {
     my $c   = Brocken::Compiler->new;
     my $mod = $c->compile(<<'BROCKEN');
 class Point {
-    field i64 $x :param;
+    field i64 $x;
 }
+my ptr $p = Point->new(x => 42);
+return $p->x;
 BROCKEN
-    my $f = find_function( $mod, 'Point::new' );
-    ok( $f, 'found auto-generated constructor Point::new' );
-    is( $f->return_type->as_string, 'void', 'returns void' );
-    is( $f->params->@*,             4,      'four params (__heap_base, __want, $self, $x)' );
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
     my $text = $f->as_string();
-    like( $text, qr/__heap_base.*alloca/, 'alloca for __heap_base' );
-    like( $text, qr/store/,               'store param to field' );
+    like( $text, qr/bump_alloc/,   'allocates object via bump_alloc' );
+    like( $text, qr/getelementptr/, 'GEP for field access' );
+    like( $text, qr/store/,         'stores field value' );
 };
 subtest 'ADJUST block' => sub {
     my $c   = Brocken::Compiler->new;
@@ -332,7 +333,7 @@ subtest 'Standalone field access as expression statement' => sub {
 class Point {
     field i64 $x :param;
 }
-my ptr $p = Point->new(42);
+my ptr $p = Point->new(x => 42);
 $p->x;
 return $p->x;
 BROCKEN
@@ -349,7 +350,7 @@ class Point {
     field i64 $x :param;
 }
 sub make() -> Point {
-    return Point->new(42);
+    return Point->new(x => 42);
 }
 return make()->x;
 BROCKEN

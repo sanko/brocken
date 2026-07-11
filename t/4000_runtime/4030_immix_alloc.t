@@ -19,8 +19,8 @@ SKIP: {
 class Point {
     field i64 $x :param :reader;
 }
-my ptr $p1 = Point->new(10);
-my ptr $p2 = Point->new(32);
+my ptr $p1 = Point->new(x => 10);
+my ptr $p2 = Point->new(x => 32);
 return $p1->x() + $p2->x();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
@@ -40,7 +40,7 @@ SKIP: {
 class Counter {
     field i64 $count :param :reader :writer;
 }
-my ptr $c = Counter->new(0);
+my ptr $c = Counter->new(count => 0);
 $c->set_count(21);
 return $c->count() * 2;
 BROCKEN
@@ -64,7 +64,7 @@ class Point {
 my i64 $s = 0;
 my i64 $i = 0;
 while ($i < 10) {
-    my ptr $p = Point->new($i);
+    my ptr $p = Point->new(x => $i);
     $s = $s + $p->x();
     $i = $i + 1;
 }
@@ -88,7 +88,7 @@ class Point {
     field i64 $x :param :reader;
     field i64 $y :param :reader;
 }
-my ptr $p = Point->new(10, 32);
+my ptr $p = Point->new(x => 10, y => 32);
 return $p->x() + $p->y();
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );

@@ -270,21 +270,6 @@ class Brocken::Katsuro::Lowerer {
             }
         }
 
-        # Auto-generate constructor from :param fields
-        {
-            my @param_fields = grep {
-                my $ff = $_;
-                grep { $_ eq 'param' } $ff->attrs->@*
-            } $ast->fields->@*;
-            my $ctor_name = $class_name . '::new';
-            my $ret_type  = 'void';
-            my @params;
-            for my $pf (@param_fields) {
-                push @params, { type => $pf->type, sigil => '$', name => $pf->name };
-            }
-            $self->register_function_raw( $ctor_name, $ret_type, \@params );
-            $self->generate_constructor( $class_name, $ast->fields, \@param_fields, $ast->adjust );
-        }
         $current_class = undef;
     }
 
@@ -1436,9 +1421,7 @@ class Brocken::Katsuro::Lowerer {
         my $class_name   = $self->resolve_class_name($ast);
         my $obj_is_class = $ast->obj->isa('Brocken::Katsuro::AST::Expr::Ident');
         my $full_name    = $class_name . '::' . $ast->method;
-        my $callee       = $functions->{$full_name};
         my ( $line, $col ) = ( $ast->line, $ast->col );
-        Carp::croak( "Undefined method '" . $ast->method . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $callee;
         my $hb       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
         my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'},      undef, $line, $col );
 
@@ -1451,58 +1434,48 @@ class Brocken::Katsuro::Lowerer {
             $self->_emit_fuel_check( $line, $col );
             my $self_ptr = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
 
-            # Check for named-parameter style: new(x => 100, y => 150)
+            # Only named constructors supported: new(x => 100, y => 150)
             my $args = $ast->args;
-            if ( $args->@* == 1 && $args->[0]->isa('Brocken::Katsuro::AST::Expr::Hash') ) {
-                my $hash = $args->[0];
-                my %field_idx;
-                for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
-                    $field_idx{ $cd->{fields}[$i]{name} } = $i;
-                }
-                my %seen;
-                for my $pair ( $hash->pairs->@* ) {
-                    my $key_expr = $pair->{key};
-                    next unless $key_expr->isa('Brocken::Katsuro::AST::Expr::Const') && $key_expr->type eq 'String';
-                    my $field_name = $key_expr->value;
-                    my $fi         = $field_idx{$field_name};
-                    Carp::croak( "Unknown field '$field_name' in class '$class_name' at " . $self->_loc($ast) ) unless defined $fi;
-                    my $fd  = $cd->{fields}[$fi];
-                    my $val = $self->lower_expression( $pair->{value} );
-                    $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
-                    my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fi, '%' . $fd->{name} . '.init', $line, $col );
-                    $builder->build_store( $val, $field_ptr, $line, $col );
-                    $seen{$field_name} = 1;
-                }
-                for my $f ( $cd->{fields}->@* ) {
-                    next if $seen{ $f->{name} };
-                    next unless defined $f->{default};
-                    my $default_val = $self->lower_expression( $f->{default} );
-                    $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
-                    my $field_ptr
-                        = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{idx}, '%' . $f->{name} . '.default', $line, $col );
-                    $builder->build_store( $default_val, $field_ptr, $line, $col );
-                }
-                my $adjust_fn = $functions->{ $class_name . '::ADJUST' };
-                if ($adjust_fn) {
-                    $builder->build_call( $adjust_fn, [ $hb, $want_val, $self_ptr ], undef, $line, $col );
-                }
+            Carp::croak( "Positional constructors are not supported. Use named syntax: class->new(field => value)" )
+                unless $args->@* == 1 && $args->[0]->isa('Brocken::Katsuro::AST::Expr::Hash');
+
+            my $hash = $args->[0];
+            my %field_idx;
+            for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
+                $field_idx{ $cd->{fields}[$i]{name} } = $i;
             }
-            else {
-                my @args       = ( $hb, $want_val, $self_ptr );
-                my $ctor_p_idx = 3;
-                for my $arg ( $args->@* ) {
-                    my $val = $self->lower_expression($arg);
-                    if ( $ctor_p_idx < $callee->params->@* ) {
-                        $val = $self->maybe_convert_type( $val, $callee->params->[$ctor_p_idx]->type );
-                    }
-                    push @args, $val;
-                    $ctor_p_idx++;
-                }
-                $self->_emit_fuel_check( $line, $col );
-                $builder->build_call( $callee, \@args, undef, $line, $col );
+            my %seen;
+            for my $pair ( $hash->pairs->@* ) {
+                my $key_expr = $pair->{key};
+                next unless $key_expr->isa('Brocken::Katsuro::AST::Expr::Const') && $key_expr->type eq 'String';
+                my $field_name = $key_expr->value;
+                my $fi         = $field_idx{$field_name};
+                Carp::croak( "Unknown field '$field_name' in class '$class_name' at " . $self->_loc($ast) ) unless defined $fi;
+                my $fd  = $cd->{fields}[$fi];
+                my $val = $self->lower_expression( $pair->{value} );
+                $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
+                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fi, '%' . $fd->{name} . '.init', $line, $col );
+                $builder->build_store( $val, $field_ptr, $line, $col );
+                $seen{$field_name} = 1;
+            }
+            for my $f ( $cd->{fields}->@* ) {
+                next if $seen{ $f->{name} };
+                next unless defined $f->{default};
+                my $default_val = $self->lower_expression( $f->{default} );
+                $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
+                my $field_ptr
+                    = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{idx}, '%' . $f->{name} . '.default', $line, $col );
+                $builder->build_store( $default_val, $field_ptr, $line, $col );
+            }
+            my $adjust_fn = $functions->{ $class_name . '::ADJUST' };
+            if ($adjust_fn) {
+                $builder->build_call( $adjust_fn, [ $hb, $want_val, $self_ptr ], undef, $line, $col );
             }
             return $self_ptr;
         }
+
+        my $callee = $functions->{$full_name};
+        Carp::croak( "Undefined method '" . $ast->method . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $callee;
         my $obj_ptr = $obj_is_class ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) :
             $self->lower_expression( $ast->obj );
         my @args      = ( $hb, $want_val, $obj_ptr );
@@ -1784,61 +1757,7 @@ class Brocken::Katsuro::Lowerer {
         $builder->build_ret();
     }
 
-    method generate_constructor( $class_name, $all_fields, $param_fields, $adjust_ast ) {
-        my $ctor_name = $class_name . '::new';
-        $current_func = $functions->{$ctor_name};
-        return unless $current_func;
-        $current_func->set_blocks( [] );
-        my $entry = $current_func->append_block('entry');
-        $builder->position_at_end($entry);
-        $current_block = $entry;
-        $symbols       = {};
-        $current_func->params->[0]->name eq '%__heap_base' or Carp::croak("Constructor missing %__heap_base");
-        my $heap_base_param  = $current_func->params->[0];
-        my $heap_base_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::ptr(), '%__heap_base.addr' );
-        $builder->build_store( $heap_base_param, $heap_base_alloca );
-        $symbols->{'__heap_base'} = $heap_base_alloca;
-        {
-            my $want_param  = $current_func->params->[1];
-            my $want_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%__want.addr' );
-            $builder->build_store( $want_param, $want_alloca );
-            $symbols->{'__want'} = $want_alloca;
-        }
-        my $cd          = $classes->{$class_name};
-        my $struct_type = $cd->{struct_type};
-        my $self_ptr    = $current_func->params->[2];
 
-        # Initialize fields: defaults first, then params override
-        my $param_idx = 0;
-        for my $i ( 0 .. $all_fields->@* - 1 ) {
-            my $f         = $all_fields->[$i];
-            my ($fd)      = grep { $_->{name} eq $f->name } $cd->{fields}->@*;
-            my $field_ptr = $builder->build_struct_gep( $struct_type, $self_ptr, $i, '%' . $f->name . '.init' );
-            my $is_param  = grep { $_ eq 'param' } $f->attrs->@*;
-            if ($is_param) {
-                my $param_val = $current_func->params->[ $param_idx + 3 ];
-                my $converted = $self->maybe_convert_type( $param_val, $fd->{ir_type} );
-                $builder->build_store( $converted, $field_ptr );
-                $param_idx++;
-            }
-            elsif ( defined $f->default ) {
-                my $default_val = $self->lower_expression( $f->default );
-                $default_val = $self->maybe_convert_type( $default_val, $fd->{ir_type} );
-                $builder->build_store( $default_val, $field_ptr );
-            }
-        }
-
-        # Call ADJUST if present
-        if ( defined $adjust_ast ) {
-            my $adjust_fn = $functions->{ $class_name . '::ADJUST' };
-            if ($adjust_fn) {
-                my $hb       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
-                my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'} );
-                $builder->build_call( $adjust_fn, [ $hb, $want_val, $self_ptr ], undef );
-            }
-        }
-        $builder->build_ret();
-    }
 }
 
 =head1 NAME
