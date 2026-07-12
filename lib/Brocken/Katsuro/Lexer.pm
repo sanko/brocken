@@ -51,7 +51,9 @@ class Brocken::Katsuro::Lexer v0.0.1 {
 
             # 3. Match Numbers (hex, float, then decimal)
             if ( $remaining =~ /^(0x([0-9a-fA-F]+))/ ) {
-                push @tokens, $self->_token( 'NUM', hex($2) );
+                my $h = $2;
+                my $val = length($h) > 8 ? do { require Math::BigInt; Math::BigInt->new('0x' . $h) } : hex($h);
+                push @tokens, $self->_token( 'NUM', $val );
                 $self->_advance_pos( length($1) );
                 next;
             }
