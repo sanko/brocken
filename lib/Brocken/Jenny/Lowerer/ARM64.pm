@@ -3422,7 +3422,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         }
                     }
                     else {
-                        my $cmp_type = $lhs->type || Brocken::Lindsay::IR::Type::i64();
+                        my $cmp_type = $lhs->type // $rhs->type // Brocken::Lindsay::IR::Type::i64();
                         my $cmp_reg
                             = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_cmp', type => $cmp_type );
                         $mbb->add_instruction(
