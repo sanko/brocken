@@ -800,7 +800,17 @@ class Brocken::Jenny::Codegen::ARM64 {
                     else {
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
-                        my %base  = ( shl => 0x9AC02000, lshr => 0x9AC02400, ashr => 0x9AC02C00 );
+                        my %base  = ( shl => 0x9AC02000, lshr => 0x9AC02400, ashr => 0x9AC02800 );
+                        if ( $sid == $did ) {
+                            my %used;
+                            @used{ values %$assignment } = ();
+                            my $tmp_r;
+                            for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
+                            die 'no temp register for shift operand' unless $tmp_r;
+                            my $tid = $reg_id->($tmp_r);
+                            $bytes .= pack( 'V', 0xAA000000 | ( $sid << 16 ) | ( 0x1F << 5 ) | $tid );
+                            $sid = $tid;
+                        }
                         $bytes .= pack( 'V', $base{$opcode} | ( $sid << 16 ) | ( $did << 5 ) | $did );
                     }
                 }
