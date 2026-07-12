@@ -3422,17 +3422,20 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         }
                     }
                     else {
+                        my $cmp_type = $lhs->type || Brocken::Lindsay::IR::Type::i64();
+                        my $cmp_reg
+                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_cmp', type => $cmp_type );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'mov',
-                                operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                operands => [ $cmp_reg, $self->_lower_opnd($lhs) ],
                                 comment  => 'load lhs'
                             )
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'cmp',
-                                operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                operands => [ $cmp_reg, $self->_lower_opnd($rhs) ],
                                 comment  => 'icmp ' . $pred
                             )
                         );

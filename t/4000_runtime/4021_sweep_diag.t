@@ -8,7 +8,6 @@
 #   4   = sweep_block returned wrong count
 #  31   = shl(1,31) returned 0 (shift-63 specific, or all shifts broken)
 #  32   = shl(1,31) worked but shl(1,63) = 0
-
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
@@ -17,9 +16,7 @@ use Brocken;
 use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-
 my $name = 'shl variable-shift ARM64 diagnostic: ';
-
 SKIP: {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
@@ -78,5 +75,4 @@ BROCKEN
     };
     ok( $rc == 0, "$name exit code $rc" ) or diag("Diagnostic returned $rc on ARM64");
 }
-
 done_testing;
