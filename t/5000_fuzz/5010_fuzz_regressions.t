@@ -714,4 +714,234 @@ sub helper(u128 $x) -> u64 {
 return helper(0xDEADBEEF);
 PROG
 };
+
+# Bug: mixed-signedness comparison at same bit width < 64.
+#   x86_64 codegen loads signed values with movsx (sign-extend) and unsigned
+#   with movzx (zero-extend).  For types < 64 bits, CMP uses 32-bit operands,
+#   so a sign-extended i8 value looks like a huge positive number in the unsigned
+#   CMP, producing wrong results.
+#   Fix: widen both operands to a common 32-bit type (zext/sext) before icmp.
+#   Fuzzer seed 100, case 4.
+subtest 'mixed-signedness comparison regressions (seed 100 case 4)' => sub {
+    test_prog( 'u8(227) > i8(-73) should be true', <<'PROG', 1 );
+my u8 $a = 227;
+my i8 $b = -73;
+if ($a > $b) {
+    return 1;
+}
+return 0;
+PROG
+    test_prog( 'i8(-73) < u8(227) should be true', <<'PROG', 1 );
+my i8 $a = -73;
+my u8 $b = 227;
+if ($a < $b) {
+    return 1;
+}
+return 0;
+PROG
+    test_prog( 'u8(0) == i8(0) should be true', <<'PROG', 1 );
+my u8 $a = 0;
+my i8 $b = 0;
+if ($a == $b) {
+    return 1;
+}
+return 0;
+PROG
+    test_prog( 'i8(-1) < u8(0) should be true (signed comparison)', <<'PROG', 1 );
+my i8 $a = -1;
+my u8 $b = 0;
+if ($a < $b) {
+    return 1;
+}
+return 0;
+PROG
+    test_prog( 'u16(65535) > i16(1) should be true', <<'PROG', 1 );
+my u16 $a = 65535;
+my i16 $b = 1;
+if ($a > $b) {
+    return 1;
+}
+return 0;
+PROG
+    test_prog( 'u32(4294967295) >= i32(1) should be true', <<'PROG', 1 );
+use feature 'brocken_native_types';
+my u32 $a = 4294967295;
+my i32 $b = 1;
+if ($a >= $b) {
+    return 1;
+}
+return 0;
+PROG
+    test_prog( 'full fuzz case 4 (seed 100)', <<'PROG', 1 );
+use feature 'brocken_native_types';
+my i8 $v1 = -73;
+my i16 $v2 = -64;
+my i8 $v3 = 82;
+my u32 $v4 = 0;
+my u128 $v5 = 340282366920938463463374607431768211404;
+my u8 $v6 = 227;
+{
+    $v2 = -$v4;
+}
+while ($v2 == $v1) {
+    $v2 = -$v4;
+    $v6 = -$v5;
+    if ($v4 >= $v6) { next; }
+    if ($v2 == $v1) { next; }
+}
+if ($v2 == $v2) {
+    $v5 = 1;
+} else {
+    $v5 = 0;
+}
+$v3 = $v3 - $v5;
+if ($v5 <= $v1) {
+    $v3 = -$v1;
+    $v4 = -$v4;
+}
+$v3 = $v6 <= $v1 ? $v6 : $v3;
+if ($v1 >= $v1 && $v6 > $v1) {
+    $v2 = 1;
+} else {
+    $v2 = 0;
+}
+$v3 = $v2 % $v3;
+if ($v5 <= $v6) {
+    $v6 = 1;
+} else {
+    $v6 = 0;
+}
+while ($v6 != $v2) {
+    $v2 = -$v6;
+    $v4 = $v3 | $v6;
+}
+$v2 = $v3 ^ $v5;
+$v5 = -$v5;
+return $v3;
+PROG
+};
+
+# Bug: negating i1 (bool) wraps in 1-bit two's complement.
+#   neg(i1(1)) = i1(1) because -1 in 1-bit is 1.  When the result is
+#   later widened to i64 via zext, the value is 1 instead of -1.
+#   Fix: promote i1 to i8 before negation so i8(-1) sign-extends correctly.
+#   Fuzzer seed 100, case 7.
+subtest 'bool negation regressions (seed 100 case 7)' => sub {
+    test_prog( 'negate true bool then use as i64', <<'PROG', 255 );
+my bool $b = true;
+my i64 $v = -$b;
+return $v;
+PROG
+    test_prog( 'negate false bool then use as i64', <<'PROG', 0 );
+my bool $b = false;
+my i64 $v = -$b;
+return $v;
+PROG
+    test_prog( 'negate true bool then use as i32', <<'PROG', 255 );
+my bool $b = true;
+my i32 $v = -$b;
+return $v;
+PROG
+    test_prog( 'double negate bool should return original', <<'PROG', 1 );
+my bool $b = true;
+$b = -$b;
+$b = -$b;
+return $b;
+PROG
+    test_prog( 'negate bool in chained comparison', <<'PROG', 1 );
+my bool $a = true;
+my i64 $x = -$a;
+if ($x != -1) {
+    return 0;
+}
+return 1;
+PROG
+    test_prog( 'full fuzz case 7 (seed 100)', <<'PROG', 1 );
+use feature 'brocken_native_types';
+sub fold() -> i8 {
+    my bool $l1 = false;
+    $l1 = -$l1;
+    $l1 = -$l1;
+    $l1 = -$l1;
+    $l1 = -$l1;
+    return $l1;
+}
+
+my bool $v1 = true;
+my i64 $v2 = 76;
+my u64 $v3 = 1614032984;
+my i32 $v4 = 3;
+$v3 = $v2 / $v2;
+if ($v2 != $v3) {
+    $v4 = $v2 | $v3;
+} else {
+    $v4 = $v3 ^ $v4;
+}
+if ($v4 <= $v4) {
+    $v3 = 1;
+} else {
+    $v3 = 0;
+}
+if ($v3 != $v3 || $v4 < $v4) {
+    $v4 = 1;
+} else {
+    $v4 = 0;
+}
+if ($v4 < $v4) {
+    $v4 = 1;
+} else {
+    $v4 = 0;
+}
+$v3 = fold();
+$v2 = $v2 ^ $v2;
+if ($v4 <= $v3) {
+    $v2 = $v3 - $v2;
+} else {
+    $v2 = $v3 / $v1;
+}
+if ($v2 > $v2) {
+    $v3 = $v4 / $v1;
+    $v2 = -$v2;
+    $v3 = -$v1;
+} else {
+    $v2 = -$v1;
+    $v1 = $v4 + $v1;
+    $v4 = -$v4;
+}
+$v3 = $v1 * $v3;
+if ($v4 != $v1) {
+    $v3 = $v3 ^ $v1;
+    $v2 = -$v2;
+    $v4 = -$v1;
+} else {
+    $v3 = $v2 & $v3;
+}
+$v3 = $v1 ^ $v2;
+$v4 = $v3 ^ $v3;
+$v2 = -$v2;
+if ($v1) {
+    $v1 = 0;
+} else {
+    $v1 = 1;
+}
+if ($v2 >= $v3 || $v4 != $v3) {
+    $v1 = 1;
+} else {
+    $v1 = 0;
+}
+{
+    $v1 = -$v1;
+    $v4 = -$v1;
+    $v4 = -$v4;
+    $v4 = -$v2;
+}
+$v3 = $v3 | $v2;
+if ($v1) {
+    $v1 = 0;
+} else {
+    $v1 = 1;
+}
+return $v1;
+PROG
+};
 done_testing;
