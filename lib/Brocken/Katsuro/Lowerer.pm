@@ -1082,14 +1082,37 @@ class Brocken::Katsuro::Lowerer {
             return $lhs->type->is_signed ? $builder->build_rem( $lhs, $rhs, undef, $line, $col ) :
                 $builder->build_urem( $lhs, $rhs, undef, $line, $col );
         }
-        return $builder->build_and( $lhs, $rhs, undef, $line, $col )        if $op eq '&';
-        return $builder->build_or( $lhs, $rhs, undef, $line, $col )         if $op eq '|';
-        return $builder->build_xor( $lhs, $rhs, undef, $line, $col )        if $op eq '^';
-        return $builder->build_and( $lhs, $rhs, undef, $line, $col )        if $op eq '&&';
-        return $builder->build_or( $lhs, $rhs, undef, $line, $col )         if $op eq '||';
+        return $builder->build_and( $lhs, $rhs, undef, $line, $col ) if $op eq '&';
+        return $builder->build_or( $lhs, $rhs, undef, $line, $col )  if $op eq '|';
+        return $builder->build_xor( $lhs, $rhs, undef, $line, $col ) if $op eq '^';
+        return $builder->build_and( $lhs, $rhs, undef, $line, $col ) if $op eq '&&';
+        return $builder->build_or( $lhs, $rhs, undef, $line, $col )  if $op eq '||';
+
+        # Mixed-signedness comparison: types < 64 bits with different signedness
+        # produce wrong results because the codegen loads signed operands with
+        # movsx (sign-extend) and unsigned with movzx (zero-extend) into 32-bit
+        # registers.  When the CMP uses unsigned predicates, the sign-extended
+        # value looks like a huge positive number.  Fix: widen both operands to
+        # a common 32-bit type with appropriate extension so the bit patterns
+        # match the simulation semantics.
+        if ( $lhs->type->kind eq 'int' &&
+            $rhs->type->kind eq 'int'            &&
+            $lhs->type->bits == $rhs->type->bits &&
+            $lhs->type->bits < 64                &&
+            $lhs->type->is_signed != $rhs->type->is_signed ) {
+            if ( !$lhs->type->is_signed ) {
+                my $wt = Brocken::Lindsay::IR::Type::u32();
+                $lhs = $builder->build_zext( $lhs, $wt, undef, $line, $col );
+                $rhs = $builder->build_zext( $rhs, $wt, undef, $line, $col );
+            }
+            else {
+                my $wt = Brocken::Lindsay::IR::Type::i32();
+                $lhs = $builder->build_sext( $lhs, $wt, undef, $line, $col );
+                $rhs = $builder->build_sext( $rhs, $wt, undef, $line, $col );
+            }
+        }
         return $builder->build_icmp( 'eq', $lhs, $rhs, undef, $line, $col ) if $op eq '==';
         return $builder->build_icmp( 'ne', $lhs, $rhs, undef, $line, $col ) if $op eq '!=';
-
         if ( $op eq '<' ) {
             return $builder->build_icmp( $lhs->type->is_signed ? 'slt' : 'ult', $lhs, $rhs, undef, $line, $col );
         }
@@ -1158,6 +1181,12 @@ class Brocken::Katsuro::Lowerer {
         # Unbox dynamic operands to i64 before unary ops
         if ( $operand->type->kind eq 'dynamic' ) {
             $operand = $self->maybe_convert_type( $operand, Brocken::Lindsay::IR::Type::i64() );
+        }
+
+        # Promote i1 before negation: neg(i1) wraps (-1==1 in 1-bit)
+        # but i8(-1) sign-extends correctly to wider types.
+        if ( $op eq '-' && $operand->type->kind eq 'int' && $operand->type->bits == 1 ) {
+            $operand = $self->maybe_convert_type( $operand, Brocken::Lindsay::IR::Type::i8() );
         }
         return $builder->build_neg( $operand, undef, $line, $col ) if $op eq '-';
         if ( $op eq '!' ) {
