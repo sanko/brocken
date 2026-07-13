@@ -656,4 +656,67 @@ subtest 'libc intrinsic errors on non-string first argument' => sub {
     ok( $@, 'error thrown for non-string argument' );
     like( $@, qr/string/, 'error mentions string literal requirement' );
 };
+subtest 'Mixed-signedness comparison widens operands (u8 vs i8)' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+use feature 'brocken_native_types';
+my u8 $a = 227;
+my i8 $b = -73;
+if ($a > $b) {
+    return 1;
+}
+return 0;
+BROCKEN
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
+    my $text = $f->as_string();
+    like( $text, qr/zext\s+i8\s+.*\s+to\s+u32/, 'LHS (u8) zero-extended to u32' );
+    like( $text, qr/zext\s+i8\s+.*\s+to\s+u32/, 'RHS (i8) zero-extended to u32 (both zext for unsigned LHS)' );
+    like( $text, qr/icmp\s+ugt\s+u32/,          'icmp uses u32 type' );
+};
+subtest 'Mixed-signedness comparison widens operands (i8 vs u8, signed LHS)' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+use feature 'brocken_native_types';
+my i8 $a = -1;
+my u8 $b = 0;
+if ($a < $b) {
+    return 1;
+}
+return 0;
+BROCKEN
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
+    my $text = $f->as_string();
+    like( $text, qr/sext\s+i8\s+.*\s+to\s+i32/, 'LHS (i8) sign-extended to i32' );
+    like( $text, qr/sext\s+i8\s+.*\s+to\s+i32/, 'RHS (u8) sign-extended to i32' );
+    like( $text, qr/icmp\s+slt\s+i32/,          'icmp uses i32 type with signed predicate' );
+};
+subtest 'Bool negation promotes i1 to i8' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my bool $b = true;
+my i64 $v = -$b;
+return $v;
+BROCKEN
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
+    my $text = $f->as_string();
+    like( $text, qr/zext\s+i1\s+.*\s+to\s+i8/, 'bool promoted from i1 to i8 before neg' );
+    like( $text, qr/neg\s+i8/,                 'neg operates on i8, not i1' );
+};
+subtest 'Bool negation double-negate preserves value' => sub {
+    my $c   = Brocken::Compiler->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my bool $b = true;
+$b = -$b;
+$b = -$b;
+return $b;
+BROCKEN
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
+    my $text = $f->as_string();
+    like( $text, qr/neg\s+i8/,           'first neg on i8' );
+    like( $text, qr/and\s+i8\s+.*,\s+1/, 'result masked to 1-bit for bool storage' );
+};
 done_testing;
