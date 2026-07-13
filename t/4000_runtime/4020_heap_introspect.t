@@ -373,6 +373,8 @@ SKIP: {
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 80);
+# _init marks Line 0 — clear bitmap first
+Brocken::Runtime::clear_block_bitmap($block);
 # Initially no lines marked
 my i64 $s0 = Brocken::Runtime::sweep_block($block);
 if ($s0 != 0) { return 1; }
@@ -465,16 +467,22 @@ my ptr $block0 = Brocken::ptr_add($hb, 80);
 my ptr $cb = Brocken::load_i64(Brocken::ptr_add($hb, 56));
 # Sanity: current_block starts as hb+80
 if (Brocken::ptr_cmp_eq($cb, $block0) == 0) { return 1; }
+# Mark all 128 lines in the bitmap so find_free_line returns -1
+my i64 $i = 0;
+while (Brocken::ptr_cmp_gt(128, $i)) {
+    Brocken::Runtime::mark_line($block0, $i);
+    $i = Brocken::i64_add($i, 1);
+}
 # Make the current block appear full:
 # Set immix_cursor [hb+24] and immix_limit [hb+32] near block_end
 my ptr $block_end = Brocken::ptr_add($block0, 32752);
 my ptr $fake_end = Brocken::ptr_sub($block_end, 16);
 Brocken::store_i64(Brocken::ptr_add($hb, 24), $fake_end);
 Brocken::store_i64(Brocken::ptr_add($hb, 32), $fake_end);
-# Re-zero live_count for this test: set block0's live_count to 0
+# Re-zero live_count for this test
 Brocken::store_i64(Brocken::ptr_add($block0, 32752), 0);
 # Now allocate one Any — this will trigger block-full path in bump_alloc
-# The new block should be carved from legacy heap
+# find_free_line finds no free lines → allocates new block from legacy heap
 my $x = 42;
 my ptr $after_cb = Brocken::load_i64(Brocken::ptr_add($hb, 56));
 # current_block should have changed
@@ -482,10 +490,10 @@ if (Brocken::ptr_cmp_eq($after_cb, $block0)) { return 2; }
 # New block should have live_count = 1
 my i64 $lc = Brocken::load_i64(Brocken::ptr_add($after_cb, 32752));
 if ($lc != 1) { return 3; }
-# New block bitmap should be zero
+# New block bitmap: word0 has bit 0 set (mark_line in bump_alloc), rest zero
 my i64 $bm0 = Brocken::load_i64($after_cb);
 my i64 $bm1 = Brocken::load_i64(Brocken::ptr_add($after_cb, 8));
-if ($bm0 != 0) { return 4; }
+if ($bm0 != 1) { return 4; }
 if ($bm1 != 0) { return 5; }
 return 0;
 BROCKEN
@@ -513,12 +521,18 @@ my $c = 30;
 # live_count should be 3
 my i64 $lc_initial = Brocken::load_i64(Brocken::ptr_add($block0, 32752));
 if ($lc_initial != 3) { return 1; }
+# Mark all 128 lines in the bitmap so find_free_line returns -1
+my i64 $i = 0;
+while (Brocken::ptr_cmp_gt(128, $i)) {
+    Brocken::Runtime::mark_line($block0, $i);
+    $i = Brocken::i64_add($i, 1);
+}
 # Make block appear full
 my ptr $block_end = Brocken::ptr_add($block0, 32752);
 my ptr $fake_end = Brocken::ptr_sub($block_end, 16);
 Brocken::store_i64(Brocken::ptr_add($hb, 24), $fake_end);
 Brocken::store_i64(Brocken::ptr_add($hb, 32), $fake_end);
-# Allocate again — triggers new block from legacy heap
+# Allocate again — find_free_line finds no free lines → triggers new block from legacy heap
 my $d = 99;
 my ptr $new_block = Brocken::load_i64(Brocken::ptr_add($hb, 56));
 if (Brocken::ptr_cmp_eq($new_block, $block0)) { return 2; }
