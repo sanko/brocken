@@ -9,24 +9,7 @@ use Brocken::Jenny::MIR;
 
 class Brocken::Jenny::Codegen::X86_64 {
     field $platform : param;
-    use constant {
-        REX_W       => 0x08,
-        REX_B       => 0x01,
-        MOV_EAX_IMM => 0xB8,
-        MOV_RM_R    => 0x8B,
-        MOV_R_RM    => 0x89,
-        MOV_IMM_RM  => 0xC7,
-        ARITH_IMM   => 0x81,
-        CMP_IMM8    => 0x83,
-        SHIFT_IMM   => 0xC1,
-        IMUL_IMM    => 0x69,
-        JMP_REL32   => 0xE9,
-        JE          => 0x84,
-        JNE         => 0x85,
-        RET_BYTE    => 0xC3,
-        POP_BASE    => 0x58,
-        PUSH_BASE   => 0x50,
-    };
+    use Brocken::Jenny::Codegen::X86_64::Encodings qw[:all];
 
     # Lower Lindsay IR to MIR, allocate registers, then encode to x86_64 machine code
     method emit_function($ir_func) {
@@ -651,7 +634,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
                         my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                         my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                        $bytes .= pack( 'CCC', $rex, MOV_RM_R, $modrm );
+                        $bytes .= pack( 'CCC', $rex, MOV_R_RM, $modrm );
                     }
                 }
                 elsif ( $opcode eq 'movzx' || $opcode eq 'movsx' ) {
@@ -665,7 +648,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         my $sid   = $reg_id->($src_r);
                         my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                         my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                        $bytes .= pack( 'CCC', $rex, MOV_RM_R, $modrm );
+                        $bytes .= pack( 'CCC', $rex, MOV_R_RM, $modrm );
                     }
                     else {
                         my $dst_r = $resolve->($dst);
@@ -931,7 +914,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     else {
                         my $rex = 0x40 | ( $bits >= 64 ? 0x08 : 0 ) | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
                         if ($rex) { $bytes .= pack( 'C', $rex ) }
-                        $bytes .= pack( 'C', MOV_RM_R ) . pack( 'C', $modrm );
+                        $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
                     }
                     $bytes .= join '', $extra->@*;
                 }
@@ -946,12 +929,12 @@ class Brocken::Jenny::Codegen::X86_64 {
                     }
                     elsif ( $bits <= 16 ) {
                         my $rex = 0x40 | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
-                        $bytes .= pack( 'C', 0x66 ) . pack( 'C', $rex ) . pack( 'CC', MOV_R_RM, $modrm );
+                        $bytes .= pack( 'C', 0x66 ) . pack( 'C', $rex ) . pack( 'CC', MOV_RM_R, $modrm );
                     }
                     else {
                         my $rex = 0x40 | ( $bits >= 64 ? 0x08 : 0 ) | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
                         if ($rex) { $bytes .= pack( 'C', $rex ) }
-                        $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
+                        $bytes .= pack( 'C', MOV_RM_R ) . pack( 'C', $modrm );
                     }
                     $bytes .= join '', $extra->@*;
                 }

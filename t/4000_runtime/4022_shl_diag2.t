@@ -9,7 +9,6 @@
 #  62   = shl(1,62) returned 0
 #  63   = shl(1,63) returned 0
 #  80   = memory round-trip failed for shl(1,63)
-
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
@@ -18,9 +17,7 @@ use Brocken;
 use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-
 my $name = 'shl(1,N) per-shift diagnostic: ';
-
 SKIP: {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
@@ -78,5 +75,4 @@ BROCKEN
     };
     ok( $rc == 0, "$name exit code $rc" ) or diag("Diagnostic returned $rc on ARM64");
 }
-
 done_testing;
