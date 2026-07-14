@@ -1272,6 +1272,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $bytes .= pack( 'V', BLR | ( $sid << 5 ) );
                     $bytes .= pack( 'V', ADD_SP | ( 64 << 10 ) );
                 }
+                elsif ( $opcode eq 'nop' ) {
+                    $bytes .= pack( 'V', 0xD503201F );
+                }
                 elsif ( $opcode eq 'ret' ) {
                     if ( $callee_size > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
