@@ -745,6 +745,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                             }
                             else {
                                 $bytes .= pack( 'V', MOVZ_64 | ( ( $v & 0xFFFF ) << 5 ) | $sid );
+                                $v = unpack( 'Q', pack( 'q', $v ) );
                                 $v >>= 16;
                                 my $hw = 1;
                                 while ($v) {
@@ -773,6 +774,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         }
                         else {
                             $bytes .= pack( 'V', MOVZ_64 | ( ( $v & 0xFFFF ) << 5 ) | $sid );
+                            $v = unpack( 'Q', pack( 'q', $v ) );
                             $v >>= 16;
                             my $hw = 1;
                             while ($v) {
@@ -978,6 +980,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                             }
                             else {
                                 $bytes .= pack( 'V', MOVZ_64 | ( ( $v & 0xFFFF ) << 5 ) | $sid );
+                                $v = unpack( 'Q', pack( 'q', $v ) );
                                 $v >>= 16;
                                 my $hw = 1;
                                 while ($v) {
