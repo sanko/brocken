@@ -16,7 +16,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 80);
+my ptr $block = Brocken::ptr_add($hb, 88);
 # Block has Line 0 marked from _init
 Brocken::Runtime::clear_block_bitmap($block);
 my i64 $w0 = Brocken::load_i64($block);
@@ -40,7 +40,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 80);
+my ptr $block = Brocken::ptr_add($hb, 88);
 # Clear bitmap (Line 0 was marked by _init)
 Brocken::Runtime::clear_block_bitmap($block);
 # Empty bitmap: find_free_line should return 0
@@ -89,7 +89,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 80);
+my ptr $block = Brocken::ptr_add($hb, 88);
 # Mark all 128 lines
 my i64 $i = 0;
 while (Brocken::ptr_cmp_gt(128, $i)) {
@@ -116,7 +116,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 80);
+my ptr $block = Brocken::ptr_add($hb, 88);
 Brocken::Runtime::clear_block_bitmap($block);
 # Mark lines 0-9
 my i64 $i = 0;
@@ -150,7 +150,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 80);
+my ptr $block = Brocken::ptr_add($hb, 88);
 # _init sets next_free to 0
 my i64 $nf0 = Brocken::Runtime::get_next_free($block);
 if ($nf0 != 0) { return 1; }
@@ -179,7 +179,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 80);
+my ptr $block = Brocken::ptr_add($hb, 88);
 # Check that Line 0 is marked in the bitmap after _init
 my i64 $w0 = Brocken::load_i64($block);
 my i64 $bit0 = Brocken::band($w0, 1);
@@ -204,7 +204,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 80);
+my ptr $block0 = Brocken::ptr_add($hb, 88);
 # Allocate many times to ensure we cross at least one line boundary
 my $a = 10; my $b = 20; my $c = 30; my $d = 40;
 my $e = 50; my $f = 60; my $g = 70; my $h = 80;
@@ -243,7 +243,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 80);
+my ptr $block = Brocken::ptr_add($hb, 88);
 # Force cursor to near end of Line 127 to trigger block-full path
 my ptr $block_end = Brocken::ptr_add($block, 32752);
 my ptr $fake_end = Brocken::ptr_sub($block_end, 16);
@@ -255,7 +255,7 @@ Brocken::Runtime::clear_block_bitmap($block);
 Brocken::Runtime::set_next_free($block, 0);
 # Allocate — should reuse a free line instead of allocating new block
 my $x = 42;
-my ptr $after_cb = Brocken::load_i64(Brocken::ptr_add($hb, 56));
+my ptr $after_cb = Brocken::load_i64(Brocken::ptr_add($hb, 80));
 # current_block should NOT have changed — free line was reused
 if (Brocken::ptr_cmp_eq($after_cb, $block) == 0) { return 1; }
 # The allocation should be somewhere in the block (not block0's original cursor area)
@@ -276,8 +276,8 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 80);
-my ptr $cb = Brocken::load_i64(Brocken::ptr_add($hb, 56));
+my ptr $block0 = Brocken::ptr_add($hb, 88);
+my ptr $cb = Brocken::load_i64(Brocken::ptr_add($hb, 80));
 if (Brocken::ptr_cmp_eq($cb, $block0) == 0) { return 1; }
 # Mark ALL 128 lines so find_free_line returns -1
 my i64 $i = 0;
@@ -292,7 +292,7 @@ Brocken::store_i64(Brocken::ptr_add($hb, 24), $fake_end);
 Brocken::store_i64(Brocken::ptr_add($hb, 32), $fake_end);
 # Allocate — must go to legacy heap
 my $x = 42;
-my ptr $after_cb = Brocken::load_i64(Brocken::ptr_add($hb, 56));
+my ptr $after_cb = Brocken::load_i64(Brocken::ptr_add($hb, 80));
 # current_block should have changed
 if (Brocken::ptr_cmp_eq($after_cb, $block0)) { return 2; }
 # New block live_count = 1
@@ -315,7 +315,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 80);
+my ptr $block = Brocken::ptr_add($hb, 88);
 # Mark several lines
 Brocken::Runtime::mark_line($block, 0);
 Brocken::Runtime::mark_line($block, 1);
@@ -351,7 +351,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 80);
+my ptr $block0 = Brocken::ptr_add($hb, 88);
 {
     # Allocate in a block scope — freed on exit
     my $a = 10;
@@ -387,7 +387,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 80);
+my ptr $block0 = Brocken::ptr_add($hb, 88);
 # Many allocations to span multiple lines
 my $a = 1; my $b = 2; my $c = 3; my $d = 4;
 my $e = 5; my $f = 6; my $g = 7; my $h = 8;
@@ -418,7 +418,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 80);
+my ptr $block0 = Brocken::ptr_add($hb, 88);
 # Initially next_free = 0
 my i64 $nf0 = Brocken::Runtime::get_next_free($block0);
 if ($nf0 != 0) { return 1; }
