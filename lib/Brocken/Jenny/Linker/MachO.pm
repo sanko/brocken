@@ -24,14 +24,15 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         $layout->add_section( '.linkedit', 4096,         1 );                        # Symbols, Strings, Dynamic linking info
 
         if ( $dbg >= 1 ) {
-            $layout->add_section( '.debug_line',     4096, 0 );
-            $layout->add_section( '.debug_info',     8192, 0 );
-            $layout->add_section( '.debug_abbrev',   4096, 0 );
-            $layout->add_section( '.debug_frame',    8192, 0 );
-            $layout->add_section( '.debug_aranges',  4096, 0 );
-            $layout->add_section( '.debug_pubnames', 4096, 0 );
-            $layout->add_section( '.debug_names',    4096, 0 );
-            $layout->add_section( '.debug_str',      4096, 0 );
+            my $dd = $self->debug_data;
+            $layout->add_section( '.debug_line',     ( length( $dd->{'.debug_line'}     // '' ) + 256 ) || 4096, 0 );
+            $layout->add_section( '.debug_info',     ( length( $dd->{'.debug_info'}     // '' ) + 256 ) || 8192, 0 );
+            $layout->add_section( '.debug_abbrev',   ( length( $dd->{'.debug_abbrev'}   // '' ) + 256 ) || 4096, 0 );
+            $layout->add_section( '.debug_frame',    ( length( $dd->{'.debug_frame'}    // '' ) + 256 ) || 8192, 0 );
+            $layout->add_section( '.debug_aranges',  ( length( $dd->{'.debug_aranges'}  // '' ) + 256 ) || 4096, 0 );
+            $layout->add_section( '.debug_pubnames', ( length( $dd->{'.debug_pubnames'} // '' ) + 256 ) || 4096, 0 );
+            $layout->add_section( '.debug_names',    ( length( $dd->{'.debug_names'}    // '' ) + 256 ) || 4096, 0 );
+            $layout->add_section( '.debug_str',      ( length( $dd->{'.debug_str'}      // '' ) + 256 ) || 4096, 0 );
         }
     }
 
