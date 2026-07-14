@@ -8,105 +8,9 @@ use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
 
 class Brocken::Jenny::Codegen::ARM64 {
-    use Brocken::Jenny::Codegen::ARM64::Inst qw[:all];
+    use Brocken::Jenny::Codegen::ARM64::Encodings qw[:all];
+    use Brocken::Jenny::Codegen::ARM64::Inst      qw[:all];
     field $platform : param;
-    use constant {
-        B              => 0x14000000,
-        CBZ            => 0xB4000000,
-        CBNZ           => 0xB5000000,
-        ADD_W          => 0x0B000000,
-        SUB_W          => 0x4B000000,
-        AND_W          => 0x0A000000,
-        ORR_W          => 0x2A000000,
-        EOR_W          => 0x4A000000,
-        MUL_W          => 0x1B007C00,
-        ADD_X          => 0x8B000000,
-        ADD_X_EXT      => 0x8B200000,
-        UXTX_OPT       => 0b011,
-        SUB_X          => 0xCB000000,
-        ADCS_X         => 0x9A000000,
-        SBCS_X         => 0xDA000000,
-        AND_X          => 0x8A000000,
-        ORR_X          => 0xAA000000,
-        EOR_X          => 0xCA000000,
-        MUL_X          => 0x9B007C00,
-        UMULH_X        => 0x9BC07C00,
-        SDIV_X         => 0x9AC00C00,
-        SDIV_W         => 0x1AC00C00,
-        UDIV_X         => 0x9AC00800,
-        UDIV_W         => 0x1AC00800,
-        ADD_IMM        => 0x11000000,
-        ADD_IMM_64     => 0x91000000,    # ADD_IMM | SF
-        SUB_IMM        => 0x51000000,
-        UBFM           => 0xD3400000,
-        UBFM_W         => 0x53400000,
-        SBFM           => 0x93400000,
-        SBFM_W         => 0x13400000,
-        MOVZ_32        => 0x52800000,
-        MOVZ_64        => 0xD2800000,
-        MOVK_32        => 0x72800000,
-        MOVK_64        => 0xF2800000,
-        MOV_X          => 0xAA0003E0,
-        MOV_W          => 0x2A0003E0,
-        SUB_SP         => 0xD10003FF,
-        ADD_SP         => 0x910003FF,
-        MOV_SP         => 0x910003E0,
-        LDRB           => 0x39400000,
-        LDRSB          => 0x39800000,
-        LDRH           => 0x79400000,
-        LDRSH          => 0x79800000,
-        LDR_32         => 0xB9400000,
-        LDR_64         => 0xF9400000,
-        STRB           => 0x39000000,
-        STRH           => 0x79000000,
-        STR_32         => 0xB9000000,
-        STR_64         => 0xF9000000,
-        LDRB_REG       => 0x38408000,
-        LDRSB_REG      => 0x38C08000,
-        LDRH_REG       => 0x78408000,
-        LDRSH_REG      => 0x78C08000,
-        LDR_32_REG     => 0xB8408000,
-        LDR_64_REG     => 0xF8408000,
-        STRB_REG       => 0x38208000,
-        STRH_REG       => 0x78208000,
-        STR_32_REG     => 0xB8208000,
-        STR_64_REG     => 0xF8208000,
-        FLDR_32        => 0xBD400000,
-        FLDR_64        => 0xFD400000,
-        FSTR_32        => 0xBD000000,
-        FSTR_64        => 0xFD000000,
-        FLDR_32_REG    => 0xBC408000,
-        FLDR_64_REG    => 0xFC408000,
-        FSTR_32_REG    => 0xBC208000,
-        FSTR_64_REG    => 0xFC208000,
-        CMP_IMM        => 0x7100001F,
-        CMP_REG        => 0x6B00001F,
-        CSINC          => 0x9A9F07E0,
-        FABS_32        => 0x1E20C000,
-        FNEG_32        => 0x1E214000,
-        FSQRT_32       => 0x1E21C000,
-        FMOV_32        => 0x1E204000,
-        FMOV_GP2F_32   => 0x1E270000,
-        FMOV_GP2F_64   => 0x9E670000,
-        FCMP_32        => 0x1E202000,
-        FCMP_64        => 0x1E602000,
-        FP_SZ          => 0x00400000,
-        FADD           => 0x1E202800,
-        FSUB           => 0x1E203800,
-        FMUL           => 0x1E200800,
-        FDIV           => 0x1E201800,
-        FMIN           => 0x1E205800,
-        FMAX           => 0x1E204800,
-        SCVTF_D_X      => 0x9E244000,    # unused (type-aware now)
-        FCVTZS_X_D     => 0x9EE80000,    # unused (type-aware now)
-        SF             => 0x80000000,
-        BR             => 0xD61F0000,
-        ADR            => 0x10000000,
-        BL             => 0x94000000,
-        BLR            => 0xD63F0000,
-        FCB_RESUME_OFF => 112,
-        RET            => 0xD65F03C0,
-    };
 
     method emit_function($ir_func) {
         my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
@@ -638,8 +542,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                     else {
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
-                        my $bits  = $dst->type ? $dst->type->bits : 64;
-                        my $op    = ( $bits >= 64 ) ? MOV_X : MOV_W;
+                        my $bits  = $dst->type      ? $dst->type->bits : 64;
+                        my $op    = ( $bits >= 64 ) ? MOV_X            : MOV_W;
                         $bytes .= pack( 'V', $op | ( $sid << 16 ) | $did );
                     }
                 }
@@ -804,7 +708,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $bits  = $dst->type ? $dst->type->bits : 64;
                     my $is_w  = $bits < 64;
                     my $mask  = $is_w ? 0x1F : 0x3F;
-                    my $msb   = $is_w ? 31 : 63;
+                    my $msb   = $is_w ? 31   : 63;
                     if ( $src->kind eq 'imm' ) {
                         my $imm = $src->value;
                         if ( $opcode eq 'shl' ) {
@@ -823,8 +727,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                         }
                     }
                     else {
-                        my $src_r = $resolve->($src);
-                        my $sid   = $reg_id->($src_r);
+                        my $src_r  = $resolve->($src);
+                        my $sid    = $reg_id->($src_r);
                         my %base_w = ( shl => 0x1AC02000, lshr => 0x1AC02400, ashr => 0x1AC02800 );
                         my %base_x = ( shl => 0x9AC02000, lshr => 0x9AC02400, ashr => 0x9AC02800 );
                         my %base   = $is_w ? %base_w : %base_x;

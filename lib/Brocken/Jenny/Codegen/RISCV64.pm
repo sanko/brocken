@@ -9,29 +9,7 @@ use Brocken::Jenny::MIR;
 
 class Brocken::Jenny::Codegen::RISCV64 {
     field $platform : param;
-    use constant {
-        JAL            => 0x0000006F,
-        JALR           => 0x00008067,
-        SRAI_B         => 0x40000000,
-        FSGNJ          => 0x20000000,
-        FMINMAX        => 0x28000000,
-        FSQRT          => 0x58000000,
-        FMV_W_X        => 0xF0000000,
-        FMV_D_X        => 0xF2000000,
-        FCVT_D_L       => 0xD2201000,
-        FCVT_L_D       => 0xC2201000,
-        FP_FMT         => 0x02000000,
-        OP_IMM         => 0x13,
-        OP             => 0x33,
-        LOAD           => 0x03,
-        STORE          => 0x23,
-        FLOAD          => 0x07,
-        FSTORE         => 0x27,
-        FP_OP          => 0x53,
-        BCC            => 0x63,
-        LUI            => 0x37,
-        FCB_RESUME_OFF => 120,
-    };
+    use Brocken::Jenny::Codegen::RISCV64::Encodings qw[:all];
 
     method emit_function($ir_func) {
         my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new( platform => $platform );
