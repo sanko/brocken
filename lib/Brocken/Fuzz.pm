@@ -138,13 +138,54 @@ package Brocken::Fuzz {
         }
 
         # Generate a random Brocken program with typed variables.
-        # May include sub declarations and inter-procedural calls (Phase F2).
+        # May include sub declarations, inter-procedural calls (Phase F2),
+        # arrays (Phase F3a), and class instances (Phase F3b).
         method generate_program( $max_ops = 15, $max_vars = 5 ) {
             $expect_crash = 0;
             my $vars      = {};
             my $var_types = {};
             my @stmts;
             my $n_vars = $self->_rand_int($max_vars) + 1;
+
+            # Array tracking: name => [elem0, elem1, ...]
+            my $arrays = {};
+
+            # Class definitions: ClassName => { fields => [{name, bits, signed}] }
+            my $classes = {};
+
+            # Instance tracking: var_name => { class => Name, fields => { field => val } }
+            my $instances = {};
+
+            # Optionally generate class declarations (0-1)
+            my @class_names;
+            my @class_pool = qw[Point Counter Box Vec Item];
+            my $n_classes  = $self->_rand_int(2);              # 0-1 classes
+            for my $ci ( 1 .. $n_classes ) {
+                my $cdecl = $self->_gen_class_decl( \@class_pool );
+                next unless $cdecl;
+                push @stmts, $cdecl->{code};
+                $classes->{ $cdecl->{name} } = $cdecl->{meta};
+                push @class_names, $cdecl->{name};
+            }
+
+            # Optionally generate array declarations (0-1)
+            my @arr_names;
+            my $n_arrs = $self->_rand_int(2);                  # 0-1 arrays
+            for my $ai ( 1 .. $n_arrs ) {
+                my $aname = 'arr' . $ai;
+                my $size  = $self->_rand_int(3) + 2;           # 2-4 elements
+                my @elems;
+                for my $ei ( 0 .. $size - 1 ) {
+                    push @elems, $self->_rand_i64_val() & 0xFF;
+                }
+                $arrays->{$aname} = \@elems;
+                my $init_list = join ', ', @elems;
+                push @stmts, "my [i64; $size] \@$aname;";
+                for my $ei ( 0 .. $size - 1 ) {
+                    push @stmts, "\@$aname\[$ei\] = $elems[$ei];";
+                }
+                push @arr_names, $aname;
+            }
 
             # Declare variables with random types and initial values
             my @var_names;
@@ -170,10 +211,25 @@ package Brocken::Fuzz {
                 push @subs_meta, $sub;
             }
 
-            # Generate random operations (now with call support)
+            # Optionally construct class instances (0-2)
+            my @instance_names;
+            for my $ci ( 1 .. scalar(@class_names) ) {
+                last if $self->_rand_int(3) == 0;    # 50% chance per class
+                my $cname  = $class_names[ $ci - 1 ];
+                my $meta   = $classes->{$cname};
+                my $ivname = 'obj' . $ci;
+                my $cdecl  = $self->_gen_class_construct( $cname, $meta, $vars, $var_types, \@var_names, $ivname );
+                next unless $cdecl;
+                push @stmts, $cdecl->{code};
+                $instances->{$ivname} = $cdecl->{instance};
+                push @instance_names, $ivname;
+            }
+
+            # Generate random operations (with call, array, and class support)
             my $n_ops = $self->_rand_int($max_ops) + 1;
             for my $oi ( 1 .. $n_ops ) {
-                my $stmt = $self->_random_stmt( $vars, $var_types, \@var_names, $oi == $n_ops, \@subs_meta );
+                my $stmt = $self->_random_stmt( $vars, $var_types, \@var_names, $oi == $n_ops,
+                    \@subs_meta, $arrays, \@arr_names, $instances, \@instance_names );
                 push @stmts, $stmt->{code} if $stmt->{code};
             }
             my $result_var = $var_names[ $self->_rand_int($#var_names) ];
@@ -208,16 +264,27 @@ package Brocken::Fuzz {
             return { source => $source, expected => $expected, vars => $vars, subs => \@subs_meta };
         }
 
-        # Generate a single random statement (optionally including function calls
-        # when $subs_meta is non-empty).
-        method _random_stmt( $vars, $var_types, $var_names, $is_last, $subs_meta = [] ) {
+        # Generate a single random statement (optionally including function calls,
+        # array ops, and class field ops).
+        method _random_stmt(
+            $vars, $var_types, $var_names, $is_last,
+            $subs_meta      = [],
+            $arrays         = {},
+            $arr_names      = [],
+            $instances      = {},
+            $instance_names = []
+        ) {
             my $n_vars     = scalar( $var_names->@* );
             my @i1_vars    = grep { $var_types->{$_}{bits} == 1 } $var_names->@*;
             my @f64_vars   = grep { $var_types->{$_}{signed} eq 'f' } $var_names->@*;
             my $n_f64_vars = scalar(@f64_vars);
             my $n_int_vars = $n_vars - $n_f64_vars;
             my $n_subs     = scalar( $subs_meta->@* );
-            my $type       = $self->_rand_int( $n_subs >= 1 ? 16 : 15 );
+            my $n_arrs     = scalar( $arr_names->@* );
+            my $n_insts    = scalar( $instance_names->@* );
+            my $n_total    = 15 + ( $n_subs >= 1 ? 1 : 0 ) + ( $n_arrs >= 1 ? 2 : 0 ) + ( $n_insts >= 1 ? 2 : 0 );
+            my $type       = $self->_rand_int($n_total);
+
             if ( $type == 0 ) {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
@@ -266,6 +333,18 @@ package Brocken::Fuzz {
             elsif ( $type == 15 && $n_vars >= 2 && !$is_last ) {
                 return $self->_gen_block( $vars, $var_types, $var_names, $subs_meta );
             }
+            elsif ( $type == 16 && $n_arrs >= 1 && scalar( $arr_names->@* ) >= 1 ) {
+                return $self->_gen_array_write( $vars, $var_types, $arrays, $arr_names );
+            }
+            elsif ( $type == 17 && $n_arrs >= 1 && $n_vars >= 1 ) {
+                return $self->_gen_array_read( $vars, $var_types, $var_names, $arrays, $arr_names );
+            }
+            elsif ( $type == 18 && $n_insts >= 1 && $n_vars >= 1 ) {
+                return $self->_gen_class_read( $vars, $var_types, $var_names, $instances, $instance_names );
+            }
+            elsif ( $type == 19 && $n_insts >= 1 && $n_vars >= 1 ) {
+                return $self->_gen_class_write( $vars, $var_types, $var_names, $instances, $instance_names );
+            }
             else {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
             }
@@ -286,6 +365,42 @@ package Brocken::Fuzz {
             }
             my $body_code = join "\n", map { "    " . $_->{code} } @items;
             return { code => "{\n$body_code\n}" };
+        }
+
+        # Generate a block that creates and destroys scoped Any-typed variables,
+        # exercising bump_alloc (allocation) and decref (R3 suspect push on
+        # RC > 0) during scope exit.
+        method _gen_gc_stress( $vars, $var_types, $var_names ) {
+            my $n_new = $self->_rand_int(3) + 2;    # 2-4 new vars
+            my @block_lines;
+            my @scope_names;
+            for my $si ( 1 .. $n_new ) {
+                my $sname = "_s${si}";
+                push @scope_names, $sname;
+                my $val = $self->_rand_i64_val();
+                $val = 1 if $val == 0;
+                push @block_lines, "my \$$sname = $val;";
+            }
+            my @inner_items;
+            my $n_inner = $self->_rand_int(2) + 1;    # 1-2 inner assignments
+            for my $ii ( 1 .. $n_inner ) {
+                my $item = $self->_gen_body_assign( $vars, $var_types, $var_names );
+                if ( $item->{code} ) {
+                    push @inner_items, $item;
+                    push @block_lines, $item->{code};
+                }
+            }
+            my $body_code = join "\n", map {"    $_"} @block_lines;
+            my $code      = "{\n$body_code\n}";
+            my $apply     = sub {
+                for my $item (@inner_items) {
+                    $item->{apply}->() if $item->{apply};
+                }
+                for my $sn (@scope_names) {
+                    delete $vars->{$sn};
+                }
+            };
+            return { code => $code, apply => $apply };
         }
 
         method _gen_binop_assign( $vars, $var_types, $var_names ) {
@@ -705,6 +820,142 @@ package Brocken::Fuzz {
             my $t = $var_types->{$dst};
             $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
             return { code => "\$$dst = \$$lhs $logic \$$rhs;" };
+        }
+
+        # -- Phase F3a: Array support --
+        # Generate an array write: @arr[idx] = value;
+        # Value can be a literal or an existing variable.
+        method _gen_array_write( $vars, $var_types, $arrays, $arr_names ) {
+            return { code => undef } unless $arr_names->@*;
+            my $aname     = $arr_names->[ $self->_rand_int($#$arr_names) ];
+            my $elems     = $arrays->{$aname};
+            my $size      = scalar @$elems;
+            my $idx       = $self->_rand_int( $size - 1 );
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } keys $vars->%*;
+            my $val_code;
+            my $val;
+
+            if ( @int_names && $self->_rand_int(3) ) {
+                my $vn = $int_names[ $self->_rand_int($#int_names) ];
+                $val_code = "\$$vn";
+                $val      = $vars->{$vn};
+            }
+            else {
+                $val      = $self->_rand_i64_val() & 0xFF;
+                $val_code = "$val";
+            }
+            $elems->[$idx] = $val if defined $val;
+            return { code => "\@$aname\[$idx\] = $val_code;" };
+        }
+
+        # Generate an array read: $var = @arr[idx];
+        method _gen_array_read( $vars, $var_types, $var_names, $arrays, $arr_names ) {
+            return { code => undef } unless $arr_names->@* && $var_names->@*;
+            my $aname = $arr_names->[ $self->_rand_int($#$arr_names) ];
+            my $elems = $arrays->{$aname};
+            my $size  = scalar @$elems;
+            my $idx   = $self->_rand_int( $size - 1 );
+            my $dst   = $var_names->[ $self->_rand_int($#$var_names) ];
+            my $val   = $elems->[$idx] // 0;
+            my $t     = $var_types->{$dst};
+            $vars->{$dst} = $self->_clamp_to_type( $val, $t->{bits}, $t->{signed} );
+            return { code => "\$$dst = \@$aname\[$idx\];" };
+        }
+
+        # -- Phase F3b: Class instance support --
+        # Generate a class declaration with 1-2 i64 :param :reader fields.
+        # Returns { code => '...', name => 'ClassName', meta => { fields => [...] } }
+        method _gen_class_decl($class_pool) {
+            return undef unless $class_pool->@*;
+            my $name     = shift @$class_pool;
+            my $n_fields = $self->_rand_int(2) + 1;    # 1-2 fields
+            my @fields;
+            my @field_decls;
+            for my $fi ( 1 .. $n_fields ) {
+                my $fname = 'f' . $fi;
+                push @fields, { name => $fname, bits => 64, signed => 1 };
+                push @field_decls, "    field i64 \$$fname :param :reader :writer;";
+            }
+            my $code = "class $name {\n" . join( "\n", @field_decls ) . "\n}";
+            return { code => $code, name => $name, meta => { fields => \@fields } };
+        }
+
+        # Generate a constructor call: my ptr $obj = ClassName->new(field => val, ...);
+        # Returns { code => '...', instance => { class => Name, fields => { field => val } } }
+        method _gen_class_construct( $cname, $meta, $vars, $var_types, $var_names, $ivname ) {
+            my @args;
+            for my $f ( $meta->{fields}->@* ) {
+                my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+                my $val;
+                my $val_code;
+                if ( @int_names && $self->_rand_int(3) ) {
+                    my $vn = $int_names[ $self->_rand_int($#int_names) ];
+                    $val      = $vars->{$vn};
+                    $val_code = "$vn";
+                }
+                else {
+                    $val      = $self->_rand_i64_val() & 0xFF;
+                    $val_code = "$val";
+                }
+                push @args, $f->{name} => $val;
+            }
+            my $fields = {};
+            for my $i ( 0 .. $#{ $meta->{fields} } ) {
+                $fields->{ $meta->{fields}[$i]{name} } = $args[ $i * 2 + 1 ];
+            }
+            my $arg_str = join ', ', map {"$_ => $args[ $_ eq 'f1' ? 1 : $_ eq 'f2' ? 3 : 1 ]"} grep { !ref $_ } @args;
+
+            # Rebuild arg string properly
+            my @pairs;
+            for my $i ( 0 .. $#{ $meta->{fields} } ) {
+                my $f = $meta->{fields}[$i];
+                push @pairs, "$f->{name} => $args[ $i * 2 + 1 ]";
+            }
+            my $code = "my ptr \$$ivname = $cname->new(" . join( ', ', @pairs ) . ");";
+            return { code => $code, instance => { class => $cname, fields => $fields } };
+        }
+
+        # Generate a class field read: $var = $obj->field();
+        method _gen_class_read( $vars, $var_types, $var_names, $instances, $instance_names ) {
+            return { code => undef } unless $instance_names->@* && $var_names->@*;
+            my $ivname      = $instance_names->[ $self->_rand_int($#$instance_names) ];
+            my $inst        = $instances->{$ivname};
+            my $fields      = $inst->{fields};
+            my @field_names = keys $fields->%*;
+            return { code => undef } unless @field_names;
+            my $fname = $field_names[ $self->_rand_int($#field_names) ];
+            my $dst   = $var_names->[ $self->_rand_int($#$var_names) ];
+            my $val   = $fields->{$fname} // 0;
+            my $t     = $var_types->{$dst};
+            $vars->{$dst} = $self->_clamp_to_type( $val, $t->{bits}, $t->{signed} );
+            return { code => "\$$dst = \$$ivname->$fname();" };
+        }
+
+        # Generate a class field write: $obj->set_field(val);
+        method _gen_class_write( $vars, $var_types, $var_names, $instances, $instance_names ) {
+            return { code => undef } unless $instance_names->@*;
+            my $ivname      = $instance_names->[ $self->_rand_int($#$instance_names) ];
+            my $inst        = $instances->{$ivname};
+            my $fields      = $inst->{fields};
+            my @field_names = keys $fields->%*;
+            return { code => undef } unless @field_names;
+            my $fname     = $field_names[ $self->_rand_int($#field_names) ];
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } keys $vars->%*;
+            my $val;
+            my $val_code;
+
+            if ( @int_names && $self->_rand_int(3) ) {
+                my $vn = $int_names[ $self->_rand_int($#int_names) ];
+                $val      = $vars->{$vn};
+                $val_code = "\$$vn";
+            }
+            else {
+                $val      = $self->_rand_i64_val() & 0xFF;
+                $val_code = "$val";
+            }
+            $fields->{$fname} = $val if defined $val;
+            my $set_method = "set_$fname";
+            return { code => "\$$ivname->$set_method($val_code);" };
         }
 
         # Float binary ops (+, -, *, / only; no shift/bitwise for float)

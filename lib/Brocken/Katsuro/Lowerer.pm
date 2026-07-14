@@ -804,7 +804,7 @@ class Brocken::Katsuro::Lowerer {
         unless ( $current_block->terminator ) {
             $builder->build_br( $merge_block, $line, $col );
         }
-        if ( $next->name ne 'if_end' ) {
+        if ( $next_idx < $all_pairs->@* ) {
             $builder->position_at_end($next);
             $current_block = $next;
             $self->lower_elsif_chain( $all_pairs->[$next_idx], $merge_block, $all_pairs, $next_idx );
@@ -1347,6 +1347,9 @@ class Brocken::Katsuro::Lowerer {
 
         # Unbox: dynamic -> native
         if ( $val->type->kind eq 'dynamic' && $target_type->kind ne 'dynamic' ) {
+
+            # Reinterpret: dynamic -> ptr is a no-op; Any vars ARE pointers to fat scalars
+            return $val if $target_type->kind eq 'ptr';
             return $builder->build_unbox( $val, $target_type, undef, $line, $col );
         }
 

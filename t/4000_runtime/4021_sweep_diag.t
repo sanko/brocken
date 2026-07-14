@@ -56,7 +56,7 @@ if (!Brocken::ptr_cmp_eq(Brocken::bxor($c62, $p62), 0)) { return 3; }
 
 #### Phase 4: full mark_line integration smoke test ####
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 80);
+my ptr $block = Brocken::ptr_add($hb, 88);
 Brocken::Runtime::mark_line($block, 0);
 Brocken::Runtime::mark_line($block, 1);
 Brocken::Runtime::mark_line($block, 63);

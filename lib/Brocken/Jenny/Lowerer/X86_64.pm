@@ -3102,6 +3102,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 );
                     $size ||= 1;    # i1 rounds up from 0 to 1 byte
+                    $size *= $inst->count->value if $inst->count;
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'alloca',

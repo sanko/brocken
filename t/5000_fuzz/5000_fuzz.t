@@ -3,7 +3,7 @@ use Test2::V0 '!subtest';
 use lib 'lib', '../../lib', '../lib';
 use Brocken::Fuzz;
 no warnings qw[experimental::class];
-my $fuzz       = Brocken::Fuzz->new( seed => 20260702 );
+my $fuzz       = Brocken::Fuzz->new( seed => 20260713 );
 my $iterations = $ENV{FUZZ_ITERATIONS} // 20;
 my %summary;
 
