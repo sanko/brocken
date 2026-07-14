@@ -49,18 +49,21 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         $layout->add_section( '.eh_frame',     4096, 0 );
         $layout->add_section( '.eh_frame_hdr', 4096, 0 );
         #
-        if ( $dbg >= 1 ) { $layout->add_section( '.debug_line', 16384, 0 ); }
+        # Dynamic debug section sizing: compute actual size from debug_data, with a
+        # 256-byte margin to accommodate minor payload growth (alignment padding, etc.).
+        my $dd = $self->debug_data;
+        if ( $dbg >= 1 ) { $layout->add_section( '.debug_line', ( length( $dd->{'.debug_line'} // '' ) + 256 ) || 16384, 0 ); }
         if ( $dbg >= 2 ) {
-            $layout->add_section( '.debug_info',   16384, 0 );
-            $layout->add_section( '.debug_abbrev', 16384, 0 );
+            $layout->add_section( '.debug_info',   ( length( $dd->{'.debug_info'}   // '' ) + 256 ) || 16384, 0 );
+            $layout->add_section( '.debug_abbrev', ( length( $dd->{'.debug_abbrev'} // '' ) + 256 ) || 4096,  0 );
         }
         if ( $dbg >= 3 ) {
-            $layout->add_section( '.debug_frame',   16384, 0 );
-            $layout->add_section( '.debug_aranges', 16384, 0 );
+            $layout->add_section( '.debug_frame',   ( length( $dd->{'.debug_frame'}   // '' ) + 256 ) || 16384, 0 );
+            $layout->add_section( '.debug_aranges', ( length( $dd->{'.debug_aranges'} // '' ) + 256 ) || 4096,  0 );
         }
         if ( $dbg >= 4 ) {
-            $layout->add_section( '.debug_names', 16384, 0 );
-            $layout->add_section( '.debug_str',   16384, 0 );
+            $layout->add_section( '.debug_names', ( length( $dd->{'.debug_names'} // '' ) + 256 ) || 4096, 0 );
+            $layout->add_section( '.debug_str',   ( length( $dd->{'.debug_str'}   // '' ) + 256 ) || 4096, 0 );
         }
     }
 
