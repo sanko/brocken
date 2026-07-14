@@ -680,7 +680,7 @@ class Brocken::Jenny::Codegen::ARM64 {
 
                         # SXTH Xd/Wd, Wn - use Xd (sf=1, N=1) when dst is 64-bit
                         if ( $dst_bits >= 64 ) {
-                            $bytes .= pack( 'V', 0x93003C00 | ( $sid << 5 ) | $did );
+                            $bytes .= pack( 'V', 0x93403C00 | ( $sid << 5 ) | $did );
                         }
                         else {
                             $bytes .= pack( 'V', 0x13003C00 | ( $sid << 5 ) | $did );
@@ -689,7 +689,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     else {
                         # SXTB Xd/Wd, Wn - use Xd (sf=1, N=1) when dst is 64-bit
                         if ( $dst_bits >= 64 ) {
-                            $bytes .= pack( 'V', 0x93001C00 | ( $sid << 5 ) | $did );
+                            $bytes .= pack( 'V', 0x93401C00 | ( $sid << 5 ) | $did );
                         }
                         else {
                             $bytes .= pack( 'V', 0x13001C00 | ( $sid << 5 ) | $did );
