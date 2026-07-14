@@ -39,12 +39,15 @@ class Brocken::Jenny::Codegen::ARM64 {
         ADD_IMM_64     => 0x91000000,    # ADD_IMM | SF
         SUB_IMM        => 0x51000000,
         UBFM           => 0xD3400000,
+        UBFM_W         => 0x53400000,
         SBFM           => 0x93400000,
+        SBFM_W         => 0x13400000,
         MOVZ_32        => 0x52800000,
         MOVZ_64        => 0xD2800000,
         MOVK_32        => 0x72800000,
         MOVK_64        => 0xF2800000,
         MOV_X          => 0xAA0003E0,
+        MOV_W          => 0x2A0003E0,
         SUB_SP         => 0xD10003FF,
         ADD_SP         => 0x910003FF,
         MOV_SP         => 0x910003E0,
@@ -635,7 +638,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                     else {
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
-                        $bytes .= pack( 'V', MOV_X | ( $sid << 16 ) | $did );
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my $op    = ( $bits >= 64 ) ? MOV_X : MOV_W;
+                        $bytes .= pack( 'V', $op | ( $sid << 16 ) | $did );
                     }
                 }
                 elsif ( $opcode eq 'movzx' ) {
@@ -796,24 +801,33 @@ class Brocken::Jenny::Codegen::ARM64 {
                 elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
+                    my $bits  = $dst->type ? $dst->type->bits : 64;
+                    my $is_w  = $bits < 64;
+                    my $mask  = $is_w ? 0x1F : 0x3F;
+                    my $msb   = $is_w ? 31 : 63;
                     if ( $src->kind eq 'imm' ) {
                         my $imm = $src->value;
                         if ( $opcode eq 'shl' ) {
-                            my $immr = ( 64 - $imm ) & 0x3F;
-                            my $imms = ( 63 - $imm ) & 0x3F;
-                            $bytes .= pack( 'V', UBFM | ( $immr << 16 ) | ( $imms << 10 ) | ( $did << 5 ) | $did );
+                            my $immr = ( ( $is_w ? 32 : 64 ) - $imm ) & $mask;
+                            my $imms = ( $msb - $imm ) & $mask;
+                            my $base = $is_w ? UBFM_W : UBFM;
+                            $bytes .= pack( 'V', $base | ( $immr << 16 ) | ( $imms << 10 ) | ( $did << 5 ) | $did );
                         }
                         elsif ( $opcode eq 'lshr' ) {
-                            $bytes .= pack( 'V', UBFM | ( $imm << 16 ) | ( 63 << 10 ) | ( $did << 5 ) | $did );
+                            my $base = $is_w ? UBFM_W : UBFM;
+                            $bytes .= pack( 'V', $base | ( $imm << 16 ) | ( $msb << 10 ) | ( $did << 5 ) | $did );
                         }
                         else {
-                            $bytes .= pack( 'V', SBFM | ( $imm << 16 ) | ( 63 << 10 ) | ( $did << 5 ) | $did );
+                            my $base = $is_w ? SBFM_W : SBFM;
+                            $bytes .= pack( 'V', $base | ( $imm << 16 ) | ( $msb << 10 ) | ( $did << 5 ) | $did );
                         }
                     }
                     else {
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
-                        my %base  = ( shl => 0x9AC02000, lshr => 0x9AC02400, ashr => 0x9AC02800 );
+                        my %base_w = ( shl => 0x1AC02000, lshr => 0x1AC02400, ashr => 0x1AC02800 );
+                        my %base_x = ( shl => 0x9AC02000, lshr => 0x9AC02400, ashr => 0x9AC02800 );
+                        my %base   = $is_w ? %base_w : %base_x;
                         if ( $sid == $did ) {
                             my %used;
                             @used{ values %$assignment } = ();
