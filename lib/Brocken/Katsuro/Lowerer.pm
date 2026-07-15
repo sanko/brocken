@@ -554,8 +554,13 @@ class Brocken::Katsuro::Lowerer {
             my $hb_fuel       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
             my $err_off72     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 72 );
             my $err_code_addr = $builder->build_add( $hb_fuel, $err_off72 );
-            my $err_code_val  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 2 );
-            $builder->build_store( $err_code_val, $err_code_addr );
+            my $cur_err       = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $err_code_addr );
+            my $zero_i64      = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+            my $still_ok      = $builder->build_icmp( 'eq', $cur_err, $zero_i64 );
+            my $no_fuel_val   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 2 );
+            my $final_err     = $builder->build_select( $still_ok, $no_fuel_val, $cur_err );
+            $builder->build_store( $final_err, $err_code_addr );
+
             if ( $current_func->return_type->kind eq 'void' ) {
                 $builder->build_ret();
             }
@@ -764,22 +769,20 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method lower_if($ast) {
-        my $parent_block = $current_block;
-        my $func         = $current_func;
+        my $func = $current_func;
         my ( $line, $col ) = ( $ast->line, $ast->col );
         my $then_block  = $func->append_block( $self->unique_block_name('then') );
         my $merge_block = $func->append_block( $self->unique_block_name('if_end') );
         my $else_block;
         my $has_else = defined $ast->else || $ast->elsif->@* > 0;
         my $cond     = $self->as_condition( $self->lower_expression( $ast->cond ), $line, $col );
-
         if ($has_else) {
             $else_block = $func->append_block( $self->unique_block_name('else') );
-            $builder->position_at_end($parent_block);
+            $builder->position_at_end($current_block);
             $builder->build_cond_br( $cond, $then_block, $else_block, $line, $col );
         }
         else {
-            $builder->position_at_end($parent_block);
+            $builder->position_at_end($current_block);
             $builder->build_cond_br( $cond, $then_block, $merge_block, $line, $col );
         }
         $builder->position_at_end($then_block);
@@ -1111,10 +1114,12 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_sub( $lhs, $rhs, undef, $line, $col ) if $op eq '-';
         return $builder->build_mul( $lhs, $rhs, undef, $line, $col ) if $op eq '*';
         if ( $op eq '/' ) {
+            $rhs = $self->_emit_div_zero_check( $rhs, $line, $col );
             return $lhs->type->is_signed ? $builder->build_div( $lhs, $rhs, undef, $line, $col ) :
                 $builder->build_udiv( $lhs, $rhs, undef, $line, $col );
         }
         if ( $op eq '%' ) {
+            $rhs = $self->_emit_div_zero_check( $rhs, $line, $col );
             return $lhs->type->is_signed ? $builder->build_rem( $lhs, $rhs, undef, $line, $col ) :
                 $builder->build_urem( $lhs, $rhs, undef, $line, $col );
         }
@@ -1261,6 +1266,28 @@ class Brocken::Katsuro::Lowerer {
         $builder->build_br( $fuel_exit_block, $line, $col );
         $builder->position_at_end($cont_block);
         $current_block = $cont_block;
+    }
+
+    method _emit_div_zero_check( $rhs, $line, $col ) {
+        return $rhs unless $symbols->{'__heap_base'};
+        return $rhs unless defined $fuel_exit_block;
+        my $rhs_type  = $rhs->type;
+        my $zero      = Brocken::Lindsay::IR::Constant->new( type => $rhs_type, value => 0 );
+        my $is_zero   = $builder->build_icmp( 'eq', $rhs, $zero, undef, $line, $col );
+        my $err_block = $current_func->append_block( $self->unique_block_name('div_by_zero') );
+        my $ok_block  = $current_func->append_block( $self->unique_block_name('div_ok') );
+        $builder->build_cond_br( $is_zero, $err_block, $ok_block, $line, $col );
+        $builder->position_at_end($err_block);
+        $current_block = $err_block;
+        my $hb       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
+        my $err_off  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_CODE );
+        my $err_addr = $builder->build_add( $hb, $err_off, undef, $line, $col );
+        my $err_val  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_DIV_ZERO );
+        $builder->build_store( $err_val, $err_addr, $line, $col );
+        $builder->build_br( $fuel_exit_block, $line, $col );
+        $builder->position_at_end($ok_block);
+        $current_block = $ok_block;
+        return $rhs;
     }
 
     method lower_call_expr($ast) {

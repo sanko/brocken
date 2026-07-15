@@ -3,6 +3,7 @@ package Brocken::Fuzz {
     use feature qw[class];
     no warnings qw[experimental::class];
     use Time::HiRes qw[time];
+    use File::Copy;
 
     # Utility subroutines callable as Brocken::Fuzz::encode_case_id(...)
     # without instantiating a Fuzz object.
@@ -29,6 +30,10 @@ package Brocken::Fuzz {
     # that would crash the real program.  Checked in generate_program
     # to set expected=255 for programs that will crash.
     my $expect_crash = 0;
+
+    # Flag set when simulation detects division by zero.  The runtime now
+    # handles this uniformly: err_code=4 and the function returns 0.
+    my $div_zero_hit = 0;
 
     class Brocken::Fuzz {
         field $seed         : param = undef;
@@ -153,6 +158,7 @@ package Brocken::Fuzz {
         # arrays (Phase F3a), and class instances (Phase F3b).
         method generate_program( $max_ops = 15, $max_vars = 5 ) {
             $expect_crash = 0;
+            $div_zero_hit = 0;
             my $vars      = {};
             my $var_types = {};
             my @stmts;
@@ -273,7 +279,7 @@ package Brocken::Fuzz {
             my $header   = $uses_big ? q{use feature 'brocken_native_types';} . "\n" : '';
             my $sub_code = join "\n\n", map { $_->{code} } @subs_meta;
             my $source   = $header . ( $sub_code ? "$sub_code\n\n" : '' ) . join "\n", @stmts;
-            my $expected = $expect_crash ? 255 : $vars->{$result_var} & 0xFF;
+            my $expected = $div_zero_hit ? 0 : $expect_crash ? 255 : $vars->{$result_var} & 0xFF;
             my $prog     = { source => $source, expected => $expected, vars => $vars, subs => \@subs_meta };
             $prog->{expected_stdout} = $expected_stdout if length $expected_stdout;
             return $prog;
@@ -449,7 +455,7 @@ package Brocken::Fuzz {
                 $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
             }
             else {
-                $expect_crash = 1;
+                $div_zero_hit = 1;
                 my $t = $var_types->{$dst};
                 $vars->{$dst} = $self->_clamp_to_type( 0, $t->{bits}, $t->{signed} );
             }
@@ -596,7 +602,10 @@ package Brocken::Fuzz {
             my @body_items;
             for my $bi ( 1 .. $n_body ) {
                 my $item = $self->_gen_loop_body_item( $vars, $var_types, $var_names );
-                push @body_items, $item if $item->{code};
+                if ( $item->{code} ) {
+                    push @body_items, $item;
+                    $item->{apply}->() if $item->{apply};
+                }
             }
             return { code => undef } if @body_items == 0;
 
@@ -708,7 +717,7 @@ package Brocken::Fuzz {
                         $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
                     }
                     else {
-                        $expect_crash = 1;
+                        $div_zero_hit = 1;
                         my $t = $var_types->{$dst};
                         $vars->{$dst} = $self->_clamp_to_type( 0, $t->{bits}, $t->{signed} );
                     }
@@ -1135,20 +1144,9 @@ package Brocken::Fuzz {
         method _eval_i64( $op, $l, $r ) {
             if ( $r == 0 && ( $op eq '/' || $op eq '%' ) ) {
 
-                # Platform-specific division-by-zero behavior:
-                # x86_64:  crash (SIGFPE) - return undef to signal expect_crash
-                # ARM64:   SDIV by 0 = 0, UREM by 0 = dividend
-                # RISCV64: DIV by 0 = -1 (all ones), REM by 0 = dividend
-                if ( $self->host->is_x64 ) {
-                    return undef;
-                }
-                elsif ( $self->host->is_arm64 ) {
-                    return $op eq '/' ? 0 : $l;
-                }
-                elsif ( $self->host->is_riscv64 ) {
-                    return $op eq '/' ? -1 : $l;
-                }
-                return undef;    # fallback: assume crash
+                # Division by zero: runtime sets err_code=4 and returns 0.
+                $div_zero_hit = 1;
+                return 0;
             }
             use integer;
             if ( $op eq '+' )  { return $l + $r }
@@ -1169,16 +1167,8 @@ package Brocken::Fuzz {
         method _eval_i128_binop( $op, $lv, $rv ) {
             require Math::BigInt;
             if ( ( $op eq '/' || $op eq '%' ) && ( ref($rv) ? $rv->is_zero : $rv == 0 ) ) {
-                if ( $self->host->is_x64 ) {
-                    return undef;
-                }
-                elsif ( $self->host->is_arm64 ) {
-                    return $op eq '/' ? Math::BigInt->new(0) : $lv;
-                }
-                elsif ( $self->host->is_riscv64 ) {
-                    return $op eq '/' ? Math::BigInt->new(-1) : $lv;
-                }
-                return undef;
+                $div_zero_hit = 1;
+                return Math::BigInt->new(0);
             }
             my $l = ref($lv) && $lv->isa('Math::BigInt') ? $lv : Math::BigInt->new($lv);
             my $r = ref($rv) && $rv->isa('Math::BigInt') ? $rv : Math::BigInt->new($rv);
@@ -1674,6 +1664,15 @@ package Brocken::Fuzz {
                 timeout        => 10,
             );
             if ( $exec_result->{error} ) {
+                if ( $exec_result->{error} =~ /Inappropriate/ && $file && -e $file ) {
+                    my $diag_dir = $self->tmpdir;
+                    my $src_path = "$diag_dir/fuzz_bad_source.brocken";
+                    open my $sfh, '>', $src_path or warn "Cannot write $src_path: $!";
+                    if ($sfh) { print $sfh $program->{source}; close $sfh; }
+                    my $exe_path = "$diag_dir/fuzz_bad_output.exe";
+                    copy( $file, $exe_path ) if -e $file;
+                    warn "CAPTURED bad exe: source=$src_path exe=$exe_path\n";
+                }
                 unlink $file if $file;
                 my $reason = $exec_result->{error} =~ /fuzz_timeout/ ? "Exec: timeout" : "Exec: $exec_result->{error}";
                 return { %$result, status => 'exec_fail', reason => $reason };
