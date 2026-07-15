@@ -14,6 +14,17 @@ package Brocken::Fuzz {
         return unpack 'V V C C', pack 'H*', $id;
     }
 
+    # Quote a string for diagnostic display (non-printable chars as \xNN).
+    sub _dquot ($s) {
+        $s =~ s/\\/\\\\/g;
+        $s =~ s/"/\\"/g;
+        $s =~ s/\n/\\n/g;
+        $s =~ s/\r/\\r/g;
+        $s =~ s/\t/\\t/g;
+        $s =~ s/([^\x20-\x7E])/ sprintf "\\x%02x", ord($1) /ge;
+        return qq{"$s"};
+    }
+
     # Flag set when simulation encounters a fatal error (div-by-zero)
     # that would crash the real program.  Checked in generate_program
     # to set expected=255 for programs that will crash.
@@ -225,12 +236,14 @@ package Brocken::Fuzz {
                 push @instance_names, $ivname;
             }
 
-            # Generate random operations (with call, array, and class support)
-            my $n_ops = $self->_rand_int($max_ops) + 1;
+            # Generate random operations (with call, array, class, and say support)
+            my $n_ops           = $self->_rand_int($max_ops) + 1;
+            my $expected_stdout = '';
             for my $oi ( 1 .. $n_ops ) {
                 my $stmt = $self->_random_stmt( $vars, $var_types, \@var_names, $oi == $n_ops,
                     \@subs_meta, $arrays, \@arr_names, $instances, \@instance_names );
                 push @stmts, $stmt->{code} if $stmt->{code};
+                $expected_stdout .= $stmt->{expected_output} if $stmt->{expected_output};
             }
             my $result_var = $var_names[ $self->_rand_int($#var_names) ];
             if ( $var_types->{$result_var}{signed} eq 'f' ) {
@@ -261,7 +274,9 @@ package Brocken::Fuzz {
             my $sub_code = join "\n\n", map { $_->{code} } @subs_meta;
             my $source   = $header . ( $sub_code ? "$sub_code\n\n" : '' ) . join "\n", @stmts;
             my $expected = $expect_crash ? 255 : $vars->{$result_var} & 0xFF;
-            return { source => $source, expected => $expected, vars => $vars, subs => \@subs_meta };
+            my $prog     = { source => $source, expected => $expected, vars => $vars, subs => \@subs_meta };
+            $prog->{expected_stdout} = $expected_stdout if length $expected_stdout;
+            return $prog;
         }
 
         # Generate a single random statement (optionally including function calls,
@@ -282,7 +297,7 @@ package Brocken::Fuzz {
             my $n_subs     = scalar( $subs_meta->@* );
             my $n_arrs     = scalar( $arr_names->@* );
             my $n_insts    = scalar( $instance_names->@* );
-            my $n_total    = 15 + ( $n_subs >= 1 ? 1 : 0 ) + ( $n_arrs >= 1 ? 2 : 0 ) + ( $n_insts >= 1 ? 2 : 0 );
+            my $n_total    = 16 + ( $n_subs >= 1 ? 1 : 0 ) + ( $n_arrs >= 1 ? 2 : 0 ) + ( $n_insts >= 1 ? 2 : 0 );
             my $type       = $self->_rand_int($n_total);
 
             if ( $type == 0 ) {
@@ -344,6 +359,9 @@ package Brocken::Fuzz {
             }
             elsif ( $type == 19 && $n_insts >= 1 && $n_vars >= 1 ) {
                 return $self->_gen_class_write( $vars, $var_types, $var_names, $instances, $instance_names );
+            }
+            elsif ( $type == 20 ) {
+                return $self->_gen_say_stmt( $vars, $var_types, $var_names );
             }
             else {
                 return $self->_gen_binop_assign( $vars, $var_types, $var_names );
@@ -959,6 +977,59 @@ package Brocken::Fuzz {
         }
 
         # Float binary ops (+, -, *, / only; no shift/bitwise for float)
+        # Generate a say() statement with string concat patterns.
+        # Exercises: string constant emission, constant fold, runtime concat
+        # (strlen+malloc+strcpy+strcat), int-to-string (_stringify), and puts.
+        # Returns { code => '...', expected_output => '...' }.
+        method _gen_say_stmt( $vars, $var_types, $var_names ) {
+            my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
+            my @str_pool  = qw[hello world foo bar baz test ok hi yo];
+            my $n_ints    = scalar @int_names;
+            my $pattern   = $self->_rand_int(4);
+
+            # Pattern 0: say("literal")  --  basic string constant
+            if ( $pattern == 0 ) {
+                my $s = $str_pool[ $self->_rand_int($#str_pool) ];
+                return { code => "say(\"$s\");", expected_output => "$s\n" };
+            }
+
+            # Pattern 1: say("a" . "b")  --  compile-time constant fold
+            if ( $pattern == 1 ) {
+                my $a = $str_pool[ $self->_rand_int($#str_pool) ];
+                my $b = $str_pool[ $self->_rand_int($#str_pool) ];
+                return { code => "say(\"$a\" . \"$b\");", expected_output => "$a$b\n" };
+            }
+
+            # Pattern 2: say("prefix" . $v)  --  runtime str . int concat
+            if ( $pattern == 2 && $n_ints >= 1 ) {
+                my $s   = $str_pool[ $self->_rand_int($#str_pool) ];
+                my $v   = $int_names[ $self->_rand_int($#int_names) ];
+                my $val = defined $vars->{$v} ? "$vars->{$v}" : '0';
+                return { code => "say(\"$s\" . \$$v);", expected_output => "$s$val\n" };
+            }
+
+            # Pattern 3: say($v . "suffix")  --  runtime int . str concat
+            if ( $pattern == 3 && $n_ints >= 1 ) {
+                my $s   = $str_pool[ $self->_rand_int($#str_pool) ];
+                my $v   = $int_names[ $self->_rand_int($#int_names) ];
+                my $val = defined $vars->{$v} ? "$vars->{$v}" : '0';
+                return { code => "say(\$$v . \"$s\");", expected_output => "$val$s\n" };
+            }
+
+            # Pattern 4: say($v1 . $v2)  --  int . int, both stringified
+            if ( $pattern == 4 && $n_ints >= 2 ) {
+                my $v1   = $int_names[ $self->_rand_int($#int_names) ];
+                my $v2   = $int_names[ $self->_rand_int($#int_names) ];
+                my $val1 = defined $vars->{$v1} ? "$vars->{$v1}" : '0';
+                my $val2 = defined $vars->{$v2} ? "$vars->{$v2}" : '0';
+                return { code => "say(\$$v1 . \$$v2);", expected_output => "$val1$val2\n" };
+            }
+
+            # Fallback: say("literal")
+            my $s = $str_pool[ $self->_rand_int($#str_pool) ];
+            return { code => "say(\"$s\");", expected_output => "$s\n" };
+        }
+
         method _rand_fbinop() {
             my @ops = qw[+ - * /];
             return $ops[ $self->_rand_int($#ops) ];
@@ -1533,6 +1604,7 @@ package Brocken::Fuzz {
         #   args            - arrayref of command-line arguments (optional)
         #   capture_stdout  - boolean, capture stdout into result (optional)
         #   capture_stderr  - boolean, capture stderr into result (optional)
+        #   expected_stdout - expected stdout string for say() verification (optional)
         method test_program($program) {
             my $result
                 = { source => $program->{source}, status => 'pass', expected => $program->{expected}, host => $self->host_str, seed => $self->seed };
@@ -1545,7 +1617,11 @@ package Brocken::Fuzz {
                 return { %$result, status => 'compile_fail', reason => "Compile: $err" };
             }
             my $funcs;
-            eval { $funcs = $self->codegen->emit_functions( $module->functions ); };
+            my $rodata;
+            eval {
+                $rodata = $module->rodata;
+                $funcs  = $self->codegen->emit_functions( $module->functions );
+            };
             $self->_release_module($module);
             undef $module;
             if ( my $err = $@ ) {
@@ -1554,6 +1630,7 @@ package Brocken::Fuzz {
             my $file;
             eval {
                 $file = $self->tmpdir . '/fuzz_output' . $self->ext;
+                $self->linker->set_rodata($rodata) if $rodata && keys %$rodata;
                 $self->linker->write_executable( $file, $funcs, $self->host );
             };
             $self->_release_funcs($funcs);
@@ -1562,10 +1639,11 @@ package Brocken::Fuzz {
                 unlink $file if $file;
                 return { %$result, status => 'link_fail', reason => "Link: $err" };
             }
+            my $want_stdout = exists $program->{expected_stdout};
             my $exec_result = $self->_exec_program(
                 $file,
                 args           => $program->{args}           // [],
-                capture_stdout => $program->{capture_stdout} // 0,
+                capture_stdout => ( $program->{capture_stdout} // 0 ) || $want_stdout,
                 capture_stderr => $program->{capture_stderr} // 0,
                 timeout        => 10,
             );
@@ -1590,6 +1668,19 @@ package Brocken::Fuzz {
                     reason => "Expected " . $program->{expected} . " (masked $masked_expected), got $exit_code",
                     got    => $exit_code,
                 };
+            }
+            if ($want_stdout) {
+                my $got = $exec_result->{stdout} // '';
+                my $exp = $program->{expected_stdout};
+                if ( $got ne $exp ) {
+                    return {
+                        %$result,
+                        status      => 'fail',
+                        reason      => "Stdout mismatch: expected " . _dquot($exp) . ", got " . _dquot($got),
+                        got_stdout  => $got,
+                        exp_stdout  => $exp,
+                    };
+                }
             }
             return $result;
         }
