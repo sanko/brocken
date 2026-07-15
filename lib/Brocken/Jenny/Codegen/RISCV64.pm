@@ -799,9 +799,26 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     die 'no temp register for store_imm' unless $tmp_r;
                     my $tid = $reg_id->($tmp_r);
 
-                    # li xtmp, imm  (addi xtmp, zero, imm12)
-                    my $im = $imm->value & 0xFFF;
-                    $bytes .= pack( 'V', ( $im << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                    # li xtmp, imm (full 64-bit immediate via SLLI+ADDI sequence)
+                    my $val = $imm->value;
+                    if ( $val >= -2048 && $val <= 2047 ) {
+                        my $im = $val & 0xFFF;
+                        $bytes .= pack( 'V', ( $im << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                    }
+                    else {
+                        my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
+                        my @chunks;
+                        while ( $tmp != 0 ) {
+                            push @chunks, $tmp & 0x7FF;
+                            $tmp >>= 11;
+                        }
+                        my $first = pop @chunks;
+                        $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                        for my $chunk ( reverse @chunks ) {
+                            $bytes .= pack( 'V', ( 11 << 20 ) | ( $tid << 15 ) | ( 1 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                            $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                        }
+                    }
                     my $store_bid = $bid;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
