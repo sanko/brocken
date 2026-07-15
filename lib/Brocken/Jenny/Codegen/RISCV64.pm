@@ -6,6 +6,7 @@ use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Lowerer::RISCV64;
 use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
+use Brocken::ICB;
 
 class Brocken::Jenny::Codegen::RISCV64 {
     field $platform : param;
@@ -293,7 +294,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'alloca',
-                operands => [ $icb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 64, type => $i64 ) ],
+                operands => [ $icb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => Brocken::ICB::SIZE, type => $i64 ) ],
                 comment  => 'main thread ICB'
             )
         );

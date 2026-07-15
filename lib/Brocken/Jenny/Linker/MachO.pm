@@ -13,15 +13,15 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
     field $got_offsets : reader : writer;
 
     method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
-        $layout->add_section( '.text', $text_size, 5 );                              # Read + Execute
+        $layout->add_section( '.text', $text_size, 5 );                                 # Read + Execute
         my $brk_sym_size = $self->brk_sym_size();
         $layout->add_section( '.brk_sym', $brk_sym_size, 5 ) if $brk_sym_size > 0;
         my $rodata_size = 0;
         $rodata_size += length($_) for values $self->rodata->%*;
-        $layout->add_section( '.__const',  $rodata_size, 4 ) if $rodata_size > 0;    # Read-Only data
-        $layout->add_section( '.data',     $data_size,   3 ) if $data_size > 0;      # Read + Write
-        $layout->add_section( '.got',      512,          3 );                        # Global Offset Table
-        $layout->add_section( '.linkedit', 4096,         1 );                        # Symbols, Strings, Dynamic linking info
+        $layout->add_section( '.__const',  $rodata_size || 1, 4 );                      # Read-Only data
+        $layout->add_section( '.data',     $data_size,        3 ) if $data_size > 0;    # Read + Write
+        $layout->add_section( '.got',      512,               3 );                      # Global Offset Table
+        $layout->add_section( '.linkedit', 4096,              1 );                      # Symbols, Strings, Dynamic linking info
 
         if ( $dbg >= 1 ) {
             my $dd = $self->debug_data;

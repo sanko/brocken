@@ -3,6 +3,7 @@ use feature qw[class];
 no warnings qw[portable];
 no warnings qw[experimental::class];
 use Brocken::Jenny::MIR;
+use Brocken::ICB;
 
 class Brocken::Jenny::Lowerer::ARM64 {
     field $platform : param;
@@ -4015,7 +4016,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     my $callee   = $inst->callee;
                     my $stack_sz = 64 * 1024;
                     my $fcb_sz   = 128;
-                    my $icb_sz   = 80;
+                    my $icb_sz   = Brocken::ICB::SIZE;
                     my $i64      = Brocken::Lindsay::IR::Type::i64();
                     my $ptr      = Brocken::Lindsay::IR::Type::ptr();
                     my $stack    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.stk', type => $ptr );

@@ -2,20 +2,20 @@
 # Automatically compiled alongside user code.
 #
 # Isolate Control Block (ICB) layout (112 bytes at heap_base):
-#   [heap_base + 0]:  heap_cursor    (ptr - legacy simple-bump pointer, unused after Immix full deployment)
-#   [heap_base + 8]:  current_fcb    (ptr - active Fiber Control Block, 0 = no fiber)
-#   [heap_base + 16]: fiber_head     (ptr - head of fiber linked list)
-#   [heap_base + 24]: immix_cursor   (ptr - current bump-allocation pointer within current line)
-#   [heap_base + 32]: immix_limit    (ptr - end of current Immix line/block)
-#   [heap_base + 40]: free_blocks    (ptr - free 32KB block list)
-#   [heap_base + 48]: free16_head    (ptr - segregated free list for 16-byte reclaimed objects)
-#   [heap_base + 56]: suspect_buffer_head (ptr — linked list via free16 nodes; current_block derived from immix_cursor)
-#   [heap_base + 64]: fuel           (i64 — remaining instruction budget, set by compiler)
-#   [heap_base + 72]: err_code       (i64 — termination reason code, 0=OK, 1=OOM, 2=NO_FUEL, 3=SECURITY)
-#   [heap_base + 80]: current_block  (ptr — pointer to active Immix block)
-#   [heap_base + 88]: memory_limit   (i64 — max heap bytes for this isolate, 0 = unlimited)
-#   [heap_base + 96]: memory_used    (i64 — cumulative bytes allocated, enforced by bump_alloc)
-#   [heap_base + 104]: capabilities  (i64 — bitmask of allowed operations, checked before syscall/libc)
+#   [heap_base + 0  ]: heap_cursor              (ptr - legacy simple-bump pointer, unused after Immix full deployment)
+#   [heap_base + 8  ]: current_fcb              (ptr - active Fiber Control Block, 0 = no fiber)
+#   [heap_base + 16 ]: fiber_head               (ptr - head of fiber linked list)
+#   [heap_base + 24 ]: immix_cursor             (ptr - current bump-allocation pointer within current line)
+#   [heap_base + 32 ]: immix_limit              (ptr - end of current Immix line/block)
+#   [heap_base + 40 ]: free_blocks              (ptr - free 32KB block list)
+#   [heap_base + 48 ]: free16_head              (ptr - segregated free list for 16-byte reclaimed objects)
+#   [heap_base + 56 ]: suspect_buffer_head      (ptr - GC suspect buffer linked list (via free16 nodes))
+#   [heap_base + 64 ]: fuel                     (i64 - remaining instruction budget, set by compiler)
+#   [heap_base + 72 ]: err_code                 (i64 - termination reason code)
+#   [heap_base + 80 ]: current_block            (ptr - pointer to active Immix block)
+#   [heap_base + 88 ]: memory_limit             (i64 - max heap bytes for this isolate, 0 = unlimited)
+#   [heap_base + 96 ]: memory_used              (i64 - cumulative bytes allocated, enforced by bump_alloc)
+#   [heap_base + 104]: capabilities             (i64 - bitmask of allowed operations, checked before syscall/libc)
 #
 # First Immix block starts at heap_base + 112.
 #
@@ -50,7 +50,7 @@ sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
     Brocken::store_i64(Brocken::ptr_add($block_base, 32760), 0);
     # Mark Line 0 as in-use (it is the active allocation line)
     Brocken::Runtime::mark_line($block_base, 0);
-    # legacy heap_cursor (offset 0)
+    # heap_cursor (offset 0)
     Brocken::store_i64($heap_base, $line0_data);
     # current_fcb (offset 8)
     Brocken::store_i64(Brocken::ptr_add($heap_base, 8), 0);
@@ -81,11 +81,8 @@ sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
     return;
 }
 
-# Return the current Immix block base from ICB offset 80.
-# ICB layout: [0]=heap_cursor, [8]=current_fcb, [16]=fiber_head, [24]=immix_cursor,
-# [32]=immix_limit, [40]=free_blocks, [48]=free16_head, [56]=suspect_buffer_head,
-# [64]=fuel, [72]=err_code, [80]=current_block, [88]=memory_limit, [96]=memory_used,
-# [104]=capabilities.
+# Return the current Immix block base from ICB offset 80 (current_block).
+# See etc/icb_layout.pl for the full ICB layout.
 sub Brocken::Runtime::get_current_block(ptr $hb) -> ptr {
     return Brocken::load_i64(Brocken::ptr_add($hb, 80));
 }
@@ -748,6 +745,72 @@ sub Brocken::Runtime::gc_drain(ptr $hb) {
     }
     Brocken::store_i64(Brocken::ptr_add($hb, 56), 0);
     return;
+}
+
+# Convert a signed i64 to a NUL-terminated decimal string.
+# Allocates 32 bytes from bump_alloc and returns a pointer to the string.
+sub Brocken::Runtime::i64_to_str(ptr $hb, i64 $val) -> ptr {
+    my ptr $buf = Brocken::Runtime::bump_alloc($hb, 32);
+    my ptr $cursor = $buf;
+    # Handle negative
+    if ($val < 0) {
+        Brocken::store_i8($cursor, 45);  # '-'
+        $cursor = Brocken::ptr_add($cursor, 1);
+        $val = 0 - $val;
+    }
+    # Extract digits in reverse order
+    my ptr $digits_start = $cursor;
+    while (1) {
+        my i64 $digit = $val % 10;
+        my i64 $ch = Brocken::i64_add($digit, 48);  # '0' + digit
+        Brocken::store_i8($cursor, $ch);
+        $cursor = Brocken::ptr_add($cursor, 1);
+        $val = $val / 10;
+        if ($val == 0) { last; }
+    }
+    # Reverse the digits (not the sign prefix)
+    my ptr $end = Brocken::ptr_add($cursor, -1);
+    while (Brocken::ptr_cmp_lt($digits_start, $end) != 0) {
+        my i8 $a = Brocken::load_i8($digits_start);
+        my i8 $b = Brocken::load_i8($end);
+        Brocken::store_i8($digits_start, $b);
+        Brocken::store_i8($end, $a);
+        $digits_start = Brocken::ptr_add($digits_start, 1);
+        $end = Brocken::ptr_add($end, -1);
+    }
+    # NUL terminate
+    Brocken::store_i8($cursor, 0);
+    return $buf;
+}
+
+# Convert an unsigned u64 to a NUL-terminated decimal string.
+# Allocates 32 bytes from bump_alloc and returns a pointer to the string.
+sub Brocken::Runtime::u64_to_str(ptr $hb, i64 $val) -> ptr {
+    my ptr $buf = Brocken::Runtime::bump_alloc($hb, 32);
+    my ptr $cursor = $buf;
+    # Extract digits in reverse order (unsigned: no negative case)
+    my ptr $digits_start = $cursor;
+    while (1) {
+        my i64 $digit = $val % 10;
+        my i64 $ch = Brocken::i64_add($digit, 48);  # '0' + digit
+        Brocken::store_i8($cursor, $ch);
+        $cursor = Brocken::ptr_add($cursor, 1);
+        $val = $val / 10;
+        if ($val == 0) { last; }
+    }
+    # Reverse the digits
+    my ptr $end = Brocken::ptr_add($cursor, -1);
+    while (Brocken::ptr_cmp_lt($digits_start, $end) != 0) {
+        my i8 $a = Brocken::load_i8($digits_start);
+        my i8 $b = Brocken::load_i8($end);
+        Brocken::store_i8($digits_start, $b);
+        Brocken::store_i8($end, $a);
+        $digits_start = Brocken::ptr_add($digits_start, 1);
+        $end = Brocken::ptr_add($end, -1);
+    }
+    # NUL terminate
+    Brocken::store_i8($cursor, 0);
+    return $buf;
 }
 
 # Return the number of entries in the suspect buffer (walks 16-byte nodes at ICB offset 56).

@@ -3,6 +3,7 @@ use feature qw[class];
 no warnings qw[experimental::class];
 use Brocken::Lindsay::IR;
 use Brocken::Lindsay::IR::Builder;
+use Brocken::ICB;
 use Carp ();
 
 class Brocken::Katsuro::Lowerer {
@@ -283,34 +284,43 @@ class Brocken::Katsuro::Lowerer {
 
     method _stringify( $val, $line, $col ) {
         return $val if $val->type->kind eq 'ptr';
-        my $type        = $val->type;
-        my $kind        = $type->kind;
-        my $buf         = $builder->build_alloca( Brocken::Lindsay::IR::Type::i8(), undef, 64, $line, $col );
-        my $sprintf_arg = $val;
-        my $fmt_str;
+        my $type = $val->type;
+        my $kind = $type->kind;
         if ( $kind eq 'int' ) {
+            my $sprintf_arg = $val;
+            my $to_str_fn;
             if ( $type->is_signed ) {
                 if ( $type->bits < 64 ) {
                     $sprintf_arg = $builder->build_sext( $val, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
                 }
-                $fmt_str = $self->platform && $self->platform->is_windows ? "%I64d\0" : "%lld\0";
+                $to_str_fn = $functions->{'Brocken::Runtime::i64_to_str'};
+                Carp::croak("Runtime function i64_to_str not found") unless $to_str_fn;
             }
             else {
                 if ( $type->bits < 64 ) {
                     $sprintf_arg = $builder->build_zext( $val, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
                 }
-                $fmt_str = $self->platform && $self->platform->is_windows ? "%I64u\0" : "%llu\0";
+                $to_str_fn = $functions->{'Brocken::Runtime::u64_to_str'};
+                Carp::croak("Runtime function u64_to_str not found") unless $to_str_fn;
             }
+            my $hb
+                = $symbols->{'__heap_base'} ?
+                $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col ) :
+                undef;
+            Carp::croak("_stringify requires __heap_base for int conversion at line $line, col $col") unless $hb;
+            return $builder->build_call( $to_str_fn, [ $hb, $sprintf_arg ], undef, $line, $col );
         }
-        elsif ( $kind eq 'float' ) {
+        my $buf         = $builder->build_alloca( Brocken::Lindsay::IR::Type::i8(), undef, 64, $line, $col );
+        my $sprintf_arg = $val;
+        my $fmt_str;
+        if ( $kind eq 'float' ) {
             $fmt_str = "%f\0";
         }
         else {
             Carp::croak("Cannot concatenate value of type '$kind' at line $line, col $col");
         }
-        my $fmt_label = '__fmt_' . $_rodata_label_counter++;
-        $rodata->{$fmt_label} = $fmt_str;
-        my $fmt_ref    = Brocken::Lindsay::IR::RodataRef->new( label => $fmt_label, bytes => $fmt_str, type => Brocken::Lindsay::IR::Type::ptr(), );
+        my ( $fmt_label, $fmt_bytes ) = $self->_intern_rodata($fmt_str);
+        my $fmt_ref    = Brocken::Lindsay::IR::RodataRef->new( label => $fmt_label, bytes => $fmt_bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
         my $sprintf_fn = Brocken::Lindsay::IR::Function->new(
             name        => $self->_crt_name('sprintf'),
             return_type => Brocken::Lindsay::IR::Type::i32(),
@@ -461,28 +471,28 @@ class Brocken::Katsuro::Lowerer {
                 $builder->build_call( $_init_fn, [ $heap_base, $heap_size ], undef );
             }
 
-            # Initialize fuel at [hb+64] to default_fuel
+            # Initialize fuel at [hb+FUEL] to default_fuel
             my $default_fuel = $Brocken::default_fuel // 1000000;
             my $fuel_const   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $default_fuel );
             my $hb_fuel      = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
-            my $fuel_off64   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 64 );
-            my $fuel_addr    = $builder->build_add( $hb_fuel, $fuel_off64 );
+            my $fuel_off     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::FUEL );
+            my $fuel_addr    = $builder->build_add( $hb_fuel, $fuel_off );
             $builder->build_store( $fuel_const, $fuel_addr );
 
-            # Initialize memory_limit at [hb+88]
+            # Initialize memory_limit at [hb+MEMORY_LIMIT]
             my $mem_limit_val   = $Brocken::default_mem_limit // 0;
             my $mem_limit_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $mem_limit_val );
             my $hb_mem          = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
-            my $mem_off88       = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 88 );
-            my $mem_limit_addr  = $builder->build_add( $hb_mem, $mem_off88 );
+            my $mem_off = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::MEMORY_LIMIT );
+            my $mem_limit_addr = $builder->build_add( $hb_mem, $mem_off );
             $builder->build_store( $mem_limit_const, $mem_limit_addr );
 
-            # Initialize capabilities at [hb+104]
-            my $caps_val    = $Brocken::default_capabilities // ~0;
-            my $caps_const  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $caps_val );
-            my $hb_caps     = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
-            my $caps_off104 = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 104 );
-            my $caps_addr   = $builder->build_add( $hb_caps, $caps_off104 );
+            # Initialize capabilities at [hb+CAPABILITIES]
+            my $caps_val   = $Brocken::default_capabilities // ~0;
+            my $caps_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $caps_val );
+            my $hb_caps    = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+            my $caps_off   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::CAPABILITIES );
+            my $caps_addr  = $builder->build_add( $hb_caps, $caps_off );
             $builder->build_store( $caps_const, $caps_addr );
         }
         for my $i ( 0 .. $ast->params->@* - 1 ) {
@@ -500,8 +510,8 @@ class Brocken::Katsuro::Lowerer {
         if ($has_hidden_heap_base) {
             if ( $current_func->name ne '_BROCKEN_ENTRY' ) {
                 my $hb_fuel    = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
-                my $fuel_off64 = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 64 );
-                my $fuel_addr  = $builder->build_add( $hb_fuel, $fuel_off64 );
+                my $fuel_off   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::FUEL );
+                my $fuel_addr  = $builder->build_add( $hb_fuel, $fuel_off );
                 my $fuel_val   = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $fuel_addr );
                 my $one        = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
                 my $fuel_after = $builder->build_sub( $fuel_val, $one );
@@ -849,8 +859,8 @@ class Brocken::Katsuro::Lowerer {
         $current_block = $check;
         if ( $symbols->{'__heap_base'} ) {
             my $hb_for_fuel = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
-            my $fuel_off64  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 64 );
-            my $fuel_addr   = $builder->build_add( $hb_for_fuel, $fuel_off64, undef, $line, $col );
+            my $fuel_off    = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::FUEL );
+            my $fuel_addr   = $builder->build_add( $hb_for_fuel, $fuel_off, undef, $line, $col );
             my $fuel_val    = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $fuel_addr, undef, $line, $col );
             my $one         = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
             my $fuel_after  = $builder->build_sub( $fuel_val, $one, undef, $line, $col );
@@ -951,11 +961,21 @@ class Brocken::Katsuro::Lowerer {
         Carp::croak( "Unknown expression type: " . ref($expr) . " at " . $self->_loc($expr) );
     }
 
+    method _intern_rodata($bytes) {
+        for my $key ( keys $rodata->%* ) {
+            if ( $rodata->{$key} eq $bytes ) {
+                return ( $key, $rodata->{$key} );
+            }
+        }
+        my $label = '__str_' . $_rodata_label_counter++;
+        $rodata->{$label} = $bytes;
+        return ( $label, $bytes );
+    }
+
     method lower_const($ast) {
         if ( $ast->type eq 'String' ) {
-            my $label = '__str_' . $_rodata_label_counter++;
-            $rodata->{$label} = $ast->value . "\0";
-            return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $ast->value . "\0", type => Brocken::Lindsay::IR::Type::ptr(), );
+            my ( $label, $bytes ) = $self->_intern_rodata( $ast->value . "\0" );
+            return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
         }
         return Brocken::Lindsay::IR::Constant->new( type => $self->native_type_from_name( $ast->type ), value => $ast->value, );
     }
@@ -1146,9 +1166,8 @@ class Brocken::Katsuro::Lowerer {
             $rhs = $self->_stringify( $rhs, $line, $col );
             if ( $lhs->isa('Brocken::Lindsay::IR::RodataRef') && $rhs->isa('Brocken::Lindsay::IR::RodataRef') ) {
                 my $combined = substr( $lhs->bytes, 0, -1 ) . $rhs->bytes;
-                my $label    = '__str_' . $_rodata_label_counter++;
-                $rodata->{$label} = $combined;
-                return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $combined, type => Brocken::Lindsay::IR::Type::ptr(), );
+                my ( $label, $bytes ) = $self->_intern_rodata($combined);
+                return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
             }
             my $strlen_fn = Brocken::Lindsay::IR::Function->new(
                 name        => $self->_crt_name('strlen'),
@@ -1223,7 +1242,7 @@ class Brocken::Katsuro::Lowerer {
         return unless $symbols->{'__heap_base'};
         return unless defined $fuel_exit_block;
         my $hb         = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
-        my $caps_off   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 104 );
+        my $caps_off   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::CAPABILITIES );
         my $caps_addr  = $builder->build_add( $hb, $caps_off, undef, $line, $col );
         my $caps_val   = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $caps_addr, undef, $line, $col );
         my $cap_mask   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $required_cap );
@@ -1235,9 +1254,9 @@ class Brocken::Katsuro::Lowerer {
         $builder->build_cond_br( $blocked, $sec_block, $cont_block, $line, $col );
         $builder->position_at_end($sec_block);
         $current_block = $sec_block;
-        my $err_off72     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 72 );
-        my $err_code_addr = $builder->build_add( $hb, $err_off72, undef, $line, $col );
-        my $err_code_val  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 3 );
+        my $err_off       = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_CODE );
+        my $err_code_addr = $builder->build_add( $hb, $err_off, undef, $line, $col );
+        my $err_code_val  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_SECURITY );
         $builder->build_store( $err_code_val, $err_code_addr, $line, $col );
         $builder->build_br( $fuel_exit_block, $line, $col );
         $builder->position_at_end($cont_block);
@@ -1305,6 +1324,11 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $args[0], undef, $line, $col ) if $name eq 'load_i64';
 
         if ( $name eq 'store_i64' ) {
+            $builder->build_store( $args[1], $args[0], $line, $col );
+            return undef;
+        }
+        return $builder->build_load( Brocken::Lindsay::IR::Type::i8(), $args[0], undef, $line, $col ) if $name eq 'load_i8';
+        if ( $name eq 'store_i8' ) {
             $builder->build_store( $args[1], $args[0], $line, $col );
             return undef;
         }

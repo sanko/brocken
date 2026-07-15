@@ -1133,8 +1133,23 @@ package Brocken::Fuzz {
         }
 
         method _eval_i64( $op, $l, $r ) {
-            return undef if $op eq '/' && $r == 0;
-            return undef if $op eq '%' && $r == 0;
+            if ( $r == 0 && ( $op eq '/' || $op eq '%' ) ) {
+
+                # Platform-specific division-by-zero behavior:
+                # x86_64:  crash (SIGFPE) - return undef to signal expect_crash
+                # ARM64:   SDIV by 0 = 0, UREM by 0 = dividend
+                # RISCV64: DIV by 0 = -1 (all ones), REM by 0 = dividend
+                if ( $self->host->is_x64 ) {
+                    return undef;
+                }
+                elsif ( $self->host->is_arm64 ) {
+                    return $op eq '/' ? 0 : $l;
+                }
+                elsif ( $self->host->is_riscv64 ) {
+                    return $op eq '/' ? -1 : $l;
+                }
+                return undef;    # fallback: assume crash
+            }
             use integer;
             if ( $op eq '+' )  { return $l + $r }
             if ( $op eq '-' )  { return $l - $r }
@@ -1153,7 +1168,18 @@ package Brocken::Fuzz {
         # Matches Brocken's i128 semantics (truncate-toward-zero division).
         method _eval_i128_binop( $op, $lv, $rv ) {
             require Math::BigInt;
-            return undef if ( $op eq '/' || $op eq '%' ) && ( ref($rv) ? $rv->is_zero : $rv == 0 );
+            if ( ( $op eq '/' || $op eq '%' ) && ( ref($rv) ? $rv->is_zero : $rv == 0 ) ) {
+                if ( $self->host->is_x64 ) {
+                    return undef;
+                }
+                elsif ( $self->host->is_arm64 ) {
+                    return $op eq '/' ? Math::BigInt->new(0) : $lv;
+                }
+                elsif ( $self->host->is_riscv64 ) {
+                    return $op eq '/' ? Math::BigInt->new(-1) : $lv;
+                }
+                return undef;
+            }
             my $l = ref($lv) && $lv->isa('Math::BigInt') ? $lv : Math::BigInt->new($lv);
             my $r = ref($rv) && $rv->isa('Math::BigInt') ? $rv : Math::BigInt->new($rv);
             if ( $op eq '+' ) { return $l + $r }
