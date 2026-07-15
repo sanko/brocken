@@ -24,7 +24,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         # Flags: 1=alloc, 2=write, 4=execute
         $layout->add_section( '.text', $text_size, 5 );    # RX (Alloc + Execute)
         my $rodata_size = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
-        $layout->add_section( '.rodata', $rodata_size || 1, 2 ) if $rodata_size > 0;
+        $layout->add_section( '.rodata', $rodata_size || 1, 2 );
         my $brk_sym_size = $self->brk_sym_size();
         $layout->add_section( '.brk_sym', $brk_sym_size, 2 ) if $brk_sym_size > 0;
 
