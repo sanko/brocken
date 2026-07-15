@@ -312,6 +312,17 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             # Update text size and recalculate layout so all subsequent RVA
             # lookups (e.g. import_rva, got_rva) reflect the current code size.
             $self->layout->get('.text')->{size} = length($code_bytes) + $entry_stub_len;
+
+            # Update .rodata size to match current rodata content.  Without this,
+            # stale size=0 from a prior empty-rodata compilation causes .calculate()
+            # to place .interp (and other sections) at the same offset as .rodata.
+            # The section-output loop then writes .rodata payload first, then .interp
+            # overwrites it, making string constants read as the dynamic linker path.
+            my $_rd = $self->layout->get('.rodata');
+            if ($_rd) {
+                my $_rodata_size = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
+                $_rd->{size} = $_rodata_size || 1;
+            }
             $self->layout->calculate( $self->layout->section_align );
         }
         my $l          = $self->layout;
