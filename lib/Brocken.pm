@@ -12,7 +12,16 @@ package Brocken v0.0.1 {
     use Brocken::Jenny::Linker::PE;
     use Brocken::Jenny::Linker::ELF64;
     use File::Temp;
-    our $default_fuel = 1000000;    # initial fuel budget for entry function
+    our $default_fuel         = 1000000;    # initial fuel budget for entry function
+    our $default_mem_limit    = 0;          # 0 = unlimited; max heap bytes per isolate
+    our $default_capabilities = ~0;         # all capabilities enabled by default
+
+    # Capability bitmask constants
+    our $CAP_FS_READ  = 1 << 0;             # 1   - file system read
+    our $CAP_FS_WRITE = 1 << 1;             # 2   - file system write
+    our $CAP_NET      = 1 << 2;             # 4   - network access
+    our $CAP_SYSTEM   = 1 << 3;             # 8   - system() / process spawn
+    our $CAP_FFI      = 1 << 4;             # 16  - syscall / libc / raw FFI
 
     class Brocken {
         field $platform    : param = undef;

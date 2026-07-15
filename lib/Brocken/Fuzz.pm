@@ -1642,7 +1642,7 @@ package Brocken::Fuzz {
             my $want_stdout = exists $program->{expected_stdout};
             my $exec_result = $self->_exec_program(
                 $file,
-                args           => $program->{args}           // [],
+                args           => $program->{args} // [],
                 capture_stdout => ( $program->{capture_stdout} // 0 ) || $want_stdout,
                 capture_stderr => $program->{capture_stderr} // 0,
                 timeout        => 10,
@@ -1675,10 +1675,10 @@ package Brocken::Fuzz {
                 if ( $got ne $exp ) {
                     return {
                         %$result,
-                        status      => 'fail',
-                        reason      => "Stdout mismatch: expected " . _dquot($exp) . ", got " . _dquot($got),
-                        got_stdout  => $got,
-                        exp_stdout  => $exp,
+                        status     => 'fail',
+                        reason     => "Stdout mismatch: expected " . _dquot($exp) . ", got " . _dquot($got),
+                        got_stdout => $got,
+                        exp_stdout => $exp,
                     };
                 }
             }
