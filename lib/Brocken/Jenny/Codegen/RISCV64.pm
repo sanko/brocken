@@ -603,8 +603,8 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $opcode eq 'slt'   ||
                     $opcode eq 'sltu'  ||
                     $opcode eq 'sltiu' ) {
-                    my $dst_r  = $resolve->($dst);
-                    my $did    = $reg_id->($dst_r);
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
 
                     # 3-operand sltu/slt (R-type: rd, rs1, rs2) - used by i128 carry/borrow detection
                     if ( scalar @ops == 3 && ( $opcode eq 'sltu' || $opcode eq 'slt' ) ) {
@@ -615,7 +615,6 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', ( 0x00 << 25 ) | ( $s2id << 20 ) | ( $s1id << 15 ) | ( $f3 << 12 ) | ( $did << 7 ) | OP );
                         next;
                     }
-
                     my %imm_f3 = ( add => 0, sub => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3, sltiu => 3 );
                     my %reg_f7 = (
                         add   => 0x00,
