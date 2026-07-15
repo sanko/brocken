@@ -1,7 +1,7 @@
 # core.brocken -- Brocken v0.1 Runtime Primitives
 # Automatically compiled alongside user code.
 #
-# Isolate Control Block (ICB) layout (80 bytes at heap_base):
+# Isolate Control Block (ICB) layout (112 bytes at heap_base):
 #   [heap_base + 0]:  heap_cursor    (ptr - legacy simple-bump pointer, unused after Immix full deployment)
 #   [heap_base + 8]:  current_fcb    (ptr - active Fiber Control Block, 0 = no fiber)
 #   [heap_base + 16]: fiber_head     (ptr - head of fiber linked list)
@@ -11,9 +11,13 @@
 #   [heap_base + 48]: free16_head    (ptr - segregated free list for 16-byte reclaimed objects)
 #   [heap_base + 56]: suspect_buffer_head (ptr — linked list via free16 nodes; current_block derived from immix_cursor)
 #   [heap_base + 64]: fuel           (i64 — remaining instruction budget, set by compiler)
-#   [heap_base + 72]: err_code       (i64 — termination reason code, 0 = no error)
+#   [heap_base + 72]: err_code       (i64 — termination reason code, 0=OK, 1=OOM, 2=NO_FUEL, 3=SECURITY)
+#   [heap_base + 80]: current_block  (ptr — pointer to active Immix block)
+#   [heap_base + 88]: memory_limit   (i64 — max heap bytes for this isolate, 0 = unlimited)
+#   [heap_base + 96]: memory_used    (i64 — cumulative bytes allocated, enforced by bump_alloc)
+#   [heap_base + 104]: capabilities  (i64 — bitmask of allowed operations, checked before syscall/libc)
 #
-# First Immix block starts at heap_base + 80.
+# First Immix block starts at heap_base + 112.
 #
 # Immix block layout (32 KB = 32768 bytes per block):
 #   [block + 0..15]:     bitmap (128-bit line bitmap, bit N = line N in use)
@@ -33,10 +37,10 @@
 # When a block's live_count reaches 0, the entire block is recycled to free_blocks.
 
 # Initialize ICB and Immix heap metadata.
-# heap_base = address of ICB, first Immix block starts at heap_base + 80.
+# heap_base = address of ICB, first Immix block starts at heap_base + 112.
 sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
-    # Block starts after the ICB (88 bytes). get_current_block() reads from ICB offset 80.
-    my ptr $block_base = Brocken::ptr_add($heap_base, 88);
+    # Block starts after the ICB (112 bytes). get_current_block() reads from ICB offset 80.
+    my ptr $block_base = Brocken::ptr_add($heap_base, 112);
     my ptr $line0_data = Brocken::ptr_add($block_base, 16);
     # Zero the block metadata: bitmap at [block+0..15], live_count at [block+32752],
     # next_free at [block+32760].
@@ -68,13 +72,20 @@ sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
     Brocken::store_i64(Brocken::ptr_add($heap_base, 72), 0);
     # current_block (offset 80) -- pointer to active Immix block
     Brocken::store_i64(Brocken::ptr_add($heap_base, 80), $block_base);
+    # memory_limit (offset 88) -- 0 = unlimited, set by compiler entry prologue
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 88), 0);
+    # memory_used (offset 96) -- cumulative bytes allocated, starts at 0
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 96), 0);
+    # capabilities (offset 104) -- bitmask of allowed operations, set by compiler entry prologue
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 104), 0);
     return;
 }
 
 # Return the current Immix block base from ICB offset 80.
 # ICB layout: [0]=heap_cursor, [8]=current_fcb, [16]=fiber_head, [24]=immix_cursor,
 # [32]=immix_limit, [40]=free_blocks, [48]=free16_head, [56]=suspect_buffer_head,
-# [64]=fuel, [72]=err_code, [80]=current_block.
+# [64]=fuel, [72]=err_code, [80]=current_block, [88]=memory_limit, [96]=memory_used,
+# [104]=capabilities.
 sub Brocken::Runtime::get_current_block(ptr $hb) -> ptr {
     return Brocken::load_i64(Brocken::ptr_add($hb, 80));
 }
@@ -87,6 +98,17 @@ sub Brocken::Runtime::get_current_block(ptr $hb) -> ptr {
 #   - when block exhausted, sweeps bitmap for free lines before allocating new block
 # Returns pointer to allocated memory, or 0 on out-of-memory.
 sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
+    # Memory limit check: if memory_limit > 0 and memory_used + size > memory_limit, OOM.
+    my i64 $mem_limit = Brocken::load_i64(Brocken::ptr_add($heap_base, 88));
+    if (Brocken::ptr_cmp_gt($mem_limit, 0)) {
+        my i64 $mem_used = Brocken::load_i64(Brocken::ptr_add($heap_base, 96));
+        my i64 $new_used = Brocken::i64_add($mem_used, $size);
+        if (Brocken::ptr_cmp_gt($new_used, $mem_limit)) {
+            Brocken::store_i64(Brocken::ptr_add($heap_base, 72), 1);
+            return 0;
+        }
+    }
+
     # Hot path: free16_head at ICB offset 48
     my ptr $free16_ptr = Brocken::ptr_add($heap_base, 48);
     my ptr $head = Brocken::load_i64($free16_ptr);
@@ -135,6 +157,9 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
                 # Increment live_count
                 my i64 $lc = Brocken::load_i64(Brocken::ptr_add($block_base, 32752));
                 Brocken::store_i64(Brocken::ptr_add($block_base, 32752), Brocken::i64_add($lc, 1));
+                # Increment memory_used
+                my i64 $mu1 = Brocken::load_i64(Brocken::ptr_add($heap_base, 96));
+                Brocken::store_i64(Brocken::ptr_add($heap_base, 96), Brocken::i64_add($mu1, $size));
                 return $line_start;
             }
             # Allocation too large for remaining space in that line — fall through
@@ -159,6 +184,9 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
             Brocken::store_i64(Brocken::ptr_add($heap_base, 80), $fb);
             # Allocate from the new block
             Brocken::store_i64($cursor_ptr, Brocken::ptr_add($fb_line0, $size));
+            # Increment memory_used
+            my i64 $mu2 = Brocken::load_i64(Brocken::ptr_add($heap_base, 96));
+            Brocken::store_i64(Brocken::ptr_add($heap_base, 96), Brocken::i64_add($mu2, $size));
             return $fb_line0;
         }
         # No free block available. Allocate a new 32KB block from legacy heap.
@@ -184,6 +212,9 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
         Brocken::store_i64(Brocken::ptr_add($heap_base, 32), Brocken::ptr_add($new_block, 256));
         # Increment live_count for this allocation
         Brocken::store_i64(Brocken::ptr_add($new_block, 32752), 1);
+        # Increment memory_used
+        my i64 $mu3 = Brocken::load_i64(Brocken::ptr_add($heap_base, 96));
+        Brocken::store_i64(Brocken::ptr_add($heap_base, 96), Brocken::i64_add($mu3, $size));
         return $nb_line0;
     }
 
@@ -193,6 +224,9 @@ sub Brocken::Runtime::bump_alloc(ptr $heap_base, i64 $size) -> ptr {
     my ptr $block_base2 = Brocken::Runtime::get_current_block($heap_base);
     my i64 $lc2 = Brocken::load_i64(Brocken::ptr_add($block_base2, 32752));
     Brocken::store_i64(Brocken::ptr_add($block_base2, 32752), Brocken::i64_add($lc2, 1));
+    # Increment memory_used
+    my i64 $mu4 = Brocken::load_i64(Brocken::ptr_add($heap_base, 96));
+    Brocken::store_i64(Brocken::ptr_add($heap_base, 96), Brocken::i64_add($mu4, $size));
     return $cursor;
 }
 

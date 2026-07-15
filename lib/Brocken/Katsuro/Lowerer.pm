@@ -468,6 +468,22 @@ class Brocken::Katsuro::Lowerer {
             my $fuel_off64   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 64 );
             my $fuel_addr    = $builder->build_add( $hb_fuel, $fuel_off64 );
             $builder->build_store( $fuel_const, $fuel_addr );
+
+            # Initialize memory_limit at [hb+88]
+            my $mem_limit_val   = $Brocken::default_mem_limit // 0;
+            my $mem_limit_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $mem_limit_val );
+            my $hb_mem          = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+            my $mem_off88       = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 88 );
+            my $mem_limit_addr  = $builder->build_add( $hb_mem, $mem_off88 );
+            $builder->build_store( $mem_limit_const, $mem_limit_addr );
+
+            # Initialize capabilities at [hb+104]
+            my $caps_val    = $Brocken::default_capabilities // ~0;
+            my $caps_const  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $caps_val );
+            my $hb_caps     = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+            my $caps_off104 = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 104 );
+            my $caps_addr   = $builder->build_add( $hb_caps, $caps_off104 );
+            $builder->build_store( $caps_const, $caps_addr );
         }
         for my $i ( 0 .. $ast->params->@* - 1 ) {
             my $p      = $current_func->params->[ $i + $hidden_count ];
@@ -1203,6 +1219,31 @@ class Brocken::Katsuro::Lowerer {
         # Phase S0 will re-enable with a proper fix.
     }
 
+    method _emit_cap_check( $required_cap, $line, $col ) {
+        return unless $symbols->{'__heap_base'};
+        return unless defined $fuel_exit_block;
+        my $hb         = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
+        my $caps_off   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 104 );
+        my $caps_addr  = $builder->build_add( $hb, $caps_off, undef, $line, $col );
+        my $caps_val   = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $caps_addr, undef, $line, $col );
+        my $cap_mask   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $required_cap );
+        my $allowed    = $builder->build_and( $caps_val, $cap_mask, undef, $line, $col );
+        my $zero       = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+        my $blocked    = $builder->build_icmp( 'eq', $allowed, $zero, undef, $line, $col );
+        my $sec_block  = $current_func->append_block( $self->unique_block_name('cap_violation') );
+        my $cont_block = $current_func->append_block( $self->unique_block_name('cap_cont') );
+        $builder->build_cond_br( $blocked, $sec_block, $cont_block, $line, $col );
+        $builder->position_at_end($sec_block);
+        $current_block = $sec_block;
+        my $err_off72     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 72 );
+        my $err_code_addr = $builder->build_add( $hb, $err_off72, undef, $line, $col );
+        my $err_code_val  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 3 );
+        $builder->build_store( $err_code_val, $err_code_addr, $line, $col );
+        $builder->build_br( $fuel_exit_block, $line, $col );
+        $builder->position_at_end($cont_block);
+        $current_block = $cont_block;
+    }
+
     method lower_call_expr($ast) {
         my $name   = $ast->func_name;
         my $callee = $functions->{$name};
@@ -1284,8 +1325,11 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_xor( $args[0], $args[1], undef, $line, $col )  if $name eq 'bxor';
         return $builder->build_shl( $args[0], $args[1], undef, $line, $col )  if $name eq 'shl';
         return $builder->build_lshr( $args[0], $args[1], undef, $line, $col ) if $name eq 'shr';
-        return $builder->build_syscall( \@args, undef, $line, $col )          if $name eq 'syscall';
 
+        if ( $name eq 'syscall' ) {
+            $self->_emit_cap_check( $Brocken::CAP_FFI // 16, $line, $col );
+            return $builder->build_syscall( \@args, undef, $line, $col );
+        }
         if ( $name eq 'syscall_by_name' ) {
             my $name_ast = $ast->args->[0];
             Carp::croak( "First argument to syscall_by_name must be a string literal at " . $self->_loc($ast) )
@@ -1298,6 +1342,7 @@ class Brocken::Katsuro::Lowerer {
             for my $i ( 1 .. $#args ) {
                 push @syscall_args, $args[$i];
             }
+            $self->_emit_cap_check( $Brocken::CAP_FFI // 16, $line, $col );
             return $builder->build_syscall( \@syscall_args, undef, $line, $col );
         }
         if ( $name eq 'libc' ) {
@@ -1311,6 +1356,7 @@ class Brocken::Katsuro::Lowerer {
             for my $i ( 1 .. $#args ) {
                 push @call_args, $args[$i];
             }
+            $self->_emit_cap_check( $Brocken::CAP_FFI // 16, $line, $col );
             return $builder->build_call( $extern_fn, \@call_args, undef, $line, $col );
         }
         if ( $name eq 'heap_base' ) {
