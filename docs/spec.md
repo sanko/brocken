@@ -365,17 +365,81 @@ while ($cursor < $limit) {
     ...
 }
 
+foreach my $item (@arr) {
+    ...
+}
+
 return $value;
 return;        # void return
 ```
 
 - No statement modifiers (`say "hi" if $x`)
-- No `unless`, `until`, `for`, `foreach` in v0.1
-- No `next`, `last`, `redo` in v0.1
+- No `unless`, `until` in v0.1
+
+#### 2.4.1 `foreach` / `for` Loop
+
+`foreach` (or its alias `for`) iterates over a list, binding each element to a loop variable. The loop variable is lexically scoped to the loop body.
+
+```perl
+# Single variable iteration
+foreach my $x (@arr) {
+    say($x);
+}
+
+# Multi-variable iteration (consumes N items per step)
+foreach my ($key, $value) (%map) {
+    say("$key = $value");
+}
+
+# C-style for loop (also supported)
+for (my i64 $i = 0; $i < 10; $i = $i + 1) {
+    say($i);
+}
+```
+
+**Reference aliasing:** A loop variable declared with `\` creates a reference alias to the iterated element, allowing in-place mutation:
+
+```perl
+foreach my \@item (@arr) {
+    # \@item aliases each element; modifying \$item modifies the array
+    $item = $item * 2;
+}
+```
+
+**Lowering:** `foreach my $var (EXPR)` is lowered to:
+
+1. Evaluate `EXPR` into a temporary list value
+2. Initialize an iterator (index = 0)
+3. Loop header: compare index against list count
+4. Loop body: load element at index, bind to `$var`, execute body, increment index
+5. Loop exit: jump past the loop
+
+Multi-variable `foreach my ($k, $v) (EXPR)` consumes N elements per iteration (where N = number of loop variables). The iterator advances by N each step.
+
+`next` jumps to the loop increment; `last` exits the loop; `redo` re-executes the current iteration without incrementing.
+
+#### 2.4.2 `next`, `last`, `redo`
+
+| Keyword | Behaviour |
+|---------|-----------|
+| `next` | Jump to the next iteration (skip remaining body) |
+| `last` | Exit the loop immediately |
+| `redo` | Re-execute the current iteration without incrementing the iterator |
+
+These work in both `while` and `foreach` loops:
+
+```perl
+foreach my $x (@arr) {
+    next if $x < 0;     # skip negative values
+    last if $x == 100;   # stop at 100
+    redo if $x == 0;     # re-try zero
+    say($x);
+}
+```
 
 ### 2.5 Subroutines
 
-Strict signatures with arity and optional return type.
+Strict signatures with arity, named parameters, and optional return type.
 
 ```perl
 sub allocate_block(i64 $size) -> ptr {
@@ -392,6 +456,69 @@ sub greet(i64 $n) {
 - Parameters are `(TYPE $name, ...)`
 - Return type is `-> TYPE`; omitted means void
 - Last expression is NOT implicitly returned - must use `return`
+
+#### 2.5.1 Named Parameters (Perl 5.44-style)
+
+Named parameters allow callers to pass arguments by name rather than position. Named parameters are declared with a `:` prefix and are passed as `name => value` pairs after all positional arguments.
+
+```perl
+# Positional only
+sub create_point(i64 $x, i64 $y) -> ptr { ... }
+
+# Positional + named
+sub create_point(i64 $x, i64 $y, :i64 $color = 0, :bool $visible = true) -> ptr { ... }
+
+# Call site: positional args first, then named as key-value pairs
+my ptr $p = create_point(10, 20, color => 0xFF0000, visible => false);
+```
+
+**Syntax rules:**
+
+| Form | Meaning |
+|------|---------|
+| `:TYPE $name` | Required named parameter (no default) |
+| `:TYPE $name = DEFAULT` | Optional named parameter with default value |
+| `name => value` | Named argument at call site (fat comma auto-quotes bareword) |
+
+- Named parameters must appear **after** all positional parameters in the signature
+- Named parameters are passed in any order at the call site
+- Omitted named parameters use their declared default value
+- If no default is declared, the parameter defaults to a zero-initialized value of its type
+
+**Lowering:**
+
+Named parameters are lowered as regular positional parameters in the IR. The compiler generates a **named parameter matcher prologue** at the function entry:
+
+1. Positional parameters are bound first (in declaration order)
+2. Remaining arguments are consumed in pairs: `(name_ptr, value, name_ptr, value, ...)`
+3. Each name pointer is compared against declared named parameter names (string comparison at runtime)
+4. Matched values are assigned to the corresponding parameter
+5. Unmatched parameters retain their default (or zero-init)
+
+```
+# Source:
+sub f(i64 $x, :i64 $alpha = 0, :i64 $beta = 0) -> i64 { ... }
+f(42, alpha => 10);
+
+# Lowered IR equivalent:
+sub @f(i64 $x, i64 $alpha, i64 $beta, ptr $__named_args, i64 $__named_count) -> i64 {
+    # prologue: bind positional
+    $x = arg0
+    # prologue: zero-init named params
+    $alpha = 0
+    $beta = 0
+    # prologue: match named args (pairs)
+    for i in 0..$__named_count step 2:
+        $key = load_ptr($__named_args + i * 8)
+        $val = load_i64($__named_args + (i+1) * 8)
+        if $key == "alpha": $alpha = $val
+        elif $key == "beta": $beta = $val
+    # body:
+    ...
+}
+```
+
+**Interaction with `want`:** Named parameters do not affect `want` context. The `want` builtin operates on the function's return context, not its argument handling.
 
 ### 2.6 Object-Oriented Programming
 
@@ -636,16 +763,28 @@ sub allocate_block(i64 $size) -> ptr {
 - Return type is `-> TYPE`; omitted means void
 - Last expression is NOT implicitly returned - must use `return`
 
+Named parameters:
+
+```perl
+sub create(i64 $x, i64 $y, :i64 $color = 0) -> ptr { ... }
+create(10, 20, color => 0xFF);
+```
+
 #### 2.16.3 Control Flow
 
 ```perl
 if ($x > 0) { ... } elsif ($x == 0) { ... } else { ... }
 while ($cursor < $limit) { ... }
+foreach my $item (@arr) {
+    next if $item < 0;
+    last if $item == 100;
+    say($item);
+}
 return $value;
 return;   # void return
 ```
 
-Not in v0.1: `unless`, `until`, `for`, `foreach`, statement modifiers, `next`, `last`, `redo`.
+Not in v0.1: `unless`, `until`, statement modifiers.
 
 #### 2.16.4 Classes
 
@@ -698,14 +837,18 @@ use feature 'brocken_native_types';   # enables i128, u128
 | Pod6 | Documentation - defer |
 | Multiple dispatch | Not needed |
 | Operator overloading | Not needed |
-| `want` / context | Supported (P3) — `want(TypeName)` constant-folds, `want('scalar'\|'list'\|'void')` calls runtime |
+| `unless` / `until` | Inverted conditionals; use `if`/`while` with negation instead |
+| Statement modifiers | e.g., `say "hi" if $x` — deferred to post-v0.1 |
 | Inheritance | Classes as flat structs only - no `:isa` |
 
-**Shift operators (`<<`, `>>`) are implemented** in the lexer (`>>` token),
-parser (`PREC_SHIFT` precedence level), and lowerer (maps to `build_shl`,
-`build_ashr`/`build_lshr` based on signedness). Signed right shift emits
-`ashr` (arithmetic, sign-extending), unsigned right shift emits `lshr`
-(logical, zero-extending). Left shift emits `shl` regardless of signedness.
+**Implemented features (previously deferred):**
+
+- **`foreach` / `for` loops** — Single-variable, multi-variable, and reference aliasing (§2.4.1)
+- **`next` / `last` / `redo`** — Loop control keywords (§2.4.2)
+- **Named parameters** — Perl 5.44-style `:name` params with defaults (§2.5.1)
+- **`want` / context** — `want(TypeName)` constant-folds, `want('scalar'|'list'|'void')` calls runtime (P3)
+- **Shift operators (`<<`, `>>`)** — `>>` token, `PREC_SHIFT` precedence, `build_shl`/`build_ashr`/`build_lshr` lowering
+- **Fat comma (`=>`)** — Auto-quotes bareword LHS as `Expr::Const(String)`; used in hash literals and named parameter calls
 
 ---
 
