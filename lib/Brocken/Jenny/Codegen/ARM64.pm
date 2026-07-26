@@ -54,6 +54,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         my @func_idx;    # maps @mfs index to $ir_funcs index
         my $has_fiber   = 0;
         my $has_isolate = 0;
+        my $has_gate    = 0;
         my $entry_index = -1;
         for my $i ( 0 .. $#$ir_funcs ) {
             my $func = $ir_funcs->[$i];
@@ -63,6 +64,7 @@ class Brocken::Jenny::Codegen::ARM64 {
             my $mf      = $lowerer->lower($func);
             $has_fiber   ||= $self->_has_fiber_ops_mf($mf);
             $has_isolate ||= $self->_has_isolate_ops_ir($func);
+            $has_gate    ||= $self->_has_gate_ops_ir($func);
             push @mfs,      $mf;
             push @func_idx, $i;
         }
@@ -125,6 +127,10 @@ class Brocken::Jenny::Codegen::ARM64 {
             my $tramp_mf = $self->_build_isolate_trampoline_mf;
             push @result, $self->_emit_single_mf($tramp_mf);
         }
+        if ($has_gate) {
+            my $gate_mf = $self->_build_gate_dispatch_mf;
+            push @result, $self->_emit_single_mf($gate_mf);
+        }
         if ( $has_isolate && $platform->is_windows ) {
             push @result, $self->_build_create_thread_fn;
         }
@@ -186,6 +192,17 @@ class Brocken::Jenny::Codegen::ARM64 {
             for my $inst ( $block->instructions->@* ) {
                 return 1
                     if $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateCreate') || $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateJoin');
+            }
+        }
+        return 0;
+    }
+
+    method _has_gate_ops_ir($func) {
+        for my $block ( $func->blocks->@* ) {
+            for my $inst ( $block->instructions->@* ) {
+                if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') && $inst->callee ) {
+                    return 1 if $inst->callee->name eq '_brocken_gate_dispatch';
+                }
             }
         }
         return 0;
@@ -307,6 +324,133 @@ class Brocken::Jenny::Codegen::ARM64 {
 
         # return result
         $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => 'return' ) );
+        $mf->add_block($mbb);
+        return $mf;
+    }
+
+    # Build the _brocken_gate_dispatch trampoline.
+    # Called by gate stubs: _brocken_gate_dispatch(ICB, gate_id, a0..a5) -> i64
+    # Loads function pointer from gate_table[gate_id] at ICB+112 and calls through it.
+    method _build_gate_dispatch_mf() {
+        my $i64 = Brocken::Lindsay::IR::Type::i64();
+        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => '_brocken_gate_dispatch' );
+        my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
+
+        # Parameters: x0=ICB, x1=gate_id, x2=a0, x3=a1, x4=a2, x5=a3, stack: a4, a5
+        # Save ICB to stack before clobbering x0 for gate table load
+        my $icb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%icb', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $icb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' ) ],
+                comment  => 'ICB = x0'
+            )
+        );
+
+        # Save gate_id (x1) before we might clobber it
+        my $gate_id = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%gate_id', type => $i64 );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $gate_id, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x1' ) ],
+                comment  => 'gate_id = x1'
+            )
+        );
+
+        # sub sp, 16 to make room for saved ICB (16-byte aligned)
+        my $sp      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'sp' );
+        my $sixteen = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16, type => $i64 );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'sub',
+                operands => [ $sp, $sixteen ],
+                comment  => 'allocate stack slot for saved ICB (16-byte aligned)'
+            )
+        );
+        my $saved_icb_mem = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => 'sp', disp => 0 }, type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'store', operands => [ $saved_icb_mem, $icb ], comment => 'save ICB to stack' ) );
+
+        # Load gate_table from ICB+112 (GATE_TABLE offset)
+        my $gt     = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%gt', type => $ptr );
+        my $gt_off = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%icb', disp => Brocken::ICB::GATE_TABLE() },
+            type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'load', operands => [ $gt, $gt_off ], comment => 'gate_table = ICB->gate_table' )
+        );
+
+        # fn_ptr_addr = gate_table + gate_id * 8
+        my $fn_ptr_addr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%fn_addr', type => $ptr );
+        my $eight_c     = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm',      value => 8,          type => $i64 );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mul',
+                operands => [ $fn_ptr_addr, $gate_id, $eight_c ],
+                comment  => 'offset = gate_id * 8'
+            )
+        );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'add',
+                operands => [ $fn_ptr_addr, $gt, $fn_ptr_addr ],
+                comment  => 'fn_addr = gate_table + offset'
+            )
+        );
+
+        # Load function pointer from gate_table[gate_id]
+        my $fn_ptr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%fn', type => $ptr );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'load',
+                operands =>
+                    [ $fn_ptr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fn_addr', disp => 0 }, type => $ptr ) ],
+                comment => 'fn = *fn_addr'
+            )
+        );
+
+        # Restore ICB from stack
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'load',
+                operands => [ $icb, $saved_icb_mem ],
+                comment  => 'restore ICB from stack'
+            )
+        );
+
+        # Add sp, 16 to deallocate stack slot
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'add', operands => [ $sp, $sixteen ], comment => 'deallocate stack slot' ) );
+
+        # Re-set x0 = ICB for the called function (AAPCS64: x0 = first arg)
+        my $x0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $x0, $icb ],
+                comment  => 'x0 = ICB (first arg for called function)'
+            )
+        );
+
+        # x1 = gate_id for called function (second arg)
+        my $x1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x1' );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $x1, $gate_id ], comment => 'x1 = gate_id (second arg)' ) );
+
+        # Arguments a0-a3 are already in x2-x5 (unchanged).
+        # Arguments a4, a5 are on the caller's stack, also unchanged.
+        # call_indirect fn_ptr -- calls fn(ICB, gate_id, a0, a1, a2, a3, a4, a5)
+        my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%ret', type => $i64 );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'call_indirect',
+                operands => [ $result, $fn_ptr ],
+                comment  => 'call gate function'
+            )
+        );
+
+        # Return result
+        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => 'return result' ) );
         $mf->add_block($mbb);
         return $mf;
     }

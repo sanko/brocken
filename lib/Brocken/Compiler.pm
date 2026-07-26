@@ -9,6 +9,37 @@ class Brocken::Compiler {
     use File::Basename qw[dirname];
     use File::Spec;
 
+    field $fuel         : param = $Brocken::default_fuel;
+    field $mem_limit    : param = $Brocken::default_mem_limit;
+    field $capabilities : param = $Brocken::default_capabilities;
+
+    my %_CLASS_DEFAULTS;
+
+    sub set_default_policy {
+        my @args = @_;
+        shift @args if @args && $args[0] eq __PACKAGE__;
+        my %opts = @args;
+        $_CLASS_DEFAULTS{fuel}         = $opts{fuel}         if exists $opts{fuel};
+        $_CLASS_DEFAULTS{mem_limit}    = $opts{mem_limit}    if exists $opts{mem_limit};
+        $_CLASS_DEFAULTS{capabilities} = $opts{capabilities} if exists $opts{capabilities};
+        $Brocken::default_fuel         = $opts{fuel}         if exists $opts{fuel};
+        $Brocken::default_mem_limit    = $opts{mem_limit}    if exists $opts{mem_limit};
+        $Brocken::default_capabilities = $opts{capabilities} if exists $opts{capabilities};
+        return;
+    }
+
+    ADJUST {
+        if ( exists $_CLASS_DEFAULTS{fuel} && $fuel == $Brocken::default_fuel ) {
+            $fuel = $_CLASS_DEFAULTS{fuel};
+        }
+        if ( exists $_CLASS_DEFAULTS{mem_limit} && $mem_limit == $Brocken::default_mem_limit ) {
+            $mem_limit = $_CLASS_DEFAULTS{mem_limit};
+        }
+        if ( exists $_CLASS_DEFAULTS{capabilities} && $capabilities == $Brocken::default_capabilities ) {
+            $capabilities = $_CLASS_DEFAULTS{capabilities};
+        }
+    }
+
     method _core_brocken_path() {
         return File::Spec->catfile( dirname(__FILE__), '..', '..', 'src', 'runtime', 'core.brocken' );
     }
@@ -40,8 +71,13 @@ class Brocken::Compiler {
         my $user_ast = $self->_parse( $source, $filename );
         push @all_stmts, $user_ast->statements->@*;
         my $merged_ast = Brocken::Katsuro::AST::Program->new( statements => \@all_stmts );
-        my $lowerer    = Brocken::Katsuro::Lowerer->new( platform => $platform );
-        my $module     = $lowerer->lower_program($merged_ast);
+        my $lowerer    = Brocken::Katsuro::Lowerer->new(
+            platform     => $platform,
+            fuel         => $fuel,
+            mem_limit    => $mem_limit,
+            capabilities => $capabilities,
+        );
+        my $module = $lowerer->lower_program($merged_ast);
         $module->set_class_info( $lowerer->classes );
         $module->set_rodata( $lowerer->rodata );
         return $module;
