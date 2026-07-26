@@ -9,6 +9,9 @@ use Carp ();
 class Brocken::Katsuro::Lowerer {
     field $module : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
     field $platform : reader : param = undef;
+    field $fuel : param = $Brocken::default_fuel;
+    field $mem_limit : param = $Brocken::default_mem_limit;
+    field $capabilities : param = $Brocken::default_capabilities;
     field $builder = Brocken::Lindsay::IR::Builder->new();
     field $current_func;
     field $current_block;
@@ -472,24 +475,21 @@ class Brocken::Katsuro::Lowerer {
             }
 
             # Initialize fuel at [hb+FUEL] to default_fuel
-            my $default_fuel = $Brocken::default_fuel // 1000000;
-            my $fuel_const   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $default_fuel );
+            my $fuel_const   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $fuel );
             my $hb_fuel      = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
             my $fuel_off     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::FUEL );
             my $fuel_addr    = $builder->build_add( $hb_fuel, $fuel_off );
             $builder->build_store( $fuel_const, $fuel_addr );
 
             # Initialize memory_limit at [hb+MEMORY_LIMIT]
-            my $mem_limit_val   = $Brocken::default_mem_limit // 0;
-            my $mem_limit_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $mem_limit_val );
+            my $mem_limit_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $mem_limit );
             my $hb_mem          = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
             my $mem_off = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::MEMORY_LIMIT );
             my $mem_limit_addr = $builder->build_add( $hb_mem, $mem_off );
             $builder->build_store( $mem_limit_const, $mem_limit_addr );
 
             # Initialize capabilities at [hb+CAPABILITIES]
-            my $caps_val   = $Brocken::default_capabilities // ~0;
-            my $caps_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $caps_val );
+            my $caps_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $capabilities );
             my $hb_caps    = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
             my $caps_off   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::CAPABILITIES );
             my $caps_addr  = $builder->build_add( $hb_caps, $caps_off );
@@ -1166,6 +1166,42 @@ class Brocken::Katsuro::Lowerer {
         if ( $op eq '>=' ) {
             return $builder->build_icmp( $lhs->type->is_signed ? 'sge' : 'uge', $lhs, $rhs, undef, $line, $col );
         }
+        if ( $op eq 'eq' || $op eq 'ne' || $op eq 'lt' || $op eq 'gt' || $op eq 'le' || $op eq 'ge' || $op eq 'cmp' ) {
+            $lhs = $self->_stringify( $lhs, $line, $col );
+            $rhs = $self->_stringify( $rhs, $line, $col );
+            my $strcmp_fn = Brocken::Lindsay::IR::Function->new(
+                name        => $self->_crt_name('strcmp'),
+                return_type => Brocken::Lindsay::IR::Type::i32(),
+                params      => [
+                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                ],
+            );
+            my $cmp_result = $builder->build_call( $strcmp_fn, [ $lhs, $rhs ], undef, $line, $col );
+            my $cmp_i64    = $builder->build_sext( $cmp_result, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
+            my $zero       = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+            if ( $op eq 'cmp' ) {
+                return $cmp_i64;
+            }
+            if ( $op eq 'eq' ) {
+                return $builder->build_icmp( 'eq', $cmp_i64, $zero, undef, $line, $col );
+            }
+            if ( $op eq 'ne' ) {
+                return $builder->build_icmp( 'ne', $cmp_i64, $zero, undef, $line, $col );
+            }
+            if ( $op eq 'lt' ) {
+                return $builder->build_icmp( 'slt', $cmp_i64, $zero, undef, $line, $col );
+            }
+            if ( $op eq 'gt' ) {
+                return $builder->build_icmp( 'sgt', $cmp_i64, $zero, undef, $line, $col );
+            }
+            if ( $op eq 'le' ) {
+                return $builder->build_icmp( 'sle', $cmp_i64, $zero, undef, $line, $col );
+            }
+            if ( $op eq 'ge' ) {
+                return $builder->build_icmp( 'sge', $cmp_i64, $zero, undef, $line, $col );
+            }
+        }
         if ( $op eq '.' ) {
             $lhs = $self->_stringify( $lhs, $line, $col );
             $rhs = $self->_stringify( $rhs, $line, $col );
@@ -1237,10 +1273,29 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method _emit_fuel_check( $line, $col ) {
+        return unless $symbols->{'__heap_base'};
+        return unless defined $fuel_exit_block;
 
-        # Disabled: body-block register-indirect memory access corrupts PE binary.
-        # See Bug 9 - call-site fuel check binary corruption.
-        # Phase S0 will re-enable with a proper fix.
+        # Emit fuel decrement + overflow check in a dedicated block, then
+        # branch to fuel_exit_block or a fresh ok_block.  Keeping the memory
+        # ops in a separate block from any subsequent call_func avoids the
+        # register-allocator pressure that previously corrupted PE binaries
+        # (Bug 9 - the load/add/load/sub/store/cmp sequence placed inline
+        # right before a call_func confused the allocator when a physical
+        # register overlapped a call argument and the ICB base).
+        my $hb_fuel    = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
+        my $fuel_off   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::FUEL );
+        my $fuel_addr  = $builder->build_add( $hb_fuel, $fuel_off, undef, $line, $col );
+        my $fuel_val   = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $fuel_addr, undef, $line, $col );
+        my $one        = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
+        my $fuel_after = $builder->build_sub( $fuel_val, $one, undef, $line, $col );
+        $builder->build_store( $fuel_after, $fuel_addr, $line, $col );
+        my $zero      = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+        my $exhausted = $builder->build_icmp( 'sle', $fuel_after, $zero, undef, $line, $col );
+        my $ok_block  = $current_func->append_block( $self->unique_block_name('fuel_cont') );
+        $builder->build_cond_br( $exhausted, $fuel_exit_block, $ok_block, $line, $col );
+        $builder->position_at_end($ok_block);
+        $current_block = $ok_block;
     }
 
     method _emit_cap_check( $required_cap, $line, $col ) {
@@ -1300,6 +1355,15 @@ class Brocken::Katsuro::Lowerer {
                 $callee = Brocken::Lindsay::IR::Function->new(
                     name        => $puts_name,
                     return_type => Brocken::Lindsay::IR::Type::void(),
+                    params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
+                );
+                $module->add_function($callee);
+                $functions->{$name} = $callee;
+            }
+            elsif ( $name eq 'length' ) {
+                $callee = Brocken::Lindsay::IR::Function->new(
+                    name        => $self->_crt_name('strlen'),
+                    return_type => Brocken::Lindsay::IR::Type::i64(),
                     params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
                 );
                 $module->add_function($callee);

@@ -549,6 +549,12 @@ class Brocken::Katsuro::Parser {
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 0, type => 'Bool' ) if $token->{value} =~ /^false$/i;
             return Brocken::Katsuro::AST::Expr::ClassConst->new( $self->_pos_token($token) ) if $token->{value} eq '__CLASS__';
             return $self->parse_want($token)                                                 if $token->{value} eq 'want';
+            if ( $token->{value} eq 'length' ) {
+                $self->consume( '(', undef, "Expected '(' after 'length'" );
+                my $arg = $self->parse_expression(0);
+                $self->consume( ')', undef, "Expected ')' after length argument" );
+                return Brocken::Katsuro::AST::Expr::Call->new( $self->_pos_token($token), func_name => 'length', args => [$arg] );
+            }
             Carp::croak( "Unexpected keyword '$token->{value}' in expression at " . $self->_loc($token) );
         }
         if ( $token->{type} eq 'OP' ) {
@@ -665,6 +671,17 @@ class Brocken::Katsuro::Parser {
             }
             Carp::croak( "Unknown operator '$op' at " . $self->_loc($token) );
         }
+        if ( $token->{type} eq 'KEYWORD' ) {
+            my $kw = $token->{value};
+            if ( $kw eq 'eq' || $kw eq 'ne' || $kw eq 'lt' || $kw eq 'gt' || $kw eq 'le' || $kw eq 'ge' || $kw eq 'cmp' ) {
+                return Brocken::Katsuro::AST::Expr::BinOp->new(
+                    $self->_pos_token($token),
+                    op  => $kw,
+                    lhs => $left,
+                    rhs => $self->parse_expression(PREC_COMPARE)
+                );
+            }
+        }
         if ( $token->{type} eq '[' ) {
             my $index = $self->parse_expression(0);
             $self->consume(']');
@@ -744,6 +761,10 @@ class Brocken::Katsuro::Parser {
         }
         return PREC_DEREF if $token->{type} eq '[';
         return PREC_CALL  if $token->{type} eq '(';
+        if ( $token->{type} eq 'KEYWORD' ) {
+            my $kw = $token->{value};
+            return PREC_COMPARE if $kw eq 'eq' || $kw eq 'ne' || $kw eq 'lt' || $kw eq 'gt' || $kw eq 'le' || $kw eq 'ge' || $kw eq 'cmp';
+        }
         return 0;
     }
 }

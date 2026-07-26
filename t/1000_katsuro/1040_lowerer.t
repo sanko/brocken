@@ -293,7 +293,7 @@ sub helper() -> i64 {
 }
 return helper();
 BROCKEN
-    is( $mod->functions->@*, 67, '67 functions (65 runtime + helper + entry)' );
+    is( $mod->functions->@*, 71, '71 functions (65 runtime + gate_table/host_icb + helper + entry)' );
     my $text = $mod->as_string();
     like( $text, qr/call\s+i64\s+\@helper/, 'call to helper' );
 };
