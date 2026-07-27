@@ -216,16 +216,16 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
             $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size if length($stub_bytes);
         }
         $self->layout->get('.text')->{size} = length($text);
-
         if ( my $const_sec = $self->layout->get('.__const') ) {
-            my $text_sec     = $self->layout->get('.text');
+            my $text_sec      = $self->layout->get('.text');
             my $section_align = $self->layout->section_align;
-            my $rva = $text_sec->{rva} + ( ( $text_sec->{size} + $section_align - 1 ) & ~( $section_align - 1 ) );
+            my $rva           = $text_sec->{rva} + ( ( $text_sec->{size} + $section_align - 1 ) & ~( $section_align - 1 ) );
             if ( my $brk_sec = $self->layout->get('.brk_sym') ) {
                 $rva += ( ( $brk_sec->{size} + $section_align - 1 ) & ~( $section_align - 1 ) );
             }
             $const_sec->{rva} = $rva;
         }
+
         # Resolve cross-function call fixups at link time
         for my $ff (@func_fixups) {
             my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};

@@ -376,6 +376,7 @@ enabled.
         $idata_rva += ( length($data_bytes) + 4095 ) & ~4095   if length($data_bytes) > 0;
         $idata_rva += ( length($edata_bytes) + 4095 ) & ~4095  if $has_exports;
         my %iat_base;    # name => IAT RVA entry (populated below if has_idata)
+
         if ($has_idata) {
             my $desc_size = 20;
             my $num_idlls = ( @k32_list ? 1 : 0 ) + ( @mscrt_list ? 1 : 0 );
@@ -475,11 +476,7 @@ enabled.
                     $text .= pack( 'CC l<', 0xFF, 0x25, $disp32 );
                 }
                 elsif ( $platform->is_arm64 ) {
-                    $text .= pack( 'V3',
-                        adrp( X16, $iat_entry_rva, $text_rva + $stub_ofs ),
-                        ldr_64( X16, X16, $iat_entry_rva & 0xFFF ),
-                        br( X16 ),
-                    );
+                    $text .= pack( 'V3', adrp( X16, $iat_entry_rva, $text_rva + $stub_ofs ), ldr_64( X16, X16, $iat_entry_rva & 0xFFF ), br(X16), );
                 }
                 $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size;
                 $target_off = $stub_ofs - $entry_size;

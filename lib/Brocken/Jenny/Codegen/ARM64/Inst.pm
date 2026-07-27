@@ -117,8 +117,8 @@ package Brocken::Jenny::Codegen::ARM64::Inst {
         my $page_diff = ( ( $target >> 12 ) - ( $pc >> 12 ) ) & 0x1FFFFF;
         _ADRP | ( ( $page_diff & 3 ) << 29 ) | ( ( ( $page_diff >> 2 ) & 0x7FFFF ) << 5 ) | $rd;
     }
-    sub blr ($rn)   { _BLR | ( $rn << 5 ) }
-    sub br  ($rn)   { _BR  | ( $rn << 5 ) }
+    sub blr ($rn) { _BLR | ( $rn << 5 ) }
+    sub br  ($rn) { _BR | ( $rn << 5 ) }
     sub bl($offset) { _BL | ( ( $offset >> 2 ) & 0x3FFFFFF ) }
     sub b    ($offset)    { _B | ( ( $offset >> 2 ) & 0x3FFFFFF ) }
     sub brk  ($imm16)     { _BRK | ( ( $imm16 & 0xFFFF ) << 5 ) }

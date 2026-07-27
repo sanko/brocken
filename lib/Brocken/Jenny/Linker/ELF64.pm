@@ -520,12 +520,12 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size;
         }
         $self->layout->get('.text')->{size} = length($text);
-
         if ( my $rodata_sec = $self->layout->get('.rodata') ) {
-            my $text_sec     = $self->layout->get('.text');
+            my $text_sec      = $self->layout->get('.text');
             my $section_align = $self->layout->section_align;
             $rodata_sec->{rva} = $text_sec->{rva} + ( ( $text_sec->{size} + $section_align - 1 ) & ~( $section_align - 1 ) );
         }
+
         # Resolve cross-function call fixups at link time
         for my $ff (@func_fixups) {
             my $src_pos = $entry_size + $ff->{base_offset} + $ff->{offset};
