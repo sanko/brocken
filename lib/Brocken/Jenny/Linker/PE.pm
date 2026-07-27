@@ -360,9 +360,19 @@ enabled.
         my $idata_rva   = 0;
 
         # Pre-compute idata RVA (text + preceding sections, page-aligned)
-        $idata_rva = 0x1000 + ( ( length($text) + 4095 ) & ~4095 );
-        $idata_rva += ( $self->brk_sym_size() + 4095 ) & ~4095 if $self->brk_sym_size() > 0;
+        # Account for import stubs that will be appended to .text during fixup resolution
+        my $import_stub_overhead = 0;
+        if ( $platform->is_arm64 ) {
+            $import_stub_overhead = scalar(@import_list) * 12;    # ADRP + LDR + BR (4 bytes each)
+        }
+        elsif ( $platform->is_x64 ) {
+            $import_stub_overhead = scalar(@import_list) * 6;     # JMP [rip+disp32]
+        }
+        my $final_text_size = length($text) + $import_stub_overhead;
+        my $rdata_rva_fixed = 0x1000 + ( ( $final_text_size + 4095 ) & ~4095 );
+        $idata_rva = $rdata_rva_fixed;
         $idata_rva += ( length($rodata_bytes) + 4095 ) & ~4095 if $has_rodata;
+        $idata_rva += ( $self->brk_sym_size() + 4095 ) & ~4095 if $self->brk_sym_size() > 0;
         $idata_rva += ( length($data_bytes) + 4095 ) & ~4095   if length($data_bytes) > 0;
         $idata_rva += ( length($edata_bytes) + 4095 ) & ~4095  if $has_exports;
         my %iat_base;    # name => IAT RVA entry (populated below if has_idata)
@@ -426,26 +436,24 @@ enabled.
 
             # rodata-relocated fixups are resolved first (no function target needed)
             if ( $ff->{type} eq 'lea_rodata_rel32' ) {
-                my $rdata_rva = 0x1000 + ( ( length($text_bytes) + 4095 ) & ~4095 );
                 my $label_off = 0;
                 for my $key ( sort keys $self->rodata->%* ) {
                     last if $key eq $ff->{target};
                     $label_off += length( $self->rodata->{$key} );
                 }
-                my $target_rva = $rdata_rva + $label_off;
+                my $target_rva = $rdata_rva_fixed + $label_off;
                 my $src_rva    = 0x1000 + $src_pos;
                 my $rel        = $target_rva - ( $src_rva + 4 );
                 substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
                 next;
             }
             if ( $ff->{type} eq 'lea_rodata_adr' ) {
-                my $rdata_rva = 0x1000 + ( ( length($text_bytes) + 4095 ) & ~4095 );
                 my $label_off = 0;
                 for my $key ( sort keys $self->rodata->%* ) {
                     last if $key eq $ff->{target};
                     $label_off += length( $self->rodata->{$key} );
                 }
-                my $target_rva = $rdata_rva + $label_off;
+                my $target_rva = $rdata_rva_fixed + $label_off;
                 my $src_rva    = 0x1000 + $src_pos;
                 my $rel        = $target_rva - $src_rva;
                 my $word       = unpack( 'V', substr( $text, $src_pos, 4 ) );
@@ -467,11 +475,11 @@ enabled.
                     $text .= pack( 'CC l<', 0xFF, 0x25, $disp32 );
                 }
                 elsif ( $platform->is_arm64 ) {
-                    my $page = ( $iat_entry_rva >> 12 ) - ( ( $text_rva + $stub_ofs ) >> 12 );
-                    my $adrp = 0x90000000 | ( ( $page & 3 ) << 29 ) | ( ( ( $page >> 2 ) & 0x7FFFF ) << 5 ) | 16;
-                    my $ldr  = 0xF9400200 | ( ( ( $iat_entry_rva & 0xFF8 ) >> 3 ) << 10 ) | ( 16 << 5 ) | 16;
-                    my $br   = 0xD61F0000 | ( 16 << 5 );
-                    $text .= pack( 'V3', $adrp, $ldr, $br );
+                    $text .= pack( 'V3',
+                        adrp( X16, $iat_entry_rva, $text_rva + $stub_ofs ),
+                        ldr_64( X16, X16, $iat_entry_rva & 0xFFF ),
+                        br( X16 ),
+                    );
                 }
                 $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size;
                 $target_off = $stub_ofs - $entry_size;

@@ -1,6 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
+use Brocken;
 use Brocken::Katsuro::Lexer;
 use Brocken::Katsuro::Parser;
 use Brocken::Katsuro::Lowerer;
