@@ -12,7 +12,7 @@ package Brocken::Jenny::Codegen::ARM64::Inst {
                 str_64 ldr_64 str_32 ldr_32
                 ldr_lit ldr_lit_64
                 movz_64 movz_32 movk_64 movk_32 mov_64
-                adr adrp blr bl b
+                adr adrp blr br bl b
                 brk svc uxtb
                 add_imm sub_imm
                 cmp_imm
@@ -78,6 +78,7 @@ package Brocken::Jenny::Codegen::ARM64::Inst {
         _ADR        => 0x10000000,    # ADR: 0 0 1 10000 imm19 rd
         _ADRP       => 0x90000000,    # ADRP: 1 0 0 10000 imm19 rd
         _BLR        => 0xD63F0000,    # BLR: 10 010 101 10 000 000000 00000 00000 rn 00000
+        _BR         => 0xD61F0000,    # BR:  1101 0110 0001 1111 0000 0000 000 rn 00000
         _BL         => 0x94000000,    # BL: 10 010 11 imm26
         _B          => 0x14000000,    # B: 00 010 11 imm26
         _BRK        => 0xD4200000,    # BRK: 11 010 100 001 imm16 00000 00000
@@ -117,6 +118,7 @@ package Brocken::Jenny::Codegen::ARM64::Inst {
         _ADRP | ( ( $page_diff & 3 ) << 29 ) | ( ( ( $page_diff >> 2 ) & 0x7FFFF ) << 5 ) | $rd;
     }
     sub blr ($rn)   { _BLR | ( $rn << 5 ) }
+    sub br  ($rn)   { _BR  | ( $rn << 5 ) }
     sub bl($offset) { _BL | ( ( $offset >> 2 ) & 0x3FFFFFF ) }
     sub b    ($offset)    { _B | ( ( $offset >> 2 ) & 0x3FFFFFF ) }
     sub brk  ($imm16)     { _BRK | ( ( $imm16 & 0xFFFF ) << 5 ) }
