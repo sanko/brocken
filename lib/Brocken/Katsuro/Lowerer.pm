@@ -7,10 +7,10 @@ use Brocken::ICB;
 use Carp ();
 
 class Brocken::Katsuro::Lowerer {
-    field $module : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
-    field $platform : reader : param = undef;
-    field $fuel : param = $Brocken::default_fuel;
-    field $mem_limit : param = $Brocken::default_mem_limit;
+    field $module       : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
+    field $platform     : reader : param = undef;
+    field $fuel         : param = $Brocken::default_fuel;
+    field $mem_limit    : param = $Brocken::default_mem_limit;
     field $capabilities : param = $Brocken::default_capabilities;
     field $builder = Brocken::Lindsay::IR::Builder->new();
     field $current_func;
@@ -475,10 +475,10 @@ class Brocken::Katsuro::Lowerer {
             }
 
             # Initialize fuel at [hb+FUEL] to default_fuel
-            my $fuel_const   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $fuel );
-            my $hb_fuel      = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
-            my $fuel_off     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::FUEL );
-            my $fuel_addr    = $builder->build_add( $hb_fuel, $fuel_off );
+            my $fuel_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $fuel );
+            my $hb_fuel    = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+            my $fuel_off   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::FUEL );
+            my $fuel_addr  = $builder->build_add( $hb_fuel, $fuel_off );
             $builder->build_store( $fuel_const, $fuel_addr );
 
             # Initialize memory_limit at [hb+MEMORY_LIMIT]
@@ -610,6 +610,8 @@ class Brocken::Katsuro::Lowerer {
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Assign') )        { return $self->lower_assign($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ListVarDecl') )   { return $self->lower_list_var_decl($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') )        { return $self->lower_return($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Throw') )         { return $self->lower_throw($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::TryCatch') )      { return $self->lower_trycatch($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') )            { return $self->lower_if($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') )         { return $self->lower_while($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Break') )         { return $self->lower_break($stmt); }
@@ -886,6 +888,228 @@ class Brocken::Katsuro::Lowerer {
         pop $_loop_exit_blocks->@*;
         $builder->position_at_end($exit);
         $current_block = $exit;
+    }
+
+    # === Exception handling: setjmp/longjmp intrinsics ===
+    method _ensure_sjlj_intrinsics() {
+        return if $functions->{'setjmp'};
+        my $setjmp_fn = Brocken::Lindsay::IR::Function->new(
+            name        => 'setjmp',
+            return_type => Brocken::Lindsay::IR::Type::i64(),
+            params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
+        );
+        $module->add_function($setjmp_fn);
+        $functions->{'setjmp'} = $setjmp_fn;
+        my $longjmp_fn = Brocken::Lindsay::IR::Function->new(
+            name        => 'longjmp',
+            return_type => Brocken::Lindsay::IR::Type::void(),
+            params      => [
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64() ),
+            ],
+        );
+        $module->add_function($longjmp_fn);
+        $functions->{'longjmp'} = $longjmp_fn;
+    }
+
+    # === try/catch/finally lowering ===
+    # CFG structure:
+    #   try_setup -> setjmp call, branch on return value
+    #   try_body  -> user code, normal exit pops handler -> finally/merge
+    #   landing   -> exception path: load thrown_value, pop handler -> catch/finally
+    #   catch     -> catch body -> finally/merge
+    #   finally   -> finally body -> merge
+    method lower_trycatch($ast) {
+        my $func = $current_func;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $hb_alloca = $symbols->{'__heap_base'} or Carp::croak( "try/catch requires __heap_base at " . $self->_loc($ast) );
+        my $hb        = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb_alloca, undef, $line, $col );
+        $self->_ensure_sjlj_intrinsics();
+        my $try_body_block   = $func->append_block( $self->unique_block_name('try_body') );
+        my $landing_block    = $func->append_block( $self->unique_block_name('landing') );
+        my $merge_block      = $func->append_block( $self->unique_block_name('try_merge') );
+        my $catch_block      = defined $ast->catch_body   ? $func->append_block( $self->unique_block_name('catch') )   : undef;
+        my $finally_block    = defined $ast->finally_body ? $func->append_block( $self->unique_block_name('finally') ) : undef;
+        my $normal_exit      = $finally_block // $merge_block;
+        my $catch_or_finally = $catch_block   // $finally_block // $merge_block;
+
+        # --- try_setup block ---
+        my $setup_block = $func->append_block( $self->unique_block_name('try_setup') );
+        $builder->build_br( $setup_block, $line, $col );
+        $builder->position_at_end($setup_block);
+        $current_block = $setup_block;
+        my $bump_alloc_fn = $functions->{'Brocken::Runtime::bump_alloc'} or
+            Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) );
+
+        # Allocate handler node (16 bytes): [next_ptr, jmp_buf_ptr]
+        my $handler_size = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 16 );
+        my $handler      = $builder->build_call( $bump_alloc_fn, [ $hb, $handler_size ], undef, $line, $col );
+
+        # Allocate jmp_buf (256 bytes, generous for all platforms)
+        my $jmp_buf_size = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 256 );
+        my $jmp_buf      = $builder->build_call( $bump_alloc_fn, [ $hb, $jmp_buf_size ], undef, $line, $col );
+
+        # Load current handler stack head
+        my $eh_stack_addr
+            = $builder->build_add( $hb,
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::EXCEPTION_HANDLER_STACK ),
+            undef, $line, $col, );
+        my $old_head = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $eh_stack_addr, undef, $line, $col );
+
+        # Store old_head at handler+0 (next pointer)
+        $builder->build_store( $old_head, $handler, $line, $col );
+
+        # Store jmp_buf at handler+8
+        my $jmp_buf_slot
+            = $builder->build_add( $handler, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 8 ),
+            undef, $line, $col, );
+        $builder->build_store( $jmp_buf, $jmp_buf_slot, $line, $col );
+
+        # Push handler onto ICB exception_handler_stack
+        $builder->build_store( $handler, $eh_stack_addr, $line, $col );
+
+        # Call setjmp(jmp_buf) -> returns 0 on first call, nonzero after longjmp
+        my $setjmp_fn = $functions->{'setjmp'};
+        my $sj_ret    = $builder->build_call( $setjmp_fn, [$jmp_buf], undef, $line, $col );
+
+        # Branch: 0 -> try body, nonzero -> landing pad
+        my $zero   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+        my $is_exc = $builder->build_icmp( 'ne', $sj_ret, $zero, undef, $line, $col );
+        $builder->build_cond_br( $is_exc, $landing_block, $try_body_block, $line, $col );
+
+        # --- try body block ---
+        $builder->position_at_end($try_body_block);
+        $current_block = $try_body_block;
+        $self->lower_block_body( $ast->try_body );
+
+        # Normal exit: pop handler from ICB
+        unless ( $current_block->terminator ) {
+            my $cur_head         = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $eh_stack_addr, undef, $line, $col );
+            my $cur_handler_next = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $cur_head,      undef, $line, $col );
+            $builder->build_store( $cur_handler_next, $eh_stack_addr, $line, $col );
+            $builder->build_br( $normal_exit, $line, $col );
+        }
+
+        # --- landing pad block (exception path) ---
+        $builder->position_at_end($landing_block);
+        $current_block = $landing_block;
+
+        # Load thrown value
+        my $thrown_addr
+            = $builder->build_add( $hb,
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::THROWN_VALUE ),
+            undef, $line, $col, );
+        my $thrown_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $thrown_addr, undef, $line, $col );
+
+        # Store thrown value to catch_var if present
+        if ( $catch_block && defined $ast->catch_var ) {
+            my $var_name = $ast->catch_var;
+            my $alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%' . $var_name . '.addr', undef, $line, $col, $var_name, 'i64' );
+            $symbols->{$var_name} = $alloca;
+            $builder->build_store( $thrown_val, $alloca, $line, $col );
+        }
+
+        # Pop handler from ICB (re-load from memory since longjmp clobbered registers)
+        my $cur_head2         = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $eh_stack_addr, undef, $line, $col );
+        my $cur_handler_next2 = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $cur_head2,     undef, $line, $col );
+        $builder->build_store( $cur_handler_next2, $eh_stack_addr, $line, $col );
+
+        # Branch to catch or finally
+        $builder->build_br( $catch_or_finally, $line, $col );
+
+        # --- catch body block ---
+        if ($catch_block) {
+            $builder->position_at_end($catch_block);
+            $current_block = $catch_block;
+            $self->lower_block_body( $ast->catch_body );
+
+            # Clean up catch_var from symbols
+            if ( defined $ast->catch_var ) {
+                delete $symbols->{ $ast->catch_var };
+            }
+            unless ( $current_block->terminator ) {
+                $builder->build_br( $finally_block // $merge_block, $line, $col );
+            }
+        }
+
+        # --- finally body block ---
+        if ($finally_block) {
+            $builder->position_at_end($finally_block);
+            $current_block = $finally_block;
+            $self->lower_block_body( $ast->finally_body );
+            unless ( $current_block->terminator ) {
+                $builder->build_br( $merge_block, $line, $col );
+            }
+        }
+
+        # --- merge block ---
+        $builder->position_at_end($merge_block);
+        $current_block = $merge_block;
+    }
+
+    # === throw lowering ===
+    # Evaluate expr, store in ICB.thrown_value.
+    # If handler exists: longjmp to it.
+    # If no handler: set err_code = ERR_THROW, continue.
+    method lower_throw($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $hb_alloca = $symbols->{'__heap_base'} or Carp::croak( "throw requires __heap_base at " . $self->_loc($ast) );
+        my $hb        = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb_alloca, undef, $line, $col );
+        $self->_ensure_sjlj_intrinsics();
+
+        # Evaluate the expression
+        my $val = $self->lower_expression( $ast->expr );
+
+        # Store thrown value in ICB.thrown_value
+        my $thrown_addr
+            = $builder->build_add( $hb,
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::THROWN_VALUE ),
+            undef, $line, $col, );
+        $builder->build_store( $val, $thrown_addr, $line, $col );
+
+        # Load handler from ICB.exception_handler_stack
+        my $eh_stack_addr
+            = $builder->build_add( $hb,
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::EXCEPTION_HANDLER_STACK ),
+            undef, $line, $col, );
+        my $handler = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $eh_stack_addr, undef, $line, $col );
+
+        # Check if handler exists
+        my $zero            = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+        my $has_handler     = $builder->build_icmp( 'ne', $handler, $zero, undef, $line, $col );
+        my $do_throw_block  = $current_func->append_block( $self->unique_block_name('do_throw') );
+        my $unhandled_block = $current_func->append_block( $self->unique_block_name('unhandled_throw') );
+        my $cont_block      = $current_func->append_block( $self->unique_block_name('throw_cont') );
+        $builder->build_cond_br( $has_handler, $do_throw_block, $unhandled_block, $line, $col );
+
+        # --- do_throw: longjmp ---
+        $builder->position_at_end($do_throw_block);
+        $current_block = $do_throw_block;
+        my $jmp_buf_slot
+            = $builder->build_add( $handler, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 8 ),
+            undef, $line, $col, );
+        my $jmp_buf_ptr = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $jmp_buf_slot, undef, $line, $col );
+        my $longjmp_fn  = $functions->{'longjmp'};
+        my $one         = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
+        $builder->build_call( $longjmp_fn, [ $jmp_buf_ptr, $one ], undef, $line, $col );
+
+        # longjmp never returns; add unreachable branch for CFG validity
+        $builder->build_br( $cont_block, $line, $col );
+
+        # --- unhandled: set err_code = ERR_THROW, continue ---
+        $builder->position_at_end($unhandled_block);
+        $current_block = $unhandled_block;
+        my $err_addr
+            = $builder->build_add( $hb,
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_CODE ),
+            undef, $line, $col, );
+        my $err_throw = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_THROW );
+        $builder->build_store( $err_throw, $err_addr, $line, $col );
+        $builder->build_br( $cont_block, $line, $col );
+
+        # --- continue block ---
+        $builder->position_at_end($cont_block);
+        $current_block = $cont_block;
     }
 
     method lower_break($ast) {
@@ -1181,7 +1405,12 @@ class Brocken::Katsuro::Lowerer {
             my $cmp_i64    = $builder->build_sext( $cmp_result, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
             my $zero       = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
             if ( $op eq 'cmp' ) {
-                return $cmp_i64;
+                my $neg     = $builder->build_icmp( 'slt', $cmp_i64, $zero, undef, $line, $col );
+                my $is_zero = $builder->build_icmp( 'eq',  $cmp_i64, $zero, undef, $line, $col );
+                my $neg_one = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => -1 );
+                my $one     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value =>  1 );
+                my $inner   = $builder->build_select( $neg, $neg_one, $one, undef, $line, $col );
+                return $builder->build_select( $is_zero, $zero, $inner, undef, $line, $col );
             }
             if ( $op eq 'eq' ) {
                 return $builder->build_icmp( 'eq', $cmp_i64, $zero, undef, $line, $col );

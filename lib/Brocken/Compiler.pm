@@ -8,11 +8,9 @@ use Brocken::Katsuro::Lowerer;
 class Brocken::Compiler {
     use File::Basename qw[dirname];
     use File::Spec;
-
     field $fuel         : param = $Brocken::default_fuel;
     field $mem_limit    : param = $Brocken::default_mem_limit;
     field $capabilities : param = $Brocken::default_capabilities;
-
     my %_CLASS_DEFAULTS;
 
     sub set_default_policy {
@@ -27,7 +25,6 @@ class Brocken::Compiler {
         $Brocken::default_capabilities = $opts{capabilities} if exists $opts{capabilities};
         return;
     }
-
     ADJUST {
         if ( exists $_CLASS_DEFAULTS{fuel} && $fuel == $Brocken::default_fuel ) {
             $fuel = $_CLASS_DEFAULTS{fuel};
@@ -71,13 +68,8 @@ class Brocken::Compiler {
         my $user_ast = $self->_parse( $source, $filename );
         push @all_stmts, $user_ast->statements->@*;
         my $merged_ast = Brocken::Katsuro::AST::Program->new( statements => \@all_stmts );
-        my $lowerer    = Brocken::Katsuro::Lowerer->new(
-            platform     => $platform,
-            fuel         => $fuel,
-            mem_limit    => $mem_limit,
-            capabilities => $capabilities,
-        );
-        my $module = $lowerer->lower_program($merged_ast);
+        my $lowerer = Brocken::Katsuro::Lowerer->new( platform => $platform, fuel => $fuel, mem_limit => $mem_limit, capabilities => $capabilities, );
+        my $module  = $lowerer->lower_program($merged_ast);
         $module->set_class_info( $lowerer->classes );
         $module->set_rodata( $lowerer->rodata );
         return $module;

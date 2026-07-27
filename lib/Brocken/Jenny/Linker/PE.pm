@@ -218,15 +218,92 @@ enabled.
             push @extern_funcs, $ff->{target} unless grep { $_ eq $ff->{target} } @extern_funcs;
         }
 
+        # Generate inline setjmp/longjmp stubs for x64 (skip msvcrt import)
+        my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
+        my %sjlj_stubs;
+        if ( $platform->is_x64 && grep { $_ eq 'setjmp' || $_ eq 'longjmp' } @extern_funcs ) {
+            my $stub_base = length($text);
+            if ( grep { $_ eq 'setjmp' } @extern_funcs ) {
+
+                # setjmp(buf): save callee-saved regs, return 0
+                # All [rcx+disp8] stores use mod=01 for correct encoding
+                # 48 89 59 00       mov [rcx+0x00], rbx
+                # 48 89 69 08       mov [rcx+0x08], rbp
+                # 48 89 79 10       mov [rcx+0x10], rdi
+                # 48 89 71 18       mov [rcx+0x18], rsi
+                # 4C 89 61 20       mov [rcx+0x20], r12
+                # 4C 89 69 28       mov [rcx+0x28], r13
+                # 4C 89 71 30       mov [rcx+0x30], r14
+                # 4C 89 79 38       mov [rcx+0x38], r15
+                # 48 89 E0          mov rax, rsp
+                # 48 89 41 40       mov [rcx+0x40], rax
+                # 48 8B 04 24       mov rax, [rsp]
+                # 48 89 41 48       mov [rcx+0x48], rax
+                # 31 C0             xor eax, eax
+                # C3                ret
+                $text .= pack( 'C4', 0x48, 0x89, 0x59, 0x00 );
+                $text .= pack( 'C4', 0x48, 0x89, 0x69, 0x08 );
+                $text .= pack( 'C4', 0x48, 0x89, 0x79, 0x10 );
+                $text .= pack( 'C4', 0x48, 0x89, 0x71, 0x18 );
+                $text .= pack( 'C4', 0x4C, 0x89, 0x61, 0x20 );
+                $text .= pack( 'C4', 0x4C, 0x89, 0x69, 0x28 );
+                $text .= pack( 'C4', 0x4C, 0x89, 0x71, 0x30 );
+                $text .= pack( 'C4', 0x4C, 0x89, 0x79, 0x38 );
+                $text .= pack( 'C3', 0x48, 0x89, 0xE0 );
+                $text .= pack( 'C4', 0x48, 0x89, 0x41, 0x40 );
+                $text .= pack( 'C4', 0x48, 0x8B, 0x04, 0x24 );
+                $text .= pack( 'C4', 0x48, 0x89, 0x41, 0x48 );
+                $text .= pack( 'C2', 0x31, 0xC0 );
+                $text .= pack( 'C',  0xC3 );
+                $sjlj_stubs{setjmp} = $stub_base;
+                $stub_base = length($text);
+            }
+            if ( grep { $_ eq 'longjmp' } @extern_funcs ) {
+
+                # longjmp(buf, val): restore regs, jump to saved ret addr
+                # 4C 8B 41 48       mov r8, [rcx+0x48]    (return addr)
+                # 48 8B 19          mov rbx, [rcx+0x00]
+                # 48 8B 69 08       mov rbp, [rcx+0x08]
+                # 48 8B 79 10       mov rdi, [rcx+0x10]
+                # 48 8B 71 18       mov rsi, [rcx+0x18]
+                # 4C 8B 61 20       mov r12, [rcx+0x20]
+                # 4C 8B 69 28       mov r13, [rcx+0x28]
+                # 4C 8B 71 30       mov r14, [rcx+0x30]
+                # 4C 8B 79 38       mov r15, [rcx+0x38]
+                # 48 8B 41 40       mov rax, [rcx+0x40]   (saved rsp)
+                # 48 89 C4          mov rsp, rax
+                # 48 89 D0          mov rax, rdx           (return val)
+                # 41 FF E0          jmp r8
+                $text .= pack( 'C4', 0x4C, 0x8B, 0x41, 0x48 );
+                $text .= pack( 'C3', 0x48, 0x8B, 0x19 );
+                $text .= pack( 'C4', 0x48, 0x8B, 0x69, 0x08 );
+                $text .= pack( 'C4', 0x48, 0x8B, 0x79, 0x10 );
+                $text .= pack( 'C4', 0x48, 0x8B, 0x71, 0x18 );
+                $text .= pack( 'C4', 0x4C, 0x8B, 0x61, 0x20 );
+                $text .= pack( 'C4', 0x4C, 0x8B, 0x69, 0x28 );
+                $text .= pack( 'C4', 0x4C, 0x8B, 0x71, 0x30 );
+                $text .= pack( 'C4', 0x4C, 0x8B, 0x79, 0x38 );
+                $text .= pack( 'C4', 0x48, 0x8B, 0x41, 0x40 );
+                $text .= pack( 'C3', 0x48, 0x89, 0xC4 );
+                $text .= pack( 'C3', 0x48, 0x89, 0xD0 );
+                $text .= pack( 'C3', 0x41, 0xFF, 0xE0 );
+                $sjlj_stubs{longjmp} = $stub_base;
+            }
+
+            # Register stub offsets (relative to code start, excluding entry stub)
+            for my $name ( keys %sjlj_stubs ) {
+                $func_offsets{$name} = $sjlj_stubs{$name} - $entry_size;
+            }
+            @extern_funcs = grep { $_ ne 'setjmp' && $_ ne 'longjmp' } @extern_funcs;
+        }
+
         # Generate import stubs for undefined external functions
-        my $entry_size       = $self->type eq 'exe' ? length($entry_stub) : 0;
         my @kernel32_imports = qw(CreateThread WaitForSingleObject CloseHandle SetThreadAffinityMask GetExitCodeThread
             AcquireSRWLockExclusive ReleaseSRWLockExclusive InitializeConditionVariable
             SleepConditionVariableSRW WakeConditionVariable WakeAllConditionVariable);
         my %kernel32_imports = map { $_ => 1 } @kernel32_imports;
         my %import_names;
         my ( %kernel32_names, %msvcrt_names );
-
         for my $name (@extern_funcs) {
             if ( $kernel32_imports{$name} ) {
                 $kernel32_names{$name} = 1;

@@ -22,7 +22,7 @@ my i64 $f16 = Brocken::Runtime::free16_count($hb);
 my i64 $fb = Brocken::Runtime::free_blocks_count($hb);
 # Expected: heap_cursor == immix_cursor == hb + 144 (block at hb+128, Line 0 data at block+16)
 
-    my ptr $base = Brocken::ptr_add($hb, 128);
+    my ptr $base = Brocken::ptr_add($hb, 144);
     my ptr $line0 = Brocken::ptr_add($base, 16);
     # hc should be line0
     if (Brocken::ptr_cmp_eq($hc, $line0) == 0) { return 1; }
@@ -372,7 +372,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block = Brocken::ptr_add($hb, 128);
+my ptr $block = Brocken::ptr_add($hb, 144);
 # _init marks Line 0 — clear bitmap first
 Brocken::Runtime::clear_block_bitmap($block);
 # Initially no lines marked
@@ -416,7 +416,7 @@ SKIP: {
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $fb0 = Brocken::Runtime::free_blocks_count($hb);
-my ptr $block = Brocken::ptr_add($hb, 128);
+my ptr $block = Brocken::ptr_add($hb, 144);
 # Manually recycle the (currently empty) block
 Brocken::Runtime::recycle_block($hb, $block);
 my i64 $fb1 = Brocken::Runtime::free_blocks_count($hb);
@@ -463,7 +463,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $source = <<'BROCKEN';
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 128);
+my ptr $block0 = Brocken::ptr_add($hb, 144);
 my ptr $cb = Brocken::load_i64(Brocken::ptr_add($hb, 80));
 # Sanity: current_block starts as hb+128
 if (Brocken::ptr_cmp_eq($cb, $block0) == 0) { return 1; }
@@ -513,7 +513,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $source = <<'BROCKEN';
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 128);
+my ptr $block0 = Brocken::ptr_add($hb, 144);
 # Normal allocations in block 0
 my $a = 10;
 my $b = 20;

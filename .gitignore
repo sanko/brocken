@@ -47,3 +47,7 @@ eg/lib/*.pm
 
 *.txt
 *.exe
+test_*.pl
+tmp_*.pl
+test_*.c
+tmp_*.c

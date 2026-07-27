@@ -136,24 +136,26 @@ subtest 'desc not present when omitted' => sub {
 # -- ICB field list produces expected layout ---------------------------
 subtest 'ICB layout matches committed offsets' => sub {
     require Brocken::ICB;
-    is( Brocken::ICB::SIZE(), 128, 'ICB size=128' );
+    is( Brocken::ICB::SIZE(), 144, 'ICB size=144' );
     my @expected = (
-        [ 'HEAP_CURSOR',         0 ],
-        [ 'CURRENT_FCB',         8 ],
-        [ 'FIBER_HEAD',          16 ],
-        [ 'IMMIX_CURSOR',        24 ],
-        [ 'IMMIX_LIMIT',         32 ],
-        [ 'FREE_BLOCKS',         40 ],
-        [ 'FREE16_HEAD',         48 ],
-        [ 'SUSPECT_BUFFER_HEAD', 56 ],
-        [ 'FUEL',                64 ],
-        [ 'ERR_CODE',            72 ],
-        [ 'CURRENT_BLOCK',       80 ],
-        [ 'MEMORY_LIMIT',        88 ],
-        [ 'MEMORY_USED',         96 ],
-        [ 'CAPABILITIES',        104 ],
-        [ 'GATE_TABLE',          112 ],
-        [ 'HOST_ICB',            120 ],
+        [ 'HEAP_CURSOR',             0 ],
+        [ 'CURRENT_FCB',             8 ],
+        [ 'FIBER_HEAD',              16 ],
+        [ 'IMMIX_CURSOR',            24 ],
+        [ 'IMMIX_LIMIT',             32 ],
+        [ 'FREE_BLOCKS',             40 ],
+        [ 'FREE16_HEAD',             48 ],
+        [ 'SUSPECT_BUFFER_HEAD',     56 ],
+        [ 'FUEL',                    64 ],
+        [ 'ERR_CODE',                72 ],
+        [ 'CURRENT_BLOCK',           80 ],
+        [ 'MEMORY_LIMIT',            88 ],
+        [ 'MEMORY_USED',             96 ],
+        [ 'CAPABILITIES',            104 ],
+        [ 'GATE_TABLE',              112 ],
+        [ 'HOST_ICB',                120 ],
+        [ 'EXCEPTION_HANDLER_STACK', 128 ],
+        [ 'THROWN_VALUE',            136 ],
     );
     for my $e (@expected) {
         my ( $name, $offset ) = @$e;
@@ -165,6 +167,7 @@ subtest 'ICB layout matches committed offsets' => sub {
     is( Brocken::ICB::ERR_OOM(),      1, 'ERR_OOM=1' );
     is( Brocken::ICB::ERR_NO_FUEL(),  2, 'ERR_NO_FUEL=2' );
     is( Brocken::ICB::ERR_SECURITY(), 3, 'ERR_SECURITY=3' );
+    is( Brocken::ICB::ERR_THROW(),    5, 'ERR_THROW=5' );
 };
 
 # -- error on missing name/type ----------------------------------------
