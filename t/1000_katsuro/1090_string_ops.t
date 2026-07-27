@@ -164,7 +164,7 @@ BROCKEN
         $brocken->linker->write_executable( $file, $funcs, $host );
         chmod 0755, $file;
         my $output = `$file`;
-        like( $output, qr/^-1\n0\n$/m, 'cmp returns strcmp values natively' );
+        like( $output, qr/^-1\R0\R$/m, 'cmp returns strcmp values natively' );
         unlink $file;
     }
 };
