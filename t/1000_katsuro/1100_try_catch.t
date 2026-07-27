@@ -14,7 +14,8 @@ subtest 'try/catch with no throw - normal flow' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
 SKIP: {
-        skip 'Not native', 2 unless $host->is_native;
+        skip 'Not native',            2 unless $host->is_native;
+        skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my i64 $x = 10;
 try {
@@ -36,7 +37,8 @@ subtest 'throw and catch' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
 SKIP: {
-        skip 'Not native', 2 unless $host->is_native;
+        skip 'Not native',            2 unless $host->is_native;
+        skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my i64 $result = 0;
 try {
@@ -60,7 +62,8 @@ subtest 'try/finally without catch' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
 SKIP: {
-        skip 'Not native', 2 unless $host->is_native;
+        skip 'Not native',            2 unless $host->is_native;
+        skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my i64 $x = 0;
 try {
@@ -82,7 +85,8 @@ subtest 'try/catch/finally - finally runs after catch' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
 SKIP: {
-        skip 'Not native', 2 unless $host->is_native;
+        skip 'Not native',            2 unless $host->is_native;
+        skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 my i64 $x = 0;
 try {
@@ -106,7 +110,8 @@ subtest 'unhandled throw sets err_code' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
 SKIP: {
-        skip 'Not native', 2 unless $host->is_native;
+        skip 'Not native',            2 unless $host->is_native;
+        skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
         my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 throw 42;
 return 0;

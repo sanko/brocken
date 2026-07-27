@@ -218,7 +218,7 @@ enabled.
             push @extern_funcs, $ff->{target} unless grep { $_ eq $ff->{target} } @extern_funcs;
         }
 
-        # Generate inline setjmp/longjmp stubs for x64 (skip msvcrt import)
+        # Generate inline setjmp/longjmp stubs (skip libc import)
         my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
         my %sjlj_stubs;
         if ( $platform->is_x64 && grep { $_ eq 'setjmp' || $_ eq 'longjmp' } @extern_funcs ) {
@@ -287,6 +287,45 @@ enabled.
                 $text .= pack( 'C3', 0x48, 0x89, 0xC4 );
                 $text .= pack( 'C3', 0x48, 0x89, 0xD0 );
                 $text .= pack( 'C3', 0x41, 0xFF, 0xE0 );
+                $sjlj_stubs{longjmp} = $stub_base;
+            }
+
+            # Register stub offsets (relative to code start, excluding entry stub)
+            for my $name ( keys %sjlj_stubs ) {
+                $func_offsets{$name} = $sjlj_stubs{$name} - $entry_size;
+            }
+            @extern_funcs = grep { $_ ne 'setjmp' && $_ ne 'longjmp' } @extern_funcs;
+        }
+        elsif ( $platform->is_arm64 && grep { $_ eq 'setjmp' || $_ eq 'longjmp' } @extern_funcs ) {
+            use Brocken::Jenny::Codegen::ARM64::Inst;
+            my $stub_base = length($text);
+            if ( grep { $_ eq 'setjmp' } @extern_funcs ) {
+
+                # setjmp(buf): save x19-x30 + SP, return 0
+                # x0 = jmp_buf pointer (Windows ARM64 ABI: x0 = first arg)
+                for my $i ( 0 .. 11 ) {
+                    my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
+                    $text .= pack( 'V', str_64( $reg, 0, $i * 8 ) );
+                }
+                $text .= pack( 'V', add_imm( 1, 31, 0 ) );    # mov x1, sp
+                $text .= pack( 'V', str_64( 1, 0, 96 ) );     # str x1, [x0, #96]
+                $text .= pack( 'V', movz_64( 0, 0 ) );        # mov x0, #0
+                $text .= pack( 'V', ret() );                  # ret
+                $sjlj_stubs{setjmp} = $stub_base;
+                $stub_base = length($text);
+            }
+            if ( grep { $_ eq 'longjmp' } @extern_funcs ) {
+
+                # longjmp(buf, val): restore x19-x30 + SP, jump to saved LR
+                # x0 = buf, x1 = return value
+                $text .= pack( 'V', ldr_64( 2, 0, 96 ) );     # ldr x2, [x0, #96]  (saved SP)
+                $text .= pack( 'V', add_imm( 31, 2, 0 ) );    # mov sp, x2
+                for my $i ( reverse( 0 .. 11 ) ) {
+                    my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
+                    $text .= pack( 'V', ldr_64( $reg, 0, $i * 8 ) );
+                }
+                $text .= pack( 'V', mov_64( 0, 1 ) );         # mov x0, x1  (return val)
+                $text .= pack( 'V', ret() );                  # ret (jumps to saved LR)
                 $sjlj_stubs{longjmp} = $stub_base;
             }
 
