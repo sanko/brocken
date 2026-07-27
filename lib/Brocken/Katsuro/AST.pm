@@ -179,4 +179,15 @@ class Brocken::Katsuro::AST::Stmt::ListVarDecl : isa(Brocken::Katsuro::AST::Node
     field $targets : param : reader;                # Array of { sigil, name, type } (type optional, inferred)
     field $expr    : param : reader;                # AST::Node (RHS expression)
 }
+
+class Brocken::Katsuro::AST::Stmt::TryCatch : isa(Brocken::Katsuro::AST::Node) {
+    field $try_body     : param : reader;            # AST::Stmt::Block
+    field $catch_var    : param : reader = undef;    # string (variable name) or undef
+    field $catch_body   : param : reader = undef;    # AST::Stmt::Block or undef
+    field $finally_body : param : reader = undef;    # AST::Stmt::Block or undef
+}
+
+class Brocken::Katsuro::AST::Stmt::Throw : isa(Brocken::Katsuro::AST::Node) {
+    field $expr : param : reader;                    # AST::Node expression to throw
+}
 1;

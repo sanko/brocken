@@ -120,12 +120,24 @@ sub Brocken::Runtime::get_host_icb(ptr $hb) -> ptr {
 sub Brocken::Runtime::set_host_icb(ptr $hb, ptr $val) {
     Brocken::store_i64(Brocken::ptr_add($hb, 120), $val);
 }
+sub Brocken::Runtime::get_exception_handler_stack(ptr $hb) -> ptr {
+    return Brocken::load_i64(Brocken::ptr_add($hb, 128));
+}
+sub Brocken::Runtime::set_exception_handler_stack(ptr $hb, ptr $val) {
+    Brocken::store_i64(Brocken::ptr_add($hb, 128), $val);
+}
+sub Brocken::Runtime::get_thrown_value(ptr $hb) -> i64 {
+    return Brocken::load_i64(Brocken::ptr_add($hb, 136));
+}
+sub Brocken::Runtime::set_thrown_value(ptr $hb, i64 $val) {
+    Brocken::store_i64(Brocken::ptr_add($hb, 136), $val);
+}
 
 # Initialize ICB and Immix heap metadata.
 sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
-    # Block starts after the ICB (128 bytes). Cannot read current_block from ICB
-    # yet — it hasn't been initialized. Compute directly.
-    my ptr $block_base = Brocken::ptr_add($heap_base, 128);
+    # Block starts after the ICB (144 bytes). Cannot read current_block from ICB
+    # yet -- it hasn't been initialized. Compute directly.
+    my ptr $block_base = Brocken::ptr_add($heap_base, 144);
     my ptr $line0_data = Brocken::ptr_add($block_base, 16);
     # Zero the block metadata: bitmap at [block+0..15], live_count at [block+32752],
     # next_free at [block+32760].
@@ -150,6 +162,8 @@ sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
     Brocken::Runtime::set_capabilities($heap_base, 0);
     Brocken::Runtime::set_gate_table($heap_base, 0);
     Brocken::Runtime::set_host_icb($heap_base, 0);
+    Brocken::Runtime::set_exception_handler_stack($heap_base, 0);
+    Brocken::Runtime::set_thrown_value($heap_base, 0);
     return;
 }
 

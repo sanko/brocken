@@ -101,7 +101,10 @@ class Brocken::Katsuro::Parser {
         return $self->parse_if()           if $self->check( 'KEYWORD', 'if' );
         return $self->parse_while()        if $self->check( 'KEYWORD', 'while' );
         return $self->parse_return()       if $self->check( 'KEYWORD', 'return' );
+        return $self->parse_throw()        if $self->check( 'KEYWORD', 'throw' );
+        return $self->parse_trycatch()     if $self->check( 'KEYWORD', 'try' );
         return $self->parse_loop_control() if $self->check( 'KEYWORD', 'last' ) || $self->check( 'KEYWORD', 'next' );
+
         if ( $self->check( 'KEYWORD', 'say' ) || $self->check( 'KEYWORD', 'print' ) ) {
             return $self->parse_builtin_print();
         }
@@ -252,6 +255,43 @@ class Brocken::Katsuro::Parser {
         }
         $self->consume( ';', undef, "Expected ';' after return" );
         return Brocken::Katsuro::AST::Stmt::Return->new( $self->_pos_token($ret_token), expr => $expr );
+    }
+
+    method parse_throw() {
+        my $throw_token = $self->advance();
+        my $expr        = $self->parse_expression(0);
+        $self->consume( ';', undef, "Expected ';' after throw" );
+        return Brocken::Katsuro::AST::Stmt::Throw->new( $self->_pos_token($throw_token), expr => $expr );
+    }
+
+    method parse_trycatch() {
+        my $try_token    = $self->advance();
+        my $try_body     = $self->parse_block();
+        my $catch_var    = undef;
+        my $catch_body   = undef;
+        my $finally_body = undef;
+        if ( $self->check( 'KEYWORD', 'catch' ) ) {
+            $self->advance();
+            if ( $self->check('(') ) {
+                $self->consume('(');
+                my $var_tok = $self->consume( 'VAR', undef, "Expected variable name in catch" );
+                $catch_var = $var_tok->{value};
+                $self->consume(')');
+            }
+            $catch_body = $self->parse_block();
+        }
+        if ( $self->check( 'KEYWORD', 'finally' ) ) {
+            $self->advance();
+            $finally_body = $self->parse_block();
+        }
+        Carp::croak( "Expected 'catch' or 'finally' after try block at " . $self->_loc() ) unless defined $catch_body || defined $finally_body;
+        return Brocken::Katsuro::AST::Stmt::TryCatch->new(
+            $self->_pos_token($try_token),
+            try_body     => $try_body,
+            catch_var    => $catch_var,
+            catch_body   => $catch_body,
+            finally_body => $finally_body,
+        );
     }
 
     # Parse (expr, expr, ...) as a list expression
