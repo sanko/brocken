@@ -355,6 +355,133 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
             $extern_seen{ $ff->{target} } = 1;
         }
 
+        # Generate inline setjmp/longjmp stubs (skip libc import)
+        my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
+        my %sjlj_stubs;
+        if ( grep { $_ eq 'setjmp' || $_ eq 'longjmp' } keys %extern_seen ) {
+            my $stub_base = length($text);
+            if ( $platform->is_x64 ) {
+
+                # x64 System V ABI: rdi = buf, rsi = val (longjmp)
+                # Callee-saved: rbx, rbp, r12-r15; also save rdi, rsi, rsp, ret-addr
+                if ( grep { $_ eq 'setjmp' } keys %extern_seen ) {
+
+                    # setjmp(buf): save callee-saved + rsp + ret addr, return 0
+                    $text .= pack( 'C3', 0x48, 0x89, 0x3F );          # mov [rdi], rbx
+                    $text .= pack( 'C4', 0x48, 0x89, 0x6F, 0x08 );    # mov [rdi+0x08], rbp
+                    $text .= pack( 'C4', 0x48, 0x89, 0x77, 0x10 );    # mov [rdi+0x10], rsi
+                    $text .= pack( 'C4', 0x4C, 0x89, 0x67, 0x18 );    # mov [rdi+0x18], r12
+                    $text .= pack( 'C4', 0x4C, 0x89, 0x6F, 0x20 );    # mov [rdi+0x20], r13
+                    $text .= pack( 'C4', 0x4C, 0x89, 0x77, 0x28 );    # mov [rdi+0x28], r14
+                    $text .= pack( 'C4', 0x4C, 0x89, 0x7F, 0x30 );    # mov [rdi+0x30], r15
+                    $text .= pack( 'C3', 0x48, 0x89, 0xE0 );          # mov rax, rsp
+                    $text .= pack( 'C4', 0x48, 0x89, 0x47, 0x38 );    # mov [rdi+0x38], rax
+                    $text .= pack( 'C4', 0x48, 0x8B, 0x04, 0x24 );    # mov rax, [rsp]
+                    $text .= pack( 'C4', 0x48, 0x89, 0x47, 0x40 );    # mov [rdi+0x40], rax
+                    $text .= pack( 'C2', 0x31, 0xC0 );                # xor eax, eax
+                    $text .= pack( 'C',  0xC3 );                      # ret
+                    $sjlj_stubs{setjmp} = $stub_base;
+                    $stub_base = length($text);
+                }
+                if ( grep { $_ eq 'longjmp' } keys %extern_seen ) {
+
+                    # longjmp(buf, val): restore regs, jump to saved ret addr
+                    $text .= pack( 'C4', 0x4C, 0x8B, 0x47, 0x40 );    # mov r8, [rdi+0x40]  (return addr)
+                    $text .= pack( 'C3', 0x48, 0x8B, 0x1F );          # mov rbx, [rdi]
+                    $text .= pack( 'C4', 0x48, 0x8B, 0x6F, 0x08 );    # mov rbp, [rdi+0x08]
+                    $text .= pack( 'C4', 0x48, 0x8B, 0x77, 0x10 );    # mov rsi, [rdi+0x10]
+                    $text .= pack( 'C4', 0x4C, 0x8B, 0x67, 0x18 );    # mov r12, [rdi+0x18]
+                    $text .= pack( 'C4', 0x4C, 0x8B, 0x6F, 0x20 );    # mov r13, [rdi+0x20]
+                    $text .= pack( 'C4', 0x4C, 0x8B, 0x77, 0x28 );    # mov r14, [rdi+0x28]
+                    $text .= pack( 'C4', 0x4C, 0x8B, 0x7F, 0x30 );    # mov r15, [rdi+0x30]
+                    $text .= pack( 'C4', 0x48, 0x8B, 0x47, 0x38 );    # mov rax, [rdi+0x38] (saved rsp)
+                    $text .= pack( 'C3', 0x48, 0x89, 0xC4 );          # mov rsp, rax
+                    $text .= pack( 'C3', 0x48, 0x89, 0xF0 );          # mov rax, rsi        (return val)
+                    $text .= pack( 'C3', 0x41, 0xFF, 0xE0 );          # jmp r8
+                    $sjlj_stubs{longjmp} = $stub_base;
+                }
+            }
+            elsif ( $platform->is_arm64 ) {
+                use Brocken::Jenny::Codegen::ARM64::Inst;
+                if ( grep { $_ eq 'setjmp' } keys %extern_seen ) {
+
+                    # setjmp(buf): save x19-x30 + SP, return 0
+                    for my $i ( 0 .. 11 ) {
+                        my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
+                        $text .= pack( 'V', str_64( $reg, 0, $i * 8 ) );
+                    }
+                    $text .= pack( 'V', add_imm( 1, 31, 0 ) );    # mov x1, sp
+                    $text .= pack( 'V', str_64( 1, 0, 96 ) );     # str x1, [x0, #96]
+                    $text .= pack( 'V', movz_64( 0, 0 ) );        # mov x0, #0
+                    $text .= pack( 'V', ret() );                  # ret
+                    $sjlj_stubs{setjmp} = $stub_base;
+                    $stub_base = length($text);
+                }
+                if ( grep { $_ eq 'longjmp' } keys %extern_seen ) {
+
+                    # longjmp(buf, val): restore x19-x30 + SP, return via saved LR
+                    $text .= pack( 'V', ldr_64( 2, 0, 96 ) );     # ldr x2, [x0, #96]  (saved SP)
+                    $text .= pack( 'V', add_imm( 31, 2, 0 ) );    # mov sp, x2
+                    for my $i ( reverse( 0 .. 11 ) ) {
+                        my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
+                        $text .= pack( 'V', ldr_64( $reg, 0, $i * 8 ) );
+                    }
+                    $text .= pack( 'V', mov_64( 0, 1 ) );         # mov x0, x1  (return val)
+                    $text .= pack( 'V', ret() );                  # ret (jumps to saved LR)
+                    $sjlj_stubs{longjmp} = $stub_base;
+                }
+            }
+            elsif ( $platform->is_riscv64 ) {
+
+                # Helper subs for RISC-V64 instruction encoding
+                my $rv_sd = sub ( $rs2, $rs1, $imm ) {
+                    ( ( ( $imm >> 5 ) & 0x7F ) << 25 ) | ( $rs2 << 20 ) | ( $rs1 << 15 ) | ( 3 << 12 ) | ( ( $imm & 0x1F ) << 7 ) | 0x23;
+                };
+                my $rv_ld = sub ( $rd, $rs1, $imm ) {
+                    ( ( $imm & 0xFFF ) << 20 ) | ( $rs1 << 15 ) | ( 3 << 12 ) | ( $rd << 7 ) | 0x03;
+                };
+                my $rv_addi = sub ( $rd, $rs1, $imm ) {
+                    ( ( $imm & 0xFFF ) << 20 ) | ( $rs1 << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13;
+                };
+                my $rv_jalr = sub ( $rd, $rs1, $imm ) {
+                    ( ( $imm & 0xFFF ) << 20 ) | ( $rs1 << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x67;
+                };
+                if ( grep { $_ eq 'setjmp' } keys %extern_seen ) {
+
+                    # setjmp(buf): a0=buf, save s0-s11, ra, sp, return 0
+                    my @callee_saved = ( 8, 9, 18 .. 27 );    # s0-s11
+                    for my $i ( 0 .. $#callee_saved ) {
+                        $text .= pack( 'V', $rv_sd->( $callee_saved[$i], 10, $i * 8 ) );
+                    }
+                    $text .= pack( 'V', $rv_sd->( 1, 10, 12 * 8 ) );    # sd ra, 96(a0)
+                    $text .= pack( 'V', $rv_sd->( 2, 10, 13 * 8 ) );    # sd sp, 104(a0)
+                    $text .= pack( 'V', $rv_addi->( 10, 0, 0 ) );       # li a0, 0
+                    $text .= pack( 'V', $rv_jalr->( 0, 1, 0 ) );        # ret
+                    $sjlj_stubs{setjmp} = $stub_base;
+                    $stub_base = length($text);
+                }
+                if ( grep { $_ eq 'longjmp' } keys %extern_seen ) {
+
+                    # longjmp(buf, val): a0=buf, a1=val, restore s0-s11, ra, sp
+                    my @callee_saved = ( 8, 9, 18 .. 27 );              # s0-s11
+                    for my $i ( 0 .. $#callee_saved ) {
+                        $text .= pack( 'V', $rv_ld->( $callee_saved[$i], 10, $i * 8 ) );
+                    }
+                    $text .= pack( 'V', $rv_ld->( 1, 10, 12 * 8 ) );    # ld ra, 96(a0)
+                    $text .= pack( 'V', $rv_ld->( 2, 10, 13 * 8 ) );    # ld sp, 104(a0)
+                    $text .= pack( 'V', $rv_addi->( 10, 11, 0 ) );      # mv a0, a1
+                    $text .= pack( 'V', $rv_jalr->( 0, 1, 0 ) );        # jr ra
+                    $sjlj_stubs{longjmp} = $stub_base;
+                }
+            }
+
+            # Register stub offsets and remove from extern list
+            for my $name ( keys %sjlj_stubs ) {
+                $func_offsets{$name} = $sjlj_stubs{$name} - $entry_size;
+            }
+            delete $extern_seen{$_} for grep { $_ eq 'setjmp' || $_ eq 'longjmp' } keys %extern_seen;
+        }
+
         # Allocate GOT slots for extern functions starting at +128 (slot 16+)
         my $next_got_offset = 128;
         for my $name ( sort keys %extern_seen ) {
@@ -363,7 +490,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         }
 
         # Generate import stubs for undefined external functions
-        my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
             my $got_rva;

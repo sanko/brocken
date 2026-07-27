@@ -1405,12 +1405,12 @@ class Brocken::Katsuro::Lowerer {
             my $cmp_i64    = $builder->build_sext( $cmp_result, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
             my $zero       = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
             if ( $op eq 'cmp' ) {
-                my $neg     = $builder->build_icmp( 'slt', $cmp_i64, $zero, undef, $line, $col );
-                my $is_zero = $builder->build_icmp( 'eq',  $cmp_i64, $zero, undef, $line, $col );
-                my $neg_one = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => -1 );
-                my $one     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value =>  1 );
-                my $inner   = $builder->build_select( $neg, $neg_one, $one, undef, $line, $col );
-                return $builder->build_select( $is_zero, $zero, $inner, undef, $line, $col );
+                my $gt   = $builder->build_icmp( 'sgt', $cmp_i64, $zero, undef, $line, $col );
+                my $lt   = $builder->build_icmp( 'slt', $cmp_i64, $zero, undef, $line, $col );
+                my $gt64 = $builder->build_zext( $gt, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
+                my $lt64 = $builder->build_zext( $lt, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
+                my $neg  = $builder->build_sub( $zero, $lt64, undef, $line, $col );
+                return $builder->build_add( $gt64, $neg, undef, $line, $col );
             }
             if ( $op eq 'eq' ) {
                 return $builder->build_icmp( 'eq', $cmp_i64, $zero, undef, $line, $col );
