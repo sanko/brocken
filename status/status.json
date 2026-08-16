@@ -19,11 +19,11 @@
 ,
 "FreeBSD:ARM": "success"
 ,
-"Haiku:Intel": "success"
+"Haiku:Intel": "failure"
 ,
 "MidnightBSD:Intel": "success"
 ,
-"NetBSD:Intel": "failure"
+"NetBSD:Intel": "success"
 ,
 "NetBSD:ARM": "success"
 ,
