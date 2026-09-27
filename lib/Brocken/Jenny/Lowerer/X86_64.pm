@@ -2741,7 +2741,27 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                     else {
-                        die "Unsupported unary op $opcode for non-float type";
+                        die "Unsupported unary op $opcode for non-float type" if $opcode eq 'sqrt';
+                        my $type = $inst->type;
+                        die "Unsupported unary op $opcode for type with no kind" unless $type && $type->kind;
+                        die "Unsupported unary op $opcode for i128" if $type->bits > 64;
+                        my $src = $self->_materialize( $mbb, $val );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [ $dst, $src ],
+                                comment  => "load $opcode operand"
+                            )
+                        );
+
+                        # RMW: the encoder negates $dst in place, so the value must already be there.
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'neg',
+                                operands => [$dst],
+                                comment  => 'neg'
+                            )
+                        );
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
