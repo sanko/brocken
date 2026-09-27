@@ -1846,13 +1846,33 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'udiv',
+                                    opcode   => ( $opcode eq 'div' ? 'idiv' : 'udiv' ),
                                     operands => [ $dst, $rhs_op ],
-                                    comment  => 'udiv'
+                                    comment  => $opcode
                                 )
                             );
                         }
-                        elsif ( $opcode eq 'rem' || $opcode eq 'urem' ) {
+                        elsif ( $opcode eq 'rem' ) {
+
+                            # IDIV already leaves the remainder in RDX, so unlike the
+                            # unsigned form this needs no multiply-and-subtract fixup.
+                            my $rhs_op = $self->_reg_opnd( $mbb, $rhs, $inst->name . '_divisor' );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    comment  => 'load ' . ( $lhs->name || $lhs->value ) . ' (rem)'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'irem',
+                                    operands => [ $dst, $rhs_op ],
+                                    comment  => 'rem'
+                                )
+                            );
+                        }
+                        elsif ( $opcode eq 'urem' ) {
                             my $tmp
                                 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type );
                             my $rhs_op = $self->_reg_opnd( $mbb, $rhs, $inst->name . '_divisor' );

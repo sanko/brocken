@@ -694,30 +694,42 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $rdx_modrm = 0xC0 | ( 2 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rdx_rex, 0x8B, $rdx_modrm );
                 }
-                elsif ( $opcode eq 'udiv' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $src_r = $resolve->($src);
-                    my $did   = $reg_id->($dst_r);
-                    my $sid   = $reg_id->($src_r);
-                    my $rex_w = REX_W;
+                elsif ( $opcode eq 'udiv' || $opcode eq 'idiv' || $opcode eq 'irem' ) {
+                    my $dst_r     = $resolve->($dst);
+                    my $src_r     = $resolve->($src);
+                    my $did       = $reg_id->($dst_r);
+                    my $sid       = $reg_id->($src_r);
+                    my $rex_w     = REX_W;
+                    my $is_signed = $opcode ne 'udiv';
+                    my $want_rem  = $opcode eq 'irem';
 
                     # MOV RAX, dst  (RAX = low 64 bits of dividend)
                     my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $rax_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rax_rex, 0x8B, $rax_modrm );
 
-                    # XOR RDX, RDX  (RDX = 0 = high 64 bits of dividend)
-                    my $rdx_rex = 0x40 | $rex_w;
-                    $bytes .= pack( 'CCC', $rdx_rex, 0x31, 0xD2 );
+                    # Unsigned divides the full 128-bit RDX:RAX, so RDX must be 0.
+                    # Signed divides the 128-bit sign extension of RAX, so RDX must
+                    # repeat RAX's sign bit; CQTO does exactly that. Leaving RDX
+                    # zeroed for a negative dividend makes the divisor see a huge
+                    # unsigned value instead.
+                    if ($is_signed) {
+                        $bytes .= pack( 'CC', 0x40 | $rex_w, 0x99 );    # CQTO
+                    }
+                    else {
+                        my $rdx_rex = 0x40 | $rex_w;
+                        $bytes .= pack( 'CCC', $rdx_rex, 0x31, 0xD2 );    # XOR RDX, RDX
+                    }
 
                     # DIV src  (RDX:RAX / src -> RAX = quotient, RDX = remainder; /6 = DIV)
+                    # IDIV src (same, signed; /7 = IDIV)
                     my $div_rex   = 0x40 | $rex_w | ( $sid >= 8 ? 1 : 0 );
-                    my $div_modrm = 0xC0 | ( 6 << 3 ) | ( $sid & 7 );
+                    my $div_modrm = 0xC0 | ( ( $is_signed ? 7 : 6 ) << 3 ) | ( $sid & 7 );
                     $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
 
-                    # MOV dst, RAX  (dst = quotient)
+                    # MOV dst, RAX (quotient) or MOV dst, RDX (remainder)
                     my $mov_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
-                    my $mov_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
+                    my $mov_modrm = 0xC0 | ( ( $want_rem ? 2 : 0 ) << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $mov_rex, 0x89, $mov_modrm );
                 }
                 elsif ( $opcode eq 'div128_64' || $opcode eq 'rem128_64' ) {
