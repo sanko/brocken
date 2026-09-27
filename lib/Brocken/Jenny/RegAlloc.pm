@@ -315,6 +315,31 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             $defined_phys{rdx} = 1;
         }
 
+        # The register-source shift encodings (shl/lshr/ashr with a non-immediate
+        # count) use the D3 /ext form, which requires the count in CL, so the
+        # count is moved into rcx immediately before the shift. That move is
+        # invisible to the per-function phys_reg destination scan above, so a
+        # value or shift destination allocated to rcx would be silently
+        # destroyed by it. Keep rcx out of the pool for such functions.
+        my $has_shift_scratch = 0;
+        if ( $mf && $mf->blocks->@* && !$is_float ) {
+            SHIFT_SCAN: for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    next unless $inst->opcode eq 'shl'
+                        || $inst->opcode eq 'lshr'
+                        || $inst->opcode eq 'ashr';
+                    my @ops = $inst->operands->@*;
+                    next if @ops < 2;
+                    next if $ops[1]->kind eq 'imm';
+                    $has_shift_scratch = 1;
+                    last SHIFT_SCAN;
+                }
+            }
+        }
+        if ($has_shift_scratch) {
+            $defined_phys{rcx} = 1;
+        }
+
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         my $spill_temp = pop @caller_regs;
         my @regs       = ( @caller_regs, @callee_regs );
