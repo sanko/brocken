@@ -832,8 +832,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $did   = $reg_id->($dst_r);
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did );
                     my $bits = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
-                    my $rex  = ( $bits == 64 ? 0x48 : 0 ) | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
-                    if ($rex) { $bytes .= pack( 'C', $rex ) }
+                    my $rex_w    = ( $bits == 64 ) ? REX_W : 0;
+                    my $rex_bits = $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+                    $bytes .= pack( 'C', 0x40 | $rex_w | $rex_bits ) if ( $rex_w | $rex_bits );
                     $bytes .= pack( 'C', MOV_RM_R ) . pack( 'C', $modrm );
                     $bytes .= join '', $extra->@*;
                 }
@@ -842,8 +843,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $sid   = $reg_id->($src_r);
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $dst, $sid );
                     my $bits = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
-                    my $rex  = ( $bits == 64 ? 0x48 : 0 ) | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
-                    if ($rex) { $bytes .= pack( 'C', $rex ) }
+                    my $rex_w    = ( $bits == 64 ) ? REX_W : 0;
+                    my $rex_bits = $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
+                    $bytes .= pack( 'C', 0x40 | $rex_w | $rex_bits ) if ( $rex_w | $rex_bits );
                     $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
                     $bytes .= join '', $extra->@*;
                 }
@@ -851,8 +853,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my ( $mem, $imm ) = $inst->operands->@*;
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $mem, 0 );    # /0 ext = mov
                     my $bits = ( $imm->type && $imm->type->kind eq 'int' ) ? $imm->type->bits : 64;
-                    my $rex  = ( $bits == 64 ? 0x48 : 0 ) | $rex_x | $rex_b;
-                    if ($rex) { $bytes .= pack( 'C', $rex ) }
+                    my $rex_w    = ( $bits == 64 ) ? REX_W : 0;
+                    my $rex_bits = $rex_x | $rex_b;
+                    $bytes .= pack( 'C', 0x40 | $rex_w | $rex_bits ) if ( $rex_w | $rex_bits );
                     $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
                     $bytes .= join '', $extra->@*;
                     $bytes .= pack( 'V', $imm->value );
