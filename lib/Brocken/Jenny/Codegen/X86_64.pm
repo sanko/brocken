@@ -20,6 +20,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         CMP_IMM8    => 0x83,
         SHIFT_IMM   => 0xC1,
         IMUL_IMM    => 0x69,
+        GRP3_RM     => 0xF7,
         JMP_REL32   => 0xE9,
         JE          => 0x84,
         JNE         => 0x85,
@@ -776,6 +777,19 @@ class Brocken::Jenny::Codegen::X86_64 {
                         my $smodrm = 0xC0 | ( $extval << 3 ) | ( $did & 7 );
                         $bytes .= pack( 'CCC', $rex, 0xD3, $smodrm );
                     }
+                }
+                elsif ( $opcode eq 'neg' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $bits  = $dst->type ? $dst->type->bits : 64;
+                    my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
+
+                    # RMW: the target is the r/m operand, so a high register needs REX.B, not REX.R.
+                    my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                    my $modrm = 0xC0 | ( 3 << 3 ) | ( $did & 7 );
+
+                    # NEG r/m64 => REX.W F7 /3
+                    $bytes .= pack( 'CCC', $rex, GRP3_RM, $modrm );
                 }
                 elsif ( $opcode eq 'alloca' ) {
                     my $dst_r = $resolve->($dst);
