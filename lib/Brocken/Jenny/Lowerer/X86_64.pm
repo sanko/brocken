@@ -2756,10 +2756,56 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             )
                         );
 
-                        # RMW: the encoder negates $dst in place, so the value must already be there.
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'neg', operands => [$dst], comment => 'neg' ) );
+                        if ( $opcode eq 'abs' ) {
+
+                            # Branchless |x|: mask = x >> (bits-1) is 0 for a non-negative
+                            # x and all-ones for a negative one, and (x ^ mask) - mask then
+                            # gives -x in the second case and x in the first. Two's
+                            # complement, so the minimum value maps to itself, which is what
+                            # a signed abs has to do when the result cannot be represented.
+                            my $bits = $type->bits;
+                            my $mask = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_abs_mask',
+                                type  => $type
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $mask, $dst ],
+                                    comment  => 'abs sign mask copy'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'ashr',
+                                    operands => [ $mask, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $bits - 1 ) ],
+                                    comment  => 'abs sign mask'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'xor',
+                                    operands => [ $dst, $mask ],
+                                    comment  => 'abs xor'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'sub',
+                                    operands => [ $dst, $mask ],
+                                    comment  => 'abs sub'
+                                )
+                            );
+                        }
+                        else {
+
+                            # RMW: the encoder negates $dst in place, so the value must already be there.
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'neg', operands => [$dst], comment => 'neg' ) );
+                        }
                     }
+
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
                     my $val  = $inst->operands->[0];
