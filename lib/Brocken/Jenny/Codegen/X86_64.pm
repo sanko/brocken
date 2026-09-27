@@ -679,7 +679,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $rex_w = REX_W;
 
                     # MOV RAX, dst  (RAX = dst, first operand)
-                    my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 );
+                    my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $rax_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rax_rex, 0x8B, $rax_modrm );
 
@@ -689,7 +689,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'CCC', $mul_rex, 0xF7, $mul_modrm );
 
                     # MOV dst, RDX  (dst = high 64 bits)
-                    my $rdx_rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 );
+                    my $rdx_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $rdx_modrm = 0xC0 | ( 2 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rdx_rex, 0x8B, $rdx_modrm );
                 }
@@ -701,7 +701,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $rex_w = REX_W;
 
                     # MOV RAX, dst  (RAX = low 64 bits of dividend)
-                    my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 );
+                    my $rax_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $rax_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $rax_rex, 0x8B, $rax_modrm );
 
