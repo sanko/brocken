@@ -89,9 +89,9 @@ jobs:
       checkout_submodules: recursive
       matrix: |-
         [
-          {"name":"Intel [Ubuntu 26.04]","arch":"x86_64","variant":"default","platform_name":"linux","os":"ubuntu-26.04","toolchain":"gcc"},
+          {"name":"Intel [Ubuntu 26.04]","arch":"x86_64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-26.04","toolchain":"gcc"},
           {"name":"Intel [Ubuntu 24.04]","arch":"x86_64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04","toolchain":"gcc"},
-          {"name":"ARM [Ubuntu 24.04]","arch":"aarch64","perl_version":"5.42.0","configure":"-Dcc=clang","platform_name":"linux","os":"ubuntu-24.04-arm","toolchain":"clang"}
+          {"name":"ARM [Ubuntu 24.04]","arch":"aarch64", "perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04-arm","toolchain":"clang"}
         ]
       task: |
         export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
