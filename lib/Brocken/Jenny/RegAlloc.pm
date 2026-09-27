@@ -289,6 +289,30 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             $defined_phys{r10} = 1;
             $defined_phys{r11} = 1;
         }
+
+        # The umulh/udiv/div128_64 encodings use rax and rdx as internal
+        # temporaries, which is invisible to the per-function phys_reg
+        # destination scan above. A virtual register allocated to either would
+        # have its value silently destroyed by the sequence, so keep both out
+        # of the pool whenever one of those opcodes is present.
+        my $has_div_scratch = 0;
+        if ( $mf && $mf->blocks->@* && !$is_float ) {
+            DIV_SCAN: for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    next unless $inst->opcode eq 'umulh'
+                        || $inst->opcode eq 'udiv'
+                        || $inst->opcode eq 'div128_64'
+                        || $inst->opcode eq 'rem128_64';
+                    $has_div_scratch = 1;
+                    last DIV_SCAN;
+                }
+            }
+        }
+        if ($has_div_scratch) {
+            $defined_phys{rax} = 1;
+            $defined_phys{rdx} = 1;
+        }
+
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         my $spill_temp = pop @caller_regs;
         my @regs       = ( @caller_regs, @callee_regs );

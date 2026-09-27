@@ -1830,6 +1830,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                         }
                         elsif ( $opcode eq 'div' || $opcode eq 'udiv' ) {
+                            my $rhs_op = $self->_reg_opnd( $mbb, $rhs, $inst->name . '_divisor' );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -1840,7 +1841,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'udiv',
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    operands => [ $dst, $rhs_op ],
                                     comment  => 'udiv'
                                 )
                             );
@@ -1848,6 +1849,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         elsif ( $opcode eq 'rem' || $opcode eq 'urem' ) {
                             my $tmp
                                 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type );
+                            my $rhs_op = $self->_reg_opnd( $mbb, $rhs, $inst->name . '_divisor' );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -1858,14 +1860,14 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'udiv',
-                                    operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                    operands => [ $tmp, $rhs_op ],
                                     comment  => 'udiv (rem)'
                                 )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mul',
-                                    operands => [ $tmp, $self->_lower_opnd($rhs) ],
+                                    operands => [ $tmp, $rhs_op ],
                                     comment  => 'mul (rem)'
                                 )
                             );
@@ -1903,7 +1905,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'movzx',
-                            operands => [ $dst, $self->_lower_opnd($val) ],
+                            operands => [ $dst, $self->_reg_opnd( $mbb, $val, $inst->name . '_src' ) ],
                             comment  => 'zext ' . ( $val->name || $val->value )
                         )
                     );
@@ -1914,7 +1916,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'movsx',
-                            operands => [ $dst, $self->_lower_opnd($val) ],
+                            operands => [ $dst, $self->_reg_opnd( $mbb, $val, $inst->name . '_src' ) ],
                             comment  => 'sext ' . ( $val->name || $val->value )
                         )
                     );
@@ -2756,12 +2758,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
 
                         # RMW: the encoder negates $dst in place, so the value must already be there.
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'neg',
-                                operands => [$dst],
-                                comment  => 'neg'
-                            )
-                        );
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'neg', operands => [$dst], comment => 'neg' ) );
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
@@ -3973,6 +3970,23 @@ class Brocken::Jenny::Lowerer::X86_64 {
             return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value, type => $ir_val->type );
         }
         return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type );
+    }
+
+    # x86 has no immediate form for idiv/div, and the remaining register-only
+    # encoders resolve their source through $resolve, which rejects 'imm'.
+    # Put a constant in a virtual register first so they all see a register.
+    method _reg_opnd( $mbb, $ir_val, $name ) {
+        my $opnd = $self->_lower_opnd($ir_val);
+        return $opnd unless $opnd->kind eq 'imm';
+        my $vreg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $ir_val->type );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $vreg, $opnd ],
+                comment  => 'materialize immediate'
+            )
+        );
+        return $vreg;
     }
 }
 
