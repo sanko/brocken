@@ -146,7 +146,7 @@ jobs:
       checkout_submodules: recursive
       matrix: |-
         [
-          {"platform_name":"netbsd","os":"netbsd","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","prepare":"/usr/sbin/pkg_add perl"}
+          {"name":"Intel","platform_name":"netbsd","os":"netbsd","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","prepare":"/usr/sbin/pkg_add perl"}
         ]
       os_version: 10.1
       task: |
@@ -271,8 +271,8 @@ jobs:
       checkout_submodules: recursive
       matrix: |-
         [
-          {"name":"Intel","arch":"x86_64","platform_name":"windows","os":"windows-2022",  "toolchain":"clang","variant":"5.42.3.1","prepare":"choco install llvm -y; curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"},
-          {"name":"ARM","arch":"aarch64","platform_name":"windows", "os":"windows-11-arm","toolchain":"gcc",  "variant":"5.42.3.1","prepare":"choco install make -y; curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54051_64bit/strawberry-perl-5.40.5.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"}
+          {"name":"Intel","arch":"x86_64","platform_name":"windows","os":"windows-2022",  "variant":"5.42.3.1","prepare":"curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"},
+          {"name":"ARM","arch":"aarch64","platform_name":"windows", "os":"windows-11-arm","variant":"5.42.3.1","prepare":"curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"}
         ]
       task: |
         export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
