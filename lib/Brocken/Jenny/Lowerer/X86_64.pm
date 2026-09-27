@@ -7,9 +7,15 @@ use List::Util qw[min max];
 
 class Brocken::Jenny::Lowerer::X86_64 {
     field $platform : param;
+
+    # Backs the uniquifier in _wide_imm_opnd, so two wide immediates materialized
+    # for the same instruction or memory base still get distinct virtual registers.
+    field $wide_imm_seq = 0;
+
     method _abi() { $platform->abi }
 
     method lower($ir_func) {
+        $wide_imm_seq = 0;
         my $mf = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
         for my $block ( $ir_func->blocks->@* ) {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
@@ -1892,7 +1898,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => $opcode,
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    operands => [ $dst, $self->_wide_imm_opnd( $mbb, $self->_lower_opnd($rhs), $inst->name . '_wide' ) ],
                                     comment  => $opcode
                                 )
                             );
@@ -2499,8 +2505,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                     else {
-                        my $lhs_op  = $self->_lower_opnd($lhs);
-                        my $rhs_op  = $self->_lower_opnd($rhs);
+                        my $lhs_op = $self->_lower_opnd($lhs);
+                        my $rhs_op = $self->_wide_imm_opnd( $mbb, $self->_lower_opnd($rhs), $inst->name . '_rhs' );
                         my $result  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         my $cmp_lhs = $lhs_op;
                         if ( $lhs_op->kind eq 'imm' ) {
@@ -2658,17 +2664,19 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             value => { base => $ptr->name, disp => 8 },
                             type  => Brocken::Lindsay::IR::Type::i64()
                         );
+                        my $lo_st = $self->_wide_imm_opnd( $mbb, $lo, ( $ptr->name // 'i128' ) . '_slo' );
+                        my $hi_st = $self->_wide_imm_opnd( $mbb, $hi, ( $ptr->name // 'i128' ) . '_shi' );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => ( $lo->kind eq 'imm' ? 'store_imm' : 'store' ),
-                                operands => [ $mem_lo, $lo ],
+                                opcode   => ( $lo_st->kind eq 'imm' ? 'store_imm' : 'store' ),
+                                operands => [ $mem_lo, $lo_st ],
                                 comment  => 'i128 store lo'
                             )
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => ( $hi->kind eq 'imm' ? 'store_imm' : 'store' ),
-                                operands => [ $mem_hi, $hi ],
+                                opcode   => ( $hi_st->kind eq 'imm' ? 'store_imm' : 'store' ),
+                                operands => [ $mem_hi, $hi_st ],
                                 comment  => 'i128 store hi'
                             )
                         );
@@ -2686,10 +2694,14 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                         }
                         else {
+                            my $val_op
+                                = $self->_wide_imm_opnd( $mbb, $self->_lower_opnd($val),
+                                ( $mem->value->{base} // 'st' ) . '_sv' );
+
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
-                                    operands => [ $mem, $self->_lower_opnd($val) ],
+                                    opcode   => ( $val_op->kind eq 'imm' ? 'store_imm' : 'store' ),
+                                    operands => [ $mem, $val_op ],
                                     comment  => 'store'
                                 )
                             );
@@ -2825,10 +2837,11 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     # store [%dyn + 0], %val
                     my $mem_val
                         = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 0 }, type => $val->type );
+                    my $box_val = $self->_wide_imm_opnd( $mbb, $self->_lower_opnd($val), $inst->name . '_box' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
-                            operands => [ $mem_val, $self->_lower_opnd($val) ],
+                            opcode   => ( $box_val->kind eq 'imm' ? 'store_imm' : 'store' ),
+                            operands => [ $mem_val, $box_val ],
                             comment  => 'box: store payload'
                         )
                     );
@@ -4030,6 +4043,37 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 opcode   => 'mov',
                 operands => [ $vreg, $opnd ],
                 comment  => 'materialize immediate'
+            )
+        );
+        return $vreg;
+    }
+
+    # Every immediate-form encoder here (mov r/m,imm32, add/sub/and/or/xor r/m,imm32,
+    # cmp r/m,imm32, imul r,r/m,imm32) takes a sign-extended imm32, so a 64-bit
+    # constant outside that range is silently truncated to its low 32 bits. The
+    # register mov encoder does handle the wide case, via the movabs form, so route
+    # only the immediates that actually need it through a virtual register and keep
+    # the cheaper immediate encoding for everything that fits.
+    method _imm_needs_reg($opnd) {
+        return 0 unless $opnd->kind eq 'imm';
+        my $bits = ( $opnd->type && $opnd->type->kind eq 'int' ) ? $opnd->type->bits : 64;
+        return 0 if $bits < 64;
+        my $value = $opnd->value;
+        return ( $value >= -2147483648 && $value <= 2147483647 ) ? 0 : 1;
+    }
+
+    method _wide_imm_opnd( $mbb, $opnd, $name ) {
+        return $opnd unless $self->_imm_needs_reg($opnd);
+        my $vreg = Brocken::Jenny::MIR::MachineOperand->new(
+            kind  => 'virt_reg',
+            value => $name . '_w' . $wide_imm_seq++,
+            type  => $opnd->type
+        );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $vreg, $opnd ],
+                comment  => 'materialize wide immediate'
             )
         );
         return $vreg;
