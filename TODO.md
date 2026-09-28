@@ -414,12 +414,13 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       A wasm local is the engine's own per-invocation slot, reclaimed on return,
       so a slot whose address is never taken does not belong in linear memory at
       all. `Lowerer::Wasm::_promotable_allocas` promotes such a slot: a
-      function-scope, single-element, non-aggregate alloca whose address appears
-      only as the address operand of a `load`/`store`. The alloca then emits
-      nothing, and the `load`/`store` become `local.get`/`local.set` against a
-      local typed with the *element* type. This is the same thing LLVM's wasm
-      backend does for a whole-function `alloca`; the shadow stack is only the
-      fallback for allocas that escape.
+      single-element, non-aggregate alloca whose address appears only as the
+      address operand of a `load`/`store`. The alloca then emits nothing, and the
+      `load`/`store` become `local.get`/`local.set` against a local typed with the
+      *element* type. This is the same thing LLVM's wasm backend does for a
+      whole-function `alloca`; the shadow stack is only the fallback for allocas
+      that escape. Promotion applies in **any** block, not just the entry block,
+      because a wasm local is per-invocation rather than per-block.
       `fib(20)` = 6765 and `fib(25)` = 75025 now run in a 1-page module that
       previously trapped, because recursion no longer touches memory at all.
       The aliasing bug above also becomes structurally impossible, since there is
@@ -430,6 +431,29 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       Regression: `3290_wasm_recursion.t` asserts at the MIR level that `fib`
       emits no alloca and no `i64_load`/`i64_store`, that an array base still
       allocates, and executes `fib(20)`, `fib(25)` and the class case.
+- [x] **A slot declared inside a loop body was the last shape still spilling to
+      the bump cursor, and it silently returned garbage.** Promotion was first
+      restricted to the entry block, so `my ptr $p = P->new($i);` inside a `while`
+      body still took a spill slot -- and that slot landed at `heap_base + 16`,
+      the same address `bump_alloc` hands the instance out from. The pointer and
+      the object occupied the same bytes, so a loop summing `$p->x()` over 10
+      iterations returned **10760** instead of 45, with no trap and no error.
+      Correct on x86_64, so it was Wasm-specific and silent. Promoting in any
+      block fixes it, since a local is per-invocation and does not need a fresh
+      reservation per iteration.
+- [x] **A variable array index produced an invalid module.** `getelementptr` pushed
+      the index at its IR width (i64) and then scaled and added it with `i32.mul`
+      / `i32_add`, so wasmtime rejected the module with "type mismatch: expected
+      i32, found i64". A *constant* index was folded into a displacement and
+      worked, which is why `$a[3] = 10` was fine and `$a[$i] = 10` was not --
+      an entire loop over an array could not be compiled. The index is now
+      narrowed with `i32_wrap_i64`, matching what the pointer arithmetic in
+      `Runtime::_init` already did.
+- [ ] **A class pointer cannot be passed to a function and used there.**
+      `Cannot determine class for field or method access`, from the lowerer
+      before any backend runs, so it affects x86_64/ARM64/RISCV64/Wasm equally
+      and is a language gap rather than a backend bug. The class table that
+      would type `$q->x()` is not threaded through function calls yet.
 - [ ] **Wasm declares one 64KB page but the runtime is told the heap is 1MB.**
       `Linker::Wasm` emits `1 page, no maximum` while `Katsuro::Lowerer` passes
       `0x100000` as the heap size to `Runtime::_init`, so any program that
