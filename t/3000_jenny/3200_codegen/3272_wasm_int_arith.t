@@ -112,17 +112,27 @@ subtest 'Wasm integer div/rem/min/max and extension' => sub {
                 }
                 else {
 
-                    # No wasmtime, so fall back to node. The shim exits with the
-                    # return value coerced to a Number, which is how 3218 reads
-                    # results back on a host without wasmtime.
+                    # No wasmtime, so fall back to node. The result is printed
+                    # rather than passed out through the exit status: a POSIX
+                    # exit status is an 8-bit value, so every case outside
+                    # 0..255 came back as its low byte (-21 read as 235), which
+                    # failed on the macOS leg where wasmtime is not installed.
+                    # The shim runs through the list form, since a qx string with
+                    # a redirect goes via cmd.exe on Windows and the embedded
+                    # newlines and quotes do not survive it.
                     my $js = sprintf
                         "const fs = require('fs'); const buf = fs.readFileSync('%s');\n"
                       . "WebAssembly.instantiate(buf)\n"
-                      . "  .then(res => { process.exit(Number(res.instance.exports.main())); })\n"
+                      . "  .then(res => { process.stdout.write(String(res.instance.exports.main())); })\n"
                       . "  .catch(e => { console.error(e); process.exit(1); });\n",
                         $file;
-                    qx["$node_path" -e "$js" 2>$null];
-                    $got = $? >> 8;
+                    my $out = '';
+                    if ( open my $fh, '-|', $node_path, '-e', $js ) {
+                        $out = do { local $/ = undef; <$fh> };
+                        close $fh;
+                    }
+                    $got = $out;
+                    $got =~ s/\s+//g;
                 }
                 unlink $file;
                 is( $got, $want, "returned $want" );

@@ -54,6 +54,33 @@ class Brocken::Jenny::Codegen::ARM64 {
         LDR_64_REG     => 0xF8408000,
         STR_32_REG     => 0xB8208000,
         STR_64_REG     => 0xF8208000,
+
+        # Narrow (8/16-bit) accesses. The zero-extending LDRB/LDRH only have a
+        # 32-bit destination, so a narrow load sign-extends straight into the X
+        # register (ldrsb/ldrsh) instead, which leaves the register holding
+        # exactly what the narrow store wrote. All verified against
+        # `strb w0, [x1]` = 0x39000000, `ldrsb x0, [x1]` = 0x39800000 and
+        # `ldrb w0, [x1, x2]` = 0x38626820.
+        LDRSB_64       => 0x39800000,
+        LDRSH_64       => 0x79800000,
+        STRB_32        => 0x39000000,
+        STRH_32        => 0x79000000,
+        LDRSB_64_REG   => 0x38A06800,
+        LDRSH_64_REG   => 0x78A06800,
+        STRB_32_REG    => 0x38206800,
+        STRH_32_REG    => 0x78206800,
+
+        # Unscaled (signed 9-bit displacement) forms, needed when a slot sits
+        # below the base register. `ldur x0, [x1, #-8]` = 0xF85F8020,
+        # `sturb w0, [x1, #-1]` = 0x381FF020, so the imm9 lives in bits 20:12.
+        LDUR_32        => 0xB8400000,
+        LDUR_64        => 0xF8400000,
+        STUR_32        => 0xB8000000,
+        STUR_64        => 0xF8000000,
+        LDURSB_64      => 0x389F0000,
+        LDURSH_64      => 0x789F0000,
+        STURB_32       => 0x381F0000,
+        STURH_32       => 0x781F0000,
         FLDR_32        => 0xBD400000,
         FLDR_64        => 0xFD400000,
         FSTR_32        => 0xBD000000,
@@ -434,6 +461,29 @@ class Brocken::Jenny::Codegen::ARM64 {
         return $mf;
     }
 
+    # Returns ( unsigned-offset base, unscaled base, scale, register-indexed
+    # base ) for a $bits-wide integer access. $is_load picks between the load
+    # and the store mnemonic; for a narrow access the load sign-extends, so the
+    # register holds exactly the value the narrow store wrote. An 8/16-bit slot
+    # has to be moved at its real width, or a 64-bit LDR/STR would move 8 bytes
+    # through a 1-2 byte stack slot and clobber the neighbouring frame.
+    method _mem_forms( $bits, $is_load ) {
+        if ( $bits >= 64 ) {
+            return $is_load ? ( LDR_64, LDUR_64, 3, LDR_64_REG )
+                            : ( STR_64, STUR_64, 3, STR_64_REG );
+        }
+        if ( $bits >= 32 ) {
+            return $is_load ? ( LDR_32, LDUR_32, 2, LDR_32_REG )
+                            : ( STR_32, STUR_32, 2, STR_32_REG );
+        }
+        if ($is_load) {
+            return ( LDRSH_64, LDURSH_64, 1, LDRSH_64_REG ) if $bits >= 16;
+            return ( LDRSB_64, LDURSB_64, 0, LDRSB_64_REG );
+        }
+        return ( STRH_32, STURH_32, 1, STRH_32_REG ) if $bits >= 16;
+        return ( STRB_32, STURB_32, 0, STRB_32_REG );
+    }
+
     method _encode( $mf, $assignment, $used_callee ) {
         my $bytes        = '';
         my $alloca_frame = 0;
@@ -627,26 +677,52 @@ class Brocken::Jenny::Codegen::ARM64 {
                 }
                 elsif ( $opcode eq 'movsx' ) {
                     my $src_bits = $src->type ? $src->type->bits : 64;
+                    my $dst_bits = $dst->type ? $dst->type->bits : 64;
                     my $dst_r    = $resolve->($dst);
                     my $did      = $reg_id->($dst_r);
                     my $src_r    = $resolve->($src);
                     my $sid      = $reg_id->($src_r);
 
                     # Same Rn placement as movzx: SXTW/SXTH/SXTB are SBFM with
-                    # the source in Rn (bits 9:5).
-                    if ( $src_bits >= 32 ) {
+                    # the source in Rn (bits 9:5). The x-forms carry the
+                    # destination in the sf bit, so a 64-bit destination needs
+                    # 0x9340.. rather than the 0x1300.. w-forms, which write
+                    # 31:0 and zero the whole upper half. The two differ only
+                    # by that sf bit, so SXTB/SXTH cannot fix a 64-bit result
+                    # by widening the immediate.
+                    if ( $dst_bits <= 32 ) {
+                        if ( $src_bits >= 16 ) {
+
+                            # SXTH Wd, Wn
+                            $bytes .= pack( 'V', 0x13003C00 | ( $sid << 5 ) | $did );
+                        }
+                        else {
+
+                            # SXTB Wd, Wn
+                            $bytes .= pack( 'V', 0x13001C00 | ( $sid << 5 ) | $did );
+                        }
+                    }
+                    elsif ( $src_bits >= 64 ) {
+
+                        # sext i64 <- i64 is a no-op, so this has to stay 64-bit:
+                        # SXTW re-signs from bit 31 and would corrupt any source
+                        # whose bits 63:32 are meaningful. MOV Xd, Xn reads the
+                        # source from Rm (bits 20:16).
+                        $bytes .= pack( 'V', MOV_X | ( $sid << 16 ) | $did );
+                    }
+                    elsif ( $src_bits >= 32 ) {
 
                         # SXTW Xd, Wn
                         $bytes .= pack( 'V', 0x93407C00 | ( $sid << 5 ) | $did );
                     }
                     elsif ( $src_bits >= 16 ) {
 
-                        # SXTH Wd, Wn
-                        $bytes .= pack( 'V', 0x13003C00 | ( $sid << 5 ) | $did );
+                        # SXTH Xd, Wn
+                        $bytes .= pack( 'V', 0x93403C00 | ( $sid << 5 ) | $did );
                     }
                     else {
-                        # SXTB Wd, Wn
-                        $bytes .= pack( 'V', 0x13001C00 | ( $sid << 5 ) | $did );
+                        # SXTB Xd, Wn
+                        $bytes .= pack( 'V', 0x93401C00 | ( $sid << 5 ) | $did );
                     }
                 }
                 elsif ( $opcode eq 'add' ||
@@ -753,17 +829,26 @@ class Brocken::Jenny::Codegen::ARM64 {
                     );
                     my $bid  = $reg_id->($base_r);
                     my $bits = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
+                    my ( $off_base, $uns_base, $scale, $reg_base ) = $self->_mem_forms( $bits, 1 );
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
-                        my $reg_op  = $bits == 32 ? LDR_32_REG : LDR_64_REG;
-                        $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $did );
+                        $bytes .= pack( 'V', $reg_base | ( $iid << 16 ) | ( $bid << 5 ) | $did );
                     }
                     else {
-                        my $disp  = $addr->{disp} // 0;
-                        my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $base  = $bits == 32 ? LDR_32 : LDR_64;
-                        $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
+                        my $disp = $addr->{disp} // 0;
+                        if ( $disp < 0 ) {
+
+                            # Unscaled form: imm9 is a signed byte offset in
+                            # bits 20:12, not the scaled imm12 of the unsigned
+                            # form, which would otherwise shift sign garbage into
+                            # the opcode itself.
+                            $bytes .= pack( 'V', $uns_base | ( ( $disp & 0x1FF ) << 12 ) | ( $bid << 5 ) | $did );
+                        }
+                        else {
+                            my $imm12 = $disp >> $scale;
+                            $bytes .= pack( 'V', $off_base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
+                        }
                     }
                 }
                 elsif ( $opcode eq 'store' ) {
@@ -778,17 +863,21 @@ class Brocken::Jenny::Codegen::ARM64 {
                     );
                     my $bid  = $reg_id->($base_r);
                     my $bits = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
+                    my ( $off_base, $uns_base, $scale, $reg_base ) = $self->_mem_forms( $bits, 0 );
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
-                        my $reg_op  = $bits == 32 ? STR_32_REG : STR_64_REG;
-                        $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $sid );
+                        $bytes .= pack( 'V', $reg_base | ( $iid << 16 ) | ( $bid << 5 ) | $sid );
                     }
                     else {
-                        my $disp  = $addr->{disp} // 0;
-                        my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $base  = $bits == 32 ? STR_32 : STR_64;
-                        $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
+                        my $disp = $addr->{disp} // 0;
+                        if ( $disp < 0 ) {
+                            $bytes .= pack( 'V', $uns_base | ( ( $disp & 0x1FF ) << 12 ) | ( $bid << 5 ) | $sid );
+                        }
+                        else {
+                            my $imm12 = $disp >> $scale;
+                            $bytes .= pack( 'V', $off_base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
+                        }
                     }
                 }
                 elsif ( $opcode eq 'store_imm' ) {
@@ -823,14 +912,19 @@ class Brocken::Jenny::Codegen::ARM64 {
                     if ( defined $addr->{index} ) {
                         my $index_r  = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid      = $reg_id->($index_r);
-                        my $str_base = $bits >= 64 ? STR_64_REG : STR_32_REG;
-                        $bytes .= pack( 'V', $str_base | ( $iid << 16 ) | ( $bid << 5 ) | $tid );
+                        my ( undef, undef, undef, $reg_base ) = $self->_mem_forms( $bits, 0 );
+                        $bytes .= pack( 'V', $reg_base | ( $iid << 16 ) | ( $bid << 5 ) | $tid );
                     }
                     else {
-                        my $disp     = $addr->{disp} // 0;
-                        my $imm12    = $disp >> ( $bits == 32 ? 2 : 3 );
-                        my $str_base = $bits >= 64 ? STR_64 : STR_32;
-                        $bytes .= pack( 'V', $str_base | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
+                        my $disp = $addr->{disp} // 0;
+                        my ( $off_base, $uns_base, $scale ) = $self->_mem_forms( $bits, 0 );
+                        if ( $disp < 0 ) {
+                            $bytes .= pack( 'V', $uns_base | ( ( $disp & 0x1FF ) << 12 ) | ( $bid << 5 ) | $tid );
+                        }
+                        else {
+                            my $imm12 = $disp >> $scale;
+                            $bytes .= pack( 'V', $off_base | ( $imm12 << 10 ) | ( $bid << 5 ) | $tid );
+                        }
                     }
                 }
                 elsif ( $opcode eq 'cmp' ) {
