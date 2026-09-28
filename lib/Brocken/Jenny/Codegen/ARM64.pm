@@ -63,7 +63,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         FSTR_64_REG    => 0xFC208000,
         CMP_IMM        => 0x7100001F,
         CMP_REG        => 0x6B00001F,
-        CSINC          => 0x9A9F07E0,
+        CSINC          => 0x1A800400,    # sf bit added by the caller; sets the CSINC op bit (10)
         FABS_32        => 0x1E20C000,
         FNEG_32        => 0x1E214000,
         FSQRT_32       => 0x1E21C000,
@@ -850,8 +850,16 @@ class Brocken::Jenny::Codegen::ARM64 {
                     );
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $cond  = $arm_cond{$opcode};
-                    $bytes .= pack( 'V', CSINC | ( 31 << 16 ) | ( $cond << 12 ) | ( 31 << 5 ) | $did );
+
+                    # CSET Rd, cond is CSINC Rd, ZR, ZR, invert(cond), so both
+                    # source fields read ZR and the CSINC cond field is the
+                    # inverse of the predicate CSET evaluates. %arm_cond already
+                    # carries those inverted codes (cset_lt -> GE, cset_eq -> NE,
+                    # ...) and is used as-is. SF is fixed on: the result is a
+                    # 0/1 boolean, so the 64-bit form is valid for every operand
+                    # width and leaves the upper half zeroed for 64-bit
+                    # consumers; the icmp result itself carries no width.
+                    $bytes .= pack( 'V', SF | CSINC | ( 31 << 16 ) | ( $arm_cond{$opcode} << 12 ) | ( 31 << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'sltu' ) {
                     my $dst_r = $resolve->($dst);
@@ -859,7 +867,11 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
                     $bytes .= pack( 'V', SF | CMP_REG | ( $sid << 16 ) | ( $did << 5 ) );
-                    $bytes .= pack( 'V', CSINC | ( 31 << 16 ) | ( 2 << 12 ) | ( 31 << 5 ) | $did );
+
+                    # sltu dst = (dst < src unsigned), i.e. cset dst, lo after
+                    # the CMP above; LO is 0x3 and the CSINC cond field carries
+                    # invert(lo) = hs = 0x2.
+                    $bytes .= pack( 'V', SF | CSINC | ( 31 << 16 ) | ( 2 << 12 ) | ( 31 << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'fload' ) {
                     my $dst_r  = $resolve->($dst);

@@ -8,39 +8,32 @@ use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# The ARM64 `cset_*` family is how every comparison reaches the hardware, but as
-# of this writing it encodes an unallocated instruction word.
+# The ARM64 `cset_*` family is how every scalar comparison reaches the hardware.
+# Straightforward to get wrong on paper, so its encoding is pinned here,
+# byte-exact, against the independently derived architectural formula:
 #
-# CSET Rd, cond is defined as CSINC Rd, ZR, ZR, invert(cond):
+#     sf | 0x1A800400 | csinc_cond<<12 | (31<<16) | (31<<5) | Rd
 #
-#     sf | 0x1A800400 | cond<<12 | Rn<<5 | Rd      with Rn = 31 (ZR)
+# CSET Rd, cond is defined as CSINC Rd, ZR, ZR, invert(cond). Both source fields
+# read ZR (31): CSINC selects Xm + 1 when its cond is false, so the cond CSET
+# evaluates is the inverse of what the CSINC field holds. Verified against
+# ground truth disassembly: `cset w0, eq` = 0x1A9F17E0, i.e. this formula with
+# Rd = 0, csinc_cond = NE and both source fields 31.
 #
-# Codegen/ARM64.pm instead packs CSINC => 0x9A9F07E0 and ORs in (31 << 16),
-# (cond << 12) and (31 << 5). That constant already has bit 20 and the Rm field
-# baked in, so the result lands in the reserved space between the CSEL and
-# CSINC groups rather than in CSINC at all. Concretely, for `cset_lt` into
-# register 10 the encoder produces 0x9A9FA7EA where the architectural word is
-# 0x1A80B7EA (32-bit) or 0x9A80B7EA (64-bit).
+# The codegen's %arm_cond map already carries the inverted codes (cset_lt -> GE,
+# cset_eq -> NE, ...) and is emitted as-is, so each row below is the inverse of
+# the predicate's true condition. These are the same codes Lowerer/ARM64.pm
+# relies on, pinned here so a swap in either file fails loudly.
 #
-# Four independent defects, all in the one pack() at Codegen/ARM64.pm:854:
+# SF is fixed on: the result is a 0/1 boolean, so the 64-bit form is valid for
+# every operand width and leaves the upper half zeroed for 64-bit consumers.
+# The icmp result value itself carries no width (it is i1), so both the i32 and
+# i64 comparisons below must produce the same word; the SF bit always set is
+# the encoder's contract.
 #
-#   1. the CSINC base constant sets bit 20, which must be 0 for the group;
-#   2. (31 << 16) forces Rm = 31, so both CSINC inputs are the same register
-#      and the "invert via Xm + 1" trick collapses to a no-op;
-#   3. cond is forwarded un-inverted, where CSET requires cond ^ 1;
-#   4. no SF bit, so a 64-bit comparison yields a 32-bit result -- the two
-#      widths emit the identical word.
-#
-# Nothing catches this because no test asserts these encodings. `sltu` in the
-# same file shares all four defects, and roughly sixty `cset_*` sites across
-# Lowerer/ARM64.pm depend on it: every ICmp predicate, the i128 div/icmp/min-max
-# expansions and the float compare paths. That is the most likely reason all
-# four aarch64 CI legs are red.
-#
-# The byte-exact assertion below is wrapped in `todo` on purpose. It fails today
-# and the failure output records the emitted word, so the defect is pinned in the
-# suite without turning the currently-green legs red. Fixing the encoder turns
-# these into unexpected successes, at which point the `todo` markers come off.
+# `sltu` (dst = dst < src unsigned, i.e. cset dst, lo after CMP) shares the
+# same CSINC base with cond 2 = hs, the inverse of the lo it wants; its word
+# is pinned here via the `ult` row.
 
 my $i32 = Brocken::Lindsay::IR::Type::i32();
 my $i64 = Brocken::Lindsay::IR::Type::i64();
@@ -59,18 +52,22 @@ my %cset_for = (
     uge => 'cset_cs',
 );
 
-# ICmp predicate -> architectural NZCV condition code.
+# ICmp predicate -> the cond field the CSET must emit. CSET Rd, pred is
+# CSINC Rd, ZR, ZR, invert(pred), so these are the *inverted* TRUE conditions:
+# eq -> ne(0x1), slt -> ge(0xA), ugt -> ls(0x9), uge -> lo(0x3), ... They are
+# the same codes Lowerer/ARM64.pm expects the codegen to produce, pinned here
+# so a swap in either file fails loudly.
 my %nzcv = (
-    eq  => 0x0,
-    ne  => 0x1,
+    eq  => 0x1,
+    ne  => 0x0,
     slt => 0xA,
     sgt => 0xD,
     sle => 0xC,
     sge => 0xB,
     ult => 0x2,
-    ugt => 0x3,
+    ugt => 0x9,
     ule => 0x8,
-    uge => 0x9,
+    uge => 0x3,
 );
 
 # CSEL/CSINC/ CSET all share bits[28:21] == 0b11010_100, which survives the
@@ -129,13 +126,15 @@ subtest 'ARM64: cset_* encodes CSET Rd, cond' => sub {
                     my @found = grep { ( ( $_ >> 21 ) & 0xFF ) == $CSEL_SIG } unpack 'V*', $bytes;
                     is( scalar @found, 1, 'exactly one CSEL-family word in the stream' ) or return;
 
-                    my $sf   = $width == 64 ? 0x80000000 : 0x00000000;
-                    my $want = $sf | 0x1A800400 | ( ( $nzcv{$pred} ^ 1 ) << 12 ) | ( 31 << 5 );
-
-                    todo 'CSINC base constant sets bit 20 and Rm; cond is not inverted; SF is missing' => sub {
-                        is( $found[0] & ~$RD_MASK, $want,
-                            "cset word is CSET Rd, " . ( $nzcv{$pred} ^ 1 ) );
-                    };
+                    # Both widths must produce the same word (SF always on); the
+                    # boolean result is 0/1, so a 64-bit cset is correct for an
+                    # i32 comparison too. Pinning the identical word for both is
+                    # the encoder's contract.
+                    my $want = 0x80000000 | 0x1A800400 | ( $nzcv{$pred} << 12 )
+                        | ( 31 << 16 )                         # Rm = ZR
+                        | ( 31 << 5 );                         # Rn = ZR
+                    is( $found[0] & ~$RD_MASK, $want,
+                        "cset word is CSET Rd, $pred" );
                 };
             }
         }
