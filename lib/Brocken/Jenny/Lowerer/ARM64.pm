@@ -2366,8 +2366,22 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             # abs(x) = csneg x, x, x, gt across a move, so the
                             # encode is a single conditional-select-negate with
                             # the value in both read slots.
+                            #
+                            # CSNEG reads a *flag* condition, so the cmp is not
+                            # optional: without it the select follows whatever
+                            # instruction last set the flags, and abs returned
+                            # the right answer only when the stale flags
+                            # happened to agree. cmp against 0 makes gt mean
+                            # "x > 0", which also leaves -0 and the most
+                            # negative value alone.
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $dst, $src ], comment => 'abs load' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'cmp',
+                                    operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                    comment  => 'abs cmp 0'
+                                ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'csneg', operands => [ $dst, $dst, $dst ], comment => 'abs' ) );
                         }
