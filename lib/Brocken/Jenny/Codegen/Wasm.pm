@@ -152,6 +152,7 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i64_shl' )   { $$buf .= pack( 'C', 0x86 ) }
                 elsif ( $opcode eq 'i64_shr_s' ) { $$buf .= pack( 'C', 0x87 ) }
                 elsif ( $opcode eq 'i64_shr_u' ) { $$buf .= pack( 'C', 0x88 ) }
+                elsif ( $opcode eq 'i32_wrap_i64' ) { $$buf .= pack( 'C', 0xA7 ) }
                 elsif ( $opcode eq 'i32_load' ) {
                     $$buf .= pack( 'C', 0x28 ) . $self->_uleb(2) . $self->_uleb(0);
                 }
@@ -332,8 +333,19 @@ class Brocken::Jenny::Codegen::Wasm {
         if ( $return_type && $return_type->kind eq 'int' && $return_type->bits == 128 ) {
             $ret_valtype = [ 0x7E, 0x7E ];
         }
+        elsif ( !$return_type || $return_type->kind eq 'void' ) {
+
+            # A void function gets an empty Wasm result vector. The frontend
+            # gives an unannotated function a real type object whose kind is
+            # 'void', so testing only for a missing return type was not enough
+            # and fell through to the i32 default: Brocken::Runtime::_init then
+            # declared itself as returning i32 while its body ends in a bare
+            # `return` with an empty stack, and the validator rejected the module
+            # with "expected i32 but nothing on stack".
+            $ret_valtype = 'void';
+        }
         else {
-            $ret_valtype = $return_type ? $self->_wasm_valtype($return_type) : 0x7F;
+            $ret_valtype = $self->_wasm_valtype($return_type);
         }
         return ( { body => $bytes . pack( 'C', 0x0B ), locals => $locals_block, num_locals => $next_local, return_valtype => $ret_valtype },
             \@func_fixups );

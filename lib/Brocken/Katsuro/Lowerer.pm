@@ -743,6 +743,21 @@ class Brocken::Katsuro::Lowerer {
             if ( $val->type->bits < $target_type->bits ) {
                 return $val->type->is_signed ? $builder->build_sext( $val, $target_type ) : $builder->build_zext( $val, $target_type );
             }
+            return $val;
+        }
+
+        # Integer -> pointer. A backend declares a pointer as a machine address
+        # of its own width, so a `return 0` in a function declared `-> ptr` has
+        # to arrive as a pointer. Leaving the literal typed as i64 made the
+        # return value an i64 while the Wasm type section declared the function
+        # as returning i32, and the module failed to validate.
+        if ( $val->type->kind eq 'int' && $target_type->kind eq 'ptr' ) {
+            return $builder->build_ptrcast( $val, $target_type );
+        }
+
+        # Pointer -> integer, the mirror image: `-> i64` returning a pointer.
+        if ( $val->type->kind eq 'ptr' && $target_type->kind eq 'int' ) {
+            return $builder->build_ptrcast( $val, $target_type );
         }
         $val;
     }

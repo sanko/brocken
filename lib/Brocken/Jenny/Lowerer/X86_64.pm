@@ -2034,6 +2034,21 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::PtrCast') ) {
+
+                    # A pointer and an address-sized integer are the same bits,
+                    # so this is a plain move; the cast exists to give a value
+                    # the exact type its function declares.
+                    my ($val) = $inst->operands->@*;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, $self->_reg_opnd( $mbb, $val, $inst->name . '_src' ) ],
+                            comment  => 'ptrcast ' . ( $val->name // $val->value )
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
                     my ($val) = $inst->operands->@*;
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
