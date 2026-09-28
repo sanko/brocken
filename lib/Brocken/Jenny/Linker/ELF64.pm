@@ -171,12 +171,44 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
     # Standard Linux x86_64 static image base; PIE/BSD use base 0 for ASLR.
     method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
 
+    # Is $cc something we could actually run? A bare name is looked up on
+    # PATH; anything with a directory separator is taken as a path, because
+    # searching PATH for it would be wrong. Used to keep a missing compiler
+    # from reaching open3, which throws rather than reporting the failure.
+    sub _executable ($cc) {
+        return -x $cc if File::Spec->file_name_is_absolute($cc);
+
+        # On Windows a bare name only exists with one of the PATHEXT suffixes,
+        # so `gcc` is really gcc.exe and a plain catfile test never finds it.
+        my @names = ($cc);
+        if ( my $ext = $ENV{PATHEXT} ) {
+            push @names, map { $cc . $_ } grep { length } split /;/, $ext;
+        }
+        for my $dir ( File::Spec->path ) {
+            $dir = File::Spec->curdir if !defined $dir || !length $dir;
+            for my $name (@names) {
+                my $full = File::Spec->catfile( $dir, $name );
+                return $full if -f $full && -x _;
+            }
+        }
+        return undef;
+    }
+
     # Asks a compiler where it keeps $lib, and returns the path it prints
     # (undef if there is no such compiler, or it says nothing). The child's
     # stderr goes to the null device and no shell is involved, so a missing or
-    # grumpy compiler is silent on every platform. A missing compiler is not
-    # even an error: the pipe just comes back empty.
+    # grumpy compiler is silent on every platform.
     sub _cc_print_file_name ( $cc, $lib ) {
+
+        # open3 dies when the program cannot be executed at all, so a compiler
+        # that is simply absent is a hard error unless we check for it first.
+        # That case is ordinary, not exceptional: the caller loops over
+        # clang/gcc/cc precisely so an absent one can be skipped, and a host
+        # with no compiler for the target at all is meant to fall through to
+        # the platform default.
+        return undef unless defined $cc && length $cc;
+        return undef unless _executable($cc);
+
         open my $null, '>', File::Spec->devnull or return undef;
         my $out;
         my $pid = open3( undef, $out, $null, $cc, '-pthread', "-print-file-name=$lib" );
