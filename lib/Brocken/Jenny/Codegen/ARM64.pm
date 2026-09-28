@@ -32,6 +32,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         MUL_X          => 0x9B007C00,
         UMULH_X        => 0x9BC07C00,
         UDIV_X         => 0x9AC00800,
+        SDIV_X         => 0x9AC00C00,
         ADD_IMM        => 0x11000000,
         ADD_IMM_64     => 0x91000000,    # ADD_IMM | SF
         SUB_IMM        => 0x51000000,
@@ -596,19 +597,32 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $did      = $reg_id->($dst_r);
                     my $src_r    = $resolve->($src);
                     my $sid      = $reg_id->($src_r);
-                    if ( $src_bits >= 32 ) {
 
-                        # 32-bit zext: MOV Wd, Wn (zeros upper 32)
-                        $bytes .= pack( 'V', 0x2A0003E0 | ( $sid << 16 ) | $did );
+                    # Every form below takes its source in Rn (bits 9:5). The
+                    # 32-bit ORR-immediate form has no Rm field at all, and the
+                    # UBFM/SBFM forms behind UXTB/UXTH/SXTB/SXTH/SXTW read Rn
+                    # too, so the source register goes at bit 5, not bit 16
+                    # (bit 16 is Rm and silently produced immr/imms garbage).
+                    if ( $src_bits >= 64 ) {
+
+                        # zext i64 <- i64 is a no-op, so this has to stay 64-bit:
+                        # the 32-bit ORR form below would drop bits 63..32.
+                        # MOV Xd, Xn reads the source from Rm (bits 20:16).
+                        $bytes .= pack( 'V', MOV_X | ( $sid << 16 ) | $did );
+                    }
+                    elsif ( $src_bits >= 32 ) {
+
+                        # 32-bit zext: ORR Wd, WZR, #0xffffffff (zeros upper 32)
+                        $bytes .= pack( 'V', 0x2A0003E0 | ( $sid << 5 ) | $did );
                     }
                     elsif ( $src_bits >= 16 ) {
 
                         # UXTH Wd, Wn
-                        $bytes .= pack( 'V', 0x53003C00 | ( $sid << 16 ) | $did );
+                        $bytes .= pack( 'V', 0x53003C00 | ( $sid << 5 ) | $did );
                     }
                     else {
                         # UXTB Wd, Wn
-                        $bytes .= pack( 'V', 0x53001C00 | ( $sid << 16 ) | $did );
+                        $bytes .= pack( 'V', 0x53001C00 | ( $sid << 5 ) | $did );
                     }
                 }
                 elsif ( $opcode eq 'movsx' ) {
@@ -617,19 +631,22 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $did      = $reg_id->($dst_r);
                     my $src_r    = $resolve->($src);
                     my $sid      = $reg_id->($src_r);
+
+                    # Same Rn placement as movzx: SXTW/SXTH/SXTB are SBFM with
+                    # the source in Rn (bits 9:5).
                     if ( $src_bits >= 32 ) {
 
                         # SXTW Xd, Wn
-                        $bytes .= pack( 'V', 0x93407C00 | ( $sid << 16 ) | $did );
+                        $bytes .= pack( 'V', 0x93407C00 | ( $sid << 5 ) | $did );
                     }
                     elsif ( $src_bits >= 16 ) {
 
                         # SXTH Wd, Wn
-                        $bytes .= pack( 'V', 0x13003C00 | ( $sid << 16 ) | $did );
+                        $bytes .= pack( 'V', 0x13003C00 | ( $sid << 5 ) | $did );
                     }
                     else {
                         # SXTB Wd, Wn
-                        $bytes .= pack( 'V', 0x13001C00 | ( $sid << 16 ) | $did );
+                        $bytes .= pack( 'V', 0x13001C00 | ( $sid << 5 ) | $did );
                     }
                 }
                 elsif ( $opcode eq 'add' ||
@@ -640,6 +657,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $opcode eq 'mul'   ||
                     $opcode eq 'umulh' ||
                     $opcode eq 'udiv'  ||
+                    $opcode eq 'sdiv'  ||
                     $opcode eq 'adc'   ||
                     $opcode eq 'sbb' ) {
                     my $dst_r  = $resolve->($dst);
@@ -654,6 +672,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         mul   => ( $bits >= 64 ? MUL_X : MUL_W ),
                         umulh => UMULH_X,
                         udiv  => UDIV_X,
+                        sdiv  => SDIV_X,
                         adc   => ADCS_X,
                         sbb   => SBCS_X,
                     );
@@ -690,7 +709,11 @@ class Brocken::Jenny::Codegen::ARM64 {
                     else {
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
-                        my %base  = ( shl => 0x9AC02000, lshr => 0x9AC02400, ashr => 0x9AC02C00 );
+                        # Register forms: LSLV 0x9AC02000, LSRV 0x9AC02400,
+                        # ASRV 0x9AC02800, RORV 0x9AC02C00 (each +0x400). 0x2C00
+                        # is RORV, which silently rotated instead of shifting
+                        # arithmetically right.
+                        my %base = ( shl => 0x9AC02000, lshr => 0x9AC02400, ashr => 0x9AC02800 );
                         $bytes .= pack( 'V', $base{$opcode} | ( $sid << 16 ) | ( $did << 5 ) | $did );
                     }
                 }
@@ -813,8 +836,15 @@ class Brocken::Jenny::Codegen::ARM64 {
                 elsif ( $opcode eq 'cmp' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $bits  = $dst->type      ? $dst->type->bits : 64;
-                    my $sf    = ( $bits >= 64 ) ? SF               : 0x00000000;
+
+                    # The compare width belongs to the operands, not the result:
+                    # an icmp result is i1, so taking the width from $dst turned a
+                    # 64-bit compare into a 32-bit one and made values that only
+                    # differ above bit 31 compare equal.
+                    my $cmp_type
+                        = ( $src->kind ne 'imm' && $src->type ) ? $src->type : $dst->type;
+                    my $bits = $cmp_type ? $cmp_type->bits : 64;
+                    my $sf   = ( $bits >= 64 ) ? SF : 0x00000000;
                     if ( $src->kind eq 'imm' ) {
                         my $imm12 = $src->value & 0xFFF;
                         $bytes .= pack( 'V', $sf | CMP_IMM | ( $imm12 << 10 ) | ( $did << 5 ) );
