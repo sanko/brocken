@@ -129,6 +129,8 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i32_add' )   { $$buf .= pack( 'C', 0x6A ) }
                 elsif ( $opcode eq 'i32_sub' )   { $$buf .= pack( 'C', 0x6B ) }
                 elsif ( $opcode eq 'i32_mul' )   { $$buf .= pack( 'C', 0x6C ) }
+                elsif ( $opcode eq 'i32_div_s' ) { $$buf .= pack( 'C', 0x6D ) }
+                elsif ( $opcode eq 'i32_div_u' ) { $$buf .= pack( 'C', 0x6E ) }
                 elsif ( $opcode eq 'i32_rem_s' ) { $$buf .= pack( 'C', 0x6F ) }
                 elsif ( $opcode eq 'i32_rem_u' ) { $$buf .= pack( 'C', 0x70 ) }
                 elsif ( $opcode eq 'i32_and' )   { $$buf .= pack( 'C', 0x71 ) }
@@ -140,6 +142,7 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i64_add' )   { $$buf .= pack( 'C', 0x7C ) }
                 elsif ( $opcode eq 'i64_sub' )   { $$buf .= pack( 'C', 0x7D ) }
                 elsif ( $opcode eq 'i64_mul' )   { $$buf .= pack( 'C', 0x7E ) }
+                elsif ( $opcode eq 'i64_div_s' ) { $$buf .= pack( 'C', 0x7F ) }
                 elsif ( $opcode eq 'i64_div_u' ) { $$buf .= pack( 'C', 0x80 ) }
                 elsif ( $opcode eq 'i64_rem_s' ) { $$buf .= pack( 'C', 0x81 ) }
                 elsif ( $opcode eq 'i64_rem_u' ) { $$buf .= pack( 'C', 0x82 ) }
@@ -180,7 +183,8 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i64_le_s' )         { $$buf .= pack( 'C', 0x57 ) }
                 elsif ( $opcode eq 'i64_ge_s' )         { $$buf .= pack( 'C', 0x59 ) }
                 elsif ( $opcode eq 'i64_lt_u' )         { $$buf .= pack( 'C', 0x54 ) }
-                elsif ( $opcode eq 'i64_extend_i32_u' ) { $$buf .= pack( 'C', 0xAC ) }
+                elsif ( $opcode eq 'i64_extend_i32_s' ) { $$buf .= pack( 'C', 0xAC ) }
+                elsif ( $opcode eq 'i64_extend_i32_u' ) { $$buf .= pack( 'C', 0xAD ) }
                 elsif ( $opcode eq 'i64_gt_u' )         { $$buf .= pack( 'C', 0x56 ) }
                 elsif ( $opcode eq 'i64_le_u' )         { $$buf .= pack( 'C', 0x58 ) }
                 elsif ( $opcode eq 'i64_ge_u' )         { $$buf .= pack( 'C', 0x5A ) }
@@ -226,6 +230,17 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'f64_gt' )   { $$buf .= pack( 'C', 0x64 ) }
                 elsif ( $opcode eq 'f64_le' )   { $$buf .= pack( 'C', 0x65 ) }
                 elsif ( $opcode eq 'f64_ge' )   { $$buf .= pack( 'C', 0x66 ) }
+                elsif ( $opcode eq 'select' ) {
+
+                    # Plain 0x1B, with no type immediate. The MVP select is
+                    # untyped and infers its operands from the stack, which
+                    # covers i32/i64/f32/f64 alike. The typed form is a
+                    # different opcode (0x1C) and takes a *vector* of value
+                    # types, so appending a bare valtype here makes the
+                    # validator read that byte as a vector length and reject
+                    # the module.
+                    $$buf .= pack( 'C', 0x1B );
+                }
                 elsif ( $opcode eq 'ret' ) {
                     $$buf .= pack( 'C', 0x0F );
                 }
@@ -251,6 +266,21 @@ class Brocken::Jenny::Codegen::Wasm {
                     my $fixup_pos = length($$buf);
                     $$buf .= pack( 'C', 0x10 ) . "\x80\x80\x80\x80\x00";    # call + placeholder LEB128
                     push @func_fixups, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
+                }
+                else {
+
+                    # Never fall through an unhandled opcode. An earlier version
+                    # of this chain had no else, so every opcode the encoder did
+                    # not know was silently dropped: i32 division returned its
+                    # right-hand operand, and integer min/max did the same,
+                    # because Wasm has no i32.min/i64.min at all and the
+                    # lowerer emitted one anyway. The result was a wrong answer
+                    # with no diagnostic, which is how those bugs stayed
+                    # invisible while the Wasm tests skipped for want of a
+                    # runtime. Opcodes that are deliberately no-ops (ctx_swap)
+                    # get an explicit branch above rather than falling through.
+                    die "Brocken::Jenny::Codegen::Wasm: no encoder for MIR opcode '$opcode'"
+                        . ( defined $ops[0] ? ' (first operand: ' . $ops[0]->value . ')' : '' );
                 }
             }
         }
