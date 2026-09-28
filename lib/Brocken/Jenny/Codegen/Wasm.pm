@@ -76,7 +76,10 @@ class Brocken::Jenny::Codegen::Wasm {
         my $bytes       = '';
         my %vreg_map    = ();
         my $next_local  = scalar( $ir_params->@* );
-        my @func_fixups = ();
+
+        # Fixups are collected per block and rebased onto the function body
+        # during assembly below.
+        my @block_fixups = ();
 
         # Map parameters to locals 0..N-1
         for my $i ( 0 .. ( $next_local - 1 ) ) {
@@ -86,28 +89,311 @@ class Brocken::Jenny::Codegen::Wasm {
         # Reserve a local for the linear-memory heap bump pointer
         $vreg_map{'%heap_ptr'} = $next_local++;
         my @blocks = $mf->blocks->@*;
+        my $nb     = scalar @blocks;
         my %label_to_block_idx;
-        for my $bi ( 0 .. $#blocks ) {
+        for my $bi ( 0 .. $nb - 1 ) {
             for my $inst ( $blocks[$bi]->instructions->@* ) {
                 $label_to_block_idx{ $inst->operands->[0]->value } = $bi if $inst->opcode eq 'label';
             }
         }
-        my $num_non_entry = $#blocks;
-        my $entry_bytes   = '';
-        my @non_entry_bytes;
-        for my $bi ( 0 .. $#blocks ) {
+
+        # Successors, read off the terminator. A block ends in `jmp`, `br-if`,
+        # or `ret`, so nothing should depend on falling into the next block;
+        # anything else is treated as a fall-through to the MIR successor and
+        # given an explicit branch, which is what lets the emitted order differ
+        # from the MIR order below.
+        my ( %succ, %fallthru );
+        for my $bi ( 0 .. $nb - 1 ) {
+            my @s;
+            my $instrs = $blocks[$bi]->instructions;
+            my $last_op = @$instrs ? $instrs->[-1]->opcode : undef;
+            for my $inst (@$instrs) {
+                next unless $inst->opcode eq 'jmp' || $inst->opcode eq 'bne';
+                my $t = $label_to_block_idx{ $inst->operands->[0]->value };
+                push @s, $t if defined $t;
+            }
+            if ( !defined $last_op || ( $last_op ne 'jmp' && $last_op ne 'ret' ) ) {
+                if ( $bi + 1 < $nb ) { $fallthru{$bi} = $bi + 1; push @s, $bi + 1 }
+            }
+            $succ{$bi} = \@s;
+        }
+
+        # Depth-first walk to find the back edges. An edge to a block still on
+        # the DFS stack closes a cycle, and its target is a loop header.
+        my ( %preds, %is_back, %seen, %on_stack );
+        for my $bi ( 0 .. $nb - 1 ) {
+            push @{ $preds{$_} }, $bi for @{ $succ{$bi} // [] };
+        }
+        my $dfs;
+        $dfs = sub {
+            my ($bi) = @_;
+            $on_stack{$bi} = 1;
+            for my $s ( @{ $succ{$bi} // [] } ) {
+                if   ( $on_stack{$s} ) { $is_back{"$bi>$s"} = 1 }
+                elsif ( !$seen{$s} )   { $seen{$s} = 1; $dfs->($s) }
+            }
+            delete $on_stack{$bi};
+        };
+        for my $root ( 0 .. $nb - 1 ) {
+            next if $seen{$root};
+            $seen{$root} = 1;
+            $dfs->($root);
+        }
+
+        # Natural loop body per header: the header plus everything that reaches
+        # the back edge without going back through the header. The walk stops at
+        # anything the header cannot reach, which is what keeps a preheader out.
+        # Without that stop every block feeding the header is pulled in, so a
+        # loop wrapped in an `if` swallows the whole `if` and the condition
+        # ends up inside the loop it guards. Reducible CFGs, which is all the
+        # frontend produces, make these laminar, so each block sits in one
+        # innermost loop.
+        my ( %loop_body, %loop_header );
+        for my $edge ( sort keys %is_back ) {
+            my ( $u, $h ) = split />/, $edge, 2;
+            $loop_header{$h} = 1;
+            $loop_body{$h} //= { $h => 1 };
+
+            # What the header reaches without passing back through itself.
+            my ( @todo, %from_header );
+            $from_header{$h} = 1;
+            push @todo, $h;
+            while (@todo) {
+                my $n = shift @todo;
+                for my $s ( @{ $succ{$n} // [] } ) {
+                    next if $from_header{$s} || $s == $h;
+                    $from_header{$s} = 1;
+                    push @todo, $s;
+                }
+            }
+
+            my @work = ($u);
+            while (@work) {
+                my $n = pop @work;
+                next if $n == $h || $loop_body{$h}{$n};
+                $loop_body{$h}{$n} = 1;
+                push @work, grep { $from_header{$_} } @{ $preds{$n} // [] };
+            }
+        }
+        my %innermost;
+        for my $bi ( 0 .. $nb - 1 ) {
+            my $best;
+            for my $h ( keys %loop_body ) {
+                next unless $loop_body{$h}{$bi};
+                $best = $h if !defined $best || keys %{ $loop_body{$h} } < keys %{ $loop_body{$best} };
+            }
+            $innermost{$bi} = $best;
+        }
+
+        # Emission order. A structured encoding needs every branch that is not a
+        # loop back edge to point *forwards* in the emitted code, and each
+        # loop's blocks to be one unbroken run. Neither falls out of a plain
+        # reverse postorder: that put an `if`'s continuation between the loop
+        # header and the loop body, and it laid an `else` arm out *after* the
+        # join that arm branches back to, which no stack of labels can express
+        # because a label that has closed cannot be branched to again.
+        #
+        # So order the regions one at a time, and within a region place a block
+        # only once every predecessor that is not a back edge has been placed.
+        # Waiting for the predecessors is what puts a join after both the arms
+        # that reach it, which is the case a depth-first walk gets wrong: it
+        # finishes the first arm's whole subgraph, join included, before it
+        # starts the second arm. Each region keeps its own ready list, so a
+        # block that belongs to an enclosing region is handed back to the
+        # caller and lands after this region rather than inside it.
+        my %pending;
+        $pending{$_} = 0 for 0 .. $nb - 1;
+        for my $u ( 0 .. $nb - 1 ) {
+            $pending{$_}++ for grep { !$is_back{"$u>$_"} } @{ $succ{$u} // [] };
+        }
+
+        my ( @order, %placed, @sink );
+        my $place_region;
+        $place_region = sub {
+            my ( $region, $entry, $outer ) = @_;
+            $outer //= \@sink;
+            my @ready = ($entry);
+            while (@ready) {
+                my $bi = shift @ready;
+                next if $placed{$bi};
+                my $rs = $innermost{$bi} // 'fn';
+                if ( $rs ne $region ) {
+                    if ( $region eq 'fn' || $loop_body{$region}{$rs} ) {
+
+                        # A loop nested in this one. Hand back to *this*
+                        # region's list, not to the caller's: a block the
+                        # nested loop leads to but does not own belongs to this
+                        # region, and it has to be placed here to keep the
+                        # region's blocks in one run.
+                        $place_region->( $rs, $bi, \@ready );
+                    }
+                    else {
+                        push @$outer, $bi;
+                    }
+                    next;
+                }
+                $placed{$bi} = 1;
+                push @order, $bi;
+                for my $s ( @{ $succ{$bi} // [] } ) {
+                    next if $placed{$s} || $is_back{"$bi>$s"};
+                    push @ready, $s unless --$pending{$s};
+                }
+            }
+        };
+        $place_region->( 'fn', 0, undef );
+        $place_region->( $innermost{$_} // 'fn', $_, undef ) for grep { !$placed{$_} } 0 .. $nb - 1;
+
+        my %order_pos;
+        $order_pos{ $order[$_] } = $_ for 0 .. $#order;
+
+        # Check the properties the branch depths rely on, so a layout that broke
+        # one is reported here rather than as an unreadable module.
+        for my $bi ( 0 .. $nb - 1 ) {
+            for my $s ( @{ $succ{$bi} // [] } ) {
+                next if $is_back{"$bi>$s"} || $order_pos{$s} > $order_pos{$bi};
+                die "Wasm: branch from block $bi to $s runs backwards in the emitted code";
+            }
+        }
+        for my $h ( sort keys %loop_body ) {
+            my @pos = sort { $a <=> $b } map { $order_pos{$_} } grep { $loop_body{$h}{$_} } 0 .. $nb - 1;
+            next unless @pos > 1;
+            die "Wasm: loop at block $h is not laid out contiguously"
+                if $pos[-1] - $pos[0] != $#pos;
+        }
+
+        # A region is one loop, or the whole function. Its items are the blocks
+        # it owns, in emission order. A loop header's own code belongs inside
+        # its loop, so the loop instead takes a "loop:N" marker in the region
+        # that *encloses* it. Emitted the other way round, a loop would have no
+        # event at all and its body would be dropped from the function.
+        my %owned;
+        for my $bi ( 0 .. $nb - 1 ) {
+            push @{ $owned{ $innermost{$bi} // 'fn' } }, $bi;
+        }
+        my ( %region_items, %item_pos );
+        for my $key ( keys %owned ) {
+            for my $bi ( @{ $owned{$key} } ) {
+                push @{ $region_items{$key} }, $bi;
+                $item_pos{$bi} = $order_pos{$bi};
+            }
+        }
+        for my $h ( keys %loop_header ) {
+
+            # The enclosing region is the smallest loop that contains the header
+            # other than the header's own loop.
+            my $parent;
+            for my $L ( keys %loop_body ) {
+                next if $L == $h || !$loop_body{$L}{$h};
+                $parent = $L if !defined $parent || keys %{ $loop_body{$L} } < keys %{ $loop_body{$parent} };
+            }
+            $parent //= 'fn';
+            push @{ $region_items{$parent} }, "loop:$h";
+            $item_pos{"loop:$h"} = $order_pos{$h};
+        }
+        for my $key ( keys %region_items ) {
+            @{ $region_items{$key} } = sort { $item_pos{$a} <=> $item_pos{$b} } @{ $region_items{$key} };
+        }
+
+        # Every branch target needs a label, and the label has to close right
+        # before that block's own code so the branch lands on it. Opening them
+        # in reverse order means the innermost is the one that closes first.
+        my %need_label;
+        for my $bi ( 0 .. $nb - 1 ) {
+            $need_label{$_} = 1 for @{ $succ{$bi} // [] };
+        }
+
+        # A loop header is entered two different ways. A back edge wants the
+        # loop itself, since branching to a `loop` restarts at its head, while a
+        # branch from outside wants a plain `block` that ends just before the
+        # loop begins. Only emit that outer block when something outside the loop
+        # actually branches here; the back edge alone needs no second label.
+        my %outer_label;
+        for my $bi ( 0 .. $nb - 1 ) {
+            next unless $need_label{$bi};
+            $outer_label{$bi} = 1
+                if !$loop_header{$bi}
+                || grep { !$loop_body{$bi}{$_} } @{ $preds{$bi} // [] };
+        }
+
+        my @events;
+        my $build_region;
+        $build_region = sub {
+            my ( $key, $header ) = @_;
+            my @items = @{ $region_items{$key} // [] };
+
+            # A region's own header is labelled by the enclosing region, so it
+            # contributes no label events here, only its code.
+            my $labelled = sub {
+                my ($it) = @_;
+                my $bi = $it =~ /^loop:(\d+)$/ ? $1 : $it;
+                return ( $bi, 0 ) if defined $header && $bi == $header;
+                return ( $bi, $outer_label{$bi} ? 1 : 0 );
+            };
+
+            for my $it ( reverse @items ) {
+                my ( $bi, $lab ) = $labelled->($it);
+                push @events, [ 'open', $bi ] if $lab;
+            }
+            for my $it (@items) {
+                my ( $bi, $lab ) = $labelled->($it);
+                if ( $it =~ /^loop:/ ) {
+                    push @events, [ 'close', $bi ] if $lab;
+                    push @events, [ 'open_loop', $bi ];
+                    $build_region->( $bi, $bi );
+                    push @events, ['close_loop'];
+                }
+                else {
+                    push @events, [ 'close', $bi ] if $lab;
+                    push @events, [ 'code',  $bi ];
+                }
+            }
+        };
+        $build_region->( 'fn', undef );
+
+        # Walk the events to record, for each block, how deep each of its
+        # targets sits. Doing it against the live label stack is what makes the
+        # depth right: the old code derived it from a single formula that only
+        # held for a branch out of the entry block.
+        my ( @stack, %depth_to );
+        for my $ev (@events) {
+            my $kind = $ev->[0];
+            if ( $kind eq 'open' )         { push @stack, [ 'block', $ev->[1] ] }
+            elsif ( $kind eq 'close' )      { pop @stack }
+            elsif ( $kind eq 'open_loop' )  { push @stack, [ 'loop', $ev->[1] ] }
+            elsif ( $kind eq 'close_loop' ) { pop @stack }
+            else {
+                my $bi  = $ev->[1];
+                my @tgt = @{ $succ{$bi} // [] };
+                for my $t (@tgt) {
+                    my $want = $is_back{"$bi>$t"} ? 'loop' : 'block';
+                    my $idx;
+                    for my $i ( reverse 0 .. $#stack ) {
+                        next unless $stack[$i][1] == $t;
+                        $idx = $i, last if $stack[$i][0] eq $want;
+                        $idx = $i unless defined $idx;
+                    }
+                    die "Wasm: no enclosing label for the branch from block $bi to $t" unless defined $idx;
+                    $depth_to{"$bi\t$t"} = $#stack - $idx;
+                }
+            }
+        }
+
+        my @block_bytes;
+        for my $bi ( 0 .. $nb - 1 ) {
             my $mbb = $blocks[$bi];
-            my $buf = $bi == 0 ? \$entry_bytes : \( $non_entry_bytes[ $bi - 1 ] = '' );
+            my $buf = \( $block_bytes[$bi] = '' );
             for my $inst ( $mbb->instructions->@* ) {
                 next if $bi > 0 && $inst->opcode eq 'label';
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
                 if ( $opcode eq 'bne' ) {
-                    my $depth = $num_non_entry - $label_to_block_idx{ $ops[0]->value };
+                    my $t     = $label_to_block_idx{ $ops[0]->value };
+                    my $depth = $depth_to{"$bi\t$t"};
                     $$buf .= pack( 'C', 0x0D ) . $self->_uleb($depth);
                 }
                 elsif ( $opcode eq 'jmp' ) {
-                    my $depth = $num_non_entry - $label_to_block_idx{ $ops[0]->value };
+                    my $t     = $label_to_block_idx{ $ops[0]->value };
+                    my $depth = $depth_to{"$bi\t$t"};
                     $$buf .= pack( 'C', 0x0C ) . $self->_uleb($depth);
                 }
                 elsif ( $opcode eq 'local_get' ) {
@@ -253,7 +539,7 @@ class Brocken::Jenny::Codegen::Wasm {
                     my $func_name = $ops[0]->value;
                     my $fixup_pos = length($$buf);
                     $$buf .= pack( 'C', 0x10 ) . "\x80\x80\x80\x80\x00";    # call + placeholder LEB128
-                    push @func_fixups, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
+                    push @{ $block_fixups[$bi] }, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
                 }
                 elsif ( $opcode eq 'call_indirect' ) {
                     $$buf .= pack( 'C', 0x00 );                             # unreachable (stub)
@@ -266,7 +552,7 @@ class Brocken::Jenny::Codegen::Wasm {
                     my $func_name = $ops[1]->value;
                     my $fixup_pos = length($$buf);
                     $$buf .= pack( 'C', 0x10 ) . "\x80\x80\x80\x80\x00";    # call + placeholder LEB128
-                    push @func_fixups, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
+                    push @{ $block_fixups[$bi] }, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
                 }
                 else {
 
@@ -286,19 +572,42 @@ class Brocken::Jenny::Codegen::Wasm {
             }
         }
 
-        # Open nested blocks (outermost first).  br N targets N levels out;
-        # after the matching `end`, control continues.  So each block's
-        # body must come *after* that block's `end`, not before it.
-        for my $bi ( 1 .. $num_non_entry ) {
-            $bytes .= pack( 'C', 0x02 ) . pack( 'C', 0x40 );
+        # A block that did not end in a branch falls into its MIR successor,
+        # which the reordering above may have moved, so say so explicitly.
+        for my $bi ( 0 .. $nb - 1 ) {
+            next unless defined $fallthru{$bi};
+            $block_bytes[$bi] .= pack( 'C', 0x0C ) . $self->_uleb( $depth_to{"$bi\t$fallthru{$bi}"} );
         }
-        $bytes .= $entry_bytes;
 
-        # Close innermost first, emitting each block's code *after* its end
-        for my $bi ( reverse 1 .. $num_non_entry ) {
-            $bytes .= pack( 'C', 0x0B );
-            $bytes .= $non_entry_bytes[ $bi - 1 ];
+        # Assemble the event list. A `block` label closes immediately before the
+        # code of the block it names, which is what makes `br` to it land there;
+        # a `loop` label is what a back edge targets, because branching to a
+        # `loop` restarts at its head while branching to a `block` resumes
+        # after its end.
+        my @func_fixups;
+        for my $ev (@events) {
+            my $kind = $ev->[0];
+            if ( $kind eq 'open' )   { $bytes .= pack( 'C', 0x02 ) . pack( 'C', 0x40 ) }    # block void
+            elsif ( $kind eq 'close' )    { $bytes .= pack( 'C', 0x0B ) }                      # end
+            elsif ( $kind eq 'open_loop' )  { $bytes .= pack( 'C', 0x03 ) . pack( 'C', 0x40 ) }# loop void
+            elsif ( $kind eq 'close_loop' ) { $bytes .= pack( 'C', 0x0B ) }                      # end
+            else {
+                my $bi = $ev->[1];
+
+                # The encoder measured each placeholder against its own block,
+                # but the linker rewrites the finished function body, where the
+                # same call sits after however many `block`/`loop` opcodes the
+                # region layout put in front of it. Rebase here or the linker
+                # overwrites the wrong five bytes: for an `if`, whose entry
+                # block is preceded by one `block` per target, it landed on the
+                # `call` opcode itself and left the function calling itself.
+                for my $fx ( @{ $block_fixups[$bi] // [] } ) {
+                    push @func_fixups, { %$fx, offset => $fx->{offset} + length($bytes) };
+                }
+                $bytes .= $block_bytes[$bi];
+            }
         }
+
         my $num_params       = scalar( $ir_params->@* );
         my $num_extra_locals = $next_local - $num_params;
         my $locals_block     = '';
