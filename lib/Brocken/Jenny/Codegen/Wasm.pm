@@ -86,8 +86,17 @@ class Brocken::Jenny::Codegen::Wasm {
             $vreg_map{ $ir_params->[$i]->name } = $i;
         }
 
-        # Reserve a local for the linear-memory heap bump pointer
-        $vreg_map{'%heap_ptr'} = $next_local++;
+    # The linear-memory bump pointer. Wasm locals are per-invocation and start
+    # at zero, so giving this a local index made every call frame begin its
+    # spill allocations at address 0: recursive frames then aliased one slot,
+    # and a frame that re-read a spilled parameter *after* a recursive call read
+    # back whatever the callee had stored there. fib(n-1) + fib(n-2) was wrong
+    # for that reason alone, while fact(n), which reads its parameter before
+    # recursing and never again, happened to be right. It has to be a module
+    # global (section 6) that every frame shares; the linker emits it and the
+    # entry stub seeds it from the %__heap_base argument.
+    use constant HEAP_PTR_GLOBAL => 0;
+
         my @blocks = $mf->blocks->@*;
         my $nb     = scalar @blocks;
         my %label_to_block_idx;
@@ -397,8 +406,13 @@ class Brocken::Jenny::Codegen::Wasm {
                     $$buf .= pack( 'C', 0x0C ) . $self->_uleb($depth);
                 }
                 elsif ( $opcode eq 'local_get' ) {
-                    my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
-                    $$buf .= pack( 'C', 0x20 ) . $self->_uleb($lid);
+                    if ( $ops[0]->value eq '%heap_ptr' ) {
+                        $$buf .= pack( 'C', 0x23 ) . $self->_uleb(HEAP_PTR_GLOBAL);
+                    }
+                    else {
+                        my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
+                        $$buf .= pack( 'C', 0x20 ) . $self->_uleb($lid);
+                    }
                 }
                 elsif ( $opcode eq 'i32_const' ) {
                     $$buf .= pack( 'C', 0x41 ) . $self->_sleb( $ops[0]->value );
@@ -532,8 +546,13 @@ class Brocken::Jenny::Codegen::Wasm {
                     $$buf .= pack( 'C', 0x0F );
                 }
                 elsif ( $opcode eq 'local_set' ) {
-                    my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
-                    $$buf .= pack( 'C', 0x21 ) . $self->_uleb($lid);
+                    if ( $ops[0]->value eq '%heap_ptr' ) {
+                        $$buf .= pack( 'C', 0x24 ) . $self->_uleb(HEAP_PTR_GLOBAL);
+                    }
+                    else {
+                        my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
+                        $$buf .= pack( 'C', 0x21 ) . $self->_uleb($lid);
+                    }
                 }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $ops[0]->value;

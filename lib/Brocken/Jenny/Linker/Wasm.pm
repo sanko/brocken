@@ -107,6 +107,16 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             }
             $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $func_sec;
 
+            # Global Section (ID 6): one mutable i32 bump pointer. It is seeded
+            # at run time by the entry stub below rather than here, because the
+            # heap base arrives as an argument to _BROCKEN_ENTRY.
+            my $global_content = pack( 'C', 1 )                     # 1 global
+                . pack( 'C', 0x7F )                                 # valtype i32
+                . pack( 'C', 0x01 )                                 # mutable
+                . pack( 'C', 0x41 ) . pack( 'C', 0x00 )             # i32.const 0
+                . pack( 'C', 0x0B );                                # end
+            my $global_sec = pack( 'C', 6 ) . $self->_uleb( length($global_content) ) . $global_content;
+
             # Export Section (ID 7) -- export all named functions
             my $export_sec = '';
             for my $i ( 0 .. $#func_data ) {
@@ -114,6 +124,24 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
                 $export_sec .= $self->_uleb( length($name) ) . $name . pack( 'C', 0x00 ) . $self->_uleb($i);
             }
             $export_sec = pack( 'C', 7 ) . $self->_uleb( length($export_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $export_sec;
+
+            # Seed the shared bump pointer. This has to run before the entry
+            # function's first alloca, so it goes in front of the body -- and
+            # after the call fixups above, whose offsets are already resolved
+            # against the un-prefixed bytes. _BROCKEN_ENTRY's first parameter is
+            # %__heap_base. +16 skips the cursor/limit pair that
+            # Brocken::Runtime::_init keeps in the first 16 bytes of the heap.
+            for my $fd (@func_data) {
+                next unless $fd->{name} eq '_BROCKEN_ENTRY';
+                my $stub
+                    = pack( 'C', 0x20 ) . pack( 'C', 0x00 )     # local.get 0
+                    . pack( 'C', 0x41 ) . pack( 'C', 0x10 )     # i32.const 16
+                    . pack( 'C', 0x6A )                         # i32.add
+                    . pack( 'C', 0x24 ) . pack( 'C', 0x00 );    # global.set 0
+                my $at = $self->_locals_prefix_len( $fd->{bytes} );
+                substr( $fd->{bytes}, $at, 0 ) = $stub;
+                last;
+            }
 
             # Code Section (ID 10)
             my $code_sec = '';
@@ -127,7 +155,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
 
             # WASM magic number \0asm + version 1 (MVP)
             print $fh "\0asm\x01\x00\x00\x00";
-            print $fh $type_sec, $func_sec, $mem_sec, $export_sec, $code_sec;
+            print $fh $type_sec, $func_sec, $mem_sec, $global_sec, $export_sec, $code_sec;
             close $fh;
             return;
         }
@@ -160,6 +188,25 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         my $func_sec = $self->_uleb(1) . $self->_uleb($type_idx);
         $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) ) . $func_sec;
 
+        # Global Section (ID 6): the shared bump pointer, as in the multi-function
+        # path above. Only the body that actually uses %heap_ptr needs it, but the
+        # section is always emitted so both paths produce the same module shape.
+        my $global_content = pack( 'C', 1 )
+            . pack( 'C', 0x7F )
+            . pack( 'C', 0x01 )
+            . pack( 'C', 0x41 ) . pack( 'C', 0x00 )
+            . pack( 'C', 0x0B );
+        my $global_sec = pack( 'C', 6 ) . $self->_uleb( length($global_content) ) . $global_content;
+
+        if ( $name eq '_BROCKEN_ENTRY' ) {
+            $body
+                = pack( 'C', 0x20 ) . pack( 'C', 0x00 )
+                . pack( 'C', 0x41 ) . pack( 'C', 0x10 )
+                . pack( 'C', 0x6A )
+                . pack( 'C', 0x24 ) . pack( 'C', 0x00 )
+                . $body;
+        }
+
         # Export Section (ID 7)
         my $export_sec = $self->_uleb(1) . $self->_uleb( length($name) ) . $name . pack( 'C', 0x00 ) . $self->_uleb($func_idx);
         $export_sec = pack( 'C', 7 ) . $self->_uleb( length($export_sec) ) . $export_sec;
@@ -172,8 +219,27 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
         binmode $fh;
         print $fh "\0asm\x01\x00\x00\x00";
-        print $fh $type_sec, $func_sec, $mem_sec, $export_sec, $code_sec;
+        print $fh $type_sec, $func_sec, $mem_sec, $global_sec, $export_sec, $code_sec;
         close $fh;
+    }
+
+    # A function body is the locals declaration followed by the expression, so
+    # anything spliced into the front of the code has to go after the locals.
+    # The declaration is a group count, then that many (count, valtype) pairs.
+    method _locals_prefix_len($bytes) {
+        my $pos = 0;
+        my $read_uleb_at = sub {
+            my $b = ord substr( $bytes, $pos, 1 );
+            $pos++;
+            while ( $b & 0x80 ) { $b = ord substr( $bytes, $pos, 1 ); $pos++; }
+            return $b;
+        };
+        my $groups = $read_uleb_at->();
+        for ( 1 .. $groups ) {
+            $read_uleb_at->();              # how many locals in this group
+            $pos++;                         # the group's single valtype byte
+        }
+        return $pos;
     }
 
     # Unsigned LEB128 encoding: emit 7-bit chunks with continuation bit 0x80,
