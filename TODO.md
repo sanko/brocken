@@ -271,10 +271,56 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
         leaving an i64 in an i32 local. `Wasm::_wasm_push` only re-types
         constants, so a vreg conversion has to be explicit.
       Regression: `3286_wasm_locals.t`, which compiles frontend programs with
-      locals and asserts the module passes `wasmtime` validation. Executing the
-      result still needs the entry to be called with a heap base, which is the
-      separate pre-existing entry-ABI question. The Wasm halves of the alloca
-      and sub-word-load audits are unblocked.
+      locals and executes them under `wasmtime`, asserting the returned value.
+      The Wasm halves of the alloca and sub-word-load audits are unblocked.
+
+### Wasm call results and branch depths
+- [x] **Two calls to the same function in one expression were miscompiled.**
+      The frontend named every call result after the callee, so two calls to
+      `g` both produced `%g_res` and the second shadowed the first. The IR is
+      supposed to be SSA, and every backend maps values to registers or locals
+      by name, so the two values collapsed into one and `g(20) + g(1)`
+      computed `2 + 2` and answered 4 instead of 42. Call results now go
+      through a Builder helper that appends a counter to a repeated name.
+- [x] **The Wasm linker misplaced every call fixup after the first.**
+      A `call` placeholder is five bytes and the LEB128 index that replaces it
+      is one or two, so each substitution shortened the buffer, but the offsets
+      recorded by the encoder assumed nothing had been rewritten yet. The
+      second call in a function therefore overwrote the wrong bytes and left
+      four continuation bytes in front of its index, which the validator read
+      as the five-byte index `0x30000000` and rejected as out of function
+      range. Any function with two calls failed to compile. Fixups are now
+      applied in ascending offset order while tracking the shift.
+      Regression: `3287_wasm_call_results.t`, which checks the two call results
+      get distinct names and that repeated calls return the right value.
+- [ ] **Wasm cannot compile a loop, or any branch out of a non-entry block.**
+      The encoder gives each non-entry basic block a `block`/`end` pair and
+      computes every branch depth as `num_non_entry - target_index`, which is
+      only right for a branch out of the entry block. From inside block `j` the
+      nesting depth is `j`, so the depth has to be `j - target`, and a target at
+      or before `j` is not expressible at all: back edges need a `loop`
+      construct, which the encoder never emits. `while` fails validation with
+      "branch depth too large". Fixing this means reworking the encoder to
+      emit `loop` for headers and to derive depths from real nesting, so it
+      wants its own change rather than a patch to the offset arithmetic.
+
+### Wasm entry ABI
+- [x] **The heap-base argument is a real parameter, not a leftover.**
+      `Katsuro::Lowerer::register_function` prepends a `%__heap_base` pointer to
+      `_BROCKEN_ENTRY`, matching `docs/spec.md` 2.9: the runtime is a bump
+      allocator and the host hands it the base of the region to hand out. The
+      native linkers supply it from an entry stub (ELF64 carves the heap off
+      the stack and passes `rsp`); the Wasm linker emits no stub and exports the
+      function directly, so `wasmtime run --invoke _BROCKEN_ENTRY` needs the
+      address as a trailing argument, after the module path. This is what
+      unblocked executing Wasm output in `3286`/`3287`.
+- [ ] The Wasm module still has no `_start` or `main` export, so `wasmtime run
+      module.wasm` cannot run it as a WASI command and every invocation has to
+      name `--invoke _BROCKEN_ENTRY` and pass a heap base. A real entry stub
+      that calls `_BROCKEN_ENTRY` with the `__heap_base` global would match the
+      other three backends. The linker also still declares a single 64KB memory
+      page, while the runtime is told the heap is 1MB, so a program that
+      allocates more than one page traps.
 
 ### Phase B: Int/Bool native alias support
 - [x] Lower `Int` and `Bool` as native types (i64/i1)
