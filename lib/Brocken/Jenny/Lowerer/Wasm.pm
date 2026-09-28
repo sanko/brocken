@@ -1872,7 +1872,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_and', operands => [], comment => 'zext' ) );
                     }
-                    if ( $dst_bits > 32 ) {
+                    if ( $src_bits <= 32 && $dst_bits > 32 ) {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode => 'i64_extend_i32_u', operands => [], comment => 'widen' ) );
@@ -1906,7 +1906,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => $pair->[0], operands => [], comment => $pair->[1] ) );
                         }
                     }
-                    if ( $dst_bits > 32 ) {
+                    if ( $src_bits <= 32 && $dst_bits > 32 ) {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode => 'i64_extend_i32_s', operands => [], comment => 'widen' ) );
@@ -1917,15 +1917,61 @@ class Brocken::Jenny::Lowerer::Wasm {
                 }
                 elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
                     my ($val) = $inst->operands->@*;
-                    die "Wasm unary op $opcode requires float type" unless $inst->type && $inst->type->kind eq 'float';
-                    my $p = $inst->type->bits >= 64 ? 'f64' : 'f32';
-                    $mbb->add_instruction( $self->_wasm_push( $val, 'unop: val' ) );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_${opcode}", operands => [], comment => $opcode ) );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
-                    );
+                    if ( $inst->type && $inst->type->kind eq 'float' ) {
+                        my $p = $inst->type->bits >= 64 ? 'f64' : 'f32';
+                        $mbb->add_instruction( $self->_wasm_push( $val, 'unop: val' ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_${opcode}", operands => [], comment => $opcode ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
+                        );
+                    }
+                    elsif ( $inst->type && $inst->type->kind eq 'int' ) {
+                        die "Unsupported unary op $opcode for i128" if $inst->type->bits > 64;
+                        if ( $opcode eq 'sqrt' ) {
+                            die "Unsupported unary op $opcode for non-float type";
+                        }
+
+                        # Wasm has no integer neg/abs opcode; neg(x) is 0 - x
+                        # and abs(x) is x < 0 ? -x : x, both built from the
+                        # generic i32/i64 ops. `select` pops cond, val2, val1
+                        # and yields val1 when cond is non-zero, so pushing
+                        # (-x, x, x < 0) picks -x for a negative operand.
+                        my $p = $inst->type->bits >= 64 ? 'i64' : 'i32';
+                        my $zero = sub {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_const",
+                                    operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                    comment  => "$opcode zero" )
+                            );
+                        };
+                        if ( $opcode eq 'neg' ) {
+                            $zero->();
+                            $mbb->add_instruction( $self->_wasm_push( $val, 'neg val' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_sub", operands => [], comment => 'neg' ) );
+                        }
+                        else {
+                            $zero->();
+                            $mbb->add_instruction( $self->_wasm_push( $val, 'abs -x' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_sub", operands => [], comment => 'abs -x' ) );
+                            $mbb->add_instruction( $self->_wasm_push( $val, 'abs val1' ) );
+                            $mbb->add_instruction( $self->_wasm_push( $val, 'abs val2' ) );
+                            $zero->();
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_lt_s", operands => [], comment => 'abs x < 0' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'select', operands => [], comment => 'abs' ) );
+                        }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
+                        );
+                    }
+                    else {
+                        die "Wasm unary op $opcode requires a typed value";
+                    }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
                     $mbb->add_instruction(
