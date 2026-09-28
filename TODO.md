@@ -357,20 +357,69 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       `if`, a loop after an `if`, an `if`/`else` inside a loop, an `if` inside a
       nested loop, and a return from inside a loop. Ten of the twelve fail
       against the previous encoder.
-- [ ] **Two self-calls to the same function in one expression are miscompiled.**
+- [x] **Two self-calls to the same function in one expression are miscompiled.**
+      *The "values lost in the frontend" diagnosis below was wrong; the real
+      cause is the Wasm heap pointer and it is still open — see the next
+      entry. Recording the correction so nobody re-derives it.*
       `sub fib(i64 $n) { if ($n < 2) { return $n; } return fib($n - 1) + fib($n - 2); }`
-      lowers to `local_get(UNDEF) | local_get(UNDEF) | i32_add |
-      local_set(%v<virt_reg:void/0>) | ret`, so both call results are undefined
-      and the add is typed `i32`/`void` regardless of the function's result
-      type. `fib(15)` is rejected by the validator (`type mismatch: expected
-      i64 but nothing on stack`) or returns a wrong answer, depending on the
-      shape. Two calls to a *different* function are fine (that is
-      `3287_wasm_call_results.t`), as is one self-call added to a constant; it
-      is specifically two calls to the enclosing function that lose their
-      values. Confirmed against `61df315` with the Wasm encoder stashed, so it
-      predates the control-flow work and is not caused by it. The values are
-      already lost in the frontend by the time MIR exists, so this affects every
-      backend and cannot be fixed in the Wasm encoder.
+      used to lower to `local_get(UNDEF) | local_get(UNDEF) | i32_add |
+      local_set(%v<virt_reg:void/0>) | ret`, so both call results were undefined
+      and the add was typed `i32`/`void` regardless of the function's result
+      type. `61df315` fixed it: the call results now come out of
+      `Lindsay::IR::Builder::_unique_name` as `%fib_res_1` and `%fib_res_2`, and
+      all four backends emit a correct `call_func` / result pair for each. The
+      earlier claim that the values were gone before MIR existed was never
+      checked against the current frontend — dumping the IR now shows both
+      calls present, correctly typed `i64`, and `X86_64`/`ARM64`/`RISCV64`
+      produce correct MIR. The IR was right all along; the broken encoder on top
+      of it is what produced the `UNDEF`.
+- [x] **The Wasm heap bump pointer was a function local, so every invocation
+      started it at 0 and recursion aliased every frame's spill slot.**
+      `Codegen::Wasm::_encode` gave `%heap_ptr` a local index
+      (`$vreg_map{'%heap_ptr'} = $next_local++`) instead of a module global.
+      Wasm locals start at zero and `_init` cannot write another function's
+      local, so nothing ever initialised it: the prologue of `fib` is literally
+      `local.get 1` / `local.set 2` / `local.get 1` / `i32.const 8` /
+      `i32.add` / `local.set 1`, and the parameter spill address is 0 in *every*
+      frame. The MIR is correct and so is the instruction selection — the
+      damage is only visible in the encoded bytes, which is why reading the IR
+      or the MIR does not find it.
+      It stays hidden while each frame reads its parameter before recursing and
+      never reads it again, so `fact` (`$n * fact($n - 1)`, one call) computes
+      correctly and passes for n=10. It breaks as soon as a frame re-reads a
+      spilled slot *after* a recursive call, which is what
+      `fib(n-1) + fib(n-2)` does: the second argument's `i64.load` sits after
+      the first `call`, so it reads a slot the callee has already overwritten.
+      `fib(10)` returned -80, `fib(15)` -195, `fib(20)` -360, all stable
+      regardless of heap size.
+      Now a mutable i32 **global** (section 6, `HEAP_PTR_GLOBAL`) read with
+      `global.get`/`global.set`, seeded by the linker from the `%__heap_base`
+      argument at `heap_base + 16` — the offset `Runtime::_init` uses, so the
+      cursor stays clear of the cursor/limit pair it keeps in the first 16 bytes.
+      The seed is spliced in after the function's locals declaration, since a
+      body is `locals` followed by the expression, and after the call fixups,
+      whose offsets are already resolved. `fib(10)` = 55, `fib(15)` = 610,
+      `fib(17)` = 1597. Regression: `3290_wasm_recursion.t`.
+      Left open: this is a *second* cursor, separate from the one
+      `bump_alloc` keeps in `[heap_base]`, so spills and class instances can
+      overlap once classes work on Wasm — they cannot today
+      (`Point->new(7)->get_x() * 6` returns 6240, not 42, for an unrelated
+      reason). Unifying them means moving `_BROCKEN_ENTRY`'s own alloca to after
+      its `_init` call in the shared `Katsuro::Lowerer`, which is not safe to do
+      without native hardware for the other three backends.
+- [ ] **Wasm declares one 64KB page but the runtime is told the heap is 1MB.**
+      `Linker::Wasm` emits `1 page, no maximum` while `Katsuro::Lowerer` passes
+      `0x100000` as the heap size to `Runtime::_init`, so any program that
+      allocates past 64KB traps with "out of bounds memory access" no matter
+      what heap base the host hands in — the size argument is not honoured.
+      This is now the binding limit on recursion rather than a separate concern,
+      because the shared bump pointer in the entry above is never decremented:
+      `fib(n)` invokes fib `2*fib(n+1)-1` times and every frame keeps its 8-byte
+      spill, so the ceiling is `65536/8 ≈ 8192` frames. Measured: `fib(17)`
+      needs 41336 bytes and passes, `fib(18)` needs 66888 and traps, `fib(20)`
+      needs 175128. So the recursion work is "correct up to fib(17)" until this
+      is raised — worth fixing before anyone reads a `fib(18)` trap as a
+      codegen bug.
 
 ### Wasm entry ABI
 - [x] **The heap-base argument is a real parameter, not a leftover.**
