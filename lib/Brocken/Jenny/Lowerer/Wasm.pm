@@ -8,6 +8,9 @@ use List::Util qw[min max];
 class Brocken::Jenny::Lowerer::Wasm {
 
     method lower($ir_func) {
+
+        # alloca name => the Alloca instruction, for slots held in a wasm local
+        my %promoted = %{ $self->_promotable_allocas($ir_func) };
         my $mf = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
         for my $block ( $ir_func->blocks->@* ) {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
@@ -2092,6 +2095,11 @@ class Brocken::Jenny::Lowerer::Wasm {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
+
+                    # A promoted slot is a wasm local, defined by the store that
+                    # fills it and read by the loads that use it.
+                    next if $promoted{ $inst->name };
+
                     my $elem = $inst->allocated_type->bits / 8;
 
                     # The bump is a single immediate, so a count has to be a
@@ -2129,6 +2137,29 @@ class Brocken::Jenny::Lowerer::Wasm {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                     my $ptr = $inst->operands->[0];
+                    if ( $ptr && $ptr->name && ( my $slot = $promoted{ $ptr->name } ) ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'local_get',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $ptr->name,
+                                        type  => $slot->allocated_type
+                                    )
+                                ],
+                                comment => 'load: ' . $ptr->name
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'local_set',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                                comment  => 'load: save to ' . $inst->name
+                            )
+                        );
+                        next;
+                    }
                     if ( $inst->type && $inst->type->kind eq 'int' && $inst->type->bits == 128 ) {
                         my ( $lo_dst, $hi_dst ) = $self->_split_i128($inst);
                         $mbb->add_instruction( $self->_wasm_push( $ptr, 'load: ptr' ) );
@@ -2173,6 +2204,24 @@ class Brocken::Jenny::Lowerer::Wasm {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
                     my ( $val, $ptr ) = $inst->operands->@*;
+                    if ( $ptr && $ptr->name && ( my $slot = $promoted{ $ptr->name } ) ) {
+                        my $bits = $slot->allocated_type->kind eq 'int' ? $slot->allocated_type->bits : undef;
+                        $mbb->add_instruction( $self->_wasm_push( $val, 'store: val', $bits ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'local_set',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $ptr->name,
+                                        type  => $slot->allocated_type
+                                    )
+                                ],
+                                comment => 'store: save to ' . $ptr->name
+                            )
+                        );
+                        next;
+                    }
                     if ( $val->type && $val->type->kind eq 'int' && $val->type->bits == 128 ) {
                         my ( $lo_val, $hi_val ) = $self->_split_i128($val);
 
@@ -2701,6 +2750,60 @@ class Brocken::Jenny::Lowerer::Wasm {
         }
         $mf->compute_cfg;
         return $mf;
+    }
+
+    # A slot is a per-invocation value, not a place in linear memory, unless
+    # something needs its address. Spilling it to the bump cursor instead makes
+    # memory scale with the total number of calls rather than the current depth,
+    # because nothing ever gives the space back. A wasm local is the engine's own
+    # per-invocation slot, reclaimed on return, so promoting removes that cost.
+    method _promotable_allocas($ir_func) {
+        my $entry = $ir_func->blocks->[0];
+        my %promotable;
+        for my $block ( $ir_func->blocks->@* ) {
+            for my $inst ( $block->instructions->@* ) {
+                next unless $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca');
+
+                # Only a function-scope slot of one scalar. A counted alloca is
+                # an array, whose base is offset by getelementptr, and a 128-bit
+                # one is already lowered as a pair.
+                next unless $block == $entry;
+                next if defined $inst->count;
+                my $elem = $inst->allocated_type;
+                next unless $elem && ( $elem->kind eq 'int' || $elem->kind eq 'ptr' || $elem->kind eq 'float' );
+                next if $elem->kind eq 'int' && $elem->bits == 128;
+                next unless $inst->name;
+
+                # The address may only ever be the address operand of a load or
+                # a store. Any other mention -- a call argument, a return, a
+                # pointer add -- needs a real memory object behind it.
+                my $escapes = 0;
+                OUTER: for my $use_block ( $ir_func->blocks->@* ) {
+                    for my $use ( $use_block->instructions->@* ) {
+                        next if $use == $inst;
+                        if ( $use->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
+                            my $addr = $use->operands->[0];
+                            next if $addr && $addr->name && $addr->name eq $inst->name;
+                        }
+                        elsif ( $use->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
+                            my $addr = $use->operands->[1];
+                            next
+                                if $addr
+                                && $addr->name
+                                && $addr->name eq $inst->name
+                                && !$use->operands->[0]->isa($inst);
+                        }
+                        for my $opnd ( $use->operands->@* ) {
+                            next unless $opnd && $opnd->name && $opnd->name eq $inst->name;
+                            $escapes = 1;
+                            last OUTER;
+                        }
+                    }
+                }
+                $promotable{ $inst->name } = $inst unless $escapes;
+            }
+        }
+        return \%promotable;
     }
 
     method _wasm_push( $ir_val, $label, $force_bits = undef ) {

@@ -400,26 +400,49 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       body is `locals` followed by the expression, and after the call fixups,
       whose offsets are already resolved. `fib(10)` = 55, `fib(15)` = 610,
       `fib(17)` = 1597. Regression: `3290_wasm_recursion.t`.
-      Left open: this is a *second* cursor, separate from the one
-      `bump_alloc` keeps in `[heap_base]`, so spills and class instances can
-      overlap once classes work on Wasm — they cannot today
-      (`Point->new(7)->get_x() * 6` returns 6240, not 42, for an unrelated
-      reason). Unifying them means moving `_BROCKEN_ENTRY`'s own alloca to after
-      its `_init` call in the shared `Katsuro::Lowerer`, which is not safe to do
-      without native hardware for the other three backends.
+      Left open: nothing. This global is now only used by the allocas that
+      genuinely need linear memory (arrays, and objects whose address is passed to
+      a method); see the entry below for why.
+- [x] **Scalars were spilled to a bump cursor that is never decremented, so
+      memory scaled with the total number of calls instead of the live depth.**
+      Even with the cursor shared, the model was wrong: every frame copied its
+      locals into linear memory and nothing ever gave the space back, so a
+      recursive call tree needed `8 * (2*fib(n+1) - 1)` bytes for `fib(n)` —
+      `fib(17)` = 41336 bytes, `fib(18)` = 66888, `fib(30)` = 33.2MB. The
+      ceiling was therefore a function of *call count*, not stack depth, and
+      raising the page count would only have slid the cliff.
+      A wasm local is the engine's own per-invocation slot, reclaimed on return,
+      so a slot whose address is never taken does not belong in linear memory at
+      all. `Lowerer::Wasm::_promotable_allocas` promotes such a slot: a
+      function-scope, single-element, non-aggregate alloca whose address appears
+      only as the address operand of a `load`/`store`. The alloca then emits
+      nothing, and the `load`/`store` become `local.get`/`local.set` against a
+      local typed with the *element* type. This is the same thing LLVM's wasm
+      backend does for a whole-function `alloca`; the shadow stack is only the
+      fallback for allocas that escape.
+      `fib(20)` = 6765 and `fib(25)` = 75025 now run in a 1-page module that
+      previously trapped, because recursion no longer touches memory at all.
+      The aliasing bug above also becomes structurally impossible, since there is
+      no shared spill memory left to alias. And with scalars gone from the bump
+      cursor, the two-cursor overlap resolves itself: `Point->new(7)->x() * 6`
+      returns **42** (it returned 6240 before), because the instance now comes
+      from the runtime allocator alone.
+      Regression: `3290_wasm_recursion.t` asserts at the MIR level that `fib`
+      emits no alloca and no `i64_load`/`i64_store`, that an array base still
+      allocates, and executes `fib(20)`, `fib(25)` and the class case.
 - [ ] **Wasm declares one 64KB page but the runtime is told the heap is 1MB.**
       `Linker::Wasm` emits `1 page, no maximum` while `Katsuro::Lowerer` passes
       `0x100000` as the heap size to `Runtime::_init`, so any program that
       allocates past 64KB traps with "out of bounds memory access" no matter
       what heap base the host hands in — the size argument is not honoured.
-      This is now the binding limit on recursion rather than a separate concern,
-      because the shared bump pointer in the entry above is never decremented:
-      `fib(n)` invokes fib `2*fib(n+1)-1` times and every frame keeps its 8-byte
-      spill, so the ceiling is `65536/8 ≈ 8192` frames. Measured: `fib(17)`
-      needs 41336 bytes and passes, `fib(18)` needs 66888 and traps, `fib(20)`
-      needs 175128. So the recursion work is "correct up to fib(17)" until this
-      is raised — worth fixing before anyone reads a `fib(18)` trap as a
-      codegen bug.
+      Ordinary recursion is no longer affected (promotion keeps scalars out of
+      memory), so this is back to being a separate concern, and it now only
+      binds for arrays and objects. Note that the two numbers are not directly
+      comparable: the runtime's limit is `heap_base + 0x100000`, so honouring a
+      1MB heap at base 1024 needs `ceil((1024 + 0x100000) / 65536)` = **17**
+      pages, not 16. The usual fix is to declare a small minimum and grow with
+      `memory.grow` (0x40) when `bump_alloc` runs out of room.
+
 
 ### Wasm entry ABI
 - [x] **The heap-base argument is a real parameter, not a leftover.**
