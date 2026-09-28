@@ -240,6 +240,7 @@ jobs:
       - omnios
       - haiku
       - windows
+      - wasm
     uses: sanko/workflow-testing/.github/workflows/results-summary.yml@main
     with:
       title: Brocken CI Matrix
@@ -288,6 +289,53 @@ jobs:
         command -v cpanm
         cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
         cpanm --test-only -v .
+  wasm:
+    name: Wasm
+    uses: sanko/workflow-testing/.github/workflows/run-direct.yml@main
+    with:
+      checkout_submodules: recursive
+      matrix: |-
+        [
+          {"name":"Intel [Ubuntu 26.04]","arch":"x86_64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-26.04","toolchain":"gcc","prepare":"curl -fsSL --retry 3 -o /tmp/wasmtime.tar.xz https://github.com/bytecodealliance/wasmtime/releases/download/v32.0.1/wasmtime-v32.0.1-x86_64-linux.tar.xz && sudo tar -xJf /tmp/wasmtime.tar.xz -C /usr/local/bin --strip-components=1 wasmtime-v32.0.1-x86_64-linux/wasmtime && rm -f /tmp/wasmtime.tar.xz && wasmtime --version"}
+        ]
+      task: |
+        export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
+        #~ The Wasm tests execute the modules the backend emits, so they skip
+        #~ unless a runtime is on PATH. A skip and a pass look alike in the log,
+        #~ which is how this lane used to report green without checking
+        #~ anything. Prove the runtime works before trusting the suite, using
+        #~ the same invocation the tests rely on (run --invoke main) against a
+        #~ module exporting main() -> i32 that returns 42, assembled here as raw
+        #~ bytes so the check does not depend on Brocken being built.
+        command -v wasmtime
+        perl -e 'print pack "H*", join "", (
+          "0061736d01000000",     # magic + version
+          "0105016000017f",       # type: () -> (i32)
+          "03020100",             # func 0
+          "070801046d61696e0000", # export "main" -> func 0
+          "0a06010400412a0b",     # code: i32.const 42; end
+        )' > /tmp/smoke.wasm
+        got=$(wasmtime run --invoke main /tmp/smoke.wasm)
+        if [ "$got" != "42" ]; then
+          echo "wasmtime smoke test returned '$got', expected 42" >&2
+          exit 1
+        fi
+        echo "wasmtime smoke test returned 42"
+        #~ Same bootstrap the Linux legs use: distro perl is read-only to the
+        #~ runner user, so cpanm relocates installs into $HOME/perl5 and that
+        #~ layout has to be adopted before the dependency and Build steps.
+        curl -L https://cpanmin.us | perl - --notest App::cpanminus
+        if [ -x "$HOME/perl5/bin/cpanm" ]; then
+          export PATH="$HOME/perl5/bin:$PATH"
+          "$HOME/perl5/bin/cpanm" --local-lib="$HOME/perl5" --notest local::lib
+          eval "$(perl -I "$HOME/perl5/lib/perl5" -Mlocal::lib)"
+        fi
+        command -v cpanm
+        cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v . \
+          || sudo "$(command -v cpanm)" --installdeps --notest --with-suggests --with-recommends --with-configure -v .
+        perl Build.PL
+        ./Build
+        ./Build test --v
 name: CI Matrix
 on:
   pull_request: ~
