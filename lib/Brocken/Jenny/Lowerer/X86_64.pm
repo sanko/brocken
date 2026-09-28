@@ -1904,11 +1904,109 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                     comment  => 'load ' . ( $lhs->name || $lhs->value ) . ' (rem)'
                                 )
                             );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $tmp ], comment => 'sub (rem)' ) );
+                        }
+                        elsif ( $opcode eq 'min' || $opcode eq 'max' ) {
+
+                            # x86 has no min/max instruction, so build a mask from the
+                            # signed comparison and select with xor/and, the same shape
+                            # the i128 path above uses. Without this the generic
+                            # fallthrough emitted a `min`/`max` MIR op that the encoder
+                            # silently dropped, leaving the result equal to the lhs.
+                            # Materialize both operands: a 64-bit immediate cannot be
+                            # encoded inline, and cmp/xor need it in a register.
+                            my $l = $self->_reg_opnd( $mbb, $lhs, $inst->name . '_ml' );
+                            my $r = $self->_reg_opnd( $mbb, $rhs, $inst->name . '_mr' );
+                            my $zero = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 );
+                            my $i64  = Brocken::Lindsay::IR::Type::i64();
+                            my $not  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => -1, type => $i64 );
+                            my $mask = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_mmask',
+                                type  => $inst->type
+                            );
+                            my $t0 = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_mt0',
+                                type  => $inst->type
+                            );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $tmp ], comment => 'sub (rem)' ) );
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $t0, $l ],
+                                    comment  => 'minmax lhs'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'cmp',
+                                    operands => [ $t0, $r ],
+                                    comment  => 'minmax cmp'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $t0, $zero ],
+                                    comment  => 'minmax zero'
+                                )
+                            );
+                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'setl', operands => [$t0], comment => 'minmax lt' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $mask, $zero ],
+                                    comment  => 'minmax mask=0'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'sub',
+                                    operands => [ $mask, $t0 ],
+                                    comment  => 'minmax mask=-(a<b)'
+                                )
+                            );
+                            if ( $opcode eq 'max' ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'xor',
+                                        operands => [ $mask, $not ],
+                                        comment  => 'minmax invert mask'
+                                    )
+                                );
+                            }
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $dst, $l ],
+                                    comment  => 'minmax sel mov'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'xor',
+                                    operands => [ $dst, $r ],
+                                    comment  => 'minmax sel xor'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'and',
+                                    operands => [ $dst, $mask ],
+                                    comment  => 'minmax sel and'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'xor',
+                                    operands => [ $dst, $r ],
+                                    comment  => 'minmax sel'
+                                )
+                            );
                         }
                         else {
                             $mbb->add_instruction(
+
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
                                     operands => [ $dst, $self->_lower_opnd($lhs) ],
