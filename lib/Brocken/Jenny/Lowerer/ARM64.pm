@@ -2144,6 +2144,11 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             }
                         }
                         elsif ( $opcode eq 'div' || $opcode eq 'udiv' ) {
+
+                            # Signed div needs SDIV: lowering it as UDIV made
+                            # every negative dividend produce a huge positive
+                            # quotient (and -13/3 came out as 3074457345618258602).
+                            my $div_op = $opcode eq 'div' ? 'sdiv' : 'udiv';
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' ) {
                                 my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_dv',
@@ -2165,10 +2170,20 @@ class Brocken::Jenny::Lowerer::ARM64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'udiv', operands => [ $dst, $rhs_opnd ], comment => 'udiv' )
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $div_op,
+                                    operands => [ $dst, $rhs_opnd ],
+                                    comment  => $div_op
+                                )
                             );
                         }
                         elsif ( $opcode eq 'rem' || $opcode eq 'urem' ) {
+
+                            # Same signed/unsigned split as div: the remainder is
+                            # lhs - (lhs / rhs) * rhs, and that identity only
+                            # holds with a signed quotient for a signed rem
+                            # (-100 - (-14 * 7) = -2, not a 2^64-scaled value).
+                            my $div_op = $opcode eq 'rem' ? 'sdiv' : 'udiv';
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' ) {
                                 my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rm',
@@ -2193,9 +2208,9 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'udiv',
+                                    opcode   => $div_op,
                                     operands => [ $tmp, $rhs_opnd ],
-                                    comment  => 'udiv (rem)'
+                                    comment  => $div_op . ' (rem)'
                                 )
                             );
                             $mbb->add_instruction(
@@ -2263,7 +2278,18 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         }
                         else {
                             my $rhs_opnd = $self->_lower_opnd($rhs);
-                            if ( $rhs_opnd->kind eq 'imm' && $opcode ne 'add' && $opcode ne 'sub' ) {
+
+                            # add/sub keep an immediate only when it fits the
+                            # encoder's unsigned imm12 field (0..0xFFF); any
+                            # negative or wider value would be truncated to its
+                            # low 12 bits (a 2**33 constant became 0, a -1
+                            # became 4095). Everything else goes through a
+                            # register.
+                            my $keep_imm = ( $opcode eq 'add' || $opcode eq 'sub' )
+                                && $rhs_opnd->kind eq 'imm'
+                                && $rhs_opnd->value >= 0
+                                && $rhs_opnd->value <= 0xFFF;
+                            if ( $rhs_opnd->kind eq 'imm' && !$keep_imm ) {
                                 my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_r',
                                     type => $inst->type );
                                 $mbb->add_instruction(
@@ -3064,14 +3090,14 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'mov',
-                                operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                operands => [ $dst, $self->_reg_opnd( $mbb, $lhs, $inst->name . '_cmp_lhs' ) ],
                                 comment  => 'load lhs'
                             )
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'cmp',
-                                operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                operands => [ $dst, $self->_reg_opnd( $mbb, $rhs, $inst->name . '_cmp_rhs' ) ],
                                 comment  => 'icmp ' . $pred
                             )
                         );

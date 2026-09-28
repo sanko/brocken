@@ -1553,6 +1553,10 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             }
                         }
                         elsif ( $opcode eq 'div' || $opcode eq 'udiv' ) {
+
+                            # Signed div needs DIV; DIVU made every negative
+                            # dividend produce a huge positive quotient.
+                            my $div_op = $opcode eq 'div' ? 'div' : 'divu';
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -1562,13 +1566,18 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'divu',
+                                    opcode   => $div_op,
                                     operands => [ $dst, $self->_lower_opnd($rhs) ],
-                                    comment  => 'divu'
+                                    comment  => $div_op
                                 )
                             );
                         }
                         elsif ( $opcode eq 'rem' || $opcode eq 'urem' ) {
+
+                            # rem = lhs - (lhs / rhs) * rhs only holds with a
+                            # signed quotient for a signed rem, so -100 % 7 is
+                            # -100 - (-14 * 7) = -2 rather than a 2^64 value.
+                            my $div_op = $opcode eq 'rem' ? 'div' : 'divu';
                             my $tmp
                                 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_rem', type => $inst->type );
                             $mbb->add_instruction(
@@ -1580,9 +1589,9 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'divu',
+                                    opcode   => $div_op,
                                     operands => [ $tmp, $self->_lower_opnd($rhs) ],
-                                    comment  => 'divu (rem)'
+                                    comment  => $div_op . ' (rem)'
                                 )
                             );
                             $mbb->add_instruction(
@@ -1603,6 +1612,26 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $tmp ], comment => 'sub (rem)' ) );
                         }
                         else {
+                            my $rhs_opnd = $self->_lower_opnd($rhs);
+
+                            # add/sub keep an immediate as the encoder's addi
+                            # form only when the value survives its sign-
+                            # extended 12-bit (+ sign-flip for sub) handling;
+                            # anything wider would be truncated to its low 12
+                            # bits. Everything else goes through a register,
+                            # which also keeps and/or/xor/... out of the
+                            # truncating imm12 path.
+                            my $v        = $rhs_opnd->value;
+                            my $fits_imm = $rhs_opnd->kind eq 'imm'
+                                && ( $opcode eq 'add' ? ( $v >= -2048 && $v <= 2047 )
+                                    : ( $opcode eq 'sub' && $v >= -2047 && $v <= 2048 ) );
+                            if ( !$fits_imm && $rhs_opnd->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_r',
+                                    type => $inst->type );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $r, $rhs_opnd ], comment => 'rhs' ) );
+                                $rhs_opnd = $r;
+                            }
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -1613,7 +1642,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => $opcode,
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    operands => [ $dst, $rhs_opnd ],
                                     comment  => $opcode
                                 )
                             );
@@ -1846,19 +1875,26 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         elsif ( $opcode eq 'min' || $opcode eq 'max' ) {
 
                             # Signed scalar min/max, branchless, with no Zbb
-                            # dependency: mask = (lhs < rhs), then
+                            # dependency: mask = -(lhs < rhs), then
                             # dst = rhs ^ ((lhs ^ rhs) & mask). If lhs<rhs the
-                            # mask is 1 and dst becomes lhs, otherwise rhs; max
-                            # inverts the mask first. Without this the branch
-                            # emitted nothing for scalar min/max, losing the
-                            # result. Ops mirror the i128 minmax select shape
-                            # and the scalar icmp signed `slt` convention.
-                            my $one = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 );
+                            # mask is all ones and dst becomes lhs, otherwise
+                            # rhs; max inverts the mask first. The mask has to
+                            # be a full-width -1/0, not the 0/1 that `slt`
+                            # produces: `& 1` keeps only the low bit of
+                            # (lhs ^ rhs), so min/max returned garbage whenever
+                            # the xor was even. Ops mirror the i128 minmax
+                            # select shape and the scalar icmp signed `slt`
+                            # convention.
                             my $l   = $self->_reg_opnd( $mbb, $ops[0], $inst->name . '_ml' );
                             my $r   = $self->_reg_opnd( $mbb, $ops[1], $inst->name . '_mr' );
                             my $mask = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'virt_reg',
                                 value => $inst->name . '_mk',
+                                type  => $inst->type
+                            );
+                            my $cond = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_mc',
                                 type  => $inst->type
                             );
                             my $diff = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1867,14 +1903,21 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                 type  => $inst->type
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $mask, $l ], comment => 'minmax mask lhs' )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $cond, $l ], comment => 'minmax cond lhs' )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'slt', operands => [ $mask, $r ], comment => 'minmax slt' )
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'slt', operands => [ $cond, $r ], comment => 'minmax slt' )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'neg', operands => [ $mask, $cond ], comment => 'minmax mask=-(lhs<rhs)' )
                             );
                             if ( $opcode eq 'max' ) {
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $mask, $one ], comment => 'minmax invert mask' )
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'xor',
+                                        operands => [ $mask, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => -1 ) ],
+                                        comment  => 'max invert mask'
+                                    )
                                 );
                             }
                             $mbb->add_instruction(
@@ -2446,14 +2489,14 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'mv',
-                                operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                operands => [ $dst, $self->_reg_opnd( $mbb, $lhs, $inst->name . '_icmp_lhs' ) ],
                                 comment  => 'icmp ' . $pred . ': mv lhs'
                             )
                         );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'xor',
-                                operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                operands => [ $dst, $self->_reg_opnd( $mbb, $rhs, $inst->name . '_icmp_rhs' ) ],
                                 comment  => 'icmp ' . $pred . ': xor rhs'
                             )
                         );
@@ -2481,14 +2524,14 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mv',
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    operands => [ $dst, $self->_reg_opnd( $mbb, $rhs, $inst->name . '_icmp_rhs' ) ],
                                     comment  => 'icmp ' . $pred . ': mv rhs'
                                 )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'sltu',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    operands => [ $dst, $self->_reg_opnd( $mbb, $lhs, $inst->name . '_icmp_lhs' ) ],
                                     comment  => 'icmp ' . $pred . ': sltu'
                                 )
                             );
@@ -2497,14 +2540,14 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mv',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    operands => [ $dst, $self->_reg_opnd( $mbb, $lhs, $inst->name . '_icmp_lhs' ) ],
                                     comment  => 'icmp ' . $pred . ': mv lhs'
                                 )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'sltu',
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    operands => [ $dst, $self->_reg_opnd( $mbb, $rhs, $inst->name . '_icmp_rhs' ) ],
                                     comment  => 'icmp ' . $pred . ': sltu'
                                 )
                             );
@@ -2527,14 +2570,14 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mv',
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    operands => [ $dst, $self->_reg_opnd( $mbb, $rhs, $inst->name . '_icmp_rhs' ) ],
                                     comment  => 'icmp ' . $pred . ': mv rhs'
                                 )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'slt',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    operands => [ $dst, $self->_reg_opnd( $mbb, $lhs, $inst->name . '_icmp_lhs' ) ],
                                     comment  => 'icmp ' . $pred . ': slt'
                                 )
                             );
@@ -2543,14 +2586,14 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mv',
-                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    operands => [ $dst, $self->_reg_opnd( $mbb, $lhs, $inst->name . '_icmp_lhs' ) ],
                                     comment  => 'icmp ' . $pred . ': mv lhs'
                                 )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'slt',
-                                    operands => [ $dst, $self->_lower_opnd($rhs) ],
+                                    operands => [ $dst, $self->_reg_opnd( $mbb, $rhs, $inst->name . '_icmp_rhs' ) ],
                                     comment  => 'icmp ' . $pred . ': slt'
                                 )
                             );

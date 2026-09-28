@@ -487,20 +487,9 @@ class Brocken::Jenny::Codegen::RISCV64 {
                             $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                         }
                         else {
-                            # Full 64-bit immediate: decompose into 11-bit chunks
-                            # using ADDI+SLLI sequence to avoid LUI sign-extension issues
-                            my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
-                            my @chunks;
-                            while ( $tmp != 0 ) {
-                                push @chunks, $tmp & 0x7FF;
-                                $tmp >>= 11;
-                            }
-                            my $first = pop @chunks;
-                            $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
-                            for my $chunk ( reverse @chunks ) {
-                                $bytes .= pack( 'V', ( 11 << 20 ) | ( $did << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
-                                $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
-                            }
+
+                            # Full 64-bit immediate
+                            $bytes .= $self->_li64( $did, $val );
                         }
                     }
                     else {
@@ -528,10 +517,19 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', ( 48 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
                         $bytes .= pack( 'V', ( 48 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
-                    else {
+                    elsif ( $src_bits <= 32 ) {
+
                         # slli rd, rs, 32; srli rd, rd, 32
                         $bytes .= pack( 'V', ( 32 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
                         $bytes .= pack( 'V', ( 32 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    }
+                    else {
+
+                        # 64-bit source: the value is already zero-extended, so
+                        # this is a plain move. The 32-bit slli/srli pair above
+                        # would drop bits 63..32 and corrupt every 64-bit
+                        # constant result (neg, div/rem, and friends).
+                        $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                 }
                 elsif ( $opcode eq 'movsx' ) {
@@ -552,9 +550,17 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', ( 48 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
                         $bytes .= pack( 'V', SRAI_B | ( 48 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
-                    else {
+                    elsif ( $src_bits <= 32 ) {
+
                         # addiw rd, rs, 0 (sign-extends 32-bit to 64-bit)
                         $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x1B );
+                    }
+                    else {
+
+                        # 64-bit source: already sign-extended, so just move it
+                        # (addiw would sign-extend from bit 31 and corrupt a
+                        # 64-bit value).
+                        $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                 }
                 elsif ( $opcode eq 'add' ||
@@ -566,6 +572,8 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $opcode eq 'mulhu' ||
                     $opcode eq 'div'   ||
                     $opcode eq 'divu'  ||
+                    $opcode eq 'rem'   ||
+                    $opcode eq 'remu'  ||
                     $opcode eq 'slt'   ||
                     $opcode eq 'sltu'  ||
                     $opcode eq 'sltiu' ) {
@@ -575,10 +583,18 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my %reg_f7 = (
                         add   => 0x00,
                         sub   => 0x20,
+
+                        # M extension: funct7 is 1 for every mul/div/rem, and
+                        # funct3 picks the operation (0 mul, 1 mulh, 3 mulhu,
+                        # 4 div, 5 divu, 6 rem, 7 remu). Encoding mul with
+                        # funct7 0 makes it bit-identical to add, so a rem
+                        # sequence silently turned into divu;add;sub.
                         mul   => 0x01,
                         mulhu => 0x01,
                         div   => 0x01,
                         divu  => 0x01,
+                        rem   => 0x01,
+                        remu  => 0x01,
                         and   => 0x00,
                         or    => 0x00,
                         xor   => 0x00,
@@ -590,8 +606,10 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         sub   => 0,
                         mul   => 0,
                         mulhu => 3,
-                        div   => 0,
-                        divu  => 1,
+                        div   => 4,
+                        divu  => 5,
+                        rem   => 6,
+                        remu  => 7,
                         and   => 7,
                         or    => 6,
                         xor   => 4,
@@ -601,11 +619,18 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     );
                     if ( $src->kind eq 'imm' && exists $imm_f3{$opcode} ) {
 
-                        # I-type: opcode 0x13, funct3 from %imm_f3
+                        # I-type: opcode 0x13, funct3 from %imm_f3, funct7 from
+                        # %imm_f7. XORI is the only I-type ALU op that needs
+                        # funct7 0x20; without it the encoding is the register
+                        # XOR, so the immediate landed in the rs2 field and the
+                        # instruction read a register (x1 for an immediate of
+                        # 1) instead of the constant.
                         my $imm = $src->value;
                         $imm = -$imm if $opcode eq 'sub';
                         $imm &= 0xFFF;
-                        $bytes .= pack( 'V', ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
+                        my %imm_f7 = ( xor => 0x20 );
+                        my $f7 = $imm_f7{$opcode} // 0x00;
+                        $bytes .= pack( 'V', ( $f7 << 25 ) | ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                     else {
                         my $src_r;
@@ -623,18 +648,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                                 $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
                             }
                             else {
-                                my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
-                                my @chunks;
-                                while ( $tmp != 0 ) {
-                                    push @chunks, $tmp & 0x7FF;
-                                    $tmp >>= 11;
-                                }
-                                my $first = pop @chunks;
-                                $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
-                                for my $chunk ( reverse @chunks ) {
-                                    $bytes .= pack( 'V', ( 11 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $sid << 7 ) | OP_IMM );
-                                    $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
-                                }
+                                $bytes .= $self->_li64( $sid, $val );
                             }
                             $src_r = $tmp_r;
                         }
@@ -642,6 +656,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                             $src_r = $resolve->($src);
                             $sid   = $reg_id->($src_r);
                         }
+
+                        # The MIR form is 2-address: `op dst, src` means the
+                        # accumulator already holds the left operand, so rs1
+                        # (bits 15..19) is the destination register and rs2
+                        # (bits 20..24) the source.
                         $bytes .= pack( 'V',
                             ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
                     }
@@ -669,7 +688,9 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', $extra | ( $shamt << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                     else {
-                        # R-type shift: SLL/SRL/SRA, funct7=0x00/0x00/0x20, funct3=1/5/5
+                        # R-type shift: SLL/SRL/SRA, funct7=0x00/0x00/0x20, funct3=1/5/5.
+                        # 2-address form: rs1 is the value in the destination
+                        # register, rs2 the shift amount.
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
                         my %f3    = ( shl => 1,    lshr => 5,    ashr => 5 );
@@ -768,9 +789,14 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     die 'no temp register for store_imm' unless $tmp_r;
                     my $tid = $reg_id->($tmp_r);
 
-                    # li xtmp, imm  (addi xtmp, zero, imm12)
-                    my $im = $imm->value & 0xFFF;
-                    $bytes .= pack( 'V', ( $im << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                    # li xtmp, imm
+                    my $ival = $imm->value;
+                    if ( $ival >= -2048 && $ival <= 2047 ) {
+                        $bytes .= pack( 'V', ( ( $ival & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                    }
+                    else {
+                        $bytes .= $self->_li64( $tid, $ival );
+                    }
                     my $store_bid = $bid;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
@@ -1053,6 +1079,24 @@ class Brocken::Jenny::Codegen::RISCV64 {
             }
         }
         return ( $bytes, \@func_fixups );
+    }
+
+    # Materialize a 64-bit constant into $did with an ADDI/SLLI chain.
+    # The top 9 bits (bits 63..55) are sign-extended by the first ADDI, then
+    # five 11-bit chunks are shifted in. Decomposing by "shift until zero"
+    # instead would emit the top chunk as an unsigned 12-bit immediate, which
+    # turned every negative constant into a large positive one (-1 became 511).
+    method _li64($rd, $val) {
+        my $uval = $val & 0xFFFFFFFFFFFFFFFF;
+        my $top  = ( $uval >> 55 ) & 0x1FF;
+        $top -= 0x200 if $top & 0x100;
+        my $out = pack( 'V', ( ( $top & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | OP_IMM );
+        for my $shift ( 44, 33, 22, 11, 0 ) {
+            my $chunk = ( $uval >> $shift ) & 0x7FF;
+            $out .= pack( 'V', ( 11 << 20 ) | ( $rd << 15 ) | ( 1 << 12 ) | ( $rd << 7 ) | OP_IMM );
+            $out .= pack( 'V', ( $chunk << 20 ) | ( $rd << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | OP_IMM );
+        }
+        return $out;
     }
 
     method _compute_spill_frame( $mf, $stack_reg ) {
