@@ -145,6 +145,16 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
 - [x] **ArrayDecl AST node** — parses `my i64 @arr = [10, 20, 30];`
 - [x] **ArrayIndex AST node** — parses `$arr[0]` for both read and write
 - [x] **Lowering** — alloca with element count, GEP for element access, load/store
+- [x] **Alloca honours the element count on all 4 backends** — X86_64 sized the
+      reservation from the element type alone, so `my [i64; 5] @a;` reserved 8
+      bytes and every element past the first wrote into the neighbouring stack
+      slot. A plain local declared after the array was silently overwritten
+      (returned 33 instead of 123). ARM64/RISCV64/Wasm additionally called
+      `->value` on the count without checking it was a `Constant`, so a
+      non-literal size such as `my [i64; $n] @a;` read `undef` and reserved 0
+      bytes on Wasm or died with a confusing internal error on the native
+      backends; all four now reject it with a clear message.
+      See `t/3000_jenny/3200_codegen/3285_alloca_count.t`.
 
 ### Completed: Class Methods & Auto-Generated Accessors
 - [x] **Method declarations** — `method foo() -> TYPE { ... }` inside class, lowered as `ClassName::foo`
@@ -231,6 +241,16 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
 
 ### Wasm sub-word load/store widths
 - [ ] Wasm loads and stores an i8/i16 through a full 32-bit `i32_load`/`i32_store` rather than `i32_load8_s`/`i32_store8` and friends. The lane holds a sign-extended value, so a single sub-word access round-trips correctly today, but any neighbouring access to the adjacent 3 bytes reads or writes the wrong cells. Needs an audit of struct field layout and byte-sized accesses before it can be called correct.
+- [ ] **Wasm cannot compile any program that declares a local variable.** Every
+      frontend program with at least one `my` local is rejected by the Wasm
+      validator, even `my i32 $x = 123; return $x;`:
+      `type mismatch: expected i32, found i64`. Found while adding
+      `3285_alloca_count.t`; the emitted module is byte-identical before and
+      after that fix, so it is a separate pre-existing defect. The Wasm tests
+      that do pass build their IR by hand and keep values in virtual
+      registers, which is why this went unnoticed. Blocks the Wasm half of the
+      alloca and sub-word-load audits, since neither can be executed end to
+      end until locals work.
 
 ### Phase B: Int/Bool native alias support
 - [x] Lower `Int` and `Bool` as native types (i64/i1)

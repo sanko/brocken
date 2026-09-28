@@ -2014,7 +2014,17 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
                     my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    my $size = ( $inst->allocated_type->bits / 8 ) * ( $inst->count ? $inst->count->value : 1 );
+                    my $elem = $inst->allocated_type->bits / 8;
+
+                    # The frame is reserved up front from a single immediate,
+                    # so a count has to be a literal to scale the reservation.
+                    # A computed count has no ->value and reserved 0 bytes.
+                    my $size = $elem;
+                    if ( defined $inst->count ) {
+                        die "RISCV64 alloca with a non-constant element count is not supported"
+                            unless $inst->count->isa('Brocken::Lindsay::IR::Constant');
+                        $size = $elem * $inst->count->value;
+                    }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'alloca',
