@@ -2215,6 +2215,52 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $tmp ], comment => 'sub (rem)' ) );
                         }
+                        elsif ( $opcode eq 'min' || $opcode eq 'max' ) {
+
+                            # Signed scalar min/max via cmp + csel. Without this
+                            # the generic fallthrough emitted a `min`/`max` MIR
+                            # op that the encoder cannot encode, dropping the
+                            # result entirely. csel needs both operands in
+                            # registers, so materialize an immediate rhs.
+                            my $rhs_opnd = $self->_lower_opnd($rhs);
+                            if ( $rhs_opnd->kind eq 'imm' ) {
+                                my $r = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name . '_mr',
+                                    type  => $inst->type
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [ $r, $rhs_opnd ],
+                                        comment  => 'minmax rhs'
+                                    )
+                                );
+                                $rhs_opnd = $r;
+                            }
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mv',
+                                    operands => [ $dst, $self->_lower_opnd($lhs) ],
+                                    comment  => 'load ' . ( $lhs->name || $lhs->value )
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'cmp',
+                                    operands => [ $dst, $rhs_opnd ],
+                                    comment  => 'minmax cmp'
+                                )
+                            );
+                            my $sel = $opcode eq 'min' ? 'csel_le' : 'csel_ge';
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $sel,
+                                    operands => [ $dst, $dst, $rhs_opnd ],
+                                    comment  => $opcode
+                                )
+                            );
+                        }
                         else {
                             my $rhs_opnd = $self->_lower_opnd($rhs);
                             if ( $rhs_opnd->kind eq 'imm' && $opcode ne 'add' && $opcode ne 'sub' ) {

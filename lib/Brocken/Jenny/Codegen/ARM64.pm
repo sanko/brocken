@@ -64,6 +64,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         CMP_IMM        => 0x7100001F,
         CMP_REG        => 0x6B00001F,
         CSINC          => 0x1A800400,    # sf bit added by the caller; sets the CSINC op bit (10)
+        CSEL           => 0x1A800000,    # sf and cond fields added by the caller
         FABS_32        => 0x1E20C000,
         FNEG_32        => 0x1E214000,
         FSQRT_32       => 0x1E21C000,
@@ -860,6 +861,26 @@ class Brocken::Jenny::Codegen::ARM64 {
                     # width and leaves the upper half zeroed for 64-bit
                     # consumers; the icmp result itself carries no width.
                     $bytes .= pack( 'V', SF | CSINC | ( 31 << 16 ) | ( $arm_cond{$opcode} << 12 ) | ( 31 << 5 ) | $did );
+                }
+                elsif ( $opcode eq 'csel_le' || $opcode eq 'csel_ge' ) {
+                    my ( $dst, $if_t, $if_f ) = $inst->operands->@*;
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $t_r   = $resolve->($if_t);
+                    my $tid   = $reg_id->($t_r);
+                    my $f_r   = $resolve->($if_f);
+                    my $fid   = $reg_id->($f_r);
+                    my $bits  = $dst->type ? $dst->type->bits : 64;
+                    my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
+                    my %csel  = ( csel_le => 0xD, csel_ge => 0xA );
+
+                    # CSEL Rd, Rn, Rm, cond selects Rn when cond is true, Rm
+                    # otherwise, so here the CSINC condition field is the
+                    # predicate itself (not an inverted one, unlike CSET).
+                    # Verified against ground truth: `csel w0, w1, w2, eq`
+                    # assembles to 0x1A820020, this formula with Rn=1, Rm=2,
+                    # cond=EQ and no SF; the x-form adds the SF bit.
+                    $bytes .= pack( 'V', $sf | CSEL | ( $fid << 16 ) | ( $csel{$opcode} << 12 ) | ( $tid << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'sltu' ) {
                     my $dst_r = $resolve->($dst);
