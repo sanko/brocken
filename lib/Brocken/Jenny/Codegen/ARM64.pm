@@ -624,8 +624,17 @@ class Brocken::Jenny::Codegen::ARM64 {
                         my $bits    = $dst->type      ? $dst->type->bits : 64;
                         my $sf      = ( $bits >= 64 ) ? SF               : 0x00000000;
                         my $value   = $src->value;
-                        my $max_hw  = int( ( $bits + 15 ) / 16 ) - 1;
+                        my $max_hw  = $bits >= 64 ? 3 : 1;
                         my $emitted = 0;
+
+                        # An ARM64 register is never narrower than 32 bits, so a
+                        # narrow destination still needs its upper half filled:
+                        # MOVZ only writes 16 bits and zero-extends, which turned
+                        # a negative i8/i16 constant into 0xff80 instead of
+                        # 0xffffff80 and made every comparison against it wrong.
+                        # Sizing the chunks by the type instead emitted one MOVZ
+                        # for an 8- or 16-bit value. Zero chunks are still
+                        # skipped, so a positive narrow constant is unchanged.
                         for my $hw ( 0 .. $max_hw ) {
                             my $chunk = ( $value >> ( $hw * 16 ) ) & 0xFFFF;
                             if ( $chunk || !$emitted ) {
