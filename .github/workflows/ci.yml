@@ -91,7 +91,11 @@ jobs:
         [
           {"name":"Intel [Ubuntu 26.04]","arch":"x86_64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-26.04","toolchain":"gcc"},
           {"name":"Intel [Ubuntu 24.04]","arch":"x86_64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04","toolchain":"gcc"},
-          {"name":"ARM [Ubuntu 24.04]","arch":"aarch64", "perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04-arm","toolchain":"clang"}
+          {"name":"Intel [Ubuntu 22.04]","arch":"x86_64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-22.04","toolchain":"gcc"},
+          {"name":"ARM [Ubuntu 26.04]","arch":"aarch64", "perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-26.04-arm","toolchain":"clang"},
+          {"name":"ARM [Ubuntu 24.04]","arch":"aarch64", "perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04-arm","toolchain":"clang"},
+          {"name":"ARM [Ubuntu 22.04]","arch":"aarch64", "perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-22.04-arm","toolchain":"clang"},
+          {"name":"RISC-V [Ubuntu 24.04]","arch":"riscv64", "perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04-riscv","toolchain":"gcc"}
         ]
       task: |
         export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
@@ -146,7 +150,8 @@ jobs:
       checkout_submodules: recursive
       matrix: |-
         [
-          {"name":"Intel","platform_name":"netbsd","os":"netbsd","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","prepare":"/usr/sbin/pkg_add perl"}
+          {"name":"Intel","platform_name":"netbsd","os":"netbsd","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","prepare":"/usr/sbin/pkg_add perl"},
+          {"name":"ARM","platform_name":"netbsd","os":"netbsd","arch":"aarch64","toolchain":"gcc","perl_version":"5.42.0","prepare":"/usr/sbin/pkg_add perl"}
         ]
       os_version: 10.1
       task: |
@@ -200,7 +205,8 @@ jobs:
       checkout_submodules: recursive
       matrix: |-
         [
-          {"platform_name":"openbsd","os":"openbsd","arch":"x86_64","toolchain":"gcc","perl_version":"5.40.2","prepare":"pkg_add gmake curl"}
+          {"name":"Intel","platform_name":"openbsd","os":"openbsd","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","prepare":"pkg_add gmake curl"},
+          {"name":"ARM","platform_name":"openbsd","os":"openbsd","arch":"aarch64","toolchain":"gcc","perl_version":"5.42.0","prepare":"pkg_add gmake curl"}
         ]
       os_version: 7.8
       task: |
@@ -236,7 +242,7 @@ jobs:
       - windows
     uses: sanko/workflow-testing/.github/workflows/results-summary.yml@main
     with:
-      title: Acme::Parataxis CI Matrix
+      title: Brocken CI Matrix
   solaris:
     name: Solaris
     uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
@@ -244,7 +250,7 @@ jobs:
       checkout_submodules: recursive
       matrix: |-
         [
-          {"platform_name":"solaris","os":"solaris","arch":"x86_64","toolchain":"gcc","perl_version":"5.40.2","configure":"-A'ccflags=-D__EXTENSIONS__'","prepare":"pkg install -v --accept perl-538 gcc developer/build/make bash web/curl"}
+          {"platform_name":"solaris","os":"solaris","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","configure":"-A'ccflags=-D__EXTENSIONS__'","prepare":"pkg install -v --accept perl-538 gcc developer/build/make bash web/curl"}
         ]
       os_version: 11.4
       task: |
