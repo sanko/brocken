@@ -29,6 +29,9 @@ MYMETA.*
 
 /Brocken-*
 
+# ELF written to the repo root by t/000_basic/000_init.t
+/pulse_output
+
 test-output-*/
 fum_test.wasm
 gh_run_*.log
