@@ -12,6 +12,9 @@ NetBSD x86_64/aarch64, OpenBSD x86_64/aarch64, DragonFly, OmniOS, Solaris, Haiku
 Runner labels must be real or the leg queues forever. There are **no Debian,
 Fedora, or Alpine GitHub-hosted Linux runners** — only the Ubuntu family. RISC-V
 comes from the RISE RISC-V Runners App (`ubuntu-24.04-riscv`), not from GitHub.
+`ubuntu-26.04-riscv` appears in RISE's labels reference but their FAQ states
+24.04 is the only routable label (26.04 is staged until RVA23 hardware lands), so
+the matrix deliberately stays on 24.04 rather than queue a leg forever.
 
 ### Failing legs (as of run 36359673750)
 - [ ] **All aarch64 legs are red** — FreeBSD/ARM, Linux/ARM, macOS/Apple Silicon, Windows/ARM. This is the ARM64 codegen catch-up, not a CI problem.
@@ -210,14 +213,17 @@ comes from the RISE RISC-V Runners App (`ubuntu-24.04-riscv`), not from GitHub.
 - [x] Add signedness-aware widening to `maybe_convert_type` (zext/sext)
 - [x] Add `zext`/`sext` IR instructions to `IR.pm` + `Builder.pm`
 - [x] Backend: lower `zext`/`sext` on all 4 targets
-- [ ] Backend: proper `movzx`/`movsx`/`UXTB`/`SXTB` encoding for zext/sext (currently plain `mov`) — **X86_64 fixed** in `ff8988a` (MOVSXD was emitted for every source width, truncating any 64-bit source to 32 bits and re-reading it signed; `sext` of `INT64_MIN` returned 0). ARM64/RISCV64/Wasm still need auditing.
+- [ ] Backend: proper `movzx`/`movsx`/`UXTB`/`SXTB` encoding for zext/sext (currently plain `mov`) — **X86_64 fixed** in `ff8988a` (MOVSXD was emitted for every source width, truncating any 64-bit source to 32 bits and re-reading it signed; `sext` of `INT64_MIN` returned 0). **ARM64/RISCV64 fixed** in `8b98245` — the ARM64 UBFM/SBFM forms behind UXTB/UXTH/SXTB/SXTH/SXTW took the source from Rm instead of Rn, and both backends truncated a 64-bit source to 32 bits. Wasm still needs auditing.
 
 ### Scalar integer min/max
 - [x] X86_64 — `0460da8`, `3248_int_minmax.t`. The generic fallback emitted a `min`/`max` MIR op that x86 codegen dropped, so the result silently kept the left-hand operand.
-- [ ] **ARM64** — the only `min`/`max` block in the lowerer is the i128 path; scalar integer has no expansion.
-- [ ] **RISCV64** — float `fmin`/`fmax` and i128 are native, but scalar integer `min`/`max` has no lowering fallback at all (the branch is empty).
+- [x] **ARM64** — `fd0abbf`. Branchless `cmp` + `csel_le`/`csel_ge`; the only previous `min`/`max` block in the lowerer was the i128 path.
+- [x] **RISCV64** — `fd0abbf`, then `8b98245`. The first expansion masked with the 0/1 that `slt` produces, which keeps only the low bit of `(lhs ^ rhs)` and returned garbage whenever the xor was even; the mask is now a full-width `-(lhs < rhs)`.
 - [ ] **Wasm** — not yet audited.
 
+### Scalar div/rem, shift, and compare audit
+- [x] **ARM64/RISCV64** — `8b98245`. Found by compiling small programs and *executing* them under `qemu-aarch64`/`qemu-riscv64` rather than by reading disassembly: `sdiv` was never encoded (signed `div`/`rem` emitted `udiv`, so `-13/3` was `3074457345618258602`); ARM64 register `ashr` used `0x9AC02C00`, which is RORV, not ASRV (`0x9AC02800`); ARM64 `cmp` took its width from the i1 result, so 64-bit compares only looked at the low 32 bits and values differing solely above bit 31 compared equal; ARM64 UXTB/UXTH/SXTB/SXTH/SXTW read the source from Rm instead of Rn; the RISC-V M table had `mul` as funct7 0 (bit-identical to `add`) and `div`/`divu` in the wrong funct3 slots, so a rem silently became `divu;add;sub`; RISC-V XORI lacked funct7 0x20; and 64-bit `zext`/`sext` truncated the source to 32 bits on both backends.
+- [ ] **Wasm** — the same harness does not execute Wasm, so this audit has not been repeated for the Wasm backend.
 
 ### Phase B: Int/Bool native alias support
 - [x] Lower `Int` and `Bool` as native types (i64/i1)
