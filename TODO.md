@@ -21,7 +21,7 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
   - Narrow-slot width, `movsx` destination width, negative-displacement encodings and narrow negative constant materialization are fixed and verified by executing 154 generated programs under `qemu-aarch64` (`strb`/`ldrsb` for i8 slots, `sxtb/sxth/sxtw` x-forms, `ldur`/`stur` imm9, `movz`/`movk` covering the register rather than the type). Integer `abs` was selecting on stale flags — the `csneg` had no `cmp` in front of it, so it followed whatever the previous instruction left in NZCV and only agreed by luck; it now compares against zero first, which is also what makes `abs` of a constant and `abs` under spill pressure come out right. Still open: whatever the next re-run reports, since these tests only execute on a native ARM64 host and pass on x86_64 by testing the x86_64 encoder instead.
 - [ ] **DragonFly BSD / Intel** and **NetBSD / Intel** — both x86_64, so not arch-specific.
 - [x] OpenBSD and Solaris were pinned to perl 5.40.2, which cannot satisfy `use v5.42`. Bumped to 5.42.0 in `14fc284`; both need a re-run to confirm perl 5.42.0 builds there.
-- [ ] `cpanfile` claimed `v5.40.0` while ten modules require `v5.42`; corrected in `14fc284`. 5 module files still carry no `use vX.Y` guard at all.
+- [x] `cpanfile` claimed `v5.40.0` while ten modules require `v5.42`; corrected in `14fc284`. The follow-up note that "5 module files still carry no `use vX.Y` guard" was stale by the time it was written — all 84 files under `lib/` now carry a `use vX.Y` guard (re-verified this round).
 
 ### Workflow hygiene
 - [x] Removed `blank.yml` (byte-identical duplicate of `c-thread-disassembly.yml`) and the orphaned `unix.yml`.
@@ -214,17 +214,23 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
 - [x] Add signedness-aware widening to `maybe_convert_type` (zext/sext)
 - [x] Add `zext`/`sext` IR instructions to `IR.pm` + `Builder.pm`
 - [x] Backend: lower `zext`/`sext` on all 4 targets
-- [ ] Backend: proper `movzx`/`movsx`/`UXTB`/`SXTB` encoding for zext/sext (currently plain `mov`) — **X86_64 fixed** in `ff8988a` (MOVSXD was emitted for every source width, truncating any 64-bit source to 32 bits and re-reading it signed; `sext` of `INT64_MIN` returned 0). **ARM64/RISCV64 fixed** in `8b98245` — the ARM64 UBFM/SBFM forms behind UXTB/UXTH/SXTB/SXTH/SXTW took the source from Rm instead of Rn, and both backends truncated a 64-bit source to 32 bits. Wasm still needs auditing.
+- [ ] Backend: proper `movzx`/`movsx`/`UXTB`/`SXTB` encoding for zext/sext (currently plain `mov`) — **X86_64 fixed** in `ff8988a` (MOVSXD was emitted for every source width, truncating any 64-bit source to 32 bits and re-reading it signed; `sext` of `INT64_MIN` returned 0). **ARM64/RISCV64 fixed** in `8b98245` — the ARM64 UBFM/SBFM forms behind UXTB/UXTH/SXTB/SXTH/SXTW took the source from Rm instead of Rn, and both backends truncated a 64-bit source to 32 bits. **Wasm fixed** (this round, `3268_wasm_ext_widen.t`): both handlers emitted `i64_extend_i32_u`/`i64_extend_i32_s` whenever the destination was wider than 32 bits, without checking the source width. Those opcodes consume an i32, so a 64-bit source left an i64 on the stack and the validator rejected the module outright (`type mismatch: expected i32, found i64`). The widening is now gated on the source being at most 32 bits.
 
 ### Scalar integer min/max
 - [x] X86_64 — `0460da8`, `3248_int_minmax.t`. The generic fallback emitted a `min`/`max` MIR op that x86 codegen dropped, so the result silently kept the left-hand operand.
 - [x] **ARM64** — `fd0abbf`. Branchless `cmp` + `csel_le`/`csel_ge`; the only previous `min`/`max` block in the lowerer was the i128 path.
 - [x] **RISCV64** — `fd0abbf`, then `8b98245`. The first expansion masked with the 0/1 that `slt` produces, which keeps only the low bit of `(lhs ^ rhs)` and returned garbage whenever the xor was even; the mask is now a full-width `-(lhs < rhs)`.
-- [ ] **Wasm** — not yet audited.
+- [x] **Wasm** — this round. Audited by executing under `wasmtime`: correct as written. Wasm only has `f32.min`/`f64.min`, so integer min/max already lower to a `select` over `i32_lt_s`/`i64_lt_s`, matching the `select` operand ordering the codegen expects. Verified against negative operands, equal operands, and values differing only above bit 31.
 
 ### Scalar div/rem, shift, and compare audit
 - [x] **ARM64/RISCV64** — `8b98245`. Found by compiling small programs and *executing* them under `qemu-aarch64`/`qemu-riscv64` rather than by reading disassembly: `sdiv` was never encoded (signed `div`/`rem` emitted `udiv`, so `-13/3` was `3074457345618258602`); ARM64 register `ashr` used `0x9AC02C00`, which is RORV, not ASRV (`0x9AC02800`); ARM64 `cmp` took its width from the i1 result, so 64-bit compares only looked at the low 32 bits and values differing solely above bit 31 compared equal; ARM64 UXTB/UXTH/SXTB/SXTH/SXTW read the source from Rm instead of Rn; the RISC-V M table had `mul` as funct7 0 (bit-identical to `add`) and `div`/`divu` in the wrong funct3 slots, so a rem silently became `divu;add;sub`; RISC-V XORI lacked funct7 0x20; and 64-bit `zext`/`sext` truncated the source to 32 bits on both backends.
-- [ ] **Wasm** — the same harness does not execute Wasm, so this audit has not been repeated for the Wasm backend.
+- [x] **Wasm** — this round. Audited by executing under `wasmtime` (per-op modules, not a batched bitmask): signed/unsigned `div`/`rem`, `shl`/`lshr`/`ashr`, and all 10 `icmp` predicates are correct, including the `-13/3` sign case and operands differing only above bit 31 that the ARM64/RISC-V audit turned up. No bugs in this group.
+
+### Wasm integer unary ops (neg / abs / sqrt)
+- [x] **Wasm** — this round, `3267_wasm_int_neg.t`. Wasm has no integer `neg`/`abs` opcode (only `f32.neg`/`f64.neg`/`f32.abs`/`f64.abs`), and the lowerer died with "Wasm unary op neg requires float type" for every integer negation. Unary minus reaches the lowerer for any numeric type (`Brocken::Katsuro::Lowerer` emits `build_neg` for `-` on every numeric type), so a plain `return -x;` over an int failed to compile on Wasm while every other backend handled it. `neg(x)` is now `0 - x` and `abs(x)` is `x < 0 ? -x : x` via `select`, both from the generic i32/i64 ops. Integer `sqrt` is still rejected: Wasm has no integer square root, and silently miscompiling it would be worse than the die. `3239_int_neg.t` only exercised the host platform, which is why the gap went unnoticed.
+
+### Wasm sub-word load/store widths
+- [ ] Wasm loads and stores an i8/i16 through a full 32-bit `i32_load`/`i32_store` rather than `i32_load8_s`/`i32_store8` and friends. The lane holds a sign-extended value, so a single sub-word access round-trips correctly today, but any neighbouring access to the adjacent 3 bytes reads or writes the wrong cells. Needs an audit of struct field layout and byte-sized accesses before it can be called correct.
 
 ### Phase B: Int/Bool native alias support
 - [x] Lower `Int` and `Bool` as native types (i64/i1)
