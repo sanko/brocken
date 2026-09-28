@@ -18,6 +18,7 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
 
 ### Failing legs (as of run 36359673750)
 - [ ] **All aarch64 legs are red** — FreeBSD/ARM, Linux/ARM, macOS/Apple Silicon, Windows/ARM. This is the ARM64 codegen catch-up, not a CI problem.
+  - Narrow-slot width, `movsx` destination width and negative-displacement encodings are fixed and verified by executing 97 generated programs under `qemu-aarch64` (`strb`/`ldrsb` for i8 slots, `sxtb/sxth/sxtw` x-forms, `ldur`/`stur` imm9). Still open: whatever the next re-run reports, since these tests only execute on a native ARM64 host and pass on x86_64 by testing the x86_64 encoder instead.
 - [ ] **DragonFly BSD / Intel** and **NetBSD / Intel** — both x86_64, so not arch-specific.
 - [x] OpenBSD and Solaris were pinned to perl 5.40.2, which cannot satisfy `use v5.42`. Bumped to 5.42.0 in `14fc284`; both need a re-run to confirm perl 5.42.0 builds there.
 - [ ] `cpanfile` claimed `v5.40.0` while ten modules require `v5.42`; corrected in `14fc284`. 5 module files still carry no `use vX.Y` guard at all.
