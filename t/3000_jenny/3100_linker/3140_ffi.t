@@ -65,7 +65,16 @@ else {
 }
 if ( $? == 0 && defined $nm_out && $nm_out ne '' ) {
     my $expected_sym = 'my_func';
-    like $nm_out, qr/\b_?$expected_sym\b/, "Verified via 'nm' that '$expected_sym' is present in $lib_file";
+
+    # The nm on PATH is the host's, so it cannot read a foreign-arch symbol
+    # table. Only assert the symbol is present when the library was built for
+    # this host, otherwise a cross-arch run reports a bogus FFI failure.
+    if ( $platform->is_native ) {
+        like $nm_out, qr/\b_?$expected_sym\b/, "Verified via 'nm' that '$expected_sym' is present in $lib_file";
+    }
+    else {
+        note "host nm cannot read a " . $platform->friendly . " symbol table; skipping symbol check";
+    }
 }
 else {
     note 'nm is not available or failed; skipping symbol table extraction check';
@@ -201,6 +210,15 @@ SKIP: {
         }
     }
     elsif ( $is_posix && ( $is_x64 || $is_arm64 || $is_riscv64 ) ) {
+
+        # This path links a wrapper for the *target* arch and then runs it, so it
+        # only works when the host can execute what it just built. Without the
+        # guard, cross-arch runs (or an emulated host) try to exec a foreign
+        # binary and report it as an FFI failure.
+        if ( !$platform->is_native ) {
+            skip 'Native FFI wrapper execution needs a native host for ' . $platform->friendly, 4;
+            next;
+        }
         my $wrapper_file = $brocken->tmpdir . '/test_wrapper';
         my $wrapper_linker
             = $platform->is_macos ? Brocken::Jenny::Linker::MachO->new( type => 'exe' ) : Brocken::Jenny::Linker::ELF64->new( type => 'exe' );

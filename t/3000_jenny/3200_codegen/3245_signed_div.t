@@ -174,17 +174,21 @@ subtest 'signed divide sign-extends RDX' => sub {
     # A structural check on the encoding: the signed form has to sign-extend RAX
     # into RDX (REX.W CQTO = 48 99) and use the /7 group, while the unsigned form
     # zeroes RDX and uses /6. Guards the fix independently of the runtime results.
-    my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
-    my $builder = Brocken::Lindsay::IR::Builder->new();
-    my $seq     = 0;
-    my $nm      = sub { sprintf '%%v%d', $seq++ };
-    my $K       = sub { Brocken::Lindsay::IR::Constant->new( @_ ) };
-    $builder->position_at_end( $func->append_block('entry') );
-    my $C = sub { $K->( type => $i64, value => $_[0] ) };
-    $builder->build_div( $C->(7), $C->(2), $nm->() );
-    my $bytes = $brocken->codegen->emit_function($func);
-    like( $bytes, qr/\x48\x99/, 'signed div emits REX.W CQTO' );
-    like( $bytes, qr/\x48\xf7[\xf8-\xff]/, 'signed div uses the IDIV group' );
+    # These are x86-64 encodings, so the subtest is meaningless on other hosts.
+    SKIP: {
+        skip 'x86-64 encoding check only applies to x86_64 hosts', 1 unless $platform->is_x64;
+        my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
+        my $builder = Brocken::Lindsay::IR::Builder->new();
+        my $seq     = 0;
+        my $nm      = sub { sprintf '%%v%d', $seq++ };
+        my $K       = sub { Brocken::Lindsay::IR::Constant->new( @_ ) };
+        $builder->position_at_end( $func->append_block('entry') );
+        my $C = sub { $K->( type => $i64, value => $_[0] ) };
+        $builder->build_div( $C->(7), $C->(2), $nm->() );
+        my $bytes = $brocken->codegen->emit_function($func);
+        like( $bytes, qr/\x48\x99/, 'signed div emits REX.W CQTO' );
+        like( $bytes, qr/\x48\xf7[\xf8-\xff]/, 'signed div uses the IDIV group' );
+    }
 };
 
 done_testing;

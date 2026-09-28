@@ -143,25 +143,29 @@ for my $tname (qw(i8 i16 i32 i64)) {
 subtest 'narrow load uses a real REX prefix' => sub {
     # Pin the encoding itself. The second load lands in r8, so it needs REX.R, and
     # the prefix byte has to carry the 0x40 base: 44 for i32, not 04.
-    for my $tname (qw(i8 i16 i32)) {
-        my $t       = $TYPE{$tname};
-        my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i64 );
-        my $builder = Brocken::Lindsay::IR::Builder->new();
-        my $seq     = 0;
-        my $nm      = sub { sprintf '%%v%d', $seq++ };
-        my $K       = sub { Brocken::Lindsay::IR::Constant->new( @_ ) };
-        $builder->position_at_end( $func->append_block('entry') );
-        my $ld = sub {
-            my ( $value ) = @_;
-            my $slot = $builder->build_alloca( $t, $nm->() );
-            $builder->build_store( $K->( type => $t, value => $value ), $slot );
-            return $builder->build_load( $t, $slot, $nm->() );
-        };
-        $builder->build_add( $ld->(6), $ld->(5), $nm->() );
-        $builder->build_ret( $K->( type => $i64, value => 0 ) );
-        my $bytes = $brocken->codegen->emit_function($func);
-        unlike( $bytes, qr/\x04\x8b/, "$tname load does not emit a bare REX.R" );
-        like( $bytes, qr/[\x40-\x4f]\x8b/, "$tname load emits a proper REX prefix" );
+    # REX is an x86-64 concept, so the subtest is meaningless on other hosts.
+    SKIP: {
+        skip 'REX prefix check only applies to x86_64 hosts', 1 unless $platform->is_x64;
+        for my $tname (qw(i8 i16 i32)) {
+            my $t       = $TYPE{$tname};
+            my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i64 );
+            my $builder = Brocken::Lindsay::IR::Builder->new();
+            my $seq     = 0;
+            my $nm      = sub { sprintf '%%v%d', $seq++ };
+            my $K       = sub { Brocken::Lindsay::IR::Constant->new( @_ ) };
+            $builder->position_at_end( $func->append_block('entry') );
+            my $ld = sub {
+                my ( $value ) = @_;
+                my $slot = $builder->build_alloca( $t, $nm->() );
+                $builder->build_store( $K->( type => $t, value => $value ), $slot );
+                return $builder->build_load( $t, $slot, $nm->() );
+            };
+            $builder->build_add( $ld->(6), $ld->(5), $nm->() );
+            $builder->build_ret( $K->( type => $i64, value => 0 ) );
+            my $bytes = $brocken->codegen->emit_function($func);
+            unlike( $bytes, qr/\x04\x8b/, "$tname load does not emit a bare REX.R" );
+            like( $bytes, qr/[\x40-\x4f]\x8b/, "$tname load emits a proper REX prefix" );
+        }
     }
 };
 
