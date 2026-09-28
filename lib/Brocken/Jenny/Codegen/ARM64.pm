@@ -65,6 +65,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         CMP_REG        => 0x6B00001F,
         CSINC          => 0x1A800400,    # sf bit added by the caller; sets the CSINC op bit (10)
         CSEL           => 0x1A800000,    # sf and cond fields added by the caller
+        CSNEG          => 0x5A800400,    # csneg Rd, Rn, Rm, cond: cond ? Rn : -Rm (see cset/csel notes)
+        NEG            => 0x4B0003E0,    # neg Rd, Rm == sub Rd, ZR, Rm; Rn field holds ZR
         FABS_32        => 0x1E20C000,
         FNEG_32        => 0x1E214000,
         FSQRT_32       => 0x1E21C000,
@@ -881,6 +883,38 @@ class Brocken::Jenny::Codegen::ARM64 {
                     # assembles to 0x1A820020, this formula with Rn=1, Rm=2,
                     # cond=EQ and no SF; the x-form adds the SF bit.
                     $bytes .= pack( 'V', $sf | CSEL | ( $fid << 16 ) | ( $csel{$opcode} << 12 ) | ( $tid << 5 ) | $did );
+                }
+                elsif ( $opcode eq 'neg' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $bits  = $dst->type ? $dst->type->bits : 64;
+                    my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
+
+                    # NEG Rd, Rm is SUB Rd, ZR, Rm (Rn already fixed to ZR in
+                    # the base), so only Rm and Rd are encoded here.
+                    $bytes .= pack( 'V', $sf | NEG | ( $sid << 16 ) | $did );
+                }
+                elsif ( $opcode eq 'csneg' ) {
+                    my ( $dst, $if_t, $if_f ) = $inst->operands->@*;
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $t_r   = $resolve->($if_t);
+                    my $tid   = $reg_id->($t_r);
+                    my $f_r   = $resolve->($if_f);
+                    my $fid   = $reg_id->($f_r);
+                    my $bits  = $dst->type ? $dst->type->bits : 64;
+                    my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
+
+                    # CSNEG Rd, Rn, Rm, cond yields Rn when cond is true and
+                    # -Rm otherwise, and (unlike CSET, like CSEL) carries the
+                    # true predicate in the cond field. The lowerer wires up
+                    # integer abs as csneg x, x, x, gt; cond GT (0xC) gives
+                    # abs(x) = x if x > 0 else -x, where -0 == 0. Verified
+                    # against the Arm pseudocode base 0x5A800400 (+SF for the
+                    # x-form): `csneg x0, x1, x2, gt` decodes to 0xDA82C420.
+                    $bytes .= pack( 'V', $sf | CSNEG | ( $fid << 16 ) | ( 0xC << 12 ) | ( $tid << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'sltu' ) {
                     my $dst_r = $resolve->($dst);

@@ -1893,6 +1893,39 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $dst, $diff ], comment => 'minmax sel' )
                             );
                         }
+                        elsif ( $opcode eq 'neg' ) {
+                            my $src = $ops[0]->isa('Brocken::Lindsay::IR::Constant') ? $self->_reg_opnd( $mbb, $ops[0], $inst->name . '_src' ) : $self->_lower_opnd($ops[0]);
+
+                            # neg rd, rs; the encoder read the x0 zero register
+                            # as rs1, so this is a single sub-from-zero.
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'neg', operands => [ $dst, $src ], comment => 'neg' ) );
+                        }
+                        elsif ( $opcode eq 'abs' ) {
+                            my $src = $self->_materialize( $mbb, $ops[0] );
+
+                            # Branchless |x| like x86/ARM64: mask = x >> 63 (0
+                            # for non-negative, all-ones for negative - narrow
+                            # values are sign-extended in this backend) then
+                            # dst = (x ^ mask) - mask. mv mask, src; ashr mask,
+                            # 63; mv dst, src; xor dst, mask; sub dst, mask.
+                            my $mask = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_mask',
+                                type  => $inst->type
+                            );
+                            my $s63 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $mask, $src ], comment => 'abs sign mask copy' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ashr', operands => [ $mask, $s63 ], comment => 'abs sign mask' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $dst, $src ], comment => 'abs load' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $dst, $mask ], comment => 'abs xor' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $mask ], comment => 'abs sub' ) );
+                        }
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {

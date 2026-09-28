@@ -646,6 +646,17 @@ class Brocken::Jenny::Codegen::RISCV64 {
                             ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
                     }
                 }
+                elsif ( $opcode eq 'neg' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+
+                    # neg rd, rs == sub rd, x0, rs: rs1 is the x0 zero register,
+                    # so this cannot reuse the RMW add/sub form above (which
+                    # pins rs1 to the destination).
+                    $bytes .= pack( 'V', ( 0x20 << 25 ) | ( $sid << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP );
+                }
                 elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
