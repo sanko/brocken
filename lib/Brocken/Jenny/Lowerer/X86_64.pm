@@ -2707,7 +2707,22 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
                     my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    my $size = $inst->allocated_type->bits / 8;
+                    my $elem = $inst->allocated_type->bits / 8;
+
+                    # The frame is reserved up front from a single immediate,
+                    # so a count has to be a literal to scale the reservation.
+                    # Reading ->value off a computed count yielded undef and
+                    # reserved 0 bytes, and ignoring the count outright (which
+                    # is what this did) reserved a single element, so every
+                    # element past the first ran into the neighbouring slot:
+                    # `my [i64; 5] @a;` got 8 bytes, and @a[2] overwrote
+                    # whatever the next variable was allocated there.
+                    my $size = $elem;
+                    if ( defined $inst->count ) {
+                        die "X86_64 alloca with a non-constant element count is not supported"
+                            unless $inst->count->isa('Brocken::Lindsay::IR::Constant');
+                        $size = $elem * $inst->count->value;
+                    }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'alloca',

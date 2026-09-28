@@ -2000,7 +2000,17 @@ class Brocken::Jenny::Lowerer::Wasm {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
-                    my $size = ( $inst->allocated_type->bits / 8 ) * ( $inst->count ? $inst->count->value : 1 );
+                    my $elem = $inst->allocated_type->bits / 8;
+
+                    # The bump is a single immediate, so a count has to be a
+                    # literal to scale the reservation. A computed count has
+                    # no ->value and reserved 0 bytes.
+                    my $size = $elem;
+                    if ( defined $inst->count ) {
+                        die "Wasm alloca with a non-constant element count is not supported"
+                            unless $inst->count->isa('Brocken::Lindsay::IR::Constant');
+                        $size = $elem * $inst->count->value;
+                    }
 
                     # save current heap_ptr as result
                     $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap' ) );
