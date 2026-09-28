@@ -233,7 +233,33 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
 - [x] **Wasm** — this round. Audited by executing under `wasmtime`: correct as written. Wasm only has `f32.min`/`f64.min`, so integer min/max already lower to a `select` over `i32_lt_s`/`i64_lt_s`, matching the `select` operand ordering the codegen expects. Verified against negative operands, equal operands, and values differing only above bit 31.
 
 ### Scalar div/rem, shift, and compare audit
-- [x] **ARM64/RISCV64** — `8b98245`. Found by compiling small programs and *executing* them under `qemu-aarch64`/`qemu-riscv64` rather than by reading disassembly: `sdiv` was never encoded (signed `div`/`rem` emitted `udiv`, so `-13/3` was `3074457345618258602`); ARM64 register `ashr` used `0x9AC02C00`, which is RORV, not ASRV (`0x9AC02800`); ARM64 `cmp` took its width from the i1 result, so 64-bit compares only looked at the low 32 bits and values differing solely above bit 31 compared equal; ARM64 UXTB/UXTH/SXTB/SXTH/SXTW read the source from Rm instead of Rn; the RISC-V M table had `mul` as funct7 0 (bit-identical to `add`) and `div`/`divu` in the wrong funct3 slots, so a rem silently became `divu;add;sub`; RISC-V XORI lacked funct7 0x20; and 64-bit `zext`/`sext` truncated the source to 32 bits on both backends.
+- [x] **ARM64/RISCV64** — `8b98245`. Found by compiling small programs and *executing* them under `qemu-aarch64`/`qemu-riscv64` rather than by reading disassembly: `sdiv` was never encoded (signed `div`/`rem` emitted `udiv`, so `-13/3` was `3074457345618258602`); ARM64 register `ashr` used `0x9AC02C00`, which is RORV, not ASRV (`0x9AC02880`); ARM64 `cmp` took its width from the i1 result, so 64-bit compares only looked at the low 32 bits and values differing solely above bit 31 compared equal; ARM64 UXTB/UXTH/SXTB/SXTH/SXTW read the source from Rm instead of Rn; the RISC-V M table had `mul` as funct7 0 (bit-identical to `add`) and `div`/`divu` in the wrong funct3 slots, so a rem silently became `divu;add;sub`; and 64-bit `zext`/`sext` truncated the source to 32 bits on both backends. The RISC-V XORI claim in that commit ("XORI needs funct7 0x20") was wrong and the change it made was reverted below.
+- [x] **RISC-V XORI set bit 30, so every negated condition was true.**
+      `8b98245` read bit 30 as a funct7 and set it on the I-type XORI the
+      way SRAI does, on the belief that without it "the encoding is the
+      register XOR, so the immediate landed in the rs2 field". Bits 31..25 of
+      an OP-IMM instruction are imm[11:5] of the constant, not a funct7, and
+      the register XOR is funct3 4 of the *other* opcode (0x33) — there is no
+      rs2 field in an OP-IMM word and nothing to disambiguate. The constant
+      became `0x400 | value` instead of `value`. The lowerer negates a
+      comparison with `xori cond, 1` whenever a branch wants the opposite
+      sense, and `0x401` is never zero, so the negated condition was true for
+      every input. `if ($x)` took its then-arm with a false `$x`
+      (`1050_integration.t`, 'else branch taken', answered 0 instead of 42),
+      and the inverted exit test of `while ($i <= $n)` never became true, so
+      the `Factorial` subtest in the same file never returned and hung the
+      run. Regression: `3289_riscv_xori.t`, which asserts the encoding from the
+      instruction words rather than executing, so it catches this off RISC-V
+      too.
+- [ ] Every RISC-V test in `3200_codegen` is guarded by `is_riscv64 &&
+      is_native`, so the backend's encodings are only ever checked on real
+      RISC-V hardware. Nothing in the suite validates an instruction word
+      elsewhere, which is how a wrong bit in a single encoding survived
+      review and a green run: the RISC-V half of the `8b98245` audit reported
+      32/32 under qemu while `xori` was broken, so whatever those cases
+      covered, they did not cover a negated comparison. Decoding emitted words
+      on the host, as `3289_riscv_xori.t` now does for one instruction, would
+      cover the rest.
 - [x] **Wasm** — this round. Audited by executing under `wasmtime` (per-op modules, not a batched bitmask): signed/unsigned `div`/`rem`, `shl`/`lshr`/`ashr`, and all 10 `icmp` predicates are correct, including the `-13/3` sign case and operands differing only above bit 31 that the ARM64/RISC-V audit turned up. No bugs in this group.
 
 ### Wasm integer unary ops (neg / abs / sqrt)

@@ -619,18 +619,20 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     );
                     if ( $src->kind eq 'imm' && exists $imm_f3{$opcode} ) {
 
-                        # I-type: opcode 0x13, funct3 from %imm_f3, funct7 from
-                        # %imm_f7. XORI is the only I-type ALU op that needs
-                        # funct7 0x20; without it the encoding is the register
-                        # XOR, so the immediate landed in the rs2 field and the
-                        # instruction read a register (x1 for an immediate of
-                        # 1) instead of the constant.
+                        # I-type: opcode 0x13, funct3 from %imm_f3, and bits
+                        # 31..25 are imm[11:5] of the constant, not a funct7.
+                        # XORI is funct3 4 of OP-IMM; the register XOR is
+                        # funct3 4 of the *other* opcode (0x33), so an
+                        # immediate XOR needs nothing to tell the two apart.
+                        # Setting bit 30 here the way SRAI does turns the
+                        # constant into 0x400 | value, and since 0x400 is
+                        # never zero the comparison this feeds is always
+                        # "true": an `if` took its then-arm whatever the
+                        # condition, and a `while` never terminated.
                         my $imm = $src->value;
                         $imm = -$imm if $opcode eq 'sub';
                         $imm &= 0xFFF;
-                        my %imm_f7 = ( xor => 0x20 );
-                        my $f7 = $imm_f7{$opcode} // 0x00;
-                        $bytes .= pack( 'V', ( $f7 << 25 ) | ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
+                        $bytes .= pack( 'V', ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                     else {
                         my $src_r;
