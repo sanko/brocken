@@ -293,16 +293,58 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       applied in ascending offset order while tracking the shift.
       Regression: `3287_wasm_call_results.t`, which checks the two call results
       get distinct names and that repeated calls return the right value.
-- [ ] **Wasm cannot compile a loop, or any branch out of a non-entry block.**
-      The encoder gives each non-entry basic block a `block`/`end` pair and
-      computes every branch depth as `num_non_entry - target_index`, which is
-      only right for a branch out of the entry block. From inside block `j` the
-      nesting depth is `j`, so the depth has to be `j - target`, and a target at
-      or before `j` is not expressible at all: back edges need a `loop`
-      construct, which the encoder never emits. `while` fails validation with
-      "branch depth too large". Fixing this means reworking the encoder to
-      emit `loop` for headers and to derive depths from real nesting, so it
-      wants its own change rather than a patch to the offset arithmetic.
+- [x] **Wasm could not compile a loop, or any branch out of a non-entry block.**
+      The encoder gave each non-entry basic block a `block`/`end` pair and
+      computed every branch depth as `num_non_entry - target_index`, which is
+      only right for a branch out of the entry block, so any `if` failed
+      validation with an unknown label and any `loop` with "branch depth too
+      large". Three separate mistakes had to be fixed together. A back edge
+      needs a `loop` to target, because branching to a `block` resumes after
+      its `end` rather than restarting at its head, and the branch that enters
+      the loop from outside needs a second plain `block` that ends just before
+      the `loop` begins; neither existed. A natural loop has to stop at its
+      header, or walking predecessors from the back edge pulls in the preheader
+      and a loop inside an `if` swallows the `if` along with its condition, so
+      `if ($i < 1) { while ($i < 3) {...} }` iterated four times instead of
+      three. And the emitted order has to place a join after every arm that
+      reaches it while keeping each loop's blocks in one unbroken run, which
+      reverse postorder does neither of: it inserted an `if`'s continuation
+      between a loop header and its body, and laid an `else` arm out *after* the
+      join that arm branches back to, which no stack of labels can express
+      because a label that has closed cannot be branched to again. The encoder
+      now finds back edges with a depth-first walk, computes reachability-
+      restricted natural loops, and emits one region at a time, placing a block
+      only once all of its non-back-edge predecessors are placed. Branch depths
+      come from the live label stack, so a loop header entered from outside and
+      re-entered by a back edge resolve to different depths.
+      Reordering blocks invalidated the call fixups recorded above: the encoder
+      measured each `call` placeholder against the start of its own block, but
+      the linker rewrites the whole function body, where the same call sits
+      after however many `block`/`loop` opcodes the layout put in front of it.
+      For an `if`, whose entry block is preceded by one `block` per target, the
+      `_init` call landed on the `call` opcode itself and left the entry
+      function calling itself; fixups are now collected per block and rebased
+      onto the final body offset.
+      Regression: `3288_wasm_control_flow.t`, twelve programs executed under
+      `wasmtime` and asserting the returned value: `if`/`else`, `while`,
+      division in a loop, two and three levels of nesting, a loop inside an
+      `if`, a loop after an `if`, an `if`/`else` inside a loop, an `if` inside a
+      nested loop, and a return from inside a loop. Ten of the twelve fail
+      against the previous encoder.
+- [ ] **Two self-calls to the same function in one expression are miscompiled.**
+      `sub fib(i64 $n) { if ($n < 2) { return $n; } return fib($n - 1) + fib($n - 2); }`
+      lowers to `local_get(UNDEF) | local_get(UNDEF) | i32_add |
+      local_set(%v<virt_reg:void/0>) | ret`, so both call results are undefined
+      and the add is typed `i32`/`void` regardless of the function's result
+      type. `fib(15)` is rejected by the validator (`type mismatch: expected
+      i64 but nothing on stack`) or returns a wrong answer, depending on the
+      shape. Two calls to a *different* function are fine (that is
+      `3287_wasm_call_results.t`), as is one self-call added to a constant; it
+      is specifically two calls to the enclosing function that lose their
+      values. Confirmed against `61df315` with the Wasm encoder stashed, so it
+      predates the control-flow work and is not caused by it. The values are
+      already lost in the frontend by the time MIR exists, so this affects every
+      backend and cannot be fixed in the Wasm encoder.
 
 ### Wasm entry ABI
 - [x] **The heap-base argument is a real parameter, not a leftover.**
