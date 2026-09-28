@@ -1626,7 +1626,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'movzx',
-                            operands => [ $dst, $self->_lower_opnd($val) ],
+                            operands => [ $dst, $self->_reg_opnd( $mbb, $val, $inst->name . '_src' ) ],
                             comment  => 'zext ' . ( $val->name || $val->value )
                         )
                     );
@@ -1637,7 +1637,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'movsx',
-                            operands => [ $dst, $self->_lower_opnd($val) ],
+                            operands => [ $dst, $self->_reg_opnd( $mbb, $val, $inst->name . '_src' ) ],
                             comment  => 'sext ' . ( $val->name || $val->value )
                         )
                     );
@@ -3411,6 +3411,24 @@ class Brocken::Jenny::Lowerer::RISCV64 {
             return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $ir_val->value, type => $ir_val->type );
         }
         return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type );
+    }
+
+    # Form encoders that can only name a register (movzx/movsx) must not be handed
+    # a bare immediate: the RISC-V encoder resolves both source operands through
+    # $resolve, which only understands virt_reg/phys_reg. Constant-folded
+    # zext/sext therefore died with 'Unexpected operand kind: imm'.
+    method _reg_opnd( $mbb, $ir_val, $name ) {
+        my $opnd = $self->_lower_opnd($ir_val);
+        return $opnd unless $opnd->kind eq 'imm';
+        my $vreg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $ir_val->type );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $vreg, $opnd ],
+                comment  => 'materialize immediate'
+            )
+        );
+        return $vreg;
     }
 
     method _type_tag($type) {
