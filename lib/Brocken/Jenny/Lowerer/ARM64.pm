@@ -2325,6 +2325,27 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => $mop, operands => [ $dst, $dst ], comment => $mop ) );
                     }
+                    elsif ( $inst->type && $inst->type->kind eq 'int' ) {
+                        my $src = $val->isa('Brocken::Lindsay::IR::Constant') ? $self->_reg_opnd( $mbb, $val, $inst->name . '_src' ) : $self->_lower_opnd($val);
+                        if ( $opcode eq 'neg' ) {
+
+                            # NEG Rd, Rm == SUB Rd, ZR, Rm; SF is width-aware
+                            # in the encoder, so i8/i16/i32 keep the 32-bit
+                            # form.
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'neg', operands => [ $dst, $src ], comment => 'neg' ) );
+                        }
+                        elsif ( $opcode eq 'abs' ) {
+
+                            # abs(x) = csneg x, x, x, gt across a move, so the
+                            # encode is a single conditional-select-negate with
+                            # the value in both read slots.
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $dst, $src ], comment => 'abs load' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'csneg', operands => [ $dst, $dst, $dst ], comment => 'abs' ) );
+                        }
+                    }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
                     $mbb->add_instruction(
