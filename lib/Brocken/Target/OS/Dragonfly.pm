@@ -4,7 +4,7 @@ no warnings 'portable', 'experimental::class';
 
 class Brocken::Target::OS::Dragonfly : isa(Brocken::Target::OS) {
     ADJUST {
-        die "OS name mismatch" unless $self->name eq 'dragonfly';
+        die "OS name mismatch" unless $self->name =~ /^dragonfly(?:bsd)?$/;
     }
 }
 1;
