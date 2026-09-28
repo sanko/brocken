@@ -140,6 +140,34 @@ BROCKEN
     ok( $allocas, 'an array base still allocates in linear memory' );
 }
 
+# An index is an i64 in the IR while a wasm32 address is i32, so the scale,
+# multiply and add have to see a narrowed index. Without the wrap the sequence is
+# `local.get` (i64) then `i32.mul`, and wasmtime rejects the whole module with
+# "type mismatch: expected i32, found i64" -- so a *variable* index produced an
+# invalid module while a constant index, folded into a displacement, worked.
+{
+    my $module  = Brocken::Compiler->new->compile( <<'BROCKEN' );
+sub main() -> i64 {
+    my [i64; 16] $a;
+    my i64 $i = 3;
+    $a[$i] = 10;
+    return $a[$i];
+}
+BROCKEN
+    my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
+    my ($fn) = grep { $_->name eq 'main' } $module->functions->@*;
+    my $mf = $lowerer->lower($fn);
+    my ( $wraps, $geps ) = ( 0, 0 );
+    for my $mbb ( $mf->blocks->@* ) {
+        for my $mi ( $mbb->instructions->@* ) {
+            $geps++  if ( $mi->comment // '' ) =~ /gep: idx/;
+            $wraps++ if ( $mi->comment // '' ) =~ /gep: wrap index/;
+        }
+    }
+    ok( $geps,  'a variable array index goes through the gep path' );
+    is( $wraps, $geps, 'every variable index is narrowed to the i32 address space' );
+}
+
 # --- Execution --------------------------------------------------------------
 
 my $FIB = <<'BROCKEN';
@@ -188,6 +216,34 @@ class Point { field i64 $x :param :reader; }
 BROCKEN
     tail => 'my ptr $p = Point->new(7); return $p->x() * 6;',
     want => 42,
+    };
+
+# A local object *declared inside a loop body* is the one shape that still needed
+# the spill cursor while promotion was restricted to the entry block. That put the
+# slot at `heap_base + 16` -- the same base `bump_alloc` hands the instance out
+# from -- so the pointer and the object overlapped and the loop summed garbage
+# (10760 instead of 45). Promoting in any block fixes it, because a wasm local is
+# per-invocation rather than per-block. The same program is correct on x86_64, so
+# this is Wasm-specific and silent, which is why it is worth its own case.
+push @cases,
+    {
+    name => 'object declared in a loop body',
+    prog => <<'BROCKEN',
+class P { field i64 $x :param :reader; }
+BROCKEN
+    tail => <<'BROCKEN',
+my i64 $t = 0;
+my i64 $i = 0;
+while ($i < 10) { my ptr $p = P->new($i); $t = $t + $p->x(); $i = $i + 1; }
+return $t;
+BROCKEN
+    want => 45,
+    },
+    {
+    name => 'array store and load with a variable index',
+    prog => '',
+    tail => 'my [i64; 16] $a; my i64 $i = 3; $a[$i] = 10; return $a[$i];',
+    want => 10,
     };
 
 for my $case (@cases) {

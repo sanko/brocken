@@ -2277,6 +2277,25 @@ class Brocken::Jenny::Lowerer::Wasm {
                     }
                     else {
                         $mbb->add_instruction( $self->_wasm_push( $idx, 'gep: idx' ) );
+
+                        # An index is an i64 in the IR, but a wasm32 address is
+                        # i32 and the scale/multiply/add below are all i32
+                        # operations. Pushing the index unchanged emits an i64
+                        # followed by `i32.mul`, which the validator rejects with
+                        # "type mismatch: expected i32, found i64" -- so a
+                        # variable index into an array produced an invalid module
+                        # while a constant index, folded into a displacement above,
+                        # worked. Narrow it the way the pointer arithmetic does.
+                        my $idx_bits = $idx->type && $idx->type->kind eq 'int' ? $idx->type->bits : 32;
+                        if ( $idx_bits > 32 ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i32_wrap_i64',
+                                    operands => [],
+                                    comment  => 'gep: wrap index to i32'
+                                )
+                            );
+                        }
                         if ( $scale > 1 ) {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2758,16 +2777,16 @@ class Brocken::Jenny::Lowerer::Wasm {
     # because nothing ever gives the space back. A wasm local is the engine's own
     # per-invocation slot, reclaimed on return, so promoting removes that cost.
     method _promotable_allocas($ir_func) {
-        my $entry = $ir_func->blocks->[0];
         my %promotable;
         for my $block ( $ir_func->blocks->@* ) {
             for my $inst ( $block->instructions->@* ) {
                 next unless $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca');
 
-                # Only a function-scope slot of one scalar. A counted alloca is
-                # an array, whose base is offset by getelementptr, and a 128-bit
-                # one is already lowered as a pair.
-                next unless $block == $entry;
+                # Only a slot of one scalar. A counted alloca is an array, whose
+                # base is offset by getelementptr, and a 128-bit one is already
+                # lowered as a pair. The block does not matter: a wasm local is
+                # per-invocation, so a slot declared in a loop body is one local
+                # reused each trip rather than a fresh reservation per trip.
                 next if defined $inst->count;
                 my $elem = $inst->allocated_type;
                 next unless $elem && ( $elem->kind eq 'int' || $elem->kind eq 'ptr' || $elem->kind eq 'float' );
