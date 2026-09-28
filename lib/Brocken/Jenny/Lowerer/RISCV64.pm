@@ -1843,6 +1843,56 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                 )
                             );
                         }
+                        elsif ( $opcode eq 'min' || $opcode eq 'max' ) {
+
+                            # Signed scalar min/max, branchless, with no Zbb
+                            # dependency: mask = (lhs < rhs), then
+                            # dst = rhs ^ ((lhs ^ rhs) & mask). If lhs<rhs the
+                            # mask is 1 and dst becomes lhs, otherwise rhs; max
+                            # inverts the mask first. Without this the branch
+                            # emitted nothing for scalar min/max, losing the
+                            # result. Ops mirror the i128 minmax select shape
+                            # and the scalar icmp signed `slt` convention.
+                            my $one = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 );
+                            my $l   = $self->_reg_opnd( $mbb, $ops[0], $inst->name . '_ml' );
+                            my $r   = $self->_reg_opnd( $mbb, $ops[1], $inst->name . '_mr' );
+                            my $mask = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_mk',
+                                type  => $inst->type
+                            );
+                            my $diff = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'virt_reg',
+                                value => $inst->name . '_df',
+                                type  => $inst->type
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $mask, $l ], comment => 'minmax mask lhs' )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'slt', operands => [ $mask, $r ], comment => 'minmax slt' )
+                            );
+                            if ( $opcode eq 'max' ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $mask, $one ], comment => 'minmax invert mask' )
+                                );
+                            }
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $diff, $l ], comment => 'minmax diff lhs' )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $diff, $r ], comment => 'minmax diff xor' )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $diff, $mask ], comment => 'minmax diff and' )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $dst, $r ], comment => 'minmax sel rhs' )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $dst, $diff ], comment => 'minmax sel' )
+                            );
+                        }
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
