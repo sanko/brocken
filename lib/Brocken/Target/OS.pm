@@ -5,7 +5,10 @@ no warnings 'portable', 'experimental::class';
 class Brocken::Target::OS {
     field $name : param : reader;
     ADJUST {
-        die "Invalid OS: $name" unless $name =~ /^(?:linux|win64|macos|freebsd|openbsd|netbsd|solaris|dragonfly|midnightbsd|haiku)$/;
+        # `dragonfly` and `dragonflybsd` are both accepted: Katsuro spells the
+        # platform `dragonflybsd` (that is what perl's $^O reports), while the
+        # long-standing spelling here has been the bare `dragonfly`.
+        die "Invalid OS: $name" unless $name =~ /^(?:linux|win64|macos|freebsd|openbsd|netbsd|solaris|dragonfly(?:bsd)?|midnightbsd|haiku)$/;
     }
 
     method is_posix () {
@@ -13,7 +16,7 @@ class Brocken::Target::OS {
     }
 
     method is_bsd_like () {
-        return $self->name =~ /^(?:macos|freebsd|openbsd|netbsd|dragonfly|solaris|midnightbsd)$/;
+        return $self->name =~ /^(?:macos|freebsd|openbsd|netbsd|dragonfly(?:bsd)?|solaris|midnightbsd)$/;
     }
 
     method uses_syscalls () {
@@ -97,7 +100,7 @@ class Brocken::Target::OS {
         $n = 'openbsd'     if $^O eq 'openbsd';
         $n = 'netbsd'      if $^O eq 'netbsd';
         $n = 'solaris'     if $^O eq 'solaris';
-        $n = 'dragonfly'   if $^O eq 'dragonfly';
+        $n = 'dragonfly'   if $^O =~ /^dragonfly/;
         $n = 'midnightbsd' if $^O eq 'midnightbsd';
         $n = 'haiku'       if $^O eq 'haiku';
         return $class->from_name($n);
@@ -113,6 +116,7 @@ class Brocken::Target::OS {
             netbsd      => 'Brocken::Target::OS::NetBSD',
             solaris     => 'Brocken::Target::OS::Solaris',
             dragonfly   => 'Brocken::Target::OS::Dragonfly',
+            dragonflybsd => 'Brocken::Target::OS::Dragonfly',
             midnightbsd => 'Brocken::Target::OS::MidnightBSD',
             haiku       => 'Brocken::Target::OS::Haiku',
         }->{$n} // return __PACKAGE__->new( name => $n );
