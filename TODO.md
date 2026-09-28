@@ -241,16 +241,40 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
 
 ### Wasm sub-word load/store widths
 - [ ] Wasm loads and stores an i8/i16 through a full 32-bit `i32_load`/`i32_store` rather than `i32_load8_s`/`i32_store8` and friends. The lane holds a sign-extended value, so a single sub-word access round-trips correctly today, but any neighbouring access to the adjacent 3 bytes reads or writes the wrong cells. Needs an audit of struct field layout and byte-sized accesses before it can be called correct.
-- [ ] **Wasm cannot compile any program that declares a local variable.** Every
-      frontend program with at least one `my` local is rejected by the Wasm
-      validator, even `my i32 $x = 123; return $x;`:
-      `type mismatch: expected i32, found i64`. Found while adding
-      `3285_alloca_count.t`; the emitted module is byte-identical before and
-      after that fix, so it is a separate pre-existing defect. The Wasm tests
-      that do pass build their IR by hand and keep values in virtual
-      registers, which is why this went unnoticed. Blocks the Wasm half of the
-      alloca and sub-word-load audits, since neither can be executed end to
-      end until locals work.
+- [x] **Wasm could not compile any program that declares a local variable.**
+      Every frontend program with at least one `my` local was rejected by the
+      Wasm validator, even `my i32 $x = 123; return $x;`. Found while adding
+      `3285_alloca_count.t`; the emitted module was byte-identical before and
+      after that fix, so it was a separate pre-existing defect. The Wasm tests
+      that did pass build their IR by hand and keep values in virtual
+      registers, which is why this went unnoticed. Compiling a frontend program
+      pulls in `Brocken::Runtime::_init` and `bump_alloc`, and those exposed
+      five distinct type errors; all of them were in the emitted bytes rather
+      than in a missing encoder, and each one had to be found and fixed in turn
+      because a validator stops at the first:
+      - A literal pushed for a typed op took its width from the literal's own
+        type, so an `i64.const` fed an `i32.add` in pointer arithmetic.
+      - The op width came from the result type alone, so the runtime's
+        `ptr + i64` picked `i32_add` and fed it an i64 local. The width now
+        comes from the widest operand, the narrow one is extended, and an i64
+        result landing in a pointer is wrapped back to i32.
+      - A void function was declared as returning i32, so `_init` demanded a
+        value its body never pushed. The frontend gives an unannotated
+        function a real type object whose kind is `void`, so testing only for
+        a missing return type was not enough.
+      - `return 0` in a function declared `-> ptr` pushed an i64 literal into a
+        function the type section declared as returning i32. `maybe_convert_type`
+        had no int/ptr path, so a new `ptrcast` instruction was added and
+        lowered on all four backends (a move on the native three, an explicit
+        extend or truncate on Wasm).
+      - An i64 value assigned to a ptr local was stored without truncation,
+        leaving an i64 in an i32 local. `Wasm::_wasm_push` only re-types
+        constants, so a vreg conversion has to be explicit.
+      Regression: `3286_wasm_locals.t`, which compiles frontend programs with
+      locals and asserts the module passes `wasmtime` validation. Executing the
+      result still needs the entry to be called with a heap base, which is the
+      separate pre-existing entry-ABI question. The Wasm halves of the alloca
+      and sub-word-load audits are unblocked.
 
 ### Phase B: Int/Bool native alias support
 - [x] Lower `Int` and `Bool` as native types (i64/i1)

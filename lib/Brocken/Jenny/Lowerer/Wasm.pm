@@ -1768,19 +1768,60 @@ class Brocken::Jenny::Lowerer::Wasm {
                     }
                     else {
                         my $p;
+                        my $ibits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
+                        my $lbits = $lhs->type && $lhs->type->kind eq 'int' ? $lhs->type->bits : 32;
+                        my $rbits = $rhs->type && $rhs->type->kind eq 'int' ? $rhs->type->bits : 32;
                         if ( $inst->type && $inst->type->kind eq 'float' ) {
                             $p = $inst->type->bits >= 64 ? 'f64' : 'f32';
                         }
                         else {
-                            my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
-                            $p = $bits >= 64 ? 'i64' : 'i32';
+
+                            # Pick the width from the *wider operand*, not just
+                            # the result type. Pointer arithmetic in the runtime
+                            # is `ptr + i64` (a base address plus a byte count),
+                            # and the result is a pointer, so the result type
+                            # alone would pick i32 and either mismatch the i64
+                            # operand or silently truncate the byte count.
+                            my $w     = $ibits > $lbits ? $ibits : $lbits;
+                            $w        = $rbits > $w     ? $rbits : $w;
+                            $p        = $w >= 64 ? 'i64' : 'i32';
                         }
 
-                        # Push LHS onto Wasm stack
-                        $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS' ) );
+                        # Push LHS onto Wasm stack. Both operands are forced to
+                        # the width the op below was chosen for, so a literal
+                        # typed differently from the instruction still matches.
+                        my $push_bits = $p eq 'i64' ? 64 : $p eq 'i32' ? 32 : undef;
+                        $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS', $push_bits ) );
+
+                        # A Wasm op consumes two operands of exactly its own
+                        # width. When the wider operand forced the op up to i64
+                        # (runtime pointer arithmetic is `ptr + i64`), a 32-bit
+                        # operand has to be widened on the stack first, otherwise
+                        # the validator rejects the i32 local feeding an i64_add.
+                        # This has to run before the RHS push: the operand sits on
+                        # top of the stack, and the next push would bury it.
+                        if ( $p eq 'i64' && $lbits < 64 ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i64_extend_i32_u',
+                                    operands => [],
+                                    comment  => 'widen LHS to i64'
+                                )
+                            );
+                        }
 
                         # Push RHS onto Wasm stack
-                        $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
+                        $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS', $push_bits ) );
+
+                        if ( $p eq 'i64' && $rbits < 64 ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i64_extend_i32_u',
+                                    operands => [],
+                                    comment  => 'widen RHS to i64'
+                                )
+                            );
+                        }
 
                         # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
                         my %map = (
@@ -1813,8 +1854,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                             # needs three values: val1, val2, cond. So push the
                             # pair a second time and compare that copy, leaving
                             # the originals underneath for select to choose from.
-                            $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS' ) );
-                            $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
+                            $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS', $push_bits ) );
+                            $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS', $push_bits ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => "${p}_" . ( $opcode eq 'min' ? 'lt_s' : 'gt_s' ),
@@ -1837,6 +1878,19 @@ class Brocken::Jenny::Lowerer::Wasm {
                                     comment  => $opcode ) );
                         }
 
+                        # A pointer result computed in i64 has to be wrapped back
+                        # to i32: the destination local is declared from the
+                        # instruction's ptr type, and a wasm32 address is 32 bits.
+                        if ( $p eq 'i64' && $ibits < 64 ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i32_wrap_i64',
+                                    operands => [],
+                                    comment  => 'wrap to ptr'
+                                )
+                            );
+                        }
+
                         # Store result from stack to a local
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         $mbb->add_instruction(
@@ -1853,7 +1907,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                     my $src_bits = $val->type ? $val->type->bits : 64;
                     my $dst_bits = $inst->type ? $inst->type->bits : 64;
                     my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    $mbb->add_instruction( $self->_wasm_push( $val, 'zext val' ) );
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'zext val', $src_bits ) );
                     if ( $src_bits < 32 && $dst_bits > $src_bits ) {
 
                         # A sub-word value already sits in a local holding all 32
@@ -1881,12 +1935,50 @@ class Brocken::Jenny::Lowerer::Wasm {
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
                     );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::PtrCast') ) {
+                    my ($val)    = $inst->operands->@*;
+                    my $src_bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 32;
+                    my $dst_bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
+                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+
+                    # A wasm32 address is 32 bits, so a pointer is i32 and an
+                    # i64 holding one has to be truncated, while a pointer
+                    # widened to i64 has to be zero-extended. _wasm_push only
+                    # re-types constants; a vreg keeps the width of its own
+                    # local, so the conversion has to be explicit.
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'ptrcast val' ) );
+                    if ( $dst_bits > $src_bits ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_extend_i32_u',
+                                operands => [],
+                                comment  => 'ptrcast to i64'
+                            )
+                        );
+                    }
+                    elsif ( $dst_bits < $src_bits ) {
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i32_wrap_i64',
+                                operands => [],
+                                comment  => 'ptrcast to i32'
+                            )
+                        );
+                    }
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'local_set',
+                            operands => [$dst],
+                            comment  => 'ptrcast ' . $inst->name
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
                     my ($val)    = $inst->operands->@*;
                     my $src_bits = $val->type ? $val->type->bits : 64;
                     my $dst_bits = $inst->type ? $inst->type->bits : 64;
                     my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    $mbb->add_instruction( $self->_wasm_push( $val, 'sext val' ) );
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'sext val', $src_bits ) );
                     if ( $src_bits < 32 && $dst_bits > $src_bits ) {
 
                         # Sign-extend to the full 32-bit lane first. The shift
@@ -1948,17 +2040,17 @@ class Brocken::Jenny::Lowerer::Wasm {
                         };
                         if ( $opcode eq 'neg' ) {
                             $zero->();
-                            $mbb->add_instruction( $self->_wasm_push( $val, 'neg val' ) );
+                            $mbb->add_instruction( $self->_wasm_push( $val, 'neg val', $inst->type->bits ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_sub", operands => [], comment => 'neg' ) );
                         }
                         else {
                             $zero->();
-                            $mbb->add_instruction( $self->_wasm_push( $val, 'abs -x' ) );
+                            $mbb->add_instruction( $self->_wasm_push( $val, 'abs -x', $inst->type->bits ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_sub", operands => [], comment => 'abs -x' ) );
-                            $mbb->add_instruction( $self->_wasm_push( $val, 'abs val1' ) );
-                            $mbb->add_instruction( $self->_wasm_push( $val, 'abs val2' ) );
+                            $mbb->add_instruction( $self->_wasm_push( $val, 'abs val1', $inst->type->bits ) );
+                            $mbb->add_instruction( $self->_wasm_push( $val, 'abs val2', $inst->type->bits ) );
                             $zero->();
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => "${p}_lt_s", operands => [], comment => 'abs x < 0' ) );
@@ -2377,8 +2469,9 @@ class Brocken::Jenny::Lowerer::Wasm {
                         ule => "${p}_le_u",
                         uge => "${p}_ge_u"
                     );
-                    $mbb->add_instruction( $self->_wasm_push( $lhs, 'icmp lhs' ) );
-                    $mbb->add_instruction( $self->_wasm_push( $rhs, 'icmp rhs' ) );
+                    my $push_bits = $p eq 'i64' ? 64 : $p eq 'i32' ? 32 : undef;
+                    $mbb->add_instruction( $self->_wasm_push( $lhs, 'icmp lhs', $push_bits ) );
+                    $mbb->add_instruction( $self->_wasm_push( $rhs, 'icmp rhs', $push_bits ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => $map{$pred}, operands => [], comment => 'icmp ' . $pred ) );
                     $mbb->add_instruction(
@@ -2576,7 +2669,29 @@ class Brocken::Jenny::Lowerer::Wasm {
                             $mbb->add_instruction( $self->_wasm_push_opnd( $hi, 'retval hi' ) );
                         }
                         else {
-                            $mbb->add_instruction( $self->_wasm_push( $val, 'retval' ) );
+
+                            # A literal has to be pushed at the width the
+                            # *function* returns, not the width the literal
+                            # defaults to. `return 0` in a function declared
+                            # `-> ptr` pushed an i64 literal into a function the
+                            # type section declares as returning i32, and the
+                            # validator rejected it. A non-constant needs no
+                            # special case here: lower_return already converts
+                            # the value to the declared return type, so its
+                            # vreg has the right width.
+                            my $ret_bits;
+                            if ( $inst->type->kind eq 'int' ) {
+                                $ret_bits = $inst->type->bits;
+                            }
+                            elsif ( $inst->type->kind eq 'ptr' ) {
+                                $ret_bits = 32;
+                            }
+                            if ( defined $ret_bits && $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                                $mbb->add_instruction( $self->_wasm_push( $val, 'retval', $ret_bits ) );
+                            }
+                            else {
+                                $mbb->add_instruction( $self->_wasm_push( $val, 'retval' ) );
+                            }
                         }
                     }
                     $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => '' ) );
@@ -2588,11 +2703,27 @@ class Brocken::Jenny::Lowerer::Wasm {
         return $mf;
     }
 
-    method _wasm_push( $ir_val, $label ) {
+    method _wasm_push( $ir_val, $label, $force_bits = undef ) {
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
             my $op;
+
+            # Float constants are decided by the value's own type. Checking the
+            # forced integer width first would turn an f32 literal into an
+            # i32_const, and a float op then gets an integer operand.
             if ( $ir_val->type && $ir_val->type->kind eq 'float' ) {
                 $op = $ir_val->type->bits >= 64 ? 'f64_const' : 'f32_const';
+            }
+            elsif ($force_bits) {
+
+                # The consumer already decided the width from the
+                # instruction's own type, so the literal has to be materialised
+                # at that width. Inferring it from the constant's type instead
+                # mismatched whenever the two disagreed -- most visibly in
+                # pointer arithmetic, where the add is i32 (a wasm32 address)
+                # but an integer literal defaults to i64, producing
+                # `i64.const` followed by `i32.add` and a module the
+                # validator rejects with "expected i32, found i64".
+                $op = $force_bits >= 64 ? 'i64_const' : 'i32_const';
             }
             else {
                 my $bits = $ir_val->type && $ir_val->type->kind eq 'int' ? $ir_val->type->bits : 32;

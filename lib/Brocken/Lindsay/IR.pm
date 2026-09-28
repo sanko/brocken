@@ -147,6 +147,20 @@ class Brocken::Lindsay::IR::Instruction::Sext : isa(Brocken::Lindsay::IR::Instru
     }
 }
 
+# A pointer and an address-sized integer hold the same bits on every backend,
+# so moving between them is a reinterpretation rather than a computation. It
+# exists so a value can be given the exact type a function declares, which
+# matters for the Wasm type section: a function declared `-> ptr` must return
+# an i32, and one declared `-> i64` must return an i64.
+class Brocken::Lindsay::IR::Instruction::PtrCast : isa(Brocken::Lindsay::IR::Instruction) {
+    field $target_type : reader : param;
+
+    method render() {
+        my $val = $self->operands->[0];
+        return sprintf '  %s = ptrcast %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $target_type->as_string;
+    }
+}
+
 class Brocken::Lindsay::IR::Instruction::Incref : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {

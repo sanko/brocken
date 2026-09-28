@@ -200,6 +200,18 @@ class Brocken::Lindsay::IR::Builder {
         return $insert_block->append_inst($inst);
     }
 
+    method build_ptrcast( $val, $target_type, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::PtrCast->new(
+            name        => $name // $self->_next_id(),
+            type        => $target_type,
+            opcode      => 'ptrcast',
+            target_type => $target_type,
+            operands    => [$val],
+            parent      => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
     method build_store( $val, $ptr ) {
         my $inst = Brocken::Lindsay::IR::Instruction::Store->new(
             name     => undef,
