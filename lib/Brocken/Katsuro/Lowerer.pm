@@ -689,7 +689,7 @@ class Brocken::Katsuro::Lowerer {
             $param_idx++;
         }
         my $ret_is_void = $callee->return_type->kind eq 'void';
-        return $builder->build_call( $callee, \@args, $ret_is_void ? undef : '%' . $name . '_res' );
+        return $builder->build_call( $callee, \@args, $ret_is_void ? undef : $builder->_unique_name( '%' . $name . '_res' ) );
     }
 
     method lower_intrinsic($ast) {
@@ -848,7 +848,7 @@ class Brocken::Katsuro::Lowerer {
             $param_idx++;
         }
         my $ret_is_void = $callee->return_type->kind eq 'void';
-        return $builder->build_call( $callee, \@args, $ret_is_void ? undef : '%' . $ast->method . '_res' );
+        return $builder->build_call( $callee, \@args, $ret_is_void ? undef : $builder->_unique_name( '%' . $ast->method . '_res' ) );
     }
 
     method lower_class_const($ast) {

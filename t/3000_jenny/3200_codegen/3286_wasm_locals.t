@@ -28,37 +28,53 @@ chomp $wasmtime_path if $wasmtime_path;
 #   * an i64 value assigned to a ptr local was stored without truncation, so an
 #     i64 landed in an i32 local
 #
-# Each case asserts only that the module passes Wasm validation. Returning a
-# value is not checked: the entry point the module exports is `_BROCKEN_ENTRY`,
-# not `main`, and it takes a heap-base argument, so invoking it cannot work
-# without a way to supply one. Validation is what regressed here, and a program
-# as small as one local already exercises the whole runtime.
+# `_BROCKEN_ENTRY` takes the bump allocator's base address as its one
+# parameter, which the native linkers supply from an entry stub (ELF64 carves
+# the heap out of the stack and passes rsp). The Wasm linker has no such stub
+# and exports the function directly, so the address is passed on the command
+# line instead. Everything the program allocates then lives at 1024, and the
+# value comes back on stdout, so these cases assert real behaviour rather than
+# only that the bytes validate.
 my @cases = (
-    { name => 'i32 local', src => "my i32 \$x = 123;\nreturn \$x;" },
-    { name => 'i64 local', src => "my i64 \$x = 123;\nreturn \$x;" },
-    { name => 'neighbouring locals', src => "my i32 \$x = 123;\nmy i32 \$y = 0;\n\$y = 33;\nreturn \$x;" },
+    { name => 'i32 local', src => "my i32 \$x = 123;\nreturn \$x;", want => 123 },
+    { name => 'i64 local', src => "my i64 \$x = 123;\nreturn \$x;", want => 123 },
+    {
+        name => 'neighbouring locals',
+        src  => "my i32 \$x = 123;\nmy i32 \$y = 0;\n\$y = 33;\nreturn \$x;",
+        want => 123,
+    },
+    { name => 'i32 reassigned', src => "my i32 \$x = 0;\n\$x = 55;\nreturn \$x;", want => 55 },
+    { name => 'i64 arithmetic', src => "my i64 \$x = 40;\n\$x = \$x + 2;\nreturn \$x;", want => 42 },
+    { name => 'null pointer', src => 'return 0;', want => 0 },
 );
 
 for my $case (@cases) {
     SKIP: {
-        skip "wasmtime not available", 1 and last unless $wasmtime_path && -x $wasmtime_path;
+        skip 'wasmtime not available', 1 and last unless $wasmtime_path && -f $wasmtime_path;
 
         my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
         my $module   = Brocken::Compiler->new->compile( $case->{src} );
         my $codegen  = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $funcs    = $codegen->emit_functions( $module->functions );
 
-        my $output_file = temp_path( 'wasm_locals_' . $case->{name} ) . '.wasm';
+        # A path with a space in it has to stay quoted, or wasmtime reads
+        # "wasm_locals_i32" as the module and the rest as a path it cannot
+        # open. That failure used to slip through this test: the assertion
+        # only rejected a few compile diagnostics, and "failed to open wasm
+        # module" was not one of them, so the cases passed without the module
+        # ever being validated.
+        my $safe        = $case->{name} =~ s/\W+/_/gr;
+        my $output_file = temp_path("wasm_locals_$safe") . '.wasm';
         Brocken::Jenny::Linker::Wasm->new->write_executable( $output_file, $funcs, $platform );
 
-        my $output = qx["$wasmtime_path" run --invoke _BROCKEN_ENTRY $output_file 2>&1];
-        chomp $output;
+        my $output = qx["$wasmtime_path" run --invoke _BROCKEN_ENTRY "$output_file" 1024 2>&1];
 
-        unlike(
-            $output,
-            qr/failed to compile|Invalid input WebAssembly|translation error/,
-            "$case->{name}: module passes Wasm validation"
-        );
+        # wasmtime warns on stderr about --invoke with arguments and with a
+        # return value; neither says anything about this module.
+        $output =~ s/^warning: using .*$//mg;
+        $output =~ s/^\s+|\s+$//g;
+
+        is( $output, $case->{want}, "$case->{name}: module runs and returns $case->{want}" );
 
         unlink $output_file;
     }

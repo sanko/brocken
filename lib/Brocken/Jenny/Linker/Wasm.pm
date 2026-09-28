@@ -30,15 +30,25 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
 
             # Resolve cross-function call fixups
             for my $fd (@func_data) {
-                for my $fixup ( $fd->{fixups}->@* ) {
+                # A call placeholder is five bytes and the LEB128 that replaces
+                # it is one or two, so every substitution shortens the buffer.
+                # The encoder recorded its offsets against the untouched
+                # function, so the fixups have to be applied in ascending offset
+                # order while tracking how far the string has already shrunk.
+                # Skipping that let the second call in a function overwrite the
+                # wrong bytes and leave the placeholder's four continuation
+                # bytes in front of the index, which the validator read as a
+                # five-byte index of 0x30000000 and rejected as out of bounds.
+                my $shift = 0;
+                for my $fixup ( sort { $a->{offset} <=> $b->{offset} } $fd->{fixups}->@* ) {
                     next unless $fixup->{type} eq 'call_idx';
                     my $target_idx = $func_offsets{ $fixup->{target} };
                     die "Wasm write_executable: undefined function '$fixup->{target}'" unless defined $target_idx;
                     my $leb = $self->_uleb($target_idx);
-                    my $pos = $fixup->{offset};
+                    my $pos = $fixup->{offset} - $shift;
 
-                    # Replace the 5-byte placeholder with actual LEB128; string shrinks
                     substr( $fd->{bytes}, $pos, 5, $leb );
+                    $shift += 5 - length($leb);
                 }
             }
 

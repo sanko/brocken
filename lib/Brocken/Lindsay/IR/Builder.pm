@@ -6,8 +6,21 @@ use Brocken::Lindsay::IR;
 class Brocken::Lindsay::IR::Builder {
     field $insert_block : reader = undef;
     field $id_counter = 0;
+    field %name_counts;
     method position_at_end($block) { $insert_block = $block }
     method _next_id()              { '%' . $id_counter++ }
+
+    # A readable name that is still unique. The frontend names call results
+    # after the callee, so two calls to the same function in one expression
+    # both wanted `%f_res` and the second silently overwrote the first: the
+    # IR carried two different values under one name, and every backend that
+    # maps values to registers or locals collapsed them into one.
+    method _unique_name($hint) {
+        return $self->_next_id() unless defined $hint && length $hint;
+        my $seen = $name_counts{$hint}++;
+        return $hint if $seen == 0;
+        return $hint . '_' . $seen;
+    }
 
     method build_binop( $opcode, $lhs, $rhs, $name = undef ) {
         my $inst = Brocken::Lindsay::IR::Instruction->new(
