@@ -2,6 +2,29 @@
 
 Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in place, we need to bridge the gap between abstract SSA and executable machine code.
 
+## CI Status
+
+Matrix lives in `.github/workflows/ci.yml`; every leg delegates to the
+`sanko/workflow-testing` reusable workflows. 21 legs: Linux x86_64/aarch64/riscv64,
+macOS x86_64/aarch64, Windows x86_64/aarch64, FreeBSD x86_64/aarch64,
+NetBSD x86_64/aarch64, OpenBSD x86_64/aarch64, DragonFly, OmniOS, Solaris, Haiku.
+
+Runner labels must be real or the leg queues forever. There are **no Debian,
+Fedora, or Alpine GitHub-hosted Linux runners** — only the Ubuntu family. RISC-V
+comes from the RISE RISC-V Runners App (`ubuntu-24.04-riscv`), not from GitHub.
+
+### Failing legs (as of run 36359673750)
+- [ ] **All aarch64 legs are red** — FreeBSD/ARM, Linux/ARM, macOS/Apple Silicon, Windows/ARM. This is the ARM64 codegen catch-up, not a CI problem.
+- [ ] **DragonFly BSD / Intel** and **NetBSD / Intel** — both x86_64, so not arch-specific.
+- [x] OpenBSD and Solaris were pinned to perl 5.40.2, which cannot satisfy `use v5.42`. Bumped to 5.42.0 in `14fc284`; both need a re-run to confirm perl 5.42.0 builds there.
+- [ ] `cpanfile` claimed `v5.40.0` while ten modules require `v5.42`; corrected in `14fc284`. 5 module files still carry no `use vX.Y` guard at all.
+
+### Workflow hygiene
+- [x] Removed `blank.yml` (byte-identical duplicate of `c-thread-disassembly.yml`) and the orphaned `unix.yml`.
+- [x] `debug-threading.yml` passed a `test_cmd` input that `cross.yml` does not declare — GitHub rejects unknown inputs, so the job could never run. Repointed at the real isolate/fiber tests via `test_files`/`diag`.
+- [ ] `windows.yml` is also an orphaned `workflow_call` module (nothing calls it). Left in place pending a decision.
+- [ ] `run-vm.yml` takes one `os_version` per job, so a second BSD release (e.g. FreeBSD 15.1 alongside 14.1) needs its own job rather than another matrix row.
+
 ## Active Sprint
 
 ### Brocken Class Refactoring
@@ -187,8 +210,14 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] Add signedness-aware widening to `maybe_convert_type` (zext/sext)
 - [x] Add `zext`/`sext` IR instructions to `IR.pm` + `Builder.pm`
 - [x] Backend: lower `zext`/`sext` on all 4 targets
-- [x] Add signed/unsigned div/rem IR instructions (`udiv`/`urem`)
-- [ ] Backend: proper `movzx`/`movsx`/`UXTB`/`SXTB` encoding for zext/sext (currently plain `mov`)
+- [ ] Backend: proper `movzx`/`movsx`/`UXTB`/`SXTB` encoding for zext/sext (currently plain `mov`) — **X86_64 fixed** in `ff8988a` (MOVSXD was emitted for every source width, truncating any 64-bit source to 32 bits and re-reading it signed; `sext` of `INT64_MIN` returned 0). ARM64/RISCV64/Wasm still need auditing.
+
+### Scalar integer min/max
+- [x] X86_64 — `0460da8`, `3248_int_minmax.t`. The generic fallback emitted a `min`/`max` MIR op that x86 codegen dropped, so the result silently kept the left-hand operand.
+- [ ] **ARM64** — the only `min`/`max` block in the lowerer is the i128 path; scalar integer has no expansion.
+- [ ] **RISCV64** — float `fmin`/`fmax` and i128 are native, but scalar integer `min`/`max` has no lowering fallback at all (the branch is empty).
+- [ ] **Wasm** — not yet audited.
+
 
 ### Phase B: Int/Bool native alias support
 - [x] Lower `Int` and `Bool` as native types (i64/i1)
