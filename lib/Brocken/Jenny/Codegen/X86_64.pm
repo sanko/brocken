@@ -15,7 +15,10 @@ class Brocken::Jenny::Codegen::X86_64 {
         MOV_EAX_IMM => 0xB8,
         MOV_RM_R    => 0x8B,
         MOV_R_RM    => 0x89,
+        MOV_RM8_R   => 0x8A,
+        MOV_R8_RM   => 0x88,
         MOV_IMM_RM  => 0xC7,
+        MOV_IMM8_RM => 0xC6,
         ARITH_IMM   => 0x81,
         CMP_IMM8    => 0x83,
         SHIFT_IMM   => 0xC1,
@@ -839,10 +842,52 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $did   = $reg_id->($dst_r);
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did );
                     my $bits = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
-                    my $rex_w    = ( $bits == 64 ) ? REX_W : 0;
-                    my $rex_bits = $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
-                    $bytes .= pack( 'C', 0x40 | $rex_w | $rex_bits ) if ( $rex_w | $rex_bits );
-                    $bytes .= pack( 'C', MOV_RM_R ) . pack( 'C', $modrm );
+
+                    # A sub-word load has to read only the bytes it claims.
+                    # MOV_RM_R with REX.W cleared is still a 4-byte access, so
+                    # an i8 or i16 field reached through it read three or two
+                    # bytes belonging to whatever follows it, and a store of
+                    # the same width wrote over them. Single-field access
+                    # round-tripped because the lane holds a sign-extended
+                    # value, which is why only a neighbouring access exposed
+                    # it.
+                    if ( $bits <= 8 ) {
+
+                        # 0F BE is MOVSX r32, r/m8: a one-byte read that
+                        # leaves the whole destination defined, in the form the
+                        # rest of the IR expects. A bare 0x8A also reads one
+                        # byte, but it writes only the low 8 bits of the
+                        # register and leaves the upper 56 holding whatever
+                        # the previous value put there.
+                        #
+                        # MOVSX, not MOVZX: an i8 or i16 is carried
+                        # sign-extended in the whole register, and arithmetic
+                        # on it is plain 32-bit arithmetic. Zero-extending
+                        # turned -7 into 0xF9 and abs() of that into 249.
+                        #
+                        # A REX byte is required to reach spl/bpl/dil at all,
+                        # and changes the meaning of ids 0-3 (al -> sil). It
+                        # must not carry REX.W, which would select the r64
+                        # form.
+                        my $rex   = $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+                        $bytes .= pack( 'C', 0x40 | $rex ) if $rex;
+                        $bytes .= pack( 'CCC', 0x0F, 0xBE, $modrm );
+                    }
+                    elsif ( $bits <= 16 ) {
+
+                        # 0F BF is MOVSX r32, r/m16, for the same reason: a
+                        # 2-byte read whose result is sign-extended to fill the
+                        # register, so later arithmetic sees what it expects.
+                        my $rex   = $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+                        $bytes .= pack( 'C', 0x40 | $rex ) if $rex;
+                        $bytes .= pack( 'CCC', 0x0F, 0xBF, $modrm );
+                    }
+                    else {
+                        my $rex_w    = ( $bits == 64 ) ? REX_W : 0;
+                        my $rex_bits = $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+                        $bytes .= pack( 'C', 0x40 | $rex_w | $rex_bits ) if ( $rex_w | $rex_bits );
+                        $bytes .= pack( 'C', MOV_RM_R ) . pack( 'C', $modrm );
+                    }
                     $bytes .= join '', $extra->@*;
                 }
                 elsif ( $opcode eq 'store' ) {
@@ -850,22 +895,71 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $sid   = $reg_id->($src_r);
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $dst, $sid );
                     my $bits = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
-                    my $rex_w    = ( $bits == 64 ) ? REX_W : 0;
-                    my $rex_bits = $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
-                    $bytes .= pack( 'C', 0x40 | $rex_w | $rex_bits ) if ( $rex_w | $rex_bits );
-                    $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
+
+                    # Sized like the load above: 0x88 writes one byte and a
+                    # 66-prefixed 0x89 writes two, where plain MOV_R_RM writes
+                    # four and clobbers whatever field follows this one.
+                    if ( $bits <= 8 ) {
+                        my $rex = $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
+                        $bytes .= pack( 'C', 0x40 | $rex ) if $rex;
+                        $bytes .= pack( 'C', MOV_R8_RM ) . pack( 'C', $modrm );
+                    }
+                    elsif ( $bits <= 16 ) {
+
+                        # The legacy prefix has to precede REX, not follow it.
+                        $bytes .= pack( 'C', 0x66 );
+                        my $rex = $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
+                        $bytes .= pack( 'C', 0x40 | $rex ) if $rex;
+                        $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
+                    }
+                    else {
+                        my $rex_w    = ( $bits == 64 ) ? REX_W : 0;
+                        my $rex_bits = $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
+                        $bytes .= pack( 'C', 0x40 | $rex_w | $rex_bits ) if ( $rex_w | $rex_bits );
+                        $bytes .= pack( 'C', MOV_R_RM ) . pack( 'C', $modrm );
+                    }
                     $bytes .= join '', $extra->@*;
                 }
                 elsif ( $opcode eq 'store_imm' ) {
                     my ( $mem, $imm ) = $inst->operands->@*;
                     my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $mem, 0 );    # /0 ext = mov
                     my $bits = ( $imm->type && $imm->type->kind eq 'int' ) ? $imm->type->bits : 64;
-                    my $rex_w    = ( $bits == 64 ) ? REX_W : 0;
-                    my $rex_bits = $rex_x | $rex_b;
-                    $bytes .= pack( 'C', 0x40 | $rex_w | $rex_bits ) if ( $rex_w | $rex_bits );
-                    $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
+
+                    # The same defect as the register store, which is how a
+                    # constant initialiser into an i8 or i16 field took out its
+                    # neighbour. The immediate is truncated to the access width
+                    # as well, because 0xC6 sign-extends its byte and a
+                    # 16-bit C7 only has room for the low half.
+                    #
+                    # The immediate is staged rather than emitted here: in this
+                    # instruction form it follows the displacement, so the
+                    # opcode, ModRM and displacement go out first and the
+                    # immediate is appended once the shared tail below has run.
+                    my $imm_bytes;
+                    if ( $bits <= 8 ) {
+                        my $rex = $rex_x | $rex_b;
+                        $bytes .= pack( 'C', 0x40 | $rex ) if $rex;
+                        $bytes .= pack( 'C', MOV_IMM8_RM ) . pack( 'C', $modrm );
+                        $imm_bytes = pack( 'C', $imm->value & 0xFF );
+                    }
+                    elsif ( $bits <= 16 ) {
+
+                        # Legacy prefix before REX, as above.
+                        $bytes .= pack( 'C', 0x66 );
+                        my $rex = $rex_x | $rex_b;
+                        $bytes .= pack( 'C', 0x40 | $rex ) if $rex;
+                        $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
+                        $imm_bytes = pack( 'v', $imm->value & 0xFFFF );
+                    }
+                    else {
+                        my $rex_w    = ( $bits == 64 ) ? REX_W : 0;
+                        my $rex_bits = $rex_x | $rex_b;
+                        $bytes .= pack( 'C', 0x40 | $rex_w | $rex_bits ) if ( $rex_w | $rex_bits );
+                        $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
+                        $imm_bytes = pack( 'V', $imm->value );
+                    }
                     $bytes .= join '', $extra->@*;
-                    $bytes .= pack( 'V', $imm->value );
+                    $bytes .= $imm_bytes;
                 }
 
                 # SSE float opcodes

@@ -462,11 +462,23 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i32_load' ) {
                     $$buf .= pack( 'C', 0x28 ) . $self->_uleb(2) . $self->_uleb(0);
                 }
+                elsif ( $opcode eq 'i32_load8_s' ) {
+                    $$buf .= pack( 'C', 0x2C ) . $self->_uleb(0) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i32_load16_s' ) {
+                    $$buf .= pack( 'C', 0x2E ) . $self->_uleb(1) . $self->_uleb(0);
+                }
                 elsif ( $opcode eq 'i64_load' ) {
                     $$buf .= pack( 'C', 0x29 ) . $self->_uleb(3) . $self->_uleb(0);
                 }
                 elsif ( $opcode eq 'i32_store' ) {
                     $$buf .= pack( 'C', 0x36 ) . $self->_uleb(2) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i32_store8' ) {
+                    $$buf .= pack( 'C', 0x3A ) . $self->_uleb(0) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i32_store16' ) {
+                    $$buf .= pack( 'C', 0x3B ) . $self->_uleb(1) . $self->_uleb(0);
                 }
                 elsif ( $opcode eq 'i64_store' ) {
                     $$buf .= pack( 'C', 0x37 ) . $self->_uleb(3) . $self->_uleb(0);

@@ -2268,7 +2268,26 @@ class Brocken::Jenny::Lowerer::Wasm {
                         }
                         else {
                             my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
-                            $op = $bits >= 64 ? 'i64_load' : 'i32_load';
+
+                            # Sub-word accesses need their own opcodes. A full
+                            # i32_load at an i8 or i16 address read or wrote
+                            # three or two bytes past the field, which under
+                            # C-style layout is the padding before the next
+                            # field -- or, for a struct whose only field is
+                            # smaller than 4 bytes, the next object on the
+                            # heap. Single-field access round-tripped because
+                            # the lane holds a sign-extended value, so only a
+                            # neighbouring access showed it.
+                            #
+                            # The sign-extending forms, because an i8 or i16 is
+                            # carried sign-extended and arithmetic on it is
+                            # plain i32 arithmetic. The zero-extending forms
+                            # would turn -7 into 0xF9 before anything had a
+                            # chance to narrow it back.
+                            $op = $bits <= 8  ? 'i32_load8_s'
+                                : $bits <= 16 ? 'i32_load16_s'
+                                : $bits >= 64 ? 'i64_load'
+                                :               'i32_load';
                         }
                         $mbb->add_instruction( $self->_wasm_push( $ptr, 'load: ptr' ) );
                         $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'load' ) );
@@ -2327,15 +2346,22 @@ class Brocken::Jenny::Lowerer::Wasm {
                     }
                     else {
                         my $op;
+                        my $bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 32;
                         if ( $val->type && $val->type->kind eq 'float' ) {
                             $op = $val->type->bits >= 64 ? 'f64_store' : 'f32_store';
                         }
                         else {
-                            my $bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 32;
-                            $op = $bits >= 64 ? 'i64_store' : 'i32_store';
+
+                            # Sized to the value, as the load is. Both take an
+                            # i32 operand, which is what a sub-word int already
+                            # is in wasm; only the bytes written differ.
+                            $op = $bits <= 8  ? 'i32_store8'
+                                : $bits <= 16 ? 'i32_store16'
+                                : $bits >= 64 ? 'i64_store'
+                                :               'i32_store';
                         }
                         $mbb->add_instruction( $self->_wasm_push( $ptr, 'store: ptr' ) );
-                        $mbb->add_instruction( $self->_wasm_push( $val, 'store: val' ) );
+                        $mbb->add_instruction( $self->_wasm_push( $val, 'store: val', $bits < 32 ? 32 : undef ) );
                         $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'store' ) );
                     }
                 }

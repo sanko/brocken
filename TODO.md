@@ -265,8 +265,61 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
 ### Wasm integer unary ops (neg / abs / sqrt)
 - [x] **Wasm** — this round, `3267_wasm_int_neg.t`. Wasm has no integer `neg`/`abs` opcode (only `f32.neg`/`f64.neg`/`f32.abs`/`f64.abs`), and the lowerer died with "Wasm unary op neg requires float type" for every integer negation. Unary minus reaches the lowerer for any numeric type (`Brocken::Katsuro::Lowerer` emits `build_neg` for `-` on every numeric type), so a plain `return -x;` over an int failed to compile on Wasm while every other backend handled it. `neg(x)` is now `0 - x` and `abs(x)` is `x < 0 ? -x : x` via `select`, both from the generic i32/i64 ops. Integer `sqrt` is still rejected: Wasm has no integer square root, and silently miscompiling it would be worse than the die. `3239_int_neg.t` only exercised the host platform, which is why the gap went unnoticed.
 
-### Wasm sub-word load/store widths
-- [ ] Wasm loads and stores an i8/i16 through a full 32-bit `i32_load`/`i32_store` rather than `i32_load8_s`/`i32_store8` and friends. The lane holds a sign-extended value, so a single sub-word access round-trips correctly today, but any neighbouring access to the adjacent 3 bytes reads or writes the wrong cells. Needs an audit of struct field layout and byte-sized accesses before it can be called correct.
+### Sub-word load/store widths and C struct layout
+- [x] **Every backend accessed an i8 or i16 field through a full 32-bit access.**
+      Wasm chose the width from "is this 64-bit or not" and used a 4-byte
+      `i32_load`/`i32_store`; x86-64 did the same with REX.W clear. Since a
+      sub-word value is carried sign-extended, a *lone* sub-word access
+      round-tripped correctly, which is why this survived so long: the obvious
+      test cannot see it. It needs a neighbouring access, and the class layout
+      made one certain, because fields were overlaid on top of each other.
+
+      Wasm now uses `i32.load8_s`/`i32.load16_s` and `i32.store8`/`i32.store16`.
+      x86-64 uses MOVSX r32, r/m8 and r/m16 (0F BE, 0F BF) to load, 0x88 and a
+      66-prefixed 0x89 to store, and 0xC6 / a 66-prefixed 0xC7 for the
+      immediate form, with the immediate truncated to the access width. MOVSX
+      rather than MOVZX because arithmetic on a sub-word value is plain 32-bit
+      arithmetic on a sign-extended register: zero-extending turned -7 into
+      0xF9 and `abs()` of that into 249. Not the one-byte 0x8A either, which
+      reads one byte but writes only the low 8 bits of the register and leaves
+      the upper 56 stale.
+
+      Two encoding details are easy to get wrong in a way that still produces
+      plausible bytes: the `66` operand-size prefix is a legacy prefix and has
+      to precede REX (a REX byte first also silently changes the meaning of
+      register ids 0-3, and spl/bpl/dil/sil are unreachable without one); and
+      in the immediate-store form the immediate *follows* the displacement, so
+      it has to be emitted after the displacement bytes. Getting the second one
+      wrong mis-encodes every access with a non-empty displacement at every
+      width, including 32- and 64-bit.
+
+      Regression: `3290_subword_widths.t`, 35 cases over both backends, plus
+      the layout offsets below.
+- [x] **Class fields were overlaid instead of laid out the way C lays them out.**
+      `field i8 $a; field i16 $b;` put both at offset 0. It appeared to work
+      only because every sub-word access was widened to overwrite the field it
+      overlapped, so the two defects cancelled out. That also means an FFI
+      caller, who allocates and indexes the struct by C's rules, would have read
+      the wrong bytes for every field.
+
+      Fields are now placed in declaration order at the next offset satisfying
+      their natural alignment, and the struct size is rounded up to the struct's
+      own alignment — `i8, i16` is offsets 0 and 2 with size 4. Allocation is
+      rounded up to 8 bytes independently of the struct size, so a struct may
+      have a non-8 size (a later `:pack`) without the bump allocator placing
+      the next object inside its tail padding.
+
+      Regression: the layout half of `3290_subword_widths.t` reads the offsets
+      back out of each generated accessor's field GEP, so it checks the number
+      the backend will use rather than a second computation of it.
+- [ ] `:pack` / `:pack(N)`. The alignment override is already plumbed through
+      `type_align($ir_type, $override)` in `lib/Brocken/Katsuro/Lowerer.pm` and
+      the class AST carries no alignment property yet, so this is a parser and
+      AST change on top of a layout that already accepts the result. Bare
+      `:pack` means `:pack(1)`; `:pack(N)` sets the field's alignment to exactly
+      N and may raise it above the natural alignment, which is what
+      `__attribute__((aligned(N)))` does. Struct alignment is the maximum
+      effective field alignment, so a bare `:pack` alone does not shrink it.
 - [x] **Wasm could not compile any program that declares a local variable.**
       Every frontend program with at least one `my` local was rejected by the
       Wasm validator, even `my i32 $x = 123; return $x;`. Found while adding
@@ -298,7 +351,9 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
         constants, so a vreg conversion has to be explicit.
       Regression: `3286_wasm_locals.t`, which compiles frontend programs with
       locals and executes them under `wasmtime`, asserting the returned value.
-      The Wasm halves of the alloca and sub-word-load audits are unblocked.
+      The Wasm half of the alloca audit is unblocked. The sub-word-load audit
+      has since been done; see "Sub-word load/store widths and C struct layout"
+      above.
 
 ### Wasm call results and branch depths
 - [x] **Two calls to the same function in one expression were miscompiled.**
