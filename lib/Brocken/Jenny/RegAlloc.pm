@@ -547,70 +547,115 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         }
     }
 
+    # Schedule the parameter-capture shuffle at function entry.
+    #
+    # The lowerer emits one `mov <dst>, <param_reg>` per incoming argument at
+    # the very top of the entry block, so the captures read the caller's
+    # argument registers simultaneously -- they behave like a parallel move,
+    # not a sequence.  Once the allocator picks destinations, a destination may
+    # land on a register that a *later* capture still has to read.
+    #
+    # Parking every such source in the one spill temp is not enough: each new
+    # park overwrites the previous one, so only the last value survives.  With
+    # four integer parameters the allocator produces the cycle
+    #
+    #     rcx <- rdi,  rdx <- rsi,  rsi <- rdx,  rdi <- rcx
+    #
+    # which needs two registers held live at once.  So schedule the captures as
+    # a real parallel move: emit any capture whose destination is not a pending
+    # source, and break a cycle by parking a single source in the temp, which
+    # frees that temp again as soon as its one consumer runs.
     method fix_entry_shuffle( $mf, $assignment, $temp_reg ) {
         my $entry = $mf->entry_block;
         return unless $entry;
 
-        # Collect save-phase MOVs: mov <virt_reg>, <phys_reg>  (capturing
-        # a parameter from its calling-convention register).  These are the
-        # only instructions that can create register hazards because they
-        # read the caller's register values before they are overwritten.
-        my @saves;
+        # Captures are the leading run of MOVs reading a physical register.
+        # Later MOVs that read a physical register (a return value landing in a
+        # register, say) are not part of this parallel move and must be left
+        # where they are.
+        my @prefix;
         my @insts = $entry->instructions->@*;
-        for my $i ( 0 .. $#insts ) {
-            my $inst = $insts[$i];
-            next unless $inst->opcode eq 'mov';
+        for my $inst (@insts) {
+            last unless $inst->opcode eq 'mov';
             my ( $dst, $src ) = $inst->operands->@*;
-            next unless $src->kind eq 'phys_reg';
-            my $dst_reg;
-            if ( $dst->kind eq 'phys_reg' ) {
-                $dst_reg = $dst->value;
-            }
-            elsif ( $dst->kind eq 'virt_reg' ) {
-                $dst_reg = $assignment->{ $dst->value };
-            }
-            next unless $dst_reg && $dst_reg !~ /^spill\(/;
-            push @saves, { idx => $i, dst => $dst_reg, src => $src->value };
+            last unless $src && $src->kind eq 'phys_reg';
+            last unless $dst && ( $dst->kind eq 'phys_reg' || $dst->kind eq 'virt_reg' );
+            push @prefix, { inst => $inst, src => $src->value };
         }
+        return unless @prefix > 1;
 
-        # Detect hazard: dst_i == src_j for i < j  (save MOV i overwrites
-        # a register whose original value save MOV j still needs to read).
-        # Break cycles using the platform-specific spill-temp register.
-        for my $i ( 0 .. $#saves ) {
-            for my $j ( $i + 1 .. $#saves ) {
-                if ( $saves[$i]{dst} eq $saves[$j]{src} ) {
+        my ( @work, @parked );
+        for my $cap (@prefix) {
+            my $dst = $cap->{inst}->operands->[0];
+            my $reg = $dst->kind eq 'phys_reg' ? $dst->value : $assignment->{ $dst->value };
 
-                    # MOV i writes to a register that MOV j subsequently reads
-                    # as its original caller-set value.  Insert a save before
-                    # MOV i and redirect MOV j to read from the temp register.
-                    my $hazard_reg = $saves[$i]{dst};
-                    my $save_inst  = Brocken::Jenny::MIR::MachineInstruction->new(
-                        opcode   => 'mov',
-                        operands => [
-                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_reg ),
-                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hazard_reg ),
-                        ],
-                        comment => 'entry-shuffle save ' . $hazard_reg,
-                    );
+            # A spilled or unresolved destination writes no register, so it
+            # cannot clobber a source.  A `mov r, r` preserves its source.
+            # Neither takes part in scheduling; both are still emitted.
+            if ( !defined $reg || $reg =~ /^spill\(/ || $reg eq $cap->{src} ) {
+                push @parked, $cap;
+                next;
+            }
+            push @work, { inst => $cap->{inst}, dst => $reg, src => $cap->{src} };
+        }
+        return unless @work > 1;
 
-                    # Insert before MOV i
-                    splice $entry->instructions->@*, $saves[$i]{idx}, 0, $save_inst;
+        # The spill temp is excluded from allocation, so no capture writes it.
+        # If that ever stops holding, decline rather than emit a shuffle we
+        # cannot schedule.
+        my %touched = map { $_ => 1 } map { ( $_->{dst}, $_->{src} ) } @work;
+        return if $touched{$temp_reg};
 
-                    # Shift indices after insertion point
-                    for my $k ( $i .. $#saves ) {
-                        $saves[$k]{idx}++;
-                    }
-
-                    # Patch MOV j's source to r11
-                    my $j_inst = $entry->instructions->[ $saves[$j]{idx} ];
-                    $j_inst->operands->[1]
-                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_reg, type => $j_inst->operands->[1]->type, );
-
-                    # Mark this hazard as resolved so we don't re-process it
-                    $saves[$j]{src} = $temp_reg;
+        my @plan;
+        my $total = scalar @work;
+        my $budget = 2 * $total;
+        while (@work) {
+            my $chosen;
+            for my $k ( 0 .. $#work ) {
+                my $dst = $work[$k]{dst};
+                unless ( grep { $_->{src} eq $dst } @work ) {
+                    $chosen = $k;
+                    last;
                 }
             }
+            unless ( defined $chosen ) {
+
+                # Every remaining destination is still needed as a source, so
+                # the rest is a cycle.  Park one source in the temp and
+                # reschedule; its consumer runs before the temp is reused.
+                last if --$budget < 0;
+                my $head = $work[0];
+                push @plan, { inst => undef, dst => $temp_reg, src => $head->{src} };
+                $head->{src} = $temp_reg;
+                next;
+            }
+            push @plan, splice @work, $chosen, 1;
         }
+        # A schedule step per capture, plus whatever temp parks it needed.
+        return if @plan < $total;
+
+        my @new;
+        for my $step ( @plan, @parked ) {
+            my $inst = $step->{inst};
+            if ($inst) {
+                my $src = $inst->operands->[1];
+                $inst->operands->[1]
+                    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src}, type => $src->type );
+                push @new, $inst;
+            }
+            else {
+                push @new,
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'mov',
+                    operands => [
+                        Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{dst} ),
+                        Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src} ),
+                    ],
+                    comment => 'entry-shuffle save ' . $step->{src},
+                    );
+            }
+        }
+        splice $entry->instructions->@*, 0, scalar @prefix, @new;
     }
 
     method compute_unified_frame( $num_callee, $spill_frame, $caller_save_size ) {
@@ -693,7 +738,11 @@ Elides MOV instructions where source and destination map to the same physical re
 
     $allocator->fix_entry_shuffle($mf, $assignment, $temp_reg)
 
-Detects and fixes register hazards in entry-block parameter shuffles by inserting spill-temp save/restore sequences.
+Schedules the entry-block parameter captures as a parallel move, so a capture
+is never emitted after the one that overwrites the register it still has to
+read. Cycles are broken by parking one source in the spill temp, which is
+released again before the temp is reused. Only the leading run of captures is
+touched, so a later move that reads a physical register keeps its position.
 
 =head2 compute_unified_frame
 
