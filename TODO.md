@@ -535,7 +535,7 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       `3298_stack_args.t` is still waiting on the AArch64/RISCV64 stack-argument
       work below.
 
-- [ ] **Comparing a float call result against a literal gives the wrong answer.**
+- [x] **Comparing a float call result against a literal gives the wrong answer.**
       Found while writing `3299_float_literals.t`. With the callee provably
       correct -- `sub f() -> f64 { my f64 $t = 3; return $t; }` lowers to
       `mov ..., 0x4008000000000000` / `fmov_gp2f` / `fstore` / `fload` /
@@ -549,7 +549,25 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       is the part that has to notice a virtual register defined by a move out of
       a call's return register.
 
-- [ ] **`!=` between two float locals is false when it should be true.**
+      The FP allocation was innocent. `fmov` takes its width from its
+      *destination*, and the destination for a returned float is the physical
+      return register, which the `Ret` lowering builds without a type. Untyped,
+      the move defaulted to 32 bits: the callee emitted `movss %xmm1, %xmm0`,
+      so four bytes of an eight-byte value arrived over the top of whatever
+      xmm0 had held and the caller compared a denormal against its literal.
+      Every other float `fmov` had a typed operand on one end or the other,
+      which is why nothing else was affected, and why the callee looked
+      correct in isolation -- the value only ever appeared in the return
+      register, so a test that checked the callee on its own passed. The
+      operand carries the returned type now. `3300_float_params.t` covers all
+      six ordered and unordered operators in both directions, since the fault
+      was in the move and not in the comparison and a single operator would
+      not have said so.
+
+      The same fault was in three encoders, and it is the reason five float
+      parameters were needed to see it: see the REX entry below.
+
+- [x] **`!=` between two float locals is false when it should be true.**
       `my f64 $a = 1; my f64 $b = 2; if ($a != $b)` takes the false branch. The
       lowering is correct on paper -- `ucomisd`, `setp` for unordered, `setne`,
       `or` -- and so is the MIR; `setne` is 0x95 and encodes. This was masked
@@ -558,7 +576,10 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       bug read as a pass. A case that happens to be wrong in the right direction
       is worse than one that is not tested at all.
 
-- [ ] **`<`, `>`, `<=` and `>=` on floats emit an integer predicate.**
+      The lowering was never wrong. What this entry recorded as a fault was the
+      literal bug above wearing a second hat, and it cleared with that fix.
+
+- [x] **`<`, `>`, `<=` and `>=` on floats emit an integer predicate.**
       The frontend picks the predicate from `$lhs->type->is_signed`, so a float
       comparison gets `slt`/`sgt`/`sle`/`sge`, but the backend's float
       comparison table is keyed `lt`/`gt`/`le`/`ge`. The lookup misses, and the
@@ -567,6 +588,34 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       at lib/Brocken/Jenny/Lowerer/X86_64.pm line 2240`. It warns loudly rather
       than corrupting silently, which is the only reason it was found. The
       predicate has to be chosen from the operand kind, not from signedness.
+
+      The predicate is now chosen from the operand kind rather than from
+      signedness: a float compares ordered and has no signedness to ask about,
+      so it gets `lt`/`gt`/`le`/`ge`, which is what the backend's float table is
+      keyed on. Fixing the frontend rather than widening the backend table to
+      accept both spellings matters because the miss was silent in the sense
+      that it produced a plausible-looking opcode string -- adding `slt` to the
+      table would have left the frontend still reporting a signed predicate for
+      something that has no signedness, one layer further from the type that
+      would have explained it.
+
+- [ ] **`fmov` and its neighbours put the REX byte in front of the legacy
+      prefix.** `F2` and `F3` select single and double precision and `0x66` the
+      operand size, and a REX byte is only a REX byte as the *last* prefix before
+      the opcode. A REX byte in front of one of them is discarded, and the
+      instruction decodes without it -- so REX.R, the bit that is the only way to
+      reach xmm8 to xmm15, never took effect, and any move involving one of those
+      registers read or wrote a register below it.
+
+      This is a silent fault with no warning, and it took five f64 parameters to
+      reach it: the eighth floating-point register is the first to need the bit,
+      and every smaller arity computed the right answer by accident. The same
+      inversion was in `fload`, `fstore`, `fmov`, `fmov_gp2f` and the scalar
+      float arithmetic group, so the fix was to emit the prefix first everywhere
+      rather than to patch the one opcode a test happened to hit. Verified by the
+      arity sweep in `3300_float_params.t`, which runs the full register count
+      for the ABI in use; a single high-register case would have been enough to
+      catch it but would not have said which encoders share the fault.
 
 - [ ] **Decimal float literals do not parse at all.**
       `my f64 $t = 3.0;` fails with `Expected ';' after variable declaration`,
@@ -591,6 +640,42 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       is wrong for everything past 2**52, so refusing it is right, but it does
       mean an int cannot be assigned to a float at all. Wasm already has the
       instruction (`f64.convert_i32_s`) if the native side ever grows one.
+
+- [ ] **Converting a float to an integer yields 0, silently.**
+      `my f64 $t = 3; my i64 $i = $t;` leaves `$i` at 0 rather than 3, with no
+      diagnostic. This is the mirror of the entry above and is arguably worse:
+      that one refuses, and this one answers. Any program that sums floats and
+      then uses the total as a count is wrong without saying so, and the value
+      0 is plausible enough to survive inspection.
+
+      It is not the same fix. There is no `fptosi` in the IR either, but a
+      conversion is a single instruction on all four backends -- `cvttsd2si` on
+      x86-64, `fcvtzs` on AArch64 and RISCV64, `i64.trunc_f64_s` on Wasm -- so
+      unlike `sitofp` there is no reason to refuse it. The missing piece is the
+      IR node and the four lowerings, not a backend decision.
+
+      Found while narrowing down the slot bug below, which is masked by it: a
+      three-local float sum read back through an integer always compared equal
+      to zero, so the first symptom pointed here.
+
+- [ ] **Two live f64 locals can be given the same stack slot.**
+      `my f64 $a = 1; my f64 $b = 2; my f64 $c = 3; if ($b == 2)` is false:
+      `$b` reads back 3.0, the value of `$c`. The last store to the shared slot
+      wins, so the two locals are aliases and any expression naming both is
+      reading one value twice. `a + b + c` gives 7.0, not 6.0.
+
+      It needs three simultaneously live f64 locals to show, and two work
+      correctly, which is why the arithmetic tests in `3299_float_literals.t`
+      pass -- they either use one local or add literals. It is not a spill bug
+      in the usual sense: the values fit in registers, so this is the frame slot
+      assignment giving two live locals the same offset rather than the spill
+      logic confusing two virtual registers. Nothing warns. An address-taken
+      local or one live across a call is the case to compare against, since those
+      are the paths that were expected to need a slot at all.
+
+      Found by the arity sweep in `3300_float_params.t` growing into a local
+      sweep: the sweep that found the REX fault hid this one, because a function
+      with many parameters and no locals never allocates a local frame.
 
 - [ ] **AArch64 and RISCV64 cannot pass arguments on the stack at all.** This is
       what the seven ARM64 CI failures actually are: all of `3298_stack_args.t`,

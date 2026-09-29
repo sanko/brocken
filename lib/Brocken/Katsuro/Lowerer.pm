@@ -762,17 +762,24 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_or( $lhs, $rhs )         if $op eq '||';
         return $builder->build_icmp( 'eq', $lhs, $rhs ) if $op eq '==';
         return $builder->build_icmp( 'ne', $lhs, $rhs ) if $op eq '!=';
-        if ( $op eq '<' ) {
-            return $builder->build_icmp( $lhs->type->is_signed ? 'slt' : 'ult', $lhs, $rhs );
-        }
-        if ( $op eq '>' ) {
-            return $builder->build_icmp( $lhs->type->is_signed ? 'sgt' : 'ugt', $lhs, $rhs );
-        }
-        if ( $op eq '<=' ) {
-            return $builder->build_icmp( $lhs->type->is_signed ? 'sle' : 'ule', $lhs, $rhs );
-        }
-        if ( $op eq '>=' ) {
-            return $builder->build_icmp( $lhs->type->is_signed ? 'sge' : 'uge', $lhs, $rhs );
+
+        # The ordering predicates come in two sets and the operand kind picks
+        # between them, not the signedness. A float has no signedness, so
+        # asking for it here produced an integer predicate -- `slt` -- against a
+        # backend whose float table is keyed `lt`, and the lookup missed and
+        # emitted 'set' . undef. Floats compare ordered, so there is one set
+        # each for < > <= >=; the sign matters only for integers.
+        my $is_float = $lhs->type->kind eq 'float';
+        my %order    = $is_float
+            ? ( '<' => 'lt', '>' => 'gt', '<=' => 'le', '>=' => 'ge' )
+            : (
+            '<'  => ( $lhs->type->is_signed ? 'slt' : 'ult' ),
+            '>'  => ( $lhs->type->is_signed ? 'sgt' : 'ugt' ),
+            '<=' => ( $lhs->type->is_signed ? 'sle' : 'ule' ),
+            '>=' => ( $lhs->type->is_signed ? 'sge' : 'uge' ),
+            );
+        if ( my $pred = $order{$op} ) {
+            return $builder->build_icmp( $pred, $lhs, $rhs );
         }
         Carp::croak( "Unknown binary operator '$op' at " . $self->_loc($ast) );
     }
