@@ -2060,6 +2060,21 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Trunc') ) {
+
+                    # Narrowing keeps the low bits; a plain move to the width the
+                    # destination type selects drops the rest, just as the
+                    # ptrcast to a narrower address size does.
+                    my ($val) = $inst->operands->@*;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, $self->_reg_opnd( $mbb, $val, $inst->name . '_src' ) ],
+                            comment  => 'trunc ' . ( $val->name || $val->value )
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Br') ) {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2719,6 +2734,33 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                     $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => '' ) );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::MemoryGrow') ) {
+
+                    # A native module's heap is a fixed region the host carved
+                    # out for us, so there is nothing to grow. Refusing is the
+                    # honest answer: the runtime then hands back 0 and the
+                    # caller's null check traps, instead of the bump cursor
+                    # quietly walking past the end of the region.
+                    my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $fail = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => -1 );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, $self->_materialize( $mbb, $fail ) ],
+                            comment  => 'memory.grow: fixed heap, refuse'
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::MemorySize') ) {
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mov',
+                            operands => [ $dst, $self->_lower_opnd( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) ) ],
+                            comment  => 'memory.size: no growable memory, report 0'
+                        )
+                    );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
                     my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );

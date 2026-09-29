@@ -2010,6 +2010,35 @@ class Brocken::Jenny::Lowerer::Wasm {
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
                     );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Trunc') ) {
+                    my ($val)    = $inst->operands->@*;
+                    my $src_bits = $val->type  ? $val->type->bits  : 64;
+                    my $dst_bits = $inst->type ? $inst->type->bits : 64;
+                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'trunc val', $src_bits ) );
+                    if ( $src_bits > 32 ) {
+
+                        # Keep only the low 32 bits. Wasm has no sub-word values,
+                        # so anything narrower than a lane is masked in place.
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_wrap_i64', operands => [], comment => 'trunc' ) );
+                    }
+                    if ( $dst_bits < 32 ) {
+                        my $mask = ( 1 << $dst_bits ) - 1;
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i32_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $mask ) ],
+                                comment  => 'trunc mask'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_and', operands => [], comment => 'trunc' ) );
+                    }
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
+                    );
+                }
                 elsif ( $opcode eq 'neg' || $opcode eq 'abs' || $opcode eq 'sqrt' ) {
                     my ($val) = $inst->operands->@*;
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
@@ -2094,6 +2123,40 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::MemoryGrow') ) {
+                    my $pages = $inst->operands->[0];
+
+                    # The page count is computed in i64 arithmetic, but
+                    # `memory.grow` takes an i32, so narrow it the same way an
+                    # array index is narrowed.
+                    my $bits = $pages->type && $pages->type->kind eq 'int' ? $pages->type->bits : 32;
+                    $mbb->add_instruction( $self->_wasm_push( $pages, 'grow: pages', 32 ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode => 'i32_wrap_i64', operands => [], comment => 'grow: wrap pages to i32'
+                        )
+                    ) if $bits > 32;
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'memory_grow', operands => [], comment => 'memory.grow' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'local_set',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                            comment  => 'grow: save to ' . $inst->name
+                        )
+                    );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::MemorySize') ) {
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'memory_size', operands => [], comment => 'memory.size' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'local_set',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                            comment  => 'size: save to ' . $inst->name
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
 
                     # A promoted slot is a wasm local, defined by the store that
@@ -2112,8 +2175,37 @@ class Brocken::Jenny::Lowerer::Wasm {
                         $size = $elem * $inst->count->value;
                     }
 
-                    # save current heap_ptr as result
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap' ) );
+                    # An escaping slot is a heap block, so it goes through the
+                    # same runtime allocator objects use. Bumping a second,
+                    # module-local cursor here instead was what let arrays and
+                    # objects overlap: both started at the heap base and neither
+                    # knew about the other. Sharing the allocator also buys the
+                    # array the growth and the out-of-memory refusal it lacked.
+                    # The base is the module global, because the heap base is an
+                    # entry argument and the slot can be allocated in any
+                    # function, not just the entry.
+                    $mbb->add_instruction( $self->_wasm_push_vreg( '%__heap_base', 'alloca: base' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i64_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                            comment  => "alloca: size $size"
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'call_func',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'Brocken::Runtime::bump_alloc' ) ],
+                            comment  => 'alloca: bump_alloc'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'call_func',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'Brocken::Runtime::check_alloc' ) ],
+                            comment  => 'alloca: check_alloc'
+                        )
+                    );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'local_set',
@@ -2121,19 +2213,6 @@ class Brocken::Jenny::Lowerer::Wasm {
                             comment  => 'alloca: save to ' . $inst->name
                         )
                     );
-
-                    # heap_ptr += size
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap' ) );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
-                            comment  => "alloca: size $size"
-                        )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'alloca: add' ) );
-                    $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'alloca: save heap' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                     my $ptr = $inst->operands->[0];
@@ -2322,8 +2401,30 @@ class Brocken::Jenny::Lowerer::Wasm {
                     my $val = $inst->operands->[0];
                     my $tag = $self->_type_tag( $val->type );
 
-                    # save heap_ptr as result
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap' ) );
+                    # A box is a 16-byte heap cell, so it is allocated from the
+                    # shared allocator like every other escaping block.
+                    $mbb->add_instruction( $self->_wasm_push_vreg( '%__heap_base', 'box: base' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i64_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16 ) ],
+                            comment  => 'box: size 16'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'call_func',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'Brocken::Runtime::bump_alloc' ) ],
+                            comment  => 'box: bump_alloc'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'call_func',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'Brocken::Runtime::check_alloc' ) ],
+                            comment  => 'box: check_alloc'
+                        )
+                    );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'local_set',
@@ -2332,24 +2433,16 @@ class Brocken::Jenny::Lowerer::Wasm {
                         )
                     );
 
-                    # heap_ptr += 16
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap' ) );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16 ) ],
-                            comment  => 'box: bump 16'
-                        )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'box: add' ) );
-                    $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'box: save heap' ) );
-
-                    # store payload at [%dyn + 0]
+                    # store payload at [%dyn + 0]. The payload slot is eight
+                    # bytes wide, so a 64-bit value has to be stored with the
+                    # 64-bit form; a fixed i32 store left an i64 literal on the
+                    # stack as i64 and the module failed to validate.
+                    my $vbits        = ( $val->type && $val->type->kind eq 'int' ) ? $val->type->bits : 32;
+                    my $payload_store = $vbits > 32 ? 'i64_store' : 'i32_store';
                     $mbb->add_instruction( $self->_wasm_push_vreg( $inst->name, 'box: push dyn' ) );
                     $mbb->add_instruction( $self->_wasm_push( $val, 'box: push val' ) );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store payload' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => $payload_store, operands => [], comment => 'box: store payload' ) );
 
                     # store tag at [%dyn + 8]
                     $mbb->add_instruction( $self->_wasm_push_vreg( $inst->name, 'box: push dyn' ) );
@@ -2374,9 +2467,14 @@ class Brocken::Jenny::Lowerer::Wasm {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
                     my $dyn = $inst->operands->[0];
+
+                    # Read the payload back at the width it was written at, which
+                    # is the width of the unboxed value.
+                    my $ibits       = ( $inst->type && $inst->type->kind eq 'int' ) ? $inst->type->bits : 32;
+                    my $payload_load = $ibits > 32 ? 'i64_load' : 'i32_load';
                     $mbb->add_instruction( $self->_wasm_push( $dyn, 'unbox: push dyn' ) );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_load', operands => [], comment => 'unbox: load payload' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => $payload_load, operands => [], comment => 'unbox: load payload' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'local_set',

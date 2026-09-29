@@ -147,6 +147,19 @@ class Brocken::Lindsay::IR::Instruction::Sext : isa(Brocken::Lindsay::IR::Instru
     }
 }
 
+# Narrowing counterpart of zext/sext. Needed because a literal does not carry
+# the type of the slot it is stored into: `my i32 $g = -1` produced an i64 -1
+# stored through a 4-byte slot, which native tolerated but the Wasm validator
+# rejected outright ("expected i32, found i64").
+class Brocken::Lindsay::IR::Instruction::Trunc : isa(Brocken::Lindsay::IR::Instruction) {
+    field $target_type : reader : param;
+
+    method render() {
+        my $val = $self->operands->[0];
+        return sprintf '  %s = trunc %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $target_type->as_string;
+    }
+}
+
 # A pointer and an address-sized integer hold the same bits on every backend,
 # so moving between them is a reinterpretation rather than a computation. It
 # exists so a value can be given the exact type a function declares, which
@@ -332,6 +345,29 @@ class Brocken::Lindsay::IR::Instruction::Alloca : isa(Brocken::Lindsay::IR::Inst
         my $str = sprintf '  %s = alloca %s', ( $self->name // '%<anon>' ), $allocated_type->as_string;
         $str .= sprintf ', i64 %s', $count->value if $count;
         return $str;
+    }
+}
+
+# memory_grow asks the host for $pages more pages of linear memory and yields
+# the previous size in pages, or -1 if the host refused. It is what lets a wasm
+# module back the heap the runtime was promised instead of trapping once the
+# statically declared memory runs out. Backends with a fixed, host-provided
+# region have no equivalent, so they lower this to a constant -1: the runtime
+# then reports out-of-memory instead of writing past the region.
+class Brocken::Lindsay::IR::Instruction::MemoryGrow : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $pages = $self->operands->[0];
+        return sprintf '  %s = memory_grow i32 %s', ( $self->name // '%<anon>' ), $pages->as_string;
+    }
+}
+
+# memory_size is the current linear memory size in pages, or 0 where the
+# concept does not exist. Only reached after a successful memory_grow.
+class Brocken::Lindsay::IR::Instruction::MemorySize : isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        return sprintf '  %s = memory_size', ( $self->name // '%<anon>' );
     }
 }
 

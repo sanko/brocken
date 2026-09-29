@@ -107,9 +107,11 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             }
             $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $func_sec;
 
-            # Global Section (ID 6): one mutable i32 bump pointer. It is seeded
-            # at run time by the entry stub below rather than here, because the
-            # heap base arrives as an argument to _BROCKEN_ENTRY.
+            # Global Section (ID 6): the heap base, as one mutable i32. It is
+            # seeded at run time by the entry stub below rather than here,
+            # because the heap base arrives as an argument to _BROCKEN_ENTRY.
+            # The allocator's own cursor, limit and cap live in the first bytes
+            # of the heap itself, so this global only has to carry the base.
             my $global_content = pack( 'C', 1 )                     # 1 global
                 . pack( 'C', 0x7F )                                 # valtype i32
                 . pack( 'C', 0x01 )                                 # mutable
@@ -125,18 +127,18 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             }
             $export_sec = pack( 'C', 7 ) . $self->_uleb( length($export_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $export_sec;
 
-            # Seed the shared bump pointer. This has to run before the entry
-            # function's first alloca, so it goes in front of the body -- and
-            # after the call fixups above, whose offsets are already resolved
-            # against the un-prefixed bytes. _BROCKEN_ENTRY's first parameter is
-            # %__heap_base. +16 skips the cursor/limit pair that
-            # Brocken::Runtime::_init keeps in the first 16 bytes of the heap.
+            # Publish the heap base to every frame. This has to run before any
+            # body that allocates, so it goes in front of the entry function's
+            # body -- and after the call fixups above, whose offsets are already
+            # resolved against the un-prefixed bytes. _BROCKEN_ENTRY's first
+            # parameter is %__heap_base, which is already the pointer to the
+            # allocator header, so it is stored as-is. The header's +24 skip
+            # that used to be here belongs to the cursor the runtime keeps, not
+            # to the base passed to the allocator.
             for my $fd (@func_data) {
                 next unless $fd->{name} eq '_BROCKEN_ENTRY';
                 my $stub
                     = pack( 'C', 0x20 ) . pack( 'C', 0x00 )     # local.get 0
-                    . pack( 'C', 0x41 ) . pack( 'C', 0x10 )     # i32.const 16
-                    . pack( 'C', 0x6A )                         # i32.add
                     . pack( 'C', 0x24 ) . pack( 'C', 0x00 );    # global.set 0
                 my $at = $self->_locals_prefix_len( $fd->{bytes} );
                 substr( $fd->{bytes}, $at, 0 ) = $stub;
@@ -188,9 +190,9 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         my $func_sec = $self->_uleb(1) . $self->_uleb($type_idx);
         $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) ) . $func_sec;
 
-        # Global Section (ID 6): the shared bump pointer, as in the multi-function
-        # path above. Only the body that actually uses %heap_ptr needs it, but the
-        # section is always emitted so both paths produce the same module shape.
+        # Global Section (ID 6): the heap base, as in the multi-function path
+        # above. The section is always emitted so both paths produce the same
+        # module shape.
         my $global_content = pack( 'C', 1 )
             . pack( 'C', 0x7F )
             . pack( 'C', 0x01 )
@@ -198,11 +200,10 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             . pack( 'C', 0x0B );
         my $global_sec = pack( 'C', 6 ) . $self->_uleb( length($global_content) ) . $global_content;
 
+        # Publish the heap base, as in the multi-function path above.
         if ( $name eq '_BROCKEN_ENTRY' ) {
             $body
                 = pack( 'C', 0x20 ) . pack( 'C', 0x00 )
-                . pack( 'C', 0x41 ) . pack( 'C', 0x10 )
-                . pack( 'C', 0x6A )
                 . pack( 'C', 0x24 ) . pack( 'C', 0x00 )
                 . $body;
         }
