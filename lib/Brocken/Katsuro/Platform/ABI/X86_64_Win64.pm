@@ -31,6 +31,17 @@ class Brocken::Katsuro::Platform::ABI::X86_64_Win64 : isa(Brocken::Katsuro::Plat
     # Win64 parameter passing: rcx, rdx, r8, r9 (4 integer regs, versus 6 on SysV)
     method param_registers()    { [qw(rcx rdx r8 r9)] }
     method fp_param_registers() { [qw(xmm0 xmm1 xmm2 xmm3)] }
+
+    # Win64 reserves 32 bytes of shadow space in the caller's frame ahead of
+    # the stack arguments, and the call pushes its return address below that.
+    # On entry rsp points at the return address, so shadow space occupies
+    # rsp+8..rsp+39 and the first stack argument is at rsp+40.
+    method stack_param_offset($index) { 40 + 8 * $index }
+
+    # At the call instruction the shadow space is the first 32 bytes above
+    # rsp, and the return address has not been pushed yet, so the first stack
+    # argument is at rsp+32.
+    method caller_stack_param_offset($index) { 32 + 8 * $index }
 }
 
 =encoding utf-8

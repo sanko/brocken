@@ -36,9 +36,17 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             next unless $op->kind eq 'mem';
             my $base = $op->value->{base} // '';
 
+            # A raw displacement is positioned by the ABI against the real stack
+            # pointer, so the base is a real register rather than a name the
+            # allocator owns.  Letting it in here would give the stack pointer a
+            # virtual register, and every spill slot, caller-save slot and alloca
+            # is named against that same string: the allocator would then place
+            # them through an unrelated register.
+            my $raw_stack = $op->value->{raw} && $base eq $platform->stack_reg;
+
             # Track virtual register names, but skip known physical register names
             # (like r12, which the lowerer uses directly in fiber memory operands).
-            push @names, $base if $base ne '' && $base !~ $phys_re;
+            push @names, $base if !$raw_stack && $base ne '' && $base !~ $phys_re;
             my $index = $op->value->{index} // '';
             push @names, $index if $index ne '';
         }
@@ -248,6 +256,49 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return @intervals;
     }
 
+    # How many scratch registers `insert_spill_code` can need at once.
+    #
+    # One instruction can need several spilled values simultaneously rather
+    # than one after another. A store through a spilled pointer is the plain
+    # case: it needs the address and the value at the same time. One temp
+    # cannot hold both, and the second reload lands on top of the first, so
+    # the store goes through whatever the value was instead of through the
+    # address. Every operand that may end up spilled therefore needs its own
+    # temp, and so does a `mem` operand whose base is a virtual register,
+    # because that base is replaced by a temp and has to stay valid until the
+    # instruction retires.
+    #
+    # This is counted before allocation, from the shape of the MIR, so it can
+    # only be an upper bound -- the answer is the most temps any single
+    # instruction could ask for, not the most it does. Keeping the reserve that
+    # small matters: a temp is a register the allocator never gets to use, and
+    # every extra one is paid for by every function in the module.
+    method spill_temp_count($mf) {
+        my $max = 1;
+        return $max unless $mf && $mf->blocks->@*;
+        INSN_SCAN: for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                my $need = 0;
+                for my $op ( $inst->operands->@* ) {
+                    if ( $op->kind eq 'virt_reg' ) { $need++ }
+                    elsif ( $op->kind eq 'mem' ) {
+
+                        # A base naming a virtual register becomes a temp. A
+                        # base naming a physical register is a real frame
+                        # reference and needs none. This asks only which one it
+                        # is, so the leading `%` is the whole test -- unlike the
+                        # interval model, where a base that is not an available
+                        # register is what has to be caught, and a raw stack
+                        # displacement has to be let past.
+                        $need++ if ( $op->value->{base} // '' ) =~ /^%/;
+                    }
+                }
+                $max = $need if $need > $max;
+            }
+        }
+        return $max;
+    }
+
     method _linear_scan( $mf, $intervals, $platform, $is_float ) {
         my @caller_regs = $is_float ? $platform->fp_registers('caller')->@* : $platform->registers('caller')->@*;
         my @callee_regs = $is_float ? $platform->fp_registers('callee')->@* : $platform->registers('callee')->@*;
@@ -341,8 +392,17 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         }
 
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
-        my $spill_temp = pop @caller_regs;
-        my @regs       = ( @caller_regs, @callee_regs );
+
+        # Reserve as many temps as the widest instruction could need, and
+        # always at least one. The temps are taken off the end of the caller
+        # pool, so they are the last registers a spill would otherwise reach
+        # for and the first to disappear if the function is under pressure.
+        my $temp_count = $mf ? $self->spill_temp_count($mf) : 1;
+        $temp_count = 1                  if $temp_count < 1;
+        $temp_count = scalar @caller_regs if $temp_count > @caller_regs;
+        my @spill_temps = splice @caller_regs, ( scalar(@caller_regs) - $temp_count );
+        my $spill_temp  = $spill_temps[0];
+        my @regs        = ( @caller_regs, @callee_regs );
         my %assignment;
         my %used_callee;
         my %spill_slots;
@@ -373,7 +433,13 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 push @active, $int;
             }
         }
-        return { assignment => \%assignment, used_callee => [ sort keys %used_callee ], spill_slots => \%spill_slots, spill_temp => $spill_temp, };
+        return {
+            assignment  => \%assignment,
+            used_callee => [ sort keys %used_callee ],
+            spill_slots => \%spill_slots,
+            spill_temp  => $spill_temp,
+            spill_temps => \@spill_temps,
+        };
     }
 
     method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0 ) {
@@ -382,20 +448,29 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         my $store_op    = $is_float ? 'fstore' : 'store';
         my %reads_dst   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
-        my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
+
+        # `spill_temp` is the reserved temp pool. A plain string is accepted so
+        # a caller holding only the single-temp result still works.
+        my @temps = !ref $spill_temp ? ($spill_temp) : $spill_temp->@*;
+        @temps = ('r11') unless @temps;
+
+        my $temp_for = sub ($k) {
+            $temps[ $k < @temps ? $k : $#temps ];
+        };
+        my $temp_op = sub ($k) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($k), type => undef ) };
         my $mem_op
             = sub ($o) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => undef ) };
-        my $load_inst = sub ($o) {
+        my $load_inst = sub ($k, $o) {
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => $load_op,
-                operands => [ $temp_op->(), $mem_op->($o) ],
+                operands => [ $temp_op->($k), $mem_op->($o) ],
                 comment  => 'spill-reload'
             );
         };
-        my $store_inst = sub ($o) {
+        my $store_inst = sub ($k, $o) {
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => $store_op,
-                operands => [ $mem_op->($o), $temp_op->() ],
+                operands => [ $mem_op->($o), $temp_op->($k) ],
                 comment  => 'spill-store'
             );
         };
@@ -404,6 +479,22 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             for my $inst ( $bb->instructions->@* ) {
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
+
+                # One slot per physical temp, and one reload per slot, so two
+                # values that have to be live at the same time cannot land on
+                # each other. A slot may hold more than one offset when the
+                # instruction reads and writes the same spilled value, which
+                # is a single value by definition.
+                my ( @off_of, @order );
+                my $reserve = sub ($off) {
+                    for my $k ( 0 .. $#order ) {
+                        return $k if $off_of[$k] == $off;
+                    }
+                    push @order, $off;
+                    $off_of[ $#order ] = $off;
+                    return $#order;
+                };
+
                 my %sp;
                 for my $i ( 0 .. $#ops ) {
                     next unless $ops[$i]->kind eq 'virt_reg';
@@ -411,61 +502,87 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     next unless defined $off;
                     $sp{$i} = $off;
                 }
-                my $smem_off;
+
+                # A spilled `mem` base is replaced by a temp that has to hold
+                # the address across the whole instruction, so it is reserved
+                # before any operand can claim the same temp.
+                my ( $base_k, $smem_off );
                 for my $op (@ops) {
                     next unless $op->kind eq 'mem';
+
+                    # A raw operand is addressed against the hardware stack
+                    # pointer -- an incoming stack argument, or one being
+                    # written for an outgoing call -- so its base is a real
+                    # register and there is nothing spilled to reload it from.
+                    next if $op->value->{raw};
                     my $base = $op->value->{base} // '';
                     if ( defined( my $off = $spill_slots->{$base} ) ) {
                         $smem_off = $off;
-                        $op->value->{base} = $spill_temp;
+                        $base_k   = $reserve->($off);
+                        $op->value->{base} = $temp_for->($base_k);
                     }
                 }
                 if ( !keys %sp && !defined $smem_off ) {
                     push @new, $inst;
                     next;
                 }
+
                 my $d_off = $sp{0};
                 my $s_off = $sp{1};
                 my $d_sp  = defined $d_off;
                 my $s_sp  = defined $s_off;
-                my $dd    = $d_sp && $s_sp && $d_off != $s_off;
-                if ($d_sp) {
-                    $ops[0] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[0]->type );
+                my $same  = $d_sp && $s_sp && $d_off == $s_off;
+                my $d_k   = $d_sp ? $reserve->($d_off) : undef;
+                my $s_k   = $s_sp ? $reserve->($s_off) : undef;
+
+                # A destination that the instruction also reads has to keep its
+                # old value somewhere the write will not destroy, which is a
+                # second temp holding the same offset.
+                my $needs_old_d = $d_sp && $reads_dst{$opcode} && $d_k == $base_k;
+                my $old_k       = $d_k;
+                if ($needs_old_d) {
+
+                    # The base already holds a temp for this offset, and a temp
+                    # that is about to be overwritten is not a place to keep it.
+                    $old_k = $#order + 1;
+                    push @order, $d_off;
+                    $off_of[$old_k] = $d_off;
                 }
-                if ( $s_sp && $dd && $can_mem_src{$opcode} ) {
+
+                if ($d_sp) {
+                    $ops[0] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($d_k), type => $ops[0]->type );
+                }
+                if ( $s_sp && !$same && !$can_mem_src{$opcode} ) {
+                    $ops[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($s_k), type => $ops[1]->type );
+                }
+                elsif ( $s_sp && !$same && $can_mem_src{$opcode} ) {
                     $ops[1] = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
                         value => { base => $stack_reg, disp => $s_off },
                         type  => $ops[1]->type,
                     );
                 }
-                elsif ($s_sp) {
-                    $ops[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[1]->type );
-                }
-                my @load_offsets;
-                push @load_offsets, $smem_off if defined $smem_off;
-                if ($dd) {
-                    if ( $can_mem_src{$opcode} ) {
-                        push @load_offsets, $d_off if $reads_dst{$opcode};
-                    }
-                    else {
-                        push @load_offsets, $s_off;
-                        push @load_offsets, $d_off if $reads_dst{$opcode};
-                    }
-                }
-                else {
-                    push @load_offsets, $s_off if $s_sp;
-                    push @load_offsets, $d_off if $d_sp && $reads_dst{$opcode};
-                }
+
+                # Every remaining operand is a distinct value, so each takes
+                # the next free temp and keeps it to itself.
+                my @extra_k;
                 for my $i ( 2 .. $#ops ) {
                     next unless defined $sp{$i};
-                    push @load_offsets, $sp{$i};
-                    $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[$i]->type );
+                    my $k = $reserve->( $sp{$i} );
+                    push @extra_k, [ $k, $sp{$i} ];
+                    $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($k), type => $ops[$i]->type );
                 }
-                push @new, $load_inst->($_) for @load_offsets;
+
+                my @loads;
+                push @loads, [ $base_k, $smem_off ] if defined $base_k;
+                push @loads, [ $s_k,    $s_off ]    if $s_sp && !$same && !$can_mem_src{$opcode};
+                push @loads, [ $old_k,  $d_off ]    if $needs_old_d;
+                push @loads, @extra_k;
+
+                push @new, $load_inst->(@$_) for @loads;
                 push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
                 if ($d_sp) {
-                    push @new, $store_inst->($d_off);
+                    push @new, $store_inst->( $d_k, $d_off );
                 }
             }
             $bb->instructions->@* = @new;

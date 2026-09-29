@@ -449,35 +449,85 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       base is now computed from `defined` rather than truth, so a single spill
       slot at offset 0 yields a base of 1.
 
-- [ ] **`insert_spill_code` reloads through a single temp, so a second live
+- [x] **`insert_spill_code` reloads through a single temp, so a second live
       reload clobbers the first.** Also found by the sweep above: a class with
       five `i8` constructor fields still faults where four is clean. Five fields
       fills the SysV argument register set exactly, and from there the caller
       needs two simultaneously live spilled values.
 
       One instruction with both a spilled `mem` base and a spilled operand needs
-      two values in registers at the same time, and `@load_offsets` emits one
+      two values in registers at the same time, and `@load_offsets` emitted one
       `load` per offset through the same spill temp:
 
           load  r11, mem(rsp,0)    # the object address
           load  r11, mem(rsp,8)    # the value to store, clobbering the above
           store mem(r11,0), r11    # stores the value through the value
 
-      This is the same single-temp hazard `fix_entry_shuffle` had, in a
-      different pass, and it wants the same kind of answer: enough temps for the
-      live set, or an ordering in which each temp is consumed before it is
-      reloaded. `3297_entry_shuffle.t` stops its constructor sweep at four
-      fields instead of skipping the case, so the limit stays visible.
+      This was the same single-temp hazard `fix_entry_shuffle` had, in a
+      different pass, and it wanted the same kind of answer. `LinearScan` now
+      reports `spill_temp_count` and a `spill_temps` list, so the number of
+      temps tracks the largest set of simultaneously live spilled values rather
+      than being fixed at one. A spilled `mem` base counts as a live value
+      itself, which is what the middle case above needs: the base and the
+      operand are two values, so they get two temps. `3297_entry_shuffle.t` now
+      sweeps constructors to the argument register count rather than stopping at
+      four, and the case it was skipping is the one that runs.
 
-- [ ] **Arguments past the register set are not implemented on x86-64.** Not
+- [x] **Arguments past the register set are not implemented on x86-64.** Not
       reachable from any current test, and not what any of the three CI
       failures were, but it bounds what `3297_entry_shuffle.t` can claim. The
-      x86-64 lowerer indexes its argument registers, and the caller's argument
+      x86-64 lowerer indexed its argument registers, and the caller's argument
       registers, positionally with no bounds check, so the fifth argument on
       Win64 (four registers) and the seventh on SysV (six) read past the end of
       the list. Observed as `Use of uninitialized value` warnings out of
-      `Lowerer/X86_64.pm` and a wrong value, not a crash. `3297` sweeps a free
+      `Lowerer/X86_64.pm` and a wrong value, not a crash. `3297` swept a free
       function only up to the register count for this reason.
+
+      Both directions are now placed by the ABI, which grew
+      `stack_param_offset` and `caller_stack_param_offset` alongside
+      `param_registers` (SysV `8 + 8*i` and `8*i`; Win64 `40 + 8*i` and
+      `32 + 8*i`, the difference being the 32-byte shadow space and the saved
+      return address). The callee captures the incoming argument and the caller
+      stores the outgoing one, and an `i128` takes two consecutive slots and
+      moves to the stack whole rather than straddling the boundary.
+
+      The outgoing area is reserved at the bottom of the frame and never moved
+      at run time, so it sits at a fixed displacement from the hardware stack
+      pointer. Three things want to be positioned against that pointer -- the
+      outgoing arguments, the allocator's spill and caller-save slots, and an
+      alloca -- so the other two are shifted above the reserved area instead
+      (outgoing first, then alloca and shadow space, then the allocator's own
+      slots). That keeps the frame pointer out of the stack-passing path and
+      keeps 16-byte call alignment without adjusting `rsp` around a call.
+
+      A raw displacement is a hardware stack pointer, not a name the allocator
+      owns, and it has to be encoded as one. It was reaching the allocator as a
+      virtual register named `rsp`, which the allocator then assigned an
+      unrelated register, after which every spill slot, caller-save slot and
+      alloca in the same function was addressed through that register -- hence
+      the fault observed here and the four CI failures it caused. The base is
+      now kept out of the interval model and resolved directly at encode time.
+      Verified by `3298_stack_args.t`, which sweeps free functions and
+      constructors past the register count on whichever ABI is in use, and by
+      mixed narrow-width arguments in the same region.
+
+- [ ] **Float literals cannot be materialised on x86-64, so a float argument
+      cannot be passed.** Found while adding the float half of
+      `3298_stack_args.t`. The lowerer stores a float initialiser with
+      `store_imm`, whose width is selected from the operand type and whose
+      immediate is packed as an integer, so `my f64 $t = 3;` writes the integer
+      3 into eight bytes and reads it back as a denormal rather than 3.0. The
+      encoder has no float form, and neither `mov` nor `fmov` takes a float
+      immediate, so a float argument reaching a call site dies in the operand
+      resolver with `Unexpected operand kind: imm`.
+
+      This is pre-existing and independent of argument passing -- `sub f() ->
+      f64 { my f64 $t = 3; return $t; }` fails the same way with no call
+      involved -- and it is why the float sweep could not be added to
+      `3298_stack_args.t`. The lowerer does emit `fstore` for a float argument
+      that reaches the stack area, so that half is in place; it cannot be
+      exercised until a float constant can be built, which needs either a
+      constant pool or an integer-to-float conversion.
 
 - [x] **Wasm could not compile any program that declares a local variable.**
       Every frontend program with at least one `my` local was rejected by the
