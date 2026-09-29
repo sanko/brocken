@@ -50,6 +50,15 @@ class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform:
         return $data{$category} // [];
     }
 
+    # A floating-point register to park an entry-block copy in when the copies
+    # form a cycle.  It has to be outside both sets the shuffle can name: the
+    # allocator's own registers, since a destination may be written after the
+    # parked value is needed again, and the argument registers, since a park
+    # would destroy an argument a later copy still has to read.  v16-v31 are the
+    # AAPCS64 intra-procedure-call temporaries: caller-saved, never allocated
+    # here, and never among the v0-v7 the argument registers come from.
+    method fp_entry_shuffle_temp() {'v31'}
+
     # ARM64 standard DWARF mappings: x0-x30 map to 0-30, sp maps to 31
     method dwarf_reg_num($name) {
         return 31 if $name eq 'sp';
@@ -78,7 +87,7 @@ argument-setup MOV instructions in the Lowerer.
 
 =head2 Register Sets
 
-=over 4
+=over
 
 =item * B<Caller-saved>: x0, x9-x15, x1-x7
 
