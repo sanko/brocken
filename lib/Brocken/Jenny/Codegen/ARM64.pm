@@ -529,9 +529,14 @@ class Brocken::Jenny::Codegen::ARM64 {
         $alloca_frame = $unified_frame;
         my $reg_id = sub ($r) {
             return 31 if $r eq 'sp';
-            return $1 if $r =~ /^[xw](\d+)$/;
-            return $1 if $r =~ /^v(\d+)$/;
-            return 0;
+            return $1  if $r =~ /^[xw](\d+)$/ && $1 < 32;
+            return $1  if $r =~ /^v(\d+)$/ && $1 < 32;
+
+            # Returning 0 meant x0, so a register that was never assigned read as
+            # a real one and the instruction encoded against the wrong operand.
+            # An unknown name is a lowering bug and has to say so rather than
+            # silently pick the first register.
+            die "Unknown ARM64 register: '$r'";
         };
         state $phys_re = do {
             my @regs = $platform->registers('available')->@*;

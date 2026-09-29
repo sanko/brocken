@@ -15,6 +15,18 @@ package Test2::Tools::Brocken v0.0.1 {
         riscv64 => '/usr/riscv64-linux-gnu',
     );
     my %QEMU = ( aarch64 => 'qemu-aarch64', riscv64 => 'qemu-riscv64' );
+
+    # The host architecture and OS, taken from the platform module's own host
+    # triple rather than from Config, since Config's myarchname is an OS label on
+    # Windows ("MSWin32") rather than an architecture. Both fields matter: a
+    # Linux target on a Windows host has the same architecture but is not
+    # natively runnable, and checking only the architecture would try to start a
+    # Linux ELF directly.
+    my ( $HOST_ARCH, $HOST_OS ) = do {
+        require Brocken::Katsuro::Platform;
+        my ( $a, undef, $o ) = split /-/, Brocken::Katsuro::Platform::gen_triple();
+        ( $a, $o );
+    };
     my $TMPDIR;
 
     sub temp_path ($basename) {
@@ -24,22 +36,30 @@ package Test2::Tools::Brocken v0.0.1 {
         return $dir . '/' . $basename;
     }
 
-    # The command prefix needed to run a binary built for $platform on this host,
-    # or undef if it is native or there is nothing to run it with. Both qemu and
-    # the cross sysroot have to be present, since a binary that links against
-    # libc.so.6 cannot start without the matching loader even under emulation.
+    # The command prefix needed to run a binary built for $platform on this host.
+    # A native target needs no prefix and gets an empty one; a non-native target
+    # gets qemu and its sysroot, or undef when neither is available, so a caller
+    # can skip rather than fail. Both qemu and the cross sysroot have to be
+    # present, since a binary that links against libc.so.6 cannot start without
+    # the matching loader even under emulation.
+    #
+    # The native case goes by architecture and OS rather than by is_native,
+    # because that compares whole triples: this host is x86_64-pc-linux-gnu, so a
+    # platform written as x86_64-unknown-linux-gnu is the same machine spelled
+    # with a different vendor and is_native says no.
     sub cross_runner ($platform) {
         return undef unless $platform;
-        my $arch = $platform->arch;
-        return undef if $platform->is_native;
-        my $qemu    = $QEMU{$arch}   // return undef;
+        return [] if $platform->arch eq $HOST_ARCH && ( $platform->os // '' ) eq $HOST_OS;
+        my $arch    = $platform->arch;
+        my $qemu    = $QEMU{$arch}    // return undef;
         my $sysroot = $SYSROOT{$arch} // return undef;
-        return undef unless -x _which($qemu);
+        my $path    = _which($qemu)   // return undef;
+        return undef unless -x $path;
         return undef unless -e $sysroot;
         return [ $qemu, '-L', $sysroot ];
     }
 
-    sub cross_available ($platform) { return !!cross_runner($platform) }
+    sub cross_available ($platform) { return defined cross_runner($platform) }
 
     sub _which ($name) {
         for my $dir ( split /:/, ( $ENV{PATH} // '' ) ) {

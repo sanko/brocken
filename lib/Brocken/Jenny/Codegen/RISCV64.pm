@@ -411,9 +411,14 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 t6   => 31
             );
             return $map{$r} if exists $map{$r};
-            return $1       if $r =~ /^x(\d+)$/;
+            return $1       if $r =~ /^x(\d+)$/ && $1 < 32;
             return $1       if $r =~ /^f(\d+)$/ && $1 <= 31;
-            return 0;
+
+            # Returning 0 meant x0, so a register that was never assigned read as
+            # a real one and the instruction encoded against the wrong operand.
+            # An unknown name is a lowering bug and has to say so rather than
+            # silently pick the first register.
+            die "Unknown RISCV64 register: '$r'";
         };
         my $resolve = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';

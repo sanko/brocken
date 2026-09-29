@@ -416,7 +416,16 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $alloca_frame = 0;
         my %reg_id_map   = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
         for my $i ( 0 .. 15 ) { $reg_id_map{"xmm$i"} = $i }
-        my $reg_id        = sub ($r) { return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
+        my $reg_id        = sub ($r) {
+            return $reg_id_map{$r} if exists $reg_id_map{$r};
+            return $1           if $r =~ /^r(\d+)$/ && $1 < 16;
+
+            # Returning 0 here looked like register rax, so a register that was
+            # never assigned read as a real one and the instruction encoded with
+            # the wrong operand. An unknown name is a lowering bug and has to say
+            # so rather than pick a register.
+            die "Unknown x86-64 register: '$r'";
+        };
         my $spill_frame   = $self->_compute_spill_frame( $mf, 'rsp' );
         my $call_arg_frame = $self->_compute_call_arg_frame( $mf, 'rsp' );
         my $callee_size   = scalar(@$used_callee) * 8;
