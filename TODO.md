@@ -511,23 +511,99 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       constructors past the register count on whichever ABI is in use, and by
       mixed narrow-width arguments in the same region.
 
-- [ ] **Float literals cannot be materialised on x86-64, so a float argument
-      cannot be passed.** Found while adding the float half of
-      `3298_stack_args.t`. The lowerer stores a float initialiser with
+- [x] **Float literals cannot be materialised on x86-64, so a float argument
+      cannot be passed.** The lowerer stored a float initialiser with
       `store_imm`, whose width is selected from the operand type and whose
-      immediate is packed as an integer, so `my f64 $t = 3;` writes the integer
-      3 into eight bytes and reads it back as a denormal rather than 3.0. The
-      encoder has no float form, and neither `mov` nor `fmov` takes a float
-      immediate, so a float argument reaching a call site dies in the operand
-      resolver with `Unexpected operand kind: imm`.
+      immediate is packed as an integer, so `my f64 $t = 3;` wrote the integer
+      3 into eight bytes and read it back as a denormal rather than 3.0.
 
-      This is pre-existing and independent of argument passing -- `sub f() ->
-      f64 { my f64 $t = 3; return $t; }` fails the same way with no call
-      involved -- and it is why the float sweep could not be added to
-      `3298_stack_args.t`. The lowerer does emit `fstore` for a float argument
-      that reaches the stack area, so that half is in place; it cannot be
-      exercised until a float constant can be built, which needs either a
-      constant pool or an integer-to-float conversion.
+      The cause was one level up, in the frontend. A literal carries the type it
+      was written with, so `3` is an i64 and knows nothing about the `f64` slot
+      it is stored into, and nothing in the IR recovers that: the store is
+      void-typed and its destination a plain `ptr`, so the pointee type is
+      invisible exactly where the value is written. Re-tagging the literal in
+      `maybe_convert_type` and in `lower_binop` covers the three places one
+      reaches a float -- a local initialiser, a bare return, and an arithmetic
+      operand. The return case was not a miscompile but a hard failure: nothing
+      coerced it at all, so a float function returning a literal emitted
+      `ret i64` and the comparison died with `Unexpected operand kind: imm`.
+      Verified by `3299_float_literals.t`, which also carries a value past
+      2**52 so that a fix which only got the width right cannot pass.
+
+      The stack-argument half of this still stands: the lowerer emits `fstore`
+      for a float argument that reaches the stack area, and the float sweep in
+      `3298_stack_args.t` is still waiting on the AArch64/RISCV64 stack-argument
+      work below.
+
+- [ ] **Comparing a float call result against a literal gives the wrong answer.**
+      Found while writing `3299_float_literals.t`. With the callee provably
+      correct -- `sub f() -> f64 { my f64 $t = 3; return $t; }` lowers to
+      `mov ..., 0x4008000000000000` / `fmov_gp2f` / `fstore` / `fload` /
+      `fmov xmm0` -- the caller still takes the false branch on `if (f() == 3)`.
+      The caller's MIR is right too: `call_func`, `fmov %f_res, xmm0`,
+      materialise the constant, `fcmp %f_res, %const`, `setnp`/`sete`/`and`.
+      The same comparison inside the same function, on an `fload`ed value,
+      passes. So the difference is what defines the compared register: here it
+      is a `fmov` from a physical register rather than a load. Most likely the
+      FP side of allocation, which is a separate pass from the integer one and
+      is the part that has to notice a virtual register defined by a move out of
+      a call's return register.
+
+- [ ] **`!=` between two float locals is false when it should be true.**
+      `my f64 $a = 1; my f64 $b = 2; if ($a != $b)` takes the false branch. The
+      lowering is correct on paper -- `ucomisd`, `setp` for unordered, `setne`,
+      `or` -- and so is the MIR; `setne` is 0x95 and encodes. This was masked
+      until the literal fix above: before it, `1` and `2` were stored as two
+      *different* denormals, so the comparison was accidentally true and the
+      bug read as a pass. A case that happens to be wrong in the right direction
+      is worse than one that is not tested at all.
+
+- [ ] **`<`, `>`, `<=` and `>=` on floats emit an integer predicate.**
+      The frontend picks the predicate from `$lhs->type->is_signed`, so a float
+      comparison gets `slt`/`sgt`/`sle`/`sge`, but the backend's float
+      comparison table is keyed `lt`/`gt`/`le`/`ge`. The lookup misses, and the
+      emitted opcode is `'set' . undef`:
+      `Use of uninitialized value $fcond{"slt"} in concatenation (.) or string
+      at lib/Brocken/Jenny/Lowerer/X86_64.pm line 2240`. It warns loudly rather
+      than corrupting silently, which is the only reason it was found. The
+      predicate has to be chosen from the operand kind, not from signedness.
+
+- [ ] **Decimal float literals do not parse at all.**
+      `my f64 $t = 3.0;` fails with `Expected ';' after variable declaration`,
+      while `my f64 $t = 3;` parses. The lexer recognises the integer and stops
+      at the `.`, so the whole class of float literals a reader would reach for
+      first is unavailable, and the integer spelling that does work is the one
+      carrying the bug above. Nothing in the test suite uses a decimal literal,
+      which is how a parser that cannot read them went unnoticed.
+
+- [ ] **A negative literal in a float context is a hard error.**
+      `my f64 $t = -3;` lowers unary minus to an instruction rather than folding
+      it, so the value arrives as a computed int and the new coercion refuses
+      it: `Cannot implicitly convert a computed int:64 to float:64`. It used to
+      miscompile quietly, so the error is an improvement, but a negative float
+      literal is ordinary code and folding `-` applied to a constant into the
+      constant is the whole fix.
+
+- [ ] **There is no integer-to-float conversion instruction.**
+      `my f64 $t = $i;` where `$i` is an `i32` is refused, because the IR has
+      `zext`/`sext`/`trunc`/`ptrcast` and no `sitofp`, and none of the four
+      backends has a lowering for one. Storing integer bits through a float slot
+      is wrong for everything past 2**52, so refusing it is right, but it does
+      mean an int cannot be assigned to a float at all. Wasm already has the
+      instruction (`f64.convert_i32_s`) if the native side ever grows one.
+
+- [ ] **AArch64 and RISCV64 cannot pass arguments on the stack at all.** This is
+      what the seven ARM64 CI failures actually are: all of `3298_stack_args.t`,
+      plus the eight-field constructor in `3297_entry_shuffle.t`. Only the x86-64
+      lowerer and codegen gained the machinery -- capturing past the register
+      count in the entry block, storing the overflow at the call, reserving the
+      outgoing area at the frame bottom, and the entry bias for the loads. The
+      ARM64 and RISCV64 lowerers have none of it, and their ABI classes inherit
+      `stack_param_offset` from the base, which returns `undef`. Both ABIs use
+      eight integer registers and no shadow space, so the offsets are the SysV
+      ones (callee `8 + 8i`, caller `8i`), but the frame work has to be redone
+      per backend, including the same raw-stack-base trap that x86-64 hit: on
+      these the base is `sp`, and it must stay out of the interval model.
 
 - [x] **Wasm could not compile any program that declares a local variable.**
       Every frontend program with at least one `my` local was rejected by the
