@@ -442,12 +442,19 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         };
     }
 
-    method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0 ) {
+    # `$mem_src` names the opcodes the calling backend can encode with a memory
+    # operand as the source, so a spilled source does not have to be reloaded
+    # into a temp first. It has to be passed in rather than assumed: the form is
+    # an x86 addressing mode, and the other backends resolve every source through
+    # a register, so handing one of them a `mem` operand is not a fallback but a
+    # crash. A backend that lists nothing gets a temp reload for every spilled
+    # source, which is always correct and is why this is a list and not a flag.
+    method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0, $mem_src = [] ) {
         return unless $spill_slots && keys %$spill_slots;
         my $load_op     = $is_float ? 'fload'  : 'load';
         my $store_op    = $is_float ? 'fstore' : 'store';
         my %reads_dst   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not);
-        my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
+        my %can_mem_src = map { $_ => 1 } $mem_src->@*;
 
         # `spill_temp` is the reserved temp pool. A plain string is accepted so
         # a caller holding only the single-temp result still works.
@@ -537,8 +544,10 @@ class Brocken::Jenny::RegAlloc::LinearScan {
 
                 # A destination that the instruction also reads has to keep its
                 # old value somewhere the write will not destroy, which is a
-                # second temp holding the same offset.
-                my $needs_old_d = $d_sp && $reads_dst{$opcode} && $d_k == $base_k;
+                # second temp holding the same offset. With no spilled base
+                # there is no temp to collide with, so the destination's own
+                # temp is still good.
+                my $needs_old_d = $d_sp && $reads_dst{$opcode} && defined $base_k && $d_k == $base_k;
                 my $old_k       = $d_k;
                 if ($needs_old_d) {
 

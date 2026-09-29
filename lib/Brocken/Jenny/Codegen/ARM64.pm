@@ -124,9 +124,9 @@ class Brocken::Jenny::Codegen::ARM64 {
         my $mf      = $lowerer->lower($ir_func);
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
-        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0 );
+        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0, $self->_mem_source_opcodes );
         my $fp_res = $alloc->allocate( $mf, $platform, 1 );
-        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1 );
+        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1, $self->_mem_source_opcodes );
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
         my %skip;
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
@@ -174,9 +174,9 @@ class Brocken::Jenny::Codegen::ARM64 {
             }
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
             my $int_res = $alloc->allocate( $mf, $platform, 0 );
-            $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0 );
+            $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0, $self->_mem_source_opcodes );
             my $fp_res = $alloc->allocate( $mf, $platform, 1 );
-            $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1 );
+            $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1, $self->_mem_source_opcodes );
             my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
             my %skip;
             @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
@@ -216,9 +216,9 @@ class Brocken::Jenny::Codegen::ARM64 {
     method _emit_single_mf($mf) {
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
-        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0 );
+        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0, $self->_mem_source_opcodes );
         my $fp_res = $alloc->allocate( $mf, $platform, 1 );
-        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1 );
+        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1, $self->_mem_source_opcodes );
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
         my %skip;
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
@@ -1280,6 +1280,12 @@ class Brocken::Jenny::Codegen::ARM64 {
         }
         return ( $bytes, \@func_fixups );
     }
+
+    # AArch64 has no register-plus-memory form for these: an add/sub/logical
+    # instruction names its source in a register field, so a `mem` operand does
+    # not encode at all. A spilled source is reloaded into a temp instead,
+    # which the reserve in `spill_temp_count` covers.
+    method _mem_source_opcodes { [] }
 
     method _compute_spill_frame( $mf, $stack_reg ) {
         my $max_disp = 0;
