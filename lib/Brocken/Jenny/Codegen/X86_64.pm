@@ -1155,6 +1155,35 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'C', $rex ) if $did >= 8 || $sid >= 8;
                     $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                 }
+                elsif ( $opcode eq 'fptosi' ) {
+
+                    # CVTTSD2SI / CVTTSS2SI: the double- and single-precision
+                    # forms differ only in the mandatory prefix, and both
+                    # truncate toward zero rather than rounding, which is what a
+                    # cast is. The destination is a GPR and the source an XMM, so
+                    # the registers come from two different allocator pools and
+                    # the ModRM is register-to-register with no memory form.
+                    my $dst_r = $resolve->($dst);
+                    my $src_r = $resolve->($src);
+                    my $did   = $reg_id->($dst_r);
+                    my $sid   = $reg_id->($src_r);
+                    my $sbits = $src->type ? $src->type->bits : 64;
+                    my $dbits = $dst->type ? $dst->type->bits : 64;
+
+                    # REX.W is what widens the destination to 64 bits; without it
+                    # the same opcode is the 32-bit form. REX.B extends the XMM
+                    # source, which is a register number and not a general
+                    # register, so it is bit 0 here as in the moves above.
+                    my $rex = 0x40 | ( $dbits >= 64 ? 8 : 0 ) | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                    my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+
+                    # Prefix first, REX second: see the `fmov` case above. A REX
+                    # byte in front of the F2/F3 is discarded, which would leave
+                    # the destination at 32 bits and the value truncated to fit.
+                    $bytes .= pack( 'C', $sbits >= 64 ? 0xF2 : 0xF3 );
+                    $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                    $bytes .= pack( 'CCC', 0x0F, 0x2C, $modrm );
+                }
                 elsif ( $opcode eq 'fcmp' ) {
                     my $dst_r = $resolve->($dst);
                     my $src_r = $resolve->($src);
@@ -1390,6 +1419,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $bytes .= pack( 'C',   POP_BASE + 5 );        # pop rbp
                         $bytes .= pack( 'C',   RET_BYTE );
                     }
+                }
+                else {
+                    die "Brocken::Jenny::Codegen::X86_64: no encoder for MIR opcode '$opcode'";
                 }
             }
         }

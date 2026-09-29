@@ -898,6 +898,24 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', FMV_D_X | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                     }
                 }
+                elsif ( $opcode eq 'fptosi' ) {
+
+                    # FCVT.L.S / FCVT.L.D and their 32-bit counterparts, which
+                    # round toward zero rather than to nearest even, so a cast is
+                    # not a rounding. funct3 is fixed at 7 for every float to
+                    # integer conversion and the destination width rides in rs2,
+                    # which is why rs2 is the field that is not a register here.
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $sbits = $src->type ? $src->type->bits : 64;
+                    my $dbits = $dst->type ? $dst->type->bits : 64;
+                    my $funct7 = 0x60 | ( $sbits > 32 ? 1 : 0 );
+                    my $enc = ( $funct7 << 25 ) | ( $sid << 15 ) | ( 7 << 12 ) | ( $did << 7 ) | FP_OP;
+                    $enc |= ( $dbits > 32 ? 2 : 0 ) << 20;
+                    $bytes .= pack( 'V', $enc );
+                }
                 elsif ( $opcode eq 'fcmp' ) {
                     my ( $result, $lhs, $rhs ) = $inst->operands->@*;
                     my $rd   = $reg_id->( $resolve->($result) );
@@ -1060,6 +1078,9 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         }
                     }
                     $bytes .= pack( 'V', JALR );
+                }
+                else {
+                    die "Brocken::Jenny::Codegen::RISCV64: no encoder for MIR opcode '$opcode'";
                 }
             }
         }

@@ -1905,6 +1905,22 @@ class Brocken::Jenny::Lowerer::Wasm {
                         );
                     }
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Fptosi') ) {
+
+                    # Wasm names all four combinations separately and the
+                    # mnemonic carries both widths, so the choice is made here
+                    # rather than in the encoder. `_s` is the signed form, the
+                    # counterpart of `fptosi`; the `_u` mnemonics in this range
+                    # reinterpret instead of convert and would read the IEEE
+                    # pattern as an unsigned integer.
+                    my ($val)    = $inst->operands->@*;
+                    my $src_bits = $val->type ? $val->type->bits : 64;
+                    my $dst_bits = $inst->type ? $inst->type->bits : 64;
+                    my $op = ( $dst_bits > 32 ? 'i64_trunc_f' : 'i32_trunc_f' ) . ( $src_bits > 32 ? '64' : '32' ) . '_s';
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'fptosi val' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'fptosi' ) );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') ) {
                     my ($val)    = $inst->operands->@*;
                     my $src_bits = $val->type ? $val->type->bits : 64;

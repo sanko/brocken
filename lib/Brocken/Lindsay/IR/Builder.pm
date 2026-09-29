@@ -95,6 +95,23 @@ class Brocken::Lindsay::IR::Builder {
         );
         return $insert_block->append_inst($inst);
     }
+
+    # A float reaching an integer slot is a computation, not a relabelling: the
+    # two hold different bits, so this cannot be the pointer/int mirror above.
+    # Without it the float's IEEE pattern was stored verbatim into the integer
+    # slot and the reload read it back as a large number that happened to end in
+    # zero -- a silent answer rather than a wrong-looking one.
+    method build_fptosi( $val, $target_type, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::Fptosi->new(
+            name        => $name // $self->_next_id(),
+            type        => $target_type,
+            opcode      => 'fptosi',
+            target_type => $target_type,
+            operands    => [$val],
+            parent      => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
     method build_udiv( $lhs, $rhs, $name = undef ) { $self->build_binop( 'udiv', $lhs, $rhs, $name ) }
     method build_urem( $lhs, $rhs, $name = undef ) { $self->build_binop( 'urem', $lhs, $rhs, $name ) }
 

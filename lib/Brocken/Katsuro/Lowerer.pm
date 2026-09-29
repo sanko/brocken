@@ -942,6 +942,25 @@ class Brocken::Katsuro::Lowerer {
                 unless $val->isa('Brocken::Lindsay::IR::Constant');
             return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value );
         }
+
+        # Float -> integer, the mirror of the case above and unlike it: the two
+        # hold different bits, so nothing here is a relabelling. Reaching this
+        # point at all meant the float was stored verbatim into an integer slot
+        # and read back as its IEEE pattern -- `my f64 $t = 3; my i64 $i = $t`
+        # left $i holding 0x4008000000000000, whose low byte is 0, so a program
+        # that only looked at the answer saw a plausible zero rather than an
+        # obviously wrong number.
+        if ( $val->type->kind eq 'float' && $target_type->kind eq 'int' ) {
+
+            # A literal is folded here rather than left for the instruction. A
+            # float constant holds a plain Perl number, and the integer it names
+            # is that number truncated toward zero, which is what every backend
+            # instruction does anyway.
+            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => int( $val->value ) );
+            }
+            return $builder->build_fptosi( $val, $target_type );
+        }
         $val;
     }
 

@@ -1660,6 +1660,17 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         )
                     );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Fptosi') ) {
+                    my ($val) = $inst->operands->@*;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'fptosi',
+                            operands => [ $dst, $self->_materialize( $mbb, $val ) ],
+                            comment  => 'fptosi ' . ( $val->name // $val->value )
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::PtrCast') ) {
 
                     # A pointer and an address-sized integer are the same bits,

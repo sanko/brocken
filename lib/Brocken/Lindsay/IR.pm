@@ -174,6 +174,15 @@ class Brocken::Lindsay::IR::Instruction::PtrCast : isa(Brocken::Lindsay::IR::Ins
     }
 }
 
+class Brocken::Lindsay::IR::Instruction::Fptosi : isa(Brocken::Lindsay::IR::Instruction) {
+    field $target_type : reader : param;
+
+    method render() {
+        my $val = $self->operands->[0];
+        return sprintf '  %s = fptosi %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $target_type->as_string;
+    }
+}
+
 class Brocken::Lindsay::IR::Instruction::Incref : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
