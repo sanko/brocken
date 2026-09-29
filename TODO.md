@@ -488,22 +488,29 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       object, one passed to a class method, the per-function keying, and the two
       negative cases — all on both native and Wasm. Regression:
       `1080_class_params.t`.
-- [ ] **A `:reader` is registered after the explicit methods that call it, so
-      `$self->field()` dies inside a method.** `generate_class_runtime` lowers
-      the explicit methods (the loop at `Lowerer.pm:157-160`) before the
-      `:reader` methods are generated (`162-169`), so `$self->x()` inside a
-      declared method fails with "Undefined method 'x' in class 'P'" — the
-      reader is in `$functions` only afterwards. The same class compiles fine if
-      it has no explicit method, and `$obj->x()` works from outside, which is
-      what makes it look like the reader is missing rather than merely late.
-      This is a pass-ordering bug in `generate_class_runtime`, not a class-typing
-      one, and it predates the class-parameter work above — the annotation fix
-      does not reach it. Fixing it means registering every method (readers,
-      writers, the constructor, then the explicit ones) before lowering any
-      method body, rather than interleaving registration and lowering. Left open
-      deliberately: it is a separate change, and it is the reason the
-      class-parameter test covers a field access and an outside reader call but
-      not `$self->x()` from inside a declared method.
+- [x] **A `:reader` is registered after the explicit methods that call it, so
+      `$self->field()` dies inside a method.** `generate_class_runtime` lowered
+      the explicit methods in the same loop that registered them, and the
+      `:reader` methods were only registered further down. `lower_method`
+      resolves a callee through `$functions` and returns silently if the name is
+      not there yet, so `$self->x()` inside a declared method was lowered against
+      a class that had no `x` yet: "Undefined method 'x' in class 'P'". The same
+      class compiled fine with no explicit method, and `$obj->x()` worked from
+      outside, which is what made it look like the reader was missing rather
+      than merely late. Bare `$x` was never affected — that is a field GEP
+      pre-populated by `populate_field_geps`, so it never consults `$functions` —
+      which is what made it easy to miss. Fixed by splitting
+      `generate_class_runtime` into a registration pass and a lowering pass:
+      every method the class can have (ADJUST, declared methods, readers,
+      writers, constructor) is registered first, and only then is any body
+      lowered, so a body can reach every method of its own class regardless of
+      the order bodies are lowered in. A declared method also now wins over a
+      generated accessor of the same name, so a later registration cannot
+      overwrite `$functions` and leave two functions sharing one name.
+      Verified: a method calling one reader, two readers, its own writer, and
+      another declared method, a call and a field read agreeing, ADJUST ordering,
+      a class with no fields, and the no-collision case — on native and Wasm.
+      Regression: `1085_self_reader_calls.t`.
 - [x] **Wasm declares one 64KB page but the runtime is told the heap is 1MB —
       for the object allocator.** `Linker::Wasm` emits `1 page, no maximum` while
       `Katsuro::Lowerer` passes `0x100000` as the heap size to `Runtime::_init`,
