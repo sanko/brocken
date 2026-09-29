@@ -666,12 +666,22 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       AArch64, `FCVT.W.S`/`FCVT.L.S` on RISCV64, and
       `i32/i64.trunc_f32/f64_s` on Wasm. The AArch64 and RISCV64 encodings were
       checked instruction by instruction against `aarch64-linux-gnu-as` and
-      `riscv64-linux-gnu-as`, since nothing here can run either target. The
-      truncation direction is pinned by the tests with negative values: -3.5 has
-      to become -3 and not -4. A float constant is folded to its truncated
-      integer here rather than left for the instruction, which the same test
-      covers. `3302_float_to_int.t`, and all 16 of its cases fail with the
-      lowering reverted.
+      `riscv64-linux-gnu-as`, since nothing here can run either target. Wasm
+      turns out to be runnable after all -- `wasmtime` is not in the WSL path,
+      but it is on Windows, which is why the two platforms report a different
+      test count -- and running it was worth the detour, because the Wasm
+      lowering had no `local_set`. Every value on that backend lives in a local,
+      so the truncation computed its result onto the stack and nothing stored it;
+      the function returned the uninitialised local 0 and the module still
+      validated. `3303_wasm_float_to_int.t` builds the four combinations through
+      the IR, since the frontend folds a constant conversion before it reaches a
+      backend, and runs them.
+
+      The truncation direction is pinned with negative values, so -3.5 has to
+      become -3 and not -4, and a float constant is folded to its truncated
+      integer here rather than left for the instruction. `3302_float_to_int.t`
+      covers both on the host, and all 16 of its cases fail with the lowering
+      reverted.
 
       The three native opcode dispatch chains also gained a terminal `else` that
       dies. A `fptosi` that reached a backend without an encoder emitted nothing

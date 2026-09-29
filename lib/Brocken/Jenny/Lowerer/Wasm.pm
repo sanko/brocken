@@ -1916,10 +1916,13 @@ class Brocken::Jenny::Lowerer::Wasm {
                     my ($val)    = $inst->operands->@*;
                     my $src_bits = $val->type ? $val->type->bits : 64;
                     my $dst_bits = $inst->type ? $inst->type->bits : 64;
+                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     my $op = ( $dst_bits > 32 ? 'i64_trunc_f' : 'i32_trunc_f' ) . ( $src_bits > 32 ? '64' : '32' ) . '_s';
                     $mbb->add_instruction( $self->_wasm_push( $val, 'fptosi val' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'fptosi' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') ) {
                     my ($val)    = $inst->operands->@*;
