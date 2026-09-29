@@ -4,7 +4,17 @@ package Test2::Tools::Brocken v0.0.1 {
     use Test2::API qw[context];
     use Carp       qw[croak];
     use File::Temp;
-    our @EXPORT = qw[run_exec temp_path];
+    our @EXPORT = qw[run_exec temp_path run_cross cross_available];
+
+    # Where the cross libc for each non-native target lives. These come from the
+    # libc6-<arch>-cross packages, which put the loader and shared objects under
+    # a triple-prefixed directory; qemu needs that as its -L root to find the
+    # interpreter the linker wrote into the binary.
+    my %SYSROOT = (
+        aarch64 => '/usr/aarch64-linux-gnu',
+        riscv64 => '/usr/riscv64-linux-gnu',
+    );
+    my %QEMU = ( aarch64 => 'qemu-aarch64', riscv64 => 'qemu-riscv64' );
     my $TMPDIR;
 
     sub temp_path ($basename) {
@@ -12,6 +22,50 @@ package Test2::Tools::Brocken v0.0.1 {
         my $dir = $TMPDIR->dirname;
         $dir =~ s/\\/\//g;
         return $dir . '/' . $basename;
+    }
+
+    # The command prefix needed to run a binary built for $platform on this host,
+    # or undef if it is native or there is nothing to run it with. Both qemu and
+    # the cross sysroot have to be present, since a binary that links against
+    # libc.so.6 cannot start without the matching loader even under emulation.
+    sub cross_runner ($platform) {
+        return undef unless $platform;
+        my $arch = $platform->arch;
+        return undef if $platform->is_native;
+        my $qemu    = $QEMU{$arch}   // return undef;
+        my $sysroot = $SYSROOT{$arch} // return undef;
+        return undef unless -x _which($qemu);
+        return undef unless -e $sysroot;
+        return [ $qemu, '-L', $sysroot ];
+    }
+
+    sub cross_available ($platform) { return !!cross_runner($platform) }
+
+    sub _which ($name) {
+        for my $dir ( split /:/, ( $ENV{PATH} // '' ) ) {
+            my $p = $dir . '/' . $name;
+            return $p if -x $p;
+        }
+        return undef;
+    }
+
+    # Compile $src for $platform, run it, and check the exit code. Returns the
+    # exit status, or undef if the target cannot be run here, so a caller can
+    # skip rather than fail. The exit code is the program's answer, so the same
+    # program compiles for every target and each reports its own verdict.
+    sub run_cross ( $src, $platform, %args ) {
+        require Brocken;
+        require Brocken::Compiler;
+        my $runner = cross_runner($platform) // return undef;
+        my $name   = $args{name} // ( 'Run ' . $platform->friendly );
+
+        my $brocken = Brocken->new( platform => $platform );
+        my $module  = eval { Brocken::Compiler->new->compile($src) };
+        croak "run_cross: compile failed for $platform: $@" if $@;
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/cross' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $platform );
+        return run_exec( $file, %args, runner => $runner, name => $name );
     }
 
     sub run_exec ( $file, %args ) {
@@ -23,6 +77,7 @@ package Test2::Tools::Brocken v0.0.1 {
         my $do_gdb   = $args{gdb}  // 0;
         my $keep     = $args{keep} // 0;
         my $argv     = $args{args} // [];
+        my $runner   = $args{runner} // [];
         my $ctx      = context();
         my $cmd      = $file;
         my $actual;
@@ -50,7 +105,7 @@ package Test2::Tools::Brocken v0.0.1 {
             eval {
                 local $SIG{ALRM} = sub { die "timeout\n" };
                 alarm $TIMEOUT;
-                system( $cmd, @$argv );
+                system( @$runner, $cmd, @$argv );
                 alarm 0;
             };
             if ( $@ && $@ eq "timeout\n" ) {

@@ -511,7 +511,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $resolve = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
             return $op->value                                if $op->kind eq 'phys_reg';
-            die "Unexpected operand kind: ${\$op->kind}";
+            die "Unexpected operand kind: " . $op->kind;
         };
         my %labels;
         my @fixups;

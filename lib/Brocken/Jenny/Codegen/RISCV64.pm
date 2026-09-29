@@ -19,6 +19,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         FMV_W_X        => 0xF0000000,
         FMV_D_X        => 0xF2000000,
         FP_FMT         => 0x02000000,
+        FP_FUNCT3      => 0b111,
         OP_IMM         => 0x13,
         OP             => 0x33,
         LOAD           => 0x03,
@@ -962,7 +963,12 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $bits   = $dst->type ? $dst->type->bits : 64;
                     my %fop5   = ( fadd => 0x00, fsub => 0x01, fmul => 0x02, fdiv => 0x03 );
                     my $funct5 = $fop5{$opcode};
-                    my $enc    = ( $funct5 << 27 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $did << 7 ) | FP_OP;
+
+                    # funct3 is 111 on every R-type floating point op. Leaving it
+                    # at zero decodes as fsgnj instead, which silently discards the
+                    # arithmetic and keeps only the sign, so fadd.d came out as a
+                    # sign-injection and the result was always wrong.
+                    my $enc = ( $funct5 << 27 ) | ( $sid << 20 ) | ( $did << 15 ) | ( FP_FUNCT3 << 12 ) | ( $did << 7 ) | FP_OP;
                     $enc |= FP_FMT if $bits > 32;
                     $bytes .= pack( 'V', $enc );
                 }
@@ -994,7 +1000,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
                     my $bits  = $dst->type ? $dst->type->bits : 64;
-                    my $enc   = FSQRT | ( $sid << 15 ) | ( $did << 7 ) | FP_OP;
+                    my $enc   = FSQRT | ( $sid << 15 ) | ( FP_FUNCT3 << 12 ) | ( $did << 7 ) | FP_OP;
                     $enc |= FP_FMT if $bits > 32;
                     $bytes .= pack( 'V', $enc );
                 }
