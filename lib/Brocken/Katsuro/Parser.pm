@@ -445,7 +445,18 @@ class Brocken::Katsuro::Parser {
 
     method nud($token) {
         if ( $token->{type} eq 'NUM' ) {
-            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => $token->{value}, type => 'Int' );
+
+            # The lexer decides int from float, because by the time a decimal
+            # point or an exponent has been consumed there is nothing left to
+            # tell them apart here. A float literal arrives as f64 and a
+            # narrower slot re-tags the constant, so `my f32 $t = 1.5;` does
+            # not store eight bytes into a four-byte slot. The value is a plain
+            # Perl number from here on: the token holds the spelling, and
+            # `1e3` has to be 1000 rather than the string.
+            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token),
+                value => $token->{float} ? 0 + $token->{value} : $token->{value},
+                type  => $token->{float} ? 'f64' : 'Int',
+            );
         }
         if ( $token->{type} eq 'STRING' ) {
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => $token->{value}, type => 'String' );

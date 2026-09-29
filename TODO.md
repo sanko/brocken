@@ -623,13 +623,37 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       for the ABI in use; a single high-register case would have been enough to
       catch it but would not have said which encoders share the fault.
 
-- [ ] **Decimal float literals do not parse at all.**
-      `my f64 $t = 3.0;` fails with `Expected ';' after variable declaration`,
-      while `my f64 $t = 3;` parses. The lexer recognises the integer and stops
-      at the `.`, so the whole class of float literals a reader would reach for
-      first is unavailable, and the integer spelling that does work is the one
-      carrying the bug above. Nothing in the test suite uses a decimal literal,
-      which is how a parser that cannot read them went unnoticed.
+- [x] **Decimal float literals do not parse at all.** `my f64 $t = 3.0;` failed
+      with `Expected ';' after variable declaration` while `my f64 $t = 3;`
+      parsed: the lexer recognised the integer and stopped at the `.`, so the
+      whole class of float literals a reader reaches for first was unavailable.
+      Nothing in the suite used one, which is how a parser that cannot read them
+      went unnoticed.
+
+      The lexer is the only place that can tell an integer from a float, because
+      by the time a point or an exponent has been consumed there is nothing left
+      to tell them apart, so the token carries the answer and the parser tags
+      the constant. Digits after the point are required, so `1..2` still lexes
+      as an integer and the `..` range, and an exponent may stand alone --
+      `1e9` has no point in it and is a float for the same reason.
+
+      A literal is f64, and that produced a second fault rather than fixing the
+      first: `my f32 $a = 1.5;` stored an f64 into a four-byte slot, and
+      `if ($a == 1.5)` compared an f32 against an f64. On the native backends
+      that was silent, and on Wasm it was a module the validator rejected
+      (`type mismatch: expected f32, found f64`) -- so a test that only ran
+      natively would have called this fixed. The literal takes the width of
+      whatever it meets: a constant re-tags, since each backend packs it at the
+      width its type asks for, and that is also where the rounding to f32
+      happens. Two loaded values of different widths have no answer, since the
+      IR has no fpext or fptrunc, and that now says so instead of miscompiling.
+
+      `3309_decimal_literals.t` runs each program natively and under wasmtime.
+      The values are chosen so a re-interpretation cannot pass: 16777217.0 is
+      representable in f64 and not f32, 0.1 + 0.2 is checked to within a
+      hundredth rather than for equality, and 2**53+1 stays an exact integer,
+      which is what would fail if the lexer had begun tagging every numeric
+      token as a float.
 
 - [x] **A negative value in a float context is a hard error.** This read as a hole
       rather than a rule, because the neighbouring case worked: `my f64 $t = -$i;`

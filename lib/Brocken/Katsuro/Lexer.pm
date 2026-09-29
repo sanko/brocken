@@ -50,9 +50,23 @@ class Brocken::Katsuro::Lexer v0.0.1 {
             }
 
             # 3. Match Numbers
-            if ( $remaining =~ /^(\d+)/ ) {
-                my $val = $1;
-                push @tokens, $self->_token( 'NUM', $val );
+            #
+            # A decimal point or an exponent makes it a float, and the lexer is
+            # the only place that can know: it used to match the digits and stop
+            # at the '.', so `my f64 $t = 3.0;` reached the parser as the integer
+            # 3, a '.', and a 0, and the whole class of float literals a reader
+            # reaches for first was unavailable.
+            #
+            # The digits after the point are required, so `1..2` still lexes as
+            # the integer 1 and the `..` range rather than as a malformed `1.`.
+            # An exponent may stand on its own -- `1e9` -- which is how it is
+            # written everywhere else. A float is always f64; the parser tags
+            # the token and a narrower slot re-tags the constant, so there is no
+            # untyped float to carry through the IR.
+            if ( $remaining =~ /^(\d+\.\d+(?:[eE][+-]?\d+)?|\d+[eE][+-]?\d+|\d+)/ ) {
+                my $val      = $1;
+                my $is_float = $val =~ /\.\d/ || $val =~ /[eE]/;
+                push @tokens, $self->_token( 'NUM', $val, $is_float );
                 $self->_advance_pos( length($val) );
                 next;
             }
@@ -95,8 +109,8 @@ class Brocken::Katsuro::Lexer v0.0.1 {
         return \@tokens;
     }
 
-    method _token( $type, $val ) {
-        return { type => $type, value => $val, line => $line, col => $col, };
+    method _token( $type, $val, $float = 0 ) {
+        return { type => $type, value => $val, line => $line, col => $col, ( $float ? ( float => 1 ) : () ) };
     }
 
     method _advance_pos($count) {
