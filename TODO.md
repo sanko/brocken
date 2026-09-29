@@ -656,22 +656,36 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
 
       Found while narrowing down the slot bug below, which is masked by it: a
       three-local float sum read back through an integer always compared equal
-      to zero, so the first symptom pointed here.
+      to zero, so the first symptom pointed here. Fixing the slot did not clear
+      it -- a single local still converts to 0 -- so the two are separate and the
+      one below was not what was hiding this.
 
-- [ ] **Two live f64 locals can be given the same stack slot.**
-      `my f64 $a = 1; my f64 $b = 2; my f64 $c = 3; if ($b == 2)` is false:
-      `$b` reads back 3.0, the value of `$c`. The last store to the shared slot
-      wins, so the two locals are aliases and any expression naming both is
-      reading one value twice. `a + b + c` gives 7.0, not 6.0.
+- [x] **Two live f64 locals can be given the same stack slot.**
+      `my f64 $a = 1; my f64 $b = 2; my f64 $c = 3; if ($b == 2)` was false:
+      `$b` read back 3.0, the value of `$c`. `a + b + c` gave 7.0, not 6.0.
 
-      It needs three simultaneously live f64 locals to show, and two work
+      It needs three simultaneously live f64 locals to show, and two worked
       correctly, which is why the arithmetic tests in `3299_float_literals.t`
-      pass -- they either use one local or add literals. It is not a spill bug
-      in the usual sense: the values fit in registers, so this is the frame slot
-      assignment giving two live locals the same offset rather than the spill
-      logic confusing two virtual registers. Nothing warns. An address-taken
-      local or one live across a call is the case to compare against, since those
-      are the paths that were expected to need a slot at all.
+      passed -- they either use one local or add literals.
+
+      It was not the frame slot assignment. The pre-allocation MIR was right,
+      the live intervals were right, and the scan separated the two locals
+      correctly. What happened is that a float constant reaches an XMM register
+      as its bit pattern in a GPR, and MOVD/MOVQ from R8-R15 is wrong on AMD
+      Zen 4, so the workaround parks the GPR in memory and reads the XMM back
+      from there. It named that parking place as a literal `rsp+0x20`, which is
+      where the second local is put: outgoing arguments sit at the frame bottom,
+      then the locals, then the spill and caller-save area. Storing through it
+      overwrote the local with the bit pattern being moved, so the local read
+      back as whichever constant was moved last. Two locals stayed clear of it
+      by luck, which is why the two-local cases never showed it.
+
+      The slot is now reserved at the top of the alloca area, above every local,
+      and addressed with a displacement the frame is sized to hold. The sweep in
+      `3301_float_locals.t` runs three locals up to twelve for f32 and f64 and
+      names the offending local by its exit status; twelve also pushes the slot
+      past what a one-byte displacement can express, so the wide form of the
+      addressing is covered too.
 
       Found by the arity sweep in `3300_float_params.t` growing into a local
       sweep: the sweep that found the REX fault hid this one, because a function
