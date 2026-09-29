@@ -729,6 +729,26 @@ class Brocken::Katsuro::Lowerer {
                 $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
             }
         }
+        # An integer literal on one side of a float operation is the same
+        # under-the-hood-the-same-number case as an initializer, and the same
+        # reasoning applies: re-tag the literal rather than convert it. Without
+        # this the operands reach the backend as float:64 and int:64 and the
+        # wider operand decides the width, so `$t + 1` compared and added an
+        # i64 against an f64. Re-tagging the literal to the float type puts both
+        # sides in the same domain before the instruction.
+        if ( $lhs->type->kind eq 'float' xor $rhs->type->kind eq 'float' ) {
+            my $float_side = $lhs->type->kind eq 'float' ? $lhs : $rhs;
+            my $int_side   = $lhs->type->kind eq 'float' ? $rhs : $lhs;
+            if ( $int_side->isa('Brocken::Lindsay::IR::Constant') && $int_side->type->kind eq 'int' ) {
+                my $retagged = Brocken::Lindsay::IR::Constant->new( type => $float_side->type, value => $int_side->value );
+                $int_side = $retagged;
+            }
+            else {
+                Carp::croak( "Cannot apply a float operation to a computed int operand; cast it explicitly" );
+            }
+            ( $lhs, $rhs ) = $lhs->type->kind eq 'float' ? ( $lhs, $int_side ) : ( $int_side, $rhs );
+        }
+
         return $builder->build_add( $lhs, $rhs ) if $op eq '+';
         return $builder->build_sub( $lhs, $rhs ) if $op eq '-';
         return $builder->build_mul( $lhs, $rhs ) if $op eq '*';
@@ -897,6 +917,23 @@ class Brocken::Katsuro::Lowerer {
         # Pointer -> integer, the mirror image: `-> i64` returning a pointer.
         if ( $val->type->kind eq 'ptr' && $target_type->kind eq 'int' ) {
             return $builder->build_ptrcast( $val, $target_type );
+        }
+
+        # Integer -> float. A literal reaching a float slot is not a number that
+        # needs converting, it is the same number under a different tag, so
+        # re-tagging *is* the conversion. This has to happen: the backends pack
+        # a float-typed constant with pack('d'/'f'), but fell back to packing the
+        # raw integer for an int-typed one, so `my f64 $t = 3` stored eight
+        # zero-extended bytes and the reload read them back as a denormal.
+        if ( $val->type->kind eq 'int' && $target_type->kind eq 'float' ) {
+            # A *computed* int gets no such deal. The IR has no int-to-float
+            # instruction yet, and storing integer bits through a float slot is
+            # wrong for everything past 2**52, so fail loudly instead of
+            # miscompiling quietly.
+            Carp::croak( "Cannot implicitly convert a computed int:" . $val->type->bits . " to " .
+                $target_type->kind . ":" . $target_type->bits . "; cast it explicitly" )
+                unless $val->isa('Brocken::Lindsay::IR::Constant');
+            return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value );
         }
         $val;
     }
