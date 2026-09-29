@@ -41,6 +41,17 @@ use feature               qw[class];
 #    anything) also has to survive the rebuild of the entry block: it is
 #    emitted unchanged, and dropping it would take a parameter with it.
 #
+# 4. The floating-point register the scheduler parks a cycle in was the
+#    allocator's own spill temp, which is taken from the caller-saved set. On
+#    AArch64 that set is v0-v7, and v0-v7 are also where the floating-point
+#    arguments arrive. Parking there destroys an argument a later capture still
+#    has to read, so the scheduler saw the collision and declined -- leaving the
+#    copies in the order they were written, which shifts every argument into
+#    its neighbour's value. Only the arguments the body reads are wrong, so
+#    this shows up from the third onward: with two there is nothing to shift
+#    into. The register now comes from v16-v31, which are neither allocated
+#    here nor among the argument registers.
+#
 # The last group is here because it is the same test at a different arity, and
 # because the fix for it lives in the same place as the others.
 
@@ -67,6 +78,53 @@ return g( @{[ join ', ', @args ]} );
 BROCKEN
         is( run($src), 42, "native: f64 parameter(s) in registers, $n of $fp_args" );
     }
+
+    # Past the last argument register the parameters arrive on the stack, and a
+    # literal one has to be put there. Two faults met here.
+    #
+    # A literal was materialized through a floating-point scratch the allocator
+    # picked, and the caller-save set is the argument registers, so the scratch
+    # could be handed the very register an earlier argument had just been given:
+    # the seventh float argument took one the third was sitting in, and the
+    # callee read it back twice. Nothing in the arguments was out of place at
+    # the call, so only the callee -- reading what the caller wrote -- could
+    # see it.
+    #
+    # The stack slot holds the same bits an argument register would, so the
+    # literal is stored straight from a general register and needs no
+    # floating-point register at all. The width of the store comes from the
+    # operand's type, which is why the scratch carries the float's own width:
+    # four bytes for an f32, eight for an f64.
+    #
+    # The parameters are compared one at a time rather than summed, so an
+    # argument that arrives as its neighbour is named rather than summed away.
+    for my $n ( $fp_args + 1, $fp_args + 2 ) {
+        my @params = map { "f64 \$v$_" } 0 .. $n - 1;
+        my @args   = map { $_ + 1 } 0 .. $n - 1;
+        my $all    = join ' && ', map { "\$v$_ == " . ( $_ + 1 ) } 0 .. $n - 1;
+        my $src    = <<"BROCKEN";
+sub g( @{[ join ', ', @params ]} ) -> i64 { if ($all) { return 42; } return 1; }
+return g( @{[ join ', ', @args ]} );
+BROCKEN
+        is( run($src), 42, "native: f64 parameter(s) with $n on the stack" );
+    }
+
+    # An f32 as the argument that overflows, so the narrower store is covered on
+    # the stack path as well as in a register. The float parameters before it
+    # fill the argument registers, which is what puts this one on the stack --
+    # with only a handful of arguments it would still be a register and the
+    # narrow store would never be emitted.
+    my @wide  = map { "f64 \$v$_" } 0 .. $fp_args - 1;
+    my @wides = map { $_ + 1 } 0 .. $fp_args - 1;
+    my $wide  = join ' && ', map { "\$v$_ == " . ( $_ + 1 ) } 0 .. $fp_args - 1;
+    my $stack_f32 = <<"BROCKEN";
+sub g( @{[ join ', ', @wide ]}, f32 \$z ) -> i64 {
+    if ($wide && \$z == @{[ $fp_args + 1 ]}) { return 42; }
+    return 1;
+}
+return g( @{[ join ', ', @wides ]}, @{[ $fp_args + 1 ]} );
+BROCKEN
+    is( run($stack_f32), 42, 'native: f32 on the stack behind a full set of f64 parameters' );
 
     # A float that arrived in a register, compared against a literal. The
     # operand is the result of a call in every case, so this is the read side
