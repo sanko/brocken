@@ -736,6 +736,28 @@ class Brocken::Katsuro::Lowerer {
         # wider operand decides the width, so `$t + 1` compared and added an
         # i64 against an f64. Re-tagging the literal to the float type puts both
         # sides in the same domain before the instruction.
+        # Two floats of different widths, which a decimal literal brings in:
+        # `my f32 $a = 1.5;` stores an f32 and `if ($a == 1.5)` compares it
+        # against the f64 the literal defaults to. The int case above covers
+        # ints; this is its float counterpart, and without it the comparison
+        # reached Wasm as an f32 against an f64 and the validator rejected the
+        # module. There is no fpext or fptrunc in the IR, so this only works
+        # for a literal -- but that is the case that exists, since without a
+        # decimal literal there was no way to write a float constant at all.
+        if ( $lhs->type->kind eq 'float' && $rhs->type->kind eq 'float' && $lhs->type->bits != $rhs->type->bits ) {
+            my $is_const = sub { $_[0]->isa('Brocken::Lindsay::IR::Constant') };
+            Carp::croak( "Cannot compare a " . $lhs->type->bits . "-bit float against a " . $rhs->type->bits .
+                "-bit one; the IR has no float width conversion, so at least one of them has to be a literal" )
+                unless $is_const->($lhs) || $is_const->($rhs);
+            # The literal takes the width of the value it is compared against.
+            # That direction is the only one available -- the other side is a
+            # loaded value, and there is no instruction to widen or narrow it --
+            # and it is the rule an integer literal already follows below.
+            ( $lhs, $rhs ) = $is_const->($lhs)
+                ? ( Brocken::Lindsay::IR::Constant->new( type => $rhs->type, value => $lhs->value ), $rhs )
+                : ( $lhs, Brocken::Lindsay::IR::Constant->new( type => $lhs->type, value => $rhs->value ) );
+        }
+
         if ( $lhs->type->kind eq 'float' xor $rhs->type->kind eq 'float' ) {
             my $float_side = $lhs->type->kind eq 'float' ? $lhs : $rhs;
             my $int_side   = $lhs->type->kind eq 'float' ? $rhs : $lhs;
@@ -995,6 +1017,21 @@ class Brocken::Katsuro::Lowerer {
                 return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => int( $val->value ) );
             }
             return $builder->build_fptosi( $val, $target_type );
+        }
+
+        # Float width, which is what a decimal literal runs into: it arrives as
+        # f64, and `my f32 $t = 1.5;` would otherwise store eight bytes into a
+        # four-byte slot. A *literal* is again not a number that needs
+        # converting -- the constant holds a plain Perl number and each backend
+        # packs it at the width its type asks for -- so re-tagging is the whole
+        # conversion, and it is also where the rounding to f32 happens.
+        if ( $val->type->kind eq 'float' && $target_type->kind eq 'float' ) {
+            return $val if $val->type->bits == $target_type->bits;
+            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value );
+            }
+            Carp::croak( "No float-to-float conversion from " . $val->type->bits . " bits to " . $target_type->bits .
+                "; the IR has no fptrunc or fpext, and a float of one width cannot be stored in a slot of the other" );
         }
         $val;
     }
