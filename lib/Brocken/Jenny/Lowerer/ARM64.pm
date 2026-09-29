@@ -3243,7 +3243,15 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         else {
                             my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
                             my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
-                            my $val      = $self->_lower_opnd( $args[$i] );
+
+                            # A float argument has to arrive in an S or D register,
+                            # and a literal does not have one: fmov moves
+                            # register to register only, so passing the immediate
+                            # straight through left the encoder resolving an imm
+                            # operand as a register number. _materialize is what
+                            # gives a float constant a home first, by loading its
+                            # bit pattern into a GPR and moving that across.
+                            my $val = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => $is_float ? 'fmov' : 'mov',

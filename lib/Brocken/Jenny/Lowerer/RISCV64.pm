@@ -2735,7 +2735,14 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         else {
                             my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
                             my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
-                            my $val      = $self->_lower_opnd( $args[$i] );
+                            # A float argument has to arrive in an f register,
+                            # and a literal does not have one: fmov is
+                            # register to register only, so passing the immediate
+                            # straight through left the encoder resolving an imm
+                            # operand as a register number. _materialize gives a
+                            # float constant a home first, by loading its bit
+                            # pattern into a GPR and moving that across.
+                            my $val = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => $is_float ? 'fmov' : 'mv',
@@ -2816,6 +2823,22 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                     opcode   => 'mv',
                                     operands => [ $a1, $hi ],
                                     comment  => '=> a1 (i128 hi)'
+                                )
+                            );
+                        }
+                        elsif ( $val->type && $val->type->kind eq 'float' ) {
+
+                            # A float comes back in fa0, not a0. Falling through to
+                            # the integer move below copied the return address
+                            # into a0 instead and left fa0 holding whatever the
+                            # last operation happened to leave there, so every
+                            # callee that returned a float handed back garbage.
+                            my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->fp_return_register );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'fmov',
+                                    operands => [ $fp_ret, $self->_materialize( $mbb, $val ) ],
+                                    comment  => '=> ' . $abi->fp_return_register
                                 )
                             );
                         }
