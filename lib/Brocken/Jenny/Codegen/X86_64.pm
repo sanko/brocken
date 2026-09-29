@@ -38,9 +38,9 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $mf      = $lowerer->lower($ir_func);
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
-        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0 );
+        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0, $self->_mem_source_opcodes );
         my $fp_res = $alloc->allocate( $mf, $platform, 1 );
-        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1 );
+        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1, $self->_mem_source_opcodes );
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
 
         # Caller-save: save/restore caller regs around call_func (exclude return registers)
@@ -95,9 +95,9 @@ class Brocken::Jenny::Codegen::X86_64 {
             }
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
             my $int_res = $alloc->allocate( $mf, $platform, 0 );
-            $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0 );
+            $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0, $self->_mem_source_opcodes );
             my $fp_res = $alloc->allocate( $mf, $platform, 1 );
-            $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1 );
+            $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1, $self->_mem_source_opcodes );
             my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
             my %skip;
             @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
@@ -144,9 +144,9 @@ class Brocken::Jenny::Codegen::X86_64 {
     method _emit_single_mf($mf) {
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
-        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0 );
+        $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temps}, $platform->stack_reg, 0, $self->_mem_source_opcodes );
         my $fp_res = $alloc->allocate( $mf, $platform, 1 );
-        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1 );
+        $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temps}, $platform->stack_reg, 1, $self->_mem_source_opcodes );
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
         my %skip;
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
@@ -1344,6 +1344,12 @@ class Brocken::Jenny::Codegen::X86_64 {
         }
         return ( $bytes, \@func_fixups );
     }
+
+    # Opcodes this backend can encode with a memory operand as the source, so
+    # a spilled source is read straight out of its slot instead of through a
+    # reload into a temp. x86 folds the address into the instruction's ModRM
+    # byte, so the form is free and worth having.
+    method _mem_source_opcodes { [qw(add sub adc sbb and or xor cmp)] }
 
     method _compute_spill_frame( $mf, $stack_reg ) {
         my $max_disp = 0;
