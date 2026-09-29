@@ -24,8 +24,13 @@ use feature               qw[class];
 # Every program returns 0 when it agrees with itself and a distinct nonzero code
 # otherwise, so the same source compiles for all three targets and each one
 # reports its own verdict. The exit code is the assertion.
+#
+# x86-64 is the control. It needs no qemu, and it is the only one of the three
+# with stack-argument support, so a fault that shows up on the other two and not
+# on this one is about the missing machinery rather than about the program.
 
 my @TARGETS = (
+    [ 'x86_64-unknown-linux-gnu',   'x86-64' ],
     [ 'aarch64-unknown-linux-gnu', 'aarch64' ],
     [ 'riscv64-unknown-linux-gnu', 'riscv64' ],
 );

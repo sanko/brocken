@@ -33,8 +33,14 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     if ($is_i128) {
                         my $lo_reg_name = $gp_regs[ $gp_idx++ ];
                         my $hi_reg_name = $gp_regs[ $gp_idx++ ];
-                        my $lo_reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
-                        my $hi_reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
+
+                        # An i128 takes two registers, so it can run past the end
+                        # one step earlier than a scalar would.
+                        die "Parameter $i of " . ( $ir_func->name // '?' ) . " needs two registers on ARM64; "
+                            . "stack arguments are not implemented for this target"
+                            unless defined $hi_reg_name;
+                        my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                        my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
                         my $lo_dst      = Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'virt_reg',
                             value => $param->name . '_lo',
@@ -62,8 +68,15 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     }
                     else {
                         my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
-                        my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
-                        my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
+
+                        # The callee side of the same gap as the call site: a
+                        # parameter past the last argument register has nowhere to
+                        # be read from.
+                        die "Parameter $i of " . ( $ir_func->name // '?' ) . " has no register on ARM64; "
+                            . "stack arguments are not implemented for this target"
+                            unless defined $reg_name;
+                        my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
+                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param->name, type => $param->type );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => $is_float ? 'fmov' : 'mov',
@@ -3242,7 +3255,15 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         }
                         else {
                             my $reg_name = $is_float ? $fp_regs[ $fp_idx++ ] : $gp_regs[ $gp_idx++ ];
-                            my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
+
+                            # Past the last argument register there is nowhere to put
+                            # the value: this backend has no stack-argument support
+                            # yet, so say which argument ran out rather than emitting
+                            # a move from an undefined register name.
+                            die "Argument $i of @" . ( $callee->name // '?' ) . " has no register on ARM64; "
+                                . "stack arguments are not implemented for this target"
+                                unless defined $reg_name;
+                            my $reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
 
                             # A float argument has to arrive in an S or D register,
                             # and a literal does not have one: fmov moves
