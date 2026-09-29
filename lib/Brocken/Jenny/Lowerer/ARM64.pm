@@ -3366,13 +3366,10 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     # Forward order, as before.  x86-64 emits these in reverse so
                     # arg0 lands last, but that relies on its allocator keeping a
                     # later argument's virt_reg off the register arg0 is written
-                    # to.  Here a float literal is materialized through a scratch
-                    # register the allocator picks, and in reverse order that
-                    # scratch is chosen after the argument registers are already
-                    # spoken for, so it landed on the register an earlier argument
-                    # had just been written to and overwrote it.  Forward order
-                    # lets the scratch be picked while the argument registers are
-                    # still free.
+                    # to.  Here a float literal is materialized straight into the
+                    # argument register it belongs to (see _place_float_constant),
+                    # so the order no longer decides which registers are still
+                    # free when something is materialized.
                     for my $i ( 0 .. $#args ) {
                         my $arg_type = $args[$i]->type;
                         my $is_float = $arg_type  && $arg_type->kind eq 'float';
@@ -3404,21 +3401,43 @@ class Brocken::Jenny::Lowerer::ARM64 {
 
                                 # The store encoder only understands a register
                                 # source, so an integer literal is put in one
-                                # first.  A float literal goes through the
-                                # floating-point materializer instead, which gives
-                                # it a register holding the value rather than the
-                                # bit pattern, and the slot carries the argument's
-                                # type so `fstore` writes its full width.
-                                my $val = $is_float
-                                    ? $self->_materialize( $mbb, $args[$i] )
-                                    : $self->_reg_opnd( $mbb, $args[$i], "arg_stack$i" );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => $is_float ? 'fstore' : 'store',
-                                        operands => [ $slot->( $off, $ftype ), $val ],
-                                        comment  => "arg $i to stack+$off"
-                                    )
-                                );
+                                # first.  A computed float needs a floating-point
+                                # register to be loaded from, and the slot carries
+                                # the argument's type so `fstore` writes its full
+                                # width.
+                                if ( $is_float && $args[$i]->isa('Brocken::Lindsay::IR::Constant') ) {
+
+                                    # A float *literal* does not: the stack slot
+                                    # holds the same bits the register would, so
+                                    # the pattern is stored straight out of the
+                                    # general register _place_float_constant built
+                                    # it in.  That is not only shorter, it is the
+                                    # only way to reach a floating-point register
+                                    # here that is safe -- the caller's argument
+                                    # registers are written by explicit moves the
+                                    # allocator cannot see, so a scratch it picked
+                                    # itself could land on one of them, and the
+                                    # ninth float argument took the register a
+                                    # seventh had just been given.  The width
+                                    # comes from the store operand's type, and
+                                    # both the ELF, PE and Mach-O targets this
+                                    # backend emits for are little-endian, which
+                                    # is what puts the pattern in the slot in the
+                                    # order a float load would read it back.
+                                    $self->_place_float_bits( $mbb, $args[$i], $slot->( $off, undef ) );
+                                }
+                                else {
+                                    my $val = $is_float
+                                        ? $self->_materialize( $mbb, $args[$i] )
+                                        : $self->_reg_opnd( $mbb, $args[$i], "arg_stack$i" );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => $is_float ? 'fstore' : 'store',
+                                            operands => [ $slot->( $off, $ftype ), $val ],
+                                            comment  => "arg $i to stack+$off"
+                                        )
+                                    );
+                                }
                             }
                         }
                         elsif ($is_i128) {
@@ -3449,17 +3468,35 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             # and a literal does not have one: fmov moves
                             # register to register only, so passing the immediate
                             # straight through left the encoder resolving an imm
-                            # operand as a register number. _materialize is what
-                            # gives a float constant a home first, by loading its
-                            # bit pattern into a GPR and moving that across.
-                            my $val = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => $is_float ? 'fmov' : 'mov',
-                                    operands => [ $reg, $val ],
-                                    comment  => "arg $i to $reg_name"
-                                )
-                            );
+                            # operand as a register number.
+                            if ( $is_float && $args[$i]->isa('Brocken::Lindsay::IR::Constant') ) {
+
+                                # ... and a literal is placed directly in the
+                                # register the argument goes to, rather than in a
+                                # floating-point scratch that a following `fmov`
+                                # then copies across.  The scratch was a virtual
+                                # register, so the allocator chose it from the
+                                # same pool as everything else and it could land
+                                # on the register an earlier argument had already
+                                # been given: three float arguments all
+                                # materialized through v1, and the third left 3.0
+                                # in v1 where 2.0 belonged, so the callee read the
+                                # wrong argument.  Naming the destination removes
+                                # the choice.  A non-constant keeps the scratch,
+                                # because there is nothing to place and the move
+                                # is the whole job.
+                                $self->_place_float_constant( $mbb, $args[$i], $reg );
+                            }
+                            else {
+                                my $val = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => $is_float ? 'fmov' : 'mov',
+                                        operands => [ $reg, $val ],
+                                        comment  => "arg $i to $reg_name"
+                                    )
+                                );
+                            }
                         }
                     }
                     $mbb->add_instruction(
@@ -4505,6 +4542,58 @@ class Brocken::Jenny::Lowerer::ARM64 {
             return $fp;
         }
         return $self->_lower_opnd($ir_val);
+    }
+
+    # The bit pattern of a float constant, built in a general register and moved
+    # straight across into $dest.  This is _materialize without the
+    # floating-point scratch: $dest is a register the caller already knows it
+    # wants (an argument register, say), so nothing is left for the allocator to
+    # pick and there is no chance of the pick landing on a register another
+    # instruction is relying on.  The GPR scratch is still a virtual register, but
+    # it is the same one _materialize uses, and its lifetime is the two
+    # instructions here.
+    method _place_float_constant( $mbb, $ir_val, $dest ) {
+        state $fc = 0;
+        my $bits        = $ir_val->type->bits;
+        my $value       = $ir_val->value;
+        my $bit_pattern = $bits >= 64 ? unpack( 'Q', pack( 'd', $value ) ) : unpack( 'V', pack( 'f', $value ) );
+        my $gp_type     = Brocken::Lindsay::IR::Type::i64();
+        my $gp          = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%fmcfp_gp_' . $fc++, type => $gp_type );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $gp, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $bit_pattern, type => $gp_type ) ],
+                comment  => 'fmc: bit pattern'
+            )
+        );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fmov_gp2f', operands => [ $dest, $gp ], comment => 'fmc: gp->fp' ) );
+    }
+
+    # A float constant's bit pattern, built in a general register and stored
+    # straight to a stack slot, for the argument that the register set cannot
+    # carry.  A memory slot holds the same bits an FP register would, so this
+    # needs no floating-point register at all -- see the call site for why that
+    # matters.  The scratch is typed to the float's own width so the store
+    # instruction comes out 4 bytes for an f32 and 8 for an f64.
+    method _place_float_bits( $mbb, $ir_val, $mem ) {
+        state $fc = 0;
+        my $bits        = $ir_val->type->bits;
+        my $value       = $ir_val->value;
+        my $bit_pattern = $bits >= 64 ? unpack( 'Q', pack( 'd', $value ) ) : unpack( 'V', pack( 'f', $value ) );
+        my $gp_type     = $bits >= 64
+            ? Brocken::Lindsay::IR::Type::i64()
+            : Brocken::Lindsay::IR::Type::i32();
+        my $gp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%fmcfp_gp_' . $fc++, type => $gp_type );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $gp, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $bit_pattern, type => $gp_type ) ],
+                comment  => 'fmc: bit pattern'
+            )
+        );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'store', operands => [ $mem, $gp ], comment => 'fmc: bits to stack' ) );
     }
 
     method _lower_opnd($ir_val) {
