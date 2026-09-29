@@ -14,19 +14,16 @@ use feature qw[class];
 # CPU executed "mov rax, rcx" and divided an uninitialised register. The
 # operands here are deliberately shaped so the allocator picks r8/r9, and each
 # binary is run repeatedly because the original failure was nondeterministic.
-
 my @CASES = (
-    { name => 'x / y',      src => 'my i64 $x = 12; my i64 $y = 3; return $x / $y;',  want => 4 },
-    { name => 'y / x',      src => 'my i64 $x = 12; my i64 $y = 3; return $y / $x;',  want => 0 },
-    { name => '100 / 7',    src => 'my i64 $x = 100; my i64 $y = 7; return $x / $y;', want => 14 },
-    { name => '100 % 7',    src => 'my i64 $x = 100; my i64 $y = 7; return $x % $y;', want => 2 },
-    { name => '84 / 5',     src => 'my i64 $x = 84; my i64 $y = 5; return $x / $y;',   want => 16 },
-    { name => '84 / 7',     src => 'my i64 $x = 84; my i64 $y = 7; return $x / $y;',   want => 12 },
+    { name => 'x / y',            src => 'my i64 $x = 12; my i64 $y = 3; return $x / $y;',           want => 4 },
+    { name => 'y / x',            src => 'my i64 $x = 12; my i64 $y = 3; return $y / $x;',           want => 0 },
+    { name => '100 / 7',          src => 'my i64 $x = 100; my i64 $y = 7; return $x / $y;',          want => 14 },
+    { name => '100 % 7',          src => 'my i64 $x = 100; my i64 $y = 7; return $x % $y;',          want => 2 },
+    { name => '84 / 5',           src => 'my i64 $x = 84; my i64 $y = 5; return $x / $y;',           want => 16 },
+    { name => '84 / 7',           src => 'my i64 $x = 84; my i64 $y = 7; return $x / $y;',           want => 12 },
     { name => '1000000 / 100000', src => 'my i64 $x = 1000000; my i64 $y = 100000; return $x / $y;', want => 10 },
 );
-
 my $RUNS = 8;
-
 for my $case (@CASES) {
     subtest $case->{name} => sub {
         my $brocken = Brocken->new();
@@ -46,5 +43,4 @@ for my $case (@CASES) {
         }
     };
 }
-
 done_testing;

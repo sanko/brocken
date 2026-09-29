@@ -1,0 +1,49 @@
+=head1 NAME
+
+Brocken::Target::OS::MacOS - macOS target
+
+=head1 DESCRIPTION
+
+The macOS target, a subclass of L<Brocken::Target::OS>.
+
+It is POSIX and BSD-derived as far as the rest of the codebase is concerned, its shared libraries use the C<.dylib>
+extension, and it has no executable extension. It overrides two methods for AArch64, where macOS differs from every
+other target.
+
+=head1 THE SYSCALL NUMBERS COME FROM THE BASE CLASS
+
+Worth stating because it is surprising. The C<write> and C<exit> numbers for macOS are 0x2000004 and 0x2000001, which
+is the C<SYSCALL_CLASS_MACH> base of 0x2000000 plus 4 and 1. Those are provided by the base class, which special-cases
+the name C<macos>, and they are the same on all three architectures. This subclass does not override C<syscall_write>
+or C<syscall_exit>.
+
+=head1 METHODS
+
+=head2 C<syscall_num_reg( $arch )>
+
+Returns the name of the register that carries the syscall number, overriding the base class only for AArch64, where it
+returns C<x16> rather than C<x8>.
+
+Apple's userland interposes the syscall trampoline, and C<x16> is the register the kernel entry path expects on that
+architecture. Every other architecture is delegated to the base class, so x86-64 gives C<rax> and RISC-V gives C<a7>.
+
+=head2 C<page_size( $arch )>
+
+Returns the page size in bytes, overriding the base class only for AArch64, where it returns 16384. Every other
+architecture is delegated to the base class, which returns 4096.
+
+    $os->page_size( 'x64' );     # 4096
+    $os->page_size( 'arm64' );   # 16384
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

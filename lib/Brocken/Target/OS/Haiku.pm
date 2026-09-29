@@ -42,7 +42,7 @@ class Brocken::Target::OS::Haiku : isa(Brocken::Target::OS) {
             }
         }
         if ( !$num ) {
-            my $fallbacks = { '_kern_write' => 131, '_kern_exit_team' => 33, };
+            my $fallbacks = { _kern_write => 131, _kern_exit_team => 33 };
             $num = $fallbacks->{$name} // 0;
         }
         return $cache{$key} = $num;

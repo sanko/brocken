@@ -7,7 +7,7 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # Integer literals used where a float is expected.
 #
@@ -48,19 +48,12 @@ use feature               qw[class];
 # Decimal literals (`my f64 $t = 3.0;`) are not used either: the parser rejects
 # them outright, which is a separate gap. Writing the literal as an integer is
 # currently the only way to say it, and is exactly the case that was broken.
-
 my $brocken = Brocken->new;
-
 SKIP: {
     skip 'Not native', 1 unless $brocken->platform->is_native;
-
     my @cases = (
-        [   'f64 local initialised from an integer literal',
-            q|sub f() -> i64 { my f64 $t = 3; if ($t == 3) { return 42; } return 1; } return f();|
-        ],
-        [   'f32 local initialised from an integer literal',
-            q|sub f() -> i64 { my f32 $t = 3; if ($t == 3) { return 42; } return 1; } return f();|
-        ],
+        [ 'f64 local initialised from an integer literal', q|sub f() -> i64 { my f64 $t = 3; if ($t == 3) { return 42; } return 1; } return f();| ],
+        [ 'f32 local initialised from an integer literal', q|sub f() -> i64 { my f32 $t = 3; if ($t == 3) { return 42; } return 1; } return f();| ],
 
         # A value past 2**52, where the integer and floating-point bit patterns
         # differ in more than the exponent. A fix that only got the *width*
@@ -88,17 +81,15 @@ SKIP: {
             q|sub g(f64 $a) -> i64 { if ($a == 3) { return 42; } return 1; } sub f() -> i64 { my f64 $t = 3; return g($t); } return f();|
         ],
     );
-
     for my $case (@cases) {
         my ( $name, $src ) = $case->@*;
         is( run($src), 42, "native: $name" );
     }
 }
-
 done_testing;
 
 sub run {
-    my ($src) = @_;
+    my ($src)  = @_;
     my $module = Brocken::Compiler->new->compile($src);
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = $brocken->tmpdir . '/fatlit' . $brocken->ext;

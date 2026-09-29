@@ -1,0 +1,286 @@
+=head1 NAME
+
+Brocken::Target::OS - Operating system targets, syscall numbers, and file naming
+
+=head1 DESCRIPTION
+
+This is the base class of the C<Brocken::Target::OS::*> hierarchy. An instance names an operating system and answers
+the questions the backends ask about it: is it POSIX, does it use syscalls, what are the syscall numbers on a given
+architecture, and what should an executable or library be called.
+
+Each supported operating system is a subclass that inherits everything it does not need to change, so C<Linux> and
+C<FreeBSD> are a subclass that only checks its own name. Only macOS, NetBSD, and Haiku override any of the answers.
+
+=head2 Naming
+
+Two spellings of DragonFly BSD are accepted, C<dragonfly> and C<dragonflybsd>, and both produce a
+C<Brocken::Target::OS::Dragonfly>. The longer spelling is what perl's C<$^O> reports, and the bare one is what this
+codebase used historically, so C<detect_host> maps the long spelling down to the short one. Either way the syscall
+numbers resolve, which matters because C<is_bsd_like> is anchored at both ends: an unanchored C<dragonfly> alternative
+would report false for C<dragonflybsd> and hand out the wrong syscall numbers.
+
+=head2 Syscall numbers
+
+C<write> and C<exit> are the only two syscalls the generated code needs, and they are the only two that are tabulated.
+The table varies by system in interesting ways:
+
+=over
+
+=item * macOS numbers are offset by the C<SYSCALL_CLASS_MACH> base of
+0x2000000, so C<write> is 0x2000004 and C<exit> is 0x2000001. The base
+class supplies these for every architecture, since macOS uses one numbering.
+
+=item * Linux is the only system whose numbers differ between architectures:
+C<write> is 1 on x86-64 but 64 on both AArch64 and RISC-V, and C<exit> is 60
+on x86-64 but 93 on both. The two 64-bit Linux architectures happen to agree.
+
+=item * Every BSD-derived system, which here means macOS, FreeBSD, OpenBSD,
+NetBSD, DragonFly, MidnightBSD, and Solaris, uses the same 4 and 1, so
+C<is_bsd_like> is what the syscall lookups actually test.
+
+=item * Haiku uses its B<kernel> calls rather than POSIX calls, and its
+numbers come from C<_kern_write> and C<_kern_exit_team>. See C<haiku_syscall>.
+
+=item * Windows has no syscall numbers. Both methods return C<undef>, because
+the Windows backend calls the C API rather than making system calls directly.
+C<uses_syscalls> is false, and this is the reason: C<is_posix> is the test
+that decides it.
+
+=back
+
+An unrecognised architecture returns C<undef> for C<syscall_num_reg>, except on macOS and NetBSD, which are described
+below. Callers are expected to handle C<undef> rather than assuming a register name is always available.
+
+=head2 Architecture-dependent differences
+
+C<syscall_num_reg> is the register that holds the syscall number. It is usually C<rax> on x86-64, C<x8> on AArch64, and
+C<a7> on RISC-V, but there are two exceptions:
+
+=over
+
+=item * On macOS AArch64 it is C<x16>, not C<x8>. Apple's userland
+interposes the trampoline, and C<x16> is the register the kernel entry path
+expects.
+
+=item * On NetBSD AArch64 it is C<undef>, because NetBSD passes the syscall
+number on the stack rather than in a register on that architecture.
+
+=back
+
+C<page_size> is 4096 everywhere except macOS AArch64, which uses 16384. C<$arch> is accepted for symmetry with the
+other methods but the value does not depend on it, and the base class ignores it.
+
+=head1 SUBCLASSES
+
+Ten subclasses, one per supported operating system. All are constructed with a C<name> parameter and C<from_name> is
+the normal way to get one.
+
+Every subclass re-checks in its own C<ADJUST> block that it was given the name it stands for, so C<<
+Brocken::Target::OS::Linux->new( name => 'macos' ) >> dies rather than quietly producing a Linux object with a macOS
+name. That check runs second, though. C<ADJUST> blocks run from the base class down, so the base class validates the
+name against its list first and an outright invalid name never reaches the subclass. C<< ...->new( name => 'darwin' )
+>> on C<MacOS> therefore dies with C<Invalid OS: darwin> from C<Brocken::Target::OS>, while C<name =E<gt> 'macos'> on
+C<Linux> gets past the base and dies with C<OS name mismatch> from C<Linux>. Both die; the message tells you which
+layer objected.
+
+=over
+
+=item C<Brocken::Target::OS::Linux>
+
+=item C<Brocken::Target::OS::FreeBSD>
+
+=item C<Brocken::Target::OS::OpenBSD>
+
+=item C<Brocken::Target::OS::Solaris>
+
+=item C<Brocken::Target::OS::MidnightBSD>
+
+=item C<Brocken::Target::OS::Win64>
+
+=item C<Brocken::Target::OS::Dragonfly>
+
+These inherit every answer. C<Dragonfly> is the one that accepts both spellings, and it is the only one of these whose
+C<ADJUST> uses a pattern rather than an equality test.
+
+=item C<Brocken::Target::OS::MacOS>
+
+Overrides C<syscall_num_reg> and C<page_size> for AArch64, as described above. Everything else, including the syscall
+numbers, comes from the base class, which special-cases the name C<macos>.
+
+=item C<Brocken::Target::OS::NetBSD>
+
+Overrides C<syscall_num_reg> to return C<undef> on AArch64. Note that its C<write> and C<exit> numbers are still 4 and
+1, so it is only the register that is unavailable.
+
+=item C<Brocken::Target::OS::Haiku>
+
+Replaces the whole syscall layer. See below.
+
+=back
+
+=head1 HAIKU
+
+Haiku does not expose a POSIX system call interface, and its numbers are not fixed constants, so the subclass looks
+them up. C<syscall_write> and C<syscall_exit> forward to the same underlying routine, C<haiku_syscall>, passing the
+C<_kern_> name of the entry point rather than C<write> or C<exit>.
+
+C<haiku_syscall> disassembles C</boot/system/lib/libroot.so> with C<objdump>, finds the named symbol, and reads the
+syscall number out of the instruction that loads it. The register that holds the number is the same one
+C<syscall_num_reg> reports, so the per-architecture branches read C<%rax> on x86-64, C<x8> on AArch64, and C<a7> on
+RISC-V.
+
+Two details are worth knowing when reading it. The result is cached in a lexical C<%cache> keyed on the symbol name and
+the architecture, because the disassembly is expensive and the numbers do not change while the process runs. And if the
+disassembly yields nothing, which it will on any machine that is not Haiku, or has no C<objdump>, or cannot read
+libroot, the lookup falls back to a hardcoded table of 131 for C<_kern_write> and 33 for C<_kern_exit_team>. A symbol
+that is not in the fallback table gets 0.
+
+That is why C<haiku_syscall> returns 131 and 33 when called on a Linux development machine. The fallback is the useful
+path off Haiku, and the disassembly is the authority on Haiku. The base class returns C<undef> from C<haiku_syscall>
+for every system, so calling it on a non-Haiku object is distinguishable from calling it on a Haiku one.
+
+Haiku's C<write_syscall_args> also differs in shape, because the kernel call takes a file descriptor as an argument.
+C<write> on the other systems needs only the buffer and the length, so the buffer goes in the first of the two
+registers and the length in the second. Haiku's C<_kern_write> needs a file descriptor first, so the descriptor is
+loaded as -1 for the standard output and everything shifts up one register.
+
+=head1 METHODS
+
+=head2 C<new( name =E<gt> $name )>
+
+Constructs the object, defaulting to the base class. Normally you want C<from_name> instead, which picks the right
+subclass.
+
+Dies unless C<$name> is one of C<linux>, C<win64>, C<macos>, C<freebsd>, C<openbsd>, C<netbsd>, C<solaris>,
+C<dragonfly>, C<dragonflybsd>, C<midnightbsd>, or C<haiku>.
+
+=head2 C<name()>
+
+Returns the operating system name, the same string that was passed to C<new>. This is a field reader.
+
+=head2 C<is_posix()>
+
+Returns true for every system except C<win64>.
+
+=head2 C<is_bsd_like()>
+
+Returns true for C<macos>, C<freebsd>, C<openbsd>, C<netbsd>, C<dragonfly>, C<dragonflybsd>, C<midnightbsd>, and
+C<solaris>, and false for C<linux>, C<haiku>, and C<win64>.
+
+The pattern is anchored at both ends, which is what lets the same match accept both DragonFly spellings without the
+shorter one matching inside a longer name.
+
+Returns 1 or 0, so it is safe to use in a list.
+
+=head2 C<uses_syscalls()>
+
+Returns true if the system uses system calls directly, which is the same as C<is_posix>. This is the question the
+backends actually ask, and it is false on Windows, which is why C<syscall_write> returns C<undef> there rather than a
+number nobody would use.
+
+=head2 C<exe_ext()>
+
+Returns the executable extension, including the dot. C<.exe> on C<win64> and the empty string everywhere else.
+
+=head2 C<lib_ext()>
+
+Returns the shared library extension, including the dot. C<.dll> on C<win64>, C<.dylib> on C<macos>, and C<.so> on
+everything else.
+
+=head2 C<exe_name( $base )>
+
+Returns the name to give an executable built from C<$base>. This is C<./$base.exe> on C<win64> and C<./$base>
+elsewhere. Note the leading C<./>: the result is intended to be run directly from the shell, not to be opened as a
+path.
+
+=head2 C<lib_name( $base )>
+
+Returns the name to give a shared library built from C<$base>, which is C<$base> with the extension from C<lib_ext>
+appended and no C<./> prefix.
+
+=head2 C<syscall_write( $arch )>
+
+Returns the C<write> syscall number for the given architecture, which is one of the strings C<x64>, C<arm64>, or
+C<riscv64>. See L</Syscall numbers> for the table. Returns C<undef> on C<win64> and for an architecture it does not
+recognise.
+
+=head2 C<syscall_exit( $arch )>
+
+Returns the C<exit> syscall number for the given architecture, using the same architecture names and the same C<undef>
+cases as C<syscall_write>.
+
+=head2 C<syscall_num_reg( $arch )>
+
+Returns the name of the register that carries the syscall number, as a string, so the backends can emit the right
+C<mov> instruction. Returns C<undef> for an unrecognised architecture, and also for AArch64 on macOS and NetBSD, which
+pass the number differently. See L</Architecture-dependent differences>.
+
+=head2 C<page_size( $arch )>
+
+Returns the page size in bytes, 4096 everywhere except macOS AArch64, which uses 16384. C<$arch> is required
+positionally for symmetry with the other methods but the base implementation does not vary by architecture.
+
+=head2 C<write_syscall_args( $as, $arch, $data_rva, $off, $text_rva, $len )>
+
+Loads the arguments for a C<write> of C<$len> bytes into an architecture-appropriate set of registers, using the
+assembler object C<$as>.
+
+The buffer address is formed with C<lea_rva> as C<$data_rva + $off>, rebased from the text segment at C<$text_rva>, and
+the length is loaded with C<mov_imm>. Which registers those are is the only thing that varies:
+
+=over
+
+=item * AArch64 puts the buffer in C<x1> and the length in C<x2>.
+
+=item * RISC-V puts the buffer in C<a1> and the length in C<a2>.
+
+=item * x86-64 puts the buffer in C<rsi> and the length in C<rdx>.
+
+=back
+
+Haiku overrides this to load a file descriptor first, which is described in L</HAIKU>.
+
+=head2 C<haiku_syscall( $name, $arch =E<gt> 'x64' )>
+
+Resolves a Haiku C<_kern_> entry point to its syscall number. C<$name> is the symbol name, such as C<_kern_write>, and
+C<$arch> is optional and defaults to C<x64>. Returns the number, which is looked up in L</HAIKU> and falls back to a
+fixed table.
+
+Returns C<undef> in the base class, so this is a no-op on every other system.
+
+=head1 CLASS METHODS
+
+=head2 C<from_name( $name )>
+
+Constructs the right object for C<$name> and returns it. Recognised names are the ones listed in the C<new>
+documentation; C<dragonfly> and C<dragonflybsd> both give a C<Brocken::Target::OS::Dragonfly>.
+
+Dies on an unrecognised name, which comes from the C<ADJUST> block rather than from a lookup failure, so the error is
+C<Invalid OS: $name>.
+
+This is the only constructor most callers need:
+
+    my $os = Brocken::Target::OS->from_name( 'linux' );
+    my $ext = $os->exe_ext;
+
+=head2 C<detect_host()>
+
+Returns the object for the operating system this process is running on, by mapping C<$^O> through C<from_name>.
+
+The mapping is the interesting part. C<MSWin32> and C<cygwin> both become C<win64>, C<darwin> becomes C<macos>, and
+C<dragonflybsd> becomes C<dragonfly> because of the regex match rather than an equality test. Anything the C<$^O> tests
+do not match, which includes C<aix> and any other system perl can be built on, falls through to C<linux>. That default
+is a guess, not a check.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

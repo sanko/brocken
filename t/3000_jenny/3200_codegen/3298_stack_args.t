@@ -7,7 +7,7 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # Arguments that arrive on the stack.
 #
@@ -29,12 +29,9 @@ use feature               qw[class];
 # the failure starts, and it differs per ABI, so the sweep is derived from the
 # platform rather than hard-coded: six integer registers on SysV, four on Win64,
 # where the shadow space pushes the first stack argument out to offset 32.
-
 my $brocken = Brocken->new;
-
 SKIP: {
     skip 'Not native', 1 unless $brocken->platform->is_native;
-
     my $abi = $brocken->platform->abi;
     my $gp  = scalar $abi->param_registers->@*;
 
@@ -42,12 +39,11 @@ SKIP: {
     # register up to well past it, so a frame that is too small to hold the
     # whole argument block still has to survive.
     for my $n ( $gp + 1 .. $gp + 4 ) {
-        my @params = map { "i64 \$v$_" } 0 .. $n - 1;
+        my @params = map {"i64 \$v$_"} 0 .. $n - 1;
         my @args   = map { $_ + 1 } 0 .. $n - 1;
-        my $sum    = join( ' + ', map { "\$v$_" } 0 .. $n - 1 );
+        my $sum    = join( ' + ', map {"\$v$_"} 0 .. $n - 1 );
         my $total  = 0;
         $total += $_ for @args;
-
         my $free = <<"BROCKEN";
 sub f( @{[ join ', ', @params ]} ) -> i64 { return $sum; }
 if ( f( @{[ join ', ', @args ]} ) == $total ) { return 42; }
@@ -63,10 +59,9 @@ BROCKEN
     # every field store, so it is the first thing to be clobbered.
     for my $n ( $gp .. $gp + 3 ) {
         my @args   = map { $_ + 1 } 0 .. $n - 1;
-        my @fields = map { "field i8 \$f$_ :param :reader;" } 0 .. $n - 1;
-        my $reads = join( "\n", map { "if (\$p->f$_() == " . ( $_ + 1 ) . ") {" } 0 .. $n - 1 )
-            . "\nreturn 42;\n"
-            . join( "\n", map { '}' } 0 .. $n - 1 );
+        my @fields = map {"field i8 \$f$_ :param :reader;"} 0 .. $n - 1;
+        my $reads
+            = join( "\n", map { "if (\$p->f$_() == " . ( $_ + 1 ) . ") {" } 0 .. $n - 1 ) . "\nreturn 42;\n" . join( "\n", map {'}'} 0 .. $n - 1 );
         my $ctor = <<"BROCKEN";
 class P {
     @{[ join "\n", @fields ]}
@@ -84,7 +79,7 @@ BROCKEN
     # value. Mixing the widths is the point: a uniform i64 sweep cannot see it.
     {
         my @params = ( "i8 \$a", "i16 \$b", "i32 \$c" );
-        push @params, map { "i64 \$v$_" } 0 .. 2;
+        push @params, map {"i64 \$v$_"} 0 .. 2;
         push @params, "i8 \$d", "i16 \$e", "i32 \$f";
         my $src = <<"BROCKEN";
 sub mix( @{[ join ', ', @params ]} ) -> i64 {
@@ -106,11 +101,10 @@ BROCKEN
         is( run($src), 42, "native: narrow arguments past the register set" );
     }
 }
-
 done_testing;
 
 sub run {
-    my ($src) = @_;
+    my ($src)  = @_;
     my $module = Brocken::Compiler->new->compile($src);
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = $brocken->tmpdir . '/stackarg' . $brocken->ext;

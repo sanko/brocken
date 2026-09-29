@@ -1,0 +1,112 @@
+=head1 NAME
+
+Brocken::Target::Format::ELF - Writes Linux and BSD ELF object files
+
+=head1 SYNOPSIS
+
+    use Brocken::Target::Format::ELF;
+
+    my $elf = Brocken::Target::Format::ELF->new;
+    $elf->write_bin( 'prog', $code, $data, 'x64' );    # Linux by default
+
+    # or let Brocken::Target choose it
+    use Brocken::Target;
+    my $format = Brocken::Target->for( 'freebsd', 'arm64' )->format;
+
+=head1 DESCRIPTION
+
+Writes 64-bit ELF executables and shared objects. This is the format L<Brocken::Target> selects for every OS that is
+not Windows or macOS, so it covers Linux, the BSDs, Solaris, and Haiku. It is the only subclass of
+L<Brocken::Target::Format> with a private helper.
+
+The writer is self-contained: it lays out the headers, program headers, text, and data itself and does no relocation.
+
+=head1 METHODS
+
+=head2 C<write_bin( $filename, $text, $data, $arch, $os = 'linux' )>
+
+Writes an C<ET_EXEC> executable and returns C<$filename>.
+
+C<$arch> selects the C<e_machine> value: C<'x64'> gives 62, C<'arm64'> gives 183, and C<'riscv64'> gives 243. Anything
+else falls through to the x86-64 value, so an unrecognised architecture does not die; it silently produces an x86-64
+machine header. C<$os> is accepted but not used.
+
+The layout is fixed. The image base is C<0x400000>, text starts at file offset C<0x1000>, and data follows at
+C<0x2000>; both are padded up to a page with zeroes. The entry point is C<0x401000>. The file is three program headers
+(a null C<PT_LOAD>, the executable C<PT_LOAD> for text, and a writable C<PT_LOAD> for data) plus up to two more that
+come from C<_detect_elf_info>. It ends with C<chmod 0755>, so the result is executable.
+
+Before building the headers the method calls C<_detect_elf_info> with no argument, so every executable it writes
+inherits the host's ABI and note segment. See L</CAVEATS>.
+
+=head2 C<write_lib( $filename, $text, $data, $arch, $os, $exports )>
+
+Writes an C<ET_DYN> shared object and returns C<$filename>.
+
+The arguments match C<write_bin>, with C<$exports> a hashref mapping exported symbol names to their offsets within the
+text. The method builds a C<.dynsym> and C<.dynstr> from those names, sorted, and emits C<PT_DYNAMIC> alongside the
+text and data segments. As with C<write_bin>, C<$os> is ignored and the C<$arch> fallback to x86-64 applies.
+
+The result is less complete than the executable path; see L</CAVEATS>.
+
+=head1 PRIVATE METHODS
+
+=head2 C<_detect_elf_info( $ref = undef )>
+
+Not part of the public interface. Reads an existing ELF file and returns a three-element list:
+
+    ( $osabi, $note_data, $has_pintable )
+
+C<$osabi> is the C<EI_OSABI> byte, C<$note_data> is the raw contents of the first C<PT_NOTE> segment, and
+C<$has_pintable> is true if the file contains a C<PT_OPENBSD_PINTABLE> program header (type C<0x65a3dbe9>).
+
+With no argument it tries C</bin/sh>, C</sbin/init>, C</usr/bin/env>, C</boot/system/bin/sh>, and
+C</boot/system/bin/env>, in that order, and uses the first that exists, is readable, and begins with the ELF magic. The
+C</boot/system> paths are the Haiku ones, present so the same code serves a Haiku host where the others are absent.
+Passing C<$ref> restricts the search to that one file.
+
+Both 32- and 64-bit ELF are understood: the field offsets are chosen from C<EI_CLASS>. If nothing usable is found the
+method returns C<(0, '', 0)>.
+
+C<write_bin> uses all three values. C<write_lib> uses only the ABI byte.
+
+=head1 CAVEATS
+
+=head2 Output inherits the build machine's identity
+
+C<write_bin> does not choose the ABI byte or the note segment; it copies them from whatever ELF file
+C<_detect_elf_info> found on the running host. On a typical Linux machine that means every executable produced is
+stamped as System V ABI and carries a copy of the host binary's C<PT_NOTE> segment, which in practice is a GNU build-id
+that has nothing to do with the program just written. C<readelf -n> and C<file> will report that borrowed build-id as
+if it belonged to the new file.
+
+On a host with no readable ELF file the fallback is ABI 0 and no note segment, which is the same ABI a normal Linux
+build would have used anyway.
+
+=head2 The OpenBSD pinning table is copied, with placeholder numbers
+
+When the host file has a C<PT_OPENBSD_PINTABLE> segment, C<write_bin> scans the emitted text for x86-64 C<syscall>
+instructions (C<0F 05>) or AArch64 C<svc> instructions (C<01 00 00 D4>) and emits a pinning entry for each site. The
+pinned syscall numbers it writes are fixed placeholders, 1 and 4, not the numbers the program actually uses. This
+reflects only what the host happened to expose; the maintained pinning logic is in L<Brocken::Jenny::Linker::ELF64>.
+
+=head2 C<write_lib> does not produce a linker-clean file
+
+C<write_lib> emits a section header table, but the table it writes is not consistent enough for common tools:
+C<readelf> reports that the C<PHDR> segment must occur before any C<LOAD> segment and that the section header size is
+corrupt, and C<file> calls the result a PIE executable rather than a shared object. The executable path does not have
+this problem. The production linking path for shared objects is L<Brocken::Jenny::Linker::ELF64>, so this only matters
+if C<write_lib> is called directly.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

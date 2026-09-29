@@ -7,8 +7,7 @@ use Brocken::Jenny;
 use Brocken::Compiler;
 use Test2::Tools::Brocken qw(temp_path);
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
-
+use feature qw[class];
 my $host          = Brocken::Katsuro::Platform::parse();
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
@@ -35,18 +34,16 @@ my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 # Spill slots now come from the shared runtime allocator, whose cursor is seeded
 # once by _BROCKEN_ENTRY and kept in the heap header; the module global only
 # carries the base that allocator is reached through.
-
 sub build_wasm {
     my ( $src, $name ) = @_;
-    my $module = Brocken::Compiler->new->compile($src);
+    my $module  = Brocken::Compiler->new->compile($src);
     my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
-    my $out = temp_path( $name ) . '.wasm';
+    my $out     = temp_path($name) . '.wasm';
     Brocken::Jenny::Linker::Wasm->new->write_executable( $out, $codegen->emit_functions( $module->functions ), $platform );
     return $out;
 }
 
 # --- Structure: checkable without wasmtime ---------------------------------
-
 {
     my $fib = <<'BROCKEN';
 sub fib(i64 $n) -> i64 {
@@ -55,15 +52,14 @@ sub fib(i64 $n) -> i64 {
 }
 return fib(10);
 BROCKEN
-
     my $file = build_wasm( $fib, 'wasm_recursion_struct' );
     open my $fh, '<:raw', $file or die "$file: $!";
     local $/;
     my $bytes = <$fh>;
     close $fh;
-
-    my $pos    = 8;    # skip magic + version
+    my $pos = 8;    # skip magic + version
     my %seen;
+
     while ( $pos < length $bytes ) {
         my $id = ord substr( $bytes, $pos, 1 );
         $pos++;
@@ -78,7 +74,6 @@ BROCKEN
         $seen{$id} = $len;
         $pos += $len;
     }
-
     ok( $seen{6}, 'module carries a global section (id 6) for the shared heap base' );
     is( $seen{10} ? 1 : 0, 1, 'module carries a code section' );
     ok( !$seen{7} || $seen{10}, 'sections are laid out in ascending id order, so the global lands before the exports' );
@@ -87,7 +82,6 @@ BROCKEN
     # read a per-frame heap cursor that way any more; the entry stub publishes
     # the base with global.set (0x24) instead.
     unlike( $bytes, qr/\x20\x01\x41\x08\x6a\x21\x01/, 'the heap base is not carried in a per-frame local' );
-
     unlink $file;
 }
 
@@ -96,7 +90,7 @@ BROCKEN
 # and must not touch linear memory for them at all. fib's only slot is its i64
 # parameter, so any alloca here means promotion regressed.
 {
-    my $module  = Brocken::Compiler->new->compile( <<'BROCKEN' );
+    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 sub fib(i64 $n) -> i64 {
     if ($n < 2) { return $n; }
     return fib($n - 1) + fib($n - 2);
@@ -110,8 +104,8 @@ BROCKEN
     for my $mbb ( $mf->blocks->@* ) {
         for my $mi ( $mbb->instructions->@* ) {
             $allocas++ if $mi->comment =~ /^alloca/;
-            $stores++  if $mi->opcode =~ /^i(?:32|64)_store$/;
-            $loads++   if $mi->opcode =~ /^i(?:32|64)_load$/;
+            $stores++  if $mi->opcode  =~ /^i(?:32|64)_store$/;
+            $loads++   if $mi->opcode  =~ /^i(?:32|64)_load$/;
         }
     }
     is( $allocas, 0, 'an address-not-taken scalar slot emits no alloca' );
@@ -122,7 +116,7 @@ BROCKEN
 # An array base is offset by getelementptr, so its address escapes and it has to
 # stay in linear memory -- promotion must not take it.
 {
-    my $module  = Brocken::Compiler->new->compile( <<'BROCKEN' );
+    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 sub main() -> i64 {
     my [i64; 4] $a;
     $a[0] = 5;
@@ -133,7 +127,7 @@ BROCKEN
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
     my ($fn) = grep { $_->name eq 'main' } $module->functions->@*;
     ok( $fn, 'the module lowers the array function' );
-    my $mf = $lowerer->lower($fn);
+    my $mf      = $lowerer->lower($fn);
     my $allocas = 0;
     for my $mbb ( $mf->blocks->@* ) {
         for my $mi ( $mbb->instructions->@* ) {
@@ -149,7 +143,7 @@ BROCKEN
 # "type mismatch: expected i32, found i64" -- so a *variable* index produced an
 # invalid module while a constant index, folded into a displacement, worked.
 {
-    my $module  = Brocken::Compiler->new->compile( <<'BROCKEN' );
+    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 sub main() -> i64 {
     my [i64; 16] $a;
     my i64 $i = 3;
@@ -158,8 +152,8 @@ sub main() -> i64 {
 }
 BROCKEN
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
-    my ($fn) = grep { $_->name eq 'main' } $module->functions->@*;
-    my $mf = $lowerer->lower($fn);
+    my ($fn)    = grep { $_->name eq 'main' } $module->functions->@*;
+    my $mf      = $lowerer->lower($fn);
     my ( $wraps, $geps ) = ( 0, 0 );
     for my $mbb ( $mf->blocks->@* ) {
         for my $mi ( $mbb->instructions->@* ) {
@@ -167,19 +161,17 @@ BROCKEN
             $wraps++ if ( $mi->comment // '' ) =~ /gep: wrap index/;
         }
     }
-    ok( $geps,  'a variable array index goes through the gep path' );
+    ok( $geps, 'a variable array index goes through the gep path' );
     is( $wraps, $geps, 'every variable index is narrowed to the i32 address space' );
 }
 
 # --- Execution --------------------------------------------------------------
-
 my $FIB = <<'BROCKEN';
 sub fib(i64 $n) -> i64 {
     if ($n < 2) { return $n; }
     return fib($n - 1) + fib($n - 2);
 }
 BROCKEN
-
 my $FACT = <<'BROCKEN';
 sub fact(i64 $n) -> i64 {
     if ($n <= 1) { return 1; }
@@ -195,31 +187,30 @@ BROCKEN
 # the engine's own per-invocation slot, so the cost tracks the live depth and
 # fib(25) -- 242785 calls, 3MB under the old scheme -- no longer touches memory.
 my @cases = (
-    { name => 'fib base case',   prog => $FIB,  tail => 'return fib(0);',   want => 0 },
-    { name => 'fib(1)',          prog => $FIB,  tail => 'return fib(1);',   want => 1 },
-    { name => 'fib(5)',          prog => $FIB,  tail => 'return fib(5);',   want => 5 },
-    { name => 'fib(10)',         prog => $FIB,  tail => 'return fib(10);',  want => 55 },
-    { name => 'fib(15)',         prog => $FIB,  tail => 'return fib(15);',  want => 610 },
-    { name => 'fib(20) past the old 64KB spill ceiling', prog => $FIB, tail => 'return fib(20);', want => 6765 },
-    { name => 'fib(25) 3MB of frames, no linear memory', prog => $FIB, tail => 'return fib(25);', want => 75025 },
-    { name => 'fact(5)',         prog => $FACT, tail => 'return fact(5);',  want => 120 },
-    { name => 'fact(10)',        prog => $FACT, tail => 'return fact(10);', want => 3628800 },
-    { name => 'mutual recursion down', prog => $FIB, tail => 'return fib(12) + fib(9);', want => 144 + 34 },
+    { name => 'fib base case',                           prog => $FIB,  tail => 'return fib(0);',           want => 0 },
+    { name => 'fib(1)',                                  prog => $FIB,  tail => 'return fib(1);',           want => 1 },
+    { name => 'fib(5)',                                  prog => $FIB,  tail => 'return fib(5);',           want => 5 },
+    { name => 'fib(10)',                                 prog => $FIB,  tail => 'return fib(10);',          want => 55 },
+    { name => 'fib(15)',                                 prog => $FIB,  tail => 'return fib(15);',          want => 610 },
+    { name => 'fib(20) past the old 64KB spill ceiling', prog => $FIB,  tail => 'return fib(20);',          want => 6765 },
+    { name => 'fib(25) 3MB of frames, no linear memory', prog => $FIB,  tail => 'return fib(25);',          want => 75025 },
+    { name => 'fact(5)',                                 prog => $FACT, tail => 'return fact(5);',          want => 120 },
+    { name => 'fact(10)',                                prog => $FACT, tail => 'return fact(10);',         want => 3628800 },
+    { name => 'mutual recursion down',                   prog => $FIB,  tail => 'return fib(12) + fib(9);', want => 144 + 34 },
 );
 
 # A local object used to be handed out by the *spill* cursor while the runtime's own
 # allocator kept a second cursor at the same base, so the two overlapped and the
 # class case read garbage (7*6 came back as 6240). Scalars no longer allocate, so the
 # spill cursor is idle and the object comes from the runtime allocator alone.
-push @cases,
-    {
+push @cases, {
     name => 'local object after promotion',
     prog => <<'BROCKEN',
 class Point { field i64 $x :param :reader; }
 BROCKEN
     tail => 'my ptr $p = Point->new(7); return $p->x() * 6;',
     want => 42,
-    };
+};
 
 # A local object *declared inside a loop body* is the one shape that still needed
 # the spill cursor while promotion was restricted to the entry block. That put the
@@ -228,8 +219,7 @@ BROCKEN
 # (10760 instead of 45). Promoting in any block fixes it, because a wasm local is
 # per-invocation rather than per-block. The same program is correct on x86_64, so
 # this is Wasm-specific and silent, which is why it is worth its own case.
-push @cases,
-    {
+push @cases, {
     name => 'object declared in a loop body',
     prog => <<'BROCKEN',
 class P { field i64 $x :param :reader; }
@@ -248,19 +238,15 @@ BROCKEN
     tail => 'my [i64; 16] $a; my i64 $i = 3; $a[$i] = 10; return $a[$i];',
     want => 10,
     };
-
 for my $case (@cases) {
-    SKIP: {
+SKIP: {
         skip 'wasmtime not available', 1 and next unless $wasmtime_path && -f $wasmtime_path;
-
         my $file = build_wasm( $case->{prog} . $case->{tail}, 'wasm_recursion_exec' );
         my $out  = qx["$wasmtime_path" run --invoke _BROCKEN_ENTRY "$file" 1024 2>&1];
         $out =~ s/^warning: using .*$//mg;
         $out =~ s/^\s+|\s+$//g;
-
         is( $out, $case->{want}, "$case->{name}: returns $case->{want}" );
         unlink $file;
     }
 }
-
 done_testing;

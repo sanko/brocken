@@ -1,0 +1,169 @@
+=head1 NAME
+
+Brocken::Target::Architecture::RISCV64 - Assembles RISC-V 64-bit machine code
+
+=head1 SYNOPSIS
+
+    use Brocken::Target;
+
+    my $os  = $target->os_object;
+    my $asm = Brocken::Target->for( 'linux', 'riscv64' )->arch_asm;
+    $asm->emit_print_str( $os, 0, 6 );
+    $asm->emit_exit_proc( $os, 42 );
+    $asm->resolve;
+
+    $target->format->write_bin( 'prog', $asm->code, 'hello', 'riscv64' );
+
+=head1 DESCRIPTION
+
+A minimal RV64 assembler. Like the other architecture classes it is a standalone class with no base, accumulating
+four-byte instructions into a C<code> string.
+
+Two things distinguish it from the x86-64 and ARM64 classes. It validates register names and dies on an unknown one
+rather than silently using register zero. And it has a set of private instruction encoders, C<_li> and friends, that
+the public methods are built from; the shorter public methods are compositions of those rather than single-instruction
+encoders.
+
+=head1 REGISTERS
+
+C<< %Brocken::Target::Architecture::RISCV64::REG >> maps the standard RV64 ABI names to their numbers:
+
+    zero ra sp gp tp t0 t1 t2 s0 s1 a0 a1 a2 a3 a4 a5 a6 a7
+      0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17
+    s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 t3 t4 t5 t6
+    18 19 20 21 22 23 24 25  26  27 28 29 30 31
+
+The names are matched case-insensitively.
+
+=head1 METHODS
+
+=head2 C<code()>
+
+A read-only accessor returning the accumulated machine code as a string.
+
+=head2 C<labels()>
+
+Returns a hashref mapping label names to their byte offsets in C<code>.
+
+=head2 C<ret()>
+
+Appends C<JALR x0, 0(ra)> (C<0x00008067>), the standard return.
+
+=head2 C<mov_imm( $reg, $imm )>
+
+Loads C<$imm> into C<$reg> by way of the private C<_li>: a single C<ADDI> when the value fits in 12 signed bits,
+otherwise C<LUI> for the upper bits followed by C<ADDI> for the rest. Unlike C<add_imm>, this accepts a full width
+value.
+
+=head2 C<mov_reg( $dest, $src )>
+
+Appends C<ADDI $dest, $src, 0>.
+
+=head2 C<add_imm( $reg, $imm )>, C<sub_imm( $reg, $imm )>
+
+Append C<ADDI> with C<$imm> or its negation. The immediate is masked to 12 bits without a check; see L</CAVEATS>.
+
+=head2 C<cmp_reg_imm( $reg, $imm )>
+
+Loads C<$imm> into C<t0> and appends C<SUB t0, $reg, t0>. The result is left in C<t0>, which is the register the
+conditional-jump method tests; the two are meant to be used together.
+
+=head2 C<lea_rva( $reg, $target_rva, $text_rva )>
+
+Appends C<AUIPC> plus C<ADDI> to compute C<$target_rva> from the load address C<$text_rva>. This is the standard
+two-instruction PC-relative address sequence, with the upper 20 bits from C<AUIPC> and the low 12 from C<ADDI>.
+
+=head2 C<call_rva( $target_rva, $text_rva )>
+
+Computes the slot address at C<$target_rva> into C<t0> the same way, loads the pointer with C<LD t0, 0(t0)>, then calls
+it with C<JALR ra, 0(t0)>. As with the other classes this is an indirect call through a slot, matching how the Windows
+path reaches its imports.
+
+=head2 C<syscall( $os = '', $num = 0 )>
+
+Appends C<ECALL> (C<0x00000073>). Both arguments are accepted for interface uniformity and ignored; on RISC-V the
+syscall number travels in C<a7>, which the caller sets beforehand.
+
+=head2 C<jcc( $cc, $label )>
+
+Appends a conditional branch that tests C<t0> against C<zero>, which is why C<cmp_reg_imm> leaves its result in C<t0>.
+The condition name is mapped to a branch function: equality and inequality use C<BEQ> and C<BNE>, and the ordering
+comparisons use C<BLT> and C<BGE> with the operands swapped where needed so that the branch tests the flags the
+comparison set. An unrecognised condition falls back to C<BEQ>.
+
+=head2 C<jmp( $label )>
+
+Appends C<JAL x0> with a placeholder that C<resolve> patches.
+
+=head2 C<mark_label( $name )>
+
+Records C<$name> at the current length of C<code>.
+
+=head2 C<resolve()>
+
+Patches the recorded branch displacements. RISC-V scatters a branch displacement across the instruction in a
+non-contiguous pattern, and this method reassembles that pattern separately for the C<JAL> form and the
+conditional-branch form. The displacements are relative, so no load address is needed.
+
+=head2 C<emit_print_str( $os, $off, $len )>
+
+Emits a call that writes C<$len> bytes from C<$off> bytes into the data section to standard output, using C<$os> for
+the syscall number and page size. On POSIX it sets C<a7> to the C<write> number and C<a0> to 1; on Windows it uses the
+same C<GetStdHandle> and C<WriteFile> import slots as the other classes.
+
+=head2 C<emit_exit_proc( $os, $code )>
+
+Emits a call that exits with status C<$code>. On POSIX this is the C<exit> syscall with the number in C<a7> and the
+status in C<a0>; on Windows it calls C<ExitProcess> through the import slot at C<0x3000>.
+
+=head1 PRIVATE METHODS
+
+These encode one instruction each and are not meant to be called directly. They are documented because the public
+methods above are defined in terms of them.
+
+=over
+
+=item C<_reg( $name )>
+
+Returns the number for C<$name>, or dies with C<Unknown register: $name>. Every public method that takes a register
+goes through this, unlike the other two architectures.
+
+=item C<_li( $r, $imm )>, C<_lui( $r, $imm20 )>, C<_addi( $rd, $rs1, $imm12 )>, C<_addiw( $rd, $rs1, $imm12 )>
+
+Load-immediate and integer-add encoders. C<_addiw> is defined but not used by any public method.
+
+=item C<_sub( $rd, $rs1, $rs2 )>, C<_slli( $rd, $rs1, $shamt )>, C<_ori( $rd, $rs1, $imm12 )>
+
+Additional integer encoders. C<_slli> and C<_ori> are defined but not used by any public method.
+
+=item C<_ld( $rd, $imm12, $rs1 )>, C<_sd( $rs2, $imm12, $rs1 )>
+
+Load and store doubleword encoders. Only C<_ld> is used.
+
+=back
+
+=head1 CAVEATS
+
+=head2 The Windows path is incomplete
+
+C<emit_print_str> and C<emit_exit_proc> have a Windows branch that calls through the same kernel32 import slots the
+other architectures use, but the RISC-V Windows ABI is not exercised anywhere in the test suite and the sequence is not
+verified. The POSIX path is the one that is used.
+
+=head2 Immediate arithmetic is masked to 12 bits
+
+C<add_imm> and C<sub_imm> encode a 12-bit immediate and mask the value down without checking, so C<add_imm( 'a0',
+0x1001 )> adds 1. C<mov_imm> is the only method that handles a wider value, by composing C<LUI> and C<ADDI>.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

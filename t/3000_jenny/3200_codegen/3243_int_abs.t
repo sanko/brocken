@@ -6,23 +6,19 @@ use Brocken;
 use Brocken::Lindsay;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-
 my $brocken  = Brocken->new();
 my $platform = $brocken->platform;
-
 subtest 'integer abs' => sub {
     my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func->append_block('entry') );
-
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();
 
     # The lowerer resolves operands by IR value name, so every value needs its own.
     my $seq = 0;
     my $nm  = sub { sprintf '%%v%d', $seq++ };
-    my $K   = sub { Brocken::Lindsay::IR::Constant->new( @_ ) };
-
+    my $K   = sub { Brocken::Lindsay::IR::Constant->new(@_) };
     my @checks;
     my $chk = sub {
         my ( $got, $want_type, $want_value ) = @_;
@@ -37,7 +33,7 @@ subtest 'integer abs' => sub {
         push @checks, $builder->build_icmp( 'eq', $lhs, $rhs, $nm->() );
     };
     my $pow2 = sub {
-        my ( $n ) = @_;
+        my ($n) = @_;
         my $one = $builder->build_alloca( $i64, $nm->() );
         $builder->build_store( $K->( type => $i64, value => 1 ), $one );
         $builder->build_shl( $builder->build_load( $i64, $one, $nm->() ), $K->( type => $i64, value => $n ), $nm->() );
@@ -88,13 +84,11 @@ subtest 'integer abs' => sub {
     # abs chained, and feeding a signed comparison.
     my $a9 = $abs->( $builder->build_neg( $K->( type => $i64, value => 9 ), $nm->() ), $nm->() );
     $chk->( $builder->build_mul( $a9, $K->( type => $i64, value => 2 ), $nm->() ), $i64, 18 );
+
     # abs feeding a signed comparison: the result is positive, so 0 < abs(x).
     push @checks, $builder->build_icmp( 'slt', $K->( type => $i64, value => 0 ), $abs->( $K->( type => $i64, value => -3 ), $nm->() ), $nm->() );
-
-
     my $all = $checks[0];
     $all = $builder->build_and( $all, $checks[$_], $nm->() ) for 1 .. $#checks;
-
     my $t_block = $func->append_block('if.then');
     my $f_block = $func->append_block('if.else');
     $builder->build_cond_br( $all, $t_block, $f_block );
@@ -102,22 +96,19 @@ subtest 'integer abs' => sub {
     $builder->build_ret( $K->( type => $i32, value => 42 ) );
     $builder->position_at_end($f_block);
     $builder->build_ret( $K->( type => $i32, value => 0 ) );
-
     my $bytes = $brocken->codegen->emit_function($func);
     ok( length($bytes) > 0, 'Generated integer abs bytes for ' . $platform->friendly );
-
-    SKIP: {
+SKIP: {
         skip 'Execution test only supported on native hosts', 2 unless $platform->is_native;
         my $out = $brocken->tmpdir . '/int_abs' . $brocken->ext;
         $brocken->linker->write_executable( $out, $bytes, $platform );
         ok( -e $out, 'Integer abs binary exists' );
         my $ret = system $out;
-        SKIP: {
+    SKIP: {
             skip "system() failed to spawn ($!)", 1 if $ret == -1;
             is( $? >> 8, 42, 'Integer abs returned 42 on ' . $platform->friendly );
         }
         unlink $out;
     }
 };
-
 done_testing;

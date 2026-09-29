@@ -1,0 +1,133 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Lowerer - Lower a Brocken syntax tree to Lindsay IR
+
+=head1 SYNOPSIS
+
+    use Brocken::Katsuro::Lowerer;
+
+    my $module = Brocken::Katsuro::Lowerer->new->lower_program($program);
+
+=head1 DESCRIPTION
+
+Walks a L<Brocken::Katsuro::AST::Program> and emits a L<Brocken::Lindsay::IR::Module>. This is the point where the
+source's classes, fields, and methods become plain functions over pointers, and where the C-level memory layout of a
+class is decided.
+
+=head2 Lowering passes
+
+C<lower_program> does its work in three passes:
+
+=over
+
+=item 1. Register every declaration, so functions and classes are known before their bodies are lowered.
+
+=item 2. Build every class's generated runtime (readers, writers, and constructor) and lower the declared methods. Signatures are registered for the whole class before any body is lowered, so a method can call any other method of its class regardless of declaration order.
+
+=item 3. Lower the free-function bodies.
+
+=back
+
+=head1 TYPE AND LAYOUT HELPERS
+
+=head2 C<type_from_name($name)>
+
+Maps a source type name to a Lindsay IR type. Recognizes C<Int>, C<String>, C<Any>, C<Bool>, C<ptr>, C<void>, the sized
+integer names (C<i1> through C<i128>, C<u8> through C<u128>), and the float names C<f32> and C<f64>. An unknown name is
+fatal:
+
+    Unknown type 'Nope'
+
+=head2 C<native_type_from_name($name)>
+
+Like C<type_from_name>, but maps the boxed spellings to their unboxed representation for constants: C<int> and C<Int>
+become C<i64>, C<bool> and C<Bool> become C<i1>, and C<Any> becomes C<i64>. Names without a native entry fall back to
+C<type_from_name>.
+
+=head2 C<type_size($ir_type)>
+
+Size in bytes of a type for field-offset math: C<void> is 0, pointers and dynamic values are 8, sized integers and
+floats are their bit width divided by 8, and anything else is 8.
+
+=head2 C<type_align( $ir_type, [ $override ] )>
+
+Field alignment in bytes. With no C<$override> this is the type's size capped at 8 (so an C<i128> aligns like the
+8-byte box that holds it), or 1 for a zero-sized type. An C<$override> replaces the natural alignment outright rather
+than combining with it.
+
+=head2 C<align_up( $offset, $align )>
+
+Rounds C<$offset> up to the next multiple of C<$align>; an alignment of 1 or less leaves the offset unchanged.
+
+=head1 CLASS LAYOUT
+
+Classes use C-compatible layout. Each field is placed at the next multiple of its own alignment, the struct's alignment
+is the maximum over its fields, and the total size is rounded up to that alignment so it matches C's C<sizeof>. A
+field's natural alignment can be replaced with C<:pack> (align to 1) or C<:pack(N)> (align to N).
+
+=head1 METHODS
+
+=head2 C<new( [ module => $module ] )>
+
+Constructs a lowerer. C<module> is optional and defaults to a new C<Brocken::Lindsay::IR::Module> named C<main>; the
+lowered program is added to it.
+
+=head2 C<lower_program($ast)>
+
+    my $module = $lowerer->lower_program($program);
+
+Lowers the program and returns its L<Brocken::Lindsay::IR::Module>.
+
+Top-level statements that are not class or subroutine declarations are wrapped in a generated entry function named
+C<_BROCKEN_ENTRY>. That function takes one extra leading pointer parameter, C<%__heap_base>, which the assignment of
+top-level values uses.
+
+=head2 C<unique_block_name($prefix)>
+
+Returns C<$prefix> with a monotonic numeric suffix, used to name generated basic blocks uniquely.
+
+=head1 INTERNAL PASSES
+
+The remaining methods lower the individual statement and expression forms and generate class runtime functions. They
+are implementation details rather than a public API, and are grouped here for orientation:
+
+=over
+
+=item Program and declarations - C<register_class>, C<register_function>, C<register_method>,
+C<register_function_raw>, C<param_type_for>.
+
+=item Statements - C<lower_function>, C<lower_block_body>, C<lower_statement>, C<lower_var_decl>,
+C<lower_assign>, C<lower_return>, C<lower_if>, C<lower_elsif_chain>, C<lower_while>.
+
+=item Expressions - C<lower_expression>, C<lower_const>, C<lower_var_ref>, C<lower_binop>, C<lower_unop>,
+C<lower_call_expr>, C<lower_intrinsic>, C<as_condition>, C<maybe_convert_type>.
+
+=item Arrays and fields - C<lower_array_decl>, C<lower_array_addr>, C<lower_array_index>, C<lower_field_addr>,
+C<lower_field_access>, C<lower_method_call>, C<lower_class_const>, C<resolve_class_name>.
+
+=item Class runtime - C<generate_class_runtime>, C<lower_method>, C<lower_adjust>, C<populate_field_geps>,
+C<generate_reader>, C<generate_writer>, C<generate_constructor>.
+
+=back
+
+C<register_intrinsics> is present but not called by the lowering path.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

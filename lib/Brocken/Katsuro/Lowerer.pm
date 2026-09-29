@@ -107,20 +107,20 @@ class Brocken::Katsuro::Lowerer {
     # (`field i16 $b :pack` lands it at the next byte) or push one out
     # (`field i8 $a :pack(16)`). Taking a minimum or a maximum instead would
     # make one of those a no-op.
-    method type_align($ir_type, $override = undef) {
+    method type_align( $ir_type, $override = undef ) {
         return $override if $override;
         my $size = $self->type_size($ir_type);
         return 1 if !$size;
         return $size > 8 ? 8 : $size;
     }
 
-    method align_up($offset, $align) {
+    method align_up( $offset, $align ) {
         return $offset if $align <= 1;
         my $rem = $offset % $align;
         return $rem ? $offset + ( $align - $rem ) : $offset;
     }
 
-    # === Main entry point ===
+    # Main entry point
     method lower_program($ast) {
         my @all_stmts = $ast->statements->@*;
         my @decls;
@@ -173,18 +173,13 @@ class Brocken::Katsuro::Lowerer {
     # A method body may call any method on its class, including the readers,
     # writers and constructor that are generated here rather than declared in
     # the source, and lower_method resolves a callee by looking it up in
-    # $functions. A method lowered before those exist therefore cannot see
-    # them: $self->x() inside a declared sub failed with "Undefined method
-    # 'x' in class 'P'" even though P had an :reader for x, because the
-    # explicit methods were lowered in the same loop that registered them,
-    # ahead of the accessors. Registering the whole class first and lowering
-    # second makes a body able to reach every method of its own class, so
-    # call resolution stops depending on the order bodies happen to be
-    # lowered in.
+    # $functions. A method whose callee is not yet registered cannot see it, so
+    # registering the whole class first and lowering second lets a body reach
+    # every method of its own class regardless of the order bodies are lowered
+    # in.
     method generate_class_runtime($ast) {
         my $class_name = $ast->name;
         $current_class = $class_name;
-
         my $has_adjust = defined $ast->adjust;
 
         # A generated accessor must not displace a method the source declared
@@ -193,12 +188,18 @@ class Brocken::Katsuro::Lowerer {
         # two functions of one name in the module and silently retarget calls.
         my %declared = map { $_->name => 1 } $ast->methods->@*;
         $declared{'ADJUST'} = 1 if $has_adjust;
-
-        my @readers = grep { grep { $_ eq 'reader' } $_->attrs->@* }
-            grep { !$declared{ $_->name } } $ast->fields->@*;
-        my @writers = grep { grep { $_ eq 'writer' } $_->attrs->@* }
-            grep { !$declared{ 'set_' . $_->name } } $ast->fields->@*;
-        my @param_fields = grep { grep { $_ eq 'param' } $_->attrs->@* } $ast->fields->@*;
+        my @readers = grep {
+            grep { $_ eq 'reader' }
+                $_->attrs->@*
+        } grep { !$declared{ $_->name } } $ast->fields->@*;
+        my @writers = grep {
+            grep { $_ eq 'writer' }
+                $_->attrs->@*
+        } grep { !$declared{ 'set_' . $_->name } } $ast->fields->@*;
+        my @param_fields = grep {
+            grep { $_ eq 'param' }
+                $_->attrs->@*
+        } $ast->fields->@*;
 
         # Pass 1: register signatures for everything on the class.
         if ($has_adjust) {
@@ -231,11 +232,10 @@ class Brocken::Katsuro::Lowerer {
             $self->generate_writer( $class_name, $f );
         }
         $self->generate_constructor( $class_name, $ast->fields, \@param_fields, $ast->adjust );
-
         $current_class = undef;
     }
 
-    # === Register built-in FFI functions ===
+    # Register built-in FFI functions
     method register_intrinsics() {
         for my $name (qw(say print)) {
             my $fn = Brocken::Lindsay::IR::Function->new(
@@ -248,15 +248,11 @@ class Brocken::Katsuro::Lowerer {
         }
     }
 
-    # === Pass 1: Register declarations ===
+    # Pass 1: Register declarations
     #
     # C layout. Each field goes at the next multiple of its own alignment, and
     # the struct is rounded up to its own alignment -- the max over its
-    # fields -- which is what `sizeof` returns in C. Fields used to be packed
-    # back to back, which put an i16 at offset 1 behind an i8. That is wrong
-    # for FFI, and it was only survivable because every sub-word access was
-    # widened to 4 bytes and the neighbouring bytes happened to be written
-    # with their own value.
+    # fields -- which is what `sizeof` returns in C.
     #
     # Rounding the total up is what makes `sizeof` agree with C, and it keeps
     # the value a power of two for scalar-only classes. It is still not the
@@ -286,15 +282,7 @@ class Brocken::Katsuro::Lowerer {
             # actually passed. The call site fills the gaps instead, which means
             # it needs the expression itself, not a lowered value that would
             # belong to whatever function was being compiled at the time.
-            push @fields,
-                {
-                name        => $f->name,
-                type        => $f->type,
-                ir_type     => $ir_type,
-                offset      => $offset,
-                size        => $size,
-                default_ast => $f->default,
-                };
+            push @fields, { name => $f->name, type => $f->type, ir_type => $ir_type, offset => $offset, size => $size, default_ast => $f->default, };
             $offset += $size;
         }
         $offset = $self->align_up( $offset, $max_align );
@@ -348,7 +336,7 @@ class Brocken::Katsuro::Lowerer {
         $functions->{$name} = $fn;
     }
 
-    # === Pass 2: Lower function bodies ===
+    # Pass 2: Lower function bodies
     method lower_function($ast) {
         return if $ast->body->statements->@* == 0;
         $current_func = $functions->{ $ast->name };
@@ -388,14 +376,14 @@ class Brocken::Katsuro::Lowerer {
         }
     }
 
-    # === Block lowering ===
+    # Block lowering
     method lower_block_body($block_ast) {
         for my $stmt ( $block_ast->statements->@* ) {
             $self->lower_statement($stmt);
         }
     }
 
-    # === Statement lowering ===
+    # Statement lowering
     method lower_statement($stmt) {
         return unless defined $stmt;
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') )       { return $self->lower_var_decl($stmt); }
@@ -597,7 +585,7 @@ class Brocken::Katsuro::Lowerer {
         $current_block = $exit;
     }
 
-    # === Expression lowering ===
+    # Expression lowering
     method lower_expression($expr) {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Const') ) {
             return $self->lower_const($expr);
@@ -729,6 +717,7 @@ class Brocken::Katsuro::Lowerer {
                 $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
             }
         }
+
         # An integer literal on one side of a float operation is the same
         # under-the-hood-the-same-number case as an initializer, and the same
         # reasoning applies: re-tag the literal rather than convert it. Without
@@ -746,18 +735,21 @@ class Brocken::Katsuro::Lowerer {
         # decimal literal there was no way to write a float constant at all.
         if ( $lhs->type->kind eq 'float' && $rhs->type->kind eq 'float' && $lhs->type->bits != $rhs->type->bits ) {
             my $is_const = sub { $_[0]->isa('Brocken::Lindsay::IR::Constant') };
-            Carp::croak( "Cannot compare a " . $lhs->type->bits . "-bit float against a " . $rhs->type->bits .
-                "-bit one; the IR has no float width conversion, so at least one of them has to be a literal" )
+            Carp::croak( "Cannot compare a " .
+                    $lhs->type->bits .
+                    "-bit float against a " .
+                    $rhs->type->bits .
+                    "-bit one; the IR has no float width conversion, so at least one of them has to be a literal" )
                 unless $is_const->($lhs) || $is_const->($rhs);
+
             # The literal takes the width of the value it is compared against.
             # That direction is the only one available -- the other side is a
             # loaded value, and there is no instruction to widen or narrow it --
             # and it is the rule an integer literal already follows below.
-            ( $lhs, $rhs ) = $is_const->($lhs)
-                ? ( Brocken::Lindsay::IR::Constant->new( type => $rhs->type, value => $lhs->value ), $rhs )
-                : ( $lhs, Brocken::Lindsay::IR::Constant->new( type => $lhs->type, value => $rhs->value ) );
+            ( $lhs, $rhs )
+                = $is_const->($lhs) ? ( Brocken::Lindsay::IR::Constant->new( type => $rhs->type, value => $lhs->value ), $rhs ) :
+                ( $lhs, Brocken::Lindsay::IR::Constant->new( type => $lhs->type, value => $rhs->value ) );
         }
-
         if ( $lhs->type->kind eq 'float' xor $rhs->type->kind eq 'float' ) {
             my $float_side = $lhs->type->kind eq 'float' ? $lhs : $rhs;
             my $int_side   = $lhs->type->kind eq 'float' ? $rhs : $lhs;
@@ -779,7 +771,6 @@ class Brocken::Katsuro::Lowerer {
             }
             ( $lhs, $rhs ) = $lhs->type->kind eq 'float' ? ( $lhs, $int_side ) : ( $int_side, $rhs );
         }
-
         return $builder->build_add( $lhs, $rhs ) if $op eq '+';
         return $builder->build_sub( $lhs, $rhs ) if $op eq '-';
         return $builder->build_mul( $lhs, $rhs ) if $op eq '*';
@@ -801,14 +792,12 @@ class Brocken::Katsuro::Lowerer {
         # emitted 'set' . undef. Floats compare ordered, so there is one set
         # each for < > <= >=; the sign matters only for integers.
         my $is_float = $lhs->type->kind eq 'float';
-        my %order    = $is_float
-            ? ( '<' => 'lt', '>' => 'gt', '<=' => 'le', '>=' => 'ge' )
-            : (
+        my %order    = $is_float ? ( '<' => 'lt', '>' => 'gt', '<=' => 'le', '>=' => 'ge' ) : (
             '<'  => ( $lhs->type->is_signed ? 'slt' : 'ult' ),
             '>'  => ( $lhs->type->is_signed ? 'sgt' : 'ugt' ),
             '<=' => ( $lhs->type->is_signed ? 'sle' : 'ule' ),
             '>=' => ( $lhs->type->is_signed ? 'sge' : 'uge' ),
-            );
+        );
         if ( my $pred = $order{$op} ) {
             return $builder->build_icmp( $pred, $lhs, $rhs );
         }
@@ -897,12 +886,11 @@ class Brocken::Katsuro::Lowerer {
         # host-provided region lowers it to a constant -1 and the runtime reports
         # out-of-memory rather than writing past the region.
         return $builder->build_memory_grow( $args[0] ) if $name eq 'memory_grow';
-        return $builder->build_memory_size()         if $name eq 'memory_size';
-
+        return $builder->build_memory_size()           if $name eq 'memory_size';
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }
 
-    # === Condition conversion ===
+    # Condition conversion
     method as_condition($val) {
         return $val if $val->type->bits == 1;
 
@@ -914,7 +902,7 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_icmp( 'ne', $val, $zero );
     }
 
-    # === Type conversion helper ===
+    # Type conversion helper
     method maybe_convert_type( $val, $target_type ) {
         return $val if $val->type->kind eq $target_type->kind && $val->type->bits == $target_type->bits;
 
@@ -964,6 +952,7 @@ class Brocken::Katsuro::Lowerer {
         # raw integer for an int-typed one, so `my f64 $t = 3` stored eight
         # zero-extended bytes and the reload read them back as a denormal.
         if ( $val->type->kind eq 'int' && $target_type->kind eq 'float' ) {
+
             # A *literal* is not a number that needs converting, it is the same
             # number under a different tag, so re-tagging *is* the conversion.
             if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
@@ -977,14 +966,13 @@ class Brocken::Katsuro::Lowerer {
             # answer, but it also meant an int could not be assigned to a float
             # at all.
             my $bits = $val->type->bits;
-            Carp::croak( "No integer-to-float conversion for a " . $bits . "-bit integer; " .
-                "none of the targets has an instruction wider than 64 bits" )
+            Carp::croak(
+                "No integer-to-float conversion for a " . $bits . "-bit integer; " . "none of the targets has an instruction wider than 64 bits" )
                 if $bits > 64;
 
             # x86-64 has no unsigned convert at all, and values at or above
             # 2**63 need several instructions to come out right rather than one.
-            Carp::croak( "No unsigned 64-bit integer-to-float conversion; " .
-                "x86-64 has no unsigned form of the instruction" )
+            Carp::croak( "No unsigned 64-bit integer-to-float conversion; " . "x86-64 has no unsigned form of the instruction" )
                 if $bits == 64 && !$val->type->is_signed;
 
             # Widening to 64 bits first is also what makes the unsigned cases
@@ -993,9 +981,8 @@ class Brocken::Katsuro::Lowerer {
             # correctly, while sign-extending a negative one would not.
             my $wide = $val;
             if ( $bits < 64 ) {
-                $wide = $val->type->is_signed
-                    ? $builder->build_sext( $val, Brocken::Lindsay::IR::Type::i64() )
-                    : $builder->build_zext( $val, Brocken::Lindsay::IR::Type::i64() );
+                $wide = $val->type->is_signed ? $builder->build_sext( $val, Brocken::Lindsay::IR::Type::i64() ) :
+                    $builder->build_zext( $val, Brocken::Lindsay::IR::Type::i64() );
             }
             return $builder->build_sitofp( $wide, $target_type );
         }
@@ -1030,13 +1017,16 @@ class Brocken::Katsuro::Lowerer {
             if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
                 return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value );
             }
-            Carp::croak( "No float-to-float conversion from " . $val->type->bits . " bits to " . $target_type->bits .
-                "; the IR has no fptrunc or fpext, and a float of one width cannot be stored in a slot of the other" );
+            Carp::croak( "No float-to-float conversion from " .
+                    $val->type->bits .
+                    " bits to " .
+                    $target_type->bits .
+                    "; the IR has no fptrunc or fpext, and a float of one width cannot be stored in a slot of the other" );
         }
         $val;
     }
 
-    # === Class field helpers ===
+    # Class field helpers
     method resolve_class_name($ast) {
         my $obj = $ast->obj;
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
@@ -1049,7 +1039,7 @@ class Brocken::Katsuro::Lowerer {
             # A parameter declared with its class, `sub g(Point $q)`. Keyed by
             # the function currently being lowered, which is why a local of the
             # same name in another function cannot leak a class into this one.
-            if ( $current_func ) {
+            if ($current_func) {
                 my $by_param = $param_class->{ $current_func->name }->{ $obj->name };
                 return $by_param if $by_param;
             }
@@ -1057,7 +1047,7 @@ class Brocken::Katsuro::Lowerer {
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Call') && exists $function_return_class->{ $obj->func_name } ) {
             return $function_return_class->{ $obj->func_name };
         }
-        if ( $current_class ) {
+        if ($current_class) {
             return $current_class;
         }
 
@@ -1066,9 +1056,7 @@ class Brocken::Katsuro::Lowerer {
         # rather than leaving the reader to guess why inference failed.
         my $hint = '';
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Var') ) {
-            $hint = " -- declare the parameter with its class, e.g. sub g(ClassName \$"
-                . $obj->name
-                . "), if one is in scope here";
+            $hint = " -- declare the parameter with its class, e.g. sub g(ClassName \$" . $obj->name . "), if one is in scope here";
         }
         Carp::croak( "Cannot determine class for field or method access at " . $self->_loc($ast) . $hint );
     }
@@ -1200,7 +1188,7 @@ class Brocken::Katsuro::Lowerer {
         return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => $current_class, );
     }
 
-    # === Method body lowering with field GEP pre-population ===
+    # Method body lowering with field GEP pre-population
     method lower_method( $class_name, $method_ast ) {
         my $full_name = $class_name . '::' . $method_ast->name;
         $current_func = $functions->{$full_name};
@@ -1272,7 +1260,7 @@ class Brocken::Katsuro::Lowerer {
         }
     }
 
-    # === Auto-generated accessor and constructor lowering ===
+    # Auto-generated accessor and constructor lowering
     method generate_reader( $class_name, $field_ast ) {
         my $full_name = $class_name . '::' . $field_ast->name;
         $current_func = $functions->{$full_name};

@@ -66,16 +66,16 @@ class Brocken::Jenny::Codegen::Wasm {
                 bytes          => $result->{locals} . $result->{body},
                 fixups         => \@adjusted_fixups,
                 return_valtype => $result->{return_valtype},
-                param_valtypes => \@param_valtypes,
+                param_valtypes => \@param_valtypes
                 };
         }
         return \@funcs;
     }
 
     method _encode( $mf, $ir_params, $ir_types, $return_type ) {
-        my $bytes       = '';
-        my %vreg_map    = ();
-        my $next_local  = scalar( $ir_params->@* );
+        my $bytes      = '';
+        my %vreg_map   = ();
+        my $next_local = scalar( $ir_params->@* );
 
         # Fixups are collected per block and rebased onto the function body
         # during assembly below.
@@ -86,21 +86,20 @@ class Brocken::Jenny::Codegen::Wasm {
             $vreg_map{ $ir_params->[$i]->name } = $i;
         }
 
-    # The heap base. Every heap block -- object fields, array slots, boxes --
-    # comes from Brocken::Runtime::bump_alloc, which needs the base as its
-    # first argument, and the base reaches the module as an argument to
-    # _BROCKEN_ENTRY only. A slot can be allocated in any function, so the
-    # value is published in a module global (section 6) that every frame
-    # shares; the linker emits it and the entry stub seeds it from the
-    # %__heap_base argument.
-    #
-    # This used to be a bump pointer rather than a base, which meant escaping
-    # allocas advanced their own copy of the cursor while objects advanced the
-    # one inside the runtime header. Both started at the heap base, so the two
-    # hands of the allocator could hand out the same bytes. Reading the base
-    # and letting the one allocator advance it removes the second cursor.
-    use constant HEAP_BASE_GLOBAL => 0;
-
+        # The heap base. Every heap block -- object fields, array slots, boxes --
+        # comes from Brocken::Runtime::bump_alloc, which needs the base as its
+        # first argument, and the base reaches the module as an argument to
+        # _BROCKEN_ENTRY only. A slot can be allocated in any function, so the
+        # value is published in a module global (section 6) that every frame
+        # shares; the linker emits it and the entry stub seeds it from the
+        # %__heap_base argument.
+        #
+        # This used to be a bump pointer rather than a base, which meant escaping
+        # allocas advanced their own copy of the cursor while objects advanced the
+        # one inside the runtime header. Both started at the heap base, so the two
+        # hands of the allocator could hand out the same bytes. Reading the base
+        # and letting the one allocator advance it removes the second cursor.
+        use constant HEAP_BASE_GLOBAL => 0;
         my @blocks = $mf->blocks->@*;
         my $nb     = scalar @blocks;
         my %label_to_block_idx;
@@ -118,7 +117,7 @@ class Brocken::Jenny::Codegen::Wasm {
         my ( %succ, %fallthru );
         for my $bi ( 0 .. $nb - 1 ) {
             my @s;
-            my $instrs = $blocks[$bi]->instructions;
+            my $instrs  = $blocks[$bi]->instructions;
             my $last_op = @$instrs ? $instrs->[-1]->opcode : undef;
             for my $inst (@$instrs) {
                 next unless $inst->opcode eq 'jmp' || $inst->opcode eq 'bne';
@@ -142,8 +141,8 @@ class Brocken::Jenny::Codegen::Wasm {
             my ($bi) = @_;
             $on_stack{$bi} = 1;
             for my $s ( @{ $succ{$bi} // [] } ) {
-                if   ( $on_stack{$s} ) { $is_back{"$bi>$s"} = 1 }
-                elsif ( !$seen{$s} )   { $seen{$s} = 1; $dfs->($s) }
+                if ( $on_stack{$s} ) { $is_back{"$bi>$s"} = 1 }
+                elsif ( !$seen{$s} ) { $seen{$s} = 1; $dfs->($s) }
             }
             delete $on_stack{$bi};
         };
@@ -179,7 +178,6 @@ class Brocken::Jenny::Codegen::Wasm {
                     push @todo, $s;
                 }
             }
-
             my @work = ($u);
             while (@work) {
                 my $n = pop @work;
@@ -219,7 +217,6 @@ class Brocken::Jenny::Codegen::Wasm {
         for my $u ( 0 .. $nb - 1 ) {
             $pending{$_}++ for grep { !$is_back{"$u>$_"} } @{ $succ{$u} // [] };
         }
-
         my ( @order, %placed, @sink );
         my $place_region;
         $place_region = sub {
@@ -253,9 +250,8 @@ class Brocken::Jenny::Codegen::Wasm {
                 }
             }
         };
-        $place_region->( 'fn', 0, undef );
+        $place_region->( 'fn',                   0,  undef );
         $place_region->( $innermost{$_} // 'fn', $_, undef ) for grep { !$placed{$_} } 0 .. $nb - 1;
-
         my %order_pos;
         $order_pos{ $order[$_] } = $_ for 0 .. $#order;
 
@@ -270,8 +266,7 @@ class Brocken::Jenny::Codegen::Wasm {
         for my $h ( sort keys %loop_body ) {
             my @pos = sort { $a <=> $b } map { $order_pos{$_} } grep { $loop_body{$h}{$_} } 0 .. $nb - 1;
             next unless @pos > 1;
-            die "Wasm: loop at block $h is not laid out contiguously"
-                if $pos[-1] - $pos[0] != $#pos;
+            die "Wasm: loop at block $h is not laid out contiguously" if $pos[-1] - $pos[0] != $#pos;
         }
 
         # A region is one loop, or the whole function. Its items are the blocks
@@ -296,7 +291,7 @@ class Brocken::Jenny::Codegen::Wasm {
             # other than the header's own loop.
             my $parent;
             for my $L ( keys %loop_body ) {
-                next if $L == $h || !$loop_body{$L}{$h};
+                next         if $L == $h         || !$loop_body{$L}{$h};
                 $parent = $L if !defined $parent || keys %{ $loop_body{$L} } < keys %{ $loop_body{$parent} };
             }
             $parent //= 'fn';
@@ -323,11 +318,8 @@ class Brocken::Jenny::Codegen::Wasm {
         my %outer_label;
         for my $bi ( 0 .. $nb - 1 ) {
             next unless $need_label{$bi};
-            $outer_label{$bi} = 1
-                if !$loop_header{$bi}
-                || grep { !$loop_body{$bi}{$_} } @{ $preds{$bi} // [] };
+            $outer_label{$bi} = 1 if !$loop_header{$bi} || grep { !$loop_body{$bi}{$_} } @{ $preds{$bi} // [] };
         }
-
         my @events;
         my $build_region;
         $build_region = sub {
@@ -342,7 +334,6 @@ class Brocken::Jenny::Codegen::Wasm {
                 return ( $bi, 0 ) if defined $header && $bi == $header;
                 return ( $bi, $outer_label{$bi} ? 1 : 0 );
             };
-
             for my $it ( reverse @items ) {
                 my ( $bi, $lab ) = $labelled->($it);
                 push @events, [ 'open', $bi ] if $lab;
@@ -350,7 +341,7 @@ class Brocken::Jenny::Codegen::Wasm {
             for my $it (@items) {
                 my ( $bi, $lab ) = $labelled->($it);
                 if ( $it =~ /^loop:/ ) {
-                    push @events, [ 'close', $bi ] if $lab;
+                    push @events, [ 'close',     $bi ] if $lab;
                     push @events, [ 'open_loop', $bi ];
                     $build_region->( $bi, $bi );
                     push @events, ['close_loop'];
@@ -370,7 +361,7 @@ class Brocken::Jenny::Codegen::Wasm {
         my ( @stack, %depth_to );
         for my $ev (@events) {
             my $kind = $ev->[0];
-            if ( $kind eq 'open' )         { push @stack, [ 'block', $ev->[1] ] }
+            if    ( $kind eq 'open' )       { push @stack, [ 'block', $ev->[1] ] }
             elsif ( $kind eq 'close' )      { pop @stack }
             elsif ( $kind eq 'open_loop' )  { push @stack, [ 'loop', $ev->[1] ] }
             elsif ( $kind eq 'close_loop' ) { pop @stack }
@@ -390,7 +381,6 @@ class Brocken::Jenny::Codegen::Wasm {
                 }
             }
         }
-
         my @block_bytes;
         for my $bi ( 0 .. $nb - 1 ) {
             my $mbb = $blocks[$bi];
@@ -430,34 +420,34 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'f64_const' ) {
                     $$buf .= pack( 'C', 0x44 ) . pack( 'd', $ops[0]->value );
                 }
-                elsif ( $opcode eq 'i32_add' )   { $$buf .= pack( 'C', 0x6A ) }
-                elsif ( $opcode eq 'memory_size' ) { $$buf .= pack( 'C', 0x3F ) . pack( 'C', 0x00 ) }
-                elsif ( $opcode eq 'memory_grow' ) { $$buf .= pack( 'C', 0x40 ) . pack( 'C', 0x00 ) }
-                elsif ( $opcode eq 'i32_sub' )   { $$buf .= pack( 'C', 0x6B ) }
-                elsif ( $opcode eq 'i32_mul' )   { $$buf .= pack( 'C', 0x6C ) }
-                elsif ( $opcode eq 'i32_div_s' ) { $$buf .= pack( 'C', 0x6D ) }
-                elsif ( $opcode eq 'i32_div_u' ) { $$buf .= pack( 'C', 0x6E ) }
-                elsif ( $opcode eq 'i32_rem_s' ) { $$buf .= pack( 'C', 0x6F ) }
-                elsif ( $opcode eq 'i32_rem_u' ) { $$buf .= pack( 'C', 0x70 ) }
-                elsif ( $opcode eq 'i32_and' )   { $$buf .= pack( 'C', 0x71 ) }
-                elsif ( $opcode eq 'i32_or' )    { $$buf .= pack( 'C', 0x72 ) }
-                elsif ( $opcode eq 'i32_xor' )   { $$buf .= pack( 'C', 0x73 ) }
-                elsif ( $opcode eq 'i32_shl' )   { $$buf .= pack( 'C', 0x74 ) }
-                elsif ( $opcode eq 'i32_shr_s' ) { $$buf .= pack( 'C', 0x75 ) }
-                elsif ( $opcode eq 'i32_shr_u' ) { $$buf .= pack( 'C', 0x76 ) }
-                elsif ( $opcode eq 'i64_add' )   { $$buf .= pack( 'C', 0x7C ) }
-                elsif ( $opcode eq 'i64_sub' )   { $$buf .= pack( 'C', 0x7D ) }
-                elsif ( $opcode eq 'i64_mul' )   { $$buf .= pack( 'C', 0x7E ) }
-                elsif ( $opcode eq 'i64_div_s' ) { $$buf .= pack( 'C', 0x7F ) }
-                elsif ( $opcode eq 'i64_div_u' ) { $$buf .= pack( 'C', 0x80 ) }
-                elsif ( $opcode eq 'i64_rem_s' ) { $$buf .= pack( 'C', 0x81 ) }
-                elsif ( $opcode eq 'i64_rem_u' ) { $$buf .= pack( 'C', 0x82 ) }
-                elsif ( $opcode eq 'i64_and' )   { $$buf .= pack( 'C', 0x83 ) }
-                elsif ( $opcode eq 'i64_or' )    { $$buf .= pack( 'C', 0x84 ) }
-                elsif ( $opcode eq 'i64_xor' )   { $$buf .= pack( 'C', 0x85 ) }
-                elsif ( $opcode eq 'i64_shl' )   { $$buf .= pack( 'C', 0x86 ) }
-                elsif ( $opcode eq 'i64_shr_s' ) { $$buf .= pack( 'C', 0x87 ) }
-                elsif ( $opcode eq 'i64_shr_u' ) { $$buf .= pack( 'C', 0x88 ) }
+                elsif ( $opcode eq 'i32_add' )      { $$buf .= pack( 'C', 0x6A ) }
+                elsif ( $opcode eq 'memory_size' )  { $$buf .= pack( 'C', 0x3F ) . pack( 'C', 0x00 ) }
+                elsif ( $opcode eq 'memory_grow' )  { $$buf .= pack( 'C', 0x40 ) . pack( 'C', 0x00 ) }
+                elsif ( $opcode eq 'i32_sub' )      { $$buf .= pack( 'C', 0x6B ) }
+                elsif ( $opcode eq 'i32_mul' )      { $$buf .= pack( 'C', 0x6C ) }
+                elsif ( $opcode eq 'i32_div_s' )    { $$buf .= pack( 'C', 0x6D ) }
+                elsif ( $opcode eq 'i32_div_u' )    { $$buf .= pack( 'C', 0x6E ) }
+                elsif ( $opcode eq 'i32_rem_s' )    { $$buf .= pack( 'C', 0x6F ) }
+                elsif ( $opcode eq 'i32_rem_u' )    { $$buf .= pack( 'C', 0x70 ) }
+                elsif ( $opcode eq 'i32_and' )      { $$buf .= pack( 'C', 0x71 ) }
+                elsif ( $opcode eq 'i32_or' )       { $$buf .= pack( 'C', 0x72 ) }
+                elsif ( $opcode eq 'i32_xor' )      { $$buf .= pack( 'C', 0x73 ) }
+                elsif ( $opcode eq 'i32_shl' )      { $$buf .= pack( 'C', 0x74 ) }
+                elsif ( $opcode eq 'i32_shr_s' )    { $$buf .= pack( 'C', 0x75 ) }
+                elsif ( $opcode eq 'i32_shr_u' )    { $$buf .= pack( 'C', 0x76 ) }
+                elsif ( $opcode eq 'i64_add' )      { $$buf .= pack( 'C', 0x7C ) }
+                elsif ( $opcode eq 'i64_sub' )      { $$buf .= pack( 'C', 0x7D ) }
+                elsif ( $opcode eq 'i64_mul' )      { $$buf .= pack( 'C', 0x7E ) }
+                elsif ( $opcode eq 'i64_div_s' )    { $$buf .= pack( 'C', 0x7F ) }
+                elsif ( $opcode eq 'i64_div_u' )    { $$buf .= pack( 'C', 0x80 ) }
+                elsif ( $opcode eq 'i64_rem_s' )    { $$buf .= pack( 'C', 0x81 ) }
+                elsif ( $opcode eq 'i64_rem_u' )    { $$buf .= pack( 'C', 0x82 ) }
+                elsif ( $opcode eq 'i64_and' )      { $$buf .= pack( 'C', 0x83 ) }
+                elsif ( $opcode eq 'i64_or' )       { $$buf .= pack( 'C', 0x84 ) }
+                elsif ( $opcode eq 'i64_xor' )      { $$buf .= pack( 'C', 0x85 ) }
+                elsif ( $opcode eq 'i64_shl' )      { $$buf .= pack( 'C', 0x86 ) }
+                elsif ( $opcode eq 'i64_shr_s' )    { $$buf .= pack( 'C', 0x87 ) }
+                elsif ( $opcode eq 'i64_shr_u' )    { $$buf .= pack( 'C', 0x88 ) }
                 elsif ( $opcode eq 'i32_wrap_i64' ) { $$buf .= pack( 'C', 0xA7 ) }
                 elsif ( $opcode eq 'i32_load' ) {
                     $$buf .= pack( 'C', 0x28 ) . $self->_uleb(2) . $self->_uleb(0);
@@ -483,36 +473,36 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i64_store' ) {
                     $$buf .= pack( 'C', 0x37 ) . $self->_uleb(3) . $self->_uleb(0);
                 }
-                elsif ( $opcode eq 'i32_eqz' )          { $$buf .= pack( 'C', 0x45 ) }
-                elsif ( $opcode eq 'i32_eq' )           { $$buf .= pack( 'C', 0x46 ) }
-                elsif ( $opcode eq 'i32_ne' )           { $$buf .= pack( 'C', 0x47 ) }
-                elsif ( $opcode eq 'i32_lt_s' )         { $$buf .= pack( 'C', 0x48 ) }
-                elsif ( $opcode eq 'i32_gt_s' )         { $$buf .= pack( 'C', 0x4A ) }
-                elsif ( $opcode eq 'i32_le_s' )         { $$buf .= pack( 'C', 0x4C ) }
-                elsif ( $opcode eq 'i32_ge_s' )         { $$buf .= pack( 'C', 0x4E ) }
-                elsif ( $opcode eq 'i32_lt_u' )         { $$buf .= pack( 'C', 0x49 ) }
-                elsif ( $opcode eq 'i32_gt_u' )         { $$buf .= pack( 'C', 0x4B ) }
-                elsif ( $opcode eq 'i32_le_u' )         { $$buf .= pack( 'C', 0x4D ) }
-                elsif ( $opcode eq 'i32_ge_u' )         { $$buf .= pack( 'C', 0x4F ) }
-                elsif ( $opcode eq 'i64_eqz' )          { $$buf .= pack( 'C', 0x50 ) }
-                elsif ( $opcode eq 'i64_eq' )           { $$buf .= pack( 'C', 0x51 ) }
-                elsif ( $opcode eq 'i64_ne' )           { $$buf .= pack( 'C', 0x52 ) }
-                elsif ( $opcode eq 'i64_lt_s' )         { $$buf .= pack( 'C', 0x53 ) }
-                elsif ( $opcode eq 'i64_gt_s' )         { $$buf .= pack( 'C', 0x55 ) }
-                elsif ( $opcode eq 'i64_le_s' )         { $$buf .= pack( 'C', 0x57 ) }
-                elsif ( $opcode eq 'i64_ge_s' )         { $$buf .= pack( 'C', 0x59 ) }
-                elsif ( $opcode eq 'i64_lt_u' )         { $$buf .= pack( 'C', 0x54 ) }
-                elsif ( $opcode eq 'i32_trunc_f32_s' ) { $$buf .= pack( 'C', 0xA8 ) }
-                elsif ( $opcode eq 'i32_trunc_f64_s' ) { $$buf .= pack( 'C', 0xAA ) }
-                elsif ( $opcode eq 'i64_trunc_f32_s' ) { $$buf .= pack( 'C', 0xAE ) }
-                elsif ( $opcode eq 'i64_trunc_f64_s' ) { $$buf .= pack( 'C', 0xB0 ) }
+                elsif ( $opcode eq 'i32_eqz' )           { $$buf .= pack( 'C', 0x45 ) }
+                elsif ( $opcode eq 'i32_eq' )            { $$buf .= pack( 'C', 0x46 ) }
+                elsif ( $opcode eq 'i32_ne' )            { $$buf .= pack( 'C', 0x47 ) }
+                elsif ( $opcode eq 'i32_lt_s' )          { $$buf .= pack( 'C', 0x48 ) }
+                elsif ( $opcode eq 'i32_gt_s' )          { $$buf .= pack( 'C', 0x4A ) }
+                elsif ( $opcode eq 'i32_le_s' )          { $$buf .= pack( 'C', 0x4C ) }
+                elsif ( $opcode eq 'i32_ge_s' )          { $$buf .= pack( 'C', 0x4E ) }
+                elsif ( $opcode eq 'i32_lt_u' )          { $$buf .= pack( 'C', 0x49 ) }
+                elsif ( $opcode eq 'i32_gt_u' )          { $$buf .= pack( 'C', 0x4B ) }
+                elsif ( $opcode eq 'i32_le_u' )          { $$buf .= pack( 'C', 0x4D ) }
+                elsif ( $opcode eq 'i32_ge_u' )          { $$buf .= pack( 'C', 0x4F ) }
+                elsif ( $opcode eq 'i64_eqz' )           { $$buf .= pack( 'C', 0x50 ) }
+                elsif ( $opcode eq 'i64_eq' )            { $$buf .= pack( 'C', 0x51 ) }
+                elsif ( $opcode eq 'i64_ne' )            { $$buf .= pack( 'C', 0x52 ) }
+                elsif ( $opcode eq 'i64_lt_s' )          { $$buf .= pack( 'C', 0x53 ) }
+                elsif ( $opcode eq 'i64_gt_s' )          { $$buf .= pack( 'C', 0x55 ) }
+                elsif ( $opcode eq 'i64_le_s' )          { $$buf .= pack( 'C', 0x57 ) }
+                elsif ( $opcode eq 'i64_ge_s' )          { $$buf .= pack( 'C', 0x59 ) }
+                elsif ( $opcode eq 'i64_lt_u' )          { $$buf .= pack( 'C', 0x54 ) }
+                elsif ( $opcode eq 'i32_trunc_f32_s' )   { $$buf .= pack( 'C', 0xA8 ) }
+                elsif ( $opcode eq 'i32_trunc_f64_s' )   { $$buf .= pack( 'C', 0xAA ) }
+                elsif ( $opcode eq 'i64_trunc_f32_s' )   { $$buf .= pack( 'C', 0xAE ) }
+                elsif ( $opcode eq 'i64_trunc_f64_s' )   { $$buf .= pack( 'C', 0xB0 ) }
                 elsif ( $opcode eq 'f32_convert_i64_s' ) { $$buf .= pack( 'C', 0xB4 ) }
                 elsif ( $opcode eq 'f64_convert_i64_s' ) { $$buf .= pack( 'C', 0xB9 ) }
-                elsif ( $opcode eq 'i64_extend_i32_s' ) { $$buf .= pack( 'C', 0xAC ) }
-                elsif ( $opcode eq 'i64_extend_i32_u' ) { $$buf .= pack( 'C', 0xAD ) }
-                elsif ( $opcode eq 'i64_gt_u' )         { $$buf .= pack( 'C', 0x56 ) }
-                elsif ( $opcode eq 'i64_le_u' )         { $$buf .= pack( 'C', 0x58 ) }
-                elsif ( $opcode eq 'i64_ge_u' )         { $$buf .= pack( 'C', 0x5A ) }
+                elsif ( $opcode eq 'i64_extend_i32_s' )  { $$buf .= pack( 'C', 0xAC ) }
+                elsif ( $opcode eq 'i64_extend_i32_u' )  { $$buf .= pack( 'C', 0xAD ) }
+                elsif ( $opcode eq 'i64_gt_u' )          { $$buf .= pack( 'C', 0x56 ) }
+                elsif ( $opcode eq 'i64_le_u' )          { $$buf .= pack( 'C', 0x58 ) }
+                elsif ( $opcode eq 'i64_ge_u' )          { $$buf .= pack( 'C', 0x5A ) }
                 elsif ( $opcode eq 'f32_load' ) {
                     $$buf .= pack( 'C', 0x2A ) . $self->_uleb(2) . $self->_uleb(0);
                 }
@@ -593,7 +583,6 @@ class Brocken::Jenny::Codegen::Wasm {
                     push @{ $block_fixups[$bi] }, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
                 }
                 else {
-
                     # Never fall through an unhandled opcode. An earlier version
                     # of this chain had no else, so every opcode the encoder did
                     # not know was silently dropped: i32 division returned its
@@ -604,8 +593,8 @@ class Brocken::Jenny::Codegen::Wasm {
                     # invisible while the Wasm tests skipped for want of a
                     # runtime. Opcodes that are deliberately no-ops (ctx_swap)
                     # get an explicit branch above rather than falling through.
-                    die "Brocken::Jenny::Codegen::Wasm: no encoder for MIR opcode '$opcode'"
-                        . ( defined $ops[0] ? ' (first operand: ' . $ops[0]->value . ')' : '' );
+                    die "Brocken::Jenny::Codegen::Wasm: no encoder for MIR opcode '$opcode'" .
+                        ( defined $ops[0] ? ' (first operand: ' . $ops[0]->value . ')' : '' );
                 }
             }
         }
@@ -625,10 +614,10 @@ class Brocken::Jenny::Codegen::Wasm {
         my @func_fixups;
         for my $ev (@events) {
             my $kind = $ev->[0];
-            if ( $kind eq 'open' )   { $bytes .= pack( 'C', 0x02 ) . pack( 'C', 0x40 ) }    # block void
-            elsif ( $kind eq 'close' )    { $bytes .= pack( 'C', 0x0B ) }                      # end
-            elsif ( $kind eq 'open_loop' )  { $bytes .= pack( 'C', 0x03 ) . pack( 'C', 0x40 ) }# loop void
-            elsif ( $kind eq 'close_loop' ) { $bytes .= pack( 'C', 0x0B ) }                      # end
+            if    ( $kind eq 'open' )       { $bytes .= pack( 'C', 0x02 ) . pack( 'C', 0x40 ) }    # block void
+            elsif ( $kind eq 'close' )      { $bytes .= pack( 'C', 0x0B ) }                        # end
+            elsif ( $kind eq 'open_loop' )  { $bytes .= pack( 'C', 0x03 ) . pack( 'C', 0x40 ) }    # loop void
+            elsif ( $kind eq 'close_loop' ) { $bytes .= pack( 'C', 0x0B ) }                        # end
             else {
                 my $bi = $ev->[1];
 
@@ -645,7 +634,6 @@ class Brocken::Jenny::Codegen::Wasm {
                 $bytes .= $block_bytes[$bi];
             }
         }
-
         my $num_params       = scalar( $ir_params->@* );
         my $num_extra_locals = $next_local - $num_params;
         my $locals_block     = '';
@@ -740,68 +728,5 @@ class Brocken::Jenny::Codegen::Wasm {
         return $out;
     }
 }
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Jenny::Codegen::Wasm - WebAssembly Binary Code Generator
-
-=head1 DESCRIPTION
-
-Generates WebAssembly binary code from MIR. Produces standard WASM bytecode suitable for embedding in a .wasm module.
-
-=head2 WebAssembly Features
-
-=over 4
-
-=item B<Locals>: Declares MIR virtual registers as WASM local variables
-
-=item B<Constants>: i32.const, i64.const for immediate values
-
-=item B<Arithmetic>: i32.add/sub/mul/div_s/rem_s, i64 variants, i32.and/or/xor/shl/shr_s/shr_u
-
-=item B<Comparison>: i32.eq/ne/lt_s/le_s/gt_s/ge_s, i64 variants
-
-=item B<Memory>: i32.load/store (with 4-byte alignment), i64.load/store (with 8-byte alignment)
-
-=item B<Control flow>: block, end, br (by depth), br_if, br_table, return
-
-=item B<Calls>: call (by function index)
-
-=item B<Local access>: local.get, local.set (by index)
-
-=back
-
-=head2 Structured Control Flow
-
-WebAssembly requires structured control flow (no arbitrary jumps). The codegen uses nested B<block> and B<end> pairs
-with L<br> targeting by block depth to implement conditional branches and loops.
-
-=head2 Limitations
-
-=over 4
-
-=item * No floating-point support yet (WASM supports f32/f64 natively)
-
-=item * No alloca support (WASM has linear memory but no dynamic stack allocation)
-
-=item * Limited to a single function and linear memory
-
-=back
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
+#
 1;

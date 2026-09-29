@@ -4,41 +4,6 @@ no warnings qw[experimental::class];
 use Brocken::Jenny::Linker;
 
 class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
-
-=pod
-
-=head1 NAME
-
-Brocken::Jenny::Linker::DWARF - Debug Information Generator
-
-=head1 DESCRIPTION
-
-Generates DWARF v5 compliant debug sections.
-
-=head2 Sections Generated:
-
-=over 4
-
-=item * B<.debug_line>: Maps machine code offsets to source lines.
-
-=item * B<.debug_info>: The main Debug Information Entry (DIE) tree.
-
-=item * B<.debug_abbrev>: Definitions of DIE abbreviations.
-
-=item * B<.debug_frame>: Stack unwinding and frame pointer recovery data.
-
-=item * B<.debug_aranges>: Rapid lookup table for address ranges.
-
-=item * B<.debug_names>: Fast, hashed symbol lookup table (new in DWARF 5).
-
-=item * B<.debug_str>: String table for DWARF 5 symbol references.
-
-=item * B<.eh_frame>: Exception handling frame data (LSDA compatible).
-
-=back
-
-=cut
-
     field $source_locs    : param : reader;
     field $text_base      : param : reader;
     field $source_file    : param : reader //= 'source.brocken';

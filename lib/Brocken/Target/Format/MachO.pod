@@ -1,0 +1,102 @@
+=head1 NAME
+
+Brocken::Target::Format::MachO - Writes macOS Mach-O object files
+
+=head1 SYNOPSIS
+
+    use Brocken::Target::Format::MachO;
+
+    my $macho = Brocken::Target::Format::MachO->new;
+    $macho->write_bin( 'prog', $code, $data, 'arm64' );
+
+    # or let Brocken::Target choose it
+    use Brocken::Target;
+    my $format = Brocken::Target->for( 'macos', 'arm64' )->format;
+
+=head1 DESCRIPTION
+
+Writes 64-bit Mach-O executables for macOS. This is the format L<Brocken::Target> selects for the C<macos> target.
+
+The executable it writes is a position-independent executable that loads C</usr/lib/libSystem.B.dylib> through
+C</usr/lib/dyld>. Its load commands are laid out to satisfy the checks C<dyld> and C<codesign> make on macOS, which is
+stricter than the ELF and PE writers have to be.
+
+=head1 METHODS
+
+=head2 C<write_bin( $filename, $text, $data, $arch, $os = 'macos' )>
+
+Writes a Mach-O executable, sets it executable, and returns C<$filename>. C<$os> is accepted but not used.
+
+C<$arch> selects the CPU type and, more importantly, the page size: C<'arm64'> gives CPU type C<0x0100000C> and a page
+size of C<0x4000> (16 KiB), while anything else, including C<'x64'> and any unrecognised value, gives CPU type
+C<0x01000007> and a page size of C<0x1000> (4 KiB). The 16 KiB page is the one macOS actually uses on Apple silicon,
+and it matches what L<Brocken::Target::OS::MacOS> reports for C<page_size>.
+
+Twelve load commands are written, C<sizeofcmds> bytes of them:
+
+=over
+
+=item C<LC_SEGMENT_64> for C<__PAGEZERO>, C<__TEXT>, C<__DATA>, and C<__LINKEDIT>
+
+C<__TEXT> is read-execute, C<__DATA> is read-write, and C<__LINKEDIT> is read only. C<__PAGEZERO> reserves the low
+address range.
+
+=item C<LC_MAIN>
+
+The entry point, at the start of C<__TEXT>.
+
+=item C<LC_BUILD_VERSION>
+
+Declares macOS 11.0 as the minimum.
+
+=item C<LC_UUID>, C<LC_LOAD_DYLINKER>, C<LC_LOAD_DYLIB>
+
+The UUID, the path to C</usr/lib/dyld>, and the link to C</usr/lib/libSystem.B.dylib>.
+
+=item C<LC_SYMTAB>, C<LC_DYSYMTAB>, C<LC_DYLD_INFO_ONLY>
+
+Symbol and dynamic-link metadata. These are written pointing at the C<__LINKEDIT> segment with zero counts, which is
+what C<dyld> requires of a file with no external symbols.
+
+=back
+
+After the commands the file is padded to a page boundary, then text, then data, then one further empty page. That last
+page is deliberately left blank for C<codesign> to write into.
+
+On a macOS host the method then ad-hoc signs the result by running C<< codesign --force --sign - >>, because an
+unsigned arm64 binary will not load. On other hosts it skips that step and leaves the binary unsigned.
+
+=head2 C<write_lib( $filename, $text, $data, $arch, $os, $exports )>
+
+Present, overrides the base declaration, and does not write a file. See L</CAVEATS>.
+
+=head1 CAVEATS
+
+=head2 C<write_lib> is a stub
+
+C<write_lib> accepts its arguments, computes a CPU type and an C<LC_ID_DYLIB> command, optionally runs C<codesign>, and
+returns C<$filename>. It never opens C<$filename> and never writes the computed command, so it reports success without
+producing a library. The file may not exist at all when it returns, depending on whether a codesign attempt happened to
+create one.
+
+Shared libraries for macOS go through L<Brocken::Jenny::Linker::MachO>, which is complete. This method is effectively a
+placeholder.
+
+=head2 Every binary carries the same hardcoded UUID
+
+The C<LC_UUID> value is the literal C<C0FFEE> followed by zeroes, the same for every file written. macOS uses the UUID
+to identify binaries in crash reports and caches, so two different programs built this way share an identity. A fuller
+writer would generate a real UUID.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

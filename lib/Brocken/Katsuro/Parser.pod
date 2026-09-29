@@ -1,0 +1,109 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Parser - Pratt parser for Brocken
+
+=head1 SYNOPSIS
+
+    use Brocken::Katsuro::Lexer;
+    use Brocken::Katsuro::Parser;
+
+    my $tokens  = Brocken::Katsuro::Lexer->new( source => $source )->lex();
+    my $program = Brocken::Katsuro::Parser->new( tokens => $tokens, filename => 'main.brocken' )->parse_program();
+
+=head1 DESCRIPTION
+
+Builds a L<Brocken::Katsuro::AST::Program> from a token stream produced by L<Brocken::Katsuro::Lexer>. Expressions are
+parsed with a precedence-climbing (Pratt) scheme; statements and declarations are handled by dedicated methods.
+
+Syntax errors are fatal and include the source location, for example:
+
+    Expected ';' after variable declaration at main.brocken line 2, col 10
+
+=head1 METHODS
+
+=head2 C<new( tokens => $tokens, [ filename => $name ] )>
+
+Constructs a parser. C<tokens> is required and is the arrayref returned by the lexer. C<filename> is carried into
+diagnostics and defaults to C<''>.
+
+=head2 C<parse_program()>
+
+    my $program = $parser->parse_program();
+
+Parses tokens until C<EOF> and returns a L<Brocken::Katsuro::AST::Program>. Each top-level item is a class declaration,
+a subroutine declaration, or a statement.
+
+=head2 C<parse_expression($precedence)>
+
+    my $node = $parser->parse_expression(0);
+
+Parses an expression whose operators bind more tightly than C<$precedence> and returns an expression node. Callers pass
+C<0> for a full expression. Internally it reads a prefix with C<nud> and then folds infix operators with C<led> while
+the next token's precedence is higher.
+
+=head2 C<parse_statement()>
+
+Parses one statement: a C<use feature> directive, a C<my> declaration, an C<if>, a C<while>, a C<return>, a C<say> or
+C<print> call, an assignment, a bare expression, or an empty C<;>. Returns the node, or C<undef> for a directive or an
+empty statement.
+
+=head2 C<parse_block()>
+
+Consumes a C<{ ... }> block and returns a C<Brocken::Katsuro::AST::Stmt::Block>.
+
+=head2 C<parse_sub_decl()> / C<parse_class_decl()>
+
+Parse a subroutine or a class declaration and return the corresponding C<SubDecl> or C<ClassDecl> node.
+
+=head1 FEATURES
+
+A C<use feature "name";> declaration records a named feature for the rest of the parse. The only feature currently
+consulted is C<brocken_native_types>, which enables C<i128> and C<u128> as type keywords; without it, those names are
+not types.
+
+=head1 CALL AND ACCESS SYNTAX
+
+The C<< -> >> operator produces a C<MethodCall> when followed by a name and C<(>, and a C<FieldAccess> otherwise.
+
+Calling is only supported on a plain identifier, as in C<foo(...)>; calling any other expression as a function is a
+fatal error. A call whose name is qualified as C<Brocken::something> is parsed as an C<IntrinsicCall>, which the
+lowerer turns into a runtime memory intrinsic rather than an ordinary function call.
+
+A bare identifier used as a statement is rejected with a hint:
+
+    Unexpected bare identifier 'foo' at main.brocken line 1, col 4 -- did you forget parentheses?
+
+=head1 OPERATOR PRECEDENCE
+
+From lowest to highest:
+
+  = //=        assignment
+  ||           logical or
+  &&           logical and
+  == != < > <= >=   comparison
+  + -          sum
+  * / %        product
+  unary - !    prefix
+  ( ) [ ] ->   call, index, member access
+
+There is no range operator: C<1..2> is not an expression, and the parser reports the C<..> token as unexpected.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

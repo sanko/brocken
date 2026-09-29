@@ -23,12 +23,11 @@ use Test2::Tools::Brocken qw(temp_path);
 #
 # Run under wasmtime: the failure mode here is a module that will not compile,
 # and a byte-level check would not have caught it.
-
-my $i64 = Brocken::Lindsay::IR::Type::i64();
-my $i32 = Brocken::Lindsay::IR::Type::i32();
-my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
-my $devnull = File::Spec->devnull;
-my $have_wasmtime = ( `wasmtime --version 2>$devnull` ) ? 1 : 0;
+my $i64           = Brocken::Lindsay::IR::Type::i64();
+my $i32           = Brocken::Lindsay::IR::Type::i32();
+my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+my $devnull       = File::Spec->devnull;
+my $have_wasmtime = (`wasmtime --version 2>$devnull`) ? 1 : 0;
 
 sub build {
     my ( $kind, $src_type, $dst_type, $value ) = @_;
@@ -59,29 +58,22 @@ sub run {
 my @cases = (
 
     # 64-bit source: the case that used to emit a widening opcode over an i64.
-    [ 'zext', $i64, $i64,  7,            7 ],
-    [ 'sext', $i64, $i64, -7,           -7 ],
-    [ 'zext', $i64, $i64,  3000000000,  3000000000 ],
-    [ 'sext', $i64, $i64,  3000000000,  3000000000 ],
-    [ 'sext', $i64, $i64, -3000000000, -3000000000 ],
+    [ 'zext', $i64, $i64, 7, 7 ], [ 'sext', $i64, $i64, -7, -7 ], [ 'zext', $i64, $i64, 3000000000, 3000000000 ],
+    [ 'sext', $i64, $i64, 3000000000, 3000000000 ], [ 'sext', $i64, $i64, -3000000000, -3000000000 ],
 
     # 32-bit source: the widening is real and must be kept.
-    [ 'zext', $i32, $i64,  7,            7 ],
-    [ 'sext', $i32, $i64, -7,           -7 ],
-    [ 'zext', $i32, $i64,  2000000000,  2000000000 ],
-    [ 'sext', $i32, $i64,  2000000000,  2000000000 ],
+    [ 'zext', $i32, $i64, 7, 7 ], [ 'sext', $i32, $i64, -7, -7 ], [ 'zext', $i32, $i64, 2000000000, 2000000000 ],
+    [ 'sext', $i32, $i64, 2000000000, 2000000000 ],
 );
-
 SKIP: {
     skip 'wasmtime is not installed', scalar @cases unless $have_wasmtime;
     for my $c (@cases) {
         my ( $kind, $src, $dst, $value, $want ) = @$c;
         my $label = "$kind i" . $src->bits . "->i" . $dst->bits . " $value";
-        my $path = eval { build( $kind, $src, $dst, $value ) };
+        my $path  = eval { build( $kind, $src, $dst, $value ) };
         if ( !defined $path ) { fail("$label: build died: $@"); next }
         is run($path), $want, "Wasm $label";
         unlink $path if -e $path;
     }
 }
-
 done_testing;

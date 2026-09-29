@@ -148,13 +148,6 @@ jobs:
     uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
     with:
       checkout_submodules: recursive
-      #~ The NetBSD 10.1 images ship an /etc/pkg_install.conf whose PKG_PATH
-      #~ still points at the 9.0_2026Q1 pkgsrc branch, which the mirror has
-      #~ dropped, so every pkg_add 404s (perl, rsync, curl alike). Override
-      #~ PKG_PATH with the branch matching os_version below -- keep the two in
-      #~ step. Use uname -p: that is MACHINE_ARCH, whose value (x86_64 or
-      #~ aarch64) matches the pkgsrc package directory, whereas uname -m
-      #~ reports evbarm on NetBSD/aarch64 and the cdn path has no such dir.
       matrix: |-
         [
           {"name":"Intel","platform_name":"netbsd","os":"netbsd","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","prepare":"export PKG_PATH=https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/10.1/All && /usr/sbin/pkg_add perl curl gmake"},
@@ -278,24 +271,6 @@ jobs:
         command -v cpanm
         cpanm --installdeps --notest -v .
         cpanm --test-only -v .
-  windows:
-    name: Windows
-    uses: sanko/workflow-testing/.github/workflows/run-direct.yml@main
-    with:
-      checkout_submodules: recursive
-      matrix: |-
-        [
-          {"name":"Intel","arch":"x86_64","platform_name":"windows","os":"windows-2022",  "variant":"5.42.3.1","prepare":"curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"},
-          {"name":"ARM","arch":"aarch64","platform_name":"windows", "os":"windows-11-arm","variant":"5.42.3.1","prepare":"curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"}
-        ]
-      task: |
-        export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
-        export PATH="/c/Strawberry/perl/site/bin:/c/Strawberry/perl/bin:/c/Strawberry/c/bin:$PATH"
-        perl -e 'print qq(perl=\$^X :: \$^O\n)'
-        curl -L https://cpanmin.us | perl - --notest App::cpanminus
-        command -v cpanm
-        cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
-        cpanm --test-only -v .
   wasm:
     name: Wasm
     uses: sanko/workflow-testing/.github/workflows/run-direct.yml@main
@@ -343,6 +318,24 @@ jobs:
         perl Build.PL
         ./Build
         ./Build test --v
+  windows:
+    name: Windows
+    uses: sanko/workflow-testing/.github/workflows/run-direct.yml@main
+    with:
+      checkout_submodules: recursive
+      matrix: |-
+        [
+          {"name":"Intel","arch":"x86_64","platform_name":"windows","os":"windows-2022",  "variant":"5.42.3.1","prepare":"curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"},
+          {"name":"ARM","arch":"aarch64","platform_name":"windows", "os":"windows-11-arm","variant":"5.42.3.1","prepare":"curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"}
+        ]
+      task: |
+        export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
+        export PATH="/c/Strawberry/perl/site/bin:/c/Strawberry/perl/bin:/c/Strawberry/c/bin:$PATH"
+        perl -e 'print qq(perl=\$^X :: \$^O\n)'
+        curl -L https://cpanmin.us | perl - --notest App::cpanminus
+        command -v cpanm
+        cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
+        cpanm --test-only -v .
 name: CI Matrix
 on:
   pull_request: ~

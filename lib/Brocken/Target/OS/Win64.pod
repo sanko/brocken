@@ -1,0 +1,58 @@
+=head1 NAME
+
+Brocken::Target::OS::Win64 - 64-bit Windows target
+
+=head1 DESCRIPTION
+
+The 64-bit Windows target, a subclass of L<Brocken::Target::OS>.
+
+It is the one system in the hierarchy that is not POSIX. It does not use system calls directly, which is the single
+fact that drives most of its behaviour, and it is the only one with a file extension on its executables.
+
+=head1 NO SYSCALL NUMBERS, AND WHY
+
+C<syscall_write> and C<syscall_exit> both return C<undef> for Windows, on every architecture. This is not a gap in the
+table, it is a deliberate consequence of C<uses_syscalls> being false. The Windows backend calls the C API instead of
+making a system call, so there is no number to emit and the base class declines to invent one.
+
+That is the difference between this target and the other nine. Every one of them can be handed to the syscall-emitting
+assembler methods; this one cannot. C<uses_syscalls> is the predicate to test before trying.
+
+=head1 FILE NAMING
+
+Windows is also the only system where the file names are not the plain defaults:
+
+=over
+
+=item * C<exe_ext> is C<.exe>, and every other target gives the empty string.
+
+=item * C<lib_ext> is C<.dll>. Every other target gives C<.so>, except macOS which gives C<.dylib>.
+
+=item * C<exe_name( $base )> is C<./$base.exe>, so the result is directly runnable from a shell.
+
+=item * C<lib_name( $base )> is C<$base.dll>.
+
+=back
+
+The page size is 4096, and the syscall number register is the usual C<rax>, C<x8>, and C<a7>, both inherited. Neither
+matters much given the above, but they are still reported rather than left undefined.
+
+=head1 INHERITED
+
+This subclass declares no methods. Its C<ADJUST> block does one thing, which is to die unless the name it was given is
+exactly C<win64>, so a Windows object cannot end up carrying another system's name. Everything else is inherited from
+the base class.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+=cut

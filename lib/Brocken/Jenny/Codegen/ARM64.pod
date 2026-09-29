@@ -1,0 +1,73 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Codegen::ARM64 - ARM64 (AArch64) Machine Code Generator
+
+=head1 DESCRIPTION
+
+Generates ARM64 machine code from MIR. Implements full instruction encoding for the AAPCS64 calling convention.
+
+=head2 Supported Instructions
+
+=over
+
+=item B<Data movement>: mov (reg/imm), movk, adrp (for LEA), ldr, str, ldrsw, ldrb, strb, ldp, stp
+
+=item B<Arithmetic>: add, sub, adds, subs, and, orr, eor, mul, neg, sxtw
+
+=item B<Comparison>: cmp, cset (for setcc), sltu (for unsigned setcc)
+
+=item B<Shift>: lsl, lsr, asr
+
+=item B<Floating point>: fmov (gp2f and f2gp), fadd, fsub, fmul, fdiv, fcmp, fcsel, fabs, fneg, fmin, fmax, fsqrt, fcvt (single/double), scvtf (int->float)
+
+=item B<Control flow>: b (unconditional/cond), cbz, cbnz, bl (call), ret
+
+=item B<Stack>: alloca (pre-scanned, prologue-only SUB), stp/ldp for callee save/restore
+
+=back
+
+=head2 Frame Layout
+
+    SP -> [spill/caller-save slots] [callee saves] [alloca area] <- FP (x29)
+
+The alloca area is pre-scanned and allocated in the prologue. Placing it above the spill and callee-saved slots
+guarantees that memory load/store offsets from SP remain small enough to fit within 12-bit encoding boundaries.
+
+=head2 Key Constants
+
+=over
+
+=item ADD_IMM = 0x91000000 (add register, immediate, 12-bit shifted)
+
+=item MOV_IMM = 0xD2800000 (mov register, immediate, using ORR)
+
+=item LDR_IMM = 0xF9400000 (ldr register, unsigned offset, scaled)
+
+=item STR_IMM = 0xF9000000 (str register, unsigned offset, scaled)
+
+=item B_IMM   = 0x14000000 (unconditional branch, 28-bit offset)
+
+=item BL_IMM  = 0x94000000 (branch-and-link, 28-bit offset)
+
+=back
+
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

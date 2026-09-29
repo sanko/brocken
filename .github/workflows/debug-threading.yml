@@ -32,6 +32,13 @@ jobs:
     uses: ./.github/workflows/cross.yml
     with:
       arch: '${{ matrix.arch }}'
+      diag: |
+        os=$(uname -s)
+        if [ "$os" = "OpenBSD" ] || [ "$os" = "SunOS" ]; then
+          truss -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
+        else
+          strace -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
+        fi
       host: '${{ matrix.host }}'
       os: '${{ matrix.os }}'
       perl: '${{ matrix.perl }}'
@@ -45,17 +52,7 @@ jobs:
         if [ "$(uname -s)" = "Haiku" ]; then # Haiku may need a specific trace tool
              :
         fi
-      # cross.yml has no `test_cmd` input; passing one is a hard workflow error.
-      # `test_files` is the supported way to narrow the run, and `diag` runs after
-      # the deps are installed, which is where a trace belongs.
-      diag: |
-        os=$(uname -s)
-        if [ "$os" = "OpenBSD" ] || [ "$os" = "SunOS" ]; then
-          truss -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
-        else
-          strace -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
-        fi
-      test_files: 't/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t'
+      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
       version: '${{ matrix.version }}'
 name: Debug Threading Issues
 on:

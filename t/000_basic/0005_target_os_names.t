@@ -10,13 +10,12 @@ use Test2::V0;
 #
 # Every construction goes through os_for so a regression is reported as a normal
 # failure instead of aborting the file the way the real bug aborted 000_init.t.
-
 {
 
     package Local::NullOS {
         use overload 'bool' => sub {0}, fallback => 1;
-        sub AUTOLOAD   { return }
-        sub DESTROY   { }
+        sub AUTOLOAD {return}
+        sub DESTROY  { }
         our $AUTOLOAD;
     }
 
@@ -30,9 +29,7 @@ use Test2::V0;
         return $os;
     }
 }
-
 my @known = qw(linux win64 macos freebsd openbsd netbsd solaris dragonfly dragonflybsd midnightbsd haiku);
-
 for my $name (@known) {
     my $os = os_for($name);
     if ($os) {
@@ -43,19 +40,16 @@ for my $name (@known) {
         fail "from_name($name) should not die";
     }
 }
-
-is ref(os_for('dragonflybsd')), 'Brocken::Target::OS::Dragonfly',
-    'dragonflybsd resolves to the Dragonfly subclass';
-is ref(os_for('dragonfly')), 'Brocken::Target::OS::Dragonfly',
-    'dragonfly resolves to the Dragonfly subclass';
+is ref( os_for('dragonflybsd') ), 'Brocken::Target::OS::Dragonfly', 'dragonflybsd resolves to the Dragonfly subclass';
+is ref( os_for('dragonfly') ),    'Brocken::Target::OS::Dragonfly', 'dragonfly resolves to the Dragonfly subclass';
 
 # is_bsd_like is anchored with $, so an unanchored 'dragonfly' alternative would
 # silently report false for the longer spelling and break the syscall numbers.
 ok os_for('dragonflybsd')->is_bsd_like, 'dragonflybsd is bsd_like';
 ok os_for('dragonfly')->is_bsd_like,    'dragonfly is bsd_like';
-ok os_for('netbsd')->is_bsd_like,        'netbsd is bsd_like';
-ok !os_for('linux')->is_bsd_like,        'linux is not bsd_like';
-ok !os_for('win64')->is_bsd_like,        'win64 is not bsd_like';
+ok os_for('netbsd')->is_bsd_like,       'netbsd is bsd_like';
+ok !os_for('linux')->is_bsd_like,       'linux is not bsd_like';
+ok !os_for('win64')->is_bsd_like,       'win64 is not bsd_like';
 
 # DragonFly is BSD: write(4) and exit(1) on all three supported architectures.
 for my $arch (qw(x64 arm64 riscv64)) {
@@ -67,12 +61,11 @@ for my $arch (qw(x64 arm64 riscv64)) {
 for my $bad (qw(plan9 aix dragon dragnfly linux2)) {
     ok !os_for($bad), "from_name($bad) is rejected";
 }
-
 ok os_for('dragonflybsd')->is_posix, 'dragonflybsd is posix';
-ok !os_for('win64')->is_posix,        'win64 is not posix';
-is os_for('win64')->exe_ext, '.exe', 'win64 exe ext';
-is os_for('dragonflybsd')->exe_ext, '', 'dragonflybsd exe ext';
-is os_for('dragonflybsd')->lib_ext, '.so', 'dragonflybsd lib ext';
+ok !os_for('win64')->is_posix,       'win64 is not posix';
+is os_for('win64')->exe_ext,        '.exe', 'win64 exe ext';
+is os_for('dragonflybsd')->exe_ext, '',     'dragonflybsd exe ext';
+is os_for('dragonflybsd')->lib_ext, '.so',  'dragonflybsd lib ext';
 
 # detect_host used to compare $^O eq 'dragonfly', but perl reports the
 # DragonFly kernel as 'dragonflybsd', so it silently fell through to 'linux'.
@@ -87,5 +80,4 @@ is os_for('dragonflybsd')->lib_ext, '.so', 'dragonflybsd lib ext';
     local $^O = 'linux';
     is Brocken::Target::OS->detect_host->name, 'linux', 'detect_host maps linux';
 }
-
 done_testing;

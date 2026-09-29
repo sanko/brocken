@@ -1,0 +1,81 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Compiler - Front-end driver: source to Lindsay IR
+
+=head1 SYNOPSIS
+
+    use Brocken::Compiler;
+
+    my $compiler = Brocken::Compiler->new;
+    my $module   = $compiler->compile( $source, 'main.brocken' );
+
+=head1 DESCRIPTION
+
+Drives the front end of the Brocken compiler. It runs a source string through the lexer and parser and then lowers the
+resulting syntax tree to Lindsay IR.
+
+C<compile> prepends the runtime source C<src/runtime/core.brocken> to the user's program before parsing, so every
+program is compiled against the standard runtime. The runtime's statements are parsed first and their nodes are placed
+ahead of the user's in the merged program. The file is read from a path relative to this module, and if it cannot be
+read the step is skipped rather than failing.
+
+A second entry point, C<parse_only>, stops after the parser and hands back the syntax tree. It does not read or merge
+the runtime.
+
+The class holds no state between calls: each call creates its own lexer, parser, and lowerer. It is safe to keep one
+instance and call it repeatedly.
+
+=head1 METHODS
+
+=head2 C<compile( $source, [ $filename ] )>
+
+    my $module = $compiler->compile( $source, 'main.brocken' );
+
+Parses the runtime source and C<$source>, lowers the combined program, and returns a L<Brocken::Lindsay::IR::Module>.
+Because the runtime is merged in, the returned module always contains the runtime functions in addition to those the
+user declared.
+
+Expected args:
+
+=over
+
+=item C<$source> - The Brocken source text to compile.
+
+=item C<$filename> - Optional. The file name carried through diagnostics and recorded on parse nodes. Defaults to
+C<(eval)>.
+
+=back
+
+=head2 C<parse_only( $source, [ $filename ] )>
+
+    my $program = $compiler->parse_only( $source, 'main.brocken' );
+
+Parses C<$source> and returns a L<Brocken::Katsuro::AST::Program> without lowering it. The runtime source is not
+prepended, so the tree contains exactly what C<$source> declared. This is the entry point for tools that inspect the
+syntax tree rather than compile it.
+
+=head1 DIAGNOSTICS
+
+Syntax errors are reported with their source location, for example:
+
+    Unexpected token ; ';' in expression at bad.brocken line 1, col 13
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

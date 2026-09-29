@@ -27,26 +27,21 @@ my i64 $x = 123;
 @a[4] = 55;
 return $x;
 BROCKEN
-
 my %lowerer_class = (
     'X86_64'  => 'Brocken::Jenny::Lowerer::X86_64',
     'ARM64'   => 'Brocken::Jenny::Lowerer::ARM64',
     'RISCV64' => 'Brocken::Jenny::Lowerer::RISCV64',
     'Wasm'    => 'Brocken::Jenny::Lowerer::Wasm',
 );
-my %triple = (
-    'X86_64'  => 'x86_64-unknown-linux-gnu',
-    'ARM64'   => 'aarch64-unknown-linux-gnu',
-    'RISCV64' => 'riscv64-unknown-linux-gnu',
-);
+my %triple = ( 'X86_64' => 'x86_64-unknown-linux-gnu', 'ARM64' => 'aarch64-unknown-linux-gnu', 'RISCV64' => 'riscv64-unknown-linux-gnu', );
 
 sub lowerer_for {
     my ($arch) = @_;
+
     # The Wasm lowerer takes no platform; the native ones do.
     return $lowerer_class{$arch}->new() if $arch eq 'Wasm';
     return $lowerer_class{$arch}->new( platform => Brocken::Katsuro::Platform::parse( $triple{$arch} ) );
 }
-
 subtest 'Alloca reserves element-count * size on every backend' => sub {
     my $brocken = Brocken->new();
     my $module  = Brocken::Compiler->new->compile($array_src);
@@ -57,6 +52,7 @@ subtest 'Alloca reserves element-count * size on every backend' => sub {
             my $mir = lowerer_for($arch)->lower($func);
             for my $block ( $mir->blocks->@* ) {
                 for my $inst ( $block->instructions->@* ) {
+
                     # The native backends emit an `alloca` opcode commented
                     # "alloca N bytes"; Wasm lowers the bump inline with an
                     # "alloca: size N" comment and no alloca opcode at all.
@@ -67,29 +63,28 @@ subtest 'Alloca reserves element-count * size on every backend' => sub {
             }
         }
         ok( scalar @reserved, "$arch lowered the program" );
+
         # 5 elements * 8 bytes.  Reserving 8 here is the bug: $x legitimately
         # reserves 8 bytes too, so the array slot has to be told apart by size.
         is( scalar( grep { $_ == 40 } @reserved ), 1, "$arch reserved 40 bytes for a 5-element i64 array" );
     }
 };
-
 subtest 'Array writes do not clobber a neighbouring local (native)' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    SKIP: {
+SKIP: {
         skip 'needs a native host to run the executable', 3 unless $host->is_native;
         my $module = Brocken::Compiler->new->compile($array_src);
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
         my $file   = $brocken->tmpdir . '/alloca_count' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         ok( -e $file, 'executable written' );
+
         # 123 must survive the five array writes; before the fix @a[2] landed
         # in $x's slot and the program returned 33.
-        run_exec( $file, expected_exit => 123, platform => $host,
-            name => 'neighbouring local intact after array writes on ' . $host->friendly );
+        run_exec( $file, expected_exit => 123, platform => $host, name => 'neighbouring local intact after array writes on ' . $host->friendly );
     }
 };
-
 subtest 'Non-constant element count is rejected clearly' => sub {
     my $brocken = Brocken->new();
     my $module  = Brocken::Compiler->new->compile(<<'BROCKEN');
@@ -107,5 +102,4 @@ BROCKEN
         like( $err, qr/non-constant element count/, "$arch reports the non-constant count" );
     }
 };
-
 done_testing;

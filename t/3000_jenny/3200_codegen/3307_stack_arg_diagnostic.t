@@ -4,7 +4,7 @@ use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Brocken::Katsuro::Platform;
 use Test2::Tools::Brocken qw[run_cross cross_available];
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # An argument past the last argument register used to be indexed off the end of
 # the register list, which produced an undefined register name, and the encoder
@@ -19,11 +19,9 @@ use feature               qw[class];
 # and is the control: if these passed only where the stack area is reserved, a
 # diagnostic or a silent miscompile on the others would not show up as a
 # difference.
-
 my $ten = 'sub f(i64 $a, i64 $b, i64 $c, i64 $d, i64 $e, i64 $g, i64 $h, i64 $i, i64 $j, i64 $k) -> i64
              { return $a + $j; }
            if (f(1, 1, 1, 1, 1, 1, 1, 1, 41, 1) != 42) { return 1; } return 0;';
-
 my $nine = 'sub f(i64 $a, i64 $b, i64 $c, i64 $d, i64 $e, i64 $g, i64 $h, i64 $i, i64 $j) -> i64
               { return $a + $j; }
             if (f(1, 1, 1, 1, 1, 1, 1, 1, 41) != 42) { return 1; } return 0;';
@@ -49,30 +47,23 @@ my $mixed = 'sub f(i64 $a, f64 $b, i64 $c, i64 $d, i64 $e, i64 $g, i64 $h, i64 $
 my $nested = 'sub g(i64 $x) -> i64 { return $x * 2; }
               sub f(i64 $a, i64 $b, i64 $c, i64 $d, i64 $e, i64 $gg, i64 $h, i64 $i, i64 $j) -> i64 { return g($j) + $a; }
               if (f(1, 1, 1, 1, 1, 1, 1, 1, 20) != 41) { return 1; } return 0;';
-
 my @cases = (
-    [ 'nine integer arguments',  $nine ],
-    [ 'ten integer arguments',  $ten ],
-    [ 'nine float arguments',    $float ],
-    [ 'a mixed overflow',        $mixed ],
+    [ 'nine integer arguments',                 $nine ],
+    [ 'ten integer arguments',                  $ten ],
+    [ 'nine float arguments',                   $float ],
+    [ 'a mixed overflow',                       $mixed ],
     [ 'a stack argument through a nested call', $nested ],
 );
-
 my $native = Brocken::Katsuro::Platform::parse( Brocken::Katsuro::Platform::gen_triple() );
 for my $case (@cases) {
     my ( $name, $src ) = @$case;
-    is( run_cross( $src, $native, name => "native: $name", expected_exit => 0 ),
-        0, "the host backend passes $name and gets the right answer" );
+    is( run_cross( $src, $native, name => "native: $name", expected_exit => 0 ), 0, "the host backend passes $name and gets the right answer" );
 }
-
 for my $target ( [ 'aarch64-unknown-linux-gnu', 'aarch64' ], [ 'riscv64-unknown-linux-gnu', 'riscv64' ] ) {
     my ( $triple, $label ) = @$target;
     my $plat = Brocken::Katsuro::Platform::parse($triple);
-
-    SKIP: {
-        skip "$label: qemu or the cross libc is not available here", 2 * @cases
-            unless cross_available($plat);
-
+SKIP: {
+        skip "$label: qemu or the cross libc is not available here", 2 * @cases unless cross_available($plat);
         for my $case (@cases) {
             my ( $name, $src ) = @$case;
 
@@ -88,13 +79,10 @@ for my $target ( [ 'aarch64-unknown-linux-gnu', 'aarch64' ], [ 'riscv64-unknown-
             };
             unlike( $err, qr/Unknown \w+ register/, "$label compiles $name without inventing a register" );
         }
-
         for my $case (@cases) {
             my ( $name, $src ) = @$case;
-            is( run_cross( $src, $plat, name => "$label: $name", expected_exit => 0 ),
-                0, "$label passes $name and gets the right answer" );
+            is( run_cross( $src, $plat, name => "$label: $name", expected_exit => 0 ), 0, "$label passes $name and gets the right answer" );
         }
     }
 }
-
 done_testing;

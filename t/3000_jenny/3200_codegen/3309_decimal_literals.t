@@ -7,7 +7,7 @@ use Brocken::Compiler;
 use Brocken::Jenny;
 use Test2::Tools::Brocken qw[temp_path];
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # Decimal float literals.
 #
@@ -41,7 +41,9 @@ my @CASES = (
 
     # A fractional part has to survive as a fraction. 1.5 + 2.5 is 4, and a
     # constant packed with its integer bits instead would be nowhere near it.
-    { name => 'fractional arithmetic', src => 'my f64 $a = 1.5; my f64 $b = 2.5; my f64 $c = $a + $b; my i64 $i = $c; if ($i != 4) { return 1; } return 0;' },
+    {   name => 'fractional arithmetic',
+        src  => 'my f64 $a = 1.5; my f64 $b = 2.5; my f64 $c = $a + $b; my i64 $i = $c; if ($i != 4) { return 1; } return 0;'
+    },
 
     # Small magnitudes truncate to zero, and a value that did not survive as a
     # fraction would not.
@@ -71,18 +73,17 @@ my @CASES = (
 
     # Exponents, which are a float for the same reason a decimal point is and
     # which the lexer has to recognise on their own -- `1e9` has no point in it.
-    { name => 'exponent',         src => 'my f64 $a = 1e3; my i64 $i = $a; if ($i != 1000) { return 1; } return 0;' },
-    { name => 'exponent negative',src => 'my f64 $a = 1e-2; my i64 $i = $a; if ($i != 0) { return 1; } return 0;' },
+    { name => 'exponent',           src => 'my f64 $a = 1e3; my i64 $i = $a; if ($i != 1000) { return 1; } return 0;' },
+    { name => 'exponent negative',  src => 'my f64 $a = 1e-2; my i64 $i = $a; if ($i != 0) { return 1; } return 0;' },
     { name => 'point and exponent', src => 'my f64 $a = 1.5e1; my i64 $i = $a; if ($i != 15) { return 1; } return 0;' },
-    { name => 'large exponent',   src => 'my f64 $a = 1e15; my i64 $i = $a; if ($i != 1000000000000000) { return 1; } return 0;' },
+    { name => 'large exponent',     src => 'my f64 $a = 1e15; my i64 $i = $a; if ($i != 1000000000000000) { return 1; } return 0;' },
 
     # An integer literal must still be an integer. 2**53+1 is not
     # representable as a float, so if the lexer had started tagging every
     # numeric token as a float this would round.
-    { name => 'integer stays exact', src => 'my i64 $a = 9007199254740993; if ($a != 9007199254740993) { return 1; } return 0;' },
+    { name => 'integer stays exact',    src => 'my i64 $a = 9007199254740993; if ($a != 9007199254740993) { return 1; } return 0;' },
     { name => 'integer still compares', src => 'my i64 $a = 3; if ($a != 3) { return 1; } return 0;' },
 );
-
 my $brocken = Brocken->new;
 SKIP: {
     skip 'Not native', scalar @CASES unless $brocken->platform->is_native;

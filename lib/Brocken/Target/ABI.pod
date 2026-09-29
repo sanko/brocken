@@ -1,0 +1,65 @@
+=head1 NAME
+
+Brocken::Target::ABI - Maps condition names to architecture condition codes
+
+=head1 SYNOPSIS
+
+    use Brocken::Target::ABI;
+
+    my $abi = Brocken::Target::ABI->new;
+    my $code = $abi->cc( 'x64', 'lt' );    # 0xC, the x86-64 JL opcode
+
+    # or through the target
+    use Brocken::Target;
+    my $code = Brocken::Target->for( 'linux', 'x64' )->abi->cc( 'x64', 'lt' );
+
+=head1 DESCRIPTION
+
+A single class, not a hierarchy, that answers one question: for a given architecture, what is the condition code for a
+given comparison? The assembler and code generator use it to turn a branch like "less than" into the number that goes
+in a conditional jump instruction.
+
+There is no per-OS behavior and no state, so there are no fields and no constructor arguments. One instance works for
+every architecture.
+
+=head1 METHODS
+
+=head2 C<cc( $arch, $name )>
+
+Returns the condition code for the comparison C<$name> on architecture C<$arch>, or C<undef> if C<$name> is not a known
+comparison.
+
+C<$name> is one of C<'eq'>, C<'ne'>, C<'lt'>, C<'le'>, C<'gt'>, C<'ge'>, C<'z'>, or C<'nz'>. C<'z'> and C<'nz'> are
+synonyms for C<'eq'> and C<'ne'>; the two spellings exist because both the comparison and the "is zero" case come up.
+
+There are two tables, selected by architecture:
+
+    name   x64    arm64 / riscv64
+    eq     0x4    0x0
+    ne     0x5    0x1
+    lt     0xC    0xB
+    le     0xE    0xD
+    gt     0xF    0xC
+    ge     0xD    0xA
+    z      0x4    0x0
+    nz     0x5    0x1
+
+The x64 values are the low nibble of the x86-64 C<Jcc> opcodes, so C<JL> is C<0x7C> and the low part is C<0xC>. The
+arm64 and riscv64 values are the condition codes those instruction sets use, which happen to agree with each other.
+
+An unrecognised C<$arch> is not an error. It takes the x64 table, because the match for the other two is an equality
+test that falls through. Passing an unknown architecture and expecting it to be rejected will not work; the method
+returns an x86-64 code.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

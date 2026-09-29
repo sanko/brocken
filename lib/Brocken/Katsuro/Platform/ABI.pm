@@ -35,20 +35,9 @@ class Brocken::Katsuro::Platform::ABI {
     # the same as stack_param_offset: the return address the call pushes below
     # the arguments, and any shadow space, both sit between the two.
     method caller_stack_param_offset($index) {undef}
-    method return_register()                       {undef}
-    method fp_return_register()                    {undef}
-    method fiber_reg()                             {undef}
+    method return_register()                 {undef}
+    method fp_return_register()              {undef}
+    method fiber_reg()                       {undef}
 }
-
-=head1 NAME
-
-Brocken::Katsuro::Platform::ABI - Low-level Architecture Binary Interface details
-
-=head1 DESCRIPTION
-
-This class and its subclasses define the register sets and DWARF numbering for specific architectures. It abstracts the
-differences between calling conventions (e.g., which registers are preserved across calls).
-
-=cut
-
+#
 1;

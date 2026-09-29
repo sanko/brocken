@@ -1,0 +1,56 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Codegen::RISCV64 - RISC-V 64-bit Machine Code Generator
+
+=head1 DESCRIPTION
+
+Generates RISC-V 64-bit machine code from MIR. Implements full instruction encoding for the RV64IMAFD (LP64D) calling
+convention.
+
+=head2 Supported Instructions
+
+=over
+
+=item B<Data movement>: mv (ADDI), li (LUI+ADDI), la (AUIPC+ADDI for LEA), ld, sd, lw, sw, lbu, sb
+
+=item B<Arithmetic>: add, sub, and, or, xor, slli, srli, srai, addi, andi, ori, xori, slti, sltiu, slt, sltu
+
+=item B<Multiply/Divide>: mul, mulhu, div, divu
+
+=item B<Comparison/Select>: seqz, snez, sltz, blez, bgtz, min, max (branches)
+
+=item B<Floating point>: fmv.s, fmv.d, fcvt.s.l, fcvt.l.s, fcvt.d.l, fcvt.l.d, fadd.s/d, fsub.s/d, fmul.s/d, fdiv.s/d, fsqrt.s/d, fle.s/d, flt.s/d, feq.s/d, fmin.s/d, fmax.s/d, fneg.s/d, fabs.s/d
+
+=item B<Control flow>: j (jal), jal (call), jalr (ret/call), beq, bne, blt, bge, bltu, bgeu
+
+=item B<Stack>: alloca (ADDI pre-scanned, prologue-only), sd/ld for callee save/restore
+
+=back
+
+=head2 Frame Layout
+
+    SP -> [spill/caller-save slots] [callee saves] [alloca area] <- FP (s0)
+
+Mirrors ARM64 layout: pre-scanned alloca area placed safely out of the way of the spill/caller-save slots to prevent
+LDR/STR encoding bounds overflows.
+
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

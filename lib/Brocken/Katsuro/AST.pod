@@ -1,0 +1,126 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::AST - Syntax tree nodes for Brocken
+
+=head1 DESCRIPTION
+
+Defines the node classes the parser produces and the lowerer consumes. Every node is a C<class> object with read-only
+accessors. The classes form a small hierarchy: all nodes descend from L<Brocken::Katsuro::AST::Node> and carry source
+location fields, and the concrete nodes are grouped into programs, statements, and expressions.
+
+Because the nodes are objects rather than hashrefs, inspect them with the accessors below, not by looking up hash keys.
+
+=head1 LOCATION FIELDS
+
+Every node inherits these fields from the base class:
+
+=over
+
+=item C<file> - The source file name, or C<''> when unknown.
+
+=item C<line> - The one-based line number, or C<0> when unknown.
+
+=item C<col> - The one-based column number, or C<0> when unknown.
+
+=back
+
+=head1 NODES
+
+=head2 C<Brocken::Katsuro::AST::Program>
+
+The root of a parsed file.
+
+=over
+
+=item C<statements> - Arrayref of statement nodes. Defaults to an empty list.
+
+=back
+
+=head2 Statements
+
+=over
+
+=item C<Stmt::VarDecl> - A C<my> declaration. Fields: C<sigil>, C<name>, C<type> (default C<Any>), C<init> (default
+undef).
+
+=item C<Stmt::ArrayDecl> - An array declaration. Fields: C<name> (without sigil), C<elem_type>, C<size_expr>, C<init>.
+
+=item C<Stmt::Assign> - An assignment. Fields: C<target>, C<expr>, C<op> (C<=> or C<//=>, default C<=>).
+
+=item C<Stmt::Block> - A braced block. Field: C<statements>.
+
+=item C<Stmt::If> - A conditional. Fields: C<cond>, C<then> (a C<Block>), C<elsif> (arrayref of C<[cond, Block]>
+pairs), C<else> (a C<Block> or undef).
+
+=item C<Stmt::While> - A loop. Fields: C<cond>, C<body> (a C<Block>).
+
+=item C<Stmt::Return> - A C<return>. Field: C<expr> (undef for a bare C<return;>).
+
+=item C<Stmt::SubDecl> - A subroutine. Fields: C<name>, C<params>, C<return_type> (default C<void>), C<body>.
+
+=item C<Stmt::ClassDecl> - A class. Fields: C<name>, C<fields> (arrayref of C<FieldDecl>), C<methods> (arrayref of
+C<MethodDecl>), C<adjust> (an C<Adjust> node or undef).
+
+=item C<Stmt::FieldDecl> - A field. Fields: C<type>, C<name> (without sigil), C<attrs> (arrayref of attribute names),
+C<default>, C<default_op>, C<align> (from C<:pack(N)>, or undef).
+
+=item C<Stmt::MethodDecl> - A method. Fields: C<name>, C<params>, C<return_type>, C<body>. C<params> does not include
+C<$self>.
+
+=item C<Stmt::Adjust> - An C<ADJUST> block. Field: C<body> (a C<Block>).
+
+=back
+
+For C<SubDecl> and C<MethodDecl>, each entry in C<params> is a hashref with keys C<type>, C<sigil>, and C<name>.
+
+=head2 Expressions
+
+=over
+
+=item C<Expr::BinOp> - A binary operation. Fields: C<op>, C<lhs>, C<rhs>.
+
+=item C<Expr::UnOp> - A unary operation. Fields: C<op> (C<-> or C<!>), C<expr>.
+
+=item C<Expr::Const> - A literal. Fields: C<value>, C<type>. The type is C<Int>, C<String>, C<Bool>, or C<f64> for a
+float literal.
+
+=item C<Expr::Var> - A variable reference. Fields: C<sigil>, C<name>.
+
+=item C<Expr::Paren> - A parenthesized expression. Field: C<expr>.
+
+=item C<Expr::Ident> - A bare identifier, used as a function name. Field: C<name>.
+
+=item C<Expr::FieldAccess> - C<< $obj->field >>. Fields: C<obj>, C<field>.
+
+=item C<Expr::ArrayIndex> - C<< $arr[$i] >>. Fields: C<array>, C<index>.
+
+=item C<Expr::MethodCall> - C<< $obj->method(...) >>. Fields: C<obj>, C<method>, C<args>.
+
+=item C<Expr::ClassConst> - The C<__CLASS__> keyword. No fields; resolves to the enclosing class name.
+
+=item C<Expr::IntrinsicCall> - A call into the C<Brocken::> pseudo-namespace, such as C<Brocken::load_i64>. Fields:
+C<name> (the part after C<Brocken::>), C<args>.
+
+=item C<Expr::Call> - A free-function call. Fields: C<func_name>, C<args>.
+
+=back
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

@@ -4,7 +4,7 @@ use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Brocken::Katsuro::Platform;
 use Test2::Tools::Brocken qw[run_cross cross_available];
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # A cross-execution baseline for the AArch64 and RISCV64 backends.
 #
@@ -36,20 +36,10 @@ use feature               qw[class];
 # the stack, which is a different mechanism -- a reserved frame area and a
 # displacement measured from the entry stack pointer rather than from a
 # register -- and `3307` covers that separately.
-
-my @TARGETS = (
-    [ 'x86_64-unknown-linux-gnu',   'x86-64' ],
-    [ 'aarch64-unknown-linux-gnu', 'aarch64' ],
-    [ 'riscv64-unknown-linux-gnu', 'riscv64' ],
-);
-
-my @CASES = (
-    {   name => 'single arg',
-        src  => 'sub f1(i64 $a) -> i64 { return $a; } if (f1(42) != 42) { return 1; } return 0;',
-    },
-    {   name => 'two args',
-        src  => 'sub f2(i64 $a, i64 $b) -> i64 { return $a - $b; } if (f2(10, 4) != 6) { return 1; } return 0;',
-    },
+my @TARGETS = ( [ 'x86_64-unknown-linux-gnu', 'x86-64' ], [ 'aarch64-unknown-linux-gnu', 'aarch64' ], [ 'riscv64-unknown-linux-gnu', 'riscv64' ], );
+my @CASES   = (
+    { name => 'single arg', src => 'sub f1(i64 $a) -> i64 { return $a; } if (f1(42) != 42) { return 1; } return 0;', },
+    { name => 'two args',   src => 'sub f2(i64 $a, i64 $b) -> i64 { return $a - $b; } if (f2(10, 4) != 6) { return 1; } return 0;', },
     {   name => 'four args',
         src  => 'sub f4(i64 $a, i64 $b, i64 $c, i64 $d) -> i64 { return $a - $b - $c - $d; }
                   if (f4(10, 4, 3, 2) != 1) { return 1; } return 0;',
@@ -85,14 +75,11 @@ my @CASES = (
     # sitting behind it: the fadd family never set funct3, so it decoded as fsgnj
     # and quietly threw the arithmetic away, and a float return fell through to
     # the integer move and handed back the return address in a0.
-
     {   name => 'float const local',
         src  => 'sub f() -> f64 { my f64 $s = 1; return $s; } if (f() != 1) { return 1; } return 0;',
         note => 'a literal has to be given a register before anything can move it',
     },
-    {   name => 'float local from float param',
-        src  => 'sub f(f64 $a) -> f64 { my f64 $n = $a; return $n; } if (f(1) != 1) { return 1; } return 0;',
-    },
+    { name => 'float local from float param', src => 'sub f(f64 $a) -> f64 { my f64 $n = $a; return $n; } if (f(1) != 1) { return 1; } return 0;', },
     {   name => 'float arg is a literal',
         src  => 'sub f(f64 $a) -> f64 { return $a; } if (f(1) != 1) { return 1; } return 0;',
         note => 'the literal arrives at the call site, not the callee',
@@ -129,26 +116,17 @@ my @CASES = (
                   if (fac(10) != 3628800) { return 1; } return 0;',
     },
 );
-
 for my $target (@TARGETS) {
     my ( $triple, $label ) = @$target;
     my $platform = Brocken::Katsuro::Platform::parse($triple);
-
-    SKIP: {
-        skip "$label: qemu or the cross libc is not available here", scalar @CASES * 2
-            unless cross_available($platform);
-
+SKIP: {
+        skip "$label: qemu or the cross libc is not available here", scalar @CASES * 2 unless cross_available($platform);
         for my $case (@CASES) {
             my $label_line = "$label: $case->{name}";
             $label_line .= " ($case->{note})" if $case->{note};
-
-            my $rc = run_cross( $case->{src}, $platform,
-                name          => $label_line,
-                expected_exit => 0
-            );
+            my $rc = run_cross( $case->{src}, $platform, name => $label_line, expected_exit => 0 );
             is( $rc, 0, "$label_line returns 0" );
         }
     }
 }
-
 done_testing;

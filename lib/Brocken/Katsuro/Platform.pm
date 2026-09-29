@@ -4,7 +4,7 @@ no warnings qw[experimental::class experimental::builtin];
 use Brocken::Katsuro::Platform::ABI;
 
 class Brocken::Katsuro::Platform {
-    use Config qw(%Config);
+    use Config qw[%Config];
 
     #~ https://wiki.osdev.org/Target_Triplet
     #~ https://github.com/ziglang/zig/issues/20690
@@ -14,11 +14,11 @@ class Brocken::Katsuro::Platform {
     #~ -<os>[.<ver>]
     #~ [-<api>[.<ver>]
     #~ [-<abi>[+~opts]]]
-    my %known_vendor = map { $_ => 1 } qw(
+    my %known_vendor = map { $_ => 1 } qw[
         pc apple unknown w64 ibm hp sun amd
         nintendo sony mti nvidia fortanix risc0
         esp lynx unikraft kmc wrs portbld
-    );
+    ];
 
     # Hide stderr appropriately for the host OS shell.
     # This is critical for feature detection where commands might fail.
@@ -145,7 +145,7 @@ class Brocken::Katsuro::Platform {
             $os_version = $2;
             $os         = $1;
         }
-        my $class = 'Brocken::Katsuro::Platform';
+        my $class = __PACKAGE__;
         if    ( $os =~ /linux/i )                                       { $class = 'Brocken::Katsuro::Platform::Linux' }
         elsif ( $os =~ /darwin|macos|ios/i )                            { $class = 'Brocken::Katsuro::Platform::MacOS' }
         elsif ( $os =~ /windows|win32|mswin/i )                         { $class = 'Brocken::Katsuro::Platform::Windows' }
@@ -343,60 +343,5 @@ class Brocken::Katsuro::Platform {
     method fp_return_register()                    { $self->abi->fp_return_register }
     method fiber_reg()                             { $self->abi->fiber_reg }
 }
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Katsuro::Platform - Platform and Architecture Detection
-
-=head1 DESCRIPTION
-
-Central platform abstraction layer that detects, normalizes, and describes target platforms. Handles target triple
-parsing, host detection, syscall numbering, binary format selection, and register set queries.
-
-=head2 Target Triples
-
-Platforms are identified by 4-part normalized triples: C<arch-vendor-os-env>. Examples:
-
-=over 4
-
-=item C<x86_64-pc-linux-gnu> - Standard Linux on x64
-
-=item C<aarch64-apple-darwin-macho> - macOS on Apple Silicon
-
-=item C<x86_64-pc-windows-gnu> - Windows with MinGW
-
-=back
-
-=head2 Key Methods
-
-=over 4
-
-=item C<parse> - Parse a triple string into a platform object
-
-=item C<gen_triple> - Detect the host platform
-
-=item C<syscall> - Look up syscall numbers
-
-=item C<registers> - Query register sets (via ABI subclass)
-
-=item Identity methods (C<is_linux>, C<is_macos>, C<is_windows>, etc.)
-
-=back
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
+#
 1;

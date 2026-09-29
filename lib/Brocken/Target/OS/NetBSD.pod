@@ -1,0 +1,46 @@
+=head1 NAME
+
+Brocken::Target::OS::NetBSD - NetBSD target
+
+=head1 DESCRIPTION
+
+The NetBSD target, a subclass of L<Brocken::Target::OS>.
+
+It is POSIX and BSD-derived as far as the rest of the codebase is concerned, its shared libraries use the C<.so>
+extension, and it has no executable extension. The C<write> and C<exit> numbers, 4 and 1, come from the base class,
+which gives the same pair to every BSD-derived system.
+
+=head1 AARCH64 HAS NO NUMBER REGISTER
+
+The one thing this subclass changes. On NetBSD AArch64 the syscall number is not passed in a register at all, so
+C<syscall_num_reg> returns C<undef>:
+
+    $os->syscall_num_reg( 'x64' );     # 'rax'
+    $os->syscall_num_reg( 'arm64' );   # undef
+    $os->syscall_num_reg( 'riscv64' ); # 'a7'
+
+Callers must handle C<undef> rather than assuming a register name is always available. x86-64 and RISC-V are delegated
+to the base class.
+
+Note that only the register is unavailable. The C<write> and C<exit> numbers are still 4 and 1 on AArch64, and the page
+size is still 4096, so this is specific to how the number is passed.
+
+=head1 METHODS
+
+=head2 C<syscall_num_reg( $arch )>
+
+Returns the name of the register carrying the syscall number, or C<undef> for AArch64, which passes it on the stack.
+Every other architecture is delegated to the base class.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

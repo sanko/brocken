@@ -1,0 +1,30 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Platform::ABI - Low-level Architecture Binary Interface details
+
+=head1 DESCRIPTION
+
+This class and its subclasses define the register sets and DWARF numbering for specific architectures. It abstracts the
+differences between calling conventions (e.g., which registers are preserved across calls).
+
+
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

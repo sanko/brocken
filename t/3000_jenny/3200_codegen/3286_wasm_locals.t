@@ -8,7 +8,6 @@ use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
 use Test2::Tools::Brocken qw(temp_path);
-
 my $host          = Brocken::Katsuro::Platform::parse();
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
@@ -36,22 +35,16 @@ chomp $wasmtime_path if $wasmtime_path;
 # value comes back on stdout, so these cases assert real behaviour rather than
 # only that the bytes validate.
 my @cases = (
-    { name => 'i32 local', src => "my i32 \$x = 123;\nreturn \$x;", want => 123 },
-    { name => 'i64 local', src => "my i64 \$x = 123;\nreturn \$x;", want => 123 },
-    {
-        name => 'neighbouring locals',
-        src  => "my i32 \$x = 123;\nmy i32 \$y = 0;\n\$y = 33;\nreturn \$x;",
-        want => 123,
-    },
-    { name => 'i32 reassigned', src => "my i32 \$x = 0;\n\$x = 55;\nreturn \$x;", want => 55 },
-    { name => 'i64 arithmetic', src => "my i64 \$x = 40;\n\$x = \$x + 2;\nreturn \$x;", want => 42 },
-    { name => 'null pointer', src => 'return 0;', want => 0 },
+    { name => 'i32 local',           src => "my i32 \$x = 123;\nreturn \$x;",                             want => 123 },
+    { name => 'i64 local',           src => "my i64 \$x = 123;\nreturn \$x;",                             want => 123 },
+    { name => 'neighbouring locals', src => "my i32 \$x = 123;\nmy i32 \$y = 0;\n\$y = 33;\nreturn \$x;", want => 123, },
+    { name => 'i32 reassigned',      src => "my i32 \$x = 0;\n\$x = 55;\nreturn \$x;",                    want => 55 },
+    { name => 'i64 arithmetic',      src => "my i64 \$x = 40;\n\$x = \$x + 2;\nreturn \$x;",              want => 42 },
+    { name => 'null pointer',        src => 'return 0;',                                                  want => 0 },
 );
-
 for my $case (@cases) {
-    SKIP: {
+SKIP: {
         skip 'wasmtime not available', 1 and last unless $wasmtime_path && -f $wasmtime_path;
-
         my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
         my $module   = Brocken::Compiler->new->compile( $case->{src} );
         my $codegen  = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
@@ -66,18 +59,14 @@ for my $case (@cases) {
         my $safe        = $case->{name} =~ s/\W+/_/gr;
         my $output_file = temp_path("wasm_locals_$safe") . '.wasm';
         Brocken::Jenny::Linker::Wasm->new->write_executable( $output_file, $funcs, $platform );
-
         my $output = qx["$wasmtime_path" run --invoke _BROCKEN_ENTRY "$output_file" 1024 2>&1];
 
         # wasmtime warns on stderr about --invoke with arguments and with a
         # return value; neither says anything about this module.
         $output =~ s/^warning: using .*$//mg;
         $output =~ s/^\s+|\s+$//g;
-
         is( $output, $case->{want}, "$case->{name}: module runs and returns $case->{want}" );
-
         unlink $output_file;
     }
 }
-
 done_testing;

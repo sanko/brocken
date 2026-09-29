@@ -1,10 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-
-# ============================================================
-# Types
-# ============================================================
+#
 class Brocken::Lindsay::IR::Type {
     field $kind   : reader : param;        # 'int', 'float', 'ptr', 'void', 'dynamic'
     field $bits   : reader : param = 0;    # 8, 16, 32, 64, ...
@@ -504,75 +501,5 @@ class Brocken::Lindsay::IR::Module {
         return $out;
     }
 }
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Lindsay::IR - High-Level Intermediate Representation Types
-
-=head1 DESCRIPTION
-
-Defines the core data structures for Brocken's SSA-form intermediate representation. The IR is LLVM-inspired and uses
-an SSA representation with typed values, instructions, basic blocks, functions, and modules.
-
-=head2 Type System
-
-Types are represented as singleton objects via the L<Brocken::Lindsay::IR::Type> class. Common types (i1, i8, i32, i64,
-f32, f64, ptr, void, dynamic) are created once and cached.
-
-=head2 Value Hierarchy
-
-=over 4
-
-=item L<Brocken::Lindsay::IR::Value> - Base class for all IR values
-
-=item L<Brocken::Lindsay::IR::Constant> - Constant values (literals)
-
-=item L<Brocken::Lindsay::IR::Instruction> - Base instruction class
-
-=back
-
-=head2 Instruction Types
-
-=over 4
-
-=item B<Arithmetic>: add, sub, mul, div, rem, neg, abs, sqrt, shl, lshr, ashr, and, or, xor, min, max
-
-=item B<Comparison>: icmp (eq, ne, sgt, slt, etc.)
-
-=item B<Memory>: alloca, load, store, getelementptr
-
-=item B<Control flow>: br, cond_br, ret, call, select, phi
-
-=item B<Runtime>: box, unbox, incref, decref
-
-=back
-
-=head2 Program Structure
-
-=over 4
-
-=item L<Brocken::Lindsay::IR::Module> - Top-level container of functions
-
-=item L<Brocken::Lindsay::IR::Function> - Function with params, return type, and blocks
-
-=item L<Brocken::Lindsay::IR::Block> - Basic block containing a sequence of instructions
-
-=back
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
+#
 1;

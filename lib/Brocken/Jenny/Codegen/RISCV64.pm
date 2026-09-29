@@ -390,7 +390,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
             my $disp = $addr->{disp} // 0;
             return $disp unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
             return $disp + $total_frame if ( $addr->{raw} // '' ) eq 'entry';
-            return $disp if $addr->{raw};
+            return $disp                if $addr->{raw};
             return $disp + $call_arg_frame;
         };
         my $reg_id = sub ($r) {
@@ -512,7 +512,6 @@ class Brocken::Jenny::Codegen::RISCV64 {
                             $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                         }
                         else {
-
                             # Full 64-bit immediate
                             $bytes .= $self->_li64( $did, $val );
                         }
@@ -549,7 +548,6 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', ( 32 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                     else {
-
                         # 64-bit source: the value is already zero-extended, so
                         # this is a plain move. The 32-bit slli/srli pair above
                         # would drop bits 63..32 and corrupt every 64-bit
@@ -581,7 +579,6 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x1B );
                     }
                     else {
-
                         # 64-bit source: already sign-extended, so just move it
                         # (addiw would sign-extend from bit 31 and corrupt a
                         # 64-bit value).
@@ -606,8 +603,8 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $did    = $reg_id->($dst_r);
                     my %imm_f3 = ( add => 0, sub => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3, sltiu => 3 );
                     my %reg_f7 = (
-                        add   => 0x00,
-                        sub   => 0x20,
+                        add => 0x00,
+                        sub => 0x20,
 
                         # M extension: funct7 is 1 for every mul/div/rem, and
                         # funct3 picks the operation (0 mul, 1 mulh, 3 mulhu,
@@ -930,14 +927,14 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     # not a rounding. funct3 is fixed at 7 for every float to
                     # integer conversion and the destination width rides in rs2,
                     # which is why rs2 is the field that is not a register here.
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $sbits = $src->type ? $src->type->bits : 64;
-                    my $dbits = $dst->type ? $dst->type->bits : 64;
+                    my $dst_r  = $resolve->($dst);
+                    my $did    = $reg_id->($dst_r);
+                    my $src_r  = $resolve->($src);
+                    my $sid    = $reg_id->($src_r);
+                    my $sbits  = $src->type ? $src->type->bits : 64;
+                    my $dbits  = $dst->type ? $dst->type->bits : 64;
                     my $funct7 = 0x60 | ( $sbits > 32 ? 1 : 0 );
-                    my $enc = ( $funct7 << 25 ) | ( $sid << 15 ) | ( 7 << 12 ) | ( $did << 7 ) | FP_OP;
+                    my $enc    = ( $funct7 << 25 ) | ( $sid << 15 ) | ( 7 << 12 ) | ( $did << 7 ) | FP_OP;
                     $enc |= ( $dbits > 32 ? 2 : 0 ) << 20;
                     $bytes .= pack( 'V', $enc );
                 }
@@ -957,10 +954,10 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $did    = $reg_id->($dst_r);
                     my $src_r  = $resolve->($src);
                     my $sid    = $reg_id->($src_r);
-                    my $sbits  = $src->type ? $src->type->bits : 64;
-                    my $fbits  = $dst->type ? $dst->type->bits : 64;
-                    my $funct7 = $fbits >= 64 ? 0x69 : 0x68;
-                    my $rs2    = $sbits >= 64 ? 2 : 0;
+                    my $sbits  = $src->type   ? $src->type->bits : 64;
+                    my $fbits  = $dst->type   ? $dst->type->bits : 64;
+                    my $funct7 = $fbits >= 64 ? 0x69             : 0x68;
+                    my $rs2    = $sbits >= 64 ? 2                : 0;
                     my $enc    = ( $funct7 << 25 ) | ( $rs2 << 20 ) | ( $sid << 15 ) | ( 7 << 12 ) | ( $did << 7 ) | FP_OP;
                     $bytes .= pack( 'V', $enc );
                 }
@@ -1162,7 +1159,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
     # five 11-bit chunks are shifted in. Decomposing by "shift until zero"
     # instead would emit the top chunk as an unsigned 12-bit immediate, which
     # turned every negative constant into a large positive one (-1 became 511).
-    method _li64($rd, $val) {
+    method _li64( $rd, $val ) {
         my $uval = $val & 0xFFFFFFFFFFFFFFFF;
         my $top  = ( $uval >> 55 ) & 0x1FF;
         $top -= 0x200 if $top & 0x100;
@@ -1240,57 +1237,5 @@ class Brocken::Jenny::Codegen::RISCV64 {
         return $max_off ? int( $max_off / 8 ) + 1 : 0;
     }
 }
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Jenny::Codegen::RISCV64 - RISC-V 64-bit Machine Code Generator
-
-=head1 DESCRIPTION
-
-Generates RISC-V 64-bit machine code from MIR. Implements full instruction encoding for the RV64IMAFD (LP64D) calling
-convention.
-
-=head2 Supported Instructions
-
-=over 4
-
-=item B<Data movement>: mv (ADDI), li (LUI+ADDI), la (AUIPC+ADDI for LEA), ld, sd, lw, sw, lbu, sb
-
-=item B<Arithmetic>: add, sub, and, or, xor, slli, srli, srai, addi, andi, ori, xori, slti, sltiu, slt, sltu
-
-=item B<Multiply/Divide>: mul, mulhu, div, divu
-
-=item B<Comparison/Select>: seqz, snez, sltz, blez, bgtz, min, max (branches)
-
-=item B<Floating point>: fmv.s, fmv.d, fcvt.s.l, fcvt.l.s, fcvt.d.l, fcvt.l.d, fadd.s/d, fsub.s/d, fmul.s/d, fdiv.s/d, fsqrt.s/d, fle.s/d, flt.s/d, feq.s/d, fmin.s/d, fmax.s/d, fneg.s/d, fabs.s/d
-
-=item B<Control flow>: j (jal), jal (call), jalr (ret/call), beq, bne, blt, bge, bltu, bgeu
-
-=item B<Stack>: alloca (ADDI pre-scanned, prologue-only), sd/ld for callee save/restore
-
-=back
-
-=head2 Frame Layout
-
-    SP -> [spill/caller-save slots] [callee saves] [alloca area] <- FP (s0)
-
-Mirrors ARM64 layout: pre-scanned alloca area placed safely out of the way of the spill/caller-save slots to prevent
-LDR/STR encoding bounds overflows.
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
+#
 1;

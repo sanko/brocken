@@ -1,0 +1,82 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
+
+=head1 DESCRIPTION
+
+Emits ELF64 objects for the Linux and BSD targets. Inherits from L<Brocken::Jenny::Linker>, and supplies the ELF
+specific pieces of the format: the section layout, the entry stub, the fixed GOT slot assignment the dynamic linker
+imports rely on, and the image base.
+
+=head1 METHODS
+
+=head2 C<write_executable( ..., [ ... ] )>
+
+    $elf->write_executable( $output_file, $code_data, $platform, $shared, $debug_bytes )
+
+Writes a complete ELF64 image to C<$output_file>, assembling the section layout and the program headers and then
+emitting the file.
+
+Expected args:
+
+=over
+
+=item C<$output_file> - The path to write the image to.
+
+=item C<$code_data> - The machine code to link. Either a plain string of code, a hashref carrying a C<binary> key
+together with an optional C<writable_data_offset>, or an arrayref of C<{ name, bytes, fixups }> hashes when the image
+holds more than one function. The arrayref form is what lets exported functions and cross-function call fixups be
+resolved at link time.
+
+=item C<$platform> - The target platform, or a string it can be parsed from.
+
+=item C<$shared> - Optional. When true, produces a shared object instead of an executable, which also changes
+C<image_base> to zero so the file is position independent. Defaults to false.
+
+=item C<$debug_bytes> - Optional. The prebuilt debug sections to append, when the caller has already generated them.
+Defaults to C<undef>, which omits the debug sections.
+
+=back
+
+=head2 C<image_base( ... )>
+
+    $elf->image_base()
+
+Returns the address an image is loaded at: C<0> for a shared object, so it stays position independent, and C<0x400000>
+for an executable.
+
+=head2 C<import_rva( ... )>
+
+    $elf->import_rva( $name )
+
+Returns the relative virtual address of the GOT slot reserved for the named import from the dynamic linker. Slots zero
+through two are reserved, so the first import starts at offset 24; C<dlopen>, C<dlsym>, C<pthread_create>, C<exit>,
+C<pthread_join>, and the rest each have a fixed slot. Dies when asked for a name that has no slot.
+
+=head2 C<entry_stub_len( ... )>
+
+    $elf->entry_stub_len( $platform )
+
+Returns the length in bytes of the entry stub, or zero when this image is not an executable and so has no entry point.
+The size depends on the platform, since DragonFly BSD needs the extra GOT slots for C<_init_tls> and
+C<_rtld_call_init>.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

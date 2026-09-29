@@ -1,0 +1,30 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker - Unified Binary Executable Generator
+
+=head1 DESCRIPTION
+
+The Linker class provides a platform-agnostic interface for taking machine code and data segments and packaging them
+into a final executable or shared library.
+
+
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut
