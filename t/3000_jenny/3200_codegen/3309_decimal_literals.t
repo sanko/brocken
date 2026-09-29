@@ -32,6 +32,11 @@ my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $wasmtime = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime if $wasmtime;
 
+# Solaris `which` prints a diagnostic such as "no wasmtime in ..." to stdout
+# rather than leaving it empty, so a bare truthiness check would send that
+# sentence to the shell as a command.  Only an executable path counts.
+$wasmtime = undef unless $wasmtime && -x $wasmtime;
+
 # Each case is [name, source, expected exit]. The program returns 0 when it
 # agrees with itself, so the exit code is the assertion.
 my @CASES = (

@@ -28,6 +28,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         JE          => 0x84,
         JNE         => 0x85,
         RET_BYTE    => 0xC3,
+        NOP_BYTE    => 0x90,
         POP_BASE    => 0x58,
         PUSH_BASE   => 0x50,
     };
@@ -1452,6 +1453,9 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $bytes .= pack( 'C',   POP_BASE + 5 );        # pop rbp
                         $bytes .= pack( 'C',   RET_BYTE );
                     }
+                }
+                elsif ( $opcode eq 'nop' ) {
+                    $bytes .= pack( 'C', NOP_BYTE );
                 }
                 else {
                     die "Brocken::Jenny::Codegen::X86_64: no encoder for MIR opcode '$opcode'";

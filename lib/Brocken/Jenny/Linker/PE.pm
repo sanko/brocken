@@ -49,14 +49,32 @@ class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
             if ( $platform->is_arm64 ) {
 
                 # Windows ARM64 Entry Stub:
+                # - sub sp, sp, #0x100000   (carve a 1 MiB heap off the stack)
+                # - add x0, sp, #0          (heap base in the first argument)
                 # - stp x29, x30, [sp, #-16]!
                 # - mov x29, sp
-                # - bl main (relative call offset +16 bytes -> 4 instructions)
+                # - bl _BROCKEN_ENTRY
                 # - ldp x29, x30, [sp], #16
-                # - uxtb w0, w0  (truncate exit code to 8 bits)
+                # - add sp, sp, #0x100000   (return the heap to the stack)
+                # - uxtb w0, w0             (truncate exit code to 8 bits)
                 # - ret
-                my $bl = bl( 16 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
-                $entry_stub = pack( 'V6', stp_pre( 29, 30, 31, -16 ), add_imm( 29, 31, 0 ), $bl, ldp_post( 29, 30, 31, 16 ), uxtb( 0, 0 ), ret(), );
+                my $HEAP_SIZE = 0x100000;
+                my $imm12     = $HEAP_SIZE >> 12;
+                my $sub_sp    = 0xD1000000 | ( 1 << 22 ) | ( $imm12 << 10 ) | ( 31 << 5 ) | 31;
+                my $add_sp    = 0x91000000 | ( 1 << 22 ) | ( $imm12 << 10 ) | ( 31 << 5 ) | 31;
+                my $bl        = bl( 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
+                $entry_stub = pack(
+                    'V9',
+                    $sub_sp,                      # sub sp, sp, #0x100000
+                    add_imm( 0, 31, 0 ),          # add x0, sp, #0  (heap base)
+                    stp_pre( 29, 30, 31, -16 ),   # stp x29, x30, [sp, #-16]!
+                    add_imm( 29, 31, 0 ),         # mov x29, sp
+                    $bl,                          # bl _BROCKEN_ENTRY
+                    ldp_post( 29, 30, 31, 16 ),   # ldp x29, x30, [sp], #16
+                    $add_sp,                      # add sp, sp, #0x100000
+                    uxtb( 0, 0 ),                 # uxtb w0, w0
+                    ret(),                        # ret
+                );
             }
             else {
                 # Windows x86_64 Entry Stub with heap:
@@ -209,8 +227,6 @@ class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
                     $idx++;
                 }
                 my $iat_entry_rva = $iat_rva + $idx * 8;
-                warn sprintf "STUB: target=%s idx=%d idata_rva=0x%X idata_len=%d iat_rva=0x%X iat_entry=0x%X\n", $ff->{target}, $idx, $idata_rva,
-                    length($idata_bytes), $iat_rva, $iat_entry_rva;
                 if ( $platform->is_x64 ) {
                     my $disp32 = $iat_entry_rva - ( $text_rva + $stub_ofs + 6 );
                     $text .= pack( 'CC l<', 0xFF, 0x25, $disp32 );
