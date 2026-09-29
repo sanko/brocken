@@ -423,10 +423,12 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
         my $is_leaf       = 1;
         my $total_alloca  = 0;
+        my $needs_fmov_scratch;
 
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
+                $needs_fmov_scratch = 1 if $inst->opcode eq 'fmov_gp2f';
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
@@ -435,6 +437,20 @@ class Brocken::Jenny::Codegen::X86_64 {
             }
         }
         my $shadow_space = ( $platform->is_windows && !$is_leaf ) ? 32 : 0;
+
+        # The Zen 4 workaround for MOVD/MOVQ out of R8-R15 (see the fmov_gp2f
+        # case below) has to park the GPR in memory and read the XMM back from
+        # there, so it needs one scratch slot of its own.  It used to use a
+        # literal +0x20, which only lands in dead space when the frame happens
+        # to be empty: any local sitting at that offset was silently overwritten
+        # with the constant being moved, so `my f64 $a=1; my f64 $b=2;
+        # my f64 $c=3` read 3.0 back out of $b.  Reserve the slot at the top of
+        # the alloca area instead, which nothing else is addressed out of.
+        my $fmov_scratch_off;
+        if ($needs_fmov_scratch) {
+            $fmov_scratch_off = $shadow_space + $call_arg_frame + $total_alloca;
+            $total_alloca += 16;
+        }
 
         # Ensure the spill area (which includes caller-saved register slots) does not
         # overlap with the callee-saved register save area at the top of the frame.
@@ -1059,23 +1075,27 @@ class Brocken::Jenny::Codegen::X86_64 {
 
                         # AMD Zen 4 erratum: MOVD/MOVQ from R8-R15 to XMM
                         # produces wrong results.  Work around by storing the
-                        # GPR to [rsp+0x20] and loading into XMM from memory.
-                        # The +0x20 offset avoids the return address that
-                        # the entry-stub call placed at [rsp].
+                        # GPR to a scratch slot and loading into XMM from memory.
+                        # That slot is reserved above the allocas (see the
+                        # frame layout), so it cannot collide with a local.
+                        my $scratch = $fmov_scratch_off // 0x20;
+                        my $sfit = ( $scratch >= -128 && $scratch <= 127 );
+                        my $sib  = $sfit ? "\x24" . pack( 'c', $scratch ) : "\x24" . pack( 'V', $scratch );
+                        my $smod = $sfit ? 0x44 : 0x84;
                         my $rex_store = 0x40 | ( $bits >= 64 ? 8 : 0 ) | ( $sid >= 8 ? 4 : 0 );
-                        my $modrm_st  = 0x44 | ( ( $sid & 7 ) << 3 );
+                        my $modrm_st  = $smod | ( ( $sid & 7 ) << 3 );
                         $bytes .= pack( 'C', $rex_store ) if $rex_store > 0x40;
-                        $bytes .= pack( 'CC', 0x89, $modrm_st ) . pack( 'CC', 0x24, 0x20 );
+                        $bytes .= pack( 'CC', 0x89, $modrm_st ) . $sib;
                         my $op_load  = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                         my $rex_load = 0x40 | ( $did >= 8 ? 4 : 0 );
-                        my $modrm_ld = 0x44 | ( ( $did & 7 ) << 3 );
+                        my $modrm_ld = $smod | ( ( $did & 7 ) << 3 );
 
                         # Prefix before REX, as in the MOVD form below: F2 or
                         # F3 ahead of a REX discards it, and REX.R is what
                         # reaches xmm8-xmm15 at all.
                         $bytes .= pack( 'C', $op_load->[0] );
                         $bytes .= pack( 'C', $rex_load ) if $rex_load > 0x40;
-                        $bytes .= pack( 'CCCCC', $op_load->[1], $op_load->[2], $modrm_ld, 0x24, 0x20 );
+                        $bytes .= pack( 'CCC', $op_load->[1], $op_load->[2], $modrm_ld ) . $sib;
                     }
                     else {
                         my $rex = $bits >= 64 ? 0x48 : 0x40;
