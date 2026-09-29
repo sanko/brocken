@@ -337,7 +337,7 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       separately for exactly that reason, and a 3-byte struct must not be padded
       back to 4 just because the following field would prefer it.
 
-- [ ] **A field default value is ignored, on every backend.** Found while adding
+- [x] **A field default value is ignored, on every backend.** Found while adding
       `3295_field_pack.t`; unrelated to `:pack` and reproducible at
       `field i8 $a :param :reader; field i16 $b :param :reader = 5;` followed by
       `P->new(3)` and a read of `b`. The default is not applied, so `b` reads
@@ -347,8 +347,30 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       default never put a value on the stack. Verified at `55fe87f` with the
       layout work stashed, so it predates it. The attribute is parsed and the
       default expression is built, so the loss is in lowering: the constructor
-      probably stores each `:param` field unconditionally and clobbers the
-      default the `ADJUST` pass installed.
+      stores each `:param` field unconditionally, and that `if`/`elsif` leaves
+      the default branch unreachable for exactly the fields that carry one.
+
+      Not `ADJUST` clobbering a default after the fact, as first guessed -- the
+      constructor's own `elsif` is simply never reached. The default is applied
+      for a field that is *not* a `:param` and was ignored for one that is, which
+      is the opposite way round from an adjustment overwriting it.
+
+      The fix is at the call site, because that is the only place that knows what
+      the caller passed. A constructor's signature is fixed at one parameter per
+      `:param` field, so it cannot tell an omitted argument from one passed as
+      zero, and neither can it leave the slot alone. `register_class` now keeps
+      each field's `default_ast` in the class table, and `new` fills every
+      `:param` slot past the last supplied argument with that default, or a zero
+      of the right width when the field has none. The default is kept
+      unlowered on purpose: it has to be re-lowered in whichever function holds
+      the call, and a value lowered at class-registration time would belong to
+      whatever was being compiled then.
+
+      Zero-filling is not a flourish -- it is the same missing operand. Without
+      it, an omitted argument with no default at all is still an uninitialized
+      read on native, and still a stack mismatch on Wasm.
+
+      `3296_field_defaults.t`; 18 of its 29 assertions fail at `9117ecd`.
 - [x] **Wasm could not compile any program that declares a local variable.**
       Every frontend program with at least one `my` local was rejected by the
       Wasm validator, even `my i32 $x = 123; return $x;`. Found while adding
