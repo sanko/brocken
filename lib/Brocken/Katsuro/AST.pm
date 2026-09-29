@@ -102,6 +102,15 @@ class Brocken::Katsuro::AST::Stmt::FieldDecl : isa(Brocken::Katsuro::AST::Node) 
     field $attrs      : param : reader = [];        # ['reader', 'writer', 'param']
     field $default    : param : reader = undef;     # default value expression
     field $default_op : param : reader = undef;     # '=' or '//='
+
+    # Byte alignment for this field, from `:pack` (1) or `:pack(N)` (N), or
+    # undef for the type's natural alignment.
+    #
+    # This is not an entry in `attrs`. Every attribute there is a bare flag
+    # tested by name, and a layout modifier is not one: its value is a number
+    # rather than presence, and it is read by the class layout rather than by
+    # the accessor and parameter passes.
+    field $align      : param : reader = undef;
 }
 
 class Brocken::Katsuro::AST::Stmt::MethodDecl : isa(Brocken::Katsuro::AST::Node) {
