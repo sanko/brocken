@@ -149,7 +149,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
         $alloc->remove_redundant_caller_restores($mf);
-        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $self->_fp_shuffle_temp($platform) // $fp_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -198,11 +198,11 @@ class Brocken::Jenny::Codegen::ARM64 {
             $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
             $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
-            $alloc->remove_redundant_caller_restores($mf);
-            $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
-            my %callee_seen;
-            @callee_seen{ $int_res->{used_callee}->@* } = ();
-            @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+        $alloc->remove_redundant_caller_restores($mf);
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $self->_fp_shuffle_temp($platform) // $fp_res->{spill_temp} );
+        my %callee_seen;
+        @callee_seen{ $int_res->{used_callee}->@* } = ();
+        @callee_seen{ $fp_res->{used_callee}->@* }  = ();
 
             if ( $self->_has_fiber_ops_mf($mf) ) {
                 $callee_seen{ $platform->fiber_reg } = 1;
@@ -241,7 +241,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
         $alloc->remove_redundant_caller_restores($mf);
-        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $self->_fp_shuffle_temp($platform) // $fp_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -1428,6 +1428,20 @@ class Brocken::Jenny::Codegen::ARM64 {
         for my $off ( values $fp_spill->%* ) { $max_off = $off if $off > $max_off; }
         return $max_off ? int( $max_off / 8 ) + 1 : 0;
     }
+
+    # The floating-point register `fix_entry_shuffle` may park a cyclic copy in.
+    # The allocator's own spill temp cannot serve there: it is taken from the
+    # caller-saved set, which on AArch64 is v0-v7, and those are the very
+    # registers the entry copies read the floating-point arguments from.  A park
+    # in one of them destroys an argument a later copy still has to read, the
+    # scheduler sees the collision and gives up, and the copies then go out in
+    # the order they were written -- which shifts every argument but the first
+    # into its neighbour's value.  The ABI names a register outside both sets.
+    method _fp_shuffle_temp($platform) {
+        my $abi = $platform->can('abi') ? $platform->abi : $platform;
+        return undef unless $abi->can('fp_entry_shuffle_temp');
+        return $abi->fp_entry_shuffle_temp;
+    }
 }
 
 =encoding utf-8
@@ -1442,7 +1456,7 @@ Generates ARM64 machine code from MIR. Implements full instruction encoding for 
 
 =head2 Supported Instructions
 
-=over 4
+=over
 
 =item B<Data movement>: mov (reg/imm), movk, adrp (for LEA), ldr, str, ldrsw, ldrb, strb, ldp, stp
 
@@ -1469,7 +1483,7 @@ guarantees that memory load/store offsets from SP remain small enough to fit wit
 
 =head2 Key Constants
 
-=over 4
+=over
 
 =item ADD_IMM = 0x91000000 (add register, immediate, 12-bit shifted)
 
