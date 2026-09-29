@@ -43,10 +43,6 @@ use feature               qw[class];
 # failing arity is whatever fills the argument register set -- four on Win64,
 # six on SysV, and a cycle at the point where the allocator starts permuting
 # them at all.
-#
-# The sweep stops at the argument register count on purpose. Past it the
-# arguments are passed on the stack, which the x86_64 lowerer does not
-# implement; that is a separate gap and is not what this covers.
 
 my $brocken = Brocken->new;
 
@@ -71,19 +67,13 @@ BROCKEN
     }
 
     # A constructor spends one of the argument registers on its own receiver, so
-    # it gets one field fewer. This is also the shape the failure was reported
-    # in: one register argument per field, with the leading fields narrow enough
-    # that a mis-ordered capture shows up as a wrong value rather than a wrong
-    # store width.
-    #
-    # Stops at four fields rather than at the register count. Five fields fills
-    # the SysV register set exactly, and from there the caller needs two
-    # simultaneously live reloads, which `insert_spill_code` emits through the
-    # one spill temp it has -- the second reload clobbers the first and the
-    # store lands through an integer instead of the object address. That is a
-    # separate allocator defect, tracked in TODO.md, and it is not what this
-    # test covers; a failure here would not be this bug.
-    for my $n ( 1 .. 4 ) {
+    # the field that fills the register set is already passing on the stack. That
+    # is the case that used to be left out: five fields fills the SysV register
+    # set exactly, and from there the caller needs two simultaneously live
+    # reloads, which `insert_spill_code` emitted through the one spill temp it
+    # had. The second reload clobbered the first, so the store landed through an
+    # integer instead of the object address.
+    for my $n ( 1 .. $gp_args ) {
         my @args = map { $_ + 1 } 0 .. $n - 1;
         my @fields = map { "field i8 \$f$_ :param :reader;" } 0 .. $n - 1;
         my $reads = join( "\n", map { "if (\$p->f$_() == " . ( $_ + 1 ) . ") {" } 0 .. $n - 1 )

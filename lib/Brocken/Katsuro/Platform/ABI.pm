@@ -23,6 +23,18 @@ class Brocken::Katsuro::Platform::ABI {
     method dwarf_reg_num($name)                    {undef}
     method param_registers()                       { [] }
     method fp_param_registers()                    { [] }
+
+    # Byte offset of the $index-th stack-passed parameter.
+    # On entry %stack_reg points at the return address, so an offset of 8 is
+    # the first byte above it.  undef means the ABI passes every parameter in
+    # a register and has no stack argument area.
+    method stack_param_offset($index) {undef}
+
+    # Byte offset, from the caller's %stack_reg at the call instruction, where
+    # the $index-th stack-passed argument has to be written.  This is *not*
+    # the same as stack_param_offset: the return address the call pushes below
+    # the arguments, and any shadow space, both sit between the two.
+    method caller_stack_param_offset($index) {undef}
     method return_register()                       {undef}
     method fp_return_register()                    {undef}
     method fiber_reg()                             {undef}

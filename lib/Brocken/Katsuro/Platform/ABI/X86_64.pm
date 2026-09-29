@@ -34,6 +34,15 @@ class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::
     method fp_return_register() {'xmm0'}
     method fiber_reg()          {'r12'}
 
+    # Arguments past the last of rdi rsi rdx rcx r8 r9 are pushed on the
+    # stack.  On entry rsp still points at the return address, so the first
+    # stack argument is at rsp+8.
+    method stack_param_offset($index) { 8 + 8 * $index }
+
+    # At the call instruction the return address has not been pushed yet, so
+    # the same argument is at rsp+0.
+    method caller_stack_param_offset($index) { 8 * $index }
+
     # System V AMD64 DWARF register numbers (rax=0, rdx=1, etc.)
     # Reference: https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
     method dwarf_reg_num($name) {
