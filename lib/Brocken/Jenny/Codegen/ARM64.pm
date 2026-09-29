@@ -517,8 +517,13 @@ class Brocken::Jenny::Codegen::ARM64 {
         if ( !$is_leaf ) {
             push @to_save, 'x30';
         }
-        my $callee_size    = scalar(@to_save) * 8;
-        my $unified_frame  = ( $callee_size + $spill_frame + 15 ) & ~15;
+        my $callee_size = scalar(@to_save) * 8;
+
+        # The outgoing argument area sits at the bottom of the frame, below the
+        # spill slots, because the callee reads those arguments from the
+        # entry stack pointer and `bl` does not move it.
+        my $call_arg_frame = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
+        my $unified_frame  = ( $callee_size + $spill_frame + $call_arg_frame + 15 ) & ~15;
         my $extra_frame    = $unified_frame - $callee_size;
         my $aligned_alloca = ( $total_alloca + 15 ) & ~15;
         if ( $aligned_alloca > 0 && $extra_frame < 8 ) {
@@ -527,6 +532,20 @@ class Brocken::Jenny::Codegen::ARM64 {
         }
         my $total_frame = $unified_frame + $aligned_alloca;
         $alloca_frame = $unified_frame;
+
+        # An incoming argument is measured from the stack pointer as it was on
+        # entry; the prologue has since moved it down by the whole frame, so the
+        # bias is added back.  A spill slot is nominally placed where the
+        # allocator asked, which is inside the spill area, so it is lifted above
+        # the outgoing area that now sits below it.  An outgoing argument is
+        # already where it belongs.
+        my $final_disp = sub ($addr) {
+            my $disp = $addr->{disp} // 0;
+            return $disp unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
+            return $disp + $total_frame if ( $addr->{raw} // '' ) eq 'entry';
+            return $disp if $addr->{raw};
+            return $disp + $call_arg_frame;
+        };
         my $reg_id = sub ($r) {
             return 31 if $r eq 'sp';
             return $1  if $r =~ /^[xw](\d+)$/ && $1 < 32;
@@ -862,7 +881,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_base | ( $iid << 16 ) | ( $bid << 5 ) | $did );
                     }
                     else {
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = $final_disp->($addr);
                         if ( $disp < 0 ) {
 
                             # Unscaled form: imm9 is a signed byte offset in
@@ -896,7 +915,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_base | ( $iid << 16 ) | ( $bid << 5 ) | $sid );
                     }
                     else {
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = $final_disp->($addr);
                         if ( $disp < 0 ) {
                             $bytes .= pack( 'V', $uns_base | ( ( $disp & 0x1FF ) << 12 ) | ( $bid << 5 ) | $sid );
                         }
@@ -942,7 +961,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_base | ( $iid << 16 ) | ( $bid << 5 ) | $tid );
                     }
                     else {
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = $final_disp->($addr);
                         my ( $off_base, $uns_base, $scale ) = $self->_mem_forms( $bits, 0 );
                         if ( $disp < 0 ) {
                             $bytes .= pack( 'V', $uns_base | ( ( $disp & 0x1FF ) << 12 ) | ( $bid << 5 ) | $tid );
@@ -1097,7 +1116,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $did );
                     }
                     else {
-                        my $disp  = $addr->{disp} // 0;
+                        my $disp  = $final_disp->($addr);
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FLDR_32 : FLDR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $did );
@@ -1123,7 +1142,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', $reg_op | ( $iid << 16 ) | ( $bid << 5 ) | $sid );
                     }
                     else {
-                        my $disp  = $addr->{disp} // 0;
+                        my $disp  = $final_disp->($addr);
                         my $imm12 = $disp >> ( $bits == 32 ? 2 : 3 );
                         my $base  = $bits == 32 ? FSTR_32 : FSTR_64;
                         $bytes .= pack( 'V', $base | ( $imm12 << 10 ) | ( $bid << 5 ) | $sid );
@@ -1352,12 +1371,49 @@ class Brocken::Jenny::Codegen::ARM64 {
                     next unless $op->kind eq 'mem';
                     my $addr = $op->value;
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
+
+                    # A raw displacement is positioned by the calling
+                    # convention rather than by the allocator: an incoming
+                    # argument sits above the frame and an outgoing one at the
+                    # bottom.  Neither is a spill slot, and counting it here
+                    # would both size the spill area wrong and overlap the
+                    # outgoing argument area.  _compute_call_arg_frame sizes
+                    # the latter.
+                    next if $addr->{raw};
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
                     $found    = 1;
                 }
             }
         }
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+    }
+
+    # Size of the outgoing argument area at the bottom of the frame, holding
+    # the arguments that the register set could not carry.  Callers write those
+    # at fixed stack pointer offsets, so the area has to be reserved before the
+    # call rather than pushed at the call site: that keeps the register
+    # allocator's stack-relative spill slots valid across the call and leaves
+    # sp 16-byte aligned as AArch64 requires at a public interface.
+    method _compute_call_arg_frame( $mf, $stack_reg ) {
+        my $max_disp = -1;
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                for my $op ( $inst->operands->@* ) {
+                    next unless $op->kind eq 'mem';
+                    my $addr = $op->value;
+
+                    # Only the caller's outgoing arguments occupy this area; an
+                    # entry-relative load reads an incoming argument, which
+                    # belongs to whoever called here and is measured from the
+                    # entry stack pointer anyway.
+                    next unless $addr->{raw} && $addr->{raw} ne 'entry';
+                    next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
+                    $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
+                }
+            }
+        }
+        return 0 if $max_disp < 0;
+        return ( $max_disp + 8 + 15 ) & ~15;
     }
 
     method _caller_save_base( $gp_spill, $fp_spill ) {

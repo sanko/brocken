@@ -26,8 +26,16 @@ use feature               qw[class];
 # reports its own verdict. The exit code is the assertion.
 #
 # x86-64 is the control. It needs no qemu, and it is the only one of the three
-# with stack-argument support, so a fault that shows up on the other two and not
-# on this one is about the missing machinery rather than about the program.
+# that had stack-argument support to begin with, so a fault that shows up on the
+# other two and not on this one is about missing machinery rather than about the
+# program. That makes it a control in both directions: it catches a program that
+# is wrong for every backend, and a change that quietly fixed the other two by
+# breaking the reference.
+#
+# Argument counts here stop at the register limit. Past it the argument goes on
+# the stack, which is a different mechanism -- a reserved frame area and a
+# displacement measured from the entry stack pointer rather than from a
+# register -- and `3307` covers that separately.
 
 my @TARGETS = (
     [ 'x86_64-unknown-linux-gnu',   'x86-64' ],
