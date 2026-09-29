@@ -2094,6 +2094,23 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Fptosi') ) {
+
+                    # The destination is an integer and the source is a float, so
+                    # the allocator gives each its own register class from the
+                    # type on the operand. _materialize is what gives a float
+                    # constant a home in an XMM rather than leaving a GPR
+                    # holding its bit pattern.
+                    my ($val) = $inst->operands->@*;
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'fptosi',
+                            operands => [ $dst, $self->_materialize( $mbb, $val ) ],
+                            comment  => 'fptosi ' . ( $val->name // $val->value )
+                        )
+                    );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::PtrCast') ) {
 
                     # A pointer and an address-sized integer are the same bits,

@@ -502,6 +502,10 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i64_le_s' )         { $$buf .= pack( 'C', 0x57 ) }
                 elsif ( $opcode eq 'i64_ge_s' )         { $$buf .= pack( 'C', 0x59 ) }
                 elsif ( $opcode eq 'i64_lt_u' )         { $$buf .= pack( 'C', 0x54 ) }
+                elsif ( $opcode eq 'i32_trunc_f32_s' ) { $$buf .= pack( 'C', 0xA8 ) }
+                elsif ( $opcode eq 'i32_trunc_f64_s' ) { $$buf .= pack( 'C', 0xAA ) }
+                elsif ( $opcode eq 'i64_trunc_f32_s' ) { $$buf .= pack( 'C', 0xAE ) }
+                elsif ( $opcode eq 'i64_trunc_f64_s' ) { $$buf .= pack( 'C', 0xB0 ) }
                 elsif ( $opcode eq 'i64_extend_i32_s' ) { $$buf .= pack( 'C', 0xAC ) }
                 elsif ( $opcode eq 'i64_extend_i32_u' ) { $$buf .= pack( 'C', 0xAD ) }
                 elsif ( $opcode eq 'i64_gt_u' )         { $$buf .= pack( 'C', 0x56 ) }

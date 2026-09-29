@@ -110,6 +110,12 @@ class Brocken::Jenny::Codegen::ARM64 {
         FDIV           => 0x1E201800,
         FMIN           => 0x1E205800,
         FMAX           => 0x1E204800,
+
+        # FCVTZS, float to integer, rounding toward zero: a cast, not a
+        # round-to-nearest. Bit 22 selects the double-precision source and
+        # SF the 64-bit destination, so the 32-bit/single form is the base.
+        FCVTZS_32      => 0x1E380000,
+        FP_TYPE_D      => 0x00400000,
         SF             => 0x80000000,
         BR             => 0xD61F0000,
         ADR            => 0x10000000,
@@ -1152,6 +1158,23 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $base = $bits == 32 ? $base : ( $base | FP_SZ );
                     $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                 }
+                elsif ( $opcode eq 'fptosi' ) {
+
+                    # FCVTZS: one source register, no second operand, so the
+                    # ModRM-shaped fields of the arithmetic forms do not apply.
+                    # Rn carries the float and Rd the integer, which is why the
+                    # destination is looked up first here.
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $sbits = $src->type ? $src->type->bits : 64;
+                    my $dbits = $dst->type ? $dst->type->bits : 64;
+                    my $base  = FCVTZS_32;
+                    $base |= FP_TYPE_D if $sbits >= 64;
+                    $base |= SF         if $dbits >= 64;
+                    $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
+                }
                 elsif ( $opcode eq 'fcmp' ) {
                     my $lhs_r = $resolve->($dst);
                     my $lid   = $reg_id->($lhs_r);
@@ -1262,6 +1285,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                         }
                     }
                     $bytes .= pack( 'V', RET );
+                }
+                else {
+                    die "Brocken::Jenny::Codegen::ARM64: no encoder for MIR opcode '$opcode'";
                 }
             }
         }

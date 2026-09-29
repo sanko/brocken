@@ -641,7 +641,7 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       mean an int cannot be assigned to a float at all. Wasm already has the
       instruction (`f64.convert_i32_s`) if the native side ever grows one.
 
-- [ ] **Converting a float to an integer yields 0, silently.**
+- [x] **Converting a float to an integer yields 0, silently.**
       `my f64 $t = 3; my i64 $i = $t;` leaves `$i` at 0 rather than 3, with no
       diagnostic. This is the mirror of the entry above and is arguably worse:
       that one refuses, and this one answers. Any program that sums floats and
@@ -659,6 +659,43 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       to zero, so the first symptom pointed here. Fixing the slot did not clear
       it -- a single local still converts to 0 -- so the two are separate and the
       one below was not what was hiding this.
+
+      Fixed this round by adding one signed truncating instruction rather than a
+      pair, so every width combination is covered: `fptosi` in the IR with a
+      `target_type`, emitted as `CVTTSD2SI`/`CVTTSS2SI` on x86-64, `FCVTZS` on
+      AArch64, `FCVT.W.S`/`FCVT.L.S` on RISCV64, and
+      `i32/i64.trunc_f32/f64_s` on Wasm. The AArch64 and RISCV64 encodings were
+      checked instruction by instruction against `aarch64-linux-gnu-as` and
+      `riscv64-linux-gnu-as`, since nothing here can run either target. The
+      truncation direction is pinned by the tests with negative values: -3.5 has
+      to become -3 and not -4. A float constant is folded to its truncated
+      integer here rather than left for the instruction, which the same test
+      covers. `3302_float_to_int.t`, and all 16 of its cases fail with the
+      lowering reverted.
+
+      The three native opcode dispatch chains also gained a terminal `else` that
+      dies. A `fptosi` that reached a backend without an encoder emitted nothing
+      at all and left a silently truncated function behind, which is the same
+      shape of fault as this entry.
+
+- [ ] **An unknown physical register name silently becomes register 0.**
+      `reg_id` in all three native codegens ends in a bare `return 0`, so a name
+      it does not recognise encodes as `rax`/`xmm0` on x86-64, `x0`/`v0` on
+      AArch64, and `x0`/`f0` on RISCV64. Register 0 is a real register on every
+      target, so the instruction still assembles and the program still runs.
+
+      Found while checking the AArch64 and RISCV64 `fptosi` encodings. A probe
+      asked for `ft10`, the RISC-V psABI name for `f30`, and instead of being
+      rejected it was encoded as register 0, which is how a test of this kind
+      quietly starts asserting against the wrong thing. The backend does not use
+      those names -- `Brocken::Katsuro::Platform::ABI::RISCV64` numbers the
+      argument registers `f0`-`f31` and `reg_id` matches those -- so nothing is
+      broken today, but the failure mode is the reason a naming mistake costs an
+      afternoon instead of a diagnostic.
+
+      The floor is `die` on an unrecognised name. The named-register tables are
+      also worth a check of their own, since the RISCV64 one hand-maps `zero`,
+      `ra` and the rest and can only be right by being kept right by hand.
 
 - [x] **Two live f64 locals can be given the same stack slot.**
       `my f64 $a = 1; my f64 $b = 2; my f64 $c = 3; if ($b == 2)` was false:
