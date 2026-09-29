@@ -94,6 +94,29 @@ class Brocken::Katsuro::Lowerer {
         return 8;
     }
 
+    # Field alignment in bytes, C-style. Scalar fields sit at a multiple of
+    # their own size, so a `struct { int8_t a; int16_t b; }` puts b at 2
+    # rather than 1 and lines up with what a C compiler produces, which is
+    # what makes a Brocken class usable behind a C declaration.
+    #
+    # Capped at 8 so an i128 aligns like the pointer-sized box it is really
+    # stored in. The override is the seam for a future `:pack` / `:pack(N)`
+    # attribute: N replaces the natural alignment outright, so it can tighten
+    # a field (packed) or over-align one. It is deliberately unused for now
+    # so that adding the attribute is a parser change and not a layout change.
+    method type_align($ir_type, $override = undef) {
+        return $override if $override;
+        my $size = $self->type_size($ir_type);
+        return 1 if !$size;
+        return $size > 8 ? 8 : $size;
+    }
+
+    method align_up($offset, $align) {
+        return $offset if $align <= 1;
+        my $rem = $offset % $align;
+        return $rem ? $offset + ( $align - $rem ) : $offset;
+    }
+
     # === Main entry point ===
     method lower_program($ast) {
         my @all_stmts = $ast->statements->@*;
@@ -223,15 +246,35 @@ class Brocken::Katsuro::Lowerer {
     }
 
     # === Pass 1: Register declarations ===
+    #
+    # C layout. Each field goes at the next multiple of its own alignment, and
+    # the struct is rounded up to its own alignment -- the max over its
+    # fields -- which is what `sizeof` returns in C. Fields used to be packed
+    # back to back, which put an i16 at offset 1 behind an i8. That is wrong
+    # for FFI, and it was only survivable because every sub-word access was
+    # widened to 4 bytes and the neighbouring bytes happened to be written
+    # with their own value.
+    #
+    # Rounding the total up is what makes `sizeof` agree with C, and it keeps
+    # the value a power of two for scalar-only classes. It is still not the
+    # number the allocator is asked for: a later `:pack` can produce a size
+    # that is not a multiple of 8, and the allocation size below rounds
+    # separately rather than forcing the layout to stay aligned.
     method register_class($ast) {
         my @fields;
-        my $offset = 0;
+        my $offset    = 0;
+        my $max_align = 1;
         for my $f ( $ast->fields->@* ) {
             my $ir_type = $self->type_from_name( $f->type );
-            push @fields, { name => $f->name, type => $f->type, ir_type => $ir_type, offset => $offset, size => $self->type_size($ir_type), };
-            $offset += $self->type_size($ir_type);
+            my $size    = $self->type_size($ir_type);
+            my $align   = $self->type_align( $ir_type, undef );    # undef: a `:pack(N)` field supplies its own
+            $max_align = $align if $align > $max_align;
+            $offset    = $self->align_up( $offset, $align );
+            push @fields, { name => $f->name, type => $f->type, ir_type => $ir_type, offset => $offset, size => $size, };
+            $offset += $size;
         }
-        $classes->{ $ast->name } = { fields => \@fields, total_size => $offset, methods => [], adjust => undef, };
+        $offset = $self->align_up( $offset, $max_align );
+        $classes->{ $ast->name } = { fields => \@fields, total_size => $offset, align => $max_align, methods => [], adjust => undef, };
     }
 
     # A parameter whose declared type names a class is a pointer, and the class
@@ -902,12 +945,21 @@ class Brocken::Katsuro::Lowerer {
         if ( $obj_is_class && $ast->method eq 'new' ) {
             my $cd         = $classes->{$class_name};
             my $total_size = $cd->{total_size};
+
+            # The allocation size is the struct rounded up to the allocator's
+            # 8-byte granularity, kept separate from the logical layout size.
+            # The alloca below has no byte-count form, so it takes an integer
+            # type -- and deriving `bits` from a byte count invented widths no
+            # backend has, a 24-bit type for a 3-byte struct. Rounding here
+            # means the two can never drift apart again, and it matches what
+            # the heap path already asks `bump_alloc` for.
+            my $alloc_size = $self->align_up( $total_size, 8 ) || 8;
             my $self_ptr;
             if ( exists $symbols->{'__heap_base'} ) {
                 my $bump_alloc_fn = $functions->{'Brocken::Runtime::bump_alloc'};
                 Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
                 my $heap_base  = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
-                my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $total_size );
+                my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $alloc_size );
                 my $alloc      = $builder->build_call( $bump_alloc_fn, [ $heap_base, $size_const ], undef );
 
                 # `bump_alloc` reports exhaustion by returning 0. Passing that
@@ -920,8 +972,8 @@ class Brocken::Katsuro::Lowerer {
                 $self_ptr = $builder->build_call( $check_alloc_fn, [$alloc], '%obj' );
             }
             else {
-                my $struct_type = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => $total_size * 8 );
-                $self_ptr = $builder->build_alloca( $struct_type, '%obj' );
+                my $alloc_type = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => $alloc_size * 8 );
+                $self_ptr = $builder->build_alloca( $alloc_type, '%obj' );
             }
             my @args       = ($self_ptr);
             my $ctor_p_idx = 1;
