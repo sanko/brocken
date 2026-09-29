@@ -279,7 +279,22 @@ class Brocken::Katsuro::Lowerer {
             my $align = $self->type_align( $ir_type, $f->align );
             $max_align = $align if $align > $max_align;
             $offset    = $self->align_up( $offset, $align );
-            push @fields, { name => $f->name, type => $f->type, ir_type => $ir_type, offset => $offset, size => $size, };
+
+            # `default_ast` is kept as the unlowered expression because the
+            # constructor cannot apply it: its signature carries one parameter
+            # per `:param` field and so has no way to know which ones the caller
+            # actually passed. The call site fills the gaps instead, which means
+            # it needs the expression itself, not a lowered value that would
+            # belong to whatever function was being compiled at the time.
+            push @fields,
+                {
+                name        => $f->name,
+                type        => $f->type,
+                ir_type     => $ir_type,
+                offset      => $offset,
+                size        => $size,
+                default_ast => $f->default,
+                };
             $offset += $size;
         }
         $offset = $self->align_up( $offset, $max_align );
@@ -994,6 +1009,38 @@ class Brocken::Katsuro::Lowerer {
                 push @args, $val;
                 $ctor_p_idx++;
             }
+
+            # A `:param` field the caller left out still occupies a slot in the
+            # constructor's signature, and the constructor stores that slot
+            # whatever it finds there. So a missing argument used to arrive as
+            # an uninitialized register -- and on wasm as an uninitialized
+            # local, where the validator rejects the read outright ("expected
+            # i32 but nothing on stack") rather than producing a wrong answer.
+            #
+            # Supply the field's default for the gap, and a zero when it has
+            # none. Doing it here rather than in the constructor is forced: the
+            # signature is fixed at one parameter per `:param` field, so the
+            # constructor has no way to tell "passed zero" from "not passed".
+            if ( $ctor_p_idx < $callee->params->@* ) {
+                my $cd = $classes->{$class_name};
+                for my $i ( $ctor_p_idx .. $callee->params->@* - 1 ) {
+                    my $param_type = $callee->params->[$i]->type;
+
+                    # Parameter values are named with their sigil (`%b`), so the
+                    # sigil has to come off before matching a field by name.
+                    my $param_name = $callee->params->[$i]->name // '';
+                    $param_name =~ s/^%//;
+                    my ($fd) = grep { $_->{name} eq $param_name } $cd->{fields}->@*;
+                    my $val;
+                    if ( $fd && defined $fd->{default_ast} ) {
+                        $val = $self->lower_expression( $fd->{default_ast} );
+                    }
+                    else {
+                        $val = Brocken::Lindsay::IR::Constant->new( type => $param_type, value => 0 );
+                    }
+                    push @args, $self->maybe_convert_type( $val, $param_type );
+                }
+            }
             $builder->build_call( $callee, \@args, undef );
             return $self_ptr;
         }
@@ -1145,7 +1192,15 @@ class Brocken::Katsuro::Lowerer {
         my $cd       = $classes->{$class_name};
         my $self_ptr = $current_func->params->[0];
 
-        # Initialize fields: defaults first, then params override
+        # A `:param` field is stored from its parameter, and a field that is not
+        # a parameter is stored from its default if it has one.
+        #
+        # A `:param` field that also has a default is stored from the parameter
+        # like any other, because the call site has already substituted the
+        # default for a `:param` the caller left out. It cannot be applied here
+        # instead: this signature carries one parameter per `:param` field, so
+        # there is no way to tell an omitted argument from one that was passed
+        # as zero.
         my $param_idx = 0;
         for my $f ( $all_fields->@* ) {
             my ($fd) = grep { $_->{name} eq $f->name } $cd->{fields}->@*;
