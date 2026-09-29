@@ -631,26 +631,43 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       carrying the bug above. Nothing in the test suite uses a decimal literal,
       which is how a parser that cannot read them went unnoticed.
 
-- [ ] **A negative value in a float context is a hard error.**
-      `my f64 $t = -3;` lowers unary minus to an instruction rather than folding
-      it, so the value arrives as a computed int. The coercion below used to
-      refuse that outright (`Cannot implicitly convert a computed int:64 to
-      float:64`); it accepts it now, so the literal case works and this entry is
-      down to negating anything that is not a literal:
+- [x] **A negative value in a float context is a hard error.** This read as a hole
+      rather than a rule, because the neighbouring case worked: `my f64 $t = -$i;`
+      was accepted and `w() == -$i` was refused, so the same value reached a float
+      slot by one route and not the other, and the one that failed was the ordinary
+      one.
 
       ```
       sub w(i64 $i) -> f64 { my f64 $t = -$i; return $t; }
+      if (w(7) == -7) { return 0; } return 1;
       # Cannot apply a float operation to a computed int operand; cast it explicitly
       ```
 
-      That is a different diagnostic, from a different place -- the unary-op path
-      in `Brocken::Katsuro::Lowerer`, not the coercion -- so the check is simply
-      in the wrong place: it fires before the new conversion gets a look in.
-      Routing the operand through `sitofp` and negating the float would work but
-      is not free, because float negation here is an xor against a sign mask
-      rather than a subtraction, so folding `-` applied to a constant into the
-      constant is the better answer. That only helps the literal case though, and
-      the general one still wants the check to move rather than a new fold.
+      Unary minus lowers to an instruction rather than being folded, so the
+      operand arrives as a computed int, and the binary-op path refused it before
+      the conversion the initializer path performs had a chance to run. The
+      initializer went through `maybe_convert_type`, which emits `sitofp`; the
+      comparison had its own check, a leftover from before that instruction
+      existed, and it did not call it.
+
+      So the fix is the one this entry predicted: move the check, rather than
+      add a fold. A computed int is not the same number under another tag the way
+      a literal is, so re-tagging it would put integer bits in a float slot --
+      wrong for everything past 2**52, and the reason the original refusal was
+      right. It now routes through the same `sitofp` the initializer uses.
+      Negating in float instead would also be correct, but that is an xor against
+      a sign mask, and the integer still has to be converted before it, so
+      converting the already-negated one is the cheaper answer and cannot disagree
+      with the initializer.
+
+      The operator is symmetric in the source and was not in the lowerer -- the
+      check named one side and assigned the result to the other -- so both
+      positions are tested. `3308_negative_float_context.t` covers `==`, `!=` and
+      `<`, both operand positions, ordering against a positive value, the value
+      used in arithmetic rather than only compared, a negative through a nested
+      call, and the narrow signed integer sources, which reach the convert by a
+      different path and would answer with a large positive number if widened
+      without their sign.
 
 - [x] **There is no integer-to-float conversion instruction.**
       `my f64 $t = $i;` where `$i` is an `i32` is refused, because the IR has

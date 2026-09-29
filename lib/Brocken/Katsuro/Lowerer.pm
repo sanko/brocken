@@ -740,11 +740,20 @@ class Brocken::Katsuro::Lowerer {
             my $float_side = $lhs->type->kind eq 'float' ? $lhs : $rhs;
             my $int_side   = $lhs->type->kind eq 'float' ? $rhs : $lhs;
             if ( $int_side->isa('Brocken::Lindsay::IR::Constant') && $int_side->type->kind eq 'int' ) {
-                my $retagged = Brocken::Lindsay::IR::Constant->new( type => $float_side->type, value => $int_side->value );
-                $int_side = $retagged;
+                $int_side = Brocken::Lindsay::IR::Constant->new( type => $float_side->type, value => $int_side->value );
             }
             else {
-                Carp::croak( "Cannot apply a float operation to a computed int operand; cast it explicitly" );
+                # A computed int is not the same number under another tag, so
+                # this is a real conversion rather than a relabelling, and it
+                # has to go through the same path as an initializer: `sitofp`
+                # and then the float operation. It used to be refused outright,
+                # which read as a hole in the compiler because the initializer
+                # right next to it accepted the identical value -- `my f64 $t =
+                # -$i;` converts and `w() == -3` did not. Negating in float
+                # instead would mean an xor against a sign mask, so converting
+                # the already-negated integer is both the cheap answer and the
+                # one that agrees with the initializer.
+                $int_side = $self->maybe_convert_type( $int_side, $float_side->type );
             }
             ( $lhs, $rhs ) = $lhs->type->kind eq 'float' ? ( $lhs, $int_side ) : ( $int_side, $rhs );
         }
