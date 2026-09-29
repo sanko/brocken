@@ -100,10 +100,13 @@ class Brocken::Katsuro::Lowerer {
     # what makes a Brocken class usable behind a C declaration.
     #
     # Capped at 8 so an i128 aligns like the pointer-sized box it is really
-    # stored in. The override is the seam for a future `:pack` / `:pack(N)`
-    # attribute: N replaces the natural alignment outright, so it can tighten
-    # a field (packed) or over-align one. It is deliberately unused for now
-    # so that adding the attribute is a parser change and not a layout change.
+    # stored in.
+    #
+    # The override is `:pack(N)`, and it replaces the natural alignment
+    # outright rather than combining with it, so it can pull a field in
+    # (`field i16 $b :pack` lands it at the next byte) or push one out
+    # (`field i8 $a :pack(16)`). Taking a minimum or a maximum instead would
+    # make one of those a no-op.
     method type_align($ir_type, $override = undef) {
         return $override if $override;
         my $size = $self->type_size($ir_type);
@@ -267,7 +270,13 @@ class Brocken::Katsuro::Lowerer {
         for my $f ( $ast->fields->@* ) {
             my $ir_type = $self->type_from_name( $f->type );
             my $size    = $self->type_size($ir_type);
-            my $align   = $self->type_align( $ir_type, undef );    # undef: a `:pack(N)` field supplies its own
+
+            # undef unless the field asked for a specific alignment with
+            # `:pack` / `:pack(N)`, in which case N replaces the natural
+            # alignment outright -- lower for a bare `:pack`, or higher for an
+            # over-aligning `:pack(16)`, which is what C's
+            # __attribute__((aligned(N))) does.
+            my $align = $self->type_align( $ir_type, $f->align );
             $max_align = $align if $align > $max_align;
             $offset    = $self->align_up( $offset, $align );
             push @fields, { name => $f->name, type => $f->type, ir_type => $ir_type, offset => $offset, size => $size, };

@@ -335,9 +335,32 @@ class Brocken::Katsuro::Parser {
         my $fvar_token = $self->consume( 'VAR', undef, "Expected field name" );
         my $fname      = substr( $fvar_token->{value}, 1 );
         my @attrs;
+        my $align;
         while ( $self->check( 'OP', ':' ) ) {
             $self->advance();
             my $attr_token = $self->consume( 'IDENT', undef, "Expected attribute name after ':'" );
+
+            # `:pack` and `:pack(N)` are layout modifiers rather than flags, so
+            # they take their value here instead of joining @attrs -- nothing
+            # that greps @attrs for a name should see them.
+            if ( $attr_token->{value} eq 'pack' ) {
+                $align = 1;
+                if ( $self->check( '(' ) ) {
+                    $self->advance();
+                    my $n_token = $self->consume( 'NUM', undef, "Expected a byte count after ':pack('" );
+                    my $n       = 0 + $n_token->{value};    # the lexer hands back a string
+
+                    # The same constraint C puts on an alignment: it has to be
+                    # a power of two, because the layout rounds offsets up to a
+                    # multiple of it. Checked here rather than in the lowerer
+                    # so the diagnostic can point at the token.
+                    Carp::croak( "':pack($n)' alignment must be a positive power of two at " . $self->_loc($n_token) )
+                        if $n < 1 || $n & ( $n - 1 );
+                    $align = $n;
+                    $self->consume( ')', undef, "Expected ')' to close ':pack($n)'" );
+                }
+                next;
+            }
             push @attrs, $attr_token->{value};
         }
         my $default    = undef;
@@ -352,6 +375,7 @@ class Brocken::Katsuro::Parser {
             type       => $ftype,
             name       => $fname,
             attrs      => \@attrs,
+            align      => $align,
             default    => $default,
             default_op => $default_op,
         );

@@ -312,14 +312,43 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       Regression: the layout half of `3290_subword_widths.t` reads the offsets
       back out of each generated accessor's field GEP, so it checks the number
       the backend will use rather than a second computation of it.
-- [ ] `:pack` / `:pack(N)`. The alignment override is already plumbed through
-      `type_align($ir_type, $override)` in `lib/Brocken/Katsuro/Lowerer.pm` and
-      the class AST carries no alignment property yet, so this is a parser and
-      AST change on top of a layout that already accepts the result. Bare
-      `:pack` means `:pack(1)`; `:pack(N)` sets the field's alignment to exactly
-      N and may raise it above the natural alignment, which is what
-      `__attribute__((aligned(N)))` does. Struct alignment is the maximum
-      effective field alignment, so a bare `:pack` alone does not shrink it.
+- [x] `:pack` / `:pack(N)`, the C `__attribute__((packed))` and
+      `__attribute__((aligned(N)))` pair. Bare `:pack` is `:pack(1)`, and
+      `:pack(N)` sets the field's alignment to exactly N, replacing the natural
+      alignment rather than combining with it. Replacing rather than taking a
+      maximum is what makes `aligned(N)` able to *lower* a field's alignment, as
+      C's does, and a minimum would have made `:pack` a no-op.
+
+      The value is carried on a new `align` field of `FieldDecl` and not in
+      `attrs`. Every attribute in `attrs` is a bare flag tested by name by the
+      accessor and parameter passes, so a `pack` entry there would have been
+      read as a request for a reader named `pack`, and `:pack(N)` would have had
+      nowhere to put its argument. N has to be a positive power of two, since the
+      layout rounds offsets up to a multiple of it; that is rejected in the
+      parser so the diagnostic can point at the token.
+
+      Regression: `3295_field_pack.t`, 40 cases over both backends — layout
+      offsets, that `pack` stays out of `attrs`, the rejected alignments, and
+      packed structs at run time including one smaller than the 8-byte
+      allocation granularity and one that must not overrun its neighbour.
+
+      Note that a class size is no longer necessarily a multiple of 8 now that a
+      fully packed struct can be any size. The allocation size is rounded
+      separately for exactly that reason, and a 3-byte struct must not be padded
+      back to 4 just because the following field would prefer it.
+
+- [ ] **A field default value is ignored, on every backend.** Found while adding
+      `3295_field_pack.t`; unrelated to `:pack` and reproducible at
+      `field i8 $a :param :reader; field i16 $b :param :reader = 5;` followed by
+      `P->new(3)` and a read of `b`. The default is not applied, so `b` reads
+      back as 0 and the comparison fails. Present with and without `:pack`, at
+      every width, and on both x86-64 and Wasm, where it surfaces earlier still
+      as a validation error ("expected i32 but nothing on stack") because the
+      default never put a value on the stack. Verified at `55fe87f` with the
+      layout work stashed, so it predates it. The attribute is parsed and the
+      default expression is built, so the loss is in lowering: the constructor
+      probably stores each `:param` field unconditionally and clobbers the
+      default the `ADJUST` pass installed.
 - [x] **Wasm could not compile any program that declares a local variable.**
       Every frontend program with at least one `my` local was rejected by the
       Wasm validator, even `my i32 $x = 123; return $x;`. Found while adding
