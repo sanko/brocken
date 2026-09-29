@@ -112,6 +112,22 @@ class Brocken::Lindsay::IR::Builder {
         );
         return $insert_block->append_inst($inst);
     }
+    # The mirror of the conversion above, and subject to the same two ways of
+    # getting it wrong: the IEEE pattern must not be stored verbatim, and the
+    # result must be a converted number rather than integer bits in a float
+    # slot. Only the target differs, so the source keeps its own type here and
+    # the widening that makes the unsigned cases work is the frontend's job.
+    method build_sitofp( $val, $target_type, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::Sitofp->new(
+            name        => $name // $self->_next_id(),
+            type        => $target_type,
+            opcode      => 'sitofp',
+            target_type => $target_type,
+            operands    => [$val],
+            parent      => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
     method build_udiv( $lhs, $rhs, $name = undef ) { $self->build_binop( 'udiv', $lhs, $rhs, $name ) }
     method build_urem( $lhs, $rhs, $name = undef ) { $self->build_binop( 'urem', $lhs, $rhs, $name ) }
 

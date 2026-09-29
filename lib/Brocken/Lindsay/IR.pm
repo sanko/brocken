@@ -183,6 +183,15 @@ class Brocken::Lindsay::IR::Instruction::Fptosi : isa(Brocken::Lindsay::IR::Inst
     }
 }
 
+class Brocken::Lindsay::IR::Instruction::Sitofp : isa(Brocken::Lindsay::IR::Instruction) {
+    field $target_type : reader : param;
+
+    method render() {
+        my $val = $self->operands->[0];
+        return sprintf '  %s = sitofp %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $target_type->as_string;
+    }
+}
+
 class Brocken::Lindsay::IR::Instruction::Incref : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {

@@ -933,14 +933,40 @@ class Brocken::Katsuro::Lowerer {
         # raw integer for an int-typed one, so `my f64 $t = 3` stored eight
         # zero-extended bytes and the reload read them back as a denormal.
         if ( $val->type->kind eq 'int' && $target_type->kind eq 'float' ) {
-            # A *computed* int gets no such deal. The IR has no int-to-float
-            # instruction yet, and storing integer bits through a float slot is
-            # wrong for everything past 2**52, so fail loudly instead of
-            # miscompiling quietly.
-            Carp::croak( "Cannot implicitly convert a computed int:" . $val->type->bits . " to " .
-                $target_type->kind . ":" . $target_type->bits . "; cast it explicitly" )
-                unless $val->isa('Brocken::Lindsay::IR::Constant');
-            return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value );
+            # A *literal* is not a number that needs converting, it is the same
+            # number under a different tag, so re-tagging *is* the conversion.
+            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value );
+            }
+
+            # A *computed* int does need converting, and every target has one
+            # instruction for it: CVTSI2SD, SCVTF, FCVT.S.L and
+            # f64.convert_i64_s. Storing integer bits through a float slot is
+            # wrong for everything past 2**52, so refusing it was the safe
+            # answer, but it also meant an int could not be assigned to a float
+            # at all.
+            my $bits = $val->type->bits;
+            Carp::croak( "No integer-to-float conversion for a " . $bits . "-bit integer; " .
+                "none of the targets has an instruction wider than 64 bits" )
+                if $bits > 64;
+
+            # x86-64 has no unsigned convert at all, and values at or above
+            # 2**63 need several instructions to come out right rather than one.
+            Carp::croak( "No unsigned 64-bit integer-to-float conversion; " .
+                "x86-64 has no unsigned form of the instruction" )
+                if $bits == 64 && !$val->type->is_signed;
+
+            # Widening to 64 bits first is also what makes the unsigned cases
+            # work: there is only a signed convert instruction, but a u8, u16 or
+            # u32 zero-extended into an i64 is a positive i64 and converts
+            # correctly, while sign-extending a negative one would not.
+            my $wide = $val;
+            if ( $bits < 64 ) {
+                $wide = $val->type->is_signed
+                    ? $builder->build_sext( $val, Brocken::Lindsay::IR::Type::i64() )
+                    : $builder->build_zext( $val, Brocken::Lindsay::IR::Type::i64() );
+            }
+            return $builder->build_sitofp( $wide, $target_type );
         }
 
         # Float -> integer, the mirror of the case above and unlike it: the two
