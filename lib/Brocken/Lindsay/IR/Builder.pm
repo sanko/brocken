@@ -83,6 +83,18 @@ class Brocken::Lindsay::IR::Builder {
         );
         return $insert_block->append_inst($inst);
     }
+
+    method build_trunc( $val, $target_type, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::Trunc->new(
+            name        => $name // $self->_next_id(),
+            type        => $target_type,
+            opcode      => 'trunc',
+            target_type => $target_type,
+            operands    => [$val],
+            parent      => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
     method build_udiv( $lhs, $rhs, $name = undef ) { $self->build_binop( 'udiv', $lhs, $rhs, $name ) }
     method build_urem( $lhs, $rhs, $name = undef ) { $self->build_binop( 'urem', $lhs, $rhs, $name ) }
 
@@ -198,6 +210,27 @@ class Brocken::Lindsay::IR::Builder {
             allocated_type => $type,
             count          => $count,
             parent         => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_memory_grow( $pages, $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::MemoryGrow->new(
+            name     => $name // $self->_next_id(),
+            type     => Brocken::Lindsay::IR::Type::i32(),
+            opcode   => 'memory_grow',
+            operands => [$pages],
+            parent   => $insert_block
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_memory_size( $name = undef ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::MemorySize->new(
+            name   => $name // $self->_next_id(),
+            type   => Brocken::Lindsay::IR::Type::i32(),
+            opcode => 'memory_size',
+            parent => $insert_block
         );
         return $insert_block->append_inst($inst);
     }

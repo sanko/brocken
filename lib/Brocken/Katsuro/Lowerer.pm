@@ -617,6 +617,24 @@ class Brocken::Katsuro::Lowerer {
             $lhs = $self->maybe_convert_type( $lhs, $native );
             $rhs = $self->maybe_convert_type( $rhs, $native );
         }
+
+        # Two native integers have to meet at a common width before the
+        # instruction. `$g == -1` where `$g` is an i32 local and the literal is
+        # an i64 left the operands as i32 and i64, and the backend compared them
+        # as if both were the width it picked from the left operand, so the guard
+        # was silently false. A literal does not carry the local's type, so
+        # promote the narrower operand instead. The narrower side is always the
+        # one converted, which is also the only direction that works: widening
+        # emits a sext/zext, while asking for a narrow target on a wide value is
+        # a no-op and would leave the mismatch in place.
+        if ( $lhs->type->kind eq 'int' && $rhs->type->kind eq 'int' && $lhs->type->bits != $rhs->type->bits ) {
+            if ( $lhs->type->bits < $rhs->type->bits ) {
+                $lhs = $self->maybe_convert_type( $lhs, $rhs->type );
+            }
+            else {
+                $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
+            }
+        }
         return $builder->build_add( $lhs, $rhs ) if $op eq '+';
         return $builder->build_sub( $lhs, $rhs ) if $op eq '-';
         return $builder->build_mul( $lhs, $rhs ) if $op eq '*';
@@ -704,11 +722,31 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_icmp( 'slt', $args[0], $args[1] )                   if $name eq 'ptr_cmp_lt';
         return $builder->build_icmp( 'eq', $args[0], $args[1] )                    if $name eq 'ptr_cmp_eq';
         return $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $args[0] ) if $name eq 'load_i64';
-        $builder->build_store( $args[1], $args[0] );
-        return undef                                                               if $name eq 'store_i64';
+
+        # Each store has to build only for its own intrinsic. A bare
+        # `build_store` here ran for *every* intrinsic, so `load_i32` and
+        # anything added after it emitted a store with undefined operands ahead
+        # of the real instruction. `store_i64` happened to work only because the
+        # unconditional store it built was the correct one.
+        if ( $name eq 'store_i64' ) {
+            $builder->build_store( $args[1], $args[0] );
+            return undef;
+        }
         return $builder->build_load( Brocken::Lindsay::IR::Type::i32(), $args[0] ) if $name eq 'load_i32';
-        $builder->build_store( $args[1], $args[0] );
-        return undef if $name eq 'store_i32';
+        if ( $name eq 'store_i32' ) {
+            $builder->build_store( $args[1], $args[0] );
+            return undef;
+        }
+
+        # Linear-memory control. A wasm32 module can ask the host for more pages,
+        # which is what lets the runtime back the heap it was promised instead of
+        # trapping at the statically declared size. `memory_grow` yields the
+        # previous size in pages or -1 on refusal, so a target with a fixed
+        # host-provided region lowers it to a constant -1 and the runtime reports
+        # out-of-memory rather than writing past the region.
+        return $builder->build_memory_grow( $args[0] ) if $name eq 'memory_grow';
+        return $builder->build_memory_size()         if $name eq 'memory_size';
+
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }
 
@@ -738,10 +776,17 @@ class Brocken::Katsuro::Lowerer {
             return $builder->build_unbox( $val, $target_type );
         }
 
-        # Integer widening: zero-extend for unsigned, sign-extend for signed
+        # Integer width changes: widen with zero/sign extension, narrow with a
+        # truncation. A literal carries no type of its own, so `my i32 $g = -1`
+        # reaches here as an i64 -1 against an i32 slot; without the narrowing it
+        # was stored as eight bytes through a four-byte slot, which native
+        # tolerated and the Wasm validator rejected ("expected i32, found i64").
         if ( $val->type->kind eq 'int' && $target_type->kind eq 'int' ) {
             if ( $val->type->bits < $target_type->bits ) {
                 return $val->type->is_signed ? $builder->build_sext( $val, $target_type ) : $builder->build_zext( $val, $target_type );
+            }
+            if ( $val->type->bits > $target_type->bits ) {
+                return $builder->build_trunc( $val, $target_type );
             }
             return $val;
         }
@@ -816,7 +861,16 @@ class Brocken::Katsuro::Lowerer {
                 Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
                 my $heap_base  = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
                 my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $total_size );
-                $self_ptr = $builder->build_call( $bump_alloc_fn, [ $heap_base, $size_const ], '%obj' );
+                my $alloc      = $builder->build_call( $bump_alloc_fn, [ $heap_base, $size_const ], undef );
+
+                # `bump_alloc` reports exhaustion by returning 0. Passing that
+                # straight to the constructor made it store through a null
+                # pointer, which on wasm is a wild write rather than the
+                # allocation failure it actually is, so the result is checked
+                # before anything writes to it.
+                my $check_alloc_fn = $functions->{'Brocken::Runtime::check_alloc'};
+                Carp::croak( "Runtime function check_alloc not found at " . $self->_loc($ast) ) unless $check_alloc_fn;
+                $self_ptr = $builder->build_call( $check_alloc_fn, [$alloc], '%obj' );
             }
             else {
                 my $struct_type = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => $total_size * 8 );

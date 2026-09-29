@@ -392,17 +392,19 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       the first `call`, so it reads a slot the callee has already overwritten.
       `fib(10)` returned -80, `fib(15)` -195, `fib(20)` -360, all stable
       regardless of heap size.
-      Now a mutable i32 **global** (section 6, `HEAP_PTR_GLOBAL`) read with
+      Now a mutable i32 **global** (section 6, `HEAP_BASE_GLOBAL`) read with
       `global.get`/`global.set`, seeded by the linker from the `%__heap_base`
-      argument at `heap_base + 16` — the offset `Runtime::_init` uses, so the
-      cursor stays clear of the cursor/limit pair it keeps in the first 16 bytes.
-      The seed is spliced in after the function's locals declaration, since a
-      body is `locals` followed by the expression, and after the call fixups,
-      whose offsets are already resolved. `fib(10)` = 55, `fib(15)` = 610,
+      argument. The seed is spliced in after the function's locals declaration,
+      since a body is `locals` followed by the expression, and after the call
+      fixups, whose offsets are already resolved. `fib(10)` = 55, `fib(15)` = 610,
       `fib(17)` = 1597. Regression: `3290_wasm_recursion.t`.
-      Left open: nothing. This global is now only used by the allocas that
-      genuinely need linear memory (arrays, and objects whose address is passed to
-      a method); see the entry below for why.
+      **Superseded in part by the second-cursor entry below.** This global used to
+      hold the allocator's own cursor, seeded at `heap_base + 16` so it would sit
+      clear of the cursor/limit pair in the header — the wrong layout, and the
+      wrong owner. There is no per-module cursor any more: the global carries the
+      raw heap base with no displacement, and the single runtime `bump_alloc` owns
+      the cursor. Keeping the global rather than a function parameter is still
+      required, because a spill slot can be allocated in a helper.
 - [x] **Scalars were spilled to a bump cursor that is never decremented, so
       memory scaled with the total number of calls instead of the live depth.**
       Even with the cursor shared, the model was wrong: every frame copied its
@@ -470,18 +472,99 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       annotation, or an explicit `my P $q` parameter — rather than an inference
       that silently guesses. The cheap first step is a `$param_class` table
       alongside `$function_return_class`.
-- [ ] **Wasm declares one 64KB page but the runtime is told the heap is 1MB.**
-      `Linker::Wasm` emits `1 page, no maximum` while `Katsuro::Lowerer` passes
-      `0x100000` as the heap size to `Runtime::_init`, so any program that
-      allocates past 64KB traps with "out of bounds memory access" no matter
-      what heap base the host hands in — the size argument is not honoured.
-      Ordinary recursion is no longer affected (promotion keeps scalars out of
-      memory), so this is back to being a separate concern, and it now only
-      binds for arrays and objects. Note that the two numbers are not directly
-      comparable: the runtime's limit is `heap_base + 0x100000`, so honouring a
-      1MB heap at base 1024 needs `ceil((1024 + 0x100000) / 65536)` = **17**
-      pages, not 16. The usual fix is to declare a small minimum and grow with
-      `memory.grow` (0x40) when `bump_alloc` runs out of room.
+- [x] **Wasm declares one 64KB page but the runtime is told the heap is 1MB —
+      for the object allocator.** `Linker::Wasm` emits `1 page, no maximum` while
+      `Katsuro::Lowerer` passes `0x100000` as the heap size to `Runtime::_init`,
+      so any program that allocates past 64KB traps with "out of bounds memory
+      access" no matter what heap base the host hands in — the size argument is
+      not honoured. Note that the two numbers are not directly comparable: the
+      runtime's limit is `heap_base + 0x100000`, so honouring a 1MB heap at base
+      1024 needs `ceil((1024 + 0x100000) / 65536)` = **17** pages, not 16. The
+      usual fix is to declare a small minimum and grow with `memory.grow` (0x40)
+      when `bump_alloc` runs out of room.
+      **Done by growing on demand** (`3295_wasm_memory_growth.t`). The two
+      numbers are now reconciled by a third heap field rather than by growing
+      eagerly: `_init` stores `cursor`/`limit`/`cap` instead of
+      `cursor`/`limit`, starts `limit` at what `memory.size` actually reports
+      rather than at the 1MB that was only ever hoped for, and keeps the 1MB in
+      `cap` as the ceiling. `bump_alloc` grows only when a block runs past
+      `limit`, asks for exactly enough pages rounded up, and refuses past `cap`.
+      A new `memory_grow`/`memory_size` intrinsic pair carries this through
+      `Katsuro::Lowerer`; Wasm emits the real `memory.grow` (0x40) and
+      `memory.size` (0x3F), and the three native backends answer `memory_size`
+      with 0 and `memory_grow` with a constant -1, so a fixed host-carved region
+      takes the same refusal path instead of a walk off the end of the heap.
+      Two things were load-bearing and are worth not undoing:
+      * `limit` must not start at `cap`. Seeding it at the requested 1MB is the
+        original bug in a new place: every block between 64KB and 1MB fits under
+        that limit, so the grow path is never reached and the write lands in
+        memory the module does not own.
+      * growth is bounded by `cap` on purpose. Letting a runaway program ask the
+        host for whatever it wants turns a trap into memory exhaustion.
+      Verified: 30000 eight-byte objects (240KB, 4x the declared page) allocate
+      and sum correctly, a single 900KB block is backed and round-trips, a 2MB
+      block is refused, and an object loop past the cap fails instead of
+      quietly succeeding.
+      **This now covers the whole heap, not just objects** — see the second-cursor
+      item below, which routed arrays, escaping allocas and boxes through the same
+      `bump_alloc`.
+- [x] **Arrays and objects allocate from two cursors that overlap, and only the
+      object one can grow.** `bump_alloc` walks a `cursor` stored in the heap,
+      but an alloca whose address escapes — an array, or a scalar passed on — was
+      served by a separate `%heap_ptr` Wasm global, with no limit and no growth.
+      The object cursor starts at `heap_base + 24` and the global was seeded into
+      the same address range, so the two hands of the allocator handed out the
+      same bytes. Two failures, both confirmed:
+      * `my [i64; 16384] $a;` (128KB) trapped with "out of bounds memory access
+        at wasm address 0x10000 in linear memory of size 0x10000" — growth above
+        did not reach it.
+      * a 4-element array holding 111 and 222, followed by 5000 `P->new` calls,
+        read back 111 and 0: the object allocations overwrote the array.
+      **Fixed by making it one allocator.** The `%heap_ptr` global is gone; the
+      module global now carries the *base* rather than a cursor, and every
+      escaping block — array slots, escaping allocas, and the 16-byte `box` cell —
+      is allocated by calling `Brocken::Runtime::bump_alloc` and then
+      `check_alloc`, exactly as a `->new` is. One cursor, one growth path, one
+      cap, one failure mode. The base has to be reachable from *any* function
+      (a slot can be allocated in a helper, not just the entry), so it stays in a
+      module global seeded by the entry stub; the cursor, limit and cap stay in
+      the heap header where the runtime can update them.
+      The element count is still required to be a literal, but that is no longer
+      a Wasm limitation — it is a call argument now, so a computed count is a
+      lowering question rather than something the alloca opcode cannot express.
+      Verified: a 4-element array keeps 111/222 across 30000 objects, a 128KB
+      array is backed, a 1.6MB array is refused rather than writing past the heap,
+      and the object cases still pass. Regression: `3295_wasm_memory_growth.t`.
+- [ ] **Allocation failure was unchecked, so out-of-memory was a wild write.**
+      `bump_alloc` signals exhaustion by returning 0, and the class call site
+      passed that straight to the constructor, which stored through a null
+      pointer — a wild write rather than the allocation failure it is. Now
+      routed through `Runtime::check_alloc`. It traps by storing through the null
+      pointer, because the IR has no `trap`/`abort` instruction to lean on yet
+      (see below), so the failure is loud but has no diagnostic message. A real
+      trap instruction would make this say what actually went wrong.
+- [x] **Comparing an i32 against a negative literal is false.**
+      `my i32 $g = -1; if ($g == -1)` is false, and `!=` is true, on every
+      target. Found while asserting that native `memory_grow` refuses: the
+      refusal is correct, but the equality test for it could not be written
+      without tripping this. It is in the literal comparison rather than in any
+      one backend, since a plain constant in a local fails the same way, and it
+      matters well beyond diagnostics — any guard written as `x == -1` silently
+      takes the wrong branch.
+      **Fixed in the comparison, not in a backend.** The literal is materialized
+      at the wider of the two operand types, and the narrower side is promoted to
+      match: `sext` for a signed source, `zext` for an unsigned one, so `-1`
+      reaching an `i32` as `0xFFFFFFFF` compares against the same `0xFFFFFFFF`
+      and the result is true. Narrowing the other way needed the same treatment,
+      so `maybe_convert_type` now emits a real `trunc` rather than silently
+      dropping high bits: added the `Trunc` IR instruction and `build_trunc`, and
+      lowered it on Wasm, X86_64, ARM64 and RISCV64. A literal still has to be a
+      literal, but its width no longer has to match the local's exactly.
+      Verified: `my i32 $g = -1; $g == -1` and `$g != -1`, the same for `i64`,
+      a narrow local against a negative literal, a wider-local-against-narrower
+      narrowing case, and mixed-sign ordering all give the right answer on both
+      native and Wasm. Regression: `1070_type_promotion.t`.
+
 
 
 ### Wasm entry ABI
@@ -494,13 +577,42 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       function directly, so `wasmtime run --invoke _BROCKEN_ENTRY` needs the
       address as a trailing argument, after the module path. This is what
       unblocked executing Wasm output in `3286`/`3287`.
-- [ ] The Wasm module still has no `_start` or `main` export, so `wasmtime run
-      module.wasm` cannot run it as a WASI command and every invocation has to
-      name `--invoke _BROCKEN_ENTRY` and pass a heap base. A real entry stub
-      that calls `_BROCKEN_ENTRY` with the `__heap_base` global would match the
-      other three backends. The linker also still declares a single 64KB memory
-      page, while the runtime is told the heap is 1MB, so a program that
-      allocates more than one page traps.
+- [ ] **The Wasm module has no `_start` or `main` export, so
+      `wasmtime run module.wasm` cannot run it as a WASI command** and every
+      invocation has to name `--invoke _BROCKEN_ENTRY` and pass a heap base as a
+      trailing argument. A real entry stub that calls `_BROCKEN_ENTRY` with the
+      `__heap_base` global would match the other three backends, which all get
+      their heap base from a linker-supplied stub. Two knock-on effects worth
+      deciding in the same change: the `--invoke`-plus-argument convention is
+      baked into every Wasm test, and a `_start` cannot take a heap-base
+      parameter at all, so the base has to come from a data-segment or global
+      initialiser instead — which also decides what the default heap size is for
+      a module run without arguments.
+- [ ] **The Wasm linker has two independent memory-section emitters that must be
+      kept in step.** `Linker::Wasm::write_executable` builds the multi-function
+      module (memory section at `Wasm.pm:96-98`, the heap-base global at
+      `:110-118`, entry-stub seed at `:128-144`) and a single-function path
+      emits its own (memory section at `:183`, global at `:191-199`, seed at
+      `:201-208`). Any change to the declared memory — initial page count, a
+      maximum, growth — or to the runtime's heap header size has to be applied
+      twice, and the single-function path is the one that is easy to forget
+      because the multi-function tests cover the other. This is not
+      hypothetical, and it has now bitten twice:
+      * adding a third heap word took the header from 16 to 24 bytes, and the
+        `i32.const 16` in both stubs then seeded the global on top of `cap`,
+        which silently stopped growth for every program that used an array. Both
+        were fixed by hand to `0x18`.
+      * routing arrays through the runtime allocator removed the seeding offset
+        entirely — the global now holds the *raw* base, so both stubs seed it
+        with `local.get 0` and no displacement, while the `+24` that skips the
+        header moved into `bump_alloc` where the layout is known. The single
+        function path was updated in the same change, which is the only reason
+        the two agree today.
+      Worth folding into one helper, or adding a test that asserts both paths emit
+      byte-identical memory sections and identical seeds. Note that the
+      single-function path cannot run the `box`/`unbox` case any more: the
+      allocator it would need is not linked into it, which is why `3240` now
+      builds a real five-function module.
 
 ### Phase B: Int/Bool native alias support
 - [x] Lower `Int` and `Bool` as native types (i64/i1)

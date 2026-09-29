@@ -86,16 +86,20 @@ class Brocken::Jenny::Codegen::Wasm {
             $vreg_map{ $ir_params->[$i]->name } = $i;
         }
 
-    # The linear-memory bump pointer. Wasm locals are per-invocation and start
-    # at zero, so giving this a local index made every call frame begin its
-    # spill allocations at address 0: recursive frames then aliased one slot,
-    # and a frame that re-read a spilled parameter *after* a recursive call read
-    # back whatever the callee had stored there. fib(n-1) + fib(n-2) was wrong
-    # for that reason alone, while fact(n), which reads its parameter before
-    # recursing and never again, happened to be right. It has to be a module
-    # global (section 6) that every frame shares; the linker emits it and the
-    # entry stub seeds it from the %__heap_base argument.
-    use constant HEAP_PTR_GLOBAL => 0;
+    # The heap base. Every heap block -- object fields, array slots, boxes --
+    # comes from Brocken::Runtime::bump_alloc, which needs the base as its
+    # first argument, and the base reaches the module as an argument to
+    # _BROCKEN_ENTRY only. A slot can be allocated in any function, so the
+    # value is published in a module global (section 6) that every frame
+    # shares; the linker emits it and the entry stub seeds it from the
+    # %__heap_base argument.
+    #
+    # This used to be a bump pointer rather than a base, which meant escaping
+    # allocas advanced their own copy of the cursor while objects advanced the
+    # one inside the runtime header. Both started at the heap base, so the two
+    # hands of the allocator could hand out the same bytes. Reading the base
+    # and letting the one allocator advance it removes the second cursor.
+    use constant HEAP_BASE_GLOBAL => 0;
 
         my @blocks = $mf->blocks->@*;
         my $nb     = scalar @blocks;
@@ -406,8 +410,8 @@ class Brocken::Jenny::Codegen::Wasm {
                     $$buf .= pack( 'C', 0x0C ) . $self->_uleb($depth);
                 }
                 elsif ( $opcode eq 'local_get' ) {
-                    if ( $ops[0]->value eq '%heap_ptr' ) {
-                        $$buf .= pack( 'C', 0x23 ) . $self->_uleb(HEAP_PTR_GLOBAL);
+                    if ( $ops[0]->value eq '%__heap_base' ) {
+                        $$buf .= pack( 'C', 0x23 ) . $self->_uleb(HEAP_BASE_GLOBAL);
                     }
                     else {
                         my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
@@ -427,6 +431,8 @@ class Brocken::Jenny::Codegen::Wasm {
                     $$buf .= pack( 'C', 0x44 ) . pack( 'd', $ops[0]->value );
                 }
                 elsif ( $opcode eq 'i32_add' )   { $$buf .= pack( 'C', 0x6A ) }
+                elsif ( $opcode eq 'memory_size' ) { $$buf .= pack( 'C', 0x3F ) . pack( 'C', 0x00 ) }
+                elsif ( $opcode eq 'memory_grow' ) { $$buf .= pack( 'C', 0x40 ) . pack( 'C', 0x00 ) }
                 elsif ( $opcode eq 'i32_sub' )   { $$buf .= pack( 'C', 0x6B ) }
                 elsif ( $opcode eq 'i32_mul' )   { $$buf .= pack( 'C', 0x6C ) }
                 elsif ( $opcode eq 'i32_div_s' ) { $$buf .= pack( 'C', 0x6D ) }
@@ -546,13 +552,8 @@ class Brocken::Jenny::Codegen::Wasm {
                     $$buf .= pack( 'C', 0x0F );
                 }
                 elsif ( $opcode eq 'local_set' ) {
-                    if ( $ops[0]->value eq '%heap_ptr' ) {
-                        $$buf .= pack( 'C', 0x24 ) . $self->_uleb(HEAP_PTR_GLOBAL);
-                    }
-                    else {
-                        my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
-                        $$buf .= pack( 'C', 0x21 ) . $self->_uleb($lid);
-                    }
+                    my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
+                    $$buf .= pack( 'C', 0x21 ) . $self->_uleb($lid);
                 }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $ops[0]->value;

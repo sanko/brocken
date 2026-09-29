@@ -32,7 +32,9 @@ my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 # which is what `fib($n - 1) + fib($n - 2)` does for its second argument: the
 # i64.load sits after the first call and reads back the callee's value. fib(10)
 # returned -80, fib(15) -195, fib(20) -360, all stable regardless of heap size.
-# It is now a mutable module global (section 6) seeded once by the entry stub.
+# Spill slots now come from the shared runtime allocator, whose cursor is seeded
+# once by _BROCKEN_ENTRY and kept in the heap header; the module global only
+# carries the base that allocator is reached through.
 
 sub build_wasm {
     my ( $src, $name ) = @_;
@@ -77,13 +79,14 @@ BROCKEN
         $pos += $len;
     }
 
-    ok( $seen{6}, 'module carries a global section (id 6) for the shared bump pointer' );
+    ok( $seen{6}, 'module carries a global section (id 6) for the shared heap base' );
     is( $seen{10} ? 1 : 0, 1, 'module carries a code section' );
     ok( !$seen{7} || $seen{10}, 'sections are laid out in ascending id order, so the global lands before the exports' );
 
     # A local index would be encoded as local.get (0x20). The prologue must not
-    # read the cursor that way any more.
-    unlike( $bytes, qr/\x20\x01\x41\x08\x6a\x21\x01/, 'the heap bump is not a local.get/local.set pair any more' );
+    # read a per-frame heap cursor that way any more; the entry stub publishes
+    # the base with global.set (0x24) instead.
+    unlike( $bytes, qr/\x20\x01\x41\x08\x6a\x21\x01/, 'the heap base is not carried in a per-frame local' );
 
     unlink $file;
 }
