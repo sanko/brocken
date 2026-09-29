@@ -129,6 +129,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         BLR            => 0xD63F0000,
         FCB_RESUME_OFF => 112,
         RET            => 0xD65F03C0,
+        NOP            => 0xD503201F,
     };
 
     method emit_function($ir_func) {
@@ -1337,6 +1338,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                         }
                     }
                     $bytes .= pack( 'V', RET );
+                }
+                elsif ( $opcode eq 'nop' ) {
+                    $bytes .= pack( 'V', NOP );
                 }
                 else {
                     die "Brocken::Jenny::Codegen::ARM64: no encoder for MIR opcode '$opcode'";

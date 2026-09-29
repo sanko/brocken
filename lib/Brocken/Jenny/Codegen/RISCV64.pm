@@ -29,6 +29,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         FP_OP          => 0x53,
         BCC            => 0x63,
         LUI            => 0x37,
+        NOP            => 0x00000013,
         FCB_RESUME_OFF => 120,
     };
 
@@ -748,7 +749,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
-                    my $funct3 = $bits == 32                                 ? 2                : 3;
+                    my $funct3 = $bits == 8 ? 0 : $bits == 16 ? 1 : $bits == 32 ? 2 : 3;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -774,7 +775,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits : 64;
-                    my $funct3 = $bits == 32                                 ? 2                : 3;
+                    my $funct3 = $bits == 8 ? 0 : $bits == 16 ? 1 : $bits == 32 ? 2 : 3;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -803,7 +804,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $imm->type && $imm->type->kind eq 'int' ) ? $imm->type->bits : 64;
-                    my $funct3 = $bits == 32                                 ? 2                : 3;
+                    my $funct3 = $bits == 8 ? 0 : $bits == 16 ? 1 : $bits == 32 ? 2 : 3;
 
                     # find a temporary register not in use
                     my %used;
@@ -924,9 +925,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
 
                     # FCVT.L.S / FCVT.L.D and their 32-bit counterparts, which
                     # round toward zero rather than to nearest even, so a cast is
-                    # not a rounding. funct3 is fixed at 7 for every float to
-                    # integer conversion and the destination width rides in rs2,
-                    # which is why rs2 is the field that is not a register here.
+                    # not a rounding. funct3 is the rounding mode and must be 1
+                    # (RTZ); leaving it at 7 selects the dynamic mode, which
+                    # defaults to round-to-nearest-even and turns 3.5 into 4.
+                    # The destination width rides in rs2, which is why rs2 is the
+                    # field that is not a register here.
                     my $dst_r  = $resolve->($dst);
                     my $did    = $reg_id->($dst_r);
                     my $src_r  = $resolve->($src);
@@ -934,7 +937,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $sbits  = $src->type ? $src->type->bits : 64;
                     my $dbits  = $dst->type ? $dst->type->bits : 64;
                     my $funct7 = 0x60 | ( $sbits > 32 ? 1 : 0 );
-                    my $enc    = ( $funct7 << 25 ) | ( $sid << 15 ) | ( 7 << 12 ) | ( $did << 7 ) | FP_OP;
+                    my $enc    = ( $funct7 << 25 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | FP_OP;
                     $enc |= ( $dbits > 32 ? 2 : 0 ) << 20;
                     $bytes .= pack( 'V', $enc );
                 }
@@ -1128,6 +1131,9 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         }
                     }
                     $bytes .= pack( 'V', JALR );
+                }
+                elsif ( $opcode eq 'nop' ) {
+                    $bytes .= pack( 'V', NOP );
                 }
                 else {
                     die "Brocken::Jenny::Codegen::RISCV64: no encoder for MIR opcode '$opcode'";

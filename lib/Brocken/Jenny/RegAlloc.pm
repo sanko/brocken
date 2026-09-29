@@ -750,10 +750,16 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         # parameter registers happened to be numbered: a capture that wrote
         # xmm1 came before a capture that read it, and the second parameter
         # arrived as a copy of the first.
+        #
+        # RISC-V spells an integer register move `mv` rather than `mov`, and a
+        # capture that is not recognised ends the run early: with `fmov, mv,
+        # fmov` the loop stopped at the `mv`, left one floating-point capture in
+        # the prefix, and the `@prefix > 1` guard skipped the shuffle entirely,
+        # so an interleaved parameter list read the same register twice.
         my @prefix;
         my @insts = $entry->instructions->@*;
         for my $inst (@insts) {
-            last unless $inst->opcode eq 'mov' || $inst->opcode eq 'fmov';
+            last unless $inst->opcode eq 'mov' || $inst->opcode eq 'mv' || $inst->opcode eq 'fmov';
             my ( $dst, $src ) = $inst->operands->@*;
             last unless $src && $src->kind eq 'phys_reg';
             last unless $dst && ( $dst->kind eq 'phys_reg' || $dst->kind eq 'virt_reg' );
