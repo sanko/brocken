@@ -693,11 +693,17 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $src_r    = $resolve->($src);
                     my $sid      = $reg_id->($src_r);
 
-                    # Every form below takes its source in Rn (bits 9:5). The
-                    # 32-bit ORR-immediate form has no Rm field at all, and the
-                    # UBFM/SBFM forms behind UXTB/UXTH/SXTB/SXTH/SXTW read Rn
-                    # too, so the source register goes at bit 5, not bit 16
-                    # (bit 16 is Rm and silently produced immr/imms garbage).
+                    # The source register belongs in Rn (bits 9:5) for the
+                    # UBFM/SBFM forms behind UXTB/UXTH/SXTB/SXTH/SXTW, which are
+                    # immediate-class and have no Rm at all.  The two ORR forms
+                    # below are not: both are the shifted-register ORR, whose
+                    # second source is Rm (bits 20:16) while Rn names the operand
+                    # the destination is OR'd with -- and it has to be WZR, not
+                    # w0.  Putting the source at bit 5 there left Rm as x0 and
+                    # spilled the source number into imm6, so `movzx x9, x11`
+                    # encoded as `orr w9, w0, w11` and every u32 came out as its
+                    # own bits OR'd with whatever the return register happened to
+                    # hold.  The 0x3E0 is what puts WZR in Rn (imm6 0, Rn 31).
                     if ( $src_bits >= 64 ) {
 
                         # zext i64 <- i64 is a no-op, so this has to stay 64-bit:
@@ -707,8 +713,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                     elsif ( $src_bits >= 32 ) {
 
-                        # 32-bit zext: ORR Wd, WZR, #0xffffffff (zeros upper 32)
-                        $bytes .= pack( 'V', 0x2A0003E0 | ( $sid << 5 ) | $did );
+                        # 32-bit zext: ORR Wd, WZR, Wm (writes 31:0, zeroing 63:32)
+                        $bytes .= pack( 'V', 0x2A0003E0 | ( $sid << 16 ) | $did );
                     }
                     elsif ( $src_bits >= 16 ) {
 
