@@ -84,15 +84,22 @@ SKIP: {
             is $output, 42, 'Box/unbox Wasm returned 42 via wasmtime';
         }
         elsif ( $node_path && -x $node_path ) {
-            my $js
-                = "const fs=require('fs');const buf=fs.readFileSync('" .
-                $output_file .
-                "');" .
-                "WebAssembly.instantiate(buf,{_BROCKEN_ENTRY:()=>1024})" .
-                ".then(res=>{process.exit(res.instance.exports._BROCKEN_ENTRY());})" .
-                ".catch(e=>{console.error(e);process.exit(1);});";
+
+            # An i64 result arrives as a BigInt, and process.exit rejects a
+            # BigInt with ERR_INVALID_ARG_TYPE, so the comparison has to happen
+            # in node rather than in the exit status.
+            my $js = sprintf <<~'', $output_file;
+                const fs = require('fs'); const buf = fs.readFileSync('%s');
+                WebAssembly.instantiate(buf)
+                    .then(res => {
+                        const result = res.instance.exports._BROCKEN_ENTRY();
+                        const big = BigInt(result);
+                        process.exit(big === 42n ? 0 : 1);
+                    })
+                    .catch(e => { console.error(e); process.exit(1); });
+
             system( 'node', '-e', $js );
-            is $? >> 8, 42, 'Box/unbox Wasm returned 42 via node';
+            is $? >> 8, 0, 'Box/unbox Wasm returned 42 via node';
         }
         else {
             skip 'Neither wasmtime nor node are installed', 1;
