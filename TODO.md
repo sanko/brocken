@@ -234,7 +234,13 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
 
 ### Scalar div/rem, shift, and compare audit
 - [x] **ARM64/RISCV64** — `8b98245`. Found by compiling small programs and *executing* them under `qemu-aarch64`/`qemu-riscv64` rather than by reading disassembly: `sdiv` was never encoded (signed `div`/`rem` emitted `udiv`, so `-13/3` was `3074457345618258602`); ARM64 register `ashr` used `0x9AC02C00`, which is RORV, not ASRV (`0x9AC02880`); ARM64 `cmp` took its width from the i1 result, so 64-bit compares only looked at the low 32 bits and values differing solely above bit 31 compared equal; ARM64 UXTB/UXTH/SXTB/SXTH/SXTW read the source from Rm instead of Rn; the RISC-V M table had `mul` as funct7 0 (bit-identical to `add`) and `div`/`divu` in the wrong funct3 slots, so a rem silently became `divu;add;sub`; and 64-bit `zext`/`sext` truncated the source to 32 bits on both backends. The RISC-V XORI claim in that commit ("XORI needs funct7 0x20") was wrong and the change it made was reverted below.
-- [x] **Cross float arguments, arithmetic and returns, found by running the binaries rather than reading the encodings** — `2e18c99`. Every AArch64 and RISCV64 float instruction matched an assembler one instruction at a time, and every one of the three faults below still produced a binary that linked, assembled and returned the wrong answer. A float literal passed as an argument reached `fmov` as an immediate, and `fmov` is register-to-register on both targets, so the argument died in the encoder; a constant has no register to arrive in, so it is now materialized into one first, via the same `_materialize` path that loads the bit pattern into a GPR and moves it across. On RISCV64 the `fadd` family never set `funct3`, and leaving it at zero does not read as a malformed instruction — it reads as `fsgnj`, so `fadd.d` was a sign injection that discarded the arithmetic and kept only the sign; `fsqrt` had the same gap. A float return on RISCV64 fell through to the integer move, putting the return address in `a0` and leaving `fa0` holding whatever the last operation left there; the ARM64 and x86-64 lowerers already had that branch and RISCV64 did not. Separately, the ARM64 and x86-64 "unexpected operand" diagnostics dereferenced a string as a reference, so they threw about the dereference instead of naming the operand; all three backends now report the kind. `run_cross` links a real binary for the target architecture and runs it under qemu with the cross sysroot, and `3306_cross_exec_baseline.t` covers argument counts up to the register limit, int-to-float and back, float arguments, the arithmetic family, comparisons, returns, and recursion with a float in a callee-save register — 72 assertions over AArch64 and RISCV64, skipping where qemu or the cross libc is absent.
+- [x] **Cross float arguments, arithmetic and returns, found by running the binaries rather than reading the encodings** — `2e18c99`. Every AArch64 and RISCV64 float instruction matched an assembler one instruction at a time, and every one of the three faults below still produced a binary that linked, assembled and returned the wrong answer. A float literal passed as an argument reached `fmov` as an immediate, and `fmov` is register-to-register on both targets, so the argument died in the encoder; a constant has no register to arrive in, so it is now materialized into one first, via the same `_materialize` path that loads the bit pattern into a GPR and moves it across. On RISCV64 the `fadd` family never set `funct3`, and leaving it at zero does not read as a malformed instruction — it reads as `fsgnj`, so `fadd.d` was a sign injection that discarded the arithmetic and kept only the sign; `fsqrt` had the same gap. A float return on RISCV64 fell through to the integer move, putting the return address in `a0` and leaving `fa0` holding whatever the last operation left there; the ARM64 and x86-64 lowerers already had that branch and RISCV64 did not. Separately, the ARM64 and x86-64 "unexpected operand" diagnostics dereferenced a string as a reference, so they threw about the dereference instead of naming the operand; all three backends now report the kind. `run_cross` links a real binary for the target architecture and runs it under qemu with the cross sysroot, and `3306_cross_exec_baseline.t` covers argument counts up to the register limit, int-to-float and back, float arguments, the arithmetic family, comparisons, returns, and recursion with a float in a callee-save register — 72 assertions over AArch64 and RISCV64, skipping where qemu or the cross libc is absent. `3307` added x86-64 to that sweep as a native control.
+
+- [x] **AArch64 and RISCV64 pass arguments past the register file on the stack.** Only the x86-64 lowerer and codegen had the machinery, so a ninth argument indexed off the end of the register list, came back as an undefined register name, and the encoder resolved it to register 0. The three backends now agree on the mechanism, which is the one x86-64 already used: the overflow is captured in the entry block through a raw displacement measured from the entry stack pointer, an outgoing argument is stored at a raw displacement measured from the current one, the outgoing area is reserved at the bottom of the frame before the call rather than pushed at the call site, and a spill slot is lifted above it. The `entry`/`raw` markers are what keep the two apart, and `_compute_spill_frame` ignores them so the outgoing area is not double-booked against the spill area.
+
+      The offsets are not the SysV ones the x86-64 ABI uses, which was the one place this did not transfer. `x86-64`'s `call` pushes a return address, so its first stack argument is at `rsp+8` on entry; `bl` leaves the return address in `x30` and `call` leaves it in `ra`, and neither pushes, so on both targets the first stack argument is at `sp+0` and the callee- and caller-side offsets are the same `8 * $index`. Confirmed by assembling a probe that reads `[sp+0]` and exits with the value it finds, and running it under both qemus.
+
+      Verified by `3307_stack_arg_diagnostic.t`, which runs nine and ten integer arguments, nine float arguments (a different register file, `v0-v7` and `f0-f7`, so the two areas have to be sized independently), a mixed overflow where an integer must not be charged to the floating-point file, and a stack argument through a nested call, on all three native backends under qemu, plus the assertion that an unknown register name stays an error. Two of those cases are worth naming because they only fail in one direction: a float literal is materialized through a scratch register the allocator picks, and emitting arguments in reverse order — as x86-64 does, so that arg0 lands last — picks that scratch after the argument registers are already spoken for, so it landed on the register the previous argument had just been written to. These backends emit in forward order, and `3306` caught it.
 - [x] **RISC-V XORI set bit 30, so every negated condition was true.**
       `8b98245` read bit 30 as a funct7 and set it on the I-type XORI the
       way SRAI does, on the belief that without it "the encoding is the
@@ -531,10 +537,9 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       Verified by `3299_float_literals.t`, which also carries a value past
       2**52 so that a fix which only got the width right cannot pass.
 
-      The stack-argument half of this still stands: the lowerer emits `fstore`
-      for a float argument that reaches the stack area, and the float sweep in
-      `3298_stack_args.t` is still waiting on the AArch64/RISCV64 stack-argument
-      work below.
+      The stack-argument half of this is done too: the lowerer emits `fstore`
+      for a float argument that reaches the stack area, and `3307` now exercises
+      a nine-float-argument call on all three native backends.
 
 - [x] **Comparing a float call result against a literal gives the wrong answer.**
       Found while writing `3299_float_literals.t`. With the callee provably
@@ -786,24 +791,19 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       sweep: the sweep that found the REX fault hid this one, because a function
       with many parameters and no locals never allocates a local frame.
 
-- [ ] **AArch64 and RISCV64 cannot pass arguments on the stack at all.** This is
+- [x] **AArch64 and RISCV64 cannot pass arguments on the stack at all.** This was
       what the seven ARM64 CI failures actually are: all of `3298_stack_args.t`,
       plus the eight-field constructor in `3297_entry_shuffle.t`. Only the x86-64
-      lowerer and codegen gained the machinery -- capturing past the register
+      lowerer and codegen had the machinery -- capturing past the register
       count in the entry block, storing the overflow at the call, reserving the
-      outgoing area at the frame bottom, and the entry bias for the loads. The
-      ARM64 and RISCV64 lowerers have none of it, and their ABI classes inherit
-      `stack_param_offset` from the base, which returns `undef`. Both ABIs use
-      eight integer registers and no shadow space, so the offsets are the SysV
-      ones (callee `8 + 8i`, caller `8i`), but the frame work has to be redone
-      per backend, including the same raw-stack-base trap that x86-64 hit: on
-      these the base is `sp`, and it must stay out of the interval model.
-      `3306_cross_exec_baseline.t` now pins the register side of this by
-      *executing* one through eight integer arguments on both architectures
-      rather than encoding them, and it stops at eight deliberately: that is the
-      last count that fits, and the tenth argument is where the undefined
-      register allocation in `RegAlloc` shows up as an uninitialised warning and
-      a wrong answer. Nothing above the register count is claimed to work yet.
+      outgoing area at the frame bottom, and the entry bias for the loads -- and
+      the ARM64 and RISCV64 lowerers had none of it, with their ABI classes
+      inheriting `stack_param_offset` from the base, which returns `undef`. See
+      the entry above for how it was ported, why the offsets are not the SysV
+      ones, and the float-literal ordering fault it turned up. Verified by
+      `3307_stack_arg_diagnostic.t`, which executes nine- and ten-argument
+      calls, a float overflow, a mixed overflow and a stack argument through a
+      nested call on all three native backends.
 
 - [x] **Wasm could not compile any program that declares a local variable.**
       Every frontend program with at least one `my` local was rejected by the

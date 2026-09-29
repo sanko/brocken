@@ -30,6 +30,15 @@ class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform:
     method fp_return_register() {'v0'}
     method fiber_reg()          {'x28'}
 
+    # Arguments past the last of x0-x7 arrive on the stack.  AArch64's `bl`
+    # leaves the return address in x30 rather than pushing it, so nothing sits
+    # below the arguments: on entry sp points directly at the first stack
+    # argument and the offset does not skip a return address the way x86-64's
+    # does.  The call instruction does not move sp either, so the caller-side
+    # offset is the same.
+    method stack_param_offset($index)        { 8 * $index }
+    method caller_stack_param_offset($index) { 8 * $index }
+
     # ARM64 FP/SIMD registers (AAPCS64 calling convention)
     # Note: v0-v7 are caller-saved, v8-v15 are callee-saved (only the lower 64 bits)
     method fp_registers( $category = 'available' ) {
