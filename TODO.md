@@ -605,7 +605,7 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       something that has no signedness, one layer further from the type that
       would have explained it.
 
-- [ ] **`fmov` and its neighbours put the REX byte in front of the legacy
+- [x] **`fmov` and its neighbours put the REX byte in front of the legacy
       prefix.** `F2` and `F3` select single and double precision and `0x66` the
       operand size, and a REX byte is only a REX byte as the *last* prefix before
       the opcode. A REX byte in front of one of them is discarded, and the
@@ -782,24 +782,25 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       at all and left a silently truncated function behind, which is the same
       shape of fault as this entry.
 
-- [ ] **An unknown physical register name silently becomes register 0.**
-      `reg_id` in all three native codegens ends in a bare `return 0`, so a name
-      it does not recognise encodes as `rax`/`xmm0` on x86-64, `x0`/`v0` on
+- [x] **An unknown physical register name silently becomes register 0.**
+      `reg_id` in all three native codegens ended in a bare `return 0`, so a name
+      it did not recognise encoded as `rax`/`xmm0` on x86-64, `x0`/`v0` on
       AArch64, and `x0`/`f0` on RISCV64. Register 0 is a real register on every
-      target, so the instruction still assembles and the program still runs.
+      target, so the instruction still assembled and the program still ran.
 
       Found while checking the AArch64 and RISCV64 `fptosi` encodings. A probe
       asked for `ft10`, the RISC-V psABI name for `f30`, and instead of being
-      rejected it was encoded as register 0, which is how a test of this kind
-      quietly starts asserting against the wrong thing. The backend does not use
-      those names -- `Brocken::Katsuro::Platform::ABI::RISCV64` numbers the
-      argument registers `f0`-`f31` and `reg_id` matches those -- so nothing is
-      broken today, but the failure mode is the reason a naming mistake costs an
-      afternoon instead of a diagnostic.
+      rejected it was encoded as register 0 -- which is how a test of this kind
+      quietly starts asserting against the wrong thing. Nothing was broken in the
+      backend itself, since it does not use those names, but the failure mode is
+      the reason a naming mistake costs an afternoon instead of a diagnostic.
 
-      The floor is `die` on an unrecognised name. The named-register tables are
-      also worth a check of their own, since the RISCV64 one hand-maps `zero`,
-      `ra` and the rest and can only be right by being kept right by hand.
+      All three now die on an unrecognised name. The message names the register
+      and the backend, because the caller is a codegen method with no source
+      location and a bare "unknown register" gives nothing to search on. The AArch64
+      and RISCV64 tables are the ones worth a second look when adding names: the
+      RISCV64 one hand-maps `zero`, `ra` and the rest and can only be right by
+      being kept right by hand.
 
 - [x] **Two live f64 locals can be given the same stack slot.**
       `my f64 $a = 1; my f64 $b = 2; my f64 $c = 3; if ($b == 2)` was false:
