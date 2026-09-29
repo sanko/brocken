@@ -116,6 +116,12 @@ class Brocken::Jenny::Codegen::ARM64 {
         # SF the 64-bit destination, so the 32-bit/single form is the base.
         FCVTZS_32      => 0x1E380000,
         FP_TYPE_D      => 0x00400000,
+
+        # SCVTF, integer to float, no rounding mode: a cast in the other
+        # direction. Bit 31 is SF for a 64-bit integer source and bit 22 the
+        # double-precision float destination, so 32-bit/single is the base, the
+        # same pair of bits FCVTZS above uses for its two operands.
+        SCVTF_32       => 0x1E220000,
         SF             => 0x80000000,
         BR             => 0xD61F0000,
         ADR            => 0x10000000,
@@ -1173,6 +1179,25 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $base  = FCVTZS_32;
                     $base |= FP_TYPE_D if $sbits >= 64;
                     $base |= SF         if $dbits >= 64;
+                    $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
+                }
+                elsif ( $opcode eq 'sitofp' ) {
+
+                    # SCVTF, the same shape as FCVTZS with the two register
+                    # fields the other way round: Rn is the integer source and
+                    # Rd the float destination, since there is no second source
+                    # to encode. Bit 31 is SF for a 64-bit integer and bit 22
+                    # the double-precision float, so the 32-bit/single form is
+                    # the base.
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $sbits = $src->type ? $src->type->bits : 64;
+                    my $fbits = $dst->type ? $dst->type->bits : 64;
+                    my $base  = SCVTF_32;
+                    $base |= SF         if $sbits >= 64;
+                    $base |= FP_TYPE_D if $fbits >= 64;
                     $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'fcmp' ) {

@@ -625,21 +625,68 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       carrying the bug above. Nothing in the test suite uses a decimal literal,
       which is how a parser that cannot read them went unnoticed.
 
-- [ ] **A negative literal in a float context is a hard error.**
+- [ ] **A negative value in a float context is a hard error.**
       `my f64 $t = -3;` lowers unary minus to an instruction rather than folding
-      it, so the value arrives as a computed int and the new coercion refuses
-      it: `Cannot implicitly convert a computed int:64 to float:64`. It used to
-      miscompile quietly, so the error is an improvement, but a negative float
-      literal is ordinary code and folding `-` applied to a constant into the
-      constant is the whole fix.
+      it, so the value arrives as a computed int. The coercion below used to
+      refuse that outright (`Cannot implicitly convert a computed int:64 to
+      float:64`); it accepts it now, so the literal case works and this entry is
+      down to negating anything that is not a literal:
 
-- [ ] **There is no integer-to-float conversion instruction.**
+      ```
+      sub w(i64 $i) -> f64 { my f64 $t = -$i; return $t; }
+      # Cannot apply a float operation to a computed int operand; cast it explicitly
+      ```
+
+      That is a different diagnostic, from a different place -- the unary-op path
+      in `Brocken::Katsuro::Lowerer`, not the coercion -- so the check is simply
+      in the wrong place: it fires before the new conversion gets a look in.
+      Routing the operand through `sitofp` and negating the float would work but
+      is not free, because float negation here is an xor against a sign mask
+      rather than a subtraction, so folding `-` applied to a constant into the
+      constant is the better answer. That only helps the literal case though, and
+      the general one still wants the check to move rather than a new fold.
+
+- [x] **There is no integer-to-float conversion instruction.**
       `my f64 $t = $i;` where `$i` is an `i32` is refused, because the IR has
       `zext`/`sext`/`trunc`/`ptrcast` and no `sitofp`, and none of the four
       backends has a lowering for one. Storing integer bits through a float slot
       is wrong for everything past 2**52, so refusing it is right, but it does
       mean an int cannot be assigned to a float at all. Wasm already has the
       instruction (`f64.convert_i32_s`) if the native side ever grows one.
+
+      Added this round, in the same shape as the `fptosi` entry below: one `sitofp`
+      in the IR with a `target_type`, emitted as `CVTSI2SD`/`CVTSI2SS` on x86-64,
+      `SCVTF` on AArch64, `FCVT.S.L`/`FCVT.D.L` on RISCV64, and
+      `f32.convert_i64_s`/`f64.convert_i64_s` on Wasm at 0xB4 and 0xB9. The
+      AArch64 and RISCV64 encodings were checked against
+      `aarch64-linux-gnu-as` and `riscv64-linux-gnu-as`, and the x86-64 ones
+      against `as --64`, instruction by instruction.
+
+      The one part that is not a straight mirror of `fptosi` is the unsigned side.
+      `CVTSI2SD` is signed only, so a `u32` with the top bit set would come out
+      negative, and the fixup for that is two instructions on a destination the
+      IR does not model. Rather than half-build it, the frontend widens the
+      source to 64 bits first -- `sext` for the signed types, `zext` for the
+      unsigned ones up to 32 bits -- and emits a single signed conversion. A `u32`
+      zero-extended into an `i64` is a positive `i64`, and a `u8` or `u16` likewise,
+      so one instruction covers every signed type and every unsigned type that fits
+      in 32 bits. `u64` and anything wider is still refused, with its own message
+      saying why, rather than silently converting a bit pattern.
+
+      The two mnemonics on Wasm sit among the reinterpret forms, so a byte off by
+      one or three assembles cleanly as a demote or a reinterpret and the module
+      still validates; 0xB5 on the `f32` case turns -7 into 18446744000000000000
+      and the module still runs. `3305_wasm_int_to_float.t` therefore checks values
+      under `wasmtime`, like `3303` does, and needed both signs for that reason --
+      with a positive source the same mistake demotes cleanly and reads back
+      correct. `3304_int_to_float.t` covers the host end, including the narrow
+      signed types and the unsigned ones past 2**31, and all of its cases fail
+      with the coercion reverted.
+
+      The largest value in that test is per-float-type, not fixed at 2**31-1: f64
+      has a 53-bit significand and f32 a 24-bit one, so 2**31-1 is representable in
+      the first and rounds in the second. Asking f32 for it would test the float
+      format rather than the conversion.
 
 - [x] **Converting a float to an integer yields 0, silently.**
       `my f64 $t = 3; my i64 $i = $t;` leaves `$i` at 0 rather than 3, with no

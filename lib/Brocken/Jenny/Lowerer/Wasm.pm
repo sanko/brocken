@@ -1924,6 +1924,24 @@ class Brocken::Jenny::Lowerer::Wasm {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name ) );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Sitofp') ) {
+
+                    # The mirror of the branch above. The frontend widens the
+                    # source to i64 before it gets here, so only the two
+                    # `_convert_i64_s` mnemonics are reachable; they are
+                    # selected by the destination alone. As there, the result
+                    # has to be stored into a local, since nothing else on this
+                    # backend holds a value.
+                    my ($val)    = $inst->operands->@*;
+                    my $dst_bits = $inst->type ? $inst->type->bits : 64;
+                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $op = ( $dst_bits > 32 ? 'f64' : 'f32' ) . '_convert_i64_s';
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'sitofp val' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => $op, operands => [], comment => 'sitofp' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name ) );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') ) {
                     my ($val)    = $inst->operands->@*;
                     my $src_bits = $val->type ? $val->type->bits : 64;

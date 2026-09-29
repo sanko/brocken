@@ -1184,6 +1184,33 @@ class Brocken::Jenny::Codegen::X86_64 {
                     $bytes .= pack( 'C', $rex ) if $rex > 0x40;
                     $bytes .= pack( 'CCC', 0x0F, 0x2C, $modrm );
                 }
+                elsif ( $opcode eq 'sitofp' ) {
+
+                    # CVTSI2SD / CVTSI2SS: the same opcode as the moves, told
+                    # apart by the mandatory prefix, which here follows the
+                    # *float* destination rather than the source as it did for
+                    # CVTTSD2SI. The integer is the source, named in r/m, and
+                    # the float the destination in reg, so the two ModRM fields
+                    # sit the other way round from the fptosi case above.
+                    my $dst_r = $resolve->($dst);
+                    my $src_r = $resolve->($src);
+                    my $did   = $reg_id->($dst_r);
+                    my $sid   = $reg_id->($src_r);
+                    my $sbits = $src->type ? $src->type->bits : 64;
+                    my $fbits = $dst->type ? $dst->type->bits : 64;
+
+                    # REX.W widens the integer source, REX.R names an XMM
+                    # destination of 8 or above and REX.B a GPR source of 8 or
+                    # above. The instruction has no unsigned form, which is why
+                    # the frontend never hands one over: a u32 arrives here
+                    # already zero-extended into a positive i64.
+                    my $rex = 0x40 | ( $sbits >= 64 ? 8 : 0 ) | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                    my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+
+                    $bytes .= pack( 'C', $fbits >= 64 ? 0xF2 : 0xF3 );
+                    $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                    $bytes .= pack( 'CCC', 0x0F, 0x2A, $modrm );
+                }
                 elsif ( $opcode eq 'fcmp' ) {
                     my $dst_r = $resolve->($dst);
                     my $src_r = $resolve->($src);

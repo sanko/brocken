@@ -1660,14 +1660,25 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                         )
                     );
                 }
-                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Fptosi') ) {
-                    my ($val) = $inst->operands->@*;
+                elsif (
+                    $inst->isa('Brocken::Lindsay::IR::Instruction::Fptosi')
+                    or $inst->isa('Brocken::Lindsay::IR::Instruction::Sitofp')
+                    ) {
+                    # The destination and the source are of different classes, so
+                    # the allocator gives each its own register from the type on
+                    # the operand. _materialize is what gives a float constant a
+                    # home in an f register rather than leaving a GPR holding its
+                    # bit pattern; it passes anything else straight through, so
+                    # the integer source of a sitofp needs nothing special.
+                    my $to_int = $inst->isa('Brocken::Lindsay::IR::Instruction::Fptosi');
+                    my $op     = $to_int ? 'fptosi' : 'sitofp';
+                    my ($val)  = $inst->operands->@*;
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'fptosi',
+                            opcode   => $op,
                             operands => [ $dst, $self->_materialize( $mbb, $val ) ],
-                            comment  => 'fptosi ' . ( $val->name // $val->value )
+                            comment  => "$op " . ( $val->name // $val->value )
                         )
                     );
                 }

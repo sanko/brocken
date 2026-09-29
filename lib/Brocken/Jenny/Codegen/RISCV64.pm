@@ -916,6 +916,29 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $enc |= ( $dbits > 32 ? 2 : 0 ) << 20;
                     $bytes .= pack( 'V', $enc );
                 }
+                elsif ( $opcode eq 'sitofp' ) {
+
+                    # FCVT.S.L / FCVT.D.L: the R-type shape of the fptosi case
+                    # above, with the register fields the other way round. rs1 is
+                    # the integer source and rd the float destination, and rs2
+                    # is not a register at all here either -- it is the source
+                    # width, 00010 for a 64-bit integer, which is the only value
+                    # the frontend produces since it widens before emitting.
+                    # funct3 stays 111, the dynamic rounding field, rather than
+                    # the static 000 the assembler prefers for the 32-bit form:
+                    # an int to float conversion never rounds, so either encodes
+                    # the same instruction.
+                    my $dst_r  = $resolve->($dst);
+                    my $did    = $reg_id->($dst_r);
+                    my $src_r  = $resolve->($src);
+                    my $sid    = $reg_id->($src_r);
+                    my $sbits  = $src->type ? $src->type->bits : 64;
+                    my $fbits  = $dst->type ? $dst->type->bits : 64;
+                    my $funct7 = $fbits >= 64 ? 0x69 : 0x68;
+                    my $rs2    = $sbits >= 64 ? 2 : 0;
+                    my $enc    = ( $funct7 << 25 ) | ( $rs2 << 20 ) | ( $sid << 15 ) | ( 7 << 12 ) | ( $did << 7 ) | FP_OP;
+                    $bytes .= pack( 'V', $enc );
+                }
                 elsif ( $opcode eq 'fcmp' ) {
                     my ( $result, $lhs, $rhs ) = $inst->operands->@*;
                     my $rd   = $reg_id->( $resolve->($result) );
