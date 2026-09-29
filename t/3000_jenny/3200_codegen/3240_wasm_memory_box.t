@@ -70,13 +70,15 @@ SKIP: {
     my $module  = Brocken::Compiler->new->compile("my Any \$x = 42;\nreturn \$x;\n");
     my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
     my $funcs   = $codegen->emit_functions( $module->functions );
-    ok( ( grep { $_->{name} eq 'Brocken::Runtime::bump_alloc' } @$funcs ),
-        'the box/unbox module carries the shared runtime allocator alongside the entry' );
+    ok(
+        ( grep { $_->{name} eq 'Brocken::Runtime::bump_alloc' } @$funcs ),
+        'the box/unbox module carries the shared runtime allocator alongside the entry'
+    );
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
     my $output_file = temp_path('box_test') . '.wasm';
     $linker->write_executable( $output_file, $funcs, $platform );
     ok( -e $output_file, 'Wasm box/unbox file exists' );
-    SKIP: {
+SKIP: {
         if ( $wasmtime_path && -f $wasmtime_path ) {
             my $output = qx["$wasmtime_path" run --invoke _BROCKEN_ENTRY $output_file 1024 2>$null];
             chomp $output;

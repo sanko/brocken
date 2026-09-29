@@ -1,0 +1,104 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Lexer - Tokenizer for Brocken source
+
+=head1 SYNOPSIS
+
+    use Brocken::Katsuro::Lexer;
+
+    my $lexer  = Brocken::Katsuro::Lexer->new( source => $source, filename => 'main.brocken' );
+    my $tokens = $lexer->lex();
+
+=head1 DESCRIPTION
+
+Turns Brocken source text into a flat list of tokens for the parser. Whitespace and C<#>-to-end-of-line comments are
+discarded. Every token records the line and column where it starts.
+
+=head1 METHODS
+
+=head2 C<new( source => $source, [ filename => $name ] )>
+
+Constructs a lexer over the given source. C<filename> is used only in error messages and defaults to C<(eval)>.
+
+=head2 C<lex()>
+
+    my $tokens = $lexer->lex();
+
+Scans the whole source and returns an arrayref of token hashrefs. A C<EOF> token is always appended. Each token has:
+
+=over
+
+=item C<type> - One of C<IDENT>, C<KEYWORD>, C<VAR>, C<NUM>, C<STRING>, C<OP>, a single punctuation character
+(C<{> C<}> C<;> C<(> C<)> C<[> C<]> C<,>), or C<EOF>.
+
+=item C<value> - The lexeme. For punctuation tokens the value equals the type.
+
+=item C<line>, C<col> - The one-based position at which the token starts.
+
+=back
+
+A numeric token whose spelling contains a decimal point followed by a digit, or an exponent, also carries C<< float =>
+1 >>.
+
+=head1 TOKEN RULES
+
+=head2 Identifiers
+
+An identifier may start with a sigil (C<$>, C<@>, or C<%>) and may be package-qualified with C<::>, as in
+C<Brocken::load_i64>. A bare name that is one of the reserved keywords is a C<KEYWORD> token; a sigil-prefixed name is
+always a C<VAR> token; anything else is an C<IDENT>.
+
+The reserved words are:
+
+  my our state const type sub method class role has field ADJUST DESTROY
+  return exit fiber yield transfer try catch finally throw defer
+  if elsif else unless while until for foreach next last redo map say print
+  true false True False __CLASS__ Int String Any Bool ptr int bool
+  i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64
+  use require
+
+=head2 Numbers
+
+A number is a float when it contains a decimal point followed by at least one digit, or an exponent (with optional
+sign). The digits after a decimal point are required, so C<1..2> lexes as the integer C<1>, the C<..> operator, and the
+integer C<2>, not as a malformed C<1.>. An exponent may stand on its own, as in C<1e9>. Float literals are always
+tagged C<f64>; a narrower slot re-tags the constant later.
+
+=head2 Strings
+
+Strings are delimited by double or single quotes. Escape sequences are captured verbatim; the lexer does not unescape
+them. The token value is the text between the quotes.
+
+=head2 Operators
+
+Multi-character operators are matched before single-character ones:
+
+  == != <= >= <=> => -> && || //= // ... ..
+
+The single-character operators are C<+ - * / % = < > ! & | ^ ~ ? : .>.
+
+=head1 DIAGNOSTICS
+
+An unrecognized character is a fatal error:
+
+    Lexical Error: Unexpected character '@' at main.brocken line 3, col 7
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

@@ -1,0 +1,216 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::RegAlloc - Linear Scan Register Allocator
+
+=head1 DESCRIPTION
+
+Implements a linear-scan register allocator for MIR functions. Handles allocation of both general-purpose and
+floating-point registers, spill code insertion, caller-save/restore code, redundant-move elimination, and entry-block
+shuffle hazard detection.
+
+=head2 Algorithm
+
+The allocator uses a standard linear-scan approach:
+
+=over
+
+=item 1. Compute live intervals via global dataflow analysis (backward fixed-point)
+
+=item 2. Sort intervals by start position
+
+=item 3. Linear scan: allocate registers greedily with furthest-next-use spill heuristic
+
+=item 4. Insert spill code for spilled virtual registers
+
+=item 5. Insert caller-save/restore code around call instructions
+
+=item 6. Remove redundant register-to-register moves
+
+=item 7. Fix entry-block parameter shuffle hazards
+
+=back
+
+=head2 Classes
+
+=over
+
+=item L<Brocken::Jenny::RegAlloc::LiveInterval> - Represents a vreg's live range
+
+=item L<Brocken::Jenny::RegAlloc::LinearScan> - The allocator implementation
+
+=back
+
+=head1 METHODS
+
+=head2 C<allocate( ..., [ ... ] )>
+
+    $allocator->allocate( $mf, $platform, $is_float )
+
+Performs full register allocation on the MIR function. Returns a hashref with the register assignment and the spill and
+frame bookkeeping the backend needs.
+
+Expected args:
+
+=over
+
+=item C<$mf> - The MIR function to allocate for. Its control-flow graph is computed if one is not already present.
+
+=item C<$platform> - The target platform, consulted for the available, caller-saved, and callee-saved register sets.
+
+=item C<$is_float> - Optional. When true, allocates the floating-point register file instead of the general-purpose
+one. A function that mixes both is allocated twice, once per file. Defaults to false.
+
+=back
+
+The returned hashref has these keys:
+
+=over
+
+=item C<assignment> - Hashref mapping each virtual register name to the physical register it was given.
+
+=item C<used_callee> - Sorted list of the callee-saved registers the function actually touched.
+
+=item C<spill_slots> - Hashref mapping each spilled virtual register name to its stack-frame offset.
+
+=item C<spill_temp> - The primary reserved scratch register.
+
+=item C<spill_temps> - The full list of reserved scratch registers, sized to the widest instruction in the function.
+
+=back
+
+=head2 C<insert_spill_code( ..., [ ... ] )>
+
+    $allocator->insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float, $mem_src )
+
+Inserts load/store instructions for each spilled virtual register, rewriting the function in place.
+
+Expected args:
+
+=over
+
+=item C<$mf> - The MIR function to rewrite in place.
+
+=item C<$spill_slots> - Hashref mapping each spilled virtual register name to the frame offset it was assigned.
+
+=item C<$spill_temp> - The reserved scratch register, or an arrayref of them, used to hold a reloaded value. A plain
+string is accepted so a caller holding only the single-temp result still works.
+
+=item C<$stack_reg> - The physical register that names the base of the stack frame, used as the base of each spill slot.
+
+=item C<$is_float> - Optional. When true, emits C<fload>/C<fstore> rather than C<load>/C<store>, and types each slot to
+the float it holds so the width of the move is correct. Defaults to false.
+
+=item C<$mem_src> - Optional. The opcodes the calling backend can encode with a memory operand as the source, so a
+spilled source is not reloaded into a scratch register first. A backend that lists nothing gets a temp reload for every
+spilled source. Defaults to an empty list.
+
+=back
+
+=head2 C<insert_caller_save_code( ..., [ ... ] )>
+
+    $allocator->insert_caller_save_code( $mf, $caller_regs, $stack_reg, $is_float, $base_idx )
+
+Saves all caller-saved registers before each call and restores them after, rewriting the function in place.
+
+Expected args:
+
+=over
+
+=item C<$mf> - The MIR function to rewrite in place.
+
+=item C<$caller_regs> - The physical registers to save around each call. These are the registers the ABI lets a
+callee clobber, so a value the function still needs across a call has to go to the stack for the duration.
+
+=item C<$stack_reg> - The physical register that names the base of the stack frame.
+
+=item C<$is_float> - Optional. When true, emits C<fstore>/C<fload> rather than C<store>/C<load>, and types each slot so
+a 64-bit float is not moved with a 32-bit instruction. Defaults to false.
+
+=item C<$base_idx> - Optional. The first frame slot to use, so this pass does not collide with the slots the spill
+pass already claimed. Defaults to C<0>.
+
+=back
+
+=head2 C<remove_redundant_moves( ... )>
+
+    $allocator->remove_redundant_moves( $mf, $assignment )
+
+Elides MOV instructions where source and destination map to the same physical register, rewriting the function in
+place.
+
+Expected args:
+
+=over
+
+=item C<$mf> - The MIR function to rewrite in place.
+
+=item C<$assignment> - Hashref mapping each virtual register name to its physical register, used to recognise a move
+whose two ends ended up in the same place.
+
+=back
+
+=head2 C<fix_entry_shuffle( ..., [ ... ] )>
+
+    $allocator->fix_entry_shuffle( $mf, $assignment, $temp_reg, $fp_temp_reg )
+
+Schedules the entry-block parameter captures as a parallel move, so a capture is never emitted after the one that
+overwrites the register it still has to read. Cycles are broken by parking one source in the spill temp, which is
+released again before the temp is reused. Only the leading run of captures is touched, so a later move that reads a
+physical register keeps its position.
+
+Expected args:
+
+=over
+
+=item C<$mf> - The MIR function to rewrite in place.
+
+=item C<$assignment> - Hashref mapping each virtual register name to its physical register, used to resolve a capture
+whose destination is still virtual.
+
+=item C<$temp_reg> - The general-purpose scratch register to break a C<mov> cycle in.
+
+=item C<$fp_temp_reg> - Optional. The floating-point scratch register to break an C<fmov> cycle in. It has to sit
+outside both the allocated register set and the argument registers, or a cycle parked there destroys an argument a
+later capture still has to read. Defaults to C<undef>, which leaves an C<fmov> group in its original order rather than
+scheduling it around a scratch that does not exist.
+
+=back
+
+=head2 C<compute_unified_frame( ... )>
+
+    $allocator->compute_unified_frame( $num_callee, $spill_frame, $caller_save_size )
+
+Computes the total stack frame size, aligned to 16 bytes.
+
+Expected args:
+
+=over
+
+=item C<$num_callee> - The number of callee-saved registers the function has to save, each occupying eight bytes.
+
+=item C<$spill_frame> - The size in bytes of the spill area.
+
+=item C<$caller_save_size> - The size in bytes of the caller-save area.
+
+=back
+
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

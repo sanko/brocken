@@ -1,0 +1,40 @@
+=head1 NAME
+
+Brocken::Target::OS::Solaris - Solaris target
+
+=head1 DESCRIPTION
+
+The Solaris target, a subclass of L<Brocken::Target::OS>.
+
+It is POSIX and BSD-derived as far as the rest of the codebase is concerned, its shared libraries use the C<.so>
+extension, and it has no executable extension.
+
+=head1 WHY IT IS IN THE BSD GROUP
+
+C<write> is 4 and C<exit> is 1, on every architecture, and those come from the base class's BSD branch rather than
+being restated here. The interesting part is that Solaris counts as BSD-derived at all. The C<is_bsd_like> pattern
+lists it explicitly, and that classification is load-bearing in exactly one place: it is what selects the 4 and 1
+instead of falling through to C<undef>. If Solaris were ever dropped from that pattern, its syscall numbers would
+become C<undef> silently rather than loudly, since there is no Solaris-specific branch to fall into.
+
+The page size is 4096 on all three architectures, and the syscall number register is the usual C<rax>, C<x8>, and
+C<a7>. Both are inherited.
+
+=head1 INHERITED
+
+This subclass declares no methods. Its C<ADJUST> block does one thing, which is to die unless the name it was given is
+exactly C<solaris>, so a Solaris object cannot end up carrying another system's name. Everything else is inherited from
+the base class.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

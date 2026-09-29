@@ -7,7 +7,7 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # Arguments arriving in registers at all.
 #
@@ -43,21 +43,16 @@ use feature               qw[class];
 # failing arity is whatever fills the argument register set -- four on Win64,
 # six on SysV, and a cycle at the point where the allocator starts permuting
 # them at all.
-
 my $brocken = Brocken->new;
-
 SKIP: {
     skip 'Not native', 1 unless $brocken->platform->is_native;
-
     my $gp_args = scalar $brocken->platform->abi->param_registers->@*;
-
     for my $n ( 1 .. $gp_args ) {
-        my @params = map { "i64 \$v$_" } 0 .. $n - 1;
+        my @params = map {"i64 \$v$_"} 0 .. $n - 1;
         my @args   = map { $_ + 1 } 0 .. $n - 1;
-        my $sum    = join( ' + ', map { "\$v$_" } 0 .. $n - 1 );
+        my $sum    = join( ' + ', map {"\$v$_"} 0 .. $n - 1 );
         my $total  = 0;
         $total += $_ for @args;
-
         my $free = <<"BROCKEN";
 sub f( @{[ join ', ', @params ]} ) -> i64 { return $sum; }
 if ( f( @{[ join ', ', @args ]} ) == $total ) { return 42; }
@@ -74,11 +69,10 @@ BROCKEN
     # had. The second reload clobbered the first, so the store landed through an
     # integer instead of the object address.
     for my $n ( 1 .. $gp_args ) {
-        my @args = map { $_ + 1 } 0 .. $n - 1;
-        my @fields = map { "field i8 \$f$_ :param :reader;" } 0 .. $n - 1;
-        my $reads = join( "\n", map { "if (\$p->f$_() == " . ( $_ + 1 ) . ") {" } 0 .. $n - 1 )
-            . "\nreturn 42;\n"
-            . join( "\n", map { '}' } 0 .. $n - 1 );
+        my @args   = map { $_ + 1 } 0 .. $n - 1;
+        my @fields = map {"field i8 \$f$_ :param :reader;"} 0 .. $n - 1;
+        my $reads
+            = join( "\n", map { "if (\$p->f$_() == " . ( $_ + 1 ) . ") {" } 0 .. $n - 1 ) . "\nreturn 42;\n" . join( "\n", map {'}'} 0 .. $n - 1 );
         my $ctor = <<"BROCKEN";
 class P {
     @{[ join "\n", @fields ]}
@@ -90,11 +84,10 @@ BROCKEN
         is( run($ctor), 42, "native: constructor with $n argument field(s)" );
     }
 }
-
 done_testing;
 
 sub run {
-    my ($src) = @_;
+    my ($src)  = @_;
     my $module = Brocken::Compiler->new->compile($src);
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = $brocken->tmpdir . '/shuffle' . $brocken->ext;

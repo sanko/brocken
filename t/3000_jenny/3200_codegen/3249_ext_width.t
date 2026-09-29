@@ -5,16 +5,10 @@ use Brocken;
 use Brocken::Lindsay;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-
 my $brocken  = Brocken->new();
 my $platform = $brocken->platform;
-my $i64     = Brocken::Lindsay::IR::Type::i64();
-my $T       = {
-    i8  => Brocken::Lindsay::IR::Type::i8(),
-    i16 => Brocken::Lindsay::IR::Type::i16(),
-    i32 => Brocken::Lindsay::IR::Type::i32(),
-    i64 => $i64,
-};
+my $i64      = Brocken::Lindsay::IR::Type::i64();
+my $T = { i8 => Brocken::Lindsay::IR::Type::i8(), i16 => Brocken::Lindsay::IR::Type::i16(), i32 => Brocken::Lindsay::IR::Type::i32(), i64 => $i64, };
 
 # Sign/zero extension widths. MOVSXD is a 32 -> 64 sign-extend, so it is only
 # the right instruction when the source is exactly 32 bits. Emitting it
@@ -22,24 +16,21 @@ my $T       = {
 # and the low 32 were re-read as signed. sext of INT64_MIN, for instance,
 # returned 0. A 32 -> 64 zero-extend also has to avoid MOVSXD, which would
 # sign-extend instead, so it is a plain 32-bit mov.
-
 sub emit {
     my ( $t, $kind, $value, $want ) = @_;
     my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i64 );
     my $builder = Brocken::Lindsay::IR::Builder->new();
     my $seq     = 0;
     my $nm      = sub { sprintf '%%v%d', $seq++ };
-    my $K       = sub { Brocken::Lindsay::IR::Constant->new( @_ ) };
+    my $K       = sub { Brocken::Lindsay::IR::Constant->new(@_) };
     $builder->position_at_end( $func->append_block('entry') );
     my $slot = $builder->build_alloca( $t, $nm->() );
     $builder->build_store( $K->( type => $t, value => $value ), $slot );
-    my $ld  = $builder->build_load( $t, $slot, $nm->() );
-    my $got = $kind eq 'zext' ? $builder->build_zext( $ld, $i64, $nm->() )
-                              : $builder->build_sext( $ld, $i64, $nm->() );
+    my $ld      = $builder->build_load( $t, $slot, $nm->() );
+    my $got     = $kind eq 'zext' ? $builder->build_zext( $ld, $i64, $nm->() ) : $builder->build_sext( $ld, $i64, $nm->() );
     my $t_block = $func->append_block('if.then');
     my $f_block = $func->append_block('if.else');
-    $builder->build_cond_br( $builder->build_icmp( 'eq', $got, $K->( type => $i64, value => $want ), $nm->() ),
-        $t_block, $f_block );
+    $builder->build_cond_br( $builder->build_icmp( 'eq', $got, $K->( type => $i64, value => $want ), $nm->() ), $t_block, $f_block );
     $builder->position_at_end($t_block);
     $builder->build_ret( $K->( type => $i64, value => 42 ) );
     $builder->position_at_end($f_block);
@@ -58,6 +49,7 @@ sub run {
     $brocken->linker->write_executable( $out, $bytes, $platform );
     my $rc = system $out;
     my $fail;
+
     if ( $rc == -1 ) {
         fail("$label: system() failed to spawn ($!)");
         $fail = 1;
@@ -68,26 +60,26 @@ sub run {
     unlink $out;
     return $fail;
 }
-
 my $bad = 0;
 for my $spec (
-    [ 'i8',  -5 ], [ 'i8',  127 ], [ 'i8', -128 ],
-    [ 'i16', -300 ], [ 'i16', 32767 ], [ 'i16', -32768 ],
-    [ 'i32', -5 ], [ 'i32', 2147483647 ], [ 'i32', -2147483648 ],
-    )
-{
+    [ 'i8',  -5 ],
+    [ 'i8',   127 ],
+    [ 'i8',  -128 ],
+    [ 'i16', -300 ],
+    [ 'i16',  32767 ],
+    [ 'i16', -32768 ],
+    [ 'i32', -5 ],
+    [ 'i32',  2147483647 ],
+    [ 'i32', -2147483648 ],
+) {
     my ( $tname, $value ) = @$spec;
     $bad += run( "sext_${tname}_$value", $T->{$tname}, 'sext', $value, $value );
 }
 
 # 64-bit source: both conversions are the identity, so every value whose high 32
 # bits are non-zero has to survive intact.
-for my $v (
-    5, 255, 65535, 2147483647, 2147483648, 4294967295, 4294967296,
-    4294967297, 9223372036854775807, -1, -2147483648, -2147483649,
-    -4294967296, -9223372036854775807, -9223372036854775808,
-    )
-{
+for my $v ( 5, 255, 65535, 2147483647, 2147483648, 4294967295, 4294967296, 4294967297, 9223372036854775807, -1, -2147483648, -2147483649,
+    -4294967296, -9223372036854775807, -9223372036854775808, ) {
     $bad += run( "sext_i64_$v", $i64, 'sext', $v, $v );
     $bad += run( "zext_i64_$v", $i64, 'zext', $v, $v & 0xFFFFFFFFFFFFFFFF );
 }
@@ -97,7 +89,5 @@ $bad += run( 'zext_i32_neg',     $T->{i32}, 'zext', -5,          4294967291 );
 $bad += run( 'zext_i32_neg_max', $T->{i32}, 'zext', -2147483648, 2147483648 );
 $bad += run( 'zext_i16_neg',     $T->{i16}, 'zext', -300,        65236 );
 $bad += run( 'zext_i8_neg',      $T->{i8},  'zext', -5,          251 );
-
 ok( $bad == 0, 'no extension case returned a wrong value' );
-
 done_testing;

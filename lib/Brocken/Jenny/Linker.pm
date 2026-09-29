@@ -5,20 +5,6 @@ use Brocken::Jenny::Linker::Layout;
 use Brocken::Katsuro::Platform;
 
 class Brocken::Jenny::Linker {
-
-=pod
-
-=head1 NAME
-
-Brocken::Jenny::Linker - Unified Binary Executable Generator
-
-=head1 DESCRIPTION
-
-The Linker class provides a platform-agnostic interface for taking machine code and data segments and packaging them
-into a final executable or shared library.
-
-=cut
-
     field $_layout        : reader(layout);
     field $type           : param : reader = 'exe';
     field $debug_data     : reader = {};

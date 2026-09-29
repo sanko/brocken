@@ -16,7 +16,7 @@ class Brocken::Target::OS {
     }
 
     method is_bsd_like () {
-        return $self->name =~ /^(?:macos|freebsd|openbsd|netbsd|dragonfly(?:bsd)?|solaris|midnightbsd)$/;
+        return $self->name =~ /^(?:macos|freebsd|openbsd|netbsd|dragonfly(?:bsd)?|solaris|midnightbsd)$/ ? 1 : 0;
     }
 
     method uses_syscalls () {
@@ -108,17 +108,17 @@ class Brocken::Target::OS {
 
     sub from_name ( $class, $n ) {
         my $subclass = {
-            linux       => 'Brocken::Target::OS::Linux',
-            win64       => 'Brocken::Target::OS::Win64',
-            macos       => 'Brocken::Target::OS::MacOS',
-            freebsd     => 'Brocken::Target::OS::FreeBSD',
-            openbsd     => 'Brocken::Target::OS::OpenBSD',
-            netbsd      => 'Brocken::Target::OS::NetBSD',
-            solaris     => 'Brocken::Target::OS::Solaris',
-            dragonfly   => 'Brocken::Target::OS::Dragonfly',
+            linux        => 'Brocken::Target::OS::Linux',
+            win64        => 'Brocken::Target::OS::Win64',
+            macos        => 'Brocken::Target::OS::MacOS',
+            freebsd      => 'Brocken::Target::OS::FreeBSD',
+            openbsd      => 'Brocken::Target::OS::OpenBSD',
+            netbsd       => 'Brocken::Target::OS::NetBSD',
+            solaris      => 'Brocken::Target::OS::Solaris',
+            dragonfly    => 'Brocken::Target::OS::Dragonfly',
             dragonflybsd => 'Brocken::Target::OS::Dragonfly',
-            midnightbsd => 'Brocken::Target::OS::MidnightBSD',
-            haiku       => 'Brocken::Target::OS::Haiku',
+            midnightbsd  => 'Brocken::Target::OS::MidnightBSD',
+            haiku        => 'Brocken::Target::OS::Haiku',
         }->{$n} // return __PACKAGE__->new( name => $n );
         eval "require $subclass" or die $@;
         return $subclass->new( name => $n );

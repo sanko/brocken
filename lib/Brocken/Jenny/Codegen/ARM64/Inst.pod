@@ -1,0 +1,79 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Codegen::ARM64::Inst - AArch64 register constants and instruction encoders
+
+=head1 SYNOPSIS
+
+    use Brocken::Jenny::Codegen::ARM64::Inst qw[:all];
+
+    my $word = movz_64( X0, 0x1234 );
+
+=head1 DESCRIPTION
+
+A small assembly-time helper for the AArch64 backend. It exports the register numbers and a set of functions that
+assemble individual instructions into their 32-bit machine encoding.
+
+Every name in the C<:all> tag is exported by default and may also be imported explicitly. The encoders take register
+numbers and immediates and return the packed instruction word.
+
+This module is used by L<Brocken::Jenny::Codegen::ARM64> and by the native linkers (L<Brocken::Jenny::Linker::ELF64>,
+L<Brocken::Jenny::Linker::MachO>, and L<Brocken::Jenny::Linker::PE>) when they patch up instructions.
+
+=head1 REGISTER CONSTANTS
+
+C<X0> through C<X30> are the general-purpose registers. C<SP> (31), C<LR> (30), and C<FP> (29) are aliases.
+
+=head1 INSTRUCTION ENCODERS
+
+=over
+
+=item C<ret()> - C<RET>.
+
+=item C<stp_pre( $rt, $rt2, $rn, $imm )>, C<stp_post( ... )>, C<ldp_pre( ... )>, C<ldp_post( ... )> - pairwise
+store/load with the given pre- or post-index offset. The offset is encoded scaled by 8.
+
+=item C<str_64( $rt, $rn, $imm )>, C<ldr_64( ... )> - 64-bit store/load, offset scaled by 8.
+
+=item C<str_32( $rt, $rn, $imm )>, C<ldr_32( ... )> - 32-bit store/load, offset scaled by 4.
+
+=item C<ldr_lit( $rt, $offset )>, C<ldr_lit_64( ... )> - PC-relative literal load; the offset is encoded scaled by 4.
+
+=item C<movz_64( $rd, $imm16, [ $hw ] )>, C<movz_32( ... )>, C<movk_64( ... )>, C<movk_32( ... )> - move-wide
+immediate forms. C<$hw> is the optional halfword position and defaults to C<0>.
+
+=item C<mov_64( $rd, $rm )> - register move (C<ORR> of C<$rm> with the zero register).
+
+=item C<adr( $rd, $offset )>, C<adrp( $rd, $target, $pc )> - PC-relative address. C<adrp> takes the target address and
+the address of the instruction and encodes the difference of their pages.
+
+=item C<blr( $rn )>, C<bl( $offset )>, C<b( $offset )> - branch with link to register, branch with link, and branch.
+The immediate branch offsets are encoded scaled by 4.
+
+=item C<brk( $imm16 )>, C<svc( $imm16 )> - breakpoint and supervisor call.
+
+=item C<uxtb( $rd, $rn )> - unsigned extend byte.
+
+=item C<add_imm( $rd, $rn, $imm12 )>, C<sub_imm( ... )>, C<cmp_imm( $rn, $imm12 )> - add, subtract, and compare
+immediate; the 12-bit immediate is masked.
+
+=back
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

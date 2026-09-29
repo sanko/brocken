@@ -1,0 +1,60 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Codegen::X86_64 - x86_64 Machine Code Generator
+
+=head1 DESCRIPTION
+
+Generates x86_64 machine code from MIR (Machine Intermediate Representation). Implements full instruction encoding for
+the System V AMD64 ABI.
+
+=head2 Supported Instructions
+
+=over
+
+=item B<Data movement>: mov (reg/imm/mem), movzx, movsxd, lea, push, pop
+
+=item B<Arithmetic>: add, sub, adc, sbb, and, or, xor, mul, imul (umulh), div (udiv), inc, dec, neg, shl, shr, sar
+
+=item B<Comparison>: cmp, test, setcc (with FLAGS-safe xor-zeroing)
+
+=item B<Floating point (SSE/SSE2)>: movsd, addsd, subsd, mulsd, divsd, cvtsi2sd, cvttsd2si, ucomisd, sqrtsd, cmpsd, maxsd, minsd, xorsd
+
+=item B<Control flow>: jmp (near/8-bit), je, jne, jl, jle, jg, jge, jb, jae, call, ret
+
+=item B<Stack>: alloca (with frame register management)
+
+=back
+
+=head2 Encoding Scheme
+
+Instructions are encoded using a compact MIR encoding where each instruction opcode maps to a pre-defined byte sequence
+with template markers for operands. Templates include placeholders for ModRM bytes, SIB bytes, displacement fields, and
+immediate values.
+
+=head2 Frame Layout
+
+    [callee saves] [caller saves] [alloca area]  <- SP after prologue
+
+The L<_compute_spill_frame> method scans all SP-relative memory operands to determine the required spill/caller-save
+frame size.
+
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

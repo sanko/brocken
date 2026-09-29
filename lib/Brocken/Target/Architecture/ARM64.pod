@@ -1,0 +1,167 @@
+=head1 NAME
+
+Brocken::Target::Architecture::ARM64 - Assembles AArch64 machine code
+
+=head1 SYNOPSIS
+
+    use Brocken::Target;
+
+    my $os  = $target->os_object;
+    my $asm = Brocken::Target->for( 'linux', 'arm64' )->arch_asm;
+    $asm->emit_print_str( $os, 0, 6 );
+    $asm->emit_exit_proc( $os, 42 );
+    $asm->resolve;
+
+    $target->format->write_bin( 'prog', $asm->code, 'hello', 'arm64' );
+
+=head1 DESCRIPTION
+
+A minimal AArch64 assembler. Like the other architecture classes it is a standalone class with no base, and it appends
+one instruction or one small sequence per method with no parser or instruction table.
+
+AArch64 is a fixed-width instruction set, so every instruction here is exactly four bytes, and the branch fixups in
+C<resolve> are measured in instructions rather than bytes. Two details are specific to this architecture and worth
+knowing before reading the methods: immediate moves are built from a base instruction plus optional 16-bit-halfword
+inserts, and syscalls differ per OS in ways described under C<syscall>.
+
+The two high-level methods delegate syscall details to a L<Brocken::Target::OS> object; everything else is
+self-contained.
+
+=head1 REGISTERS
+
+C<< %Brocken::Target::Architecture::ARM64::REG >> maps C<x0> through C<x30> to their numbers, and maps both C<sp> and
+C<xzr> to 31. The names are matched case-insensitively.
+
+=head1 METHODS
+
+=head2 C<code()>
+
+A read-only accessor returning the accumulated machine code as a string.
+
+=head2 C<labels()>
+
+This is a field accessor rather than an ordinary method, so it does not return a hashref the way the x86-64 and RISC-V
+classes do. See L</CAVEATS>.
+
+=head2 C<label( $key )>
+
+Returns the offset recorded for C<$key>, or the empty list if there is no such label. This method exists only on this
+class; the other two do not have it.
+
+=head2 C<ret()>
+
+Appends C<RET> (C<0xD65F03C0>).
+
+=head2 C<mov_imm( $reg, $imm )>
+
+Moves a 64-bit immediate into C<$reg> using C<MOVZ> for the low 16 bits and a C<MOVK> for each higher 16-bit halfword
+that is non-zero. This is the only method here that accepts a full 64-bit constant, and it emits as few instructions as
+the value allows: one to four.
+
+=head2 C<mov_reg( $dest, $src )>
+
+Appends C<ORR $dest, xzr, $src> (an alias for C<MOV $dest, $src>).
+
+=head2 C<add_imm( $reg, $imm )>, C<sub_imm( $reg, $imm )>, C<cmp_reg_imm( $reg, $imm )>
+
+Append the 12-bit-immediate forms of C<ADD>, C<SUB>, and C<CMP>. The immediate is masked to 12 bits without a check;
+see L</CAVEATS>.
+
+=head2 C<lea_rva( $reg, $target_rva, $text_rva )>
+
+Appends an C<ADR> that computes the address C<$target_rva> from the load address C<$text_rva>. C<ADR> encodes a signed
+21-bit byte offset, so the reachable range is about one megabyte in either direction.
+
+=head2 C<call_rva( $target_rva, $text_rva )>
+
+Appends a call through a pointer stored at C<$target_rva>: C<ADR x16> to get the slot address, C<LDR x16, [x16]> to
+load the pointer, and C<BLR x16> to call it. C<x16> is the intra-procedure-call scratch register, which is what the
+architecture reserves for exactly this kind of PLT-style stub.
+
+=head2 C<syscall( $os = '', $num = 0 )>
+
+Appends the syscall instruction, and the encoding depends on C<$os> because the three ARM64 targets Brocken supports do
+not agree on the calling convention:
+
+=over
+
+=item C<macos>
+
+C<SVC #0x80>. The syscall number is passed in C<x16>, which is why L<Brocken::Target::OS::MacOS> reports C<x16> as the
+number register.
+
+=item C<netbsd>
+
+C<SVC> with C<$num> encoded directly into the instruction's immediate field, so no register carries the number. If
+C<$num> is 0 the method falls through to the Linux form instead.
+
+=item everything else
+
+C<SVC #0>, with the number in C<x8>. For C<openbsd> the method also appends C<B .+8> and C<BRK #0>, because the OpenBSD
+kernel deliberately skips the instruction after a syscall as a speculative-execution mitigation.
+
+=back
+
+=head2 C<jcc( $cc, $label )>
+
+Appends a C<B.cond> branch. C<$cc> is an AArch64 condition code, which is what L<Brocken::Target::ABI> returns for this
+architecture. The displacement is recorded for C<resolve>.
+
+=head2 C<jmp( $label )>
+
+Appends an unconditional C<B> branch and records the displacement.
+
+=head2 C<mark_label( $name )>
+
+Records C<$name> at the current length of C<code>.
+
+=head2 C<resolve()>
+
+Patches the recorded branch displacements. Because every instruction is four bytes, it converts the byte distance to an
+instruction count and writes it into the 19-bit C<B.cond> field or the 26-bit C<B> field as appropriate. As with the
+x86-64 class the displacements are relative, so no load address is needed.
+
+=head2 C<emit_print_str( $os, $off, $len )>
+
+Emits a call that writes C<$len> bytes from C<$off> bytes into the data section to standard output, using C<$os> for
+the syscall number, number register, and page size. On POSIX it sets up the C<write> syscall with C<x0> set to 1; on
+Windows it uses the same C<GetStdHandle> and C<WriteFile> import slots as the x86-64 class.
+
+=head2 C<emit_exit_proc( $os, $code )>
+
+Emits a call that exits with status C<$code>. On POSIX this is the C<exit> syscall with the status in C<x0>; on Windows
+it calls C<ExitProcess> through the import slot at C<0x3000>.
+
+=head1 CAVEATS
+
+=head2 The C<labels> accessor behaves differently than its namesakes
+
+The x86-64 and RISC-V classes define C<labels> as a method returning a hashref. Here it is a field accessor for a hash,
+so in list context it returns the flattened key and offset pairs, and in scalar context it returns the label count
+rather than a reference. Reading C<< $asm->labels->{name} >> works on the other two architectures and fails here. This
+class is also the only one with a C<label> method.
+
+=head2 Immediates are truncated to 12 bits
+
+The arithmetic methods encode a 12-bit immediate and mask the value down without checking. C<add_imm( 'x0', 0x1001 )>
+adds 1, not 0x1001. Use C<mov_imm> to load a wider constant first, or accept that only the low bits of an
+address-shaped offset are applied.
+
+=head2 An unknown register name becomes register 0
+
+As with the x86-64 class, a name missing from the register table yields C<undef> and is encoded as register 0. C<sp>
+and C<xzr> share number 31, which is correct for the architecture but means the two are interchangeable to these
+methods.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

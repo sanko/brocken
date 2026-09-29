@@ -1,0 +1,58 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Lowerer::X86_64 - x86_64 Lowerer (Lindsay IR to MIR)
+
+=head1 DESCRIPTION
+
+Lowers Lindsay IR to machine-level MIR for the x86_64 architecture. Translates SSA instructions to register-based
+machine operations while following the System V AMD64 calling convention.
+
+=head2 Lowering Strategy
+
+=over
+
+=item B<Parameters> are mapped to their ABI register positions (rdi, rsi, rdx, rcx, r8, r9) with argument-area spill slots for stack-passed args
+
+=item B<Calls> set up arguments in the correct ABI registers/stack slots, generate explicit C<call_func> MIR instructions, avoid clobbering argument registers by emitting them in reverse order
+
+=item B<Boxing> serializes type-tagged values (int32->1, int64->2, i128->6, float->3, ptr->4, dynamic->5) into a 16-byte structure using the bump allocator
+
+=item B<Unboxing> reads the type tag from the dynamic value and extracts the payload, with optional type checking
+
+=item B<Refcounting> inserts C<incref> with atomic add and C<decref> with conditional free via the allocator's free-list
+
+=item B<Alloca> translates to MIR C<alloca> instructions with pre-scanned prologue frame adjustment
+
+=back
+
+=head2 Floating-Point Materialization
+
+The L<_materialize> method loads floating-point constants into XMM registers by first loading the bit pattern as an
+integer GP register, then transferring to XMM via C<fmov_gp2f> (MOVQ/MOVD).
+
+=head2 ABI Handling
+
+Uses B<rdi> (arg 1), B<rsi> (arg 2), B<rdx> (arg 3), B<rcx> (arg 4), B<r8> (arg 5), B<r9> (arg 6). The C<caller_regs>
+list in the ABI module must be ordered so non-parameter registers come first to avoid register allocator clashes with
+argument-setup MOVs.
+
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

@@ -29,7 +29,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         state $phys_re = do {
             my @regs = $platform->registers('available')->@*;
             my $pat  = join '|', map quotemeta, @regs;
-            qr/^($pat)$/;
+            qr[^($pat)$];
         };
         my @names;
         for my $op ( $inst->operands->@* ) {
@@ -52,10 +52,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         }
         return @names;
     }
-
-    method _register_operands($inst) {
-        return $inst->operands->@*;
-    }
+    method _register_operands($inst) { $inst->operands->@* }
 
     method _compute_live_intervals( $mf, $platform, $is_float ) {
         my @blocks = $mf->blocks->@*;
@@ -276,11 +273,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
     method spill_temp_count($mf) {
         my $max = 1;
         return $max unless $mf && $mf->blocks->@*;
-        INSN_SCAN: for my $mbb ( $mf->blocks->@* ) {
+    INSN_SCAN: for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 my $need = 0;
                 for my $op ( $inst->operands->@* ) {
-                    if ( $op->kind eq 'virt_reg' ) { $need++ }
+                    if    ( $op->kind eq 'virt_reg' ) { $need++ }
                     elsif ( $op->kind eq 'mem' ) {
 
                         # A base naming a virtual register becomes a temp. A
@@ -348,14 +345,15 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         # of the pool whenever one of those opcodes is present.
         my $has_div_scratch = 0;
         if ( $mf && $mf->blocks->@* && !$is_float ) {
-            DIV_SCAN: for my $mbb ( $mf->blocks->@* ) {
+        DIV_SCAN: for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
-                    next unless $inst->opcode eq 'umulh'
-                        || $inst->opcode eq 'udiv'
-                        || $inst->opcode eq 'idiv'
-                        || $inst->opcode eq 'irem'
-                        || $inst->opcode eq 'div128_64'
-                        || $inst->opcode eq 'rem128_64';
+                    next
+                        unless $inst->opcode eq 'umulh' ||
+                        $inst->opcode eq 'udiv'         ||
+                        $inst->opcode eq 'idiv'         ||
+                        $inst->opcode eq 'irem'         ||
+                        $inst->opcode eq 'div128_64'    ||
+                        $inst->opcode eq 'rem128_64';
                     $has_div_scratch = 1;
                     last DIV_SCAN;
                 }
@@ -374,11 +372,9 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         # destroyed by it. Keep rcx out of the pool for such functions.
         my $has_shift_scratch = 0;
         if ( $mf && $mf->blocks->@* && !$is_float ) {
-            SHIFT_SCAN: for my $mbb ( $mf->blocks->@* ) {
+        SHIFT_SCAN: for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
-                    next unless $inst->opcode eq 'shl'
-                        || $inst->opcode eq 'lshr'
-                        || $inst->opcode eq 'ashr';
+                    next unless $inst->opcode eq 'shl' || $inst->opcode eq 'lshr' || $inst->opcode eq 'ashr';
                     my @ops = $inst->operands->@*;
                     next if @ops < 2;
                     next if $ops[1]->kind eq 'imm';
@@ -390,7 +386,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         if ($has_shift_scratch) {
             $defined_phys{rcx} = 1;
         }
-
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
 
         # Reserve as many temps as the widest instruction could need, and
@@ -398,7 +393,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         # pool, so they are the last registers a spill would otherwise reach
         # for and the first to disappear if the function is under pressure.
         my $temp_count = $mf ? $self->spill_temp_count($mf) : 1;
-        $temp_count = 1                  if $temp_count < 1;
+        $temp_count = 1                   if $temp_count < 1;
         $temp_count = scalar @caller_regs if $temp_count > @caller_regs;
         my @spill_temps = splice @caller_regs, ( scalar(@caller_regs) - $temp_count );
         my $spill_temp  = $spill_temps[0];
@@ -438,7 +433,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             used_callee => [ sort keys %used_callee ],
             spill_slots => \%spill_slots,
             spill_temp  => $spill_temp,
-            spill_temps => \@spill_temps,
+            spill_temps => \@spill_temps
         };
     }
 
@@ -453,17 +448,15 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return unless $spill_slots && keys %$spill_slots;
         my $load_op     = $is_float ? 'fload'  : 'load';
         my $store_op    = $is_float ? 'fstore' : 'store';
-        my %reads_dst   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not);
+        my %reads_dst   = map { $_ => 1 } qw[add sub adc sbb and or xor cmp shl shr sar neg inc dec not];
         my %can_mem_src = map { $_ => 1 } $mem_src->@*;
 
         # `spill_temp` is the reserved temp pool. A plain string is accepted so
         # a caller holding only the single-temp result still works.
         my @temps = !ref $spill_temp ? ($spill_temp) : $spill_temp->@*;
         @temps = ('r11') unless @temps;
+        my $temp_for = sub ($k) { $temps[ $k < @temps ? $k : $#temps ] };
 
-        my $temp_for = sub ($k) {
-            $temps[ $k < @temps ? $k : $#temps ];
-        };
         # One slot per physical temp, and one reload per slot, so two values that
         # have to be live at the same time cannot land on each other. A slot may
         # hold more than one offset when the instruction reads and writes the
@@ -489,17 +482,18 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         # decided by stale register contents. Restricting the type to floats
         # leaves every integer spill encoding exactly as it was.
         my $slot_type = sub ($t) { return ( $t && $t->kind eq 'float' ) ? $t : undef };
-
-        my $temp_op = sub ($k, $type) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($k), type => $type ) };
-        my $mem_op = sub ($o, $type) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => $type ) };
-        my $load_inst = sub ($k, $o) {
+        my $temp_op   = sub ( $k, $type ) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($k), type => $type ) };
+        my $mem_op    = sub ( $o, $type ) {
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => $type );
+        };
+        my $load_inst = sub ( $k, $o ) {
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => $load_op,
                 operands => [ $temp_op->( $k, $type_of[$k] ), $mem_op->( $o, $type_of[$k] ) ],
                 comment  => 'spill-reload'
             );
         };
-        my $store_inst = sub ($k, $o) {
+        my $store_inst = sub ( $k, $o ) {
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => $store_op,
                 operands => [ $mem_op->( $o, $type_of[$k] ), $temp_op->( $k, $type_of[$k] ) ],
@@ -518,7 +512,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 @off_of  = ();
                 @order   = ();
                 @type_of = ();
-
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
 
@@ -527,16 +520,15 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 # each other. A slot may hold more than one offset when the
                 # instruction reads and writes the same spilled value, which
                 # is a single value by definition.
-                my $reserve = sub ($off, $type) {
+                my $reserve = sub ( $off, $type ) {
                     for my $k ( 0 .. $#order ) {
                         return $k if $off_of[$k] == $off;
                     }
                     push @order, $off;
-                    $off_of[ $#order ] = $off;
-                    $type_of[ $#order ] = $type;
+                    $off_of[$#order]  = $off;
+                    $type_of[$#order] = $type;
                     return $#order;
                 };
-
                 my %sp;
                 for my $i ( 0 .. $#ops ) {
                     next unless $ops[$i]->kind eq 'virt_reg';
@@ -573,7 +565,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     push @new, $inst;
                     next;
                 }
-
                 my $d_off = $sp{0};
                 my $s_off = $sp{1};
                 my $d_sp  = defined $d_off;
@@ -595,10 +586,9 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     # that is about to be overwritten is not a place to keep it.
                     $old_k = $#order + 1;
                     push @order, $d_off;
-                    $off_of[$old_k] = $d_off;
+                    $off_of[$old_k]  = $d_off;
                     $type_of[$old_k] = $slot_type->( $ops[0]->type );
                 }
-
                 if ($d_sp) {
                     $ops[0] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($d_k), type => $ops[0]->type );
                 }
@@ -622,15 +612,14 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     push @extra_k, [ $k, $sp{$i} ];
                     $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($k), type => $ops[$i]->type );
                 }
-
                 my @loads;
                 push @loads, [ $base_k, $smem_off ] if defined $base_k;
                 push @loads, [ $s_k,    $s_off ]    if $s_sp && !$same && !$can_mem_src{$opcode};
                 push @loads, [ $old_k,  $d_off ]    if $needs_old_d;
                 push @loads, @extra_k;
+                push @new,   $load_inst->(@$_) for @loads;
+                push @new,   Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
 
-                push @new, $load_inst->(@$_) for @loads;
-                push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
                 if ($d_sp) {
                     push @new, $store_inst->( $d_k, $d_off );
                 }
@@ -659,8 +648,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             for my $inst ( $bb->instructions->@* ) {
                 if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap)$/ ) {
                     for my $r (@$caller_regs) {
-                        my $mem
-                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 }, type => $ftype, );
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $stack_reg, disp => $spill_idx++ * 8 },
+                            type  => $ftype,
+                        );
                         push @new,
                             Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => $store_op,
@@ -672,9 +664,11 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 push @new, $inst;
                 if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap)$/ ) {
                     for my $r ( reverse @$caller_regs ) {
-                        my $mem
-                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 }, type => $ftype,
-                            );
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 },
+                            type  => $ftype,
+                        );
                         push @new,
                             Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => $load_op,
@@ -788,6 +782,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 }
                 push @work, { cap => $cap, dst => $reg, src => $cap->{src} };
             }
+
             # One capture on its own cannot clobber a source, and none cannot
             # either, so there is nothing to order. They are still emitted: the
             # block is rebuilt from the plan, and dropping them here would take
@@ -816,9 +811,8 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 push @plan, @work, map { { cap => $_, src => $_->{src} } } @parked;
                 next;
             }
-
             my @steps;
-            my $total = scalar @work;
+            my $total  = scalar @work;
             my $budget = 2 * $total;
             while (@work) {
                 my $chosen;
@@ -842,6 +836,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 }
                 push @steps, splice @work, $chosen, 1;
             }
+
             # A schedule step per capture, plus whatever temp parks it needed.
             if ( @steps < $total ) {
                 push @plan, @work, map { { cap => $_, src => $_->{src} } } @parked;
@@ -851,14 +846,12 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             push @plan, map { { cap => $_, src => $_->{src} } } @parked;
         }
         return unless @plan;
-
         my @new;
-        for my $step ( @plan ) {
+        for my $step (@plan) {
             my $inst = $step->{cap} ? $step->{cap}{inst} : undef;
             if ($inst) {
                 my $src = $inst->operands->[1];
-                $inst->operands->[1]
-                    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src}, type => $src->type );
+                $inst->operands->[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src}, type => $src->type );
                 push @new, $inst;
             }
             else {
@@ -867,9 +860,9 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     opcode   => $step->{opcode},
                     operands => [
                         Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{dst} ),
-                        Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src} ),
+                        Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src} )
                     ],
-                    comment => 'entry-shuffle save ' . $step->{src},
+                    comment => 'entry-shuffle save ' . $step->{src}
                     );
             }
         }
@@ -881,105 +874,5 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return ( $frame + 15 ) & ~15;
     }
 }
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Jenny::RegAlloc - Linear Scan Register Allocator
-
-=head1 DESCRIPTION
-
-Implements a linear-scan register allocator for MIR functions. Handles allocation of both general-purpose and
-floating-point registers, spill code insertion, caller-save/restore code, redundant-move elimination, and entry-block
-shuffle hazard detection.
-
-=head2 Algorithm
-
-The allocator uses a standard linear-scan approach:
-
-=over 4
-
-=item 1. Compute live intervals via global dataflow analysis (backward fixed-point)
-
-=item 2. Sort intervals by start position
-
-=item 3. Linear scan: allocate registers greedily with furthest-next-use spill heuristic
-
-=item 4. Insert spill code for spilled virtual registers
-
-=item 5. Insert caller-save/restore code around call instructions
-
-=item 6. Remove redundant register-to-register moves
-
-=item 7. Fix entry-block parameter shuffle hazards
-
-=back
-
-=head2 Classes
-
-=over 4
-
-=item L<Brocken::Jenny::RegAlloc::LiveInterval> - Represents a vreg's live range
-
-=item L<Brocken::Jenny::RegAlloc::LinearScan> - The allocator implementation
-
-=back
-
-=head1 METHODS
-
-=head2 allocate
-
-    $allocator->allocate($mf, $platform, $is_float?)
-
-Performs full register allocation on the MIR function.
-
-=head2 insert_spill_code
-
-    $allocator->insert_spill_code($mf, $spill_slots, $spill_temp, $stack_reg, $is_float?)
-
-Inserts load/store instructions for each spilled virtual register.
-
-=head2 insert_caller_save_code
-
-    $allocator->insert_caller_save_code($mf, $caller_regs, $stack_reg, $is_float?, $base_idx?)
-
-Saves all caller-saved registers before each call and restores them after.
-
-=head2 remove_redundant_moves
-
-    $allocator->remove_redundant_moves($mf, $assignment)
-
-Elides MOV instructions where source and destination map to the same physical register.
-
-=head2 fix_entry_shuffle
-
-    $allocator->fix_entry_shuffle($mf, $assignment, $temp_reg)
-
-Schedules the entry-block parameter captures as a parallel move, so a capture
-is never emitted after the one that overwrites the register it still has to
-read. Cycles are broken by parking one source in the spill temp, which is
-released again before the temp is reused. Only the leading run of captures is
-touched, so a later move that reads a physical register keeps its position.
-
-=head2 compute_unified_frame
-
-    $allocator->compute_unified_frame($num_callee, $spill_frame, $caller_save_size)
-
-Computes the total stack frame size, aligned to 16 bytes.
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
+#
 1;

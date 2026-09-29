@@ -10,11 +10,8 @@ package Test2::Tools::Brocken v0.0.1 {
     # libc6-<arch>-cross packages, which put the loader and shared objects under
     # a triple-prefixed directory; qemu needs that as its -L root to find the
     # interpreter the linker wrote into the binary.
-    my %SYSROOT = (
-        aarch64 => '/usr/aarch64-linux-gnu',
-        riscv64 => '/usr/riscv64-linux-gnu',
-    );
-    my %QEMU = ( aarch64 => 'qemu-aarch64', riscv64 => 'qemu-riscv64' );
+    my %SYSROOT = ( aarch64 => '/usr/aarch64-linux-gnu', riscv64 => '/usr/riscv64-linux-gnu', );
+    my %QEMU    = ( aarch64 => 'qemu-aarch64',           riscv64 => 'qemu-riscv64' );
 
     # The host architecture and OS, taken from the platform module's own host
     # triple rather than from Config, since Config's myarchname is an OS label on
@@ -67,7 +64,6 @@ package Test2::Tools::Brocken v0.0.1 {
         return undef unless -e $sysroot;
         return [ $qemu, '-L', $sysroot ];
     }
-
     sub cross_available ($platform) { return defined cross_runner($platform) }
 
     sub _which ($name) {
@@ -85,9 +81,8 @@ package Test2::Tools::Brocken v0.0.1 {
     sub run_cross ( $src, $platform, %args ) {
         require Brocken;
         require Brocken::Compiler;
-        my $runner = cross_runner($platform) // return undef;
-        my $name   = $args{name} // ( 'Run ' . $platform->friendly );
-
+        my $runner  = cross_runner($platform) // return undef;
+        my $name    = $args{name}             // ( 'Run ' . $platform->friendly );
         my $brocken = Brocken->new( platform => $platform );
         my $module  = eval { Brocken::Compiler->new->compile($src) };
         croak "run_cross: compile failed for $platform: $@" if $@;
@@ -103,9 +98,9 @@ package Test2::Tools::Brocken v0.0.1 {
         my $expected = $args{expected_exit};
         my $name     = $args{name} // "Run $file";
         my $platform = $args{platform};
-        my $do_gdb   = $args{gdb}  // 0;
-        my $keep     = $args{keep} // 0;
-        my $argv     = $args{args} // [];
+        my $do_gdb   = $args{gdb}    // 0;
+        my $keep     = $args{keep}   // 0;
+        my $argv     = $args{args}   // [];
         my $runner   = $args{runner} // [];
         my $ctx      = context();
         my $cmd      = $file;
@@ -175,58 +170,5 @@ package Test2::Tools::Brocken v0.0.1 {
         return $actual;
     }
 };
-
-=encoding utf-8
-
-=head1 NAME
-
-Test2::Tools::Brocken - Test Utility for Running Compiled Executables
-
-=head1 DESCRIPTION
-
-Provides the C<run_exec> function for testing compiled Brocken executables within the Test2 test framework. Handles
-running the binary, checking the exit code, and optionally debugging with GDB.
-
-=head1 FUNCTIONS
-
-=head2 run_exec
-
-    run_exec($file, %args);
-
-Runs a compiled executable and checks its exit code.
-
-=head3 Arguments
-
-=over
-
-=item C<file> - Path to the compiled executable
-
-=item C<expected_exit> - Expected exit code (required for assertions)
-
-=item C<name> - Test name for Test2 output
-
-=item C<platform> - L<Brocken::Katsuro::Platform> object (for path separators)
-
-=item C<gdb> - If true, run under GDB for debugging
-
-=item C<keep> - If true, do not delete the executable after the test
-
-=item C<args> - Arrayref of command-line arguments to pass
-
-=back
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
+#
 1;

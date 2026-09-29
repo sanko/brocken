@@ -19,14 +19,13 @@ use Test2::Tools::Brocken qw(temp_path);
 # 0 - x, and abs(x) is x < 0 ? -x : x via select. These run under wasmtime
 # rather than being decoded from the bytes, which is what caught the original
 # signed-LEB128 encoder bug.
-
-my $i64 = Brocken::Lindsay::IR::Type::i64();
-my $i32 = Brocken::Lindsay::IR::Type::i32();
-my $i16 = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => 16, signed => 1 );
-my $i8  = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => 8,  signed => 1 );
-my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
-my $devnull = File::Spec->devnull;
-my $have_wasmtime = ( `wasmtime --version 2>$devnull` ) ? 1 : 0;
+my $i64           = Brocken::Lindsay::IR::Type::i64();
+my $i32           = Brocken::Lindsay::IR::Type::i32();
+my $i16           = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => 16, signed => 1 );
+my $i8            = Brocken::Lindsay::IR::Type->new( kind => 'int', bits => 8,  signed => 1 );
+my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+my $devnull       = File::Spec->devnull;
+my $have_wasmtime = (`wasmtime --version 2>$devnull`) ? 1 : 0;
 
 # Sub-word and 32-bit results come back in a full 32-bit lane. These types are
 # signed, so read the result with sext to recover the signed value (a zext
@@ -59,22 +58,11 @@ sub run {
 # Values are written as decimal literals: a bare 64-bit hex literal lands in
 # Perl as an NV and would make the comparison itself inexact.
 my @cases = (
-    [ 'neg', $i64,  42,                -42 ],
-    [ 'neg', $i64,  -42,                42 ],
-    [ 'neg', $i64,  0,                  0 ],
-    [ 'neg', $i64,  8589934592,  -8589934592 ],    # 2**33: past 32 bits
-    [ 'neg', $i64,  -8589934592, 8589934592 ],
-    [ 'neg', $i32,  1234,             -1234 ],
-    [ 'neg', $i16,  300,              -300 ],
-    [ 'neg', $i8,   7,                -7 ],
-    [ 'abs', $i64,  -8589934592, 8589934592 ],
-    [ 'abs', $i64,   8589934592, 8589934592 ],
-    [ 'abs', $i64,  0,                  0 ],
-    [ 'abs', $i32,  -7,                7 ],
-    [ 'abs', $i16,  -300,             300 ],
-    [ 'abs', $i8,   -100,             100 ],
+    [ 'neg', $i64, 42, -42 ], [ 'neg', $i64, -42, 42 ], [ 'neg', $i64, 0, 0 ], [ 'neg', $i64, 8589934592, -8589934592 ],    # 2**33: past 32 bits
+    [ 'neg', $i64, -8589934592, 8589934592 ], [ 'neg', $i32, 1234,       -1234 ],      [ 'neg', $i16, 300, -300 ], [ 'neg', $i8,   7, -7 ],
+    [ 'abs', $i64, -8589934592, 8589934592 ], [ 'abs', $i64, 8589934592, 8589934592 ], [ 'abs', $i64, 0,    0 ],   [ 'abs', $i32, -7,  7 ],
+    [ 'abs', $i16, -300,        300 ],        [ 'abs', $i8,  -100,       100 ],
 );
-
 SKIP: {
     skip 'wasmtime is not installed', scalar @cases unless $have_wasmtime;
     for my $c (@cases) {
@@ -99,9 +87,9 @@ SKIP: {
     my $r = $builder->build_abs( $builder->build_load( $i8, $slot, '%val' ), '%r' );
     $builder->build_ret( $builder->build_sext( $r, $i64, '%z' ) );
     my $bytes = eval { Brocken::Jenny::Codegen::Wasm->new( platform => $platform )->emit_function($func) };
-    SKIP: {
+SKIP: {
         skip 'wasmtime is not installed', 1 unless $have_wasmtime;
-        skip "build died: $@", 1 unless defined $bytes;
+        skip "build died: $@",            1 unless defined $bytes;
         my $out = temp_path('abs_min') . '.wasm';
         Brocken::Jenny::Linker::Wasm->new->write_executable( $out, $bytes, $platform );
         my $got = run($out);
@@ -116,11 +104,9 @@ SKIP: {
     my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func->append_block('entry') );
-    $builder->build_ret(
-        $builder->build_sqrt( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 4 ), '%r' ) );
+    $builder->build_ret( $builder->build_sqrt( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 4 ), '%r' ) );
     my $ok = eval { Brocken::Jenny::Codegen::Wasm->new( platform => $platform )->emit_function($func); 1 };
     ok !$ok, 'Wasm rejects integer sqrt';
     like $@, qr/non-float|sqrt/, 'integer sqrt error mentions a non-float type';
 }
-
 done_testing;

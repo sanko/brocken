@@ -1,0 +1,38 @@
+=head1 NAME
+
+Brocken::Target::OS::FreeBSD - FreeBSD target
+
+=head1 DESCRIPTION
+
+The FreeBSD target, a subclass of L<Brocken::Target::OS>.
+
+It is POSIX and BSD-derived as far as the rest of the codebase is concerned, its shared libraries use the C<.so>
+extension, and it has no executable extension.
+
+=head1 THE SYSCALL NUMBERS
+
+C<write> is 4 and C<exit> is 1, on every architecture. Those are not written down here. The base class gives that same
+pair to anything that reports true from C<is_bsd_like>, which is the set macOS, FreeBSD, OpenBSD, NetBSD, DragonFly,
+MidnightBSD, and Solaris, so re-stating it per platform would be a second place to update when it changes.
+
+The page size is 4096 on all three architectures, and the syscall number register is the usual C<rax> on x86-64, C<x8>
+on AArch64, and C<a7> on RISC-V. Both are inherited.
+
+=head1 INHERITED
+
+This subclass declares no methods. Its C<ADJUST> block does one thing, which is to die unless the name it was given is
+exactly C<freebsd>, so a FreeBSD object cannot end up carrying another system's name. Everything else is inherited from
+the base class.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

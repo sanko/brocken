@@ -1,0 +1,82 @@
+=head1 NAME
+
+Brocken::Target::Format - The base class of the object file format layer
+
+=head1 SYNOPSIS
+
+    use Brocken::Target;
+
+    my $target = Brocken::Target->for( 'linux', 'x64' );
+    my $format = $target->format;    # a Brocken::Target::Format subclass
+
+    $format->write_bin( 'prog', $code, $data, 'x64', 'linux' );
+
+=head1 DESCRIPTION
+
+The abstract base of the object file format layer, and the parent of L<Brocken::Target::Format::ELF>,
+L<Brocken::Target::Format::PE>, and L<Brocken::Target::Format::MachO>.
+
+The three subclasses each write a finished executable or shared library to disk from the same four pieces: the
+assembled machine code, the data that goes with it, the architecture, and the OS. Only the file format differs. This
+class names that interface and provides the two method declarations the subclasses override.
+
+This class names a small, self-contained writer. The full compiler does not link through it: the normal compile path
+goes through L<Brocken::Jenny::Linker::ELF64>, L<Brocken::Jenny::Linker::PE>, and L<Brocken::Jenny::Linker::MachO>,
+which carry relocation, symbol, and debug handling this layer does not. What is here is enough to turn a block of
+machine code into a loadable file, which is what L<Brocken::Target> exposes and what the compile smoke test exercises.
+
+=head1 METHODS
+
+=head2 C<write_bin( $filename, $text, $data, $arch, $os )>
+
+Writes an executable to C<$filename>. C<$text> is the assembled machine code as a string, C<$data> is the data that
+goes alongside it, C<$arch> is the target architecture, and C<$os> is the target OS name.
+
+This declaration has a body of C<{...}>, perl's marker for an unimplemented method, so calling it dies with
+C<Unimplemented>. The subclasses override it, and each defaults C<$os> to its own system, so it can be omitted in the
+common case: C<'linux'> for ELF, C<'macos'> for MachO, C<'win64'> for PE.
+
+=head2 C<write_lib( $filename, $text, $data, $arch, $os, $exports )>
+
+Writes a shared library to C<$filename>. The arguments are the same as C<write_bin> with C<$exports> added, a hashref
+of exported symbol names whose values are their offsets.
+
+Also unimplemented here, and also dies with C<Unimplemented>. Only ELF and Mach-O override it. Because PE inherits this
+declaration rather than lacking it, C<< $pe->can('write_lib') >> is true and is not a usable test for whether a target
+supports shared libraries; only calling it tells you.
+
+=head1 SUBCLASSES
+
+=over
+
+=item L<Brocken::Target::Format::ELF>
+
+The ELF format, for the Linux and BSD targets, and the default for every target that is not Windows or macOS. It
+overrides both methods, and is the only one of the three with a private helper, C<_detect_elf_info>, which reads an
+existing ELF file's headers.
+
+=item L<Brocken::Target::Format::MachO>
+
+The Mach-O format, for macOS. It overrides both methods, but its C<write_lib> writes no file.
+
+=item L<Brocken::Target::Format::PE>
+
+The PE format, for 64-bit Windows. It overrides C<write_bin> only.
+
+=back
+
+L<Brocken::Target> makes the choice between them from the target OS, since there is no way to produce an ELF for
+Windows or a PE for macOS.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

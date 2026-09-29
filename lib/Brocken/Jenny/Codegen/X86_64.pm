@@ -107,8 +107,8 @@ class Brocken::Jenny::Codegen::X86_64 {
             $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
             $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
-        $alloc->remove_redundant_caller_restores($mf);
-        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
+            $alloc->remove_redundant_caller_restores($mf);
+            $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -416,9 +416,9 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $alloca_frame = 0;
         my %reg_id_map   = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
         for my $i ( 0 .. 15 ) { $reg_id_map{"xmm$i"} = $i }
-        my $reg_id        = sub ($r) {
+        my $reg_id = sub ($r) {
             return $reg_id_map{$r} if exists $reg_id_map{$r};
-            return $1           if $r =~ /^r(\d+)$/ && $1 < 16;
+            return $1              if $r =~ /^r(\d+)$/ && $1 < 16;
 
             # Returning 0 here looked like register rax, so a register that was
             # never assigned read as a real one and the instruction encoded with
@@ -426,17 +426,17 @@ class Brocken::Jenny::Codegen::X86_64 {
             # so rather than pick a register.
             die "Unknown x86-64 register: '$r'";
         };
-        my $spill_frame   = $self->_compute_spill_frame( $mf, 'rsp' );
+        my $spill_frame    = $self->_compute_spill_frame( $mf, 'rsp' );
         my $call_arg_frame = $self->_compute_call_arg_frame( $mf, 'rsp' );
-        my $callee_size   = scalar(@$used_callee) * 8;
-        my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
-        my $is_leaf       = 1;
-        my $total_alloca  = 0;
+        my $callee_size    = scalar(@$used_callee) * 8;
+        my $unified_frame  = ( $callee_size + $spill_frame + 15 ) & ~15;
+        my $is_leaf        = 1;
+        my $total_alloca   = 0;
         my $needs_fmov_scratch;
 
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
-                $is_leaf = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
+                $is_leaf            = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
                 $needs_fmov_scratch = 1 if $inst->opcode eq 'fmov_gp2f';
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
@@ -471,6 +471,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         $spill_frame += $shadow_space if $shadow_space;
         my $total_frame = ( $callee_size + $spill_frame + $shadow_space + $total_alloca + $call_arg_frame + 15 ) & ~15;
         my $needs_frame = $total_frame > 0 || $used_callee->@* > 0 || $total_alloca > 0 || $call_arg_frame > 0;
+
         # How far the prologue below moves the stack pointer away from where the
         # caller left it.  An argument passed on the stack is positioned against
         # the *entry* stack pointer, but the entry block's loads run after the
@@ -540,10 +541,8 @@ class Brocken::Jenny::Codegen::X86_64 {
             # caller-save slots, which the resolver treats as a virtual register
             # the allocator places where it likes, so a raw operand has to bypass
             # it and address the hardware stack pointer directly.
-            my $base_r
-                = ( $addr->{raw} && $addr->{base} eq $platform->stack_reg )
-                ? $platform->stack_reg
-                : $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind, value => $addr->{base} ) );
+            my $base_r = ( $addr->{raw} && $addr->{base} eq $platform->stack_reg ) ? $platform->stack_reg :
+                $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind, value => $addr->{base} ) );
             my $bid  = $reg_id->($base_r);
             my $disp = $addr->{disp} // 0;
 
@@ -632,13 +631,13 @@ class Brocken::Jenny::Codegen::X86_64 {
                 elsif ( $opcode eq 'movzx' || $opcode eq 'movsx' ) {
                     my $src_bits = $src->type ? $src->type->bits : 64;
                     my $dst_bits = $dst->type ? $dst->type->bits : 64;
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $rex_w = ( $dst_bits >= 64 ) ? REX_W : 0;
-                    my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
-                    my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+                    my $dst_r    = $resolve->($dst);
+                    my $did      = $reg_id->($dst_r);
+                    my $src_r    = $resolve->($src);
+                    my $sid      = $reg_id->($src_r);
+                    my $rex_w    = ( $dst_bits >= 64 ) ? REX_W : 0;
+                    my $rex      = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                    my $modrm    = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
 
                     # Nothing to widen, or a narrowing truncation: a same-width mov
                     # already zeroes the upper half, so a plain copy is correct.
@@ -657,7 +656,6 @@ class Brocken::Jenny::Codegen::X86_64 {
                             $bytes .= pack( 'CCC', $rex32, MOV_RM_R, $modrm );
                         }
                         else {
-
                             # 32 -> 64 sign-extend: MOVSXD (0x63)
                             $bytes .= pack( 'CCC', $rex, 0x63, $modrm );
                         }
@@ -854,8 +852,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                 elsif ( $opcode eq 'neg' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $bits  = $dst->type ? $dst->type->bits : 64;
-                    my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
+                    my $bits  = $dst->type      ? $dst->type->bits : 64;
+                    my $rex_w = ( $bits >= 64 ) ? REX_W            : 0;
 
                     # RMW: the target is the r/m operand, so a high register needs REX.B, not REX.R.
                     my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
@@ -920,7 +918,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         # and changes the meaning of ids 0-3 (al -> sil). It
                         # must not carry REX.W, which would select the r64
                         # form.
-                        my $rex   = $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+                        my $rex = $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
                         $bytes .= pack( 'C', 0x40 | $rex ) if $rex;
                         $bytes .= pack( 'CCC', 0x0F, 0xBE, $modrm );
                     }
@@ -929,7 +927,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         # 0F BF is MOVSX r32, r/m16, for the same reason: a
                         # 2-byte read whose result is sign-extended to fill the
                         # register, so later arithmetic sees what it expects.
-                        my $rex   = $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+                        my $rex = $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
                         $bytes .= pack( 'C', 0x40 | $rex ) if $rex;
                         $bytes .= pack( 'CCC', 0x0F, 0xBF, $modrm );
                     }
@@ -1070,8 +1068,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                     # where that starts: the eighth floating-point register is
                     # the first to need the bit, and the sum is correct until
                     # then.
-                    $bytes .= pack( 'C', $op->[0] );
-                    $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                    $bytes .= pack( 'C',   $op->[0] );
+                    $bytes .= pack( 'C',   $rex ) if $rex > 0x40;
                     $bytes .= pack( 'CCC', $op->[1], $op->[2], $modrm );
                 }
                 elsif ( $opcode eq 'fmov_gp2f' ) {
@@ -1087,10 +1085,10 @@ class Brocken::Jenny::Codegen::X86_64 {
                         # GPR to a scratch slot and loading into XMM from memory.
                         # That slot is reserved above the allocas (see the
                         # frame layout), so it cannot collide with a local.
-                        my $scratch = $fmov_scratch_off // 0x20;
-                        my $sfit = ( $scratch >= -128 && $scratch <= 127 );
-                        my $sib  = $sfit ? "\x24" . pack( 'c', $scratch ) : "\x24" . pack( 'V', $scratch );
-                        my $smod = $sfit ? 0x44 : 0x84;
+                        my $scratch   = $fmov_scratch_off // 0x20;
+                        my $sfit      = ( $scratch >= -128 && $scratch <= 127 );
+                        my $sib       = $sfit ? "\x24" . pack( 'c', $scratch ) : "\x24" . pack( 'V', $scratch );
+                        my $smod      = $sfit ? 0x44                           : 0x84;
                         my $rex_store = 0x40 | ( $bits >= 64 ? 8 : 0 ) | ( $sid >= 8 ? 4 : 0 );
                         my $modrm_st  = $smod | ( ( $sid & 7 ) << 3 );
                         $bytes .= pack( 'C', $rex_store ) if $rex_store > 0x40;
@@ -1102,8 +1100,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                         # Prefix before REX, as in the MOVD form below: F2 or
                         # F3 ahead of a REX discards it, and REX.R is what
                         # reaches xmm8-xmm15 at all.
-                        $bytes .= pack( 'C', $op_load->[0] );
-                        $bytes .= pack( 'C', $rex_load ) if $rex_load > 0x40;
+                        $bytes .= pack( 'C',   $op_load->[0] );
+                        $bytes .= pack( 'C',   $rex_load ) if $rex_load > 0x40;
                         $bytes .= pack( 'CCC', $op_load->[1], $op_load->[2], $modrm_ld ) . $sib;
                     }
                     else {
@@ -1119,8 +1117,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                         # arrived as 0.0 and every comparison against it was
                         # decided against a zero. REX.B went with it, so a
                         # source in r8-r15 read the wrong register.
-                        $bytes .= pack( 'C', 0x66 );
-                        $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                        $bytes .= pack( 'C',  0x66 );
+                        $bytes .= pack( 'C',  $rex ) if $rex > 0x40;
                         $bytes .= pack( 'CC', 0x0F, 0x6E ) . pack( 'C', $modrm );
                     }
                 }
@@ -1142,8 +1140,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
 
                     # Prefix first, REX second: see the `fmov` case above.
-                    $bytes .= pack( 'C', $op->[0] );
-                    $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                    $bytes .= pack( 'C',   $op->[0] );
+                    $bytes .= pack( 'C',   $rex ) if $rex > 0x40;
                     $bytes .= pack( 'CCC', $op->[1], $op->[2], $modrm );
                 }
                 elsif ( $opcode eq 'fxor' || $opcode eq 'fand' ) {
@@ -1160,8 +1158,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                     # The operand-size prefix has to precede REX, as in the MOVD
                     # form above. A bare 0x40 before the opcode is just an empty
                     # REX and is left out.
-                    $bytes .= pack( 'C', $op->[0] ) if defined $op->[0];
-                    $bytes .= pack( 'C', $rex ) if $did >= 8 || $sid >= 8;
+                    $bytes .= pack( 'C',  $op->[0] ) if defined $op->[0];
+                    $bytes .= pack( 'C',  $rex )     if $did >= 8 || $sid >= 8;
                     $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'fptosi' ) {
@@ -1183,14 +1181,14 @@ class Brocken::Jenny::Codegen::X86_64 {
                     # the same opcode is the 32-bit form. REX.B extends the XMM
                     # source, which is a register number and not a general
                     # register, so it is bit 0 here as in the moves above.
-                    my $rex = 0x40 | ( $dbits >= 64 ? 8 : 0 ) | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                    my $rex   = 0x40 | ( $dbits >= 64 ? 8 : 0 ) | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
 
                     # Prefix first, REX second: see the `fmov` case above. A REX
                     # byte in front of the F2/F3 is discarded, which would leave
                     # the destination at 32 bits and the value truncated to fit.
-                    $bytes .= pack( 'C', $sbits >= 64 ? 0xF2 : 0xF3 );
-                    $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                    $bytes .= pack( 'C',   $sbits >= 64 ? 0xF2 : 0xF3 );
+                    $bytes .= pack( 'C',   $rex ) if $rex > 0x40;
                     $bytes .= pack( 'CCC', 0x0F, 0x2C, $modrm );
                 }
                 elsif ( $opcode eq 'sitofp' ) {
@@ -1213,11 +1211,10 @@ class Brocken::Jenny::Codegen::X86_64 {
                     # above. The instruction has no unsigned form, which is why
                     # the frontend never hands one over: a u32 arrives here
                     # already zero-extended into a positive i64.
-                    my $rex = 0x40 | ( $sbits >= 64 ? 8 : 0 ) | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                    my $rex   = 0x40 | ( $sbits >= 64 ? 8 : 0 ) | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-
-                    $bytes .= pack( 'C', $fbits >= 64 ? 0xF2 : 0xF3 );
-                    $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                    $bytes .= pack( 'C',   $fbits >= 64 ? 0xF2 : 0xF3 );
+                    $bytes .= pack( 'C',   $rex ) if $rex > 0x40;
                     $bytes .= pack( 'CCC', 0x0F, 0x2A, $modrm );
                 }
                 elsif ( $opcode eq 'fcmp' ) {
@@ -1233,8 +1230,8 @@ class Brocken::Jenny::Codegen::X86_64 {
                     # Prefix before REX, as above: otherwise the 66 is kept
                     # and the REX dropped, and a compare against xmm8-xmm15
                     # would read the wrong register.
-                    $bytes .= pack( 'C', $op->[0] ) if defined $op->[0];
-                    $bytes .= pack( 'C', $rex ) if $did >= 8 || $sid >= 8;
+                    $bytes .= pack( 'C',  $op->[0] ) if defined $op->[0];
+                    $bytes .= pack( 'C',  $rex )     if $did >= 8 || $sid >= 8;
                     $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'label' ) {
@@ -1549,61 +1546,5 @@ class Brocken::Jenny::Codegen::X86_64 {
         return int( $max_off / 8 ) + 1;
     }
 }
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Jenny::Codegen::X86_64 - x86_64 Machine Code Generator
-
-=head1 DESCRIPTION
-
-Generates x86_64 machine code from MIR (Machine Intermediate Representation). Implements full instruction encoding for
-the System V AMD64 ABI.
-
-=head2 Supported Instructions
-
-=over 4
-
-=item B<Data movement>: mov (reg/imm/mem), movzx, movsxd, lea, push, pop
-
-=item B<Arithmetic>: add, sub, adc, sbb, and, or, xor, mul, imul (umulh), div (udiv), inc, dec, neg, shl, shr, sar
-
-=item B<Comparison>: cmp, test, setcc (with FLAGS-safe xor-zeroing)
-
-=item B<Floating point (SSE/SSE2)>: movsd, addsd, subsd, mulsd, divsd, cvtsi2sd, cvttsd2si, ucomisd, sqrtsd, cmpsd, maxsd, minsd, xorsd
-
-=item B<Control flow>: jmp (near/8-bit), je, jne, jl, jle, jg, jge, jb, jae, call, ret
-
-=item B<Stack>: alloca (with frame register management)
-
-=back
-
-=head2 Encoding Scheme
-
-Instructions are encoded using a compact MIR encoding where each instruction opcode maps to a pre-defined byte sequence
-with template markers for operands. Templates include placeholders for ModRM bytes, SIB bytes, displacement fields, and
-immediate values.
-
-=head2 Frame Layout
-
-    [callee saves] [caller saves] [alloca area]  <- SP after prologue
-
-The L<_compute_spill_frame> method scans all SP-relative memory operands to determine the required spill/caller-save
-frame size.
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
+#
 1;

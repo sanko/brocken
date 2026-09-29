@@ -8,8 +8,7 @@ use Brocken::Jenny;
 use Brocken::Compiler;
 use Test2::Tools::Brocken qw(temp_path);
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
-
+use feature qw[class];
 my $host          = Brocken::Katsuro::Platform::parse();
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
@@ -33,7 +32,6 @@ my $wasm_platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 # size need not be a multiple of 4. The class size and the allocation size are
 # rounded separately for that reason: a 3-byte struct is a legal layout and must
 # not be rounded back up to 4 just because the next field would rather it were.
-
 # The layout half reads offsets back out of each generated accessor's field GEP,
 # so it asserts the number the backend will use rather than recomputing it.
 sub offsets_for {
@@ -54,27 +52,35 @@ sub offsets_for {
     }
     return \%out;
 }
-
 for my $case (
+
     # A bare `:pack` pulls the field to the next byte but leaves its neighbours'
     # alignment alone. `c` is an i32, so C still puts it on a 4-byte boundary and
     # it lands at 8 rather than 5 -- packing one field is not `__attribute__
     # ((packed))` on the whole struct.
-    [ 'packed i8 between two i32' => 'class P { field i32 $a :reader; field i8 $b :pack :reader; field i32 $c :reader; }', { a => 0, b => 4, c => 8 } ],
-    [ 'packed i8 after an i32'    => 'class P { field i8 $a :reader; field i32 $b :reader; field i8 $c :pack :reader; }',    { a => 0, b => 4, c => 8 } ],
-    [ 'every field packed'        => 'class P { field i8 $a :pack :reader; field i16 $b :pack :reader; field i32 $c :pack :reader; }', { a => 0, b => 1, c => 3 } ],
+    [   'packed i8 between two i32' => 'class P { field i32 $a :reader; field i8 $b :pack :reader; field i32 $c :reader; }',
+        { a => 0, b => 4, c => 8 }
+    ],
+    [ 'packed i8 after an i32' => 'class P { field i8 $a :reader; field i32 $b :reader; field i8 $c :pack :reader; }', { a => 0, b => 4, c => 8 } ],
+    [   'every field packed' => 'class P { field i8 $a :pack :reader; field i16 $b :pack :reader; field i32 $c :pack :reader; }',
+        { a => 0, b => 1, c => 3 }
+    ],
 
     # A specific alignment, including one below the natural one.
     [ 'i32 with pack(2) at offset 0' => 'class P { field i32 $a :reader; field i32 $b :pack(2) :reader; }', { a => 0, b => 4 } ],
-    [ 'i32 with pack(2) after an i8'  => 'class P { field i8 $a :reader; field i32 $b :pack(2) :reader; }', { a => 0, b => 2 } ],
-    [ 'i32 with pack(4) after an i8'  => 'class P { field i8 $a :reader; field i32 $b :pack(4) :reader; }', { a => 0, b => 4 } ],
+    [ 'i32 with pack(2) after an i8' => 'class P { field i8 $a :reader; field i32 $b :pack(2) :reader; }',  { a => 0, b => 2 } ],
+    [ 'i32 with pack(4) after an i8' => 'class P { field i8 $a :reader; field i32 $b :pack(4) :reader; }',  { a => 0, b => 4 } ],
 
     # Over-aligning, the other direction.
-    [ 'i8 over-aligned to 16' => 'class P { field i32 $a :reader; field i8 $b :pack(16) :reader; field i32 $c :reader; }', { a => 0, b => 16, c => 20 } ],
-    [ 'i8 over-aligned to 8'  => 'class P { field i8 $a :pack(8) :reader; }', { a => 0 } ],
+    [   'i8 over-aligned to 16' => 'class P { field i32 $a :reader; field i8 $b :pack(16) :reader; field i32 $c :reader; }',
+        { a => 0, b => 16, c => 20 }
+    ],
+    [ 'i8 over-aligned to 8' => 'class P { field i8 $a :pack(8) :reader; }', { a => 0 } ],
 
     # `:pack(1)` and a bare `:pack` have to agree, or the two spellings drift.
-    [ 'pack(1) matches a bare pack' => 'class P { field i32 $a :reader; field i8 $b :pack(1) :reader; field i32 $c :reader; }', { a => 0, b => 4, c => 8 } ],
+    [   'pack(1) matches a bare pack' => 'class P { field i32 $a :reader; field i8 $b :pack(1) :reader; field i32 $c :reader; }',
+        { a => 0, b => 4, c => 8 }
+    ],
 
     # Other attributes are unaffected, and `pack` never shows up as one.
     [ 'pack alongside reader and writer' => 'class P { field i8 $a :pack :reader :writer; field i8 $b :reader; }', { a => 0, b => 1 } ],
@@ -83,8 +89,7 @@ for my $case (
     my $got = offsets_for($decl);
     my @bad;
     for my $m ( sort keys %$want ) {
-        push @bad, "$m: want $want->{$m}, got " . ( defined $got->{$m} ? $got->{$m} : 'undef' )
-            if !defined $got->{$m} || $got->{$m} != $want->{$m};
+        push @bad, "$m: want $want->{$m}, got " . ( defined $got->{$m} ? $got->{$m} : 'undef' ) if !defined $got->{$m} || $got->{$m} != $want->{$m};
     }
     is( scalar @bad, 0, "pack layout: $name" ) or diag join( '; ', @bad );
 }
@@ -99,11 +104,10 @@ for my $case (
     my ($decl) = grep { $_->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') } $ast->statements->@*;
     my ($fa)   = $decl->fields->@*;
     my $fb     = $decl->fields->[1];
-
-    is( $fa->align, 1, 'a bare :pack records an alignment of 1' );
-    is( $fb->align, 4, 'a :pack(4) records an alignment of 4' );
-    is( $fa->attrs->@*, 2, 'a bare :pack leaves its two real attributes in place' );
-    is( $fb->attrs->@*, 1, 'a :pack(4) leaves its one real attribute in place' );
+    is( $fa->align,                                     1, 'a bare :pack records an alignment of 1' );
+    is( $fb->align,                                     4, 'a :pack(4) records an alignment of 4' );
+    is( $fa->attrs->@*,                                 2, 'a bare :pack leaves its two real attributes in place' );
+    is( $fb->attrs->@*,                                 1, 'a :pack(4) leaves its one real attribute in place' );
     is( scalar( grep { $_ eq 'pack' } $fa->attrs->@* ), 0, "':pack' is not in the attribute list" );
     is( scalar( grep { $_ eq 'pack' } $fb->attrs->@* ), 0, "':pack(4)' is not in the attribute list" );
 }
@@ -126,10 +130,8 @@ for my $bad ( 0, 3, 5, 12, 100 ) {
 #
 # Each program returns 42 when every field still reads back and 1 otherwise,
 # because a native exit code is a single byte and cannot carry -300.
-
 my @cases = (
-    {
-        name => 'a packed i8 write leaves the packed i32 around it alone',
+    {   name => 'a packed i8 write leaves the packed i32 around it alone',
         src  => <<'BROCKEN',
 class P {
     field i32 $a :pack :param :reader :writer;
@@ -146,8 +148,7 @@ if ($p->a() == 100000) {
 return 1;
 BROCKEN
     },
-    {
-        name => 'a packed i16 write leaves the packed i8 after it alone',
+    {   name => 'a packed i16 write leaves the packed i8 after it alone',
         src  => <<'BROCKEN',
 class P {
     field i8 $b :pack :param :reader :writer;
@@ -161,8 +162,7 @@ if ($p->b() == 7) {
 return 1;
 BROCKEN
     },
-    {
-        name => 'a fully packed struct smaller than 8 bytes still works',
+    {   name => 'a fully packed struct smaller than 8 bytes still works',
         src  => <<'BROCKEN',
 class P {
     field i8 $a :pack :param :reader :writer;
@@ -179,8 +179,7 @@ if ($p->a() == 1) {
 return 1;
 BROCKEN
     },
-    {
-        name => 'a fully packed struct does not overrun the next object',
+    {   name => 'a fully packed struct does not overrun the next object',
         src  => <<'BROCKEN',
 class A {
     field i8 $a :pack :param :reader :writer;
@@ -195,8 +194,7 @@ if ($b->w() == 258) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'an over-aligned field is still read and written whole',
+    {   name => 'an over-aligned field is still read and written whole',
         src  => <<'BROCKEN',
 class P {
     field i32 $a :pack(16) :param :reader :writer;
@@ -210,8 +208,7 @@ if ($p->a() == 500000) {
 return 1;
 BROCKEN
     },
-    {
-        name => 'a negative value in a packed field stays sign-extended',
+    {   name => 'a negative value in a packed field stays sign-extended',
         src  => <<'BROCKEN',
 class P {
     field i8 $a :pack :param :reader;
@@ -224,8 +221,7 @@ if ($p->a() == -7) {
 return 1;
 BROCKEN
     },
-    {
-        name => 'packed fields are reachable from a method body through accessors',
+    {   name => 'packed fields are reachable from a method body through accessors',
         src  => <<'BROCKEN',
 class P {
     field i8 $a :pack :param :reader :writer;
@@ -252,19 +248,16 @@ sub run_wasm {
     unlink $out;
     return $r;
 }
-
 for my $case (@cases) {
-    SKIP: {
+SKIP: {
         skip 'wasmtime not available', 1 unless $wasmtime_path && -f $wasmtime_path;
         is( run_wasm( $case->{src}, 'pack_wasm' ), 42, "wasm: $case->{name}" );
     }
 }
-
 {
     my $brocken = Brocken->new;
-    SKIP: {
+SKIP: {
         skip 'Not native', scalar @cases unless $brocken->platform->is_native;
-
         for my $case (@cases) {
             my $module = Brocken::Compiler->new->compile( $case->{src} );
             my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -275,5 +268,4 @@ for my $case (@cases) {
         }
     }
 }
-
 done_testing;

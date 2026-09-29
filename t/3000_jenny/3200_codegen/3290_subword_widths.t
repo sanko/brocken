@@ -8,8 +8,7 @@ use Brocken::Jenny;
 use Brocken::Compiler;
 use Test2::Tools::Brocken qw(temp_path);
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
-
+use feature qw[class];
 my $host          = Brocken::Katsuro::Platform::parse();
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
@@ -58,15 +57,12 @@ my $wasm_platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 #
 # The load is sized from the *destination* type and the store from the *value*
 # type, matching how the rest of the encoder picks an operand width.
-
 # A native exit code is a single byte, so a case cannot assert a field value of
 # 258, -300 or 8589934592 by returning it. Each program returns 42 when the
 # check holds and 1 when it does not, which keeps the expectation readable on
 # both backends and still fails loudly with a distinct value.
-
 my @cases = (
-    {
-        name => 'an i8 write does not clobber the i16 after it',
+    {   name => 'an i8 write does not clobber the i16 after it',
         src  => <<'BROCKEN',
 class P {
     field i8 $a :param :reader :writer;
@@ -78,8 +74,7 @@ if ($p->b() == 258) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'an i8 constant write does not clobber the i16 after it',
+    {   name => 'an i8 constant write does not clobber the i16 after it',
         src  => <<'BROCKEN',
 class P {
     field i8 $a :reader :writer;
@@ -91,8 +86,7 @@ if ($p->b() == 258) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a negative i16 survives a neighbouring i8 write',
+    {   name => 'a negative i16 survives a neighbouring i8 write',
         src  => <<'BROCKEN',
 class P {
     field i8 $a :param :reader :writer;
@@ -104,8 +98,7 @@ if ($p->b() == -300) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'two adjacent i8 fields each keep their own value',
+    {   name => 'two adjacent i8 fields each keep their own value',
         src  => <<'BROCKEN',
 class P {
     field i8 $a :param :reader :writer;
@@ -119,8 +112,7 @@ if ($p->a() == 33) {
 return 1;
 BROCKEN
     },
-    {
-        name => 'an i32 keeps its own value past an i8',
+    {   name => 'an i32 keeps its own value past an i8',
         src  => <<'BROCKEN',
 class P {
     field i8 $a :param :reader :writer;
@@ -132,8 +124,7 @@ if ($p->b() == 70000) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'an i64 keeps its own value past an i8',
+    {   name => 'an i64 keeps its own value past an i8',
         src  => <<'BROCKEN',
 class P {
     field i8 $a :param :reader :writer;
@@ -145,8 +136,7 @@ if ($p->b() == 8589934592) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a lone i8 does not disturb the next object',
+    {   name => 'a lone i8 does not disturb the next object',
         src  => <<'BROCKEN',
 class A { field i8 $v :param :reader :writer; }
 class B { field i16 $w :param :reader; }
@@ -157,8 +147,7 @@ if ($b->w() == 258) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a negative i8 field stays sign-extended in arithmetic',
+    {   name => 'a negative i8 field stays sign-extended in arithmetic',
         src  => <<'BROCKEN',
 class P { field i8 $a :param :reader; }
 my ptr $p = P->new(-7);
@@ -168,8 +157,7 @@ if ($y == -8) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a negative i16 field stays sign-extended in arithmetic',
+    {   name => 'a negative i16 field stays sign-extended in arithmetic',
         src  => <<'BROCKEN',
 class P { field i16 $b :param :reader; }
 my ptr $p = P->new(-300);
@@ -179,8 +167,7 @@ if ($y == -301) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a negative i8 field widens to the right value',
+    {   name => 'a negative i8 field widens to the right value',
         src  => <<'BROCKEN',
 class P { field i8 $a :param :reader; }
 my ptr $p = P->new(-7);
@@ -189,8 +176,7 @@ if ($x == -7) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a negative i16 field widens to the right value',
+    {   name => 'a negative i16 field widens to the right value',
         src  => <<'BROCKEN',
 class P { field i16 $b :param :reader; }
 my ptr $p = P->new(-300);
@@ -199,8 +185,7 @@ if ($x == -300) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a lone i8 field keeps its own value',
+    {   name => 'a lone i8 field keeps its own value',
         src  => <<'BROCKEN',
 class P { field i8 $a :param :reader :writer; }
 my ptr $p = P->new(7);
@@ -209,8 +194,7 @@ if ($p->a() == 7) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a lone i16 field keeps its own value',
+    {   name => 'a lone i16 field keeps its own value',
         src  => <<'BROCKEN',
 class P { field i16 $b :param :reader :writer; }
 my ptr $p = P->new(999);
@@ -236,7 +220,6 @@ BROCKEN
 # The offsets are read back out of the lowerer's own class table, by way of the
 # displacement each generated accessor bakes into its field GEP. That is the
 # number the backend will use, not a second computation of it.
-
 sub offsets_for {
     my ($src) = @_;
     my $module = Brocken::Compiler->new->compile($src);
@@ -255,30 +238,29 @@ sub offsets_for {
     }
     return \%out;
 }
-
 for my $case (
-    [ 'i8 then i16'     => 'class P { field i8 $a :reader; field i16 $b :reader; }',                        { a => 0, b => 2 } ],
-    [ 'i8 then i32'     => 'class P { field i8 $a :reader; field i32 $b :reader; }',                        { a => 0, b => 4 } ],
-    [ 'i8 then i64'     => 'class P { field i8 $a :reader; field i64 $b :reader; }',                        { a => 0, b => 8 } ],
-    [ 'i16 i8 i16'      => 'class P { field i16 $a :reader; field i8 $b :reader; field i16 $c :reader; }',   { a => 0, b => 2, c => 4 } ],
-    [ 'two i8'          => 'class P { field i8 $a :reader; field i8 $b :reader; }',                         { a => 0, b => 1 } ],
-    [ 'three i8'        => 'class P { field i8 $a :reader; field i8 $b :reader; field i8 $c :reader; }',     { a => 0, b => 1, c => 2 } ],
-    [ 'i32 then i8'     => 'class P { field i32 $a :reader; field i8 $b :reader; }',                       { a => 0, b => 4 } ],
-    [ 'i8 i32 i8'       => 'class P { field i8 $a :reader; field i32 $b :reader; field i8 $c :reader; }',    { a => 0, b => 4, c => 8 } ],
-    [ 'i8 i16 i32 i64'  => 'class P { field i8 $a :reader; field i16 $b :reader; field i32 $c :reader; field i64 $d :reader; }', { a => 0, b => 2, c => 4, d => 8 } ],
+    [ 'i8 then i16' => 'class P { field i8 $a :reader; field i16 $b :reader; }',                       { a => 0, b => 2 } ],
+    [ 'i8 then i32' => 'class P { field i8 $a :reader; field i32 $b :reader; }',                       { a => 0, b => 4 } ],
+    [ 'i8 then i64' => 'class P { field i8 $a :reader; field i64 $b :reader; }',                       { a => 0, b => 8 } ],
+    [ 'i16 i8 i16'  => 'class P { field i16 $a :reader; field i8 $b :reader; field i16 $c :reader; }', { a => 0, b => 2, c => 4 } ],
+    [ 'two i8'      => 'class P { field i8 $a :reader; field i8 $b :reader; }',                        { a => 0, b => 1 } ],
+    [ 'three i8'    => 'class P { field i8 $a :reader; field i8 $b :reader; field i8 $c :reader; }',   { a => 0, b => 1, c => 2 } ],
+    [ 'i32 then i8' => 'class P { field i32 $a :reader; field i8 $b :reader; }',                       { a => 0, b => 4 } ],
+    [ 'i8 i32 i8'   => 'class P { field i8 $a :reader; field i32 $b :reader; field i8 $c :reader; }',  { a => 0, b => 4, c => 8 } ],
+    [   'i8 i16 i32 i64' => 'class P { field i8 $a :reader; field i16 $b :reader; field i32 $c :reader; field i64 $d :reader; }',
+        { a => 0, b => 2, c => 4, d => 8 }
+    ],
 ) {
     my ( $name, $decl, $want ) = @$case;
     my $got = offsets_for($decl);
     my @bad;
     for my $m ( sort keys %$want ) {
-        push @bad, "$m: want $want->{$m}, got " . ( defined $got->{$m} ? $got->{$m} : 'undef' )
-            if !defined $got->{$m} || $got->{$m} != $want->{$m};
+        push @bad, "$m: want $want->{$m}, got " . ( defined $got->{$m} ? $got->{$m} : 'undef' ) if !defined $got->{$m} || $got->{$m} != $want->{$m};
     }
     is( scalar @bad, 0, "C layout: $name" ) or diag join( '; ', @bad );
 }
 
 # --- Wasm ---------------------------------------------------------------------
-
 sub run_wasm {
     my ( $src, $name ) = @_;
     my $module  = Brocken::Compiler->new->compile($src);
@@ -291,21 +273,18 @@ sub run_wasm {
     unlink $out;
     return $r;
 }
-
 for my $case (@cases) {
-    SKIP: {
+SKIP: {
         skip 'wasmtime not available', 1 unless $wasmtime_path && -f $wasmtime_path;
         is( run_wasm( $case->{src}, 'subword_wasm' ), 42, "wasm: $case->{name}" );
     }
 }
 
 # --- Native -------------------------------------------------------------------
-
 {
     my $brocken = Brocken->new;
-    SKIP: {
+SKIP: {
         skip 'Not native', scalar @cases unless $brocken->platform->is_native;
-
         for my $case (@cases) {
             my $module = Brocken::Compiler->new->compile( $case->{src} );
             my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -316,5 +295,4 @@ for my $case (@cases) {
         }
     }
 }
-
 done_testing;

@@ -11,49 +11,49 @@ class Brocken::Jenny::Codegen::ARM64 {
     use Brocken::Jenny::Codegen::ARM64::Inst qw[:all];
     field $platform : param;
     use constant {
-        B              => 0x14000000,
-        CBZ            => 0xB4000000,
-        CBNZ           => 0xB5000000,
-        ADD_W          => 0x0B000000,
-        SUB_W          => 0x4B000000,
-        AND_W          => 0x0A000000,
-        ORR_W          => 0x2A000000,
-        EOR_W          => 0x4A000000,
-        MUL_W          => 0x1B007C00,
-        ADD_X          => 0x8B000000,
-        ADD_X_EXT      => 0x8B200000,
-        UXTX_OPT       => 0b011,
-        SUB_X          => 0xCB000000,
-        ADCS_X         => 0x9A000000,
-        SBCS_X         => 0xDA000000,
-        AND_X          => 0x8A000000,
-        ORR_X          => 0xAA000000,
-        EOR_X          => 0xCA000000,
-        MUL_X          => 0x9B007C00,
-        UMULH_X        => 0x9BC07C00,
-        UDIV_X         => 0x9AC00800,
-        SDIV_X         => 0x9AC00C00,
-        ADD_IMM        => 0x11000000,
-        ADD_IMM_64     => 0x91000000,    # ADD_IMM | SF
-        SUB_IMM        => 0x51000000,
-        UBFM           => 0xD3400000,
-        SBFM           => 0x93400000,
-        MOVZ_32        => 0x52800000,
-        MOVZ_64        => 0xD2800000,
-        MOVK_32        => 0x72800000,
-        MOVK_64        => 0xF2800000,
-        MOV_X          => 0xAA0003E0,
-        SUB_SP         => 0xD10003FF,
-        ADD_SP         => 0x910003FF,
-        MOV_SP         => 0x910003E0,
-        LDR_32         => 0xB9400000,
-        LDR_64         => 0xF9400000,
-        STR_32         => 0xB9000000,
-        STR_64         => 0xF9000000,
-        LDR_32_REG     => 0xB8408000,
-        LDR_64_REG     => 0xF8408000,
-        STR_32_REG     => 0xB8208000,
-        STR_64_REG     => 0xF8208000,
+        B          => 0x14000000,
+        CBZ        => 0xB4000000,
+        CBNZ       => 0xB5000000,
+        ADD_W      => 0x0B000000,
+        SUB_W      => 0x4B000000,
+        AND_W      => 0x0A000000,
+        ORR_W      => 0x2A000000,
+        EOR_W      => 0x4A000000,
+        MUL_W      => 0x1B007C00,
+        ADD_X      => 0x8B000000,
+        ADD_X_EXT  => 0x8B200000,
+        UXTX_OPT   => 0b011,
+        SUB_X      => 0xCB000000,
+        ADCS_X     => 0x9A000000,
+        SBCS_X     => 0xDA000000,
+        AND_X      => 0x8A000000,
+        ORR_X      => 0xAA000000,
+        EOR_X      => 0xCA000000,
+        MUL_X      => 0x9B007C00,
+        UMULH_X    => 0x9BC07C00,
+        UDIV_X     => 0x9AC00800,
+        SDIV_X     => 0x9AC00C00,
+        ADD_IMM    => 0x11000000,
+        ADD_IMM_64 => 0x91000000,    # ADD_IMM | SF
+        SUB_IMM    => 0x51000000,
+        UBFM       => 0xD3400000,
+        SBFM       => 0x93400000,
+        MOVZ_32    => 0x52800000,
+        MOVZ_64    => 0xD2800000,
+        MOVK_32    => 0x72800000,
+        MOVK_64    => 0xF2800000,
+        MOV_X      => 0xAA0003E0,
+        SUB_SP     => 0xD10003FF,
+        ADD_SP     => 0x910003FF,
+        MOV_SP     => 0x910003E0,
+        LDR_32     => 0xB9400000,
+        LDR_64     => 0xF9400000,
+        STR_32     => 0xB9000000,
+        STR_64     => 0xF9000000,
+        LDR_32_REG => 0xB8408000,
+        LDR_64_REG => 0xF8408000,
+        STR_32_REG => 0xB8208000,
+        STR_64_REG => 0xF8208000,
 
         # Narrow (8/16-bit) accesses. The zero-extending LDRB/LDRH only have a
         # 32-bit destination, so a narrow load sign-extends straight into the X
@@ -61,61 +61,61 @@ class Brocken::Jenny::Codegen::ARM64 {
         # exactly what the narrow store wrote. All verified against
         # `strb w0, [x1]` = 0x39000000, `ldrsb x0, [x1]` = 0x39800000 and
         # `ldrb w0, [x1, x2]` = 0x38626820.
-        LDRSB_64       => 0x39800000,
-        LDRSH_64       => 0x79800000,
-        STRB_32        => 0x39000000,
-        STRH_32        => 0x79000000,
-        LDRSB_64_REG   => 0x38A06800,
-        LDRSH_64_REG   => 0x78A06800,
-        STRB_32_REG    => 0x38206800,
-        STRH_32_REG    => 0x78206800,
+        LDRSB_64     => 0x39800000,
+        LDRSH_64     => 0x79800000,
+        STRB_32      => 0x39000000,
+        STRH_32      => 0x79000000,
+        LDRSB_64_REG => 0x38A06800,
+        LDRSH_64_REG => 0x78A06800,
+        STRB_32_REG  => 0x38206800,
+        STRH_32_REG  => 0x78206800,
 
         # Unscaled (signed 9-bit displacement) forms, needed when a slot sits
         # below the base register. `ldur x0, [x1, #-8]` = 0xF85F8020,
         # `sturb w0, [x1, #-1]` = 0x381FF020, so the imm9 lives in bits 20:12.
-        LDUR_32        => 0xB8400000,
-        LDUR_64        => 0xF8400000,
-        STUR_32        => 0xB8000000,
-        STUR_64        => 0xF8000000,
-        LDURSB_64      => 0x389F0000,
-        LDURSH_64      => 0x789F0000,
-        STURB_32       => 0x381F0000,
-        STURH_32       => 0x781F0000,
-        FLDR_32        => 0xBD400000,
-        FLDR_64        => 0xFD400000,
-        FSTR_32        => 0xBD000000,
-        FSTR_64        => 0xFD000000,
-        FLDR_32_REG    => 0xBC408000,
-        FLDR_64_REG    => 0xFC408000,
-        FSTR_32_REG    => 0xBC208000,
-        FSTR_64_REG    => 0xFC208000,
-        CMP_IMM        => 0x7100001F,
-        CMP_REG        => 0x6B00001F,
-        CSINC          => 0x1A800400,    # sf bit added by the caller; sets the CSINC op bit (10)
-        CSEL           => 0x1A800000,    # sf and cond fields added by the caller
-        CSNEG          => 0x5A800400,    # csneg Rd, Rn, Rm, cond: cond ? Rn : -Rm (see cset/csel notes)
-        NEG            => 0x4B0003E0,    # neg Rd, Rm == sub Rd, ZR, Rm; Rn field holds ZR
-        FABS_32        => 0x1E20C000,
-        FNEG_32        => 0x1E214000,
-        FSQRT_32       => 0x1E21C000,
-        FMOV_32        => 0x1E204000,
-        FMOV_GP2F_32   => 0x1E270000,
-        FMOV_GP2F_64   => 0x9E670000,
-        FCMP_32        => 0x1E202000,
-        FCMP_64        => 0x1E602000,
-        FP_SZ          => 0x00400000,
-        FADD           => 0x1E202800,
-        FSUB           => 0x1E203800,
-        FMUL           => 0x1E200800,
-        FDIV           => 0x1E201800,
-        FMIN           => 0x1E205800,
-        FMAX           => 0x1E204800,
+        LDUR_32      => 0xB8400000,
+        LDUR_64      => 0xF8400000,
+        STUR_32      => 0xB8000000,
+        STUR_64      => 0xF8000000,
+        LDURSB_64    => 0x389F0000,
+        LDURSH_64    => 0x789F0000,
+        STURB_32     => 0x381F0000,
+        STURH_32     => 0x781F0000,
+        FLDR_32      => 0xBD400000,
+        FLDR_64      => 0xFD400000,
+        FSTR_32      => 0xBD000000,
+        FSTR_64      => 0xFD000000,
+        FLDR_32_REG  => 0xBC408000,
+        FLDR_64_REG  => 0xFC408000,
+        FSTR_32_REG  => 0xBC208000,
+        FSTR_64_REG  => 0xFC208000,
+        CMP_IMM      => 0x7100001F,
+        CMP_REG      => 0x6B00001F,
+        CSINC        => 0x1A800400,    # sf bit added by the caller; sets the CSINC op bit (10)
+        CSEL         => 0x1A800000,    # sf and cond fields added by the caller
+        CSNEG        => 0x5A800400,    # csneg Rd, Rn, Rm, cond: cond ? Rn : -Rm (see cset/csel notes)
+        NEG          => 0x4B0003E0,    # neg Rd, Rm == sub Rd, ZR, Rm; Rn field holds ZR
+        FABS_32      => 0x1E20C000,
+        FNEG_32      => 0x1E214000,
+        FSQRT_32     => 0x1E21C000,
+        FMOV_32      => 0x1E204000,
+        FMOV_GP2F_32 => 0x1E270000,
+        FMOV_GP2F_64 => 0x9E670000,
+        FCMP_32      => 0x1E202000,
+        FCMP_64      => 0x1E602000,
+        FP_SZ        => 0x00400000,
+        FADD         => 0x1E202800,
+        FSUB         => 0x1E203800,
+        FMUL         => 0x1E200800,
+        FDIV         => 0x1E201800,
+        FMIN         => 0x1E205800,
+        FMAX         => 0x1E204800,
 
         # FCVTZS, float to integer, rounding toward zero: a cast, not a
         # round-to-nearest. Bit 22 selects the double-precision source and
         # SF the 64-bit destination, so the 32-bit/single form is the base.
-        FCVTZS_32      => 0x1E380000,
-        FP_TYPE_D      => 0x00400000,
+        FCVTZS_32 => 0x1E380000,
+        FP_TYPE_D => 0x00400000,
 
         # SCVTF, integer to float, no rounding mode: a cast in the other
         # direction. Bit 31 is SF for a 64-bit integer source and bit 22 the
@@ -198,11 +198,11 @@ class Brocken::Jenny::Codegen::ARM64 {
             $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
             $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
-        $alloc->remove_redundant_caller_restores($mf);
-        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $self->_fp_shuffle_temp($platform) // $fp_res->{spill_temp} );
-        my %callee_seen;
-        @callee_seen{ $int_res->{used_callee}->@* } = ();
-        @callee_seen{ $fp_res->{used_callee}->@* }  = ();
+            $alloc->remove_redundant_caller_restores($mf);
+            $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $self->_fp_shuffle_temp($platform) // $fp_res->{spill_temp} );
+            my %callee_seen;
+            @callee_seen{ $int_res->{used_callee}->@* } = ();
+            @callee_seen{ $fp_res->{used_callee}->@* }  = ();
 
             if ( $self->_has_fiber_ops_mf($mf) ) {
                 $callee_seen{ $platform->fiber_reg } = 1;
@@ -481,12 +481,10 @@ class Brocken::Jenny::Codegen::ARM64 {
     # through a 1-2 byte stack slot and clobber the neighbouring frame.
     method _mem_forms( $bits, $is_load ) {
         if ( $bits >= 64 ) {
-            return $is_load ? ( LDR_64, LDUR_64, 3, LDR_64_REG )
-                            : ( STR_64, STUR_64, 3, STR_64_REG );
+            return $is_load ? ( LDR_64, LDUR_64, 3, LDR_64_REG ) : ( STR_64, STUR_64, 3, STR_64_REG );
         }
         if ( $bits >= 32 ) {
-            return $is_load ? ( LDR_32, LDUR_32, 2, LDR_32_REG )
-                            : ( STR_32, STUR_32, 2, STR_32_REG );
+            return $is_load ? ( LDR_32, LDUR_32, 2, LDR_32_REG ) : ( STR_32, STUR_32, 2, STR_32_REG );
         }
         if ($is_load) {
             return ( LDRSH_64, LDURSH_64, 1, LDRSH_64_REG ) if $bits >= 16;
@@ -543,13 +541,13 @@ class Brocken::Jenny::Codegen::ARM64 {
             my $disp = $addr->{disp} // 0;
             return $disp unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
             return $disp + $total_frame if ( $addr->{raw} // '' ) eq 'entry';
-            return $disp if $addr->{raw};
+            return $disp                if $addr->{raw};
             return $disp + $call_arg_frame;
         };
         my $reg_id = sub ($r) {
             return 31 if $r eq 'sp';
-            return $1  if $r =~ /^[xw](\d+)$/ && $1 < 32;
-            return $1  if $r =~ /^v(\d+)$/ && $1 < 32;
+            return $1 if $r =~ /^[xw](\d+)$/ && $1 < 32;
+            return $1 if $r =~ /^v(\d+)$/    && $1 < 32;
 
             # Returning 0 meant x0, so a register that was never assigned read as
             # a real one and the instruction encoded against the wrong operand.
@@ -748,7 +746,6 @@ class Brocken::Jenny::Codegen::ARM64 {
                             $bytes .= pack( 'V', 0x13003C00 | ( $sid << 5 ) | $did );
                         }
                         else {
-
                             # SXTB Wd, Wn
                             $bytes .= pack( 'V', 0x13001C00 | ( $sid << 5 ) | $did );
                         }
@@ -836,6 +833,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     else {
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
+
                         # Register forms: LSLV 0x9AC02000, LSRV 0x9AC02400,
                         # ASRV 0x9AC02800, RORV 0x9AC02C00 (each +0x400). 0x2C00
                         # is RORV, which silently rotated instead of shifting
@@ -961,8 +959,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                         }
                     }
                     if ( defined $addr->{index} ) {
-                        my $index_r  = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                        my $iid      = $reg_id->($index_r);
+                        my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
+                        my $iid     = $reg_id->($index_r);
                         my ( undef, undef, undef, $reg_base ) = $self->_mem_forms( $bits, 0 );
                         $bytes .= pack( 'V', $reg_base | ( $iid << 16 ) | ( $bid << 5 ) | $tid );
                     }
@@ -986,10 +984,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                     # an icmp result is i1, so taking the width from $dst turned a
                     # 64-bit compare into a 32-bit one and made values that only
                     # differ above bit 31 compare equal.
-                    my $cmp_type
-                        = ( $src->kind ne 'imm' && $src->type ) ? $src->type : $dst->type;
-                    my $bits = $cmp_type ? $cmp_type->bits : 64;
-                    my $sf   = ( $bits >= 64 ) ? SF : 0x00000000;
+                    my $cmp_type = ( $src->kind ne 'imm' && $src->type ) ? $src->type      : $dst->type;
+                    my $bits     = $cmp_type                             ? $cmp_type->bits : 64;
+                    my $sf       = ( $bits >= 64 )                       ? SF              : 0x00000000;
                     if ( $src->kind eq 'imm' ) {
                         my $imm12 = $src->value & 0xFFF;
                         $bytes .= pack( 'V', $sf | CMP_IMM | ( $imm12 << 10 ) | ( $did << 5 ) );
@@ -1047,8 +1044,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $tid   = $reg_id->($t_r);
                     my $f_r   = $resolve->($if_f);
                     my $fid   = $reg_id->($f_r);
-                    my $bits  = $dst->type ? $dst->type->bits : 64;
-                    my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
+                    my $bits  = $dst->type      ? $dst->type->bits : 64;
+                    my $sf    = ( $bits >= 64 ) ? SF               : 0x00000000;
                     my %csel  = ( csel_le => 0xD, csel_ge => 0xA );
 
                     # CSEL Rd, Rn, Rm, cond selects Rn when cond is true, Rm
@@ -1064,8 +1061,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $did   = $reg_id->($dst_r);
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
-                    my $bits  = $dst->type ? $dst->type->bits : 64;
-                    my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
+                    my $bits  = $dst->type      ? $dst->type->bits : 64;
+                    my $sf    = ( $bits >= 64 ) ? SF               : 0x00000000;
 
                     # NEG Rd, Rm is SUB Rd, ZR, Rm (Rn already fixed to ZR in
                     # the base), so only Rm and Rd are encoded here.
@@ -1079,8 +1076,8 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $tid   = $reg_id->($t_r);
                     my $f_r   = $resolve->($if_f);
                     my $fid   = $reg_id->($f_r);
-                    my $bits  = $dst->type ? $dst->type->bits : 64;
-                    my $sf    = ( $bits >= 64 ) ? SF : 0x00000000;
+                    my $bits  = $dst->type      ? $dst->type->bits : 64;
+                    my $sf    = ( $bits >= 64 ) ? SF               : 0x00000000;
 
                     # CSNEG Rd, Rn, Rm, cond yields Rn when cond is true and
                     # -Rm otherwise, and (unlike CSET, like CSEL) carries the
@@ -1208,7 +1205,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $dbits = $dst->type ? $dst->type->bits : 64;
                     my $base  = FCVTZS_32;
                     $base |= FP_TYPE_D if $sbits >= 64;
-                    $base |= SF         if $dbits >= 64;
+                    $base |= SF        if $dbits >= 64;
                     $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'sitofp' ) {
@@ -1226,7 +1223,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $sbits = $src->type ? $src->type->bits : 64;
                     my $fbits = $dst->type ? $dst->type->bits : 64;
                     my $base  = SCVTF_32;
-                    $base |= SF         if $sbits >= 64;
+                    $base |= SF        if $sbits >= 64;
                     $base |= FP_TYPE_D if $fbits >= 64;
                     $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
                 }
@@ -1443,74 +1440,5 @@ class Brocken::Jenny::Codegen::ARM64 {
         return $abi->fp_entry_shuffle_temp;
     }
 }
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Jenny::Codegen::ARM64 - ARM64 (AArch64) Machine Code Generator
-
-=head1 DESCRIPTION
-
-Generates ARM64 machine code from MIR. Implements full instruction encoding for the AAPCS64 calling convention.
-
-=head2 Supported Instructions
-
-=over
-
-=item B<Data movement>: mov (reg/imm), movk, adrp (for LEA), ldr, str, ldrsw, ldrb, strb, ldp, stp
-
-=item B<Arithmetic>: add, sub, adds, subs, and, orr, eor, mul, neg, sxtw
-
-=item B<Comparison>: cmp, cset (for setcc), sltu (for unsigned setcc)
-
-=item B<Shift>: lsl, lsr, asr
-
-=item B<Floating point>: fmov (gp2f and f2gp), fadd, fsub, fmul, fdiv, fcmp, fcsel, fabs, fneg, fmin, fmax, fsqrt, fcvt (single/double), scvtf (int->float)
-
-=item B<Control flow>: b (unconditional/cond), cbz, cbnz, bl (call), ret
-
-=item B<Stack>: alloca (pre-scanned, prologue-only SUB), stp/ldp for callee save/restore
-
-=back
-
-=head2 Frame Layout
-
-    SP -> [spill/caller-save slots] [callee saves] [alloca area] <- FP (x29)
-
-The alloca area is pre-scanned and allocated in the prologue. Placing it above the spill and callee-saved slots
-guarantees that memory load/store offsets from SP remain small enough to fit within 12-bit encoding boundaries.
-
-=head2 Key Constants
-
-=over
-
-=item ADD_IMM = 0x91000000 (add register, immediate, 12-bit shifted)
-
-=item MOV_IMM = 0xD2800000 (mov register, immediate, using ORR)
-
-=item LDR_IMM = 0xF9400000 (ldr register, unsigned offset, scaled)
-
-=item STR_IMM = 0xF9000000 (str register, unsigned offset, scaled)
-
-=item B_IMM   = 0x14000000 (unconditional branch, 28-bit offset)
-
-=item BL_IMM  = 0x94000000 (branch-and-link, 28-bit offset)
-
-=back
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
+#
 1;

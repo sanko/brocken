@@ -11,7 +11,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
     # Backs the uniquifier in _wide_imm_opnd, so two wide immediates materialized
     # for the same instruction or memory base still get distinct virtual registers.
     field $wide_imm_seq = 0;
-
     method _abi() { $platform->abi }
 
     method lower($ir_func) {
@@ -45,9 +44,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     # on the stack.  An i128 needs a consecutive register pair,
                     # so it goes to the stack whole when only one register is
                     # left rather than straddling the two.
-                    my $in_regs
-                        = $is_float  ? $fp_idx < @fp_regs
-                        :              $gp_idx + $num_slots <= @gp_regs;
+                    my $in_regs = $is_float ? $fp_idx < @fp_regs : $gp_idx + $num_slots <= @gp_regs;
                     if ($in_regs) {
                         if ($is_i128) {
                             my $lo_reg_name = $gp_regs[ $gp_idx++ ];
@@ -94,7 +91,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                     else {
-
                         # A raw displacement, so the encoder leaves it relative to
                         # the stack pointer instead of lifting it above the
                         # outgoing argument area like a spill slot.  'entry'
@@ -944,7 +940,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 $hi_rhs = $rmhi;
                             }
 
-                            # ---- signed i128 div/rem: convert inputs to absolute values ----
+                            # signed i128 div/rem: convert inputs to absolute values
                             my $imm128        = sub ($v) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $v ) };
                             my $apply_mask128 = sub ( $name, $lo, $hi, $mask ) {
                                 my $bor = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1053,7 +1049,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                             $apply_mask128->( $inst->name . '_av', $lo_rhs, $hi_rhs, $mask_v );
 
-                            # ---- end signed handling ----
+                            # end signed handling
                             if ($fast_path) {
                                 my $zero_v = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'virt_reg',
@@ -1522,7 +1518,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 }
                             }
 
-                            # ---- signed i128 div/rem: apply sign to quotient and remainder ----
+                            # signed i128 div/rem: apply sign to quotient and remainder
                             my $sign_q_tmp = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'virt_reg',
                                 value => $inst->name . '_sqt',
@@ -1578,7 +1574,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                             $apply_mask128->( $inst->name . '_ar', $r_lo, $r_hi, $mask_r );
 
-                            # ---- end signed handling ----
+                            # end signed handling
                             my $out_lo = $opcode eq 'div' ? $q_lo : $r_lo;
                             my $out_hi = $opcode eq 'div' ? $q_hi : $r_hi;
                             $mbb->add_instruction(
@@ -1925,12 +1921,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'irem',
-                                    operands => [ $dst, $rhs_op ],
-                                    comment  => 'rem'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'irem', operands => [ $dst, $rhs_op ], comment => 'rem' ) );
                         }
                         elsif ( $opcode eq 'urem' ) {
                             my $tmp
@@ -1964,7 +1955,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                     comment  => 'load ' . ( $lhs->name || $lhs->value ) . ' (rem)'
                                 )
                             );
-                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $tmp ], comment => 'sub (rem)' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $tmp ], comment => 'sub (rem)' ) );
                         }
                         elsif ( $opcode eq 'min' || $opcode eq 'max' ) {
 
@@ -1975,43 +1967,24 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             # silently dropped, leaving the result equal to the lhs.
                             # Materialize both operands: a 64-bit immediate cannot be
                             # encoded inline, and cmp/xor need it in a register.
-                            my $l = $self->_reg_opnd( $mbb, $lhs, $inst->name . '_ml' );
-                            my $r = $self->_reg_opnd( $mbb, $rhs, $inst->name . '_mr' );
+                            my $l    = $self->_reg_opnd( $mbb, $lhs, $inst->name . '_ml' );
+                            my $r    = $self->_reg_opnd( $mbb, $rhs, $inst->name . '_mr' );
                             my $zero = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 );
                             my $i64  = Brocken::Lindsay::IR::Type::i64();
                             my $not  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => -1, type => $i64 );
-                            my $mask = Brocken::Jenny::MIR::MachineOperand->new(
-                                kind  => 'virt_reg',
-                                value => $inst->name . '_mmask',
-                                type  => $inst->type
-                            );
-                            my $t0 = Brocken::Jenny::MIR::MachineOperand->new(
-                                kind  => 'virt_reg',
-                                value => $inst->name . '_mt0',
-                                type  => $inst->type
+                            my $mask = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_mmask',
+                                type => $inst->type );
+                            my $t0
+                                = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_mt0', type => $inst->type );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $t0, $l ], comment => 'minmax lhs' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cmp', operands => [ $t0, $r ], comment => 'minmax cmp' ) );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $t0, $zero ], comment => 'minmax zero' )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'mov',
-                                    operands => [ $t0, $l ],
-                                    comment  => 'minmax lhs'
-                                )
-                            );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'cmp',
-                                    operands => [ $t0, $r ],
-                                    comment  => 'minmax cmp'
-                                )
-                            );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'mov',
-                                    operands => [ $t0, $zero ],
-                                    comment  => 'minmax zero'
-                                )
-                            );
-                            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'setl', operands => [$t0], comment => 'minmax lt' ) );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'setl', operands => [$t0], comment => 'minmax lt' ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -2026,6 +1999,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                     comment  => 'minmax mask=-(a<b)'
                                 )
                             );
+
                             if ( $opcode eq 'max' ) {
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2057,16 +2031,10 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'xor',
-                                    operands => [ $dst, $r ],
-                                    comment  => 'minmax sel'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $dst, $r ], comment => 'minmax sel' ) );
                         }
                         else {
                             $mbb->add_instruction(
-
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
                                     operands => [ $dst, $self->_lower_opnd($lhs) ],
@@ -2094,11 +2062,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         )
                     );
                 }
-                elsif (
-                    $inst->isa('Brocken::Lindsay::IR::Instruction::Fptosi')
-                    or $inst->isa('Brocken::Lindsay::IR::Instruction::Sitofp')
-                    )
-                {
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Fptosi') or $inst->isa('Brocken::Lindsay::IR::Instruction::Sitofp') ) {
 
                     # The destination and the source are of different classes, so
                     # the allocator gives each its own register from the type on
@@ -2109,7 +2073,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     my $to_int = $inst->isa('Brocken::Lindsay::IR::Instruction::Fptosi');
                     my $op     = $to_int ? 'fptosi' : 'sitofp';
                     my ($val)  = $inst->operands->@*;
-                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $dst    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => $op,
@@ -2737,8 +2701,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                     else {
-                        my $lhs_op = $self->_lower_opnd($lhs);
-                        my $rhs_op = $self->_wide_imm_opnd( $mbb, $self->_lower_opnd($rhs), $inst->name . '_rhs' );
+                        my $lhs_op  = $self->_lower_opnd($lhs);
+                        my $rhs_op  = $self->_wide_imm_opnd( $mbb, $self->_lower_opnd($rhs), $inst->name . '_rhs' );
                         my $result  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         my $cmp_lhs = $lhs_op;
                         if ( $lhs_op->kind eq 'imm' ) {
@@ -2787,7 +2751,11 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             # branch. The callee looked right in isolation --
                             # the value only ever appeared in the return
                             # register.
-                            my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->fp_return_register, type => $inst->type );
+                            my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'phys_reg',
+                                value => $abi->fp_return_register,
+                                type  => $inst->type
+                            );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'fmov',
@@ -2853,8 +2821,11 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mov',
-                            operands => [ $dst, $self->_lower_opnd( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) ) ],
-                            comment  => 'memory.size: no growable memory, report 0'
+                            operands => [
+                                $dst,
+                                $self->_lower_opnd( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => 0 ) )
+                            ],
+                            comment => 'memory.size: no growable memory, report 0'
                         )
                     );
                 }
@@ -2980,10 +2951,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                         }
                         else {
-                            my $val_op
-                                = $self->_wide_imm_opnd( $mbb, $self->_lower_opnd($val),
-                                ( $mem->value->{base} // 'st' ) . '_sv' );
-
+                            my $val_op = $self->_wide_imm_opnd( $mbb, $self->_lower_opnd($val), ( $mem->value->{base} // 'st' ) . '_sv' );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => ( $val_op->kind eq 'imm' ? 'store_imm' : 'store' ),
@@ -3053,7 +3021,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 comment  => "load $opcode operand"
                             )
                         );
-
                         if ( $opcode eq 'abs' ) {
 
                             # Branchless |x|: mask = x >> (bits-1) is 0 for a non-negative
@@ -3062,11 +3029,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             # complement, so the minimum value maps to itself, which is what
                             # a signed abs has to do when the result cannot be represented.
                             my $bits = $type->bits;
-                            my $mask = Brocken::Jenny::MIR::MachineOperand->new(
-                                kind  => 'virt_reg',
-                                value => $inst->name . '_abs_mask',
-                                type  => $type
-                            );
+                            my $mask
+                                = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_abs_mask', type => $type );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -3082,28 +3046,16 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 )
                             );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'xor',
-                                    operands => [ $dst, $mask ],
-                                    comment  => 'abs xor'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'xor', operands => [ $dst, $mask ], comment => 'abs xor' ) );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => 'sub',
-                                    operands => [ $dst, $mask ],
-                                    comment  => 'abs sub'
-                                )
-                            );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $dst, $mask ], comment => 'abs sub' ) );
                         }
                         else {
-
                             # RMW: the encoder negates $dst in place, so the value must already be there.
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'neg', operands => [$dst], comment => 'neg' ) );
                         }
                     }
-
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
                     my $val  = $inst->operands->[0];
@@ -3238,10 +3190,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         my $arg_type  = $args[$i]->type;
                         my $is_float  = $arg_type  && $arg_type->kind eq 'float';
                         my $is_i128   = !$is_float && $arg_type && $arg_type->kind eq 'int' && $arg_type->bits == 128;
-                        my $num_slots = $is_i128 ? 2 : 1;
-                        my $in_regs
-                            = $is_float  ? $fp_idx < @fp_regs
-                            :              $gp_idx + $num_slots <= @gp_regs;
+                        my $num_slots = $is_i128  ? 2                  : 1;
+                        my $in_regs   = $is_float ? $fp_idx < @fp_regs : $gp_idx + $num_slots <= @gp_regs;
                         if ($in_regs) {
                             if ($is_i128) {
                                 $arg_regs[$i] = [ $gp_regs[ $gp_idx++ ], $gp_regs[ $gp_idx++ ] ];
@@ -3264,8 +3214,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         my $is_float = $arg_type  && $arg_type->kind eq 'float';
                         my $is_i128  = !$is_float && $arg_type && $arg_type->kind eq 'int' && $arg_type->bits == 128;
                         if ( defined $arg_stack[$i] ) {
-                            my $off = $arg_stack[$i];
-                            my $slot = sub ($disp, $type) {
+                            my $off  = $arg_stack[$i];
+                            my $slot = sub ( $disp, $type ) {
                                 return Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
                                     value => { base => $stack_reg, disp => $disp, raw => 1 },
@@ -3287,7 +3237,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 }
                             }
                             else {
-
                                 # The register store encoder has no immediate
                                 # form, so a literal argument is materialized
                                 # into a virtual register first. A float literal
@@ -3300,9 +3249,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 # untyped it moved four bytes of an eight-byte
                                 # argument and the callee read the rest as
                                 # whatever the stack held.
-                                my $val = $is_float
-                                    ? $self->_materialize( $mbb, $args[$i] )
-                                    : $self->_reg_opnd( $mbb, $args[$i], "arg_stack$i" );
+                                my $val = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_reg_opnd( $mbb, $args[$i], "arg_stack$i" );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => $is_float ? 'fstore' : 'store',
@@ -4413,12 +4360,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
             )
         );
         $mbb->add_instruction(
-            Brocken::Jenny::MIR::MachineInstruction->new(
-                opcode   => 'fmov_gp2f',
-                operands => [ $dest, $gp ],
-                comment  => 'fmg: gp->arg reg'
-            )
-        );
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fmov_gp2f', operands => [ $dest, $gp ], comment => 'fmg: gp->arg reg' ) );
         return 1;
     }
 
@@ -4437,12 +4379,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
         return $opnd unless $opnd->kind eq 'imm';
         my $vreg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $ir_val->type );
         $mbb->add_instruction(
-            Brocken::Jenny::MIR::MachineInstruction->new(
-                opcode   => 'mov',
-                operands => [ $vreg, $opnd ],
-                comment  => 'materialize immediate'
-            )
-        );
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $vreg, $opnd ], comment => 'materialize immediate' ) );
         return $vreg;
     }
 
@@ -4462,76 +4399,11 @@ class Brocken::Jenny::Lowerer::X86_64 {
 
     method _wide_imm_opnd( $mbb, $opnd, $name ) {
         return $opnd unless $self->_imm_needs_reg($opnd);
-        my $vreg = Brocken::Jenny::MIR::MachineOperand->new(
-            kind  => 'virt_reg',
-            value => $name . '_w' . $wide_imm_seq++,
-            type  => $opnd->type
-        );
+        my $vreg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name . '_w' . $wide_imm_seq++, type => $opnd->type );
         $mbb->add_instruction(
-            Brocken::Jenny::MIR::MachineInstruction->new(
-                opcode   => 'mov',
-                operands => [ $vreg, $opnd ],
-                comment  => 'materialize wide immediate'
-            )
-        );
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $vreg, $opnd ], comment => 'materialize wide immediate' ) );
         return $vreg;
     }
 }
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Jenny::Lowerer::X86_64 - x86_64 Lowerer (Lindsay IR to MIR)
-
-=head1 DESCRIPTION
-
-Lowers Lindsay IR to machine-level MIR for the x86_64 architecture. Translates SSA instructions to register-based
-machine operations while following the System V AMD64 calling convention.
-
-=head2 Lowering Strategy
-
-=over 4
-
-=item B<Parameters> are mapped to their ABI register positions (rdi, rsi, rdx, rcx, r8, r9) with argument-area spill slots for stack-passed args
-
-=item B<Calls> set up arguments in the correct ABI registers/stack slots, generate explicit C<call_func> MIR instructions, avoid clobbering argument registers by emitting them in reverse order
-
-=item B<Boxing> serializes type-tagged values (int32->1, int64->2, i128->6, float->3, ptr->4, dynamic->5) into a 16-byte structure using the bump allocator
-
-=item B<Unboxing> reads the type tag from the dynamic value and extracts the payload, with optional type checking
-
-=item B<Refcounting> inserts C<incref> with atomic add and C<decref> with conditional free via the allocator's free-list
-
-=item B<Alloca> translates to MIR C<alloca> instructions with pre-scanned prologue frame adjustment
-
-=back
-
-=head2 Floating-Point Materialization
-
-The L<_materialize> method loads floating-point constants into XMM registers by first loading the bit pattern as an
-integer GP register, then transferring to XMM via C<fmov_gp2f> (MOVQ/MOVD).
-
-=head2 ABI Handling
-
-Uses B<rdi> (arg 1), B<rsi> (arg 2), B<rdx> (arg 3), B<rcx> (arg 4), B<r8> (arg 5), B<r9> (arg 6). The C<caller_regs>
-list in the ABI module must be ordered so non-parameter registers come first to avoid register allocator clashes with
-argument-setup MOVs.
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
-# ---------------------------------------------------------------------------
-# Lowerer: Lindsay IR -> Machine IR (ARM64 / AArch64)
+#
 1;

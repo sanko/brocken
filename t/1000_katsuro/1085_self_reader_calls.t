@@ -8,8 +8,7 @@ use Brocken::Jenny;
 use Brocken::Compiler;
 use Test2::Tools::Brocken qw(temp_path);
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
-
+use feature qw[class];
 my $host          = Brocken::Katsuro::Platform::parse();
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
@@ -36,10 +35,8 @@ my $wasm_platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 # ADJUST, declared methods, readers, writers, constructor -- is registered
 # first, and only then is any body lowered. Call resolution inside a method is
 # now independent of the order bodies happen to be lowered in.
-
 my @cases = (
-    {
-        name => 'a method calls its own reader',
+    {   name => 'a method calls its own reader',
         src  => <<'BROCKEN',
 class P {
     field i64 $x :param :reader;
@@ -50,8 +47,7 @@ return $p->get();
 BROCKEN
         want => 42,
     },
-    {
-        name => 'a method calls two of its own readers',
+    {   name => 'a method calls two of its own readers',
         src  => <<'BROCKEN',
 class P {
     field i64 $x :param :reader;
@@ -63,8 +59,7 @@ return $p->total();
 BROCKEN
         want => 42,
     },
-    {
-        name => 'a method calls its own writer, then reads the field back',
+    {   name => 'a method calls its own writer, then reads the field back',
         src  => <<'BROCKEN',
 class P {
     field i64 $x :param :reader :writer;
@@ -76,8 +71,7 @@ return $p->x();
 BROCKEN
         want => 42,
     },
-    {
-        name => 'one method calls another declared method that uses a reader',
+    {   name => 'one method calls another declared method that uses a reader',
         src  => <<'BROCKEN',
 class P {
     field i64 $x :param :reader;
@@ -89,8 +83,7 @@ return $p->twice();
 BROCKEN
         want => 42,
     },
-    {
-        name => 'the reader a method calls is the one the class advertises',
+    {   name => 'the reader a method calls is the one the class advertises',
         src  => <<'BROCKEN',
 class P {
     field i64 $x :param :reader;
@@ -102,8 +95,7 @@ return $p->via_middle();
 BROCKEN
         want => 40,
     },
-    {
-        name => 'a method call and a field read agree',
+    {   name => 'a method call and a field read agree',
         src  => <<'BROCKEN',
 class P {
     field i64 $x :param :reader;
@@ -114,8 +106,7 @@ return $p->both();
 BROCKEN
         want => 42,
     },
-    {
-        name => 'ADJUST runs before a later method reads the field through a reader',
+    {   name => 'ADJUST runs before a later method reads the field through a reader',
         src  => <<'BROCKEN',
 class P {
     field i64 $x :param :reader;
@@ -127,8 +118,7 @@ return $p->get();
 BROCKEN
         want => 40,
     },
-    {
-        name => 'a class with no fields still lowers its methods',
+    {   name => 'a class with no fields still lowers its methods',
         src  => <<'BROCKEN',
 class P {
     field i64 $x :param :reader;
@@ -146,7 +136,6 @@ BROCKEN
 # The bug was an ordering bug, so check the order directly rather than trusting
 # that the bodies happen to come out right. A declared method must be lowered
 # into a function object that already exists.
-
 {
     my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 class P {
@@ -155,7 +144,6 @@ class P {
 }
 BROCKEN
     my %by_name = map { $_->name => $_ } $module->functions->@*;
-
     ok( $by_name{'P::get'},   'the declared method was registered' );
     ok( $by_name{'P::x'},     'the generated reader was registered' );
     ok( $by_name{'P::set_x'}, 'the generated writer was registered' );
@@ -163,16 +151,13 @@ BROCKEN
 
     # The reader has to exist as a callable target, and the method body has to
     # point at it rather than being lowered into a stale or empty function.
-    is( $by_name{'P::x'}->blocks->@*, 1, 'the reader has a body' )
-        if $by_name{'P::x'};
-    is( $by_name{'P::get'}->blocks->@*, 1, 'the method was lowered, not skipped' )
-        if $by_name{'P::get'};
+    is( $by_name{'P::x'}->blocks->@*,   1, 'the reader has a body' )               if $by_name{'P::x'};
+    is( $by_name{'P::get'}->blocks->@*, 1, 'the method was lowered, not skipped' ) if $by_name{'P::get'};
 }
 
 # A declared method wins over a generated accessor of the same name. Allowing a
 # later registration to overwrite `$functions` would leave two functions sharing
 # one name in the module and silently retarget every call.
-
 {
     my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
 class P {
@@ -185,7 +170,6 @@ BROCKEN
 }
 
 # --- Wasm ---------------------------------------------------------------------
-
 sub run_wasm {
     my ( $src, $name ) = @_;
     my $module  = Brocken::Compiler->new->compile($src);
@@ -198,21 +182,18 @@ sub run_wasm {
     unlink $out;
     return $r;
 }
-
 for my $case (@cases) {
-    SKIP: {
+SKIP: {
         skip 'wasmtime not available', 1 unless $wasmtime_path && -f $wasmtime_path;
         is( run_wasm( $case->{src}, 'self_reader_wasm' ), $case->{want}, "wasm: $case->{name}" );
     }
 }
 
 # --- Native -------------------------------------------------------------------
-
 {
     my $brocken = Brocken->new();
-    SKIP: {
+SKIP: {
         skip 'Not native', scalar @cases unless $brocken->platform->is_native;
-
         for my $case (@cases) {
             my $module = Brocken::Compiler->new->compile( $case->{src} );
             my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -223,5 +204,4 @@ for my $case (@cases) {
         }
     }
 }
-
 done_testing;

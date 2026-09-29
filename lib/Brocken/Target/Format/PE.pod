@@ -1,0 +1,69 @@
+=head1 NAME
+
+Brocken::Target::Format::PE - Writes 64-bit Windows PE object files
+
+=head1 SYNOPSIS
+
+    use Brocken::Target::Format::PE;
+
+    my $pe = Brocken::Target::Format::PE->new;
+    $pe->write_bin( 'prog.exe', $code, $data, 'x64' );
+
+    # or let Brocken::Target choose it
+    use Brocken::Target;
+    my $format = Brocken::Target->for( 'win64', 'x64' )->format;
+
+=head1 DESCRIPTION
+
+Writes 64-bit Windows C<PE32+> console executables. This is the format L<Brocken::Target> selects for the C<win64>
+target. It does not write shared libraries; see L</CAVEATS>.
+
+The executables it writes do not link to the C runtime. They import three functions from C<kernel32.dll> by name, which
+is enough for the kind of program the compiler emits: C<GetStdHandle>, C<WriteFile>, and C<ExitProcess>.
+
+=head1 METHODS
+
+=head2 C<write_bin( $filename, $text, $data, $arch, $os = 'win64' )>
+
+Writes a C<PE32+> executable and returns C<$filename>. C<$os> is accepted but not used.
+
+C<$arch> selects the C<Machine> field: C<'arm64'> gives C<0xAA64>, and anything else, including C<'x64'> and any
+unrecognised value, gives C<0x8664>. The image base is C<0x140000000>. File alignment is C<0x200> and section alignment
+is C<0x1000>.
+
+Three sections are emitted: C<.text> at RVA C<0x1000>, C<.data> at C<0x2000>, and C<.idata> at C<0x3000>. C<.text> is
+read-execute, and C<.data> and C<.idata> are read-write. The import directory, import lookup table, import address
+table, and hint/name entries for the three C<kernel32.dll> functions are built by hand inside C<.idata>.
+
+The C<SizeOfImage> field in the optional header is patched in place after the header block is assembled, and the file
+is written without a section table address beyond what the PE format requires.
+
+=head1 CAVEATS
+
+=head2 No shared libraries
+
+This class overrides C<write_bin> only. It does not implement C<write_lib>, so feeding a PE target through
+L<Brocken::Target>'s format accessor and calling C<write_lib> on the result dies with C<Unimplemented>. Note that C<<
+$pe->can('write_lib') >> is still true, because the declaration is inherited from L<Brocken::Target::Format>, so C<can>
+is not a usable test; only calling the method tells you.
+
+Shared libraries for Windows go through L<Brocken::Jenny::Linker::PE>.
+
+=head2 The timestamp makes output non-reproducible
+
+The PE COFF header C<TimeDateStamp> is set to the current C<time()>, so writing the same program twice produces
+different bytes. This is normal for PE and matches what a toolchain does, but it means these files cannot be compared
+byte for byte.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

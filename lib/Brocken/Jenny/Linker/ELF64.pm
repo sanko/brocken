@@ -6,17 +6,9 @@ use Brocken::Katsuro::Platform;
 
 class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
     use Brocken::Jenny::Codegen::ARM64::Inst;
-    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
+    use Fcntl      qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
     use IPC::Open3 qw(open3);
     use File::Spec ();
-
-=pod
-
-=head1 NAME
-
-Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
-
-=cut
 
     # Structurally compliant segment layout grouping all read-only sections
     # in the RX segment, and keeping only writable sections in the RW segment.
@@ -182,7 +174,7 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         # so `gcc` is really gcc.exe and a plain catfile test never finds it.
         my @names = ($cc);
         if ( my $ext = $ENV{PATHEXT} ) {
-            push @names, map { $cc . $_ } grep { length } split /;/, $ext;
+            push @names, map { $cc . $_ } grep {length} split /;/, $ext;
         }
         for my $dir ( File::Spec->path ) {
             $dir = File::Spec->curdir if !defined $dir || !length $dir;
@@ -208,7 +200,6 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         # the platform default.
         return undef unless defined $cc && length $cc;
         return undef unless _executable($cc);
-
         open my $null, '>', File::Spec->devnull or return undef;
         my $out;
         my $pid = open3( undef, $out, $null, $cc, '-pthread', "-print-file-name=$lib" );

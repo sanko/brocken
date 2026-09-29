@@ -7,7 +7,7 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # Converting a float to an integer.
 #
@@ -30,17 +30,14 @@ use feature               qw[class];
 # look plausible. `7 / 2` is written as a division because decimal literals are
 # a separate gap of their own, and `0 - $h` is written as a subtraction for the
 # same reason, since `-7` as a float initialiser is refused.
-
 my $brocken = Brocken->new;
-
 SKIP: {
     skip 'Not native', 16 unless $brocken->platform->is_native;
-
     for my $ftype (qw[f64 f32]) {
         for my $itype (qw[i32 i64]) {
-            is( truncate_ok( $ftype, $itype, 7,  3 ),  0, "native: $ftype 3.5 converts to $itype as 3" );
-            is( truncate_ok( $ftype, $itype, 9,  4 ),  0, "native: $ftype 4.5 converts to $itype as 4" );
-            is( truncate_ok( $ftype, $itype, 7, -3 ),  0, "native: $ftype -3.5 converts to $itype as -3, not -4" );
+            is( truncate_ok( $ftype, $itype, 7,  3 ), 0, "native: $ftype 3.5 converts to $itype as 3" );
+            is( truncate_ok( $ftype, $itype, 9,  4 ), 0, "native: $ftype 4.5 converts to $itype as 4" );
+            is( truncate_ok( $ftype, $itype, 7, -3 ), 0, "native: $ftype -3.5 converts to $itype as -3, not -4" );
         }
     }
 
@@ -57,7 +54,6 @@ SKIP: {
     # folded away and both halves of the round trip stay live.
     is( chained_ok(), 0, 'native: a chain of float and integer conversions is consistent' );
 }
-
 done_testing;
 
 # A half-integer converted to an integer.  `$num` over two makes the value and
@@ -66,7 +62,6 @@ done_testing;
 # only one of them is right.
 sub truncate_ok {
     my ( $ftype, $itype, $num, $want ) = @_;
-
     my $sign = $want < 0 ? '0 - $h' : '$h';
     my $src  = <<"BROCKEN";
 my $ftype \$h = $num;
@@ -83,7 +78,6 @@ BROCKEN
 # a call rather than by a store to the alloca area.
 sub param_ok {
     my ( $ftype, $itype ) = @_;
-
     my $src = <<"BROCKEN";
 sub half( $ftype \$h ) -> $itype {
     my $ftype \$t = \$h / 2;
@@ -125,7 +119,7 @@ BROCKEN
 }
 
 sub run {
-    my ($src) = @_;
+    my ($src)  = @_;
     my $module = Brocken::Compiler->new->compile($src);
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = $brocken->tmpdir . '/f2i' . $brocken->ext;

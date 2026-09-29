@@ -10,18 +10,6 @@ class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
     field $ENABLE_COFF = 0;
 
-=pod
-
-=head1 NAME
-
-Brocken::Jenny::Linker::PE - 64-bit Portable Executable (PE32+) Generator
-
-=head1 DESCRIPTION
-
-Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64).
-
-=cut
-
     method write_executable ( $output_file, $code_data, $platform, $passed_argument = undef, $debug_bytes = undef ) {
 
         # Ensure $platform is normalized into a platform object if a raw string is passed

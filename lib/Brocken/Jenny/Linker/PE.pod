@@ -1,0 +1,83 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker::PE - 64-bit Portable Executable (PE32+) Generator
+
+=head1 DESCRIPTION
+
+Generates PE binaries for modern 64-bit Windows (x86_64 and ARM64). Inherits from L<Brocken::Jenny::Linker>.
+
+=head1 METHODS
+
+=head2 C<write_executable( ..., [ ... ] )>
+
+    $pe->write_executable( $output_file, $code_data, $platform, $passed_argument, $debug_bytes )
+
+Writes a complete PE32+ image to C<$output_file>: the DOS stub, the COFF header, the section table, the import and
+export directories, and the code itself.
+
+The entry stub differs per architecture. The ARM64 one is a plain frame setup, a relative call to C<main>, and a
+truncation of the exit code to eight bits. The x86_64 one additionally reserves a 1 MB heap by moving the stack pointer
+and passes that base in C<rcx>, then reserves the 40 bytes of shadow space the calling convention requires around the
+call to C<main>.
+
+Expected args:
+
+=over
+
+=item C<$output_file> - The path to write the image to.
+
+=item C<$code_data> - The machine code to link. Either a plain string, a hashref carrying a C<binary> key, or an
+arrayref of C<{ name, bytes, fixups }> hashes when the image holds more than one function. The arrayref form is what
+lets exported functions and cross-function call fixups be resolved at link time.
+
+=item C<$platform> - The target platform, or a string it can be parsed from.
+
+=item C<$passed_argument> - Optional. An argument to hand to C<main>, for the targets whose entry stub has a slot to
+put it in. Defaults to C<undef>, which passes nothing.
+
+=item C<$debug_bytes> - Optional. The prebuilt debug sections to append, when the caller has already generated them.
+Defaults to C<undef>, which omits the debug sections.
+
+=back
+
+=head2 C<write_shared_library( ..., [ ... ] )>
+
+    $pe->write_shared_library( $output_file, $code_bytes, $platform, $debug_bytes )
+
+Writes the image as a DLL rather than an executable. This calls C<write_executable> and then patches the COFF
+characteristics field to add C<IMAGE_FILE_DLL> alongside the flags an executable already carries, so one code path
+covers both output kinds.
+
+Expected args:
+
+=over
+
+=item C<$output_file> - The path to write the DLL to.
+
+=item C<$code_bytes> - The machine code to link, in the same forms C<write_executable> accepts.
+
+=item C<$platform> - The target platform, or a string it can be parsed from.
+
+=item C<$debug_bytes> - Optional. The prebuilt debug sections to append. Defaults to C<undef>, which omits them.
+
+=back
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

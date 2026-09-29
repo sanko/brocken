@@ -8,8 +8,7 @@ use Brocken::Jenny;
 use Brocken::Compiler;
 use Test2::Tools::Brocken qw(temp_path);
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
-
+use feature qw[class];
 my $host          = Brocken::Katsuro::Platform::parse();
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
@@ -40,7 +39,6 @@ my $wasm_platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 # Zero-filling a parameterless default is not a flourish. Without it the same
 # uninitialized read is still there for a field that has no default at all, so
 # omitting an argument has to mean "zero" whether or not a default exists.
-
 # The call site is the only place that knows, so the number the constructor
 # actually receives is read back out of the generated call. These assert the
 # substitution directly rather than inferring it from a run.
@@ -87,40 +85,21 @@ sub ctor_args_for {
     }
     return undef;
 }
-
-is(
-    ctor_args_for('class P { field i16 $b :param :reader = 5; } my ptr $p = P->new();'),
-    'i16 5',
-    'an omitted :param with a default passes the default, not zero'
-);
-
-is(
-    ctor_args_for('class P { field i8 $a :param :reader = 1; field i16 $b :param :reader = 2; } my ptr $p = P->new();'),
-    'i8 1,i16 2',
-    'every omitted :param is filled, in declaration order'
-);
-
-is(
-    ctor_args_for('class P { field i32 $c :param :reader; } my ptr $p = P->new();'),
-    'i32 0',
-    'an omitted :param with no default passes a zero of its own type'
-);
-
-is(
-    ctor_args_for('class P { field i16 $b :param :reader = 5; } my ptr $p = P->new(9);'),
-    'i16 9',
-    'a supplied argument is passed through and the default is not consulted'
-);
+is( ctor_args_for('class P { field i16 $b :param :reader = 5; } my ptr $p = P->new();'),
+    'i16 5', 'an omitted :param with a default passes the default, not zero' );
+is( ctor_args_for('class P { field i8 $a :param :reader = 1; field i16 $b :param :reader = 2; } my ptr $p = P->new();'),
+    'i8 1,i16 2', 'every omitted :param is filled, in declaration order' );
+is( ctor_args_for('class P { field i32 $c :param :reader; } my ptr $p = P->new();'),
+    'i32 0', 'an omitted :param with no default passes a zero of its own type' );
+is( ctor_args_for('class P { field i16 $b :param :reader = 5; } my ptr $p = P->new(9);'),
+    'i16 9', 'a supplied argument is passed through and the default is not consulted' );
 
 # Filling the gap after `b` also has to fill `c` after it: the signature is
 # positional, so there is no argument that could mean "skip the one in front of
 # me". A supplied first argument is still the one it was, and a later omission
 # still gets a zero.
-is(
-    ctor_args_for('class P { field i16 $b :param :reader = 5; field i32 $c :param :reader; } my ptr $p = P->new(3);'),
-    'i16 3,i32 0',
-    'a supplied first argument is untouched and the one after it is zeroed'
-);
+is( ctor_args_for('class P { field i16 $b :param :reader = 5; field i32 $c :param :reader; } my ptr $p = P->new(3);'),
+    'i16 3,i32 0', 'a supplied first argument is untouched and the one after it is zeroed' );
 
 # The default is kept as an expression and re-lowered per call rather than
 # pre-lowered into the class table, so it cannot be captured from whichever
@@ -138,10 +117,8 @@ is(
 # A substitution that reads back correctly in IR can still store the wrong width
 # or the wrong offset, so each program returns 42 when every field reads back and
 # 1 otherwise, because a native exit code is a single byte and cannot carry -7.
-
 my @cases = (
-    {
-        name => 'an omitted :param with a default reads the default',
+    {   name => 'an omitted :param with a default reads the default',
         src  => <<'BROCKEN',
 class P { field i16 $b :param :reader = 5; }
 my ptr $p = P->new();
@@ -149,8 +126,7 @@ if ($p->b() == 5) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a default is an expression, evaluated per construction',
+    {   name => 'a default is an expression, evaluated per construction',
         src  => <<'BROCKEN',
 class P { field i16 $b :param :reader = 2 + 3; }
 my ptr $p = P->new();
@@ -158,8 +134,7 @@ if ($p->b() == 5) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a negative default is sign-extended into an i8',
+    {   name => 'a negative default is sign-extended into an i8',
         src  => <<'BROCKEN',
 class P { field i8 $b :param :reader = -7; }
 my ptr $p = P->new();
@@ -167,8 +142,7 @@ if ($p->b() == -7) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a default on a field that is not a :param still applies',
+    {   name => 'a default on a field that is not a :param still applies',
         src  => <<'BROCKEN',
 class P { field i16 $b :reader = 5; }
 my ptr $p = P->new();
@@ -176,8 +150,7 @@ if ($p->b() == 5) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'an omitted :param with no default reads zero',
+    {   name => 'an omitted :param with no default reads zero',
         src  => <<'BROCKEN',
 class P { field i16 $b :param :reader = 5; field i32 $c :param :reader; }
 my ptr $p = P->new();
@@ -185,8 +158,7 @@ if ($p->c() == 0) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'defaults for several omitted fields, of every width',
+    {   name => 'defaults for several omitted fields, of every width',
         src  => <<'BROCKEN',
 class P {
     field i8  $a :param :reader = 1;
@@ -205,16 +177,14 @@ if ($p->a() == 1) {
 return 1;
 BROCKEN
     },
-    {
-        name => 'a supplied argument beats the default',
+    {   name => 'a supplied argument beats the default',
         src  => <<'BROCKEN',
 class P { field i16 $b :param :reader = 5; }
 my ptr $p = P->new(9);
 if ($p->b() == 9) { return 42; }
 return 1;
 BROCKEN
-    },
-    {
+    }, {
         # `=` means "use the default when the argument is missing", not "use it
         # when the value is false", so an explicit zero has to survive. A
         # `//=`-style test would fail here, and would have caught the original
@@ -227,8 +197,7 @@ if ($p->b() == 0) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'a default and an explicit ADJUST compose',
+    {   name => 'a default and an explicit ADJUST compose',
         src  => <<'BROCKEN',
 class P {
     field i16 $b :param :reader = 5;
@@ -239,8 +208,7 @@ if ($p->b() == 10) { return 42; }
 return 1;
 BROCKEN
     },
-    {
-        name => 'two classes, one of them omitting an argument',
+    {   name => 'two classes, one of them omitting an argument',
         src  => <<'BROCKEN',
 class A { field i16 $x :param :reader = 11; }
 class B { field i16 $y :param :reader = 22; }
@@ -251,8 +219,7 @@ if ($a->x() == 11) {
 }
 return 1;
 BROCKEN
-    },
-    {
+    }, {
         # The fill happens in whichever function the call sits in, so a
         # constructor reached from a method body has to be filled too.
         name => 'a default applies to a construction inside a method body',
@@ -284,19 +251,16 @@ sub run_wasm {
     unlink $out;
     return $r;
 }
-
 for my $case (@cases) {
-    SKIP: {
+SKIP: {
         skip 'wasmtime not available', 1 unless $wasmtime_path && -f $wasmtime_path;
         is( run_wasm( $case->{src}, 'def_wasm' ), 42, "wasm: $case->{name}" );
     }
 }
-
 {
     my $brocken = Brocken->new;
-    SKIP: {
+SKIP: {
         skip 'Not native', scalar @cases unless $brocken->platform->is_native;
-
         for my $case (@cases) {
             my $module = Brocken::Compiler->new->compile( $case->{src} );
             my $funcs  = $brocken->codegen->emit_functions( $module->functions );
@@ -307,5 +271,4 @@ for my $case (@cases) {
         }
     }
 }
-
 done_testing;

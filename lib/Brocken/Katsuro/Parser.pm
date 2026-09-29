@@ -65,7 +65,7 @@ class Brocken::Katsuro::Parser {
         return $needs_feature ? ( $features->{$needs_feature} || 0 ) : 1;
     }
 
-    # === Top level ===
+    # Top level
     method parse_program() {
         my @stmts;
         while ( !$self->check('EOF') ) {
@@ -81,7 +81,7 @@ class Brocken::Katsuro::Parser {
         return $self->parse_statement();
     }
 
-    # === Statements ===
+    # Statements
     method parse_statement() {
         if ( $self->check( 'KEYWORD', 'use' ) ) {
             $self->advance();
@@ -231,7 +231,7 @@ class Brocken::Katsuro::Parser {
         return Brocken::Katsuro::AST::Stmt::Block->new( $self->_pos_token($brace_token), statements => \@stmts );
     }
 
-    # === Sub declarations ===
+    # Sub declarations
     method parse_sub_decl() {
         my $sub_token  = $self->advance();
         my $name_token = $self->consume( 'IDENT', undef, "Expected subroutine name after 'sub'" );
@@ -293,7 +293,7 @@ class Brocken::Katsuro::Parser {
         );
     }
 
-    # === Class declarations ===
+    # Class declarations
     method parse_class_decl() {
         my $class_token = $self->advance();
         my $name_token  = $self->consume( 'IDENT', undef, "Expected class name after 'class'" );
@@ -336,6 +336,7 @@ class Brocken::Katsuro::Parser {
         my $fname      = substr( $fvar_token->{value}, 1 );
         my @attrs;
         my $align;
+
         while ( $self->check( 'OP', ':' ) ) {
             $self->advance();
             my $attr_token = $self->consume( 'IDENT', undef, "Expected attribute name after ':'" );
@@ -345,17 +346,16 @@ class Brocken::Katsuro::Parser {
             # that greps @attrs for a name should see them.
             if ( $attr_token->{value} eq 'pack' ) {
                 $align = 1;
-                if ( $self->check( '(' ) ) {
+                if ( $self->check('(') ) {
                     $self->advance();
                     my $n_token = $self->consume( 'NUM', undef, "Expected a byte count after ':pack('" );
-                    my $n       = 0 + $n_token->{value};    # the lexer hands back a string
+                    my $n       = 0 + $n_token->{value};                                                    # the lexer hands back a string
 
                     # The same constraint C puts on an alignment: it has to be
                     # a power of two, because the layout rounds offsets up to a
                     # multiple of it. Checked here rather than in the lowerer
                     # so the diagnostic can point at the token.
-                    Carp::croak( "':pack($n)' alignment must be a positive power of two at " . $self->_loc($n_token) )
-                        if $n < 1 || $n & ( $n - 1 );
+                    Carp::croak( "':pack($n)' alignment must be a positive power of two at " . $self->_loc($n_token) ) if $n < 1 || $n & ( $n - 1 );
                     $align = $n;
                     $self->consume( ')', undef, "Expected ')' to close ':pack($n)'" );
                 }
@@ -432,7 +432,7 @@ class Brocken::Katsuro::Parser {
         );
     }
 
-    # === Expressions (Pratt Parser) ===
+    # Pratt Parser Expressions
     method parse_expression($precedence) {
         my $token = $self->advance();
         my $left  = $self->nud($token);
@@ -453,9 +453,10 @@ class Brocken::Katsuro::Parser {
             # not store eight bytes into a four-byte slot. The value is a plain
             # Perl number from here on: the token holds the spelling, and
             # `1e3` has to be 1000 rather than the string.
-            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token),
+            return Brocken::Katsuro::AST::Expr::Const->new(
+                $self->_pos_token($token),
                 value => $token->{float} ? 0 + $token->{value} : $token->{value},
-                type  => $token->{float} ? 'f64' : 'Int',
+                type  => $token->{float} ? 'f64'               : 'Int',
             );
         }
         if ( $token->{type} eq 'STRING' ) {

@@ -1,0 +1,43 @@
+=head1 NAME
+
+Brocken::Target::OS::Linux - Linux target
+
+=head1 DESCRIPTION
+
+The Linux target, a subclass of L<Brocken::Target::OS>.
+
+It is POSIX and uses syscalls directly, its shared libraries use the C<.so> extension, and it has no executable
+extension. It is not BSD-derived, which matters for exactly one thing, C<is_bsd_like>, and that is what decides whether
+it gets the BSD syscall numbers or its own.
+
+=head1 THE ONLY PER-ARCHITECTURE TABLE
+
+Linux is the only system in the hierarchy whose C<write> and C<exit> numbers differ between architectures:
+
+    write   x64 = 1     arm64 = 64    riscv64 = 64
+    exit    x64 = 60    arm64 = 93    riscv64 = 93
+
+x86-64 uses the low numbers, and both 64-bit architectures use the same high ones, so AArch64 and RISC-V agree with
+each other and differ from x86-64. The base class tests the name and the architecture together to get this right, which
+is why a Linux target cannot be answered without knowing which architecture is being targeted.
+
+The page size is 4096 on all three, and the syscall number register is the usual C<rax>, C<x8>, and C<a7>.
+
+=head1 INHERITED
+
+This subclass declares no methods. Its C<ADJUST> block does one thing, which is to die unless the name it was given is
+exactly C<linux>, so a Linux object cannot end up carrying another system's name. Everything else is inherited from the
+base class.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

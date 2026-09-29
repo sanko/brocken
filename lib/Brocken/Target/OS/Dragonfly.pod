@@ -1,0 +1,45 @@
+=head1 NAME
+
+Brocken::Target::OS::Dragonfly - DragonFly BSD target
+
+=head1 DESCRIPTION
+
+The DragonFly BSD target, a subclass of L<Brocken::Target::OS>.
+
+It is POSIX and BSD-derived as far as the rest of the codebase is concerned, its shared libraries use the C<.so>
+extension, and it has no executable extension. The C<write> and C<exit> numbers, 4 and 1, come from the base class's
+BSD branch and are inherited.
+
+=head1 TWO SPELLINGS
+
+This is the one subclass whose C<ADJUST> block uses a pattern rather than an equality test, because it accepts two
+names: C<dragonfly> and C<dragonflybsd>. Both produce a C<Brocken::Target::OS::Dragonfly>, and the name is stored as
+given, so C<< ->name >> round-trips either way.
+
+The two spellings exist because they are both in use. C<dragonflybsd> is what perl reports in C<$^O>, since that is the
+name of the kernel, while the bare C<dragonfly> is the long-standing spelling in this codebase. C<detect_host>
+therefore maps the long one down to the short one rather than passing it through, which is why C<< detect_host->name >>
+is C<dragonfly> even when C<$^O> is C<dragonflybsd>.
+
+This is load-bearing, not cosmetic. C<is_bsd_like> is anchored at both ends, so an unanchored C<dragonfly> alternative
+in that pattern would report false for the longer C<dragonflybsd> spelling. A false there means the syscall lookups
+skip the BSD branch and fall through to C<undef>, so the numbers that get emitted would be missing. The test suite
+checks both spellings for exactly this reason.
+
+=head1 INHERITED
+
+This subclass declares no methods. Everything except the name check and the two accepted spellings is inherited from
+the base class.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

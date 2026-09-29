@@ -8,8 +8,7 @@ use Brocken::Jenny;
 use Brocken::Compiler;
 use Test2::Tools::Brocken qw(temp_path);
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
-
+use feature qw[class];
 my $host          = Brocken::Katsuro::Platform::parse();
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
@@ -27,12 +26,11 @@ my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 # whatever it takes. Native builds have a fixed host-carved region, `memory_size`
 # reports 0 there, and `memory_grow` lowers to a constant -1, which routes those
 # allocations down the same refusal path.
-
 sub build_wasm {
     my ( $src, $name ) = @_;
     my $module  = Brocken::Compiler->new->compile($src);
     my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
-    my $out = temp_path($name) . '.wasm';
+    my $out     = temp_path($name) . '.wasm';
     Brocken::Jenny::Linker::Wasm->new->write_executable( $out, $codegen->emit_functions( $module->functions ), $platform );
     return $out;
 }
@@ -49,7 +47,6 @@ sub run_wasm {
 }
 
 # --- The lowering: checkable without wasmtime -------------------------------
-
 # `lower_intrinsic` built a store *before* dispatching on the intrinsic name, so
 # every intrinsic that was not `ptr_add`..`load_i64` emitted a store with
 # undefined operands ahead of its real instruction. `store_i64` got away with it
@@ -59,7 +56,7 @@ sub run_wasm {
 # even though the runtime only needs `store_i64`.
 {
     my $module = eval {
-        Brocken::Compiler->new->compile( <<'BROCKEN' );
+        Brocken::Compiler->new->compile(<<'BROCKEN');
 my i32 $a = 1024;
 my i32 $loaded = Brocken::load_i32($a);
 my i32 $pages  = Brocken::memory_size();
@@ -68,7 +65,6 @@ return $loaded + $pages + $grew;
 BROCKEN
     };
     ok( $module, 'load_i32 and the memory intrinsics all lower' ) or diag $@;
-
     my @broken;
     for my $fn ( $module->functions->@* ) {
         for my $bb ( $fn->blocks->@* ) {
@@ -95,8 +91,8 @@ sub opcodes_of {
 {
     my $module  = Brocken::Compiler->new->compile('return 1;');
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
-    my ($fn) = grep { $_->name eq 'Brocken::Runtime::bump_alloc' } $module->functions->@*;
-    my $sizes = opcodes_of( $lowerer->lower($fn) );
+    my ($fn)    = grep { $_->name eq 'Brocken::Runtime::bump_alloc' } $module->functions->@*;
+    my $sizes   = opcodes_of( $lowerer->lower($fn) );
     ok( $sizes->{memory_grow}, 'bump_alloc emits a memory.grow' );
     ok( $sizes->{memory_size}, 'bump_alloc asks the host how much memory it has' );
 }
@@ -106,21 +102,19 @@ sub opcodes_of {
 {
     my $module  = Brocken::Compiler->new->compile('return 1;');
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
-    my ($fn) = grep { $_->name eq 'Brocken::Runtime::_init' } $module->functions->@*;
-    my $sizes = opcodes_of( $lowerer->lower($fn) );
-    ok( $sizes->{memory_size}, '_init reads the granted memory size' );
+    my ($fn)    = grep { $_->name eq 'Brocken::Runtime::_init' } $module->functions->@*;
+    my $sizes   = opcodes_of( $lowerer->lower($fn) );
+    ok( $sizes->{memory_size},  '_init reads the granted memory size' );
     ok( !$sizes->{memory_grow}, '_init does not eagerly grow' );
 }
 
 # --- Execution --------------------------------------------------------------
-
 my @cases = (
 
     # 30000 eight-byte objects is 240000 bytes: four times the single page the
     # linker declares, and each allocation past that page has to grow memory to
     # succeed. Before this, the run trapped partway through the loop.
-    {
-        name => '30000 objects past the declared page grow memory',
+    {   name => '30000 objects past the declared page grow memory',
         prog => <<'BROCKEN',
 class P { field i64 $x :param :reader; }
 BROCKEN
@@ -136,17 +130,16 @@ BROCKEN
     # A single block that starts inside one page and ends far outside it: this is
     # the case a limit seeded at heap_base + 1MiB would happily hand out without
     # ever asking the host, and it wrote out of bounds.
-    {
-        name   => 'one allocation spanning four pages is backed',
-        prog   => '',
-        tail   => 'my ptr $p = Brocken::Runtime::bump_alloc(1024, 900000); if ($p == 0) { return -1; } Brocken::store_i64($p, 42); return Brocken::load_i64($p);',
-        want   => 42,
+    {   name => 'one allocation spanning four pages is backed',
+        prog => '',
+        tail =>
+            'my ptr $p = Brocken::Runtime::bump_alloc(1024, 900000); if ($p == 0) { return -1; } Brocken::store_i64($p, 42); return Brocken::load_i64($p);',
+        want => 42,
     },
 
     # Growth is bounded by the heap the host asked for. A block past the cap is
     # refused instead of asking the host for however much it takes.
-    {
-        name => 'an allocation past the 1MiB cap is refused',
+    {   name => 'an allocation past the 1MiB cap is refused',
         prog => '',
         tail => 'my ptr $p = Brocken::Runtime::bump_alloc(1024, 2097152); if ($p == 0) { return -1; } return 42;',
         want => -1,
@@ -160,8 +153,7 @@ BROCKEN
     # array past the declared 64 KiB page trapped. Arrays now go through
     # `bump_alloc` like every other heap block: one cursor, one growth path, one
     # cap. This asserts the two no longer overlap.
-    {
-        name => 'an array and the objects after it do not collide',
+    {   name => 'an array and the objects after it do not collide',
         prog => <<'BROCKEN',
 class P { field i64 $x :param :reader; }
 BROCKEN
@@ -181,29 +173,25 @@ BROCKEN
 
     # The case the uncapped cursor could not serve at all: a 128 KiB array, well
     # past the single declared page, now grows memory to be backed.
-    {
-        name   => 'an array larger than the declared page is backed',
-        prog   => '',
-        tail   => 'my [i64; 16384] $a; $a[0] = 7; $a[16383] = 9; if ($a[0] + $a[16383] != 16) { return 90; } return 11;',
-        want   => 11,
+    {   name => 'an array larger than the declared page is backed',
+        prog => '',
+        tail => 'my [i64; 16384] $a; $a[0] = 7; $a[16383] = 9; if ($a[0] + $a[16383] != 16) { return 90; } return 11;',
+        want => 11,
     },
 
     # Routing arrays through the shared allocator also puts them under the cap
     # the host asked for. This asserts the header is intact after an array: a
     # 2 MiB request is still refused, which only holds if `cap` survived.
-    {
-        name => 'the cap still holds after an array is used',
+    {   name => 'the cap still holds after an array is used',
         prog => '',
         tail => 'my [i64; 4] $a; $a[0] = 1; my ptr $p = Brocken::Runtime::bump_alloc(1024, 2097152); if ($p == 0) { return -1; } return 42;',
         want => -1,
     },
 );
-
 for my $case (@cases) {
-    SKIP: {
+SKIP: {
         skip 'wasmtime not available', 1 unless $wasmtime_path && -f $wasmtime_path;
-        is( run_wasm( $case->{prog} . $case->{tail}, 'wasm_memgrow_exec' ),
-            $case->{want}, "$case->{name}: returns $case->{want}" );
+        is( run_wasm( $case->{prog} . $case->{tail}, 'wasm_memgrow_exec' ), $case->{want}, "$case->{name}: returns $case->{want}" );
     }
 }
 
@@ -236,7 +224,6 @@ BROCKEN
 }
 
 # --- Native -----------------------------------------------------------------
-
 # A native build has a fixed host-carved region rather than a page it can grow,
 # so `memory_size` reports 0 and `memory_grow` lowers to a constant -1. Both are
 # asserted through behaviour rather than a hardcoded heap base: on native the base
@@ -246,7 +233,6 @@ BROCKEN
     my $brocken = Brocken->new();
 SKIP: {
         skip 'Not native', 4 unless $brocken->platform->is_native;
-
         my $run = sub {
             my ( $name, $src, $want ) = @_;
             my $module = Brocken::Compiler->new->compile($src);
@@ -256,9 +242,7 @@ SKIP: {
             system $file;
             is( $? >> 8, $want, "native: $name returns $want" );
         };
-
-        $run->(
-            'memgrow_size', <<'BROCKEN', 7 );
+        $run->( 'memgrow_size', <<'BROCKEN', 7 );
 my i32 $pages = Brocken::memory_size();
 if ($pages == 0) { return 7; }
 return 9;
@@ -272,5 +256,4 @@ BROCKEN
         $run->( 'memgrow_refuse', "return Brocken::memory_grow(1);\n", 255 );
     }
 }
-
 done_testing;

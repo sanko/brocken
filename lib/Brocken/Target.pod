@@ -1,0 +1,215 @@
+=head1 NAME
+
+Brocken::Target - Picks the architecture, ABI, and object file format for a target
+
+=head1 SYNOPSIS
+
+    use Brocken::Target;
+
+    my $target = Brocken::Target->for( 'linux', 'x64' );
+
+    my $asm = $target->arch_asm;
+    $asm->sub_imm( 'rsp', 56 );
+    $asm->emit_print_str( $target->os_object, 0, 6 );
+    $asm->emit_exit_proc( $target->os_object, 42 );
+
+    my $name = $target->exe_name('prog');
+    $target->format->write_bin( $name, $asm->code, 'hello', 'x64', 'linux' );
+
+    system $name;    # prints hello, exits 42
+
+C<emit_print_str> and C<emit_exit_proc> are the assembler's high-level helpers, and they are where the OS object earns
+its place: each one asks it for the syscall number and the number register to use. Building the same program out of the
+C<mov_imm> and C<syscall> primitives is possible but is what those two methods are there to avoid.
+
+=head1 DESCRIPTION
+
+One object that answers the question a caller has to ask four times over: given an operating system and an
+architecture, which assembler, ABI, and object file format classes do I use?
+
+There are three hierarchies under this one, and they are selected together because they are not independent. The format
+follows from the OS, since there is no way to produce an ELF for Windows or a PE for macOS. The assembler follows from
+the architecture alone. The ABI is per-architecture and not per OS, so it is a single class that takes the architecture
+as an argument rather than a hierarchy of its own.
+
+This is the one place that selection is made. Callers that need a format pick one here instead of deciding from the OS
+name themselves, so adding an architecture or an object format does not mean finding every site that would have made
+the same guess.
+
+=head1 THE THREE HIERARCHIES
+
+=over
+
+=item L<Brocken::Target::OS>
+
+The operating system. One class and ten subclasses. Answers POSIX-ness, whether the backend makes syscalls, the two
+syscall numbers, the file naming conventions, the page size, and the syscall number register. The normal constructor is
+C<from_name>, and C<detect_host> finds the current one.
+
+=item L<Brocken::Target::Architecture::X64>, L<Brocken::Target::Architecture::ARM64>, L<Brocken::Target::Architecture::RISCV64>
+
+The assembler. These are not subclasses of a common base, because there is nothing to inherit; each is a standalone
+class that accumulates machine code into a C<code> string. They have no common parent and none is added here.
+
+=item L<Brocken::Target::Format::ELF>, L<Brocken::Target::Format::PE>, L<Brocken::Target::Format::MachO>
+
+The object file format. All three subclass L<Brocken::Target::Format>, whose C<write_bin> and C<write_lib> are
+declarations rather than implementations.
+
+=item L<Brocken::Target::ABI>
+
+The condition code table. A single class with a C<cc> method taking an architecture and a condition name, rather than a
+hierarchy, because the tables differ only between x86-64 and the other two.
+
+=back
+
+The selected class names are available on the object as C<arch_class>, C<format_class>, and C<abi_class>, for callers
+that want to load or introspect a class rather than construct one.
+
+=head1 CONSTRUCTORS
+
+Use C<for>, or one of the two conveniences built on it. Calling C<new> directly works but requires you to supply all
+six parameters yourself, which defeats the point.
+
+=head2 C<for( $os, $arch )>
+
+The real constructor. Resolves the three classes from the OS and architecture, loads them, and returns the object.
+
+Dies with C<Unknown arch: $arch> if the architecture is not one it knows. The recognised names are C<x64>, C<arm64>,
+and C<riscv64>, plus the spellings perl and the toolchains use for the same two, which are accepted and translated:
+C<x86_64> and C<amd64> for x64, and C<aarch64> for arm64. The ARCHITECTURE NAMES section below explains why both
+spellings exist.
+
+An unrecognised OS does not die. It gets ELF, which is the right answer for every POSIX system in the hierarchy and the
+only sensible default.
+
+    my $t = Brocken::Target->for( 'win64', 'arm64' );
+    $t->format_name;   # 'PE'
+    $t->arch_class;    # 'Brocken::Target::Architecture::ARM64'
+
+=head2 C<from_name( $os, [ $arch ] )>
+
+Like C<for>, with the architecture defaulting to this host's. Use it when you are targeting something other than where
+you are running but still want the native architecture, such as testing a Linux build on a Linux machine.
+
+=head2 C<for_host()>
+
+The target for the machine this is running on, both halves detected. See C<detect_host>.
+
+=head1 METHODS
+
+=head2 C<os()>
+
+Returns the OS name that was given to the constructor, as a string.
+
+=head2 C<arch()>
+
+Returns the architecture name that was given to the constructor, as it was given rather than as it was normalised. C<<
+for( 'linux', 'x86_64' )->arch >> is C<x86_64>, not C<x64>.
+
+=head2 C<format_name()>
+
+Returns the short format name as a string: C<ELF>, C<PE>, or C<MachO>.
+
+=head2 C<arch_class()>
+
+Returns the assembler class name as a string, for example C<Brocken::Target::Architecture::X64>.
+
+=head2 C<format_class()>
+
+Returns the format class name as a string, for example C<Brocken::Target::Format::PE>.
+
+=head2 C<abi_class()>
+
+Returns the ABI class name, which is always C<Brocken::Target::ABI>. It is exposed as a method so that the accessors
+below are uniform.
+
+=head2 C<os_object()>
+
+Returns a new L<Brocken::Target::OS> for this target, the right subclass for the OS.
+
+A new object each call, not a cached one. The OS objects are cheap and hold nothing but a name, but if you are calling
+this in a loop, hold on to the result.
+
+=head2 C<arch_asm()>
+
+Returns a new assembler object for this target's architecture, with an empty C<code> field ready to accumulate into.
+
+=head2 C<format()>
+
+Returns a new format object for this target, the right subclass for the OS.
+
+=head2 C<abi()>
+
+Returns a new L<Brocken::Target::ABI> object. There is only one class, so this is the same class every time, but going
+through the target keeps the three accessors symmetrical.
+
+=head2 C<exe_name( $base )>
+
+Returns the name to give an executable built from C<$base>, which is C<< $target->os_object->exe_name($base) >>
+inlined. This is the C<.exe> suffix on Windows and the C<./> prefix everywhere.
+
+=head1 CLASS METHODS
+
+=head2 C<detect_host()>
+
+Returns a hash reference with C<os> and C<arch> keys for the machine this is running on. This is the detection,
+unpacked, for callers that want the values before committing to a target.
+
+The OS comes from C<< Brocken::Target::OS->detect_host >>, so the mapping from perl's C<$^O> is the one that class
+owns, including the DragonFly case where C<$^O> is C<dragonflybsd> and the target name is C<dragonfly>.
+
+The architecture comes from C<POSIX::uname()> where it is available, and falls back to C<Config>'s C<archname> with the
+vendor suffix stripped. On Windows there is no C<uname>, so it is read from C<%ENV{PROCESSOR_ARCHITEW6432}>, then
+C<%ENV{PROCESSOR_ARCHITECTURE}>, which is the order Windows uses when a 32-bit process runs on 64-bit hardware.
+
+The result is normalised the same way C<for> expects: C<amd64> becomes C<x86_64> and anything matching C<aarch64> or
+C<arm64> becomes C<aarch64>.
+
+Note that the value is C<x86_64> and not C<x64>, because detection reports what the machine says about itself and the
+translation to the assembler's spelling happens in C<for>. Both are accepted either way.
+
+=head1 ARCHITECTURE NAMES
+There are two spellings in circulation for two of the three architectures,
+and this class accepts both.
+
+perl and the GNU toolchains say C<x86_64> and C<aarch64>. The assembler classes are named C<X64> and C<ARM64>, and the
+short forms C<x64> and C<arm64> are what the rest of the codebase passes around. Translating between them at every call
+site is what this class exists partly to stop, so it accepts C<x64>, C<x86_64>, and C<amd64> for the first, and
+C<arm64> and C<aarch64> for the second, and C<riscv64> which needs no translation.
+
+C<arch> returns what you passed rather than the canonical name, so if you need the short form, ask for it that way or
+read C<arch_class>.
+
+=head1 CAVEATS
+
+=over
+
+=item * The OS is not validated here. It is passed through to
+C<< Brocken::Target::OS->from_name >>, which validates it, and an unknown OS
+dies there rather than in this class. The format default of ELF applies to
+any OS name at all, including a misspelled one, so C<for> will happily
+construct a target for C<linus> and hand back an ELF format and a Linux OS
+object that then fails.
+
+=item * C<detect_host> does not verify that the detected architecture is one
+of the three supported. A machine reporting something else gets the name back
+and then fails in C<for> with C<Unknown arch>.
+
+=item * The assembler classes are not under a common base class, so there is
+nothing to C<isa> check against. Check against C<arch_class> if you need to.
+
+=back
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

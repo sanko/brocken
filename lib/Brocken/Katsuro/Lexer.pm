@@ -52,10 +52,8 @@ class Brocken::Katsuro::Lexer v0.0.1 {
             # 3. Match Numbers
             #
             # A decimal point or an exponent makes it a float, and the lexer is
-            # the only place that can know: it used to match the digits and stop
-            # at the '.', so `my f64 $t = 3.0;` reached the parser as the integer
-            # 3, a '.', and a 0, and the whole class of float literals a reader
-            # reaches for first was unavailable.
+            # the only place that can know: by the time the digits are consumed
+            # there is nothing left to tell an integer and a float apart.
             #
             # The digits after the point are required, so `1..2` still lexes as
             # the integer 1 and the `..` range rather than as a malformed `1.`.

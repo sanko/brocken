@@ -30,6 +30,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
 
             # Resolve cross-function call fixups
             for my $fd (@func_data) {
+
                 # A call placeholder is five bytes and the LEB128 that replaces
                 # it is one or two, so every substitution shortens the buffer.
                 # The encoder recorded its offsets against the untouched
@@ -46,7 +47,6 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
                     die "Wasm write_executable: undefined function '$fixup->{target}'" unless defined $target_idx;
                     my $leb = $self->_uleb($target_idx);
                     my $pos = $fixup->{offset} - $shift;
-
                     substr( $fd->{bytes}, $pos, 5, $leb );
                     $shift += 5 - length($leb);
                 }
@@ -112,11 +112,11 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             # because the heap base arrives as an argument to _BROCKEN_ENTRY.
             # The allocator's own cursor, limit and cap live in the first bytes
             # of the heap itself, so this global only has to carry the base.
-            my $global_content = pack( 'C', 1 )                     # 1 global
-                . pack( 'C', 0x7F )                                 # valtype i32
-                . pack( 'C', 0x01 )                                 # mutable
-                . pack( 'C', 0x41 ) . pack( 'C', 0x00 )             # i32.const 0
-                . pack( 'C', 0x0B );                                # end
+            my $global_content = pack( 'C', 1 )            # 1 global
+                . pack( 'C', 0x7F )                        # valtype i32
+                . pack( 'C', 0x01 )                        # mutable
+                . pack( 'C', 0x41 ) . pack( 'C', 0x00 )    # i32.const 0
+                . pack( 'C', 0x0B );                       # end
             my $global_sec = pack( 'C', 6 ) . $self->_uleb( length($global_content) ) . $global_content;
 
             # Export Section (ID 7) -- export all named functions
@@ -137,9 +137,8 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             # to the base passed to the allocator.
             for my $fd (@func_data) {
                 next unless $fd->{name} eq '_BROCKEN_ENTRY';
-                my $stub
-                    = pack( 'C', 0x20 ) . pack( 'C', 0x00 )     # local.get 0
-                    . pack( 'C', 0x24 ) . pack( 'C', 0x00 );    # global.set 0
+                my $stub = pack( 'C', 0x20 ) . pack( 'C', 0x00 )    # local.get 0
+                    . pack( 'C', 0x24 ) . pack( 'C', 0x00 );        # global.set 0
                 my $at = $self->_locals_prefix_len( $fd->{bytes} );
                 substr( $fd->{bytes}, $at, 0 ) = $stub;
                 last;
@@ -193,19 +192,12 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         # Global Section (ID 6): the heap base, as in the multi-function path
         # above. The section is always emitted so both paths produce the same
         # module shape.
-        my $global_content = pack( 'C', 1 )
-            . pack( 'C', 0x7F )
-            . pack( 'C', 0x01 )
-            . pack( 'C', 0x41 ) . pack( 'C', 0x00 )
-            . pack( 'C', 0x0B );
-        my $global_sec = pack( 'C', 6 ) . $self->_uleb( length($global_content) ) . $global_content;
+        my $global_content = pack( 'C', 1 ) . pack( 'C', 0x7F ) . pack( 'C', 0x01 ) . pack( 'C', 0x41 ) . pack( 'C', 0x00 ) . pack( 'C', 0x0B );
+        my $global_sec     = pack( 'C', 6 ) . $self->_uleb( length($global_content) ) . $global_content;
 
         # Publish the heap base, as in the multi-function path above.
         if ( $name eq '_BROCKEN_ENTRY' ) {
-            $body
-                = pack( 'C', 0x20 ) . pack( 'C', 0x00 )
-                . pack( 'C', 0x24 ) . pack( 'C', 0x00 )
-                . $body;
+            $body = pack( 'C', 0x20 ) . pack( 'C', 0x00 ) . pack( 'C', 0x24 ) . pack( 'C', 0x00 ) . $body;
         }
 
         # Export Section (ID 7)
@@ -228,7 +220,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
     # anything spliced into the front of the code has to go after the locals.
     # The declaration is a group count, then that many (count, valtype) pairs.
     method _locals_prefix_len($bytes) {
-        my $pos = 0;
+        my $pos          = 0;
         my $read_uleb_at = sub {
             my $b = ord substr( $bytes, $pos, 1 );
             $pos++;
@@ -237,8 +229,8 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         };
         my $groups = $read_uleb_at->();
         for ( 1 .. $groups ) {
-            $read_uleb_at->();              # how many locals in this group
-            $pos++;                         # the group's single valtype byte
+            $read_uleb_at->();    # how many locals in this group
+            $pos++;               # the group's single valtype byte
         }
         return $pos;
     }
@@ -256,47 +248,5 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         return $out;
     }
 }
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Jenny::Linker::Wasm - WebAssembly Binary Generator
-
-=head1 DESCRIPTION
-
-Generates WebAssembly (WASM) binaries in the standard .wasm format. Produces a minimal executable with type section,
-function section, memory section (single page), export section (exporting _start), and code section.
-
-Currently supports a single linear memory of 1 page (64KB). The _start function is exported and executed by WASM
-runtimes.
-
-=head1 METHODS
-
-=head2 write_executable
-
-    $linker->write_executable($output_file, $code_bytes, $platform)
-
-Writes a .wasm binary with the compiled code as the body of _start.
-
-=head2 write_shared_library
-
-    $linker->write_shared_library($output_file, $code_bytes, $platform, $debug_bytes?)
-
-Not yet implemented for WASM.
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
+#
 1;

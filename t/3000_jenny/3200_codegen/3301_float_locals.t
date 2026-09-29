@@ -7,7 +7,7 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # Float locals, and the scratch slot the GP-to-XMM move has to use.
 #
@@ -39,12 +39,9 @@ use feature               qw[class];
 # placed past the locals, and a frame with that many locals in it pushes the
 # slot beyond what a one-byte displacement can express, so the wide form of the
 # addressing gets exercised too.
-
 my $brocken = Brocken->new;
-
 SKIP: {
     skip 'Not native', 3 unless $brocken->platform->is_native;
-
     for my $type (qw[f64 f32]) {
         for my $n ( 3 .. 12 ) {
             is( locals_ok( $type, $n ), 42, "native: $n $type local(s) each hold their own value" );
@@ -55,15 +52,13 @@ SKIP: {
     # just as exposed to a scratch slot landing in the middle of it.
     is( mixed_locals_ok(), 42, 'native: int and float locals in one frame all keep their values' );
 }
-
 done_testing;
 
 # One program, $n locals, each holding the next integer.  The exit status is
 # the 1-based index of the first local that lost its value, or 42 if none did.
 sub locals_ok {
     my ( $type, $n ) = @_;
-
-    my $decls = join ' ', map { "my $type \$v$_ = " . ( $_ + 1 ) . ';' } 0 .. $n - 1;
+    my $decls  = join ' ',  map { "my $type \$v$_ = " . ( $_ + 1 ) . ';' } 0 .. $n - 1;
     my $checks = join "\n", map { "if (\$v$_ != " . ( $_ + 1 ) . ") { return $_ + 1; }" } 0 .. $n - 1;
     return build("$decls\n$checks\nreturn 42;\n");
 }
@@ -73,15 +68,15 @@ sub locals_ok {
 # float values are whole numbers on purpose: a decimal literal is a separate
 # gap of its own and would only hide what this is here to check.
 sub mixed_locals_ok {
-    my $decls = '';
+    my $decls  = '';
     my $checks = '';
     for my $i ( 0 .. 9 ) {
         if ( $i % 2 ) {
-            $decls .= "my f64 \$v$i = " . ( $i + 1 ) . ';';
+            $decls  .= "my f64 \$v$i = " . ( $i + 1 ) . ';';
             $checks .= "if (\$v$i != " . ( $i + 1 ) . ") { return " . ( $i + 1 ) . "; }\n";
         }
         else {
-            $decls .= "my i64 \$v$i = " . ( $i + 100 ) . ';';
+            $decls  .= "my i64 \$v$i = " . ( $i + 100 ) . ';';
             $checks .= "if (\$v$i != " . ( $i + 100 ) . ") { return " . ( $i + 1 ) . "; }\n";
         }
     }
@@ -89,7 +84,7 @@ sub mixed_locals_ok {
 }
 
 sub build {
-    my ($src) = @_;
+    my ($src)  = @_;
     my $module = Brocken::Compiler->new->compile($src);
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = $brocken->tmpdir . '/flocal' . $brocken->ext;

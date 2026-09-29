@@ -1,0 +1,111 @@
+=head1 NAME
+
+Brocken::Target::OS::Haiku - Haiku target, which resolves its syscall numbers at run time
+
+=head1 DESCRIPTION
+
+The Haiku target, a subclass of L<Brocken::Target::OS>.
+
+Haiku is the awkward one. It has no POSIX system call interface, so there is no table of constants to copy, and its
+numbers are not fixed across builds either: they are assigned to the C<_kern_> entry points in C<libroot.so> when the
+system is built. This subclass therefore looks them up instead of hardcoding them, and it changes the shape of the
+C<write> call as well, since the kernel entry point takes a file descriptor that POSIX C<write> does not.
+
+Everything it does not change is inherited. It is POSIX as far as the rest of the codebase is concerned, it is not
+BSD-derived, it uses C<.so> and no executable extension, and the syscall number register is the usual one on every
+architecture: C<rax> on x86-64, C<x8> on AArch64, C<a7> on RISC-V.
+
+    my $os = Brocken::Target::OS->from_name( 'haiku' );
+    my $num = $os->syscall_write( 'x64' );   # 131 off Haiku
+
+=head1 RESOLVING THE NUMBERS
+
+C<haiku_syscall> is the whole mechanism, and the other three methods delegate to it. It takes the name of a C<_kern_>
+entry point and an architecture, and returns the number.
+
+On Haiku it disassembles C</boot/system/lib/libroot.so> with C<objdump>, locates the named symbol, and reads the number
+out of the instruction that loads it. Which instruction that is depends on the architecture, because the number is
+passed in the architecture's syscall register:
+
+=over
+
+=item * x86-64 reads C<mov $0x..., %eax> and C<mov %eax, 0x...>, the
+immediate either side of the move.
+
+=item * AArch64 reads C<mov x8, #0x...>.
+
+=item * RISC-V reads C<li a7, #0x...>.
+
+=back
+
+Off Haiku, the file is not there and the whole branch is skipped. The method then falls back to a fixed table: 131 for
+C<_kern_write>, 33 for C<_kern_exit_team>. Those are the values the CI machine reports, which is why a Linux
+development box sees 131 and 33 and that is not a bug.
+
+A symbol that is not in the fallback table gets 0. That is a real return value, not C<undef>, so a typo in the entry
+point name produces syscall number zero rather than an error. The base class returns C<undef> from C<haiku_syscall> for
+every other operating system, so a non-Haiku object is still distinguishable.
+
+Results are memoised in a lexical C<%cache> keyed on the symbol name and the architecture together, because the
+disassembly is a subprocess call and the numbers cannot change while the process runs. C<syscall_write> and
+C<syscall_exit> therefore get separate cache entries even though they resolve to different numbers, and the same call
+made twice costs one lookup. The cache is a lexical in the class body, so it is shared across instances and is not
+reachable from outside.
+
+=head1 METHODS
+
+=head2 C<syscall_write( $arch )>
+
+Returns the C<_kern_write> number for the given architecture, by calling C<haiku_syscall> with the symbol name. Returns
+131 off Haiku. This replaces the base class's table lookup, which has no entry for this system.
+
+=head2 C<syscall_exit( $arch )>
+
+Returns the C<_kern_exit_team> number for the given architecture. Returns 33 off Haiku. The symbol is
+C<_kern_exit_team> rather than C<_kern_exit>, because a Haiku process belongs to a team and that is the call that ends
+it.
+
+=head2 C<haiku_syscall( $name, $arch =E<gt> 'x64' )>
+
+Resolves a C<_kern_> entry point name to its syscall number. C<$arch> is optional and defaults to C<x64>, so the common
+case needs only the name.
+
+Returns the resolved number, or 0 for a symbol it cannot resolve and is not in the fallback table for. The base class
+returns C<undef>, so calling this on a non-Haiku object gives C<undef> rather than 0.
+
+=head2 C<write_syscall_args( $as, $arch, $data_rva, $off, $text_rva, $len )>
+
+Loads the arguments for a C<_kern_write> of C<$len> bytes, and differs from the base class in that the file descriptor
+comes first.
+
+The base class assumes the POSIX C<write> signature, where the first two arguments are the buffer and the length.
+C<_kern_write> takes a file descriptor as its first argument, so the standard output descriptor -1 is loaded into the
+first argument register and the buffer and length move up one register each. The buffer address is still formed with
+C<lea_rva> as C<$data_rva + $off> rebased from C<$text_rva>.
+
+=over
+
+=item * x86-64 loads C<rsi> with -1, C<rdx> with the buffer address, and
+C<r10> with the length. The base class would have used C<rsi> and C<rdx> for
+the buffer and length instead.
+
+=item * AArch64 loads C<x1> with -1, C<x2> with the buffer address, and C<x3>
+with the length.
+
+=item * RISC-V loads C<a0> with -1, C<a1> with the buffer address, and C<a2>
+with the length.
+
+=back
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+=cut

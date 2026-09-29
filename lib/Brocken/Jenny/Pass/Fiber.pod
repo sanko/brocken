@@ -1,0 +1,46 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Pass::Fiber - Fiber-Yield detection pass
+
+=head1 DESCRIPTION
+
+An intermediate pass over a Lindsay IR function. It detects whether a function contains a fiber yield, which is the
+signal that the function needs fiber lowering.
+
+The transformation itself is not implemented: C<lower> currently returns the function unchanged. The detection methods
+are what the mill uses today.
+
+=head1 METHODS
+
+=head2 C<needs_lowering($ir_func)>
+
+Returns true if any instruction in any block of C<$ir_func> is a C<Brocken::Lindsay::IR::Instruction::FiberYield>, and
+false otherwise.
+
+=head2 C<has_yield($ir_func)>
+
+An alias for C<needs_lowering>.
+
+=head2 C<lower($ir_func)>
+
+Returns C<$ir_func> unchanged. Fiber lowering is not yet implemented.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

@@ -3,19 +3,6 @@ use feature qw[class];
 no warnings qw[experimental::class];
 
 class Brocken::Jenny::Linker::Layout {
-
-=pod
-
-=head1 NAME
-
-Brocken::Jenny::Linker::Layout - Binary Section Alignment and Placement
-
-=head1 DESCRIPTION
-
-This class calculates the physical file offsets and relative virtual addresses (RVAs) for binary sections.
-
-=cut
-
     field $file_align    : param : reader = 0x200;
     field $section_align : param : reader = 0x1000;
     field @sections;

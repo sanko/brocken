@@ -1,0 +1,55 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro - Platform and Architecture Abstraction Layer
+
+=head1 DESCRIPTION
+
+This package handles the detection, normalization, and abstraction of target platforms (OS and Architecture). It
+provides a unified interface for querying syscall numbers, register sets, and binary format requirements.
+
+=head2 Target Triples
+
+Brocken uses a four-part "normalized" triple format: C<arch-vendor-os-env>.
+
+=over
+
+=item * B<arch>: x86_64, aarch64, riscv64, etc.
+
+=item * B<vendor>: pc, apple, unknown, etc.
+
+=item * B<os>: linux, darwin, windows, freebsd, netbsd, openbsd, dragonfly, haiku, solaris, wasi.
+
+=item * B<env>: gnu, msvc, macho, elf, wasi, musl, etc.
+
+=back
+
+=head2 References
+
+=over
+
+=item * Target Triplet Wiki: L<https://wiki.osdev.org/Target_Triplet>
+
+=item * LLVM Triple Header: L<https://llvm.org/doxygen/Triple_8h_source.html>
+
+=back
+
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

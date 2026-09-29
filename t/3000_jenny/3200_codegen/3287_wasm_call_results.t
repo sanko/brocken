@@ -8,8 +8,7 @@ use Brocken::Jenny;
 use Brocken::Compiler;
 use Test2::Tools::Brocken qw(temp_path);
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
-
+use feature qw[class];
 my $host          = Brocken::Katsuro::Platform::parse();
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
@@ -41,18 +40,14 @@ subtest 'distinct names for repeated call results' => sub {
 sub g(i64 $x) -> i64 { return $x * 2; }
 return g(20) + g(1);
 BROCKEN
-
     my ($entry) = grep { $_->name eq '_BROCKEN_ENTRY' } $mod->functions->@*;
     ok( $entry, 'entry function found' );
-
     my @results = grep { $_->opcode eq 'call' && $_->callee->name eq 'g' } map { $_->instructions->@* } $entry->blocks->@*;
     is( scalar @results, 2, 'both calls to g are in the IR' );
-
     my %names = map { ( $_->name // '<unnamed>' ) => 1 } @results;
     is( scalar keys %names, 2, 'the two call results have different names' );
     ok( !exists $names{''}, 'no call result is unnamed' );
 };
-
 subtest 'repeated calls in one expression' => sub {
     my @cases = (
         { name => 'two calls', src => <<'BROCKEN', want => 42 },
@@ -69,29 +64,22 @@ sub g(i64 $x) -> i64 { return $x + 14; }
 return g(1) + g(2) + g(12);
 BROCKEN
     );
-
     for my $case (@cases) {
-        SKIP: {
+    SKIP: {
             skip 'wasmtime not available', 1 and next unless $wasmtime_path && -f $wasmtime_path;
-
-            my $platform   = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
-            my $module     = Brocken::Compiler->new->compile( $case->{src} );
-            my $codegen    = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
-            my $funcs      = $codegen->emit_functions( $module->functions );
-            my $safe       = $case->{name} =~ s/\W+/_/gr;
+            my $platform    = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+            my $module      = Brocken::Compiler->new->compile( $case->{src} );
+            my $codegen     = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+            my $funcs       = $codegen->emit_functions( $module->functions );
+            my $safe        = $case->{name} =~ s/\W+/_/gr;
             my $output_file = temp_path("wasm_calls_$safe") . '.wasm';
-
             Brocken::Jenny::Linker::Wasm->new->write_executable( $output_file, $funcs, $platform );
-
             my $output = qx["$wasmtime_path" run --invoke _BROCKEN_ENTRY "$output_file" 1024 2>&1];
             $output =~ s/^warning: using .*$//mg;
             $output =~ s/^\s+|\s+$//g;
-
             is( $output, $case->{want}, "$case->{name}: returns $case->{want}" );
-
             unlink $output_file;
         }
     }
 };
-
 done_testing;

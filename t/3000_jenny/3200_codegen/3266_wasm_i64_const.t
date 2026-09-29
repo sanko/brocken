@@ -20,9 +20,8 @@ use Test2::Tools::Brocken qw(temp_path);
 # These cases are checked by running the module, not by decoding the bytes: a
 # decoder written next to the encoder is exactly the thing that agrees with a
 # broken encoder.
-
-my $i64 = Brocken::Lindsay::IR::Type::i64();
-my $K   = sub { Brocken::Lindsay::IR::Constant->new(@_) };
+my $i64      = Brocken::Lindsay::IR::Type::i64();
+my $K        = sub { Brocken::Lindsay::IR::Constant->new(@_) };
 my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 
 sub build {
@@ -37,9 +36,8 @@ sub build {
     Brocken::Jenny::Linker::Wasm->new->write_executable( $out, $bytes, $platform );
     return $out;
 }
-
 my $devnull       = File::Spec->devnull;
-my $have_wasmtime = ( `wasmtime --version 2>$devnull` ) ? 1 : 0;
+my $have_wasmtime = (`wasmtime --version 2>$devnull`) ? 1 : 0;
 
 # Runs main() and returns the value wasmtime printed on stdout, or undef when
 # the module was rejected. stderr is discarded because --invoke emits an
@@ -59,32 +57,19 @@ sub run {
 # Perl as an NV, so 0xF0F0F0F0F0F0F0F0 would silently become a float and the
 # comparison itself would be inexact.
 my @cases = (
-    [ 'zero'                  => 0 ],
-    [ 'small'                 => 42 ],
-    [ 'negative'              => -13 ],
-    [ '2**31'                 => 2147483648 ],
-    [ '2**32 - 1'             => 4294967295 ],
-    [ '2**32'                 => 4294967296 ],
-    [ '2**40'                 => 1099511627776 ],
-    [ '2**53 - 1'             => 9007199254740991 ],
-    [ '2**53'                 => 9007199254740992 ],
-    [ '2**53 + 1'             => 9007199254740993 ],
-    [ '2**62'                 => 4611686018427387904 ],
-    [ 'INT64_MAX'             => 9223372036854775807 ],
-    [ 'INT64_MIN'             => -9223372036854775808 ],
-    [ 'INT64_MIN + 1'         => -9223372036854775807 ],
-    [ '-2**62'                => -4611686018427387904 ],
-    [ 'high bits set'         => -1 ],
+    [ 'zero'  => 0 ], [ 'small' => 42 ], [ 'negative' => -13 ], [ '2**31' => 2147483648 ], [ '2**32 - 1' => 4294967295 ], [ '2**32' => 4294967296 ],
+    [ '2**40' => 1099511627776 ], [ '2**53 - 1' => 9007199254740991 ], [ '2**53' => 9007199254740992 ], [ '2**53 + 1' => 9007199254740993 ],
+    [ '2**62'         =>  4611686018427387904 ], [ 'INT64_MAX' =>  9223372036854775807 ], [ 'INT64_MIN'     => -9223372036854775808 ],
+    [ 'INT64_MIN + 1' => -9223372036854775807 ], [ '-2**62'    => -4611686018427387904 ], [ 'high bits set' => -1 ],
 
     # -(2**64 - 0x0F0F0F0F0F0F0F0): the top bit set, so negative, with a
     # repeating nibble pattern that would be obvious if the low groups were
     # dropped or rounded.
-    [ '0xF0F0..F0F0 as i64'    => -1085102592571150096 ],
+    [ '0xF0F0..F0F0 as i64' => -1085102592571150096 ],
 
     # -(2**64 - 0xFFFFFFFF00000000): only the top 32 bits set.
-    [ '0xFFFF..0000 as i64'   => -4294967296 ],
+    [ '0xFFFF..0000 as i64' => -4294967296 ],
 );
-
 SKIP: {
     skip 'wasmtime is not installed', scalar @cases unless $have_wasmtime;
     for my $c (@cases) {
@@ -96,5 +81,4 @@ SKIP: {
         unlink $path if -e $path;
     }
 }
-
 done_testing;

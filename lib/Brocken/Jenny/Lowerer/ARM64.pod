@@ -1,0 +1,87 @@
+=pod
+
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Lowerer::ARM64 - Instruction selection for AArch64
+
+=head1 SYNOPSIS
+
+    use Brocken::Jenny::Lowerer::ARM64;
+
+    my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
+    my $mf      = $lowerer->lower($ir_func);
+
+=head1 DESCRIPTION
+
+Lowers a single Lindsay IR function into AArch64 Machine IR. It is the instruction-selection stage of the AArch64
+backend: the function's basic blocks become MIR basic blocks, and each IR operation becomes one or more machine
+instructions. The result is fed to L<Brocken::Jenny::Codegen::ARM64> for register allocation and encoding.
+
+The lowerer consults the platform's ABI to lay out parameters and return values, so the same source lowers to the
+correct calling convention for each supported target.
+
+=head1 METHODS
+
+=head2 C<new( platform => $platform )>
+
+Constructs a lowerer for a target. C<$platform> is a L<Brocken::Katsuro::Platform>, and its ABI decides the parameter
+and return registers used during lowering.
+
+=head2 C<lower($ir_func)>
+
+    my $mf = $lowerer->lower($ir_func);
+
+Lowers the L<Brocken::Lindsay::IR::Function> C<$ir_func> and returns a L<Brocken::Jenny::MIR::MachineFunction> of the
+same name.
+
+Each IR block becomes a MIR basic block. Every block after the first begins with a C<label> pseudo-instruction naming
+it, which the encoder later resolves to an address. The entry block first materializes the function's parameters:
+scalars arrive in the ABI's general-purpose argument registers, floats in the floating-point argument registers, and
+any argument that does not fit a register is read from the stack. An C<i128> occupies a consecutive register pair, or
+falls to the stack whole when only one register remains rather than straddling the two.
+
+Float constants are materialized by building their bit pattern in a general register and moving it into a
+floating-point register, and a float argument that the register set cannot carry is written straight to its stack slot.
+
+=head1 INTERNAL HELPERS
+
+The following are used internally by C<lower> and are not part of the public interface:
+
+=over
+
+=item C<_abi> - The platform's ABI object.
+
+=item C<_materialize($mbb, $ir_val)> - Produces an operand for an IR value, materializing float constants.
+
+=item C<_place_float_constant( $mbb, $ir_val, $dest )> - Places a float constant's bits directly into a chosen register.
+
+=item C<_place_float_bits( $mbb, $ir_val, $mem )> - Stores a float constant's bits to a stack slot.
+
+=item C<_lower_opnd($ir_val)> - Maps a constant to an immediate operand and anything else to a virtual register.
+
+=item C<_reg_opnd( $mbb, $ir_val, $name )> - Like C<_lower_opnd>, but materializes an immediate into a register when a
+form can only name one.
+
+=item C<_type_tag($type)> - Returns an integer tag identifying a type's class for lowering decisions.
+
+=item C<_split_i128($ir_val)> - Splits an C<i128> value into low and high 64-bit operands.
+
+=back
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

@@ -7,7 +7,7 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # Floating-point parameters, and the value that comes back from a call.
 #
@@ -54,24 +54,20 @@ use feature               qw[class];
 #
 # The last group is here because it is the same test at a different arity, and
 # because the fix for it lives in the same place as the others.
-
 my $brocken = Brocken->new;
-
 SKIP: {
     skip 'Not native', 1 unless $brocken->platform->is_native;
-
     my $fp_args = scalar $brocken->platform->abi->fp_param_registers->@*;
 
     # Enough float parameters to reach the registers the REX bits name. Each is
     # used in a sum that is compared as a float, so a value that arrived in the
     # wrong register still has to produce the right total to pass.
     for my $n ( 1 .. $fp_args ) {
-        my @params = map { "f64 \$v$_" } 0 .. $n - 1;
+        my @params = map {"f64 \$v$_"} 0 .. $n - 1;
         my @args   = map { $_ + 1 } 0 .. $n - 1;
-        my $sum    = join( ' + ', map { "\$v$_" } 0 .. $n - 1 );
+        my $sum    = join( ' + ', map {"\$v$_"} 0 .. $n - 1 );
         my $total  = 0;
         $total += $_ for @args;
-
         my $src = <<"BROCKEN";
 sub g( @{[ join ', ', @params ]} ) -> i64 { if ($sum == $total) { return 42; } return 1; }
 return g( @{[ join ', ', @args ]} );
@@ -99,7 +95,7 @@ BROCKEN
     # The parameters are compared one at a time rather than summed, so an
     # argument that arrives as its neighbour is named rather than summed away.
     for my $n ( $fp_args + 1, $fp_args + 2 ) {
-        my @params = map { "f64 \$v$_" } 0 .. $n - 1;
+        my @params = map {"f64 \$v$_"} 0 .. $n - 1;
         my @args   = map { $_ + 1 } 0 .. $n - 1;
         my $all    = join ' && ', map { "\$v$_ == " . ( $_ + 1 ) } 0 .. $n - 1;
         my $src    = <<"BROCKEN";
@@ -114,9 +110,9 @@ BROCKEN
     # fill the argument registers, which is what puts this one on the stack --
     # with only a handful of arguments it would still be a register and the
     # narrow store would never be emitted.
-    my @wide  = map { "f64 \$v$_" } 0 .. $fp_args - 1;
-    my @wides = map { $_ + 1 } 0 .. $fp_args - 1;
-    my $wide  = join ' && ', map { "\$v$_ == " . ( $_ + 1 ) } 0 .. $fp_args - 1;
+    my @wide      = map {"f64 \$v$_"} 0 .. $fp_args - 1;
+    my @wides     = map { $_ + 1 } 0 .. $fp_args - 1;
+    my $wide      = join ' && ', map { "\$v$_ == " . ( $_ + 1 ) } 0 .. $fp_args - 1;
     my $stack_f32 = <<"BROCKEN";
 sub g( @{[ join ', ', @wide ]}, f32 \$z ) -> i64 {
     if ($wide && \$z == @{[ $fp_args + 1 ]}) { return 42; }
@@ -137,21 +133,15 @@ BROCKEN
     # the extra case here, since the ordered predicates are built from `setnp`
     # and a second `setCC`, and a mis-selected condition code is invisible in
     # any one of them.
-    my @comparisons = (
-        [ '==' => 3, 4 ], [ '!=' => 4, 3 ],
-        [ '<'  => 4, 2 ], [ '<=' => 3, 2 ],
-        [ '>'  => 2, 3 ], [ '>=' => 3, 4 ],
-    );
+    my @comparisons = ( [ '==' => 3, 4 ], [ '!=' => 4, 3 ], [ '<' => 4, 2 ], [ '<=' => 3, 2 ], [ '>' => 2, 3 ], [ '>=' => 3, 4 ], );
     for my $c (@comparisons) {
         my ( $op, $holds, $fails ) = $c->@*;
-
         my $yes = <<"BROCKEN";
 sub f() -> f64 { return 3; }
 if ( f() $op $holds ) { return 42; }
 return 1;
 BROCKEN
         is( run($yes), 42, "native: call result $op $holds is true" );
-
         my $no = <<"BROCKEN";
 sub f() -> f64 { return 3; }
 if ( f() $op $fails ) { return 1; }
@@ -232,7 +222,6 @@ BROCKEN
     my $noise = run( $clean, 1 );
     is( $noise, '', 'native: codegen is silent for a function with a parked entry capture' );
 }
-
 done_testing;
 
 sub run {
@@ -245,21 +234,18 @@ sub run {
     if ($quiet) {
         my $log = $brocken->tmpdir . '/fparam_stderr';
         open my $saved, '>&', \*STDERR or die "cannot dup STDERR: $!";
-        open STDERR, '>', $log          or die "cannot redirect STDERR: $!";
+        open STDERR,    '>',  $log     or die "cannot redirect STDERR: $!";
         my $answer = build($src);
-        open STDERR, '>&', $saved        or die "cannot restore STDERR: $!";
+        open STDERR, '>&', $saved or die "cannot restore STDERR: $!";
         close $saved;
-
-        my @warnings = grep { m/uninitialized value|Unknown opcode|unhandled opcode/ }
-          split /\n/, do { local ( @ARGV, $/ ) = ($log); <> };
+        my @warnings = grep {m/uninitialized value|Unknown opcode|unhandled opcode/} split /\n/, do { local ( @ARGV, $/ ) = ($log); <> };
         return join( "\n", @warnings );
     }
-
     return build($src);
 }
 
 sub build {
-    my ($src) = @_;
+    my ($src)  = @_;
     my $module = Brocken::Compiler->new->compile($src);
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = $brocken->tmpdir . '/fparam' . $brocken->ext;
