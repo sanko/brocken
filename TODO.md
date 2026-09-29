@@ -371,6 +371,114 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       read on native, and still a stack mismatch on Wasm.
 
       `3296_field_defaults.t`; 18 of its 29 assertions fail at `9117ecd`.
+
+- [x] **A function reading four or more arguments read back its neighbours.**
+      Found while adding `3297_entry_shuffle.t`. Worth stating plainly that this
+      is *not* what the three CI failures were caused by -- those turned out to
+      be the two defects below -- so it is recorded on its own terms rather than
+      as their explanation. On SysV x86-64 a free function taking four or more
+      `i64` parameters summed transposed arguments: arities one through three
+      were right, four through six were wrong.
+
+      The lowerer captures each incoming argument at the top of the function by
+      copying it out of its calling-convention register, and those captures do
+      not run in isolation. They all read the caller's registers before any of
+      them is written, so together they are one parallel move, and the allocator
+      is free to pick a destination that is still a pending source. With four
+      integer parameters it produced exactly the worst case, a cycle:
+
+          rcx <- rdi, rdx <- rsi, rsi <- rdx, rdi <- rcx
+
+      `fix_entry_shuffle` resolved that by parking each clobbered source in the
+      single spill register the allocator holds. It emitted every park before
+      every consumer, so the second park overwrote the first and the fourth
+      argument arrived holding the second. Handling the hazards one at a time is
+      no better: the temp has to be free again before its next use. The same
+      collector also swept up the trailing `retval from rax` move, which is not
+      part of the shuffle at all.
+
+      It now takes only the leading run of captures that read physical
+      registers, resolves them as a parallel move, and breaks one cycle at a
+      time so the temp is reloaded between a park and its consumer. Free
+      function arities one through the register count pass on SysV.
+
+      Regression: `3297_entry_shuffle.t`, which sweeps a free function by arity
+      because the failing arity is whatever fills the argument register set --
+      four on Win64, six on SysV -- plus a constructor at one field fewer.
+
+- [x] **An `i8` store out of `rsi`, `rdi`, `rsp` or `rbp` wrote the wrong
+      byte.** This is what `3295_field_pack.t` #34 and #36 and
+      `3296_field_defaults.t` #24 were actually reporting. The failures looked
+      like a sub-word store width problem and were not one. Found by dumping
+      the constructor for a three-`i8` class and reading one field at a time:
+      the first two fields read back correctly and only the third was wrong,
+      and only when it landed in a register whose id is 4 or greater.
+
+      The store encodes as `88 /r` with the source in the ModRM reg field. In
+      64-bit mode byte-register ids 4-7 mean `AH`/`CH`/`DH`/`BH` unless a REX
+      byte is present, and `SPL`/`BPL`/`SIL`/`DIL` when it is. The emitter added
+      REX only when the id was 8 or greater, or when the memory operand needed
+      an index or base extension, so a store out of `rsi` was emitted as a store
+      out of `DH`: the high byte of whichever register held the neighbouring
+      field. The first two fields had ids 1 and 2 and so were unaffected, which
+      is why only the third ever showed it. The bytes were self-consistent the
+      whole time -- `88 31` -- and only the absence of the REX prefix was wrong.
+
+      The sibling cases were checked rather than changed. The sub-word `load`
+      puts its byte operand on the memory side, so ids 4-7 never appear as a
+      register there, and `movsx`/`movzx` already emit a REX base (`0x40 | ...`)
+      unconditionally. The 16-bit form has no equivalent ambiguity. A REX byte
+      is now emitted whenever the source id reaches 4, giving `40 88 31`, i.e.
+      `mov %sil,(%rcx)`. Both tests pass on SysV.
+
+- [x] **The caller-save area was laid out on top of the spill slots.** Found by
+      the same sweep: a class with four `i8` constructor fields segfaulted
+      before running any of its own code. Verified at `c3b0f9f` with the
+      allocator work stashed, so it predates it. Three fields was clean, so it
+      took the extra live argument to reach.
+
+      `insert_caller_save_code` lays its save/restore slots out from a base
+      index meant to sit above the allocator's spill slots, and
+      `_caller_save_base` computes that base from the highest spill offset. It
+      tested the maximum for truth, so a function whose only spill slot was at
+      offset 0 -- one spilled value -- reported itself as having no spills at
+      all and returned 0. The caller-save area then began at slot 0, on top of
+      the spilled value, and saving `rdi` across a call overwrote the spilled
+      object pointer with an argument. The following reload dereferenced it, and
+      the program faulted writing through what had become a small integer. The
+      base is now computed from `defined` rather than truth, so a single spill
+      slot at offset 0 yields a base of 1.
+
+- [ ] **`insert_spill_code` reloads through a single temp, so a second live
+      reload clobbers the first.** Also found by the sweep above: a class with
+      five `i8` constructor fields still faults where four is clean. Five fields
+      fills the SysV argument register set exactly, and from there the caller
+      needs two simultaneously live spilled values.
+
+      One instruction with both a spilled `mem` base and a spilled operand needs
+      two values in registers at the same time, and `@load_offsets` emits one
+      `load` per offset through the same spill temp:
+
+          load  r11, mem(rsp,0)    # the object address
+          load  r11, mem(rsp,8)    # the value to store, clobbering the above
+          store mem(r11,0), r11    # stores the value through the value
+
+      This is the same single-temp hazard `fix_entry_shuffle` had, in a
+      different pass, and it wants the same kind of answer: enough temps for the
+      live set, or an ordering in which each temp is consumed before it is
+      reloaded. `3297_entry_shuffle.t` stops its constructor sweep at four
+      fields instead of skipping the case, so the limit stays visible.
+
+- [ ] **Arguments past the register set are not implemented on x86-64.** Not
+      reachable from any current test, and not what any of the three CI
+      failures were, but it bounds what `3297_entry_shuffle.t` can claim. The
+      x86-64 lowerer indexes its argument registers, and the caller's argument
+      registers, positionally with no bounds check, so the fifth argument on
+      Win64 (four registers) and the seventh on SysV (six) read past the end of
+      the list. Observed as `Use of uninitialized value` warnings out of
+      `Lowerer/X86_64.pm` and a wrong value, not a crash. `3297` sweeps a free
+      function only up to the register count for this reason.
+
 - [x] **Wasm could not compile any program that declares a local variable.**
       Every frontend program with at least one `my` local was rejected by the
       Wasm validator, even `my i32 $x = 123; return $x;`. Found while adding

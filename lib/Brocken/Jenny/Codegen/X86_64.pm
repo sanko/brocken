@@ -900,8 +900,17 @@ class Brocken::Jenny::Codegen::X86_64 {
                     # 66-prefixed 0x89 writes two, where plain MOV_R_RM writes
                     # four and clobbers whatever field follows this one.
                     if ( $bits <= 8 ) {
+
+                        # Here the source is the ModRM reg field, so the
+                        # high-byte ambiguity applies: with no REX byte
+                        # present, ids 4-7 name AH/CH/DH/BH rather than
+                        # SPL/BPL/SIL/DIL, and a store out of rsi or rdi
+                        # writes the high byte of rdx or rcx instead. The
+                        # load above dodges this only because its byte
+                        # operand is the memory side, and the extension
+                        # registers need REX for the obvious reason.
                         my $rex = $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
-                        $bytes .= pack( 'C', 0x40 | $rex ) if $rex;
+                        $bytes .= pack( 'C', 0x40 | $rex ) if $rex || $sid >= 4;
                         $bytes .= pack( 'C', MOV_R8_RM ) . pack( 'C', $modrm );
                     }
                     elsif ( $bits <= 16 ) {
@@ -1328,10 +1337,17 @@ class Brocken::Jenny::Codegen::X86_64 {
     }
 
     method _caller_save_base( $gp_spill, $fp_spill ) {
-        my $max_off = 0;
-        for my $off ( values $gp_spill->%* ) { $max_off = $off if $off > $max_off; }
-        for my $off ( values $fp_spill->%* ) { $max_off = $off if $off > $max_off; }
-        return $max_off ? int( $max_off / 8 ) + 1 : 0;
+        my $max_off;
+        for my $off ( values $gp_spill->%*, values $fp_spill->%* ) {
+
+            # A single spill slot at offset 0 is still a spill: testing the
+            # maximum for truth here reported it as "nothing spilled",
+            # handed the caller-save area the same slot, and the save of a
+            # caller's argument overwrote the spilled value underneath.
+            $max_off = $off if !defined $max_off || $off > $max_off;
+        }
+        return 0 unless defined $max_off;
+        return int( $max_off / 8 ) + 1;
     }
 }
 
