@@ -17,6 +17,7 @@ class Brocken::Katsuro::Lowerer {
     field $block_id              = 0;
     field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
+    field $param_class           = {};    # func_name -> { param_name -> class_name } (for class-typed params)
 
     method unique_block_name($prefix) {
         return $prefix . '_' . $block_id++;
@@ -220,6 +221,19 @@ class Brocken::Katsuro::Lowerer {
         $classes->{ $ast->name } = { fields => \@fields, total_size => $offset, methods => [], adjust => undef, };
     }
 
+    # A parameter whose declared type names a class is a pointer, and the class
+    # is remembered so that a field or method access on the parameter resolves.
+    # This is the parameter counterpart of the class return type above: the two
+    # together are the whole of "a class travels with a pointer", and without
+    # them `sub g(ptr $q) { $q->x() }` had no way to know what $q points at.
+    method param_type_for( $func_name, $p ) {
+        if ( $classes->{ $p->{type} } ) {
+            $param_class->{$func_name}->{ $p->{name} } = $p->{type};
+            return Brocken::Lindsay::IR::Type::ptr();
+        }
+        return $self->type_from_name( $p->{type} );
+    }
+
     method register_function($ast) {
         my $ret_type_name = $classes->{ $ast->return_type } ? 'ptr' : $ast->return_type;
         $function_return_class->{ $ast->name } = $classes->{ $ast->return_type } ? $ast->return_type : undef;
@@ -229,7 +243,7 @@ class Brocken::Katsuro::Lowerer {
             push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%__heap_base', );
         }
         for my $p ( $ast->params->@* ) {
-            push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
+            push @params, Brocken::Lindsay::IR::Value->new( type => $self->param_type_for( $ast->name, $p ), name => '%' . $p->{name}, );
         }
         my $fn = Brocken::Lindsay::IR::Function->new( name => $ast->name, return_type => $ret_type, params => \@params, );
         $module->add_function($fn);
@@ -247,7 +261,7 @@ class Brocken::Katsuro::Lowerer {
         my $ret_type = $self->type_from_name($ir_ret_type_name);
         my @params   = ( Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%self', ), );
         for my $p ( $params_ast->@* ) {
-            push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
+            push @params, Brocken::Lindsay::IR::Value->new( type => $self->param_type_for( $name, $p ), name => '%' . $p->{name}, );
         }
         my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params, );
         $module->add_function($fn);
@@ -814,14 +828,34 @@ class Brocken::Katsuro::Lowerer {
             Carp::croak( "Unknown class '" . $obj->name . "' at " . $self->_loc($obj) ) unless $classes->{ $obj->name };
             return $obj->name;
         }
-        if ( $obj->isa('Brocken::Katsuro::AST::Expr::Var') && exists $var_class->{ $obj->name } ) {
-            return $var_class->{ $obj->name };
+        if ( $obj->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            return $var_class->{ $obj->name } if exists $var_class->{ $obj->name };
+
+            # A parameter declared with its class, `sub g(Point $q)`. Keyed by
+            # the function currently being lowered, which is why a local of the
+            # same name in another function cannot leak a class into this one.
+            if ( $current_func ) {
+                my $by_param = $param_class->{ $current_func->name }->{ $obj->name };
+                return $by_param if $by_param;
+            }
         }
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Call') && exists $function_return_class->{ $obj->func_name } ) {
             return $function_return_class->{ $obj->func_name };
         }
-        Carp::croak( "Cannot determine class for field or method access at " . $self->_loc($ast) ) unless $current_class;
-        return $current_class;
+        if ( $current_class ) {
+            return $current_class;
+        }
+
+        # Nothing above knew the class. The overwhelmingly common cause is a
+        # bare `ptr` parameter, which carries no class at all, so say that
+        # rather than leaving the reader to guess why inference failed.
+        my $hint = '';
+        if ( $obj->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            $hint = " -- declare the parameter with its class, e.g. sub g(ClassName \$"
+                . $obj->name
+                . "), if one is in scope here";
+        }
+        Carp::croak( "Cannot determine class for field or method access at " . $self->_loc($ast) . $hint );
     }
 
     method lower_field_addr($ast) {

@@ -451,27 +451,59 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       an entire loop over an array could not be compiled. The index is now
       narrowed with `i32_wrap_i64`, matching what the pointer arithmetic in
       `Runtime::_init` already did.
-- [ ] **PRIORITY — a class pointer cannot be passed to a function and used
-      there.** `Cannot determine class for field or method access`, from the
-      lowerer before any backend runs, so it affects x86_64/ARM64/RISCV64/Wasm
-      equally and is a language gap rather than a backend bug.
-      `Katsuro::Lowerer::resolve_class_name` already infers a receiver's class
+- [x] **A class pointer could not be passed to a function and used there.**
+      `Cannot determine class for field or method access`, from the lowerer
+      before any backend runs, so it affected x86_64/ARM64/RISCV64/Wasm equally
+      and was a language gap rather than a backend bug.
+      `Katsuro::Lowerer::resolve_class_name` already inferred a receiver's class
       four ways: a literal class name (`P->new`), a local in `$var_class` that
       was assigned from a constructor, a call listed in
       `$function_return_class`, and finally the enclosing `$current_class` so
-      that `$self` works inside a method. A `ptr` **parameter** matches none of
+      that `$self` works inside a method. A `ptr` **parameter** matched none of
       them — it is a `Var` with no `$var_class` entry, and a plain `sub` has no
-      `$current_class` — so `sub g(ptr $q) { return $q->x(); }` croaks. The
-      machinery for "a class travels with a value" is half-built: it exists for
+      `$current_class` — so `sub g(ptr $q) { return $q->x(); }` croaked. The
+      machinery for "a class travels with a value" was half-built: it existed for
       return types and not for parameters.
-      Promoting this over the Wasm memory work because it blocks ordinary
+      Promoted over the Wasm memory work because it blocked ordinary
       object-oriented code (handing a class instance to a helper is not exotic)
-      on every target at once, whereas the page declaration only misbehaves past
-      64KB and now only for arrays and objects. Needs a decision on how a class
-      type travels with a pointer — a type tag on the allocation, a signature
-      annotation, or an explicit `my P $q` parameter — rather than an inference
-      that silently guesses. The cheap first step is a `$param_class` table
-      alongside `$function_return_class`.
+      on every target at once, whereas the page declaration only misbehaved past
+      64KB.
+      **Done as a signature annotation, not an inference.** A class name is now
+      accepted in a parameter's type position, exactly as it already was in a
+      return type position: `sub g(P $q)`. The parser takes a bare `IDENT` there
+      as a class name, and `param_type_for` lowers it to a `ptr` while recording
+      it in a new `$param_class` table alongside `$function_return_class`, which
+      `resolve_class_name` consults for a receiver that is a parameter of the
+      function being lowered. Keying on the current function is what makes this
+      sound: two functions can each have a `$q` and only one of them is
+      class-typed, so the table cannot leak by name.
+      Nothing about the ABI changes — the class was always a pointer at runtime.
+      What changed is that the lowerer now knows what the pointer points at.
+      Kept as an explicit annotation on purpose: a bare `ptr` parameter still
+      fails, and its error now names the fix rather than leaving the reader to
+      work out why inference failed.
+      Verified: a field read through a class-typed parameter, two parameters of
+      two different classes, a class parameter mixed with a plain one, a class
+      parameter forwarded to another function, one that is never used as an
+      object, one passed to a class method, the per-function keying, and the two
+      negative cases — all on both native and Wasm. Regression:
+      `1080_class_params.t`.
+- [ ] **A `:reader` is registered after the explicit methods that call it, so
+      `$self->field()` dies inside a method.** `generate_class_runtime` lowers
+      the explicit methods (the loop at `Lowerer.pm:157-160`) before the
+      `:reader` methods are generated (`162-169`), so `$self->x()` inside a
+      declared method fails with "Undefined method 'x' in class 'P'" — the
+      reader is in `$functions` only afterwards. The same class compiles fine if
+      it has no explicit method, and `$obj->x()` works from outside, which is
+      what makes it look like the reader is missing rather than merely late.
+      This is a pass-ordering bug in `generate_class_runtime`, not a class-typing
+      one, and it predates the class-parameter work above — the annotation fix
+      does not reach it. Fixing it means registering every method (readers,
+      writers, the constructor, then the explicit ones) before lowering any
+      method body, rather than interleaving registration and lowering. Left open
+      deliberately: it is a separate change, and it is the reason the
+      class-parameter test covers a field access and an outside reader call but
+      not `$self->x()` from inside a declared method.
 - [x] **Wasm declares one 64KB page but the runtime is told the heap is 1MB —
       for the object allocator.** `Linker::Wasm` emits `1 page, no maximum` while
       `Katsuro::Lowerer` passes `0x100000` as the heap size to `Runtime::_init`,

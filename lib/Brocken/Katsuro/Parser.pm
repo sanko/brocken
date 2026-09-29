@@ -246,6 +246,16 @@ class Brocken::Katsuro::Parser {
             if ( $self->is_type( $self->peek() ) ) {
                 $ptype = $self->advance()->{value};
             }
+            elsif ( $self->check('IDENT') ) {
+
+                # A class name in type position, as in `sub g(Point $q)`. This
+                # follows the rule the return type already uses just below: the
+                # class is a pointer at runtime, and the class name travels
+                # alongside it so that `$q->x()` inside the body can be
+                # resolved. An unknown identifier here is still a pointer, and
+                # the lowerer is what complains about a class it has not seen.
+                $ptype = $self->advance()->{value};
+            }
             my $var_token = $self->consume( 'VAR', undef, "Expected parameter variable" );
             my $psigil    = substr( $var_token->{value}, 0, 1 );
             my $pname     = substr( $var_token->{value}, 1 );
@@ -359,6 +369,16 @@ class Brocken::Katsuro::Parser {
             }
             my $ptype = 'Any';
             if ( $self->is_type( $self->peek() ) ) {
+                $ptype = $self->advance()->{value};
+            }
+            elsif ( $self->check('IDENT') ) {
+
+                # A class name in type position, as in `sub g(Point $q)`. This
+                # follows the rule the return type already uses just below: the
+                # class is a pointer at runtime, and the class name travels
+                # alongside it so that `$q->x()` inside the body can be
+                # resolved. An unknown identifier here is still a pointer, and
+                # the lowerer is what complains about a class it has not seen.
                 $ptype = $self->advance()->{value};
             }
             my $var_token = $self->consume( 'VAR', undef, "Expected parameter variable" );
