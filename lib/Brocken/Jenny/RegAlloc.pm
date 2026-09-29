@@ -464,26 +464,61 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         my $temp_for = sub ($k) {
             $temps[ $k < @temps ? $k : $#temps ];
         };
-        my $temp_op = sub ($k) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($k), type => undef ) };
-        my $mem_op
-            = sub ($o) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => undef ) };
+        # One slot per physical temp, and one reload per slot, so two values that
+        # have to be live at the same time cannot land on each other. A slot may
+        # hold more than one offset when the instruction reads and writes the
+        # same spilled value, which is a single value by definition.
+        #
+        # A slot also remembers the type of the value it holds, because the
+        # reload and the store are the only operands in the whole spill sequence
+        # that would otherwise have no type at all, and the width of a
+        # floating-point move is taken from it. Left unset, an f64 spilled to
+        # the stack came back through `movss`, which moves four of the eight
+        # bytes and leaves the rest as whatever the register held, so a reloaded
+        # value was whatever the high half happened to say and a comparison
+        # against it was decided by stale register contents. Nothing downstream
+        # could see it.
+        my ( @off_of, @order, @type_of );
+
+        # Only a floating-point slot needs a type. `load` and `store` derive an
+        # integer's width from the value they move rather than from the operand,
+        # so a slot that has always been untyped widens correctly; a float move
+        # takes the width from the operand instead, and an untyped one is 32
+        # bits. That put half of an f64 back into the register and left the
+        # other half as whatever was already in it, so a reloaded value was
+        # decided by stale register contents. Restricting the type to floats
+        # leaves every integer spill encoding exactly as it was.
+        my $slot_type = sub ($t) { return ( $t && $t->kind eq 'float' ) ? $t : undef };
+
+        my $temp_op = sub ($k, $type) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($k), type => $type ) };
+        my $mem_op = sub ($o, $type) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => $type ) };
         my $load_inst = sub ($k, $o) {
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => $load_op,
-                operands => [ $temp_op->($k), $mem_op->($o) ],
+                operands => [ $temp_op->( $k, $type_of[$k] ), $mem_op->( $o, $type_of[$k] ) ],
                 comment  => 'spill-reload'
             );
         };
         my $store_inst = sub ($k, $o) {
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => $store_op,
-                operands => [ $mem_op->($o), $temp_op->($k) ],
+                operands => [ $mem_op->( $o, $type_of[$k] ), $temp_op->( $k, $type_of[$k] ) ],
                 comment  => 'spill-store'
             );
         };
         for my $bb ( $mf->blocks->@* ) {
             my @new;
             for my $inst ( $bb->instructions->@* ) {
+
+                # The slot table is per instruction: the reload and store that
+                # belong to one instruction are emitted next to it, and a slot
+                # only has to be shared between the operands of that single
+                # instruction. Declaring it out here is only so the reload and
+                # store closures above can see it.
+                @off_of  = ();
+                @order   = ();
+                @type_of = ();
+
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
 
@@ -492,13 +527,13 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 # each other. A slot may hold more than one offset when the
                 # instruction reads and writes the same spilled value, which
                 # is a single value by definition.
-                my ( @off_of, @order );
-                my $reserve = sub ($off) {
+                my $reserve = sub ($off, $type) {
                     for my $k ( 0 .. $#order ) {
                         return $k if $off_of[$k] == $off;
                     }
                     push @order, $off;
                     $off_of[ $#order ] = $off;
+                    $type_of[ $#order ] = $type;
                     return $#order;
                 };
 
@@ -525,7 +560,12 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     my $base = $op->value->{base} // '';
                     if ( defined( my $off = $spill_slots->{$base} ) ) {
                         $smem_off = $off;
-                        $base_k   = $reserve->($off);
+
+                        # No type, because this slot holds the address rather
+                        # than the value: the operand's own type is the width of
+                        # what is being loaded through it, so an i8 field would
+                        # have reloaded half the address.
+                        $base_k = $reserve->( $off, undef );
                         $op->value->{base} = $temp_for->($base_k);
                     }
                 }
@@ -539,8 +579,8 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 my $d_sp  = defined $d_off;
                 my $s_sp  = defined $s_off;
                 my $same  = $d_sp && $s_sp && $d_off == $s_off;
-                my $d_k   = $d_sp ? $reserve->($d_off) : undef;
-                my $s_k   = $s_sp ? $reserve->($s_off) : undef;
+                my $d_k   = $d_sp ? $reserve->( $d_off, $slot_type->( $ops[0]->type ) ) : undef;
+                my $s_k   = $s_sp ? $reserve->( $s_off, $slot_type->( $ops[1]->type ) ) : undef;
 
                 # A destination that the instruction also reads has to keep its
                 # old value somewhere the write will not destroy, which is a
@@ -556,6 +596,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     $old_k = $#order + 1;
                     push @order, $d_off;
                     $off_of[$old_k] = $d_off;
+                    $type_of[$old_k] = $slot_type->( $ops[0]->type );
                 }
 
                 if ($d_sp) {
@@ -577,7 +618,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 my @extra_k;
                 for my $i ( 2 .. $#ops ) {
                     next unless defined $sp{$i};
-                    my $k = $reserve->( $sp{$i} );
+                    my $k = $reserve->( $sp{$i}, $slot_type->( $ops[$i]->type ) );
                     push @extra_k, [ $k, $sp{$i} ];
                     $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $temp_for->($k), type => $ops[$i]->type );
                 }
@@ -602,17 +643,28 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         my $store_op  = $is_float ? 'fstore' : 'store';
         my $load_op   = $is_float ? 'fload'  : 'load';
         my $spill_idx = $base_idx;
+
+        # A slot here is eight bytes wide whatever it holds, and the width of a
+        # floating-point move is taken from the operand type, so the save and
+        # the restore have to carry one. Untyped, they both fell back to 32 bits
+        # and every f64 live across a call was written and read back with
+        # `movss`: four of the eight bytes moved, the other four left as whatever
+        # the register already held, so the value came back as a denormal or a
+        # NaN and any comparison against it was decided by stale register
+        # contents. f64 is the right type to say for an f32 here too, since the
+        # slot is eight bytes and the meaningful half is the low one.
+        my $ftype = $is_float ? Brocken::Lindsay::IR::Type::f64() : undef;
         for my $bb ( $mf->blocks->@* ) {
             my @new;
             for my $inst ( $bb->instructions->@* ) {
                 if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap)$/ ) {
                     for my $r (@$caller_regs) {
                         my $mem
-                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 }, );
+                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 }, type => $ftype, );
                         push @new,
                             Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => $store_op,
-                            operands => [ $mem, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r ) ],
+                            operands => [ $mem, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r, type => $ftype ) ],
                             comment  => 'caller-save ' . $r,
                             );
                     }
@@ -621,12 +673,12 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap)$/ ) {
                     for my $r ( reverse @$caller_regs ) {
                         my $mem
-                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 },
+                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 }, type => $ftype,
                             );
                         push @new,
                             Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => $load_op,
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r ), $mem ],
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r, type => $ftype ), $mem ],
                             comment  => 'caller-restore ' . $r,
                             );
                     }
@@ -691,78 +743,118 @@ class Brocken::Jenny::RegAlloc::LinearScan {
     # a real parallel move: emit any capture whose destination is not a pending
     # source, and break a cycle by parking a single source in the temp, which
     # frees that temp again as soon as its one consumer runs.
-    method fix_entry_shuffle( $mf, $assignment, $temp_reg ) {
+    method fix_entry_shuffle( $mf, $assignment, $temp_reg, $fp_temp_reg = undef ) {
         my $entry = $mf->entry_block;
         return unless $entry;
 
         # Captures are the leading run of MOVs reading a physical register.
         # Later MOVs that read a physical register (a return value landing in a
         # register, say) are not part of this parallel move and must be left
-        # where they are.
+        # where they are.  Floating-point captures come first in a function with
+        # floating-point parameters, and they are `fmov` rather than `mov`, so
+        # stopping at the first non-`mov` left them in whatever order the
+        # parameter registers happened to be numbered: a capture that wrote
+        # xmm1 came before a capture that read it, and the second parameter
+        # arrived as a copy of the first.
         my @prefix;
         my @insts = $entry->instructions->@*;
         for my $inst (@insts) {
-            last unless $inst->opcode eq 'mov';
+            last unless $inst->opcode eq 'mov' || $inst->opcode eq 'fmov';
             my ( $dst, $src ) = $inst->operands->@*;
             last unless $src && $src->kind eq 'phys_reg';
             last unless $dst && ( $dst->kind eq 'phys_reg' || $dst->kind eq 'virt_reg' );
-            push @prefix, { inst => $inst, src => $src->value };
+            push @prefix, { inst => $inst, src => $src->value, is_fp => ( $inst->opcode eq 'fmov' ? 1 : 0 ) };
         }
         return unless @prefix > 1;
 
-        my ( @work, @parked );
-        for my $cap (@prefix) {
-            my $dst = $cap->{inst}->operands->[0];
-            my $reg = $dst->kind eq 'phys_reg' ? $dst->value : $assignment->{ $dst->value };
-
-            # A spilled or unresolved destination writes no register, so it
-            # cannot clobber a source.  A `mov r, r` preserves its source.
-            # Neither takes part in scheduling; both are still emitted.
-            if ( !defined $reg || $reg =~ /^spill\(/ || $reg eq $cap->{src} ) {
-                push @parked, $cap;
-                next;
-            }
-            push @work, { inst => $cap->{inst}, dst => $reg, src => $cap->{src} };
-        }
-        return unless @work > 1;
-
-        # The spill temp is excluded from allocation, so no capture writes it.
-        # If that ever stops holding, decline rather than emit a shuffle we
-        # cannot schedule.
-        my %touched = map { $_ => 1 } map { ( $_->{dst}, $_->{src} ) } @work;
-        return if $touched{$temp_reg};
-
+        # A cycle is broken through the spill temp of its own class: a `mov`
+        # cycle needs a general register and an `fmov` cycle a floating-point
+        # one, and neither can stand in for the other.
         my @plan;
-        my $total = scalar @work;
-        my $budget = 2 * $total;
-        while (@work) {
-            my $chosen;
-            for my $k ( 0 .. $#work ) {
-                my $dst = $work[$k]{dst};
-                unless ( grep { $_->{src} eq $dst } @work ) {
-                    $chosen = $k;
-                    last;
-                }
-            }
-            unless ( defined $chosen ) {
+        for my $class ( [ 0, $temp_reg, 'mov' ], [ 1, $fp_temp_reg, 'fmov' ] ) {
+            my ( $is_fp, $temp, $opcode ) = @$class;
+            my ( @work, @parked );
+            for my $cap (@prefix) {
+                next unless $cap->{is_fp} == $is_fp;
+                my $dst = $cap->{inst}->operands->[0];
+                my $reg = $dst->kind eq 'phys_reg' ? $dst->value : $assignment->{ $dst->value };
 
-                # Every remaining destination is still needed as a source, so
-                # the rest is a cycle.  Park one source in the temp and
-                # reschedule; its consumer runs before the temp is reused.
-                last if --$budget < 0;
-                my $head = $work[0];
-                push @plan, { inst => undef, dst => $temp_reg, src => $head->{src} };
-                $head->{src} = $temp_reg;
+                # A spilled or unresolved destination writes no register, so it
+                # cannot clobber a source.  A `mov r, r` preserves its source.
+                # Neither takes part in scheduling; both are still emitted.
+                if ( !defined $reg || $reg =~ /^spill\(/ || $reg eq $cap->{src} ) {
+                    push @parked, $cap;
+                    next;
+                }
+                push @work, { cap => $cap, dst => $reg, src => $cap->{src} };
+            }
+            # One capture on its own cannot clobber a source, and none cannot
+            # either, so there is nothing to order. They are still emitted: the
+            # block is rebuilt from the plan, and dropping them here would take
+            # them out of the instruction stream.
+            if ( @work <= 1 ) {
+                push @plan, @work, map { { cap => $_, src => $_->{src} } } @parked;
                 next;
             }
-            push @plan, splice @work, $chosen, 1;
+
+            # Without a scratch of this class there is nothing to park a cycle
+            # in, so the group keeps its original order rather than being
+            # scheduled around a temp that does not exist.  The same goes for a
+            # group the scheduler could not finish.  Either way its captures are
+            # still emitted: the block is rebuilt from the plan, and leaving them
+            # out would drop them.
+            unless ( defined $temp ) {
+                push @plan, @work, map { { cap => $_, src => $_->{src} } } @parked;
+                next;
+            }
+
+            # The spill temp is excluded from allocation, so no capture writes it.
+            # If that ever stops holding, decline rather than emit a shuffle we
+            # cannot schedule.
+            my %touched = map { $_ => 1 } map { ( $_->{dst}, $_->{src} ) } @work;
+            if ( $touched{$temp} ) {
+                push @plan, @work, map { { cap => $_, src => $_->{src} } } @parked;
+                next;
+            }
+
+            my @steps;
+            my $total = scalar @work;
+            my $budget = 2 * $total;
+            while (@work) {
+                my $chosen;
+                for my $k ( 0 .. $#work ) {
+                    my $dst = $work[$k]{dst};
+                    unless ( grep { $_->{src} eq $dst } @work ) {
+                        $chosen = $k;
+                        last;
+                    }
+                }
+                unless ( defined $chosen ) {
+
+                    # Every remaining destination is still needed as a source, so
+                    # the rest is a cycle.  Park one source in the temp and
+                    # reschedule; its consumer runs before the temp is reused.
+                    last if --$budget < 0;
+                    my $head = $work[0];
+                    push @steps, { cap => undef, opcode => $opcode, dst => $temp, src => $head->{src} };
+                    $head->{src} = $temp;
+                    next;
+                }
+                push @steps, splice @work, $chosen, 1;
+            }
+            # A schedule step per capture, plus whatever temp parks it needed.
+            if ( @steps < $total ) {
+                push @plan, @work, map { { cap => $_, src => $_->{src} } } @parked;
+                next;
+            }
+            push @plan, @steps;
+            push @plan, map { { cap => $_, src => $_->{src} } } @parked;
         }
-        # A schedule step per capture, plus whatever temp parks it needed.
-        return if @plan < $total;
+        return unless @plan;
 
         my @new;
-        for my $step ( @plan, @parked ) {
-            my $inst = $step->{inst};
+        for my $step ( @plan ) {
+            my $inst = $step->{cap} ? $step->{cap}{inst} : undef;
             if ($inst) {
                 my $src = $inst->operands->[1];
                 $inst->operands->[1]
@@ -772,7 +864,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             else {
                 push @new,
                     Brocken::Jenny::MIR::MachineInstruction->new(
-                    opcode   => 'mov',
+                    opcode   => $step->{opcode},
                     operands => [
                         Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{dst} ),
                         Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src} ),

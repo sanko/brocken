@@ -53,7 +53,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
         $alloc->remove_redundant_caller_restores($mf);
-        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -107,8 +107,8 @@ class Brocken::Jenny::Codegen::X86_64 {
             $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
             $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
-            $alloc->remove_redundant_caller_restores($mf);
-            $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
+        $alloc->remove_redundant_caller_restores($mf);
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -157,7 +157,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
         $alloc->remove_redundant_caller_restores($mf);
-        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp} );
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -1005,8 +1005,11 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $bits = $dst->type  ? $dst->type->bits     : 32;
                     my $op   = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                     my $rex  = 0x40 | $rex_x | $rex_b | ( $did >= 8 ? 4 : 0 );
+
+                    # Prefix first, REX second: see the `fmov` case below.
+                    $bytes .= pack( 'C', $op->[0] );
                     if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
-                    $bytes .= pack( 'CCC', $op->@* ) . pack( 'C', $modrm );
+                    $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                     $bytes .= join '', $extra->@*;
                 }
                 elsif ( $opcode eq 'fstore' ) {
@@ -1016,8 +1019,11 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $bits = $src->type  ? $src->type->bits     : 32;
                     my $op   = $bits >= 64 ? [ 0xF2, 0x0F, 0x11 ] : [ 0xF3, 0x0F, 0x11 ];
                     my $rex  = 0x40 | $rex_x | $rex_b | ( $sid >= 8 ? 4 : 0 );
+
+                    # Prefix first, REX second: see the `fmov` case below.
+                    $bytes .= pack( 'C', $op->[0] );
                     if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
-                    $bytes .= pack( 'CCC', $op->@* ) . pack( 'C', $modrm );
+                    $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                     $bytes .= join '', $extra->@*;
                 }
                 elsif ( $opcode eq 'fmov' ) {
@@ -1029,7 +1035,19 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $op    = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
+
+                    # F2 or F3 ahead of the REX, not behind it. A REX byte is
+                    # only a REX byte as the last prefix before the opcode, so
+                    # putting one in front of a legacy prefix has it discarded
+                    # and the instruction decodes without it. REX.R is what
+                    # reaches xmm8-xmm15 at all, so every move involving one
+                    # read or wrote a register below it. Five f64 parameters are
+                    # where that starts: the eighth floating-point register is
+                    # the first to need the bit, and the sum is correct until
+                    # then.
+                    $bytes .= pack( 'C', $op->[0] );
+                    $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                    $bytes .= pack( 'CCC', $op->[1], $op->[2], $modrm );
                 }
                 elsif ( $opcode eq 'fmov_gp2f' ) {
                     my $dst_r = $resolve->($dst);
@@ -1051,15 +1069,30 @@ class Brocken::Jenny::Codegen::X86_64 {
                         my $op_load  = $bits >= 64 ? [ 0xF2, 0x0F, 0x10 ] : [ 0xF3, 0x0F, 0x10 ];
                         my $rex_load = 0x40 | ( $did >= 8 ? 4 : 0 );
                         my $modrm_ld = 0x44 | ( ( $did & 7 ) << 3 );
+
+                        # Prefix before REX, as in the MOVD form below: F2 or
+                        # F3 ahead of a REX discards it, and REX.R is what
+                        # reaches xmm8-xmm15 at all.
+                        $bytes .= pack( 'C', $op_load->[0] );
                         $bytes .= pack( 'C', $rex_load ) if $rex_load > 0x40;
-                        $bytes .= pack( 'CCCC', $op_load->[0], $op_load->[1], $op_load->[2], $modrm_ld ) . pack( 'CC', 0x24, 0x20 );
+                        $bytes .= pack( 'CCCCC', $op_load->[1], $op_load->[2], $modrm_ld, 0x24, 0x20 );
                     }
                     else {
                         my $rex = $bits >= 64 ? 0x48 : 0x40;
                         $rex |= ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                         my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
+
+                        # The operand-size prefix has to precede REX, not
+                        # follow it, or the REX is discarded and 0F 6E stays
+                        # MOVD at 32 bits however wide the REX said to be.
+                        # That put 0x3ff0000000000000 through the low half of
+                        # a register and left the high half zero, so 1.0
+                        # arrived as 0.0 and every comparison against it was
+                        # decided against a zero. REX.B went with it, so a
+                        # source in r8-r15 read the wrong register.
+                        $bytes .= pack( 'C', 0x66 );
                         $bytes .= pack( 'C', $rex ) if $rex > 0x40;
-                        $bytes .= pack( 'CCC', 0x66, 0x0F, 0x6E ) . pack( 'C', $modrm );
+                        $bytes .= pack( 'CC', 0x0F, 0x6E ) . pack( 'C', $modrm );
                     }
                 }
                 elsif ( $opcode eq 'fadd' ||
@@ -1078,7 +1111,11 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $op    = $bits >= 64 ? [ 0xF2, 0x0F, $ss_op{$opcode} ] : [ 0xF3, 0x0F, $ss_op{$opcode} ];
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
+
+                    # Prefix first, REX second: see the `fmov` case above.
+                    $bytes .= pack( 'C', $op->[0] );
+                    $bytes .= pack( 'C', $rex ) if $rex > 0x40;
+                    $bytes .= pack( 'CCC', $op->[1], $op->[2], $modrm );
                 }
                 elsif ( $opcode eq 'fxor' || $opcode eq 'fand' ) {
                     my $dst_r = $resolve->($dst);
@@ -1087,16 +1124,16 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $sid   = $reg_id->($src_r);
                     my $bits  = $dst->type ? $dst->type->bits : 32;
                     my %ss_op = ( fxor => 0x57, fand => 0x54 );
-                    my $op    = $bits >= 64 ? [ 0x66, 0x0F, $ss_op{$opcode} ] : [ 0x0F, $ss_op{$opcode} ];
+                    my $op    = $bits >= 64 ? [ 0x66, 0x0F, $ss_op{$opcode} ] : [ undef, 0x0F, $ss_op{$opcode} ];
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
 
-                    if ( $bits >= 64 ) {
-                        $bytes .= pack( 'CCCC', $rex, $op->[0], $op->[1], $op->[2] ) . pack( 'C', $modrm );
-                    }
-                    else {
-                        $bytes .= pack( 'CCC', $rex, $op->[0], $op->[1] ) . pack( 'C', $modrm );
-                    }
+                    # The operand-size prefix has to precede REX, as in the MOVD
+                    # form above. A bare 0x40 before the opcode is just an empty
+                    # REX and is left out.
+                    $bytes .= pack( 'C', $op->[0] ) if defined $op->[0];
+                    $bytes .= pack( 'C', $rex ) if $did >= 8 || $sid >= 8;
+                    $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'fcmp' ) {
                     my $dst_r = $resolve->($dst);
@@ -1104,10 +1141,16 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $did   = $reg_id->($dst_r);
                     my $sid   = $reg_id->($src_r);
                     my $bits  = $dst->type  ? $dst->type->bits     : 32;
-                    my $op    = $bits >= 64 ? [ 0x66, 0x0F, 0x2E ] : [ 0x0F, 0x2E ];
+                    my $op    = $bits >= 64 ? [ 0x66, 0x0F, 0x2E ] : [ undef, 0x0F, 0x2E ];
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'C' x ( $bits >= 64 ? 4 : 3 ), $rex, $op->@* ) . pack( 'C', $modrm );
+
+                    # Prefix before REX, as above: otherwise the 66 is kept
+                    # and the REX dropped, and a compare against xmm8-xmm15
+                    # would read the wrong register.
+                    $bytes .= pack( 'C', $op->[0] ) if defined $op->[0];
+                    $bytes .= pack( 'C', $rex ) if $did >= 8 || $sid >= 8;
+                    $bytes .= pack( 'CC', $op->[1], $op->[2] ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'label' ) {
                     $labels{ $dst->value } = $current_offset->();

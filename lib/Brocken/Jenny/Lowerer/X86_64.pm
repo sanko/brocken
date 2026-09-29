@@ -2751,7 +2751,19 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         my $val = $inst->operands->[0];
                         my $abi = $self->_abi;
                         if ( $inst->type->kind eq 'float' ) {
-                            my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->fp_return_register );
+
+                            # The width of an `fmov` is taken from its
+                            # destination, which is the return register here, so
+                            # it has to carry the returned type. Without one the
+                            # move defaulted to 32 bits and a callee returning
+                            # an f64 emitted `movss`: four of the eight bytes
+                            # reached xmm0 and the rest was whatever the
+                            # register had held, so the caller compared a
+                            # denormal against its literal and took the other
+                            # branch. The callee looked right in isolation --
+                            # the value only ever appeared in the return
+                            # register.
+                            my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->fp_return_register, type => $inst->type );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'fmov',
@@ -3229,12 +3241,14 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         my $is_i128  = !$is_float && $arg_type && $arg_type->kind eq 'int' && $arg_type->bits == 128;
                         if ( defined $arg_stack[$i] ) {
                             my $off = $arg_stack[$i];
-                            my $slot = sub ($disp) {
+                            my $slot = sub ($disp, $type) {
                                 return Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
-                                    value => { base => $stack_reg, disp => $disp, raw => 1 }
+                                    value => { base => $stack_reg, disp => $disp, raw => 1 },
+                                    ( defined $type ? ( type => $type ) : () )
                                 );
                             };
+                            my $ftype = $is_float ? $arg_type : undef;
                             if ($is_i128) {
                                 my ( $lo, $hi ) = $self->_split_i128( $args[$i] );
                                 for my $half ( [ 'lo', $slot->($off), $lo ], [ 'hi', $slot->( $off + 8 ), $hi ] ) {
@@ -3252,12 +3266,23 @@ class Brocken::Jenny::Lowerer::X86_64 {
 
                                 # The register store encoder has no immediate
                                 # form, so a literal argument is materialized
-                                # into a virtual register first.
-                                my $val = $self->_reg_opnd( $mbb, $args[$i], "arg_stack$i" );
+                                # into a virtual register first. A float literal
+                                # needs the floating-point form of that instead:
+                                # `_reg_opnd` puts the value through `mov`, which
+                                # packs it as an integer, so `fstore` would write
+                                # the integer's bits into the argument slot.
+                                # The slot carries the argument's own type because
+                                # `fstore` takes its width from the operand: left
+                                # untyped it moved four bytes of an eight-byte
+                                # argument and the callee read the rest as
+                                # whatever the stack held.
+                                my $val = $is_float
+                                    ? $self->_materialize( $mbb, $args[$i] )
+                                    : $self->_reg_opnd( $mbb, $args[$i], "arg_stack$i" );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => $is_float ? 'fstore' : 'store',
-                                        operands => [ $slot->($off), $val ],
+                                        operands => [ $slot->( $off, $ftype ), $val ],
                                         comment  => "arg $i to stack+$off"
                                     )
                                 );
@@ -3285,15 +3310,31 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                         else {
                             my $reg_name = $arg_regs[$i];
-                            my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
-                            my $val      = $self->_lower_opnd( $args[$i] );
-                            $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new(
-                                    opcode   => $is_float ? 'fmov' : 'mov',
-                                    operands => [ $reg, $val ],
-                                    comment  => "arg $i to $reg_name"
-                                )
+
+                            # The destination is typed for the same reason the
+                            # stack slot is. An untyped `fmov` is a 32-bit move, so
+                            # the argument landed as a 1.0 whose low half was the
+                            # bits and whose high half was zero, and the callee
+                            # compared that against the real 2.0.
+                            my $reg = Brocken::Jenny::MIR::MachineOperand->new(
+                                kind  => 'phys_reg',
+                                value => $reg_name,
+                                ( $is_float ? ( type => $arg_type ) : () )
                             );
+
+                            # A float constant goes straight into the argument
+                            # register, with no temporary the allocator could put
+                            # in a register that another argument already holds.
+                            if ( !$is_float || !$self->_materialize_into( $mbb, $args[$i], $reg ) ) {
+                                my $val = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => $is_float ? 'fmov' : 'mov',
+                                        operands => [ $reg, $val ],
+                                        comment  => "arg $i to $reg_name"
+                                    )
+                                );
+                            }
                         }
                     }
                     $mbb->add_instruction(
@@ -4320,6 +4361,41 @@ class Brocken::Jenny::Lowerer::X86_64 {
             return $fp;
         }
         return $self->_lower_opnd($ir_val);
+    }
+
+    # Build a floating-point constant straight into a named register, with no
+    # floating-point temporary of its own. This is what a call argument has to
+    # use. `_materialize` returns a virtual register, and the argument registers
+    # are written as physical ones, so the allocator has no reason to see them
+    # as the same value and will happily hand the temporary an argument
+    # register: building 2.0 into xmm1, writing it to xmm1, then building 1.0
+    # into xmm1 again as a temporary left the callee with 1.0 in both of them.
+    # Nothing in the caller-save sequence repairs that, because the argument
+    # registers are set up after it has run.
+    method _materialize_into( $mbb, $ir_val, $dest ) {
+        return 0 unless $ir_val->isa('Brocken::Lindsay::IR::Constant');
+        return 0 unless $ir_val->type && $ir_val->type->kind eq 'float';
+        state $fmgi = 0;
+        my $bits        = $ir_val->type->bits;
+        my $value       = $ir_val->value;
+        my $bit_pattern = $bits >= 64 ? unpack( 'Q', pack( 'd', $value ) ) : unpack( 'V', pack( 'f', $value ) );
+        my $gp_type     = Brocken::Lindsay::IR::Type::i64();
+        my $gp          = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%fmgp_' . $fmgi++, type => $gp_type );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $gp, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $bit_pattern, type => $gp_type ) ],
+                comment  => 'fmg: bit pattern'
+            )
+        );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'fmov_gp2f',
+                operands => [ $dest, $gp ],
+                comment  => 'fmg: gp->arg reg'
+            )
+        );
+        return 1;
     }
 
     method _lower_opnd($ir_val) {
