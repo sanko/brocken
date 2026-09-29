@@ -22,10 +22,19 @@ package Test2::Tools::Brocken v0.0.1 {
     # Linux target on a Windows host has the same architecture but is not
     # natively runnable, and checking only the architecture would try to start a
     # Linux ELF directly.
+    #
+    # The triple is run through the platform parser rather than split on "-",
+    # because it names the OS with the release in it: macOS reports
+    # "darwin25.0.0", and the middle field is the version rather than the
+    # vendor, so splitting left $HOST_OS as "darwin25.0.0". No target compares
+    # equal to that, so the "is this native?" test below said no on macOS and
+    # every natively-built test there tried to start under qemu -- or, with
+    # nothing to run it with, was skipped. The parser's own fields are already
+    # the normalized "darwin" and "aarch64".
     my ( $HOST_ARCH, $HOST_OS ) = do {
         require Brocken::Katsuro::Platform;
-        my ( $a, undef, $o ) = split /-/, Brocken::Katsuro::Platform::gen_triple();
-        ( $a, $o );
+        my $host = Brocken::Katsuro::Platform::parse( Brocken::Katsuro::Platform::gen_triple() );
+        ( $host->arch, $host->os );
     };
     my $TMPDIR;
 
@@ -188,7 +197,7 @@ Runs a compiled executable and checks its exit code.
 
 =head3 Arguments
 
-=over 4
+=over
 
 =item C<file> - Path to the compiled executable
 
