@@ -142,57 +142,70 @@ class Brocken::Katsuro::Lowerer {
         return $module;
     }
 
+    # Register every method a class can have before lowering any of them.
+    #
+    # A method body may call any method on its class, including the readers,
+    # writers and constructor that are generated here rather than declared in
+    # the source, and lower_method resolves a callee by looking it up in
+    # $functions. A method lowered before those exist therefore cannot see
+    # them: $self->x() inside a declared sub failed with "Undefined method
+    # 'x' in class 'P'" even though P had an :reader for x, because the
+    # explicit methods were lowered in the same loop that registered them,
+    # ahead of the accessors. Registering the whole class first and lowering
+    # second makes a body able to reach every method of its own class, so
+    # call resolution stops depending on the order bodies happen to be
+    # lowered in.
     method generate_class_runtime($ast) {
         my $class_name = $ast->name;
         $current_class = $class_name;
-        my $class_data = $classes->{$class_name};
 
-        # Lower the ADJUST block if present
-        if ( defined $ast->adjust ) {
+        my $has_adjust = defined $ast->adjust;
+
+        # A generated accessor must not displace a method the source declared
+        # under the same name. The declared method is the one a caller means,
+        # and letting a later registration overwrite $functions would leave
+        # two functions of one name in the module and silently retarget calls.
+        my %declared = map { $_->name => 1 } $ast->methods->@*;
+        $declared{'ADJUST'} = 1 if $has_adjust;
+
+        my @readers = grep { grep { $_ eq 'reader' } $_->attrs->@* }
+            grep { !$declared{ $_->name } } $ast->fields->@*;
+        my @writers = grep { grep { $_ eq 'writer' } $_->attrs->@* }
+            grep { !$declared{ 'set_' . $_->name } } $ast->fields->@*;
+        my @param_fields = grep { grep { $_ eq 'param' } $_->attrs->@* } $ast->fields->@*;
+
+        # Pass 1: register signatures for everything on the class.
+        if ($has_adjust) {
             $self->register_method( $class_name, 'ADJUST', 'void', [] );
-            $self->lower_adjust( $class_name, $ast->adjust );
         }
-
-        # Lower explicit methods
         for my $m ( $ast->methods->@* ) {
             $self->register_method( $class_name, $m->name, $m->return_type, $m->params );
+        }
+        for my $f (@readers) {
+            $self->register_method( $class_name, $f->name, $f->type, [] );
+        }
+        for my $f (@writers) {
+            my @params = ( { type => $f->type, sigil => '$', name => 'value' } );
+            $self->register_method( $class_name, 'set_' . $f->name, 'void', \@params );
+        }
+        {
+            my @params = map { { type => $_->type, sigil => '$', name => $_->name } } @param_fields;
+            $self->register_function_raw( $class_name . '::new', 'void', \@params );
+        }
+
+        # Pass 2: lower bodies, now that every callee has a signature.
+        $self->lower_adjust( $class_name, $ast->adjust ) if $has_adjust;
+        for my $m ( $ast->methods->@* ) {
             $self->lower_method( $class_name, $m );
         }
-
-        # Auto-generate :reader methods
-        for my $f ( $ast->fields->@* ) {
-            if ( grep { $_ eq 'reader' } $f->attrs->@* ) {
-                my $mname = $f->name;
-                $self->register_method( $class_name, $mname, $f->type, [] );
-                $self->generate_reader( $class_name, $f );
-            }
+        for my $f (@readers) {
+            $self->generate_reader( $class_name, $f );
         }
-
-        # Auto-generate :writer methods
-        for my $f ( $ast->fields->@* ) {
-            if ( grep { $_ eq 'writer' } $f->attrs->@* ) {
-                my $mname  = 'set_' . $f->name;
-                my @params = ( { type => $f->type, sigil => '$', name => 'value' } );
-                $self->register_method( $class_name, $mname, 'void', \@params );
-                $self->generate_writer( $class_name, $f );
-            }
+        for my $f (@writers) {
+            $self->generate_writer( $class_name, $f );
         }
+        $self->generate_constructor( $class_name, $ast->fields, \@param_fields, $ast->adjust );
 
-        # Auto-generate constructor from :param fields
-        {
-            my @param_fields = grep {
-                my $ff = $_;
-                grep { $_ eq 'param' } $ff->attrs->@*
-            } $ast->fields->@*;
-            my $ctor_name = $class_name . '::new';
-            my $ret_type  = 'void';
-            my @params;
-            for my $pf (@param_fields) {
-                push @params, { type => $pf->type, sigil => '$', name => $pf->name };
-            }
-            $self->register_function_raw( $ctor_name, $ret_type, \@params );
-            $self->generate_constructor( $class_name, $ast->fields, \@param_fields, $ast->adjust );
-        }
         $current_class = undef;
     }
 
