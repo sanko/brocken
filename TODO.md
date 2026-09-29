@@ -449,11 +449,27 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       an entire loop over an array could not be compiled. The index is now
       narrowed with `i32_wrap_i64`, matching what the pointer arithmetic in
       `Runtime::_init` already did.
-- [ ] **A class pointer cannot be passed to a function and used there.**
-      `Cannot determine class for field or method access`, from the lowerer
-      before any backend runs, so it affects x86_64/ARM64/RISCV64/Wasm equally
-      and is a language gap rather than a backend bug. The class table that
-      would type `$q->x()` is not threaded through function calls yet.
+- [ ] **PRIORITY — a class pointer cannot be passed to a function and used
+      there.** `Cannot determine class for field or method access`, from the
+      lowerer before any backend runs, so it affects x86_64/ARM64/RISCV64/Wasm
+      equally and is a language gap rather than a backend bug.
+      `Katsuro::Lowerer::resolve_class_name` already infers a receiver's class
+      four ways: a literal class name (`P->new`), a local in `$var_class` that
+      was assigned from a constructor, a call listed in
+      `$function_return_class`, and finally the enclosing `$current_class` so
+      that `$self` works inside a method. A `ptr` **parameter** matches none of
+      them — it is a `Var` with no `$var_class` entry, and a plain `sub` has no
+      `$current_class` — so `sub g(ptr $q) { return $q->x(); }` croaks. The
+      machinery for "a class travels with a value" is half-built: it exists for
+      return types and not for parameters.
+      Promoting this over the Wasm memory work because it blocks ordinary
+      object-oriented code (handing a class instance to a helper is not exotic)
+      on every target at once, whereas the page declaration only misbehaves past
+      64KB and now only for arrays and objects. Needs a decision on how a class
+      type travels with a pointer — a type tag on the allocation, a signature
+      annotation, or an explicit `my P $q` parameter — rather than an inference
+      that silently guesses. The cheap first step is a `$param_class` table
+      alongside `$function_return_class`.
 - [ ] **Wasm declares one 64KB page but the runtime is told the heap is 1MB.**
       `Linker::Wasm` emits `1 page, no maximum` while `Katsuro::Lowerer` passes
       `0x100000` as the heap size to `Runtime::_init`, so any program that
