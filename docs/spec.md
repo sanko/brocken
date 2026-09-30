@@ -1331,3 +1331,7 @@ Using `wasmtime_fiber::Fiber` for cooperative isolation was considered but rejec
 | **Katsuro** | The frontend — platform abstraction, lexer, parser, AST. |
 | **DWARF** | Debug information format used for source-level debugging (`.debug_line`, `.debug_info`, etc.). |
 | **SEH** | Structured Exception Handling — Windows unwind tables (`.pdata`/`.xdata`). |
+
+---
+
+Copyright (c) 2026 Sanko Robinson. Licensed under the Creative Commons Attribution 4.0 International license (see `LICENSE-CC`) when used apart from the code.

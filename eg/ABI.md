@@ -351,3 +351,7 @@ ecall                 ; Opcode: 00000073
 * **Regex Pattern**: `/li\s+a7,\s*#?0x([0-9a-f]+)/i`
 
 If this extraction fails or if the compiler is cross-compiling, the backend falls back to standard BeOS/Haiku R1/beta4 system call constants.
+
+---
+
+Copyright (c) 2026 Sanko Robinson. Licensed under the Creative Commons Attribution 4.0 International license (see `LICENSE-CC`) when used apart from the code.
