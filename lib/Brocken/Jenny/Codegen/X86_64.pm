@@ -6,8 +6,7 @@ use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Lowerer::X86_64;
 use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
-
-class Brocken::Jenny::Codegen::X86_64 {
+class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     field $platform : param;
     use constant {
         REX_W       => 0x08,
@@ -30,7 +29,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         RET_BYTE    => 0xC3,
         NOP_BYTE    => 0x90,
         POP_BASE    => 0x58,
-        PUSH_BASE   => 0x50,
+        PUSH_BASE   => 0x50
     };
 
     # Lower Lindsay IR to MIR, allocate registers, then encode to x86_64 machine code
@@ -58,10 +57,7 @@ class Brocken::Jenny::Codegen::X86_64 {
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
-
-        if ( $self->_has_fiber_ops_mf($mf) ) {
-            $callee_seen{ $platform->fiber_reg } = 1;
-        }
+        $callee_seen{ $platform->fiber_reg }        = 1 if $self->_has_fiber_ops_mf($mf);
         my @used_callee = sort keys %callee_seen;
         my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
         return $bytes;
@@ -1549,6 +1545,6 @@ class Brocken::Jenny::Codegen::X86_64 {
         return 0 unless defined $max_off;
         return int( $max_off / 8 ) + 1;
     }
-}
+};
 #
 1;

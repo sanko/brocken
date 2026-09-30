@@ -1,9 +1,8 @@
 use v5.40;
 use feature 'class';
-no warnings 'portable', 'experimental::class';
+no warnings qw[portable experimental::class];
 #
-class Brocken::Target::Format::PE : isa(Brocken::Target::Format) {
-
+class Brocken::Target::Format::PE v0.0.1 : isa(Brocken::Target::Format) {
     method write_bin ( $filename, $text, $data, $arch, $os = 'win64' ) {
         my $fa          = 0x200;
         my $sa          = 0x1000;
@@ -64,5 +63,6 @@ class Brocken::Target::Format::PE : isa(Brocken::Target::Format) {
         close $fh;
         return $filename;
     }
-}
+};
+#
 1

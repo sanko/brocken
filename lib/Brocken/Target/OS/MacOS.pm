@@ -1,8 +1,8 @@
 use v5.40;
 use feature 'class';
-no warnings 'portable', 'experimental::class';
-
-class Brocken::Target::OS::MacOS : isa(Brocken::Target::OS) {
+no warnings qw[portable experimental::class];
+#
+class Brocken::Target::OS::MacOS v0.0.1 : isa(Brocken::Target::OS) {
     ADJUST {
         die "OS name mismatch" unless $self->name eq 'macos';
     }
@@ -16,5 +16,6 @@ class Brocken::Target::OS::MacOS : isa(Brocken::Target::OS) {
         return 0x4000 if $arch eq 'arm64';
         return $self->SUPER::page_size($arch);
     }
-}
+};
+#
 1;

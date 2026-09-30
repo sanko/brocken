@@ -1,8 +1,8 @@
 use v5.40;
 use feature 'class';
-no warnings 'portable', 'experimental::class';
-
-class Brocken::Target::Architecture::RISCV64 {
+no warnings qw[portable experimental::class];
+#
+class Brocken::Target::Architecture::RISCV64 v0.0.1 {
     our %REG = (
         zero => 0,
         ra   => 1,
@@ -226,5 +226,6 @@ class Brocken::Target::Architecture::RISCV64 {
             $self->call_rva( 0x3000, 0x1000 );
         }
     }
-}
+};
+#
 1;

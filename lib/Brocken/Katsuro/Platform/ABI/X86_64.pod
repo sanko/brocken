@@ -34,9 +34,15 @@ parameter passing, and DWARF register numbering.
 
 This software is Copyright (c) 2026 by Sanko Robinson.
 
-This is free software, licensed under:
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
 
-  The Artistic License 2.0 (GPL Compatible)
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
 
 
 =head1 AUTHOR

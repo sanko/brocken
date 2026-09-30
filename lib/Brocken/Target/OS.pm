@@ -1,8 +1,7 @@
 use v5.40;
 use feature 'class';
-no warnings 'portable', 'experimental::class';
-
-class Brocken::Target::OS {
+no warnings qw[portable experimental::class];
+class Brocken::Target::OS v0.0.1 {
     field $name : param : reader;
     ADJUST {
         # `dragonfly` and `dragonflybsd` are both accepted: Katsuro spells the
@@ -118,10 +117,11 @@ class Brocken::Target::OS {
             dragonfly    => 'Brocken::Target::OS::Dragonfly',
             dragonflybsd => 'Brocken::Target::OS::Dragonfly',
             midnightbsd  => 'Brocken::Target::OS::MidnightBSD',
-            haiku        => 'Brocken::Target::OS::Haiku',
+            haiku        => 'Brocken::Target::OS::Haiku'
         }->{$n} // return __PACKAGE__->new( name => $n );
         eval "require $subclass" or die $@;
         return $subclass->new( name => $n );
     }
-}
+};
+#
 1;

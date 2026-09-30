@@ -1,9 +1,8 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform;
-
-class Brocken::Katsuro::Platform::MacOS : isa(Brocken::Katsuro::Platform) {
+#
+class Brocken::Katsuro::Platform::MacOS v0.0.1 : isa(Brocken::Katsuro::Platform) {
     method is_macos() {1}
     method lib_ext()  {'.dylib'}
     method format()   {'macho'}
@@ -55,6 +54,6 @@ class Brocken::Katsuro::Platform::MacOS : isa(Brocken::Katsuro::Platform) {
         my %map = ( x86_64 => 'rax', aarch64 => 'x16', riscv64 => 'a7' );
         return $map{ $self->arch };
     }
-}
+};
 #
 1;

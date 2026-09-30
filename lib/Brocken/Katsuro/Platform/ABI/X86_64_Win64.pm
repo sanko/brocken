@@ -1,9 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform::ABI::X86_64;
-
-class Brocken::Katsuro::Platform::ABI::X86_64_Win64 : isa(Brocken::Katsuro::Platform::ABI::X86_64) {
+class Brocken::Katsuro::Platform::ABI::X86_64_Win64 v0.0.1 : isa(Brocken::Katsuro::Platform::ABI::X86_64) {
 
     # Windows x64 Calling Convention
     # SCRATCH: rax, rcx, rdx, r8, r9, r10, r11
@@ -42,6 +40,6 @@ class Brocken::Katsuro::Platform::ABI::X86_64_Win64 : isa(Brocken::Katsuro::Plat
     # rsp, and the return address has not been pushed yet, so the first stack
     # argument is at rsp+32.
     method caller_stack_param_offset($index) { 32 + 8 * $index }
-}
+};
 #
 1;

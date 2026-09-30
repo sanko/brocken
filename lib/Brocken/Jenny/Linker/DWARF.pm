@@ -1,9 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Jenny::Linker;
-
-class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
+class Brocken::Jenny::Linker::DWARF v0.0.1 : isa(Brocken::Jenny::Linker) {
     field $source_locs    : param : reader;
     field $text_base      : param : reader;
     field $source_file    : param : reader //= 'source.brocken';

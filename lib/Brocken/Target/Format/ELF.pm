@@ -1,9 +1,8 @@
 use v5.40;
 use feature 'class';
-no warnings 'portable', 'experimental::class';
+no warnings qw[portable experimental::class];
 #
-class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
-
+class Brocken::Target::Format::ELF v0.0.1 : isa(Brocken::Target::Format) {
     method _detect_elf_info ( $ref = undef ) {
         my @candidates = $ref ? ($ref) : ( '/bin/sh', '/sbin/init', '/usr/bin/env', '/boot/system/bin/sh', '/boot/system/bin/env' );
         for my $candidate (@candidates) {
@@ -195,5 +194,6 @@ class Brocken::Target::Format::ELF : isa(Brocken::Target::Format) {
         chmod 0755, $filename;
         return $filename;
     }
-}
+};
+#
 1;

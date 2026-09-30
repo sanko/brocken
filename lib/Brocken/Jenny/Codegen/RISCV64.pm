@@ -1,13 +1,12 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class portable];
-use List::Util ();
-use Brocken::Katsuro::Platform;
-use Brocken::Jenny::Lowerer::RISCV64;
-use Brocken::Jenny::RegAlloc;
-use Brocken::Jenny::MIR;
-
-class Brocken::Jenny::Codegen::RISCV64 {
+class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
+    use List::Util ();
+    use Brocken::Katsuro::Platform;
+    use Brocken::Jenny::Lowerer::RISCV64;
+    use Brocken::Jenny::RegAlloc;
+    use Brocken::Jenny::MIR;
     field $platform : param;
     use constant {
         JAL            => 0x0000006F,
@@ -1242,6 +1241,6 @@ class Brocken::Jenny::Codegen::RISCV64 {
         for my $off ( values $fp_spill->%* ) { $max_off = $off if $off > $max_off; }
         return $max_off ? int( $max_off / 8 ) + 1 : 0;
     }
-}
-#
-1;
+    }
+    #
+    1;

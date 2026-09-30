@@ -1,9 +1,8 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform;
-
-class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
+#
+class Brocken::Katsuro::Platform::Haiku v0.0.1 : isa(Brocken::Katsuro::Platform) {
     my %cache;
     method is_haiku()    {1}
     method libc_name()   {'libroot.so'}
@@ -107,6 +106,6 @@ class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
         $cache{ $self->arch }{$name} = $num;
         return $num;
     }
-}
+};
 #
 1;

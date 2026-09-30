@@ -1,9 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform::ABI;
-
-class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform::ABI) {
+class Brocken::Katsuro::Platform::ABI::RISCV64 v0.0.1 : isa(Brocken::Katsuro::Platform::ABI) {
 
     # RISC-V Calling Convention (lp64)
     # SCRATCH: a0-a7, t0-t6
@@ -86,6 +84,6 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform:
         );
         return $data{$category} // [];
     }
-}
-#
-1;
+    }
+    #
+    1;

@@ -16,7 +16,7 @@ Generates WebAssembly binary code from MIR. Produces standard WASM bytecode suit
 
 =item B<Locals>: Declares MIR virtual registers as WASM local variables
 
-=item B<Constants>: i32.const, i64.const for immediate values
+=item B<Constants>: i32.const, i64.const, f32.const, f64.const for immediate values
 
 =item B<Arithmetic>: i32.add/sub/mul/div_s/rem_s, i64 variants, i32.and/or/xor/shl/shr_s/shr_u
 
@@ -24,7 +24,7 @@ Generates WebAssembly binary code from MIR. Produces standard WASM bytecode suit
 
 =item B<Memory>: i32.load/store (with 4-byte alignment), i64.load/store (with 8-byte alignment)
 
-=item B<Control flow>: block, end, br (by depth), br_if, br_table, return
+=item B<Control flow>: block, loop, end, br (by depth), br_if, br_table, return
 
 =item B<Calls>: call (by function index)
 
@@ -32,31 +32,50 @@ Generates WebAssembly binary code from MIR. Produces standard WASM bytecode suit
 
 =back
 
+=head2 Floating Point
+
+C<f32> and C<f64> are implemented: constants, C<add>, C<sub>, C<mul>, C<div>, C<abs>, C<neg>, C<sqrt>, comparisons,
+loads and stores, and conversions in both directions, including C<i32.trunc_f64_s> and C<f64.convert_i64_s>.
+
+C<min> and C<max> are the exception. WebAssembly has no C<f32.min> or C<f64.min> opcode, and the ones that sound
+similar, C<f32.min> and C<f32.max> under the numeric instruction set, do not match the IEEE-754 behaviour the native
+back ends implement for NaN and signed zero. A floating-point C<min> or C<max> is therefore rejected on this target
+rather than compiled to something that silently disagrees with the others.
+
 =head2 Structured Control Flow
 
 WebAssembly requires structured control flow (no arbitrary jumps). The codegen uses nested B<block> and B<end> pairs
-with L<br> targeting by block depth to implement conditional branches and loops.
+with L<br> targeting by block depth to implement conditional branches and loops. A back edge targets a B<loop> label
+rather than a B<block>, since a label that has closed cannot be branched to again.
 
-=head2 Limitations
+=head2 Multiple Functions
 
-=over
+C<emit_functions> lowers every function in the module and returns one record per function, each carrying its name,
+encoded bytes, call fixups, and its parameter and return value types. The linker builds the type, function, and code
+sections from the whole set and resolves the cross-function call fixups, so a module with calls between its own
+functions is written correctly. C<emit_function> remains for the single-function case and returns the same shape as a
+bare record.
 
-=item * No floating-point support yet (WASM supports f32/f64 natively)
+=head2 Memory
 
-=item * No alloca support (WASM has linear memory but no dynamic stack allocation)
-
-=item * Limited to a single function and linear memory
-
-=back
+Every heap block, whether an object field, an array slot, a box, or an C<alloca>, is allocated by the runtime bump
+allocator, so the heap base is published in a module global shared by all frames rather than carried in each one. The
+entry stub seeds that global from the first argument to C<_BROCKEN_ENTRY>.
 
 
 =head1 LICENSE & LEGAL
 
 This software is Copyright (c) 2026 by Sanko Robinson.
 
-This is free software, licensed under:
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
 
-  The Artistic License 2.0 (GPL Compatible)
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
 
 
 =head1 AUTHOR

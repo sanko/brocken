@@ -1,11 +1,10 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[portable];
-no warnings qw[experimental::class];
-use Brocken::Jenny::MIR;
-use List::Util qw[min max];
-
-class Brocken::Jenny::Lowerer::Wasm {
+no warnings qw[portable experimental::class];
+#
+class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
+    use Brocken::Jenny::MIR;
+    use List::Util qw[min max];
 
     method lower($ir_func) {
 
@@ -3051,14 +3050,14 @@ class Brocken::Jenny::Lowerer::Wasm {
             $lo = -( ~$lo & 0xFFFFFFFFFFFFFFFF ) - 1 if $lo >= 0x8000000000000000;
             return (
                 Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $lo, type => Brocken::Lindsay::IR::Type::i64() ),
-                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() )
             );
         }
         return (
             Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
-            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() )
         );
     }
-}
+};
 #
 1;

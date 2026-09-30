@@ -1,11 +1,10 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Jenny::Linker;
-use Brocken::Katsuro::Platform;
-
-class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
-    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
+#
+class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
+    use Brocken::Katsuro::Platform;
+    use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
 
     method write_executable ( $output_file, $codegen_output, $platform ) {
         if ( ref $codegen_output eq 'ARRAY' ) {
@@ -247,6 +246,6 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         } while ($v);
         return $out;
     }
-}
+};
 #
 1;

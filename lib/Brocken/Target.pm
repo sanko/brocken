@@ -15,7 +15,7 @@ builtin::load_module 'Brocken::Target::Format';
 # t/000_basic/000_init.t and in the hand-written per-target script, as a name
 # map plus a conditional that chose PE on win64, MachO on macos, and ELF
 # everywhere else. It lives here so there is one copy of it.
-class Brocken::Target {
+class Brocken::Target v0.0.1 {
     field $os           : param : reader;
     field $arch         : param : reader;
     field $format_name  : param : reader;
@@ -108,5 +108,4 @@ class Brocken::Target {
         $arch = 'aarch64' if $arch =~ /^(?:aarch64|arm64)$/;
         return { os => $os, arch => $arch };
     }
-}
-1;
+} 1;

@@ -1,11 +1,11 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Lindsay::IR;
-use Brocken::Lindsay::IR::Builder;
-use Carp ();
-
-class Brocken::Katsuro::Lowerer {
+#
+class Brocken::Katsuro::Lowerer v0.0.1 {
+    use Brocken::Lindsay::IR;
+    use Brocken::Lindsay::IR::Builder;
+    use Carp ();
     field $module : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
     field $builder = Brocken::Lindsay::IR::Builder->new();
     field $current_func;
@@ -68,7 +68,7 @@ class Brocken::Katsuro::Lowerer {
         f32    => Brocken::Lindsay::IR::Type::f32(),
         f64    => Brocken::Lindsay::IR::Type::f64(),
         ptr    => Brocken::Lindsay::IR::Type::ptr(),
-        void   => Brocken::Lindsay::IR::Type::void(),
+        void   => Brocken::Lindsay::IR::Type::void()
     );
 
     method _loc($ast) {
@@ -136,7 +136,7 @@ class Brocken::Katsuro::Lowerer {
         if (@top_stmts) {
             my $main_body = Brocken::Katsuro::AST::Stmt::Block->new( statements => \@top_stmts );
             my $main_sub
-                = Brocken::Katsuro::AST::Stmt::SubDecl->new( name => '_BROCKEN_ENTRY', return_type => 'i64', params => [], body => $main_body, );
+                = Brocken::Katsuro::AST::Stmt::SubDecl->new( name => '_BROCKEN_ENTRY', return_type => 'i64', params => [], body => $main_body );
             unshift @decls, $main_sub;
         }
 
@@ -1356,5 +1356,6 @@ class Brocken::Katsuro::Lowerer {
         }
         $builder->build_ret();
     }
-}
+};
+#
 1;

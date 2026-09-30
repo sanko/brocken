@@ -1,10 +1,8 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[portable];
-no warnings qw[experimental::class];
-use Brocken::Jenny::MIR;
-
-class Brocken::Jenny::Lowerer::RISCV64 {
+no warnings qw[portable experimental::class];
+class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
+    use Brocken::Jenny::MIR;
     field $platform : param;
     method _abi() { $platform->abi }
 
@@ -3981,6 +3979,6 @@ class Brocken::Jenny::Lowerer::RISCV64 {
         return 5 if $type->kind eq 'dynamic';
         return 0;
     }
-}
+};
 #
 1;

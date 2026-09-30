@@ -12,7 +12,7 @@ use Test2::V0;
 # failure instead of aborting the file the way the real bug aborted 000_init.t.
 {
 
-    package Local::NullOS {
+    package Local::NullOS v0.0.1 {
         use overload 'bool' => sub {0}, fallback => 1;
         sub AUTOLOAD {return}
         sub DESTROY  { }

@@ -1,3 +1,7 @@
+=pod
+
+=encoding utf-8
+
 =head1 NAME
 
 Brocken::Target - Picks the architecture, ABI, and object file format for a target
@@ -98,48 +102,48 @@ The target for the machine this is running on, both halves detected. See C<detec
 
 =head1 METHODS
 
-=head2 C<os()>
+=head2 C<os( )>
 
 Returns the OS name that was given to the constructor, as a string.
 
-=head2 C<arch()>
+=head2 C<arch( )>
 
 Returns the architecture name that was given to the constructor, as it was given rather than as it was normalised. C<<
 for( 'linux', 'x86_64' )->arch >> is C<x86_64>, not C<x64>.
 
-=head2 C<format_name()>
+=head2 C<format_name( )>
 
 Returns the short format name as a string: C<ELF>, C<PE>, or C<MachO>.
 
-=head2 C<arch_class()>
+=head2 C<arch_class( )>
 
 Returns the assembler class name as a string, for example C<Brocken::Target::Architecture::X64>.
 
-=head2 C<format_class()>
+=head2 C<format_class( )>
 
 Returns the format class name as a string, for example C<Brocken::Target::Format::PE>.
 
-=head2 C<abi_class()>
+=head2 C<abi_class( )>
 
 Returns the ABI class name, which is always C<Brocken::Target::ABI>. It is exposed as a method so that the accessors
 below are uniform.
 
-=head2 C<os_object()>
+=head2 C<os_object( )>
 
 Returns a new L<Brocken::Target::OS> for this target, the right subclass for the OS.
 
 A new object each call, not a cached one. The OS objects are cheap and hold nothing but a name, but if you are calling
 this in a loop, hold on to the result.
 
-=head2 C<arch_asm()>
+=head2 C<arch_asm( )>
 
 Returns a new assembler object for this target's architecture, with an empty C<code> field ready to accumulate into.
 
-=head2 C<format()>
+=head2 C<format( )>
 
 Returns a new format object for this target, the right subclass for the OS.
 
-=head2 C<abi()>
+=head2 C<abi( )>
 
 Returns a new L<Brocken::Target::ABI> object. There is only one class, so this is the same class every time, but going
 through the target keeps the three accessors symmetrical.
@@ -149,9 +153,7 @@ through the target keeps the three accessors symmetrical.
 Returns the name to give an executable built from C<$base>, which is C<< $target->os_object->exe_name($base) >>
 inlined. This is the C<.exe> suffix on Windows and the C<./> prefix everywhere.
 
-=head1 CLASS METHODS
-
-=head2 C<detect_host()>
+=head2 C<detect_host( )>
 
 Returns a hash reference with C<os> and C<arch> keys for the machine this is running on. This is the detection,
 unpacked, for callers that want the values before committing to a target.
@@ -170,8 +172,8 @@ Note that the value is C<x86_64> and not C<x64>, because detection reports what 
 translation to the assembler's spelling happens in C<for>. Both are accepted either way.
 
 =head1 ARCHITECTURE NAMES
-There are two spellings in circulation for two of the three architectures,
-and this class accepts both.
+
+There are two spellings in circulation for two of the three architectures, and this class accepts both.
 
 perl and the GNU toolchains say C<x86_64> and C<aarch64>. The assembler classes are named C<X64> and C<ARM64>, and the
 short forms C<x64> and C<arm64> are what the rest of the codebase passes around. Translating between them at every call
@@ -185,19 +187,11 @@ read C<arch_class>.
 
 =over
 
-=item * The OS is not validated here. It is passed through to
-C<< Brocken::Target::OS->from_name >>, which validates it, and an unknown OS
-dies there rather than in this class. The format default of ELF applies to
-any OS name at all, including a misspelled one, so C<for> will happily
-construct a target for C<linus> and hand back an ELF format and a Linux OS
-object that then fails.
+=item * The OS is not validated here. It is passed through to C<< Brocken::Target::OS->from_name >>, which validates it, and an unknown OS dies there rather than in this class. The format default of ELF applies to any OS name at all, including a misspelled one, so C<for> will happily construct a target for C<linus> and hand back an ELF format and a Linux OS object that then fails.
 
-=item * C<detect_host> does not verify that the detected architecture is one
-of the three supported. A machine reporting something else gets the name back
-and then fails in C<for> with C<Unknown arch>.
+=item * C<detect_host> does not verify that the detected architecture is one of the three supported. A machine reporting something else gets the name back and then fails in C<for> with C<Unknown arch>.
 
-=item * The assembler classes are not under a common base class, so there is
-nothing to C<isa> check against. Check against C<arch_class> if you need to.
+=item * The assembler classes are not under a common base class, so there is nothing to C<isa> check against. Check against C<arch_class> if you need to.
 
 =back
 
@@ -205,11 +199,18 @@ nothing to C<isa> check against. Check against C<arch_class> if you need to.
 
 This software is Copyright (c) 2026 by Sanko Robinson.
 
-This is free software, licensed under:
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
 
-  The Artistic License 2.0 (GPL Compatible)
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
 
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
+
 =cut

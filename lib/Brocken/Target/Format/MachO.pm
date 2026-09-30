@@ -1,9 +1,8 @@
 use v5.40;
 use feature 'class';
-no warnings 'portable', 'experimental::class';
+no warnings qw[portable experimental::class];
 #
-class Brocken::Target::Format::MachO : isa(Brocken::Target::Format) {
-
+class Brocken::Target::Format::MachO v0.0.1 : isa(Brocken::Target::Format) {
     method write_bin ( $filename, $text, $data, $arch, $os = 'macos' ) {
         my $is_arm      = ( $arch eq 'arm64' );
         my $page_size   = $is_arm ? 0x4000     : 0x1000;
@@ -112,5 +111,6 @@ class Brocken::Target::Format::MachO : isa(Brocken::Target::Format) {
         system("codesign --force --sign - \"$filename\" >/dev/null 2>&1") if $^O eq 'darwin';
         return $filename;
     }
-}
-1
+};
+#
+1;

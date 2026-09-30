@@ -1,13 +1,12 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Lexer;
-use Brocken::Katsuro::Parser;
-use Brocken::Katsuro::Lowerer;
-
-class Brocken::Compiler {
+class Brocken::Compiler v0.0.1 {
     use File::Basename qw[dirname];
     use File::Spec;
+    use Brocken::Katsuro::Lexer;
+    use Brocken::Katsuro::Parser;
+    use Brocken::Katsuro::Lowerer;
 
     method _core_brocken_path() {
         return File::Spec->catfile( dirname(__FILE__), '..', '..', 'src', 'runtime', 'core.brocken' );
@@ -50,5 +49,6 @@ class Brocken::Compiler {
         my $parser = Brocken::Katsuro::Parser->new( tokens => $tokens, filename => $filename );
         return $parser->parse_program();
     }
-}
+};
+#
 1;

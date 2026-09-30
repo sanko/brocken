@@ -3,8 +3,7 @@ use feature qw[class];
 no warnings qw[experimental::class];
 use Brocken::Jenny::Linker::Layout;
 use Brocken::Katsuro::Platform;
-
-class Brocken::Jenny::Linker {
+class Brocken::Jenny::Linker v0.0.1 {
     field $_layout        : reader(layout);
     field $type           : param : reader = 'exe';
     field $debug_data     : reader = {};
@@ -79,5 +78,4 @@ class Brocken::Jenny::Linker {
     method _setup_layout( $l, $t, $d, $a, $o, $dbg = 0 )           {...}
     method write_bin( $filename, $text, $data, $arch, $os, $type ) {...}
     method import_rva($name)                                       {...}
-}
-1;
+} 1;

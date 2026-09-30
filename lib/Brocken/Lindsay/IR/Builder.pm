@@ -1,9 +1,8 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Lindsay::IR;
-
-class Brocken::Lindsay::IR::Builder {
+class Brocken::Lindsay::IR::Builder v0.0.1 {
+    use Brocken::Lindsay::IR;
     field $insert_block : reader = undef;
     field $id_counter = 0;
     field %name_counts;
@@ -491,6 +490,6 @@ class Brocken::Lindsay::IR::Builder {
         );
         return $insert_block->append_inst($inst);
     }
-}
+};
 #
 1;
