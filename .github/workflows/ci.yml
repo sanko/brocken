@@ -465,6 +465,28 @@ jobs:
       flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
       os: ubuntu-24.04
       perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
+      preflight: |
+        #~ The Wasm tests execute the modules the backend emits, so they skip
+        #~ unless a runtime is on PATH. A skip and a pass look alike in the log,
+        #~ which is how this lane reports green without checking anything. Prove
+        #~ the runtime works before trusting the suite, using the same invocation
+        #~ the tests rely on (run --invoke main) against a module exporting
+        #~ main() -> i32 that returns 42, assembled here as raw bytes so the
+        #~ check does not depend on Brocken being built.
+        command -v wasmtime
+        perl -e 'print pack "H*", join "", (
+          "0061736d01000000",     # magic + version
+          "0105016000017f",       # type: () -> (i32)
+          "03020100",             # func 0
+          "070801046d61696e0000", # export "main" -> func 0
+          "0a06010400412a0b",     # code: i32.const 42; end
+        )' > /tmp/smoke.wasm
+        got=$(wasmtime run --invoke main /tmp/smoke.wasm)
+        if [ "$got" != "42" ]; then
+          echo "wasmtime smoke test returned '$got', expected 42" >&2
+          exit 1
+        fi
+        echo "wasmtime smoke test returned 42"
       test_files: '${{ needs.setup.outputs.test_files }}'
       title: WebAssembly
   win32-arm64:
