@@ -7,7 +7,7 @@ use Brocken::Jenny::Lowerer::Wasm;
 use Brocken::Jenny::RegAlloc;
 use Brocken::Jenny::MIR;
 
-class Brocken::Jenny::Codegen::Wasm {
+class Brocken::Jenny::Codegen::Wasm v0.0.1 {
     field $platform : param;
 
     method emit_function($ir_func) {

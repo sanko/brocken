@@ -3,7 +3,7 @@ use feature qw[class];
 no warnings qw[experimental::class experimental::builtin];
 use Brocken::Katsuro::Platform::ABI;
 
-class Brocken::Katsuro::Platform {
+class Brocken::Katsuro::Platform v0.0.1 {
     use Config qw[%Config];
 
     #~ https://wiki.osdev.org/Target_Triplet
