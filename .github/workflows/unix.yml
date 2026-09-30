@@ -44,6 +44,11 @@ jobs:
           perlbrew switch cache-${{ inputs.os }}-${{ inputs.perl }}${{ inputs.flags }}
           cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
         shell: bash
+      - if: "${{ inputs.preflight != '' }}"
+        name: Run preflight checks
+        run: |
+          ${{ inputs.preflight }}
+        shell: bash
       - env:
           AUTHOR_TESTING: 0
           AUTOMATED_TESTING: 1
@@ -90,6 +95,10 @@ on:
         type: string
       perl:
         required: true
+        type: string
+      preflight:
+        default: ''
+        required: false
         type: string
       test_files:
         default: ''
