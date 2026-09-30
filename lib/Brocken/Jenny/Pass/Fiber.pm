@@ -1,9 +1,9 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Lindsay::IR;
-
-class Brocken::Jenny::Pass::Fiber {
+#
+class Brocken::Jenny::Pass::Fiber v0.0.1 {
+    use Brocken::Lindsay::IR;
 
     method needs_lowering($ir_func) {
         for my $block ( $ir_func->blocks->@* ) {
@@ -21,5 +21,4 @@ class Brocken::Jenny::Pass::Fiber {
     method lower($ir_func) {
         return $ir_func;
     }
-}
-1;
+} 1;

@@ -1,11 +1,9 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[portable];
-no warnings qw[experimental::class];
-use Brocken::Jenny::MIR;
-use List::Util qw[min max];
-
-class Brocken::Jenny::Lowerer::X86_64 {
+no warnings qw[portable experimental::class];
+class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
+    use Brocken::Jenny::MIR;
+    use List::Util qw[min max];
     field $platform : param;
 
     # Backs the uniquifier in _wide_imm_opnd, so two wide immediates materialized
@@ -4404,6 +4402,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $vreg, $opnd ], comment => 'materialize wide immediate' ) );
         return $vreg;
     }
-}
-#
-1;
+    }
+    #
+    1;

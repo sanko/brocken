@@ -1,4 +1,5 @@
 {
+   "X_No_Archive" : "Yes",
    "abstract" : "Compiler?",
    "author" : [
       "Sanko Robinson"
@@ -8,7 +9,8 @@
    "generated_by" : "App::mii v1.0.0",
    "keywords" : [],
    "license" : [
-      "artistic_2"
+      "artistic_2",
+      "mit"
    ],
    "meta-spec" : {
       "url" : "https://metacpan.org/pod/CPAN::Meta::Spec",
@@ -35,425 +37,470 @@
          "version" : "v0.0.1"
       },
       "Brocken::Compiler" : {
-         "file" : "lib/Brocken/Compiler.pm"
+         "file" : "lib/Brocken/Compiler.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny" : {
          "file" : "lib/Brocken/Jenny.pm",
          "version" : "v0.0.1"
       },
       "Brocken::Jenny::Codegen::ARM64" : {
-         "file" : "lib/Brocken/Jenny/Codegen/ARM64.pm"
+         "file" : "lib/Brocken/Jenny/Codegen/ARM64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Codegen::ARM64::Inst" : {
          "file" : "lib/Brocken/Jenny/Codegen/ARM64/Inst.pm"
       },
       "Brocken::Jenny::Codegen::RISCV64" : {
-         "file" : "lib/Brocken/Jenny/Codegen/RISCV64.pm"
+         "file" : "lib/Brocken/Jenny/Codegen/RISCV64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Codegen::Wasm" : {
          "file" : "lib/Brocken/Jenny/Codegen/Wasm.pm"
       },
       "Brocken::Jenny::Codegen::X86_64" : {
-         "file" : "lib/Brocken/Jenny/Codegen/X86_64.pm"
+         "file" : "lib/Brocken/Jenny/Codegen/X86_64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Linker" : {
-         "file" : "lib/Brocken/Jenny/Linker.pm"
+         "file" : "lib/Brocken/Jenny/Linker.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Linker::DWARF" : {
-         "file" : "lib/Brocken/Jenny/Linker/DWARF.pm"
+         "file" : "lib/Brocken/Jenny/Linker/DWARF.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Linker::ELF64" : {
-         "file" : "lib/Brocken/Jenny/Linker/ELF64.pm"
+         "file" : "lib/Brocken/Jenny/Linker/ELF64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Linker::Layout" : {
-         "file" : "lib/Brocken/Jenny/Linker/Layout.pm"
+         "file" : "lib/Brocken/Jenny/Linker/Layout.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Linker::MachO" : {
-         "file" : "lib/Brocken/Jenny/Linker/MachO.pm"
+         "file" : "lib/Brocken/Jenny/Linker/MachO.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Linker::PE" : {
-         "file" : "lib/Brocken/Jenny/Linker/PE.pm"
+         "file" : "lib/Brocken/Jenny/Linker/PE.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Linker::Wasm" : {
-         "file" : "lib/Brocken/Jenny/Linker/Wasm.pm"
+         "file" : "lib/Brocken/Jenny/Linker/Wasm.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Lowerer::ARM64" : {
-         "file" : "lib/Brocken/Jenny/Lowerer/ARM64.pm"
+         "file" : "lib/Brocken/Jenny/Lowerer/ARM64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Lowerer::RISCV64" : {
-         "file" : "lib/Brocken/Jenny/Lowerer/RISCV64.pm"
+         "file" : "lib/Brocken/Jenny/Lowerer/RISCV64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Lowerer::Wasm" : {
-         "file" : "lib/Brocken/Jenny/Lowerer/Wasm.pm"
+         "file" : "lib/Brocken/Jenny/Lowerer/Wasm.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Lowerer::X86_64" : {
-         "file" : "lib/Brocken/Jenny/Lowerer/X86_64.pm"
+         "file" : "lib/Brocken/Jenny/Lowerer/X86_64.pm",
+         "version" : "v0.0.1"
+      },
+      "Brocken::Jenny::MIR" : {
+         "file" : "lib/Brocken/Jenny/MIR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::MIR::MachineBasicBlock" : {
-         "file" : "lib/Brocken/Jenny/MIR.pm"
+         "file" : "lib/Brocken/Jenny/MIR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::MIR::MachineFunction" : {
-         "file" : "lib/Brocken/Jenny/MIR.pm"
+         "file" : "lib/Brocken/Jenny/MIR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::MIR::MachineInstruction" : {
-         "file" : "lib/Brocken/Jenny/MIR.pm"
+         "file" : "lib/Brocken/Jenny/MIR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::MIR::MachineOperand" : {
-         "file" : "lib/Brocken/Jenny/MIR.pm"
+         "file" : "lib/Brocken/Jenny/MIR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::Pass::Fiber" : {
-         "file" : "lib/Brocken/Jenny/Pass/Fiber.pm"
+         "file" : "lib/Brocken/Jenny/Pass/Fiber.pm",
+         "version" : "v0.0.1"
       },
-      "Brocken::Jenny::RegAlloc::LinearScan" : {
-         "file" : "lib/Brocken/Jenny/RegAlloc.pm"
+      "Brocken::Jenny::RegAlloc" : {
+         "file" : "lib/Brocken/Jenny/RegAlloc.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Jenny::RegAlloc::LiveInterval" : {
-         "file" : "lib/Brocken/Jenny/RegAlloc.pm"
+         "file" : "lib/Brocken/Jenny/RegAlloc.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro" : {
          "file" : "lib/Brocken/Katsuro.pm",
          "version" : "v0.0.1"
       },
-      "Brocken::Katsuro::AST::Expr::ArrayIndex" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
       "Brocken::Katsuro::AST::Expr::BinOp" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Expr::Call" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Expr::ClassConst" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Expr::Const" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Expr::FieldAccess" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Expr::Ident" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
+         "file" : "lib/Brocken/Katsuro/AST.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::AST::Expr::IntrinsicCall" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Expr::MethodCall" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
+         "file" : "lib/Brocken/Katsuro/AST.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::AST::Expr::Paren" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Expr::UnOp" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Expr::Var" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
+         "file" : "lib/Brocken/Katsuro/AST.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::AST::Node" : {
          "file" : "lib/Brocken/Katsuro/AST.pm"
       },
       "Brocken::Katsuro::AST::Program" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::Adjust" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::ArrayDecl" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::Assign" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::Block" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::ClassDecl" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::FieldDecl" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::If" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::MethodDecl" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::Return" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
+         "file" : "lib/Brocken/Katsuro/AST.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::AST::Stmt::SubDecl" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
+         "file" : "lib/Brocken/Katsuro/AST.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::AST::Stmt::VarDecl" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
-      },
-      "Brocken::Katsuro::AST::Stmt::While" : {
-         "file" : "lib/Brocken/Katsuro/AST.pm"
+         "file" : "lib/Brocken/Katsuro/AST.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Lexer" : {
          "file" : "lib/Brocken/Katsuro/Lexer.pm",
          "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Lowerer" : {
-         "file" : "lib/Brocken/Katsuro/Lowerer.pm"
+         "file" : "lib/Brocken/Katsuro/Lowerer.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Parser" : {
-         "file" : "lib/Brocken/Katsuro/Parser.pm"
+         "file" : "lib/Brocken/Katsuro/Parser.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform" : {
          "file" : "lib/Brocken/Katsuro/Platform.pm"
       },
       "Brocken::Katsuro::Platform::ABI" : {
-         "file" : "lib/Brocken/Katsuro/Platform/ABI.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/ABI.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::ABI::AArch64" : {
-         "file" : "lib/Brocken/Katsuro/Platform/ABI/AArch64.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/ABI/AArch64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::ABI::RISCV64" : {
-         "file" : "lib/Brocken/Katsuro/Platform/ABI/RISCV64.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/ABI/RISCV64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::ABI::X86_64" : {
-         "file" : "lib/Brocken/Katsuro/Platform/ABI/X86_64.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/ABI/X86_64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::ABI::X86_64_Win64" : {
-         "file" : "lib/Brocken/Katsuro/Platform/ABI/X86_64_Win64.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/ABI/X86_64_Win64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::BSD" : {
-         "file" : "lib/Brocken/Katsuro/Platform/BSD.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/BSD.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::DragonflyBSD" : {
-         "file" : "lib/Brocken/Katsuro/Platform/DragonflyBSD.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/DragonflyBSD.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::FreeBSD" : {
-         "file" : "lib/Brocken/Katsuro/Platform/FreeBSD.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/FreeBSD.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::Haiku" : {
-         "file" : "lib/Brocken/Katsuro/Platform/Haiku.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/Haiku.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::Linux" : {
-         "file" : "lib/Brocken/Katsuro/Platform/Linux.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/Linux.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::MacOS" : {
-         "file" : "lib/Brocken/Katsuro/Platform/MacOS.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/MacOS.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::MidnightBSD" : {
-         "file" : "lib/Brocken/Katsuro/Platform/MidnightBSD.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/MidnightBSD.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::NetBSD" : {
          "file" : "lib/Brocken/Katsuro/Platform/NetBSD.pm"
       },
       "Brocken::Katsuro::Platform::OpenBSD" : {
-         "file" : "lib/Brocken/Katsuro/Platform/OpenBSD.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/OpenBSD.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::Solaris" : {
-         "file" : "lib/Brocken/Katsuro/Platform/Solaris.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/Solaris.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Katsuro::Platform::Wasm" : {
          "file" : "lib/Brocken/Katsuro/Platform/Wasm.pm"
       },
       "Brocken::Katsuro::Platform::Windows" : {
-         "file" : "lib/Brocken/Katsuro/Platform/Windows.pm"
+         "file" : "lib/Brocken/Katsuro/Platform/Windows.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay" : {
          "file" : "lib/Brocken/Lindsay.pm",
          "version" : "v0.0.1"
       },
+      "Brocken::Lindsay::IR" : {
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
+      },
       "Brocken::Lindsay::IR::Block" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Builder" : {
-         "file" : "lib/Brocken/Lindsay/IR/Builder.pm"
+         "file" : "lib/Brocken/Lindsay/IR/Builder.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Constant" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Function" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Alloca" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Box" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Br" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Call" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::ChanClose" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::ChanCreate" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
-      },
-      "Brocken::Lindsay::IR::Instruction::ChanRecv" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::ChanSend" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::ChanTryRecv" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::ChanTrySend" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::CondBr" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
-      },
-      "Brocken::Lindsay::IR::Instruction::Decref" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
-      },
-      "Brocken::Lindsay::IR::Instruction::FiberCreate" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::FiberId" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::FiberPin" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::FiberTransfer" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::FiberYield" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Fptosi" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::FrameAddr" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::GetElementPtr" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::ICmp" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
-      },
-      "Brocken::Lindsay::IR::Instruction::Incref" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::IsolateCreate" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::IsolateJoin" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Load" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::MemoryGrow" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::MemorySize" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Phi" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::PtrCast" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Ret" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Select" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Sext" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Sitofp" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Store" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Trunc" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Unbox" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Instruction::Zext" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Module" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Type" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay::IR::Value" : {
-         "file" : "lib/Brocken/Lindsay/IR.pm"
+         "file" : "lib/Brocken/Lindsay/IR.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target" : {
-         "file" : "lib/Brocken/Target.pm"
+         "file" : "lib/Brocken/Target.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::ABI" : {
-         "file" : "lib/Brocken/Target/ABI.pm"
+         "file" : "lib/Brocken/Target/ABI.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::Architecture::ARM64" : {
-         "file" : "lib/Brocken/Target/Architecture/ARM64.pm"
+         "file" : "lib/Brocken/Target/Architecture/ARM64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::Architecture::RISCV64" : {
-         "file" : "lib/Brocken/Target/Architecture/RISCV64.pm"
+         "file" : "lib/Brocken/Target/Architecture/RISCV64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::Architecture::X64" : {
-         "file" : "lib/Brocken/Target/Architecture/X64.pm"
+         "file" : "lib/Brocken/Target/Architecture/X64.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::Format" : {
-         "file" : "lib/Brocken/Target/Format.pm"
+         "file" : "lib/Brocken/Target/Format.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::Format::ELF" : {
-         "file" : "lib/Brocken/Target/Format/ELF.pm"
+         "file" : "lib/Brocken/Target/Format/ELF.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::Format::MachO" : {
-         "file" : "lib/Brocken/Target/Format/MachO.pm"
+         "file" : "lib/Brocken/Target/Format/MachO.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::Format::PE" : {
-         "file" : "lib/Brocken/Target/Format/PE.pm"
+         "file" : "lib/Brocken/Target/Format/PE.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS" : {
-         "file" : "lib/Brocken/Target/OS.pm"
+         "file" : "lib/Brocken/Target/OS.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::Dragonfly" : {
-         "file" : "lib/Brocken/Target/OS/Dragonfly.pm"
+         "file" : "lib/Brocken/Target/OS/Dragonfly.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::FreeBSD" : {
-         "file" : "lib/Brocken/Target/OS/FreeBSD.pm"
+         "file" : "lib/Brocken/Target/OS/FreeBSD.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::Haiku" : {
-         "file" : "lib/Brocken/Target/OS/Haiku.pm"
+         "file" : "lib/Brocken/Target/OS/Haiku.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::Linux" : {
-         "file" : "lib/Brocken/Target/OS/Linux.pm"
+         "file" : "lib/Brocken/Target/OS/Linux.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::MacOS" : {
-         "file" : "lib/Brocken/Target/OS/MacOS.pm"
+         "file" : "lib/Brocken/Target/OS/MacOS.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::MidnightBSD" : {
-         "file" : "lib/Brocken/Target/OS/MidnightBSD.pm"
+         "file" : "lib/Brocken/Target/OS/MidnightBSD.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::NetBSD" : {
-         "file" : "lib/Brocken/Target/OS/NetBSD.pm"
+         "file" : "lib/Brocken/Target/OS/NetBSD.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::OpenBSD" : {
-         "file" : "lib/Brocken/Target/OS/OpenBSD.pm"
+         "file" : "lib/Brocken/Target/OS/OpenBSD.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::Solaris" : {
-         "file" : "lib/Brocken/Target/OS/Solaris.pm"
+         "file" : "lib/Brocken/Target/OS/Solaris.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Target::OS::Win64" : {
-         "file" : "lib/Brocken/Target/OS/Win64.pm"
+         "file" : "lib/Brocken/Target/OS/Win64.pm",
+         "version" : "v0.0.1"
       },
       "Test2::Tools::Brocken" : {
          "file" : "lib/Test2/Tools/Brocken.pm",
@@ -463,7 +510,8 @@
    "release_status" : "testing",
    "resources" : {
       "license" : [
-         "http://www.perlfoundation.org/artistic_license_2_0"
+         "http://www.perlfoundation.org/artistic_license_2_0",
+         "http://www.opensource.org/licenses/mit-license.php"
       ],
       "repository" : {}
    },

@@ -1,9 +1,8 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform::BSD;
-
-class Brocken::Katsuro::Platform::OpenBSD : isa(Brocken::Katsuro::Platform::BSD) {
+#
+class Brocken::Katsuro::Platform::OpenBSD v0.0.1 : isa(Brocken::Katsuro::Platform::BSD) {
     method is_openbsd()      {1}
     method libc_name()       {'libc.so.98.1'}
     method libpthread_name() {'libpthread.so'}
@@ -52,9 +51,9 @@ class Brocken::Katsuro::Platform::OpenBSD : isa(Brocken::Katsuro::Platform::BSD)
                 mmap      => 197,
                 nanosleep => 240,
                 brk       => 45
-            },
+            }
         };
     }
-}
+};
 #
 1;

@@ -1,13 +1,12 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Jenny::Linker;
-use Brocken::Katsuro::Platform;
-
-class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
-    use Brocken::Jenny::Codegen::ARM64::Inst;
-    use Fcntl      qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
-    use IPC::Open3 qw(open3);
+#
+class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
+    use Brocken::Jenny::Codegen::ARM64::Inst;    # TODO: Only load if required
+    use Brocken::Katsuro::Platform;
+    use Fcntl      qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
+    use IPC::Open3 qw[open3];
     use File::Spec ();
 
     # Structurally compliant segment layout grouping all read-only sections
@@ -1185,5 +1184,6 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
         chmod 0755, $output_file;
         return $output_file;
     }
-}
+};
+#
 1;

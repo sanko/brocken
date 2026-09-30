@@ -2,12 +2,10 @@ use v5.42;
 use feature qw[class];
 no warnings qw[portable];
 no warnings qw[experimental::class];
-use Brocken::Jenny::Linker;
-use Brocken::Katsuro::Platform;
-
-class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
-    use Brocken::Jenny::Codegen::ARM64::Inst;
-    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
+class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
+    use Brocken::Katsuro::Platform;
+    use Brocken::Jenny::Codegen::ARM64::Inst;    # TODO: Only load if used
+    use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
     field $ENABLE_COFF = 0;
 
     method write_executable ( $output_file, $code_data, $platform, $passed_argument = undef, $debug_bytes = undef ) {
@@ -64,16 +62,15 @@ class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
                 my $add_sp    = 0x91000000 | ( 1 << 22 ) | ( $imm12 << 10 ) | ( 31 << 5 ) | 31;
                 my $bl        = bl( 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
                 $entry_stub = pack(
-                    'V9',
-                    $sub_sp,                      # sub sp, sp, #0x100000
-                    add_imm( 0, 31, 0 ),          # add x0, sp, #0  (heap base)
-                    stp_pre( 29, 30, 31, -16 ),   # stp x29, x30, [sp, #-16]!
-                    add_imm( 29, 31, 0 ),         # mov x29, sp
-                    $bl,                          # bl _BROCKEN_ENTRY
-                    ldp_post( 29, 30, 31, 16 ),   # ldp x29, x30, [sp], #16
-                    $add_sp,                      # add sp, sp, #0x100000
-                    uxtb( 0, 0 ),                 # uxtb w0, w0
-                    ret(),                        # ret
+                    'V9', $sub_sp,                 # sub sp, sp, #0x100000
+                    add_imm( 0, 31, 0 ),           # add x0, sp, #0  (heap base)
+                    stp_pre( 29, 30, 31, -16 ),    # stp x29, x30, [sp, #-16]!
+                    add_imm( 29, 31, 0 ),          # mov x29, sp
+                    $bl,                           # bl _BROCKEN_ENTRY
+                    ldp_post( 29, 30, 31, 16 ),    # ldp x29, x30, [sp], #16
+                    $add_sp,                       # add sp, sp, #0x100000
+                    uxtb( 0, 0 ),                  # uxtb w0, w0
+                    ret(),                         # ret
                 );
             }
             else {
@@ -508,5 +505,6 @@ class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
         print $fh pack( 'v', 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
         close $fh;
     }
-}
+};
+#
 1;

@@ -1,8 +1,8 @@
 use v5.40;
 use feature 'class';
-no warnings 'portable', 'experimental::class';
-
-class Brocken::Target::OS::Haiku : isa(Brocken::Target::OS) {
+no warnings qw[portable experimental::class];
+#
+class Brocken::Target::OS::Haiku v0.0.1 : isa(Brocken::Target::OS) {
     ADJUST {
         die "OS name mismatch" unless $self->name eq 'haiku';
     }
@@ -65,5 +65,6 @@ class Brocken::Target::OS::Haiku : isa(Brocken::Target::OS) {
             $as->mov_imm( 'r10', $len );
         }
     }
-}
+};
+#
 1;

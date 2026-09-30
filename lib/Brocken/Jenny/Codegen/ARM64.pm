@@ -2,13 +2,13 @@ use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
 use List::Util ();
-use Brocken::Katsuro::Platform;
-use Brocken::Jenny::Lowerer::ARM64;
-use Brocken::Jenny::RegAlloc;
-use Brocken::Jenny::MIR;
-
-class Brocken::Jenny::Codegen::ARM64 {
+class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
     use Brocken::Jenny::Codegen::ARM64::Inst qw[:all];
+    use Brocken::Katsuro::Platform;
+    use Brocken::Jenny::Lowerer::ARM64;
+    use Brocken::Jenny::RegAlloc;
+    use Brocken::Jenny::MIR;
+    #
     field $platform : param;
     use constant {
         B          => 0x14000000,
@@ -129,7 +129,7 @@ class Brocken::Jenny::Codegen::ARM64 {
         BLR            => 0xD63F0000,
         FCB_RESUME_OFF => 112,
         RET            => 0xD65F03C0,
-        NOP            => 0xD503201F,
+        NOP            => 0xD503201F
     };
 
     method emit_function($ir_func) {
@@ -1443,6 +1443,6 @@ class Brocken::Jenny::Codegen::ARM64 {
         return undef unless $abi->can('fp_entry_shuffle_temp');
         return $abi->fp_entry_shuffle_temp;
     }
-}
-#
-1;
+    }
+    #
+    1;

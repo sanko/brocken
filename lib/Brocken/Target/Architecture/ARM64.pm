@@ -1,8 +1,8 @@
 use v5.40;
 use feature 'class';
-no warnings 'portable', 'experimental::class';
+no warnings qw[portable experimental::class];
 #
-class Brocken::Target::Architecture::ARM64 {
+class Brocken::Target::Architecture::ARM64 v0.0.1 {
     our %REG = (
         x0  => 0,
         x1  => 1,
@@ -181,5 +181,6 @@ class Brocken::Target::Architecture::ARM64 {
             }
         }
     }
-}
+};
+#
 1;

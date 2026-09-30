@@ -16,7 +16,7 @@ Lowers Lindsay IR to machine-level MIR for WebAssembly. Translates SSA instructi
 
 =item B<Parameters> mapped to C<local.get> / C<local.set> by index (no physical registers)
 
-=item B<Arithmetic> lowered to WASM i32/i64 opcodes directly
+=item B<Arithmetic> lowered to WASM i32/i64/f32/f64 opcodes directly
 
 =item B<Boxing/Unboxing> packed into linear memory via C<i64.store> / C<i64.load>
 
@@ -27,26 +27,34 @@ C<i64.atomic.rmw> + conditional free for decrement
 
 =back
 
-=head2 Limitations
+=head2 Alloca
 
-=over
+WebAssembly has no stack pointer, so C<alloca> cannot be a frame pointer bump. An C<alloca> whose element count is a
+constant is instead allocated from Brocken::Runtime::bump_alloc, the same allocator objects and array slots come from,
+which is what lets a slot escape its function.
 
-=item * No floating-point arithmetic support (WASM target missing float operations)
+That sharing is the point rather than a convenience. An earlier version gave escaping allocas their own copy of the
+bump cursor while objects advanced the cursor inside the runtime header. Both started at the heap base, so the two
+hands of the allocator could hand out the same bytes. Reading the base and letting the single allocator advance it
+removes the second cursor.
 
-=item * No alloca support (WASM has no dynamic stack allocation)
-
-=item * Control flow uses structured blocks with depth-based branch targeting
-
-=back
+A C<alloca> of a single scalar is further promoted to a WASM local where it does not escape, which avoids the
+allocation entirely. A non-constant element count is rejected.
 
 
 =head1 LICENSE & LEGAL
 
 This software is Copyright (c) 2026 by Sanko Robinson.
 
-This is free software, licensed under:
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
 
-  The Artistic License 2.0 (GPL Compatible)
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
 
 
 =head1 AUTHOR

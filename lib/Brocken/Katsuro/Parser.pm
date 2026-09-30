@@ -1,10 +1,10 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::AST;
-use Carp ();
-
-class Brocken::Katsuro::Parser {
+#
+class Brocken::Katsuro::Parser v0.0.1 {
+    use Brocken::Katsuro::AST;
+    use Carp ();
     field $tokens   : param;
     field $filename : param = '';
     field $pos      : param = 0;
@@ -609,5 +609,6 @@ class Brocken::Katsuro::Parser {
         return PREC_CALL  if $token->{type} eq '(';
         return 0;
     }
-}
+};
+#
 1;

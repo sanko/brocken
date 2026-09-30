@@ -1,9 +1,8 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class experimental::builtin];
-
-class Brocken::Katsuro::Platform::ABI {
-
+#
+class Brocken::Katsuro::Platform::ABI v0.0.1 {
     sub parse ( $class, $arch, $os = undef ) {
         if ( $arch =~ /x86_64|x64|amd64/i && defined $os && $os =~ /windows|win32|mswin/i ) {
             $class = 'Brocken::Katsuro::Platform::ABI::X86_64_Win64';
@@ -38,6 +37,6 @@ class Brocken::Katsuro::Platform::ABI {
     method return_register()                 {undef}
     method fp_return_register()              {undef}
     method fiber_reg()                       {undef}
-}
+};
 #
 1;

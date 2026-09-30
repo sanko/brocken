@@ -8,34 +8,44 @@ Brocken::Jenny::Linker::Wasm - WebAssembly Binary Generator
 
 =head1 DESCRIPTION
 
-Generates WebAssembly (WASM) binaries in the standard .wasm format. Produces a minimal executable with type section,
-function section, memory section (single page), export section (exporting _start), and code section.
+Generates WebAssembly (WASM) binaries in the standard .wasm format. Produces a module with a type section, a function
+section, a memory section, a global section holding the heap base, an export section, and a code section.
 
-Currently supports a single linear memory of 1 page (64KB). The _start function is exported and executed by WASM
-runtimes.
+The memory is a single page, 64KB. A module is not executable on its own, so it is run by a WebAssembly runtime such as
+wasmtime or node rather than by the operating system.
 
 =head1 METHODS
 
 =head2 C<write_executable( ... )>
 
-    $linker->write_executable($output_file, $code_bytes, $platform)
+    $linker->write_executable( $output_file, $codegen_output, $platform )
 
-Writes a .wasm binary with the compiled code as the body of _start.
+Writes a .wasm module. C<$codegen_output> is either the arrayref of per-function records that
+C<Brocken::Jenny::Codegen::Wasm>'s C<emit_functions> returns, or a single bare record from C<emit_function>.
 
-=head2 write_shared_library
+In the arrayref case the type, function, and code sections are built from the whole set, so cross-function calls
+resolve. A call placeholder is five bytes and the LEB128 index that replaces it is one or two, so each substitution
+shortens the buffer; the fixups are therefore applied in ascending offset order while tracking how far the string has
+already shrunk. Applying them out of order let a second call in a function overwrite the wrong bytes and leave the
+placeholder's continuation bytes in front of the index, which a validator then read as an out-of-bounds index.
 
-    $linker->write_shared_library($output_file, $code_bytes, $platform, $debug_bytes?)
-
-Not yet implemented for WASM.
+The first argument to the C<_BROCKEN_ENTRY> export is the heap base. The entry stub moves it into the module global
+that every frame shares, which is what allows a function other than the entry one to allocate.
 
 
 =head1 LICENSE & LEGAL
 
 This software is Copyright (c) 2026 by Sanko Robinson.
 
-This is free software, licensed under:
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
 
-  The Artistic License 2.0 (GPL Compatible)
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
 
 
 =head1 AUTHOR
