@@ -6,7 +6,7 @@ use Brocken;
 use Brocken::Katsuro;
 use Brocken::Jenny::Linker::ELF64;
 no warnings qw[experimental::class experimental::builtin portable];
-use feature qw[class];
+use feature               qw[class];
 use Test2::Tools::Brocken qw(temp_path);
 
 # The linker asks the compiler where it keeps libpthread before it records a
@@ -25,10 +25,8 @@ use Test2::Tools::Brocken qw(temp_path);
 # not any particular toolchain: if this subtest leaned on whatever gcc happens
 # to have installed, it would skip on the very machines where the bug lives and
 # pass vacuously against the broken code.
-
 my $probe = \&Brocken::Jenny::Linker::ELF64::_cc_print_file_name;
 is ref($probe), 'CODE', 'the shell-free query helper is available';
-
 my $host = Brocken::Katsuro::Platform::parse();
 
 # A stub compiler that prints whatever BROCKEN_STUB_OUT names, which is how a
@@ -36,10 +34,7 @@ my $host = Brocken::Katsuro::Platform::parse();
 # library, the bare name back when it does not.
 my $stub = temp_path('stub_cc') . ( $host->is_windows ? '.bat' : '' );
 {
-    my $body
-      = $host->is_windows
-      ? '@echo off' . "\n" . 'echo %BROCKEN_STUB_OUT%' . "\n"
-      : '#!/bin/sh' . "\n" . 'echo "$BROCKEN_STUB_OUT"' . "\n";
+    my $body = $host->is_windows ? '@echo off' . "\n" . 'echo %BROCKEN_STUB_OUT%' . "\n" : '#!/bin/sh' . "\n" . 'echo "$BROCKEN_STUB_OUT"' . "\n";
     open my $fh, '>', $stub or die "cannot write stub compiler $stub: $!";
     print {$fh} $body;
     close $fh;
@@ -53,7 +48,6 @@ my $target = temp_path('libpthread_stub.so');
     open my $fh, '>', $target or die "cannot write $target: $!";
     close $fh;
 }
-
 subtest 'the query reaches the compiler and its answer comes back' => sub {
     local $ENV{BROCKEN_STUB_OUT} = $target;
 
@@ -64,7 +58,6 @@ subtest 'the query reaches the compiler and its answer comes back' => sub {
     is $out, $target, 'the answer arrived intact, with the trailing newline stripped';
     ok -e $out, 'the answer is a path that exists on disk';
 };
-
 subtest 'the answer survives the caller-side accept test' => sub {
     plan skip_all => 'stub compiler did not run' unless -e $target;
     local $ENV{BROCKEN_STUB_OUT} = $target;
@@ -75,7 +68,6 @@ subtest 'the answer survives the caller-side accept test' => sub {
     # name echoed back, and is on disk. Walk that exact triple.
     ok $out && $out ne $lib && -e $out, 'the caller would accept this answer';
 };
-
 subtest 'a library the compiler lacks is echoed back and rejected' => sub {
     my $lib = 'libbrocken_no_such_library.so';
     local $ENV{BROCKEN_STUB_OUT} = $lib;
@@ -83,8 +75,8 @@ subtest 'a library the compiler lacks is echoed back and rejected' => sub {
     is $out, $lib, 'the bare name came back verbatim';
     ok !$out || !-e $out, 'and it is not on disk, so the caller treats it as not found';
 };
-
 subtest 'a missing compiler falls through quietly' => sub {
+
     # The old form ran this through cmd.exe, which printed "not recognized as
     # an internal or external command". The pipe form has no shell, so a
     # program that is not installed is simply an empty answer.
@@ -92,16 +84,13 @@ subtest 'a missing compiler falls through quietly' => sub {
     ok !$@, 'probing for a compiler that is not installed does not die';
     is $out, undef, 'and reports that it found nothing';
 };
-
 subtest 'no shell or redirect text is mixed into the answer' => sub {
     plan skip_all => 'stub compiler did not run' unless -e $target;
     local $ENV{BROCKEN_STUB_OUT} = $target;
     my $out = $probe->( $stub, 'libpthread.a' );
-    unlike $out, qr{[\\/]dev[\\/]null}i, 'no /dev/null path leaks into the answer';
-    unlike $out, qr{system cannot find}i,    'no shell error text leaks into the answer';
-    unlike $out, qr{not recognized}i,        'no shell error text leaks into the answer';
+    unlike $out, qr{[\\/]dev[\\/]null}i,  'no /dev/null path leaks into the answer';
+    unlike $out, qr{system cannot find}i, 'no shell error text leaks into the answer';
+    unlike $out, qr{not recognized}i,     'no shell error text leaks into the answer';
 };
-
 unlink $stub, $target if -e $stub && -e $target;
-
 done_testing;
