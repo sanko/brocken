@@ -1396,16 +1396,27 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_icmp( 'eq', $lhs, $rhs, undef, $line, $col ) if $op eq '==';
         return $builder->build_icmp( 'ne', $lhs, $rhs, undef, $line, $col ) if $op eq '!=';
 
-        if ( $op eq '<' ) {
+        # Ordering has no signed/unsigned split for a float, and the backends
+        # spell the float predicates plainly: the x86-64 lowerer has them as
+        # lt/le/gt/ge -> b/be/a/ae and ARM64 as cset_lt/... . Emitting the
+        # integer s/u forms here keyed off is_signed picked a name no float
+        # table has, so every ordered float comparison came out false.
+        if ( $lhs->type->kind eq 'float' ) {
+            return $builder->build_icmp( 'lt', $lhs, $rhs, undef, $line, $col ) if $op eq '<';
+            return $builder->build_icmp( 'gt', $lhs, $rhs, undef, $line, $col ) if $op eq '>';
+            return $builder->build_icmp( 'le', $lhs, $rhs, undef, $line, $col ) if $op eq '<=';
+            return $builder->build_icmp( 'ge', $lhs, $rhs, undef, $line, $col ) if $op eq '>=';
+        }
+        elsif ( $op eq '<' ) {
             return $builder->build_icmp( $lhs->type->is_signed ? 'slt' : 'ult', $lhs, $rhs, undef, $line, $col );
         }
-        if ( $op eq '>' ) {
+        elsif ( $op eq '>' ) {
             return $builder->build_icmp( $lhs->type->is_signed ? 'sgt' : 'ugt', $lhs, $rhs, undef, $line, $col );
         }
-        if ( $op eq '<=' ) {
+        elsif ( $op eq '<=' ) {
             return $builder->build_icmp( $lhs->type->is_signed ? 'sle' : 'ule', $lhs, $rhs, undef, $line, $col );
         }
-        if ( $op eq '>=' ) {
+        elsif ( $op eq '>=' ) {
             return $builder->build_icmp( $lhs->type->is_signed ? 'sge' : 'uge', $lhs, $rhs, undef, $line, $col );
         }
         if ( $op eq 'eq' || $op eq 'ne' || $op eq 'lt' || $op eq 'gt' || $op eq 'le' || $op eq 'ge' || $op eq 'cmp' ) {
