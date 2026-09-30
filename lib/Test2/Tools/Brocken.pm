@@ -32,7 +32,6 @@ package Test2::Tools::Brocken v0.0.1 {
         # (an isolate segfaulting with SIGSEGV reported as 139) pass any test
         # expecting 0. Signal death is now always a failure in its own right.
         my $signal;
-
         if ($do_gdb) {
             my @gdb_cmd = (
                 'gdb',            '-batch', '-nx',           '-ex', 'run',  '-ex',    'bt', '-ex',
@@ -67,8 +66,8 @@ package Test2::Tools::Brocken v0.0.1 {
             };
             if ( $@ && $@ eq "timeout\n" ) {
                 $ctx->diag("run_exec timed out for $name");
-                $actual  = -1;
-                $signal  = 0;
+                $actual = -1;
+                $signal = 0;
             }
             else {
                 $actual = $? >> 8;

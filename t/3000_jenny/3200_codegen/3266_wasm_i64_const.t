@@ -19,16 +19,15 @@ use Test2::Tools::Brocken qw[temp_path];
 # These cases are checked by running the module, not by decoding the bytes: a
 # decoder written next to the encoder is exactly the thing that agrees with a
 # broken encoder.
-
-my $i64 = Brocken::Lindsay::IR::Type::i64();
-my $host     = Brocken::Katsuro::Platform::parse();
-my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
-my $null     = $host->is_windows ? 'NUL' : '/dev/null';
+my $i64           = Brocken::Lindsay::IR::Type::i64();
+my $host          = Brocken::Katsuro::Platform::parse();
+my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+my $null          = $host->is_windows ? 'NUL'                    : '/dev/null';
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>$null` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
 
 sub build {
-    my ($value, $tag) = @_;
+    my ( $value, $tag ) = @_;
     my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i64 );
     my $builder = Brocken::Lindsay::IR::Builder->new();
     $builder->position_at_end( $func->append_block('entry') );
@@ -57,36 +56,21 @@ sub run ($path) {
 # Perl as an NV, so 0xF0F0F0F0F0F0F0F0 would silently become a float and the
 # comparison itself would be inexact.
 my @cases = (
-    [ 'zero'                => 0 ],
-    [ 'small'               => 42 ],
-    [ 'negative'            => -13 ],
-    [ '2**31'               => 2147483648 ],
-    [ '2**32 - 1'           => 4294967295 ],
-    [ '2**32'               => 4294967296 ],
-    [ '2**40'               => 1099511627776 ],
-    [ '2**53 - 1'           => 9007199254740991 ],
-    [ '2**53'               => 9007199254740992 ],
-    [ '2**53 + 1'           => 9007199254740993 ],
-    [ '2**62'               => 4611686018427387904 ],
-    [ 'INT64_MAX'           => 9223372036854775807 ],
-    [ 'INT64_MIN'           => -9223372036854775808 ],
-    [ 'INT64_MIN + 1'       => -9223372036854775807 ],
-    [ '-2**62'              => -4611686018427387904 ],
-    [ 'high bits set'       => -1 ],
+    [ 'zero'  => 0 ], [ 'small' => 42 ], [ 'negative' => -13 ], [ '2**31' => 2147483648 ], [ '2**32 - 1' => 4294967295 ], [ '2**32' => 4294967296 ],
+    [ '2**40' => 1099511627776 ], [ '2**53 - 1' => 9007199254740991 ], [ '2**53' => 9007199254740992 ], [ '2**53 + 1' => 9007199254740993 ],
+    [ '2**62'         =>  4611686018427387904 ], [ 'INT64_MAX' =>  9223372036854775807 ], [ 'INT64_MIN'     => -9223372036854775808 ],
+    [ 'INT64_MIN + 1' => -9223372036854775807 ], [ '-2**62'    => -4611686018427387904 ], [ 'high bits set' => -1 ],
 
     # -(2**64 - 0x0F0F0F0F0F0F0F0): the top bit set, so negative, with a
     # repeating nibble pattern that would be obvious if the low groups were
     # dropped or rounded.
-    [ '0xF0F0..F0F0 as i64'  => -1085102592571150096 ],
+    [ '0xF0F0..F0F0 as i64' => -1085102592571150096 ],
 
     # -(2**64 - 0xFFFFFFFF00000000): only the top 32 bits set.
     [ '0xFFFF..0000 as i64' => -4294967296 ]
 );
-
 SKIP: {
-    skip 'wasmtime is not installed', scalar @cases
-      unless $wasmtime_path && -x $wasmtime_path;
-
+    skip 'wasmtime is not installed', scalar @cases unless $wasmtime_path && -x $wasmtime_path;
     my $idx = 0;
     for my $c (@cases) {
         my ( $label, $value ) = @$c;
