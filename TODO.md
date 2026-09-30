@@ -467,6 +467,24 @@ here was reproduced against a natively compiled and executed binary, not read of
       lib/Brocken/Jenny/Linker/ELF64.pm line 193`. `_cc_print_file_name` now resolves a bare
       compiler name with `IPC::Cmd::can_run` and returns early when it is not installed; an
       explicit path is still used as given so the stub-compiler test is unaffected.
+- [x] **`fmov`/`mv` were not accepted by the entry-shuffle fixup** - `fix_entry_shuffle` in
+      `lib/Brocken/Jenny/RegAlloc.pm` scanned only `mov`, so a run of float captures (an `fmov`)
+      or RISC-V integer captures (an `mv`) was left unscheduled and a capture that wrote a
+      register could land before one that read it, so an argument arrived as a copy of its
+      neighbour. It now recognises `mov`, `mv` and `fmov`, partitions the captures by register
+      class, and breaks a cycle with the spill temp of the matching class.
+      Coverage: `t/3000_jenny/3200_codegen/3297_entry_shuffle.t` (integer, executing).
+- [x] **The call arguments were not a parallel move either** - the lowerer emitted one copy per
+      register argument just before a call in reverse order, on the theory that setting the first
+      argument last keeps a later copy from clobbering it. That is only true while no copy's
+      source is another copy's destination; with two floats allocated to xmm1 and xmm2 it wrote
+      xmm1 first and destroyed the source of the copy into xmm0, so the earlier argument read
+      back as its neighbour (a variable float argument is the case `dev`'s tests never reach,
+      because they pass literals). New `fix_call_shuffle` schedules the run as a real parallel
+      move, reusing the entry-shuffle algorithm and the same reserved spill temps; a run with no
+      collision, or one with a stack store, immediate, spilled source or spill temp, is left as
+      written. Coverage: `t/3000_jenny/3200_codegen/3298_float_param_registers.t` (float, variable
+      arguments, executing).
 
 ### Open
 
@@ -490,14 +508,12 @@ here was reproduced against a natively compiled and executed binary, not read of
       its codegen already selects on both widths, so it is *probably* fine; Wasm has its own
       conversion ops. Neither can be executed here, so both remain unverified until `run_cross`
       exists.
-- [ ] **`fmov` is not accepted by the entry-shuffle fixup** - `lib/Brocken/Jenny/RegAlloc.pm`
-      around line 573 only recognises `mov`, so an `fmov` is silently dropped. This is why float
-      parameters/entry shuffling is still unimplemented.
 - [ ] **A float literal cannot be passed directly as an argument** - `sub g(f32 $x) { ... }
       g(1.5)` dies with `Unexpected operand kind: imm (op_value=1.5)` at
-      `lib/Brocken/Jenny/Codegen/X86_64.pm:695`. Passing a float *variable* works and executes
-      correctly, so this is specifically the argument path's lack of a float branch for
-      immediates, not float parameters in general.
+      `lib/Brocken/Jenny/Codegen/X86_64.pm:686`. Passing a float *variable* works and executes
+      correctly (see the fixed call-shuffle item above), so this is specifically the argument
+      path's lack of a float branch for immediates, not float parameters in general. It is the
+      one thing keeping `dev`'s literal-argument float parameter tests from being adopted as-is.
 - [ ] **No float-width cast exists, by design** - `maybe_convert_type` croaks with "No
       float-to-float conversion ... the IR has no fptrunc or fpext" for a *non-constant*
       mismatch. This matches `dev`'s choice to fail loudly rather than silently reinterpret bits,
