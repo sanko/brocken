@@ -46,8 +46,7 @@ jobs:
         shell: bash
       - if: "${{ inputs.preflight != '' }}"
         name: Run preflight checks
-        run: |
-          ${{ inputs.preflight }}
+        run: "${{ inputs.preflight }}\n"
         shell: bash
       - env:
           AUTHOR_TESTING: 0

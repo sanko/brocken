@@ -143,6 +143,32 @@ jobs:
         perl Build.PL
         ./Build
         ./Build test --v
+  midnightbsd:
+    name: MidnightBSD
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    with:
+      checkout_submodules: recursive
+      matrix: |-
+        [
+          {"platform_name":"midnightbsd","os":"midnightbsd","arch":"x86_64","toolchain":"gcc","prepare":"mport install gcc || true; mport install perl5.42-5.42.2 || true; mport install curl || true; ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl || true"}
+        ]
+      task: |
+        export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
+        #~ Bootstrap cpanm via a file download, never `curl | perl`: some remote
+        #~ sh's run under pipefail, and curl's EPIPE (23) after a clean pipe
+        #~ install aborts the whole run even though it succeeded. cpanm lands in
+        #~ the active perl's sitebin/scriptdir, which is not on PATH everywhere,
+        #~ so re-export those dirs after bootstrapping.
+        if command -v curl >/dev/null 2>&1; then curl -fsSL https://cpanmin.us -o /tmp/cpanmin.pl
+        elif command -v wget >/dev/null 2>&1; then wget -qO /tmp/cpanmin.pl https://cpanmin.us
+        elif command -v fetch >/dev/null 2>&1; then fetch -o /tmp/cpanmin.pl https://cpanmin.us
+        else echo 'no http downloader available' >&2; exit 1; fi
+        perl /tmp/cpanmin.pl --notest App::cpanminus Module::Build::Tiny
+        rm -f /tmp/cpanmin.pl
+        export PATH="$(dirname "$(perl -e 'print $^X')"):$(perl -MConfig -e 'print "$Config{sitebin}:$Config{scriptdir}:"' 2>/dev/null):$PATH"
+        command -v cpanm
+        cpanm --installdeps --notest -v .
+        cpanm --test-only -v .
   netbsd:
     name: NetBSD
     uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
@@ -226,24 +252,6 @@ jobs:
         command -v cpanm
         cpanm --installdeps --notest -v .
         cpanm --test-only -v .
-  results:
-    if: always()
-    name: Results
-    needs:
-      - freebsd
-      - linux
-      - macos
-      - openbsd
-      - netbsd
-      - dragonflybsd
-      - midnightbsd
-      - omnios
-      - haiku
-      - windows
-      - wasm
-    uses: sanko/workflow-testing/.github/workflows/results-summary.yml@main
-    with:
-      title: Brocken CI Matrix
   publish-status:
     if: ( success() || failure() ) && github.ref == 'refs/heads/main'
     name: Publish Status Page
@@ -269,32 +277,24 @@ jobs:
           publish_dir: ./status
           user_email: 'github-actions[bot]@users.noreply.github.com'
           user_name: 'github-actions[bot]'
-  midnightbsd:
-    name: MidnightBSD
-    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+  results:
+    if: always()
+    name: Results
+    needs:
+      - freebsd
+      - linux
+      - macos
+      - openbsd
+      - netbsd
+      - dragonflybsd
+      - midnightbsd
+      - omnios
+      - haiku
+      - windows
+      - wasm
+    uses: sanko/workflow-testing/.github/workflows/results-summary.yml@main
     with:
-      checkout_submodules: recursive
-      matrix: |-
-        [
-          {"platform_name":"midnightbsd","os":"midnightbsd","arch":"x86_64","toolchain":"gcc","prepare":"mport install gcc || true; mport install perl5.42-5.42.2 || true; mport install curl || true; ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl || true"}
-        ]
-      task: |
-        export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
-        #~ Bootstrap cpanm via a file download, never `curl | perl`: some remote
-        #~ sh's run under pipefail, and curl's EPIPE (23) after a clean pipe
-        #~ install aborts the whole run even though it succeeded. cpanm lands in
-        #~ the active perl's sitebin/scriptdir, which is not on PATH everywhere,
-        #~ so re-export those dirs after bootstrapping.
-        if command -v curl >/dev/null 2>&1; then curl -fsSL https://cpanmin.us -o /tmp/cpanmin.pl
-        elif command -v wget >/dev/null 2>&1; then wget -qO /tmp/cpanmin.pl https://cpanmin.us
-        elif command -v fetch >/dev/null 2>&1; then fetch -o /tmp/cpanmin.pl https://cpanmin.us
-        else echo 'no http downloader available' >&2; exit 1; fi
-        perl /tmp/cpanmin.pl --notest App::cpanminus Module::Build::Tiny
-        rm -f /tmp/cpanmin.pl
-        export PATH="$(dirname "$(perl -e 'print $^X')"):$(perl -MConfig -e 'print "$Config{sitebin}:$Config{scriptdir}:"' 2>/dev/null):$PATH"
-        command -v cpanm
-        cpanm --installdeps --notest -v .
-        cpanm --test-only -v .
+      title: Brocken CI Matrix
   wasm:
     name: Wasm
     uses: sanko/workflow-testing/.github/workflows/run-direct.yml@main
