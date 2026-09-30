@@ -6,6 +6,64 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
     use Brocken::Katsuro::Platform;
     use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
 
+    # The address the bump allocator starts handing out from. 1024 rather
+    # than 0, because 0 doubles as the out-of-memory answer: `bump_alloc`
+    # returns it on exhaustion and `check_alloc` traps on it, so a heap that
+    # began at 0 could never distinguish "the first block" from "no block".
+    field $heap_base :param = 1024;
+
+    # The runtime's heap header is 24 bytes (cursor, limit, cap) and lives at
+    # the base, so the first page has to cover the base plus the header. The
+    # old fixed single page happened to cover 1024, but a heap base above 64KB
+    # would have put the header itself out of bounds.
+    method _initial_pages () {
+        my $needed = $heap_base + 24;
+        my $pages  = int( ( $needed + 65535 ) / 65536 );
+        return $pages < 1 ? 1 : $pages;
+    }
+
+    # Memory and global sections, shared by both emission paths below. The two
+    # paths used to build their own, which is how the header offset drifted
+    # between them and silently stopped array growth on one path only.
+    method _memory_section () {
+        my $mem_content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb( $self->_initial_pages );
+        return pack( 'C', 5 ) . $self->_uleb( length $mem_content ) . $mem_content;
+    }
+
+    method _global_section () {
+        my $global_content = pack( 'C', 1 )            # 1 global
+            . pack( 'C', 0x7F )                        # valtype i32
+            . pack( 'C', 0x01 )                        # mutable
+            . pack( 'C', 0x41 ) . pack( 'C', 0x00 )    # i32.const 0
+            . pack( 'C', 0x0B );                       # end
+        return pack( 'C', 6 ) . $self->_uleb( length $global_content ) . $global_content;
+    }
+
+    # A `_start` export, so `wasmtime run module.wasm` works as a WASI
+    # command rather than needing `--invoke _BROCKEN_ENTRY` and a heap base on
+    # the command line.
+    #
+    # A WASI `_start` is `() -> ()`, so it cannot pass a heap base the way
+    # `_BROCKEN_ENTRY` takes one as a parameter. It therefore supplies the
+    # link-time base itself: `i32.const <base>; call <entry>; drop; end`. The
+    # `drop` is what discards the entry's return value, since `_start` has no
+    # way to report one -- WASI reads the exit status from `proc_exit`, which
+    # this module does not import. That matches the native backends only in
+    # that the value is discarded rather than propagated; see the note in
+    # TODO.md on the missing `proc_exit` import.
+    #
+    # `i32.const` takes a *signed* LEB128, so the base is encoded with _sleb
+    # rather than the _uleb used for indices and section sizes. For 1024 the
+    # two agree, which is why the unsigned form would pass the tests.
+    method _start_body($entry_index) {
+        my $body = pack( 'C', 0x00 );                             # no locals
+        $body .= pack( 'C', 0x41 ) . $self->_sleb($heap_base);    # i32.const <base>
+        $body .= pack( 'C', 0x10 ) . $self->_uleb($entry_index);  # call <entry>
+        $body .= pack( 'C', 0x1A );                              # drop
+        $body .= pack( 'C', 0x0B );                              # end
+        return $body;
+    }
+
     method write_executable ( $output_file, $codegen_output, $platform ) {
         if ( ref $codegen_output eq 'ARRAY' ) {
 
@@ -24,6 +82,27 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                     fixups         => $fd->{fixups}         // [],
                     return_valtype => $fd->{return_valtype} // 0x7F,
                     param_valtypes => $fd->{param_valtypes} // [],
+                    };
+            }
+
+            # A `_start` export so the module runs as a WASI command. It joins
+            # the same list as every other function, so it picks up a function
+            # index, a type table entry, an export, and a code section slot
+            # from the existing bookkeeping rather than each of those needing to
+            # be taught about it separately.
+            #
+            # It is appended *after* the loop above, which means every real
+            # function keeps the index it had, and the indices recorded in
+            # $func_offsets stay valid.
+            my $entry_index = $func_offsets{_BROCKEN_ENTRY};
+            if ( defined $entry_index ) {
+                push @func_data,
+                    {
+                    name           => '_start',
+                    bytes          => $self->_start_body($entry_index),
+                    fixups         => [],
+                    return_valtype => 'void',
+                    param_valtypes => [],
                     };
             }
 
@@ -92,9 +171,12 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
             }
             $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb( scalar @type_table ) . $type_sec;
 
-            # Memory Section (ID 5): 1 page (64KB)
-            my $mem_content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb(1);
-            my $mem_sec     = pack( 'C', 5 ) . $self->_uleb( length($mem_content) ) . $mem_content;
+            # Memory Section (ID 5) and Global Section (ID 6) come from the
+            # shared helpers, so the single-function path below cannot drift
+            # from this one. They were duplicated until the heap header grew a
+            # third word and one path's seed offset was left behind.
+            my $mem_sec    = $self->_memory_section;
+            my $global_sec = $self->_global_section;
 
             # Function Section (ID 3) -- map each function to its type
             my $func_sec = '';
@@ -105,18 +187,6 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                 $func_sec .= $self->_uleb( $type_map{$key} );
             }
             $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $func_sec;
-
-            # Global Section (ID 6): the heap base, as one mutable i32. It is
-            # seeded at run time by the entry stub below rather than here,
-            # because the heap base arrives as an argument to _BROCKEN_ENTRY.
-            # The allocator's own cursor, limit and cap live in the first bytes
-            # of the heap itself, so this global only has to carry the base.
-            my $global_content = pack( 'C', 1 )            # 1 global
-                . pack( 'C', 0x7F )                        # valtype i32
-                . pack( 'C', 0x01 )                        # mutable
-                . pack( 'C', 0x41 ) . pack( 'C', 0x00 )    # i32.const 0
-                . pack( 'C', 0x0B );                       # end
-            my $global_sec = pack( 'C', 6 ) . $self->_uleb( length($global_content) ) . $global_content;
 
             # Export Section (ID 7) -- export all named functions
             my $export_sec = '';
@@ -169,6 +239,16 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $ret_valtype = $codegen_output->{return_valtype} // 0x7F;
         my $type_sec;
 
+        # A `_start` export alongside the single function, on the same terms as
+        # the multi-function path: only for the real entry, and only reusing
+        # type 0 when the function's own signature is already () -> ().
+        # This path hardcodes a parameter count of zero in its type section
+        # above, so the entry here never takes the heap-base argument the
+        # multi-function one does.
+        my $has_start       = $name eq '_BROCKEN_ENTRY';
+        my $is_void_no_args = $has_start && !ref $ret_valtype && $ret_valtype eq 'void';
+        my $start_type_idx  = $is_void_no_args ? 0 : 1;
+
         if ( ref $ret_valtype eq 'ARRAY' ) {
             $type_sec = pack( 'C', 0x60 ) . "\x00" . pack( 'C', scalar $ret_valtype->@* ) . pack( 'C*', $ret_valtype->@* );
         }
@@ -178,35 +258,69 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
         else {
             $type_sec = pack( 'C', 0x60 ) . "\x00\x01" . pack( 'C', $ret_valtype );
         }
-        $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb(1) . $type_sec;
 
-        # Memory Section (ID 5): 1 page (64KB)
-        my $mem_content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb(1);
-        my $mem_sec     = pack( 'C', 5 ) . $self->_uleb( length($mem_content) ) . $mem_content;
+        # The second type, () -> (), is only emitted when it is actually
+        # referenced. `0x60 0x00 0x00` is a functype taking nothing and
+        # returning nothing, which is the only signature WASI allows a
+        # command's _start to have.
+        my $type_count = 1;
+        if ( $start_type_idx == 1 ) {
+            $type_sec   .= pack( 'C', 0x60 ) . "\x00\x00";
+            $type_count = 2;
+        }
+        $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb($type_count) . $type_sec;
 
-        # Function Section (ID 3)
-        my $func_sec = $self->_uleb(1) . $self->_uleb($type_idx);
-        $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) ) . $func_sec;
+        # Memory and global sections, from the shared helpers above.
+        my $mem_sec    = $self->_memory_section;
+        my $global_sec = $self->_global_section;
 
-        # Global Section (ID 6): the heap base, as in the multi-function path
-        # above. The section is always emitted so both paths produce the same
-        # module shape.
-        my $global_content = pack( 'C', 1 ) . pack( 'C', 0x7F ) . pack( 'C', 0x01 ) . pack( 'C', 0x41 ) . pack( 'C', 0x00 ) . pack( 'C', 0x0B );
-        my $global_sec     = pack( 'C', 6 ) . $self->_uleb( length($global_content) ) . $global_content;
+        # Function Section (ID 3). A section is id, size, then the vector: the
+        # count is part of the counted payload, so the size has to cover the
+        # count as well as the entries. Sizing the entries and then writing a
+        # second count produces a module a validator reads as a corrupt export
+        # table, so the count is built once here and measured with the rest.
+        my $func_entries = $self->_uleb($type_idx);
+        my $func_count   = 1;
+        if ($has_start) {
+            $func_entries .= $self->_uleb($start_type_idx);
+            $func_count++;
+        }
+        my $func_sec
+            = pack( 'C', 3 ) . $self->_uleb( length($func_entries) + 1 ) . $self->_uleb($func_count) . $func_entries;
 
         # Publish the heap base, as in the multi-function path above.
         if ( $name eq '_BROCKEN_ENTRY' ) {
             $body = pack( 'C', 0x20 ) . pack( 'C', 0x00 ) . pack( 'C', 0x24 ) . pack( 'C', 0x00 ) . $body;
         }
 
-        # Export Section (ID 7)
-        my $export_sec = $self->_uleb(1) . $self->_uleb( length($name) ) . $name . pack( 'C', 0x00 ) . $self->_uleb($func_idx);
-        $export_sec = pack( 'C', 7 ) . $self->_uleb( length($export_sec) ) . $export_sec;
+        # Export Section (ID 7), on the same count-then-size shape.
+        my $export_entries = $self->_uleb( length($name) ) . $name . pack( 'C', 0x00 ) . $self->_uleb($func_idx);
+        my $export_count   = 1;
+        if ($has_start) {
+            $export_entries .= $self->_uleb(6) . '_start' . pack( 'C', 0x00 ) . $self->_uleb(1);
+            $export_count++;
+        }
+        my $export_sec
+            = pack( 'C', 7 ) . $self->_uleb( length($export_entries) + 1 ) . $self->_uleb($export_count) . $export_entries;
 
-        # Code Section (ID 10)
+        # Code Section (ID 10), same shape again.
         my $code_item = $self->_uleb( length($locals) + length($body) ) . $locals . $body;
-        my $code_sec  = $self->_uleb(1) . $code_item;
-        $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_sec) ) . $code_sec;
+        my $code_entries = $code_item;
+        my $code_count   = 1;
+        if ($has_start) {
+            # _start is a bare body with no locals of its own, so its code item
+            # is the size followed by the body directly. The `drop` is only
+            # correct when the entry left a value behind; a () -> () entry
+            # leaves the stack empty and dropping from it is a validation
+            # error, which is why the two cases share a type but not a body.
+            my $start_body = $self->_start_body($func_idx);
+            $start_body = pack( 'C', 0x41 ) . $self->_sleb($heap_base) . pack( 'C', 0x10 ) . $self->_uleb($func_idx) . pack( 'C', 0x0B )
+                if $is_void_no_args;
+            $code_entries .= $self->_uleb( length($start_body) ) . $start_body;
+            $code_count++;
+        }
+        my $code_sec
+            = pack( 'C', 10 ) . $self->_uleb( length($code_entries) + 1 ) . $self->_uleb($code_count) . $code_entries;
         die 'Wasm code section too large' if length($code_sec) > 268435456;
         sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
         binmode $fh;
@@ -244,6 +358,24 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
             $byte |= 0x80 if $v;
             $out .= pack( 'C', $byte );
         } while ($v);
+        return $out;
+    }
+
+    # Signed LEB128, for i32.const. The arithmetic has to stay in integers for
+    # the same reason it does in the codegen: `>>` on a negative value is an
+    # unsigned shift, so a plain `$v >>= 7` would not round toward negative
+    # infinity and the last group would be wrong.
+    method _sleb ($v) {
+        my $out = '';
+        while (1) {
+            my $byte = $v & 0x7F;
+            $v = $v >= 0 ? $v >> 7 : -( ( -$v + 127 ) >> 7 );
+            if ( ( $v == 0 && !( $byte & 0x40 ) ) || ( $v == -1 && ( $byte & 0x40 ) ) ) {
+                $out .= pack( 'C', $byte );
+                last;
+            }
+            $out .= pack( 'C', $byte | 0x80 );
+        }
         return $out;
     }
 };

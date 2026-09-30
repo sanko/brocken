@@ -1198,7 +1198,7 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       function directly, so `wasmtime run --invoke _BROCKEN_ENTRY` needs the
       address as a trailing argument, after the module path. This is what
       unblocked executing Wasm output in `3286`/`3287`.
-- [ ] **The Wasm module has no `_start` or `main` export, so
+- [x] **The Wasm module has no `_start` or `main` export, so
       `wasmtime run module.wasm` cannot run it as a WASI command** and every
       invocation has to name `--invoke _BROCKEN_ENTRY` and pass a heap base as a
       trailing argument. A real entry stub that calls `_BROCKEN_ENTRY` with the
@@ -1209,7 +1209,24 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       parameter at all, so the base has to come from a data-segment or global
       initialiser instead — which also decides what the default heap size is for
       a module run without arguments.
-- [ ] **The Wasm linker has two independent memory-section emitters that must be
+      Done: `Linker::Wasm` emits `_start` as `() -> ()` alongside the existing
+      export, so `_BROCKEN_ENTRY(base)` is untouched and every existing
+      `--invoke` test still runs unchanged. Because a WASI entry may not take a
+      parameter, the stub supplies the base itself (`i32.const <base>; call
+      <entry>`) from a new `heap_base` linker attribute, default `1024`. The
+      return value is `drop`ped rather than propagated, since doing that would
+      mean importing `wasi_snapshot_preview1.proc_exit` and this module has no
+      import section at all — so a program's return value does not become its
+      exit status, and both 0 and 1 exit 0. The base is still a linker default
+      rather than something derived from the module's own data: computing it from
+      the end of the static data belongs with `.rodata` (Phase C below). The
+      initial page count is now derived from the base instead of being hardcoded
+      to one page, so a base past 64KB cannot put the 24-byte heap header itself
+      out of bounds. Covered by `t/3000_jenny/3200_codegen/3310_wasm_start.t`,
+      whose control case is a linker whose `_start` traps: without it the test
+      would pass vacuously, because `wasmtime run` exits 0 for a module with no
+      `_start` at all.
+- [x] **The Wasm linker has two independent memory-section emitters that must be
       kept in step.** `Linker::Wasm::write_executable` builds the multi-function
       module (memory section at `Wasm.pm:96-98`, the heap-base global at
       `:110-118`, entry-stub seed at `:128-144`) and a single-function path
@@ -1234,6 +1251,11 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       single-function path cannot run the `box`/`unbox` case any more: the
       allocator it would need is not linked into it, which is why `3240` now
       builds a real five-function module.
+      Done both halves: the memory section, the heap-base global and the `_start`
+      body are now `_memory_section`, `_global_section` and `_start_body`, called
+      by both paths, so the two can no longer drift. `3310` asserts the emitted
+      memory sections are byte-identical, which is what would have caught both
+      of the failures above at the point they were introduced.
 
 ### Phase B: Int/Bool native alias support
 - [x] Lower `Int` and `Bool` as native types (i64/i1)

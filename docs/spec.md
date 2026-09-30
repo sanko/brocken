@@ -487,6 +487,21 @@ sub _BROCKEN_ENTRY(i64 $__heap_base) -> i64 {
 }
 ```
 
+The linker also emits whatever entry the target's loader looks for, which then
+calls `_BROCKEN_ENTRY` with a heap base of its own choosing — `rsp` on ELF64,
+a base carved from the image on PE and Mach-O, and a linker attribute
+(`heap_base`, default `1024`) on Wasm, where there is no loader to supply one.
+On Wasm that means two exports, and both are usable:
+
+| Export | Signature | Purpose |
+|--------|-----------|---------|
+| `_start` | `() -> ()` | What a WASI command loader calls, i.e. `wasmtime run module.wasm` |
+| `_BROCKEN_ENTRY` | `(i64 $__heap_base) -> T` | The entry itself, for direct invocation or a custom base |
+
+`_start` discards the entry's return value, so a program's return value is not
+its exit status; propagating it would require importing
+`wasi_snapshot_preview1.proc_exit`, and the Wasm module has no import section.
+
 ### 2.10 Feature Flags
 
 Experimental features are gated behind `use feature`:
