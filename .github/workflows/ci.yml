@@ -1,208 +1,434 @@
 ---
+name: CI Matrix
+
+on:
+  pull_request: ~
+  push: ~
+  schedule:
+    - cron: '42 5 * * 0'
+  # Manual runs may carry the same selectors as a commit tag, and win over it.
+  workflow_dispatch:
+    inputs:
+      runner:
+        default: all
+        description: 'Runners to execute, comma-separated (e.g. "freebsd,linux" or "linux#aarch64,openbsd#x86_64"). See the [runner:...] tag below.'
+        type: string
+      test_files:
+        default: ''
+        description: Test file pattern to run (e.g. t/3000_jenny/3500_isolate/*.t)
+        type: string
+      feed:
+        default: ''
+        description: 'Machine-readable result feeds: "json", "rss", or "json,rss".'
+        type: string
+
+# One run per ref. Two pushes in a row otherwise race to publish the same
+# artifacts and the older one wins the summary.
+concurrency:
+  group: '${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}'
+
+permissions:
+  actions: read
+  contents: read
+
 jobs:
+  # A commit message (or a pull request title) may carry tags:
+  #
+  #   [runner:freebsd,linux#aarch64]   only these families run
+  #   [test:t/3000_jenny/*.t]          only this test pattern runs
+  #   [feed:json,rss]                  also publish machine-readable feeds
+  #
+  # Nothing in this file parses those. The reusable generate-matrix.yml does,
+  # and the table below travels into it, so this file is only the per-family
+  # wiring: which image to boot, what to run, and how results are titled.
+  #
+  # Note the tag vocabulary changed with the move off ./cross.yml: it used to be
+  # [os:...] plus [arch:x64|arm|risc|wasm] and is now [runner:family#arch], where
+  # arch is the real name (x86_64, aarch64, riscv64) and wasm is its own family.
+  setup:
+    name: Generate Testing Matrix
+    uses: sanko/workflow-testing/.github/workflows/generate-matrix.yml@main
+    with:
+      runner: '${{ github.event.inputs.runner }}'
+      test_files: '${{ github.event.inputs.test_files }}'
+      feed: '${{ github.event.inputs.feed }}'
+      # Brocken's own portfolio, replacing the built-in table. midnightbsd and
+      # wasm are not built-in families and become selectable because the family
+      # list is derived from these keys.
+      #
+      # A literal block scalar on purpose: this is never produced by an
+      # expression, so the apostrophes in the omnios configure field are just
+      # characters in a YAML file. Interpolating a table into this position
+      # would put untrusted text inside a YAML document, which is how a single
+      # quote ends the file early.
+      #
+      # One family per line, with a trailing comma. A line without its comma is
+      # a JSON error that stops the run at this input before any job starts.
+      #
+      # perl_version is set only where the old CI built perl from source
+      # (linux, macos, wasm, via perlbrew). The BSD and illumos legs used the
+      # perl the VM image ships, so they leave it unset and install it in
+      # prepare, and the report records the version actually found instead of a
+      # hardcoded label.
+      table: |
+        {
+          "dragonflybsd": [
+            {"name":"Intel","platform_name":"dragonflybsd","os":"dragonflybsd","arch":"x86_64","toolchain":"gcc","prepare":"pkg install -y perl5-5.42 || (sed -i '' 's|/quarterly|/latest|' /usr/local/etc/pkg/repos/Avalon.conf && pkg update -f && pkg install -y perl5-5.42) || (curl -sL https://www.cpan.org/src/5.0/perl-5.42.2.tar.gz | tar xz -C /tmp && cd /tmp/perl-5.42.2 && ./Configure -des -Dprefix=/usr/local -Dusedevel && make -j$(getconf NPROCESSORS_ONLN) && make install && ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl) || true; pkg install -y gcc curl gmake || true"}
+          ],
+          "freebsd": [
+            {"name":"Intel","platform_name":"freebsd","os":"freebsd","arch":"x86_64","toolchain":"gcc","prepare":"pkg install -y perl5 gcc curl"},
+            {"name":"ARM","platform_name":"freebsd","os":"freebsd","arch":"aarch64","toolchain":"gcc","prepare":"pkg install -y perl5 gcc curl"}
+          ],
+          "haiku": [
+            {"name":"Intel","platform_name":"haiku","os":"haiku","arch":"x86_64","toolchain":"gcc","prepare":"pkgman install -y cmd:gcc cmd:make cmd:curl cmd:wget cmd:perl || pkgman install -y cmd:gcc cmd:make cmd:curl cmd:perl cmd:gcc_x86"}
+          ],
+          "linux": [
+            {"name":"Intel","arch":"x86_64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04","toolchain":"gcc"},
+            {"name":"ARM","arch":"aarch64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04-arm","toolchain":"clang"},
+            {"name":"RISC-V","arch":"riscv64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04-riscv","toolchain":"gcc"}
+          ],
+          "macos": [
+            {"name":"Apple Silicon","arch":"aarch64","perl_version":"5.42.0","variant":"default","platform_name":"macos","os":"macos-15","toolchain":"clang"},
+            {"name":"Intel","arch":"x86_64","perl_version":"5.42.0","variant":"default","platform_name":"macos","os":"macos-15-intel","toolchain":"clang"}
+          ],
+          "midnightbsd": [
+            {"name":"Intel","platform_name":"midnightbsd","os":"midnightbsd","arch":"x86_64","toolchain":"gcc","prepare":"mport install gcc || true; mport install perl5.42-5.42.2 || true; mport install curl || true; ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl || true"}
+          ],
+          "netbsd": [
+            {"name":"Intel","platform_name":"netbsd","os":"netbsd","arch":"x86_64","toolchain":"gcc","prepare":"pkgin -y install perl || true; pkgin -y install gcc curl || true"},
+            {"name":"ARM","platform_name":"netbsd","os":"netbsd","arch":"aarch64","toolchain":"gcc","prepare":"pkgin -y install perl || true; pkgin -y install gcc curl || true"}
+          ],
+          "omnios": [
+            {"name":"Intel","platform_name":"omnios","os":"omnios","arch":"x86_64","toolchain":"gcc","prepare":"pkg install -v --accept developer/gcc13 system/header developer/build/make web/curl || true; pkg install --accept perl || true"}
+          ],
+          "openbsd": [
+            {"name":"Intel","platform_name":"openbsd","os":"openbsd","arch":"x86_64","toolchain":"gcc","prepare":"pkg_add gmake curl || true"},
+            {"name":"ARM","platform_name":"openbsd","os":"openbsd","arch":"aarch64","toolchain":"gcc","prepare":"pkg_add gmake curl || true"}
+          ],
+          "wasm": [
+            {"name":"Intel","arch":"x86_64","perl_version":"5.42.0","variant":"default","platform_name":"linux","os":"ubuntu-24.04","toolchain":"gcc","prepare":"sudo apt-get update -y && sudo apt-get install -y nodejs; curl -fsSL --retry 3 -o /tmp/wasmtime.tar.xz https://github.com/bytecodealliance/wasmtime/releases/download/v32.0.1/wasmtime-v32.0.1-x86_64-linux.tar.xz && sudo tar -xJf /tmp/wasmtime.tar.xz -C /usr/local/bin --strip-components=1 wasmtime-v32.0.1-x86_64-linux/wasmtime && rm -f /tmp/wasmtime.tar.xz"}
+          ],
+          "windows": [
+            {"name":"Intel","arch":"x86_64","platform_name":"windows","os":"windows-2022","variant":"5.42.3.1","toolchain":"gcc","prepare":"curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"},
+            {"name":"ARM","arch":"aarch64","platform_name":"windows","os":"windows-11-arm","variant":"5.42.3.1","toolchain":"gcc","prepare":"curl -sL -o /c/strawberry.zip https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-5.42.3.1-64bit-portable.zip && rm -rf /c/Strawberry; powershell -NoProfile -Command Expand-Archive -Path C:/strawberry.zip -DestinationPath C:/Strawberry -Force -ErrorAction Stop; rm -f /c/strawberry.zip"}
+          ]
+        }
+
+  # Every family below is gated on its own name appearing in the padded `ready`
+  # list, which generate-matrix.yml builds after applying both the family and the
+  # arch filter. A family with no surviving setup is absent from `ready`, so an
+  # empty matrix is never handed to a reusable workflow.
+  #
+  # The BSD and illumos families boot an image (run-vm); linux, macos, wasm and
+  # windows take a hosted runner (run-direct). Which is which is the only real
+  # difference between the two kinds of job.
+
   dragonflybsd:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'dragonflybsd') }}"
     name: DragonFly BSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' dragonflybsd ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    secrets: inherit
     with:
-      arch: x86-64
-      gcc_pkg: sudo pkg install -y gcc
-      host: ubuntu-latest
-      os: dragonflybsd
-      perl: 5.42
-      pkg: sudo pkg install -y perl5-5.42 || (sudo sed -i '' 's|/quarterly|/latest|' /usr/local/etc/pkg/repos/Avalon.conf && sudo pkg update -f && sudo pkg install -y perl5-5.42) || (curl -sL https://www.cpan.org/src/5.0/perl-5.42.2.tar.gz | tar xz -C /tmp && cd /tmp/perl-5.42.2 && ./Configure -des -Dprefix=/usr/local -Dusedevel && make -j$(getconf NPROCESSORS_ONLN) && sudo make install && sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl)
-      setup: export LC_ALL=C LANG=C LC_CTYPE=C LC_NUMERIC=C LC_COLLATE=C LC_TIME=C LC_MESSAGES=C LC_MONETARY=C; sudo pkg install -y gdb p5-Test-Harness || true
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: 6.4.2
-  freebsd-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'freebsd-arm64') }}"
+      os_version: '6.4.2'
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).dragonflybsd) }}
+      task: |
+        # Same shape as the old cross.yml, minus sudo: vmactions runs prepare
+        # and run as root in the guest, so sudo is neither needed nor reliably
+        # present.
+        curl -L https://cpanmin.us | LC_ALL=C perl - --notest App::cpanminus Module::Build::Tiny
+        export PATH="$PATH:$(perl -MConfig -e 'print $Config{installsitebin}'):$(perl -MConfig -e 'print $Config{installscript}')"
+        LC_ALL=C cpanm --installdeps --notest .
+        if [ -n "$TEST_FILES" ]; then
+          perl Build.PL
+          ./Build
+          LC_ALL=C prove -Ilib -lv $TEST_FILES
+        else
+          LC_ALL=C cpanm --test-only -v .
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
+  freebsd:
     name: FreeBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' freebsd ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    secrets: inherit
     with:
-      arch: arm64
-      gcc_pkg: sudo pkg install -y gcc
-      host: ubuntu-latest
-      os: freebsd
-      perl: 5.42
-      pkg: sudo pkg install -y perl5
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: 15.1
-  freebsd-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'freebsd-x64') }}"
-    name: FreeBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: x86-64
-      gcc_pkg: sudo pkg install -y gcc
-      host: ubuntu-latest
-      os: freebsd
-      perl: 5.42
-      pkg: sudo pkg install -y perl5
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: 15.1
+      os_version: '15.1'
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).freebsd) }}
+      task: |
+        curl -L https://cpanmin.us | LC_ALL=C perl - --notest App::cpanminus Module::Build::Tiny
+        export PATH="$PATH:$(perl -MConfig -e 'print $Config{installsitebin}'):$(perl -MConfig -e 'print $Config{installscript}')"
+        LC_ALL=C cpanm --installdeps --notest .
+        if [ -n "$TEST_FILES" ]; then
+          perl Build.PL
+          ./Build
+          LC_ALL=C prove -Ilib -lv $TEST_FILES
+        else
+          LC_ALL=C cpanm --test-only -v .
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
   haiku:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'haiku') }}"
     name: Haiku
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' haiku ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    secrets: inherit
     with:
-      arch: x86-64
-      gcc_pkg: sudo pkgman install gcc || sudo pkgman install gcc_x86
-      host: ubuntu-latest
-      os: haiku
-      perl: 5.42
-      perl_subversion: 2
-      pkg: sudo pkgman install "perl>=5.42.2" -y || echo "perl 5.42 not available"
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: r1beta5
-  linux-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'linux-arm64') }}"
+      os_version: 'r1beta5'
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).haiku) }}
+      task: |
+        curl -L https://cpanmin.us | LC_ALL=C perl - --notest App::cpanminus Module::Build::Tiny
+        export PATH="$PATH:$(perl -MConfig -e 'print $Config{installsitebin}'):$(perl -MConfig -e 'print $Config{installscript}')"
+        LC_ALL=C cpanm --installdeps --notest .
+        if [ -n "$TEST_FILES" ]; then
+          perl Build.PL
+          ./Build
+          LC_ALL=C prove -Ilib -lv $TEST_FILES
+        else
+          LC_ALL=C cpanm --test-only -v .
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
+  linux:
     name: Linux
-    needs:
-      - setup
-    uses: ./.github/workflows/unix.yml
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' linux ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-direct.yml@main
+    secrets: inherit
     with:
-      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: ubuntu-24.04-arm
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      title: ARM
-  linux-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'linux-x64') }}"
-    name: Linux
-    needs:
-      - setup
-    uses: ./.github/workflows/unix.yml
-    with:
-      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: ubuntu-24.04
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      title: Intel
-  macos-arm:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'macos-arm') }}"
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).linux) }}
+      task: |
+        cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
+        perl Build.PL
+        ./Build
+        if [ -n "$TEST_FILES" ]; then
+          prove -Ilib -lv $TEST_FILES
+        else
+          ./Build test --v
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
+  macos:
     name: macOS
-    needs:
-      - setup
-    uses: ./.github/workflows/unix.yml
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' macos ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-direct.yml@main
+    secrets: inherit
     with:
-      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: macos-15
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      title: Apple Silicon
-  macos-intel:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'macos-intel') }}"
-    name: macOS
-    needs:
-      - setup
-    uses: ./.github/workflows/unix.yml
-    with:
-      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: macos-15-intel
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      title: Intel
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).macos) }}
+      task: |
+        cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
+        perl Build.PL
+        ./Build
+        if [ -n "$TEST_FILES" ]; then
+          prove -Ilib -lv $TEST_FILES
+        else
+          ./Build test --v
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
   midnightbsd:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'midnightbsd') }}"
     name: MidnightBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' midnightbsd ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    secrets: inherit
     with:
-      arch: x86-64
-      gcc_pkg: sudo mport install gcc || true
-      host: ubuntu-latest
-      os: midnightbsd
-      perl: 5.42
-      pkg: sudo mport install perl5.42-5.42.2 || true; sudo ln -sf /usr/local/bin/perl5.42.2 /usr/local/bin/perl
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: 4.0.4
-  netbsd-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'netbsd-arm64') }}"
+      os_version: '4.0.4'
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).midnightbsd) }}
+      task: |
+        curl -L https://cpanmin.us | LC_ALL=C perl - --notest App::cpanminus Module::Build::Tiny
+        export PATH="$PATH:$(perl -MConfig -e 'print $Config{installsitebin}'):$(perl -MConfig -e 'print $Config{installscript}')"
+        LC_ALL=C cpanm --installdeps --notest .
+        if [ -n "$TEST_FILES" ]; then
+          perl Build.PL
+          ./Build
+          LC_ALL=C prove -Ilib -lv $TEST_FILES
+        else
+          LC_ALL=C cpanm --test-only -v .
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
+  netbsd:
     name: NetBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' netbsd ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    secrets: inherit
     with:
-      arch: arm64
-      gcc_pkg: which gcc 2>/dev/null || sudo pkgin -y install gcc || true
-      host: ubuntu-latest
-      os: netbsd
-      perl: 5.42
-      pkg: sudo pkgin -y install perl || true
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: 10.1
-  netbsd-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'netbsd-x64') }}"
-    name: NetBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: x86-64
-      gcc_pkg: which gcc 2>/dev/null || sudo pkgin -y install gcc || true
-      host: ubuntu-latest
-      os: netbsd
-      perl: 5.42
-      pkg: sudo pkgin -y install perl || true
-      setup: sudo pkgin -y install gdb || true
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: 10.1
+      os_version: '10.1'
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).netbsd) }}
+      task: |
+        curl -L https://cpanmin.us | LC_ALL=C perl - --notest App::cpanminus Module::Build::Tiny
+        export PATH="$PATH:$(perl -MConfig -e 'print $Config{installsitebin}'):$(perl -MConfig -e 'print $Config{installscript}')"
+        LC_ALL=C cpanm --installdeps --notest .
+        if [ -n "$TEST_FILES" ]; then
+          perl Build.PL
+          ./Build
+          LC_ALL=C prove -Ilib -lv $TEST_FILES
+        else
+          LC_ALL=C cpanm --test-only -v .
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
   omnios:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'omnios') }}"
     name: OmniOS
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' omnios ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    secrets: inherit
     with:
-      arch: x86-64
-      gcc_pkg: sudo pkg install developer/gcc --accept || sudo pkg install developer/gcc11 --accept || sudo pkg install gcc --accept || sudo pkg install developer/gcc49 --accept || true
-      host: ubuntu-latest
-      os: omnios
-      perl: 5.42
-      pkg: 'sudo pkg install perl || [ $? -eq 4 ]'
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: r151058
-  openbsd-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'openbsd-arm64') }}"
+      os_version: 'r151058'
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).omnios) }}
+      task: |
+        curl -L https://cpanmin.us | LC_ALL=C perl - --notest App::cpanminus Module::Build::Tiny
+        export PATH="$PATH:$(perl -MConfig -e 'print $Config{installsitebin}'):$(perl -MConfig -e 'print $Config{installscript}')"
+        LC_ALL=C cpanm --installdeps --notest .
+        if [ -n "$TEST_FILES" ]; then
+          perl Build.PL
+          ./Build
+          LC_ALL=C prove -Ilib -lv $TEST_FILES
+        else
+          LC_ALL=C cpanm --test-only -v .
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
+  openbsd:
     name: OpenBSD
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' openbsd ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    secrets: inherit
+    with:
+      os_version: '7.9'
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).openbsd) }}
+      task: |
+        curl -L https://cpanmin.us | LC_ALL=C perl - --notest App::cpanminus Module::Build::Tiny
+        export PATH="$PATH:$(perl -MConfig -e 'print $Config{installsitebin}'):$(perl -MConfig -e 'print $Config{installscript}')"
+        LC_ALL=C cpanm --installdeps --notest .
+        if [ -n "$TEST_FILES" ]; then
+          perl Build.PL
+          ./Build
+          LC_ALL=C prove -Ilib -lv $TEST_FILES
+        else
+          LC_ALL=C cpanm --test-only -v .
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
+  # Its own family rather than an arch of linux, so [runner:wasm] selects it
+  # without dragging in the whole linux matrix.
+  wasm:
+    name: WebAssembly
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' wasm ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-direct.yml@main
+    secrets: inherit
+    with:
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).wasm) }}
+      task: |
+        # The Wasm tests execute the modules the backend emits, so they skip
+        # unless a runtime is on PATH, and a skip and a pass look alike in the
+        # log. That is how this lane reports green without checking anything.
+        # Prove the runtime works first, using the same invocation the tests
+        # rely on (run --invoke main) against a module exporting main() -> i32
+        # that returns 42, assembled here as raw bytes so the check does not
+        # depend on Brocken being built. node is the tests' fallback when
+        # wasmtime is absent, so require it too rather than let the suite fall
+        # back silently.
+        command -v wasmtime
+        command -v node
+        perl -e 'print pack "H*", join "", (
+          "0061736d01000000",     # magic + version
+          "0105016000017f",       # type: () -> (i32)
+          "03020100",             # func 0
+          "070801046d61696e0000", # export "main" -> func 0
+          "0a06010400412a0b",     # code: i32.const 42; end
+        )' > /tmp/smoke.wasm
+        got=$(wasmtime run --invoke main /tmp/smoke.wasm)
+        if [ "$got" != "42" ]; then
+          echo "wasmtime smoke test returned '$got', expected 42" >&2
+          exit 1
+        fi
+        echo "wasmtime smoke test returned 42"
+        cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
+        perl Build.PL
+        ./Build
+        if [ -n "$TEST_FILES" ]; then
+          prove -Ilib -lv $TEST_FILES
+        else
+          ./Build test --v
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
+  windows:
+    name: Windows
+    needs: setup
+    if: "${{ contains(needs.setup.outputs.ready, ' windows ') }}"
+    uses: sanko/workflow-testing/.github/workflows/run-direct.yml@main
+    secrets: inherit
+    with:
+      checkout_submodules: recursive
+      matrix: ${{ toJSON(fromJSON(needs.setup.outputs.matrices).windows) }}
+      # The harness runs the task under bash on every platform, including
+      # Windows, so this is git-bash and not the pwsh the old windows.yml used.
+      # That is also why ./Build becomes perl Build: the Build script's shebang
+      # is not reliable on Windows.
+      task: |
+        cpanm --installdeps --notest --with-suggests --with-recommends --with-configure -v .
+        if [ -n "$TEST_FILES" ]; then
+          perl Build.PL
+          perl Build
+          prove -Ilib -lv $TEST_FILES
+        else
+          cpanm --test-only -v .
+        fi
+      test_files: "${{ needs.setup.outputs.test_files }}"
+
+  # if: always(), so a summary is published even when every build failed.
+  #
+  # `needs` lists setup as well as every family. setup is here for its outputs:
+  # runner, test_files and feed all come from it, and a job that reads needs.X
+  # must depend on X. A family that never started is reported as "not selected"
+  # rather than silently missing.
+  results:
+    name: Summary
+    if: always()
     needs:
       - setup
-    uses: ./.github/workflows/cross.yml
+      - dragonflybsd
+      - freebsd
+      - haiku
+      - linux
+      - macos
+      - midnightbsd
+      - netbsd
+      - omnios
+      - openbsd
+      - wasm
+      - windows
+    uses: sanko/workflow-testing/.github/workflows/results-summary.yml@main
     with:
-      arch: arm64
-      gcc_pkg: which gcc 2>/dev/null || true
-      host: ubuntu-latest
-      os: openbsd
-      perl: 5.40
-      perl_subversion: 1
-      pkg: echo "using system perl"
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: 7.9
-  openbsd-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'openbsd-x64') }}"
-    name: OpenBSD
-    needs:
-      - setup
-    uses: ./.github/workflows/cross.yml
-    with:
-      arch: x86-64
-      gcc_pkg: which gcc 2>/dev/null || true
-      host: ubuntu-latest
-      os: openbsd
-      perl: 5.40
-      perl_subversion: 1
-      pkg: echo "using system perl"
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      version: 7.9
+      title: Brocken CI Matrix
+      # These three let the report tell "filtered out of this run" apart from
+      # "selected and reported nothing". Without them every silent family reads
+      # as a failure.
+      runner: "${{ needs.setup.outputs.runner }}"
+      test_files: "${{ needs.setup.outputs.test_files }}"
+      feed: "${{ needs.setup.outputs.feed }}"
+
   publish-status:
     if: ( success() || failure() ) && github.ref == 'refs/heads/main'
     name: Publish Status Page
@@ -228,311 +454,3 @@ jobs:
           publish_dir: ./status
           user_email: 'github-actions[bot]@users.noreply.github.com'
           user_name: 'github-actions[bot]'
-  results:
-    if: always()
-    name: Summary
-    needs:
-      - linux-x64
-      - linux-arm64
-      - riscv64
-      - macos-intel
-      - macos-arm
-      - win32-x64
-      - win32-arm64
-      - dragonflybsd
-      - freebsd-x64
-      - freebsd-arm64
-      - haiku
-      - midnightbsd
-      - netbsd-x64
-      - netbsd-arm64
-      - omnios
-      - openbsd-x64
-      - openbsd-arm64
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all test output artifacts
-        uses: actions/download-artifact@v8.0.1
-        with:
-          path: results
-      - name: Generate summary from test results
-        run: |
-          mkdir -p status
-          SUMMARY_MD="status/status.md"
-          STATUS_JSON="status/status.json"
-          echo "## Build and Test Summary" > $SUMMARY_MD
-          echo "| OS | Architecture | Result |" >> $SUMMARY_MD
-          echo "|:---|:---|:---|" >> $SUMMARY_MD
-          echo "{" > $STATUS_JSON
-          first=true
-          
-          # All expected (OS, Arch) pairs in display order
-          EXPECTED=(
-            "Linux:Intel"
-            "Linux:ARM"
-            "Linux:RISC-V"
-            "macOS:Intel"
-            "macOS:Apple Silicon"
-            "Windows:Intel"
-            "Windows:ARM"
-            "DragonFly BSD:Intel"
-            "FreeBSD:Intel"
-            "FreeBSD:ARM"
-            "Haiku:Intel"
-            "MidnightBSD:Intel"
-            "NetBSD:Intel"
-            "NetBSD:ARM"
-            "OmniOS:Intel"
-            "OpenBSD:Intel"
-            "OpenBSD:ARM"
-          )
-          
-          # Map artifact dir name → OS:Arch key
-          map_name() {
-            case "$1" in
-              *"ubuntu-24.04-arm"*)   echo "Linux:ARM" ;;
-              *"ubuntu-24.04-riscv"*) echo "Linux:RISC-V" ;;
-              *"ubuntu-24.04"*)       echo "Linux:Intel" ;;
-              *"macos-15-intel"*)    echo "macOS:Intel" ;;
-              *"macos-15"*)          echo "macOS:Apple Silicon" ;;
-              *"windows-11-arm"*)    echo "Windows:ARM" ;;
-              *"windows-2022"*)      echo "Windows:Intel" ;;
-              *"dragonflybsd"*)      echo "DragonFly BSD:Intel" ;;
-              *"freebsd"*"arm64"*)   echo "FreeBSD:ARM" ;;
-              *"freebsd"*)           echo "FreeBSD:Intel" ;;
-              *"haiku"*)             echo "Haiku:Intel" ;;
-              *"midnightbsd"*)       echo "MidnightBSD:Intel" ;;
-              *"netbsd"*"arm64"*)    echo "NetBSD:ARM" ;;
-              *"netbsd"*)            echo "NetBSD:Intel" ;;
-              *"omnios"*)            echo "OmniOS:Intel" ;;
-              *"openbsd"*"arm64"*)   echo "OpenBSD:ARM" ;;
-              *"openbsd"*)           echo "OpenBSD:Intel" ;;
-            esac
-          }
-          
-          declare -A SEEN
-          for entry in "${EXPECTED[@]}"; do
-            SEEN["$entry"]=0
-          done
-          
-          if [ -d "results" ]; then
-            for dir in results/*/; do
-              name=$(basename "$dir")
-              key=$(map_name "$name")
-              [ -z "$key" ] && continue
-              file=$(find "$dir" -name "*.txt" | head -1)
-              if [ -n "$file" ]; then
-                if grep -q "^Error!" "$file"; then
-                  SEEN["$key"]="failure"
-                else
-                  SEEN["$key"]="success"
-                fi
-              fi
-            done
-          fi
-          
-          for entry in "${EXPECTED[@]}"; do
-            IFS=':' read -r os arch <<< "$entry"
-            status="${SEEN[$entry]}"
-            case "$status" in
-              "success") icon="✅" ;;
-              "failure") icon="❌" ;;
-              *)         icon="❌"; status="failure" ;;
-            esac
-            echo "| $os | $arch | $icon |" >> $SUMMARY_MD
-            [ "$first" = false ] && echo "," >> $STATUS_JSON
-            echo "\"${os// /_}:$arch\": \"$status\"" >> $STATUS_JSON
-            first=false
-          done
-          
-          echo "}" >> $STATUS_JSON
-          cat $SUMMARY_MD >> $GITHUB_STEP_SUMMARY
-      - name: Upload status files for publishing
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: status-files
-          path: status/
-  riscv64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'riscv64') }}"
-    name: Linux
-    needs:
-      - setup
-    uses: ./.github/workflows/unix.yml
-    with:
-      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: ubuntu-24.04-riscv
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      title: RISC-V
-  setup:
-    name: Generate Testing Matrix
-    outputs:
-      matrix: '${{ steps.matrix.outputs.matrix }}'
-      runner: '${{ steps.parse_tags.outputs.runner }}'
-      test_files: '${{ steps.parse_tags.outputs.test_files }}'
-    runs-on: ubuntu-22.04
-    steps:
-      - env:
-          COMMIT_MSG: "${{ github.event.head_commit.message || github.event.pull_request.body || '' }}"
-          DISPATCH_ARCH: '${{ github.event.inputs.arch }}'
-          DISPATCH_OS: '${{ github.event.inputs.os }}'
-          DISPATCH_TEST: '${{ github.event.inputs.test_files }}'
-        id: parse_tags
-        name: Parse commit message tags for os/arch/test filtering
-        run: |
-          expand_runner() {
-            local os_input="$1"
-            local arch_input="$2"
-            [ "$os_input" = "all" ] && [ "$arch_input" = "all" ] && { echo "all"; return; }
-            local -a selected_oses
-            if [ "$os_input" = "all" ]; then
-              selected_oses=(linux macos windows freebsd openbsd netbsd dragonflybsd haiku midnightbsd omnios)
-            else
-              IFS=',' read -ra selected_oses <<< "$os_input"
-            fi
-            local -a selected_archs
-            if [ "$arch_input" = "all" ]; then
-              selected_archs=(x64 arm wasm risc)
-            else
-              IFS=',' read -ra selected_archs <<< "$arch_input"
-            fi
-            local result=""
-            local need_wasm=false
-            local need_risc=false
-            for os in "${selected_oses[@]}"; do
-              os="${os#"${os%%[! ]*}"}"; os="${os%"${os##*[! ]}"}"
-              [ -z "$os" ] && continue
-              for arch in "${selected_archs[@]}"; do
-                arch="${arch#"${arch%%[! ]*}"}"; arch="${arch%"${arch##*[! ]}"}"
-                [ -z "$arch" ] && continue
-                case "$arch" in
-                  x64)
-                    case "$os" in
-                      linux)       result="$result linux-x64" ;;
-                      macos)       result="$result macos-intel" ;;
-                      windows)     result="$result win32-x64" ;;
-                      freebsd)     result="$result freebsd-x64" ;;
-                      openbsd)     result="$result openbsd-x64" ;;
-                      netbsd)      result="$result netbsd-x64" ;;
-                      dragonflybsd|dragonfly) result="$result dragonflybsd" ;;
-                      haiku)       result="$result haiku" ;;
-                      midnightbsd) result="$result midnightbsd" ;;
-                      omnios)      result="$result omnios" ;;
-                    esac ;;
-                  arm)
-                    case "$os" in
-                      linux)   result="$result linux-arm64" ;;
-                      macos)   result="$result macos-arm" ;;
-                      windows) result="$result win32-arm64" ;;
-                      freebsd) result="$result freebsd-arm64" ;;
-                      openbsd) result="$result openbsd-arm64" ;;
-                      netbsd)  result="$result netbsd-arm64" ;;
-                    esac ;;
-                  wasm) [ "$os" = "linux" ] && need_wasm=true ;;
-                  risc) [ "$os" = "linux" ] && need_risc=true ;;
-                esac
-              done
-            done
-            $need_wasm && result="$result wasm"
-            $need_risc && result="$result riscv64"
-            echo "${result:1}"
-          }
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "runner=$(expand_runner "${DISPATCH_OS:-all}" "${DISPATCH_ARCH:-all}")" >> "$GITHUB_OUTPUT"
-            echo "test_files=${DISPATCH_TEST:-}" >> "$GITHUB_OUTPUT"
-          else
-            RAW_OS=$(echo "$COMMIT_MSG" | grep -oP '\[os:\K[^\]]+' || echo "all")
-            RAW_ARCH=$(echo "$COMMIT_MSG" | grep -oP '\[arch:\K[^\]]+' || echo "all")
-            TEST=$(echo "$COMMIT_MSG" | grep -oP '\[test:\K[^\]]+' || echo "")
-            echo "runner=$(expand_runner "$RAW_OS" "$RAW_ARCH")" >> "$GITHUB_OUTPUT"
-            echo "test_files=$TEST" >> "$GITHUB_OUTPUT"
-          fi
-      - env:
-          DATA: |
-            {
-              "perl":  ["5.42.0"],
-              "flags": [""]
-            }
-        id: matrix
-        run: "jq -rn 'env.DATA | fromjson | @json \"matrix=\\(.)\"' > $GITHUB_OUTPUT\n"
-  wasm:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'wasm') }}"
-    name: WebAssembly
-    needs:
-      - setup
-    uses: ./.github/workflows/unix.yml
-    with:
-      flags: '${{ fromJSON(needs.setup.outputs.matrix).flags[0] }}'
-      os: ubuntu-24.04
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      preflight: |
-        #~ The Wasm tests execute the modules the backend emits, so they skip
-        #~ unless a runtime is on PATH. A skip and a pass look alike in the log,
-        #~ which is how this lane reports green without checking anything. Prove
-        #~ the runtime works before trusting the suite, using the same invocation
-        #~ the tests rely on (run --invoke main) against a module exporting
-        #~ main() -> i32 that returns 42, assembled here as raw bytes so the
-        #~ check does not depend on Brocken being built.
-        command -v wasmtime
-        perl -e 'print pack "H*", join "", (
-          "0061736d01000000",     # magic + version
-          "0105016000017f",       # type: () -> (i32)
-          "03020100",             # func 0
-          "070801046d61696e0000", # export "main" -> func 0
-          "0a06010400412a0b",     # code: i32.const 42; end
-        )' > /tmp/smoke.wasm
-        got=$(wasmtime run --invoke main /tmp/smoke.wasm)
-        if [ "$got" != "42" ]; then
-          echo "wasmtime smoke test returned '$got', expected 42" >&2
-          exit 1
-        fi
-        echo "wasmtime smoke test returned 42"
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      title: WebAssembly
-  win32-arm64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'win32-arm64') }}"
-    name: Windows
-    needs:
-      - setup
-    uses: ./.github/workflows/windows.yml
-    with:
-      flags: -Dusethreads
-      os: windows-11-arm
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      title: ARM
-  win32-x64:
-    if: "${{ needs.setup.outputs.runner == 'all' || contains(needs.setup.outputs.runner, 'win32-x64') }}"
-    name: Windows
-    needs:
-      - setup
-    uses: ./.github/workflows/windows.yml
-    with:
-      flags: -Dusethreads
-      os: windows-2022
-      perl: '${{ fromJSON(needs.setup.outputs.matrix).perl[0] }}'
-      test_files: '${{ needs.setup.outputs.test_files }}'
-      title: Intel
-name: CI Matrix
-on:
-  pull_request: ~
-  push: ~
-  schedule:
-    - cron: 42 5 * * 0
-  workflow_dispatch:
-    inputs:
-      arch:
-        default: all
-        description: 'Architecture(s) to test (comma-separated, e.g. "x64,arm" or "wasm,risc"). See [arch:...] commit tag docs.'
-        type: string
-      os:
-        default: all
-        description: 'OS(es) to test (comma-separated, e.g. "linux" or "linux,macos"). See [os:...] commit tag docs.'
-        type: string
-      test_files:
-        default: ''
-        description: Test file pattern (e.g. t/3000_jenny/3500_isolate/*.t)
-        type: string
-permissions:
-  actions: read
-  contents: read
