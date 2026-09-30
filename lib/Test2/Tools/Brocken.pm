@@ -27,6 +27,12 @@ package Test2::Tools::Brocken v0.0.1 {
         my $cmd      = $file;
         my $actual;
 
+        # A child killed by a signal reports `$? & 127`, and `$? >> 8` is then 0:
+        # the harness used to call that a clean `exit 0`, which let real crashes
+        # (an isolate segfaulting with SIGSEGV reported as 139) pass any test
+        # expecting 0. Signal death is now always a failure in its own right.
+        my $signal;
+
         if ($do_gdb) {
             my @gdb_cmd = (
                 'gdb',            '-batch', '-nx',           '-ex', 'run',  '-ex',    'bt', '-ex',
@@ -44,6 +50,12 @@ package Test2::Tools::Brocken v0.0.1 {
             elsif ( $gdb_out =~ /Thread.*exited with code (\d+)\]/ ) {
                 $actual = $1;
             }
+            elsif ( $gdb_out =~ /Program received signal (\w+)/ ) {
+
+                # gdb reports the signal instead of an exit code, and gdb itself
+                # still exits 0, so record it separately.
+                $signal = $1;
+            }
             $ctx->diag("GDB output for $name:\n$gdb_out") if length $gdb_out;
         }
         else {
@@ -55,15 +67,18 @@ package Test2::Tools::Brocken v0.0.1 {
             };
             if ( $@ && $@ eq "timeout\n" ) {
                 $ctx->diag("run_exec timed out for $name");
-                $actual = -1;
+                $actual  = -1;
+                $signal  = 0;
             }
             else {
                 $actual = $? >> 8;
+                $signal = $? & 127;
             }
         }
-        my $mismatch = defined $expected && $actual != $expected;
+        my $mismatch = $signal || ( defined $expected && $actual != $expected );
         if ($mismatch) {
-            warn "$name: expected exit code $expected, got $actual (raw status \$?=$?)\n";
+            my $how = $signal ? " (killed by signal $signal)" : '';
+            warn "$name: expected exit code $expected, got $actual$how (raw status \$?=$?)\n";
 
             #            if ( -e $file ) {
             #                if ( open my $fh, '<:raw', $file ) {
