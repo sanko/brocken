@@ -425,6 +425,109 @@ The GDB JIT interface requires:
 **Priority:** Medium (enables interactive debugging of JIT code)
 **Dependencies:** All DWARF sections already JIT-ready (parameterized `text_base`, absolute encoding, proper section sizes). Needs a new ELF64 convenience method to wrap DWARF sections in a minimal in-memory ELF, plus the runtime glue (descriptor + registration function).
 
+## Found Bugs: Float & Backend Correctness
+
+Found while backporting float work from `dev` (branch `october2026`, 2026-09-30). Every item
+here was reproduced against a natively compiled and executed binary, not read off the MIR.
+
+### Fixed in this series
+
+- [x] **Float literal stored at the wrong width** - a decimal literal is lexed as `f64`, so
+      `my f32 $t = 1.5;` emitted a double-width store into a four-byte slot. The backends take
+      a store/load/move width from an operand's type, so re-tagging the constant to the target
+      type is the whole conversion (and where rounding to f32 happens). `aeb4e3f`
+- [x] **`lower_binop` widened the wrong side** - when a literal and a value of different float
+      widths met, it promoted the *value*, reinterpreting a four-byte pattern as eight. Now the
+      literal is re-tagged instead. `aeb4e3f`
+- [x] **Negative float literals were not folded** - `-1.5` became an `fneg` of a positive
+      constant, and the result is not a `Constant`, so `my f32 $a = -1.0;` had nothing to
+      re-tag and died. Folded for floats only; folding `-5` for an i64 is left alone since an
+      unsigned neg is defined as wrapping. `aeb4e3f`
+- [x] **Every ordered float comparison was false** - the frontend picked `slt`/`ult`/`sle`/...
+      off `is_signed`, but neither backend's float table has those names (x86-64 `%fcond` at
+      `Codegen/X86_64.pm:2434` is `lt/le/gt/ge`, ARM64 at `Lowerer/ARM64.pm:2974` is
+      `cset_lt/...`). Affected `<`, `>`, `<=`, `>=` at *any* float width including f64.
+      `==`/`!=` survived only because they are spelled the same for both. `1a8a713`
+- [x] **x86-64 int<->float conversion always used the double form** - `cvtsi2sd`/`cvttsd2si`
+      hardcoded the `F2` prefix, so an f32 was converted by reading or writing eight bytes of a
+      four-byte value. The single-precision forms are the same opcodes under `F3`; the prefix is
+      now taken from the float operand's type, matching how `fload`/`fstore`/`fmov` already
+      choose. `cf4fef9`
+
+### Open
+
+- [ ] **x86-64 `cmp` and ALU immediates are truncated to 32 bits** - `Codegen/X86_64.pm:1325`
+      (`cmp`) and `:847` (`add`/`sub`/`and`/`or`/`xor`/`adc`/`sbb`) both emit
+      `pack( 'CCCV', ... )`, which packs a 32-bit unsigned value. Worse, x86-64's
+      `cmp r/m64, imm32` (`81 /7`) *sign-extends* the immediate, so there is no single-instruction
+      encoding for a 64-bit constant at all.
+      **Symptoms (both reproduced by executing a compiled binary):**
+      `my i64 $x = 4294967296; return $x == 4294967296 ? 1 : 0;` returns false, as does any i64
+      comparison against a literal >= 2^31; and `my i64 $x = 1; $x = $x + 4294967296;` loses the
+      add. In both cases the *value* is fine - `$x >> 32` and `$x != 0` match - so it is
+      the immediate operand, not the arithmetic. Boundary: 2147483647 works, 2147483648 does not.
+      **Fix:** when the immediate does not fit in signed 32 bits, materialise it with
+      `mov r64, imm64` (`48 B8+r` + `pack 'Q'`) into a scratch register and use the reg/reg
+      form. `mov` already does this correctly at `:768`; copy that logic.
+      **Note:** this is why `t/1000_katsuro/1076_float_conversion.t` deliberately keeps its
+      comparisons at or below 2^31 - the float fix is real, the compare underneath it is not.
+- [ ] **f32 conversions are unverified on ARM64, RISCV64, and Wasm** - only x86-64 can be
+      executed here, and only x86-64 was fixed. ARM64/RISCV64 encode the width in the
+      instruction (`fcvtzs`, `scvtf`) rather than in a prefix, so they are *probably* fine, but
+      "probably" is not verified. Blocked on the `run_cross` harness (below).
+- [ ] **`fmov` is not accepted by the entry-shuffle fixup** - `lib/Brocken/Jenny/RegAlloc.pm`
+      around line 573 only recognises `mov`, so an `fmov` is silently dropped. This is why float
+      parameters/entry shuffling is still unimplemented.
+- [ ] **A float literal cannot be passed directly as an argument** - `sub g(f32 $x) { ... }
+      g(1.5)` dies with `Unexpected operand kind: imm (op_value=1.5)` at
+      `lib/Brocken/Jenny/Codegen/X86_64.pm:695`. Passing a float *variable* works and executes
+      correctly, so this is specifically the argument path's lack of a float branch for
+      immediates, not float parameters in general.
+- [ ] **No float-width cast exists, by design** - `maybe_convert_type` croaks with "No
+      float-to-float conversion ... the IR has no fptrunc or fpext" for a *non-constant*
+      mismatch. This matches `dev`'s choice to fail loudly rather than silently reinterpret bits,
+      but it does mean mixing `f32` and `f64` in one expression is a hard error unless one side
+      is a literal. Adding `fptrunc`/`fpext` instructions is the real fix; until then the croak
+      is the intended behaviour and should not be "fixed" by widening.
+- [ ] **Float-to-unsigned-int conversion is absent** - the IR has `SIToFP`/`FPToSI` only. There
+      is no `fptoui`, so `my u32 $j = $negative_float;` has no defined lowering.
+- [ ] **Out-of-range and NaN float->int conversion is undefined** - `cvttss2si`/`cvttsd2si`
+      return the "integer indefinite" value (all ones) for NaN and for overflow. No saturation or
+      trap semantics have been chosen or tested.
+- [ ] **`i128` has no surface syntax** - `my i128 $x = 3;` fails to parse with "Expected
+      variable name after 'my'". `i128` exists throughout the IR and the lowerers but cannot be
+      declared in source, so the i128 conversion paths have no end-to-end test. May be
+      intentional; worth confirming.
+- [ ] **Multi-block Wasm call fixups use block-relative offsets** -
+      `lib/Brocken/Jenny/Codegen/Wasm.pm:284`/`:297` record each fixup relative to its own
+      block, but `emit_functions` (`:66-68`) only adds `$locals_size` when reassembling; the
+      block offsets at `:304-319` are applied to source maps, not to fixups. Every existing Wasm
+      test is single-block, so a multi-block program produces invalid relocations. This must be
+      fixed *before* the `_start` entry point can be backported from `dev` (`ca2086c`), since
+      `_start` is itself just another function.
+- [ ] **`Linker/Wasm.pm` claims to emit `_start` but does not** - the POD (`:192-203`) documents
+      a `_start` export; the code exports only `_BROCKEN_ENTRY`. Tracked with the fixup bug above.
+
+### Test-process lessons
+
+- [ ] **MIR-level assertions give false confidence on float bugs** - `3280_sitofp_fptosi.t` and
+      the other float tests assert on IR shape, and passed while the emitted code computed
+      `0.0f`. Every float fix in this series is covered by a new test in `t/1000_katsuro/`
+      (`1074_float_width.t`, `1075_float_ordering.t`, `1076_float_conversion.t`) that compiles,
+      links, and **executes**, and each was confirmed to fail with its fix reverted.
+- [ ] **Byte-pattern greps over emitted code are unreliable** - searching for `F3 0F 11` misses
+      any encoding with a REX byte between the prefix and `0F`. This produced a false "no
+      movss-store found" reading during the f32 investigation. Prefer instrumenting the lowerer
+      and printing operand types, or disassembling with a real tool.
+
+### Untouched by this series
+
+- [ ] **illumos isolate segfaults are still unexplained** - the six skipped
+      `t/3000_jenny/3500_isolate/` tests and the two `1050_integration.t` skips are masking a real
+      crash, not fixing it. `Platform::Solaris` has no `libpthread_name` override and DT_NEEDED
+      is still just `libc.so.1`, so the pthread probe has not found anything. Needs an
+      illumos/OmniOS VM and gdb; not attempted here.
+
 ## Fuzzer Expansion Plan
 
 The current fuzzer (`lib/Brocken/Fuzz.pm`) only exercises i64 arithmetic + if/else. Expansion is needed to cover the compiler's full language surface and catch regressions across all pipeline stages (lexer, parser, lowerer, codegen, linker, runtime).
