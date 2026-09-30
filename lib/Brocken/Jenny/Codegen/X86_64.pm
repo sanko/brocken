@@ -1212,10 +1212,18 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $did   = $reg_id->($dst_r);
                     my $sid   = $reg_id->($src_r);
                     my $bits  = $src->type ? $src->type->bits : 64;
+
+                    # The opcode name says `sd`, but as with fload/fstore/fmov
+                    # this handles both float widths and the prefix picks which:
+                    # F2 is the double form (cvtsi2sd), F3 the single one
+                    # (cvtsi2ss). The float width lives on the destination; the
+                    # `bits` above is the *integer* source width, which only
+                    # decides REX.W.
+                    my $fbits = $dst->type && $dst->type->kind eq 'float' ? $dst->type->bits : 64;
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     $rex |= 0x48 if $bits >= 64;
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'C', 0xF2 );
+                    $bytes .= pack( 'C', $fbits >= 64 ? 0xF2 : 0xF3 );
                     if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
                     $bytes .= pack( 'CCC', 0x0F, 0x2A, $modrm );
                 }
@@ -1225,10 +1233,18 @@ class Brocken::Jenny::Codegen::X86_64 {
                     my $did   = $reg_id->($dst_r);
                     my $sid   = $reg_id->($src_r);
                     my $bits  = $dst->type ? $dst->type->bits : 64;
+
+                    # As above: F2 is cvttsd2si (double source), F3 is
+                    # cvttss2si (single source). The float width is on the
+                    # source; `bits` is the integer destination width and only
+                    # decides REX.W. Reading a single-precision value as a
+                    # double here is what left `my i64 $j = $f32;` wrong even
+                    # once the f32 slot itself was stored and loaded correctly.
+                    my $fbits = $src->type && $src->type->kind eq 'float' ? $src->type->bits : 64;
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     $rex |= 0x48 if $bits >= 64;
                     my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'C', 0xF2 );
+                    $bytes .= pack( 'C', $fbits >= 64 ? 0xF2 : 0xF3 );
                     if ( $rex > 0x40 ) { $bytes .= pack( 'C', $rex ) }
                     $bytes .= pack( 'CCC', 0x0F, 0x2C, $modrm );
                 }
