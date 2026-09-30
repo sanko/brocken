@@ -112,7 +112,7 @@ is( ctor_args_for('class P { field i16 $b :param :reader = 5; field i32 $c :para
     is( $f->default_op, '=', "the default's operator is recorded as '='" );
 }
 
-# --- Behaviour ----------------------------------------------------------------
+# Behaviour
 #
 # A substitution that reads back correctly in IR can still store the wrong width
 # or the wrong offset, so each program returns 42 when every field reads back and

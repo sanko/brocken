@@ -14,11 +14,9 @@ subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
     my $i64 = Brocken::Lindsay::IR::Type::i64();
     my $ptr = Brocken::Lindsay::IR::Type::ptr();
 
-    # -------------------------------------------------------------------
     # 1. Build bar()
     # It reads its own Frame Pointer, walks up to foo()'s frame,
     # and extracts the Return IP (which points directly to the next instruction in main)
-    # -------------------------------------------------------------------
     my $bar = Brocken::Lindsay::IR::Function->new( name => 'bar', return_type => $i64, params => [] );
     $b->position_at_end( $bar->append_block('entry') );
     my $bar_fp = $b->build_frame_addr('bar_fp');
@@ -34,9 +32,7 @@ subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
     my $is_valid = $b->build_icmp( 'ne', $main_ip, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ) );
     $b->build_ret($is_valid);
 
-    # -------------------------------------------------------------------
     # 2. Build foo()
-    # -------------------------------------------------------------------
     my $foo = Brocken::Lindsay::IR::Function->new( name => 'foo', return_type => $i64, params => [] );
     $b->position_at_end( $foo->append_block('entry') );
     my $res = $b->build_call( $bar, [] );

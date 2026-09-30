@@ -1,5 +1,6 @@
 use v5.42;
 use Test2::V0 '!subtest';
+use blib;
 use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Brocken;
 use Brocken::Katsuro;
@@ -83,7 +84,7 @@ for my $case (
     ],
 
     # Other attributes are unaffected, and `pack` never shows up as one.
-    [ 'pack alongside reader and writer' => 'class P { field i8 $a :pack :reader :writer; field i8 $b :reader; }', { a => 0, b => 1 } ],
+    [ 'pack alongside reader and writer' => 'class P { field i8 $a :pack :reader :writer; field i8 $b :reader; }', { a => 0, b => 1 } ]
 ) {
     my ( $name, $decl, $want ) = @$case;
     my $got = offsets_for($decl);
@@ -121,7 +122,7 @@ for my $bad ( 0, 3, 5, 12, 100 ) {
     like( $@ // '', qr/power of two/, "':pack($bad)' says why" ) unless $ok;
 }
 
-# --- Behaviour ----------------------------------------------------------------
+# Behaviour
 #
 # A layout is only correct if the generated code agrees with it at run time, and
 # a packed struct is the case where the two are most likely to drift: the fields

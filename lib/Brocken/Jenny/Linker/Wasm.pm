@@ -10,7 +10,7 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
     # than 0, because 0 doubles as the out-of-memory answer: `bump_alloc`
     # returns it on exhaustion and `check_alloc` traps on it, so a heap that
     # began at 0 could never distinguish "the first block" from "no block".
-    field $heap_base :param = 1024;
+    field $heap_base : param = 1024;
 
     # The runtime's heap header is 24 bytes (cursor, limit, cap) and lives at
     # the base, so the first page has to cover the base plus the header. The
@@ -56,11 +56,11 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
     # rather than the _uleb used for indices and section sizes. For 1024 the
     # two agree, which is why the unsigned form would pass the tests.
     method _start_body($entry_index) {
-        my $body = pack( 'C', 0x00 );                             # no locals
-        $body .= pack( 'C', 0x41 ) . $self->_sleb($heap_base);    # i32.const <base>
-        $body .= pack( 'C', 0x10 ) . $self->_uleb($entry_index);  # call <entry>
-        $body .= pack( 'C', 0x1A );                              # drop
-        $body .= pack( 'C', 0x0B );                              # end
+        my $body = pack( 'C', 0x00 );                               # no locals
+        $body .= pack( 'C', 0x41 ) . $self->_sleb($heap_base);      # i32.const <base>
+        $body .= pack( 'C', 0x10 ) . $self->_uleb($entry_index);    # call <entry>
+        $body .= pack( 'C', 0x1A );                                 # drop
+        $body .= pack( 'C', 0x0B );                                 # end
         return $body;
     }
 
@@ -97,13 +97,7 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
             my $entry_index = $func_offsets{_BROCKEN_ENTRY};
             if ( defined $entry_index ) {
                 push @func_data,
-                    {
-                    name           => '_start',
-                    bytes          => $self->_start_body($entry_index),
-                    fixups         => [],
-                    return_valtype => 'void',
-                    param_valtypes => [],
-                    };
+                    { name => '_start', bytes => $self->_start_body($entry_index), fixups => [], return_valtype => 'void', param_valtypes => [], };
             }
 
             # Resolve cross-function call fixups
@@ -248,7 +242,6 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $has_start       = $name eq '_BROCKEN_ENTRY';
         my $is_void_no_args = $has_start && !ref $ret_valtype && $ret_valtype eq 'void';
         my $start_type_idx  = $is_void_no_args ? 0 : 1;
-
         if ( ref $ret_valtype eq 'ARRAY' ) {
             $type_sec = pack( 'C', 0x60 ) . "\x00" . pack( 'C', scalar $ret_valtype->@* ) . pack( 'C*', $ret_valtype->@* );
         }
@@ -265,7 +258,7 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
         # command's _start to have.
         my $type_count = 1;
         if ( $start_type_idx == 1 ) {
-            $type_sec   .= pack( 'C', 0x60 ) . "\x00\x00";
+            $type_sec .= pack( 'C', 0x60 ) . "\x00\x00";
             $type_count = 2;
         }
         $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb($type_count) . $type_sec;
@@ -285,8 +278,7 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
             $func_entries .= $self->_uleb($start_type_idx);
             $func_count++;
         }
-        my $func_sec
-            = pack( 'C', 3 ) . $self->_uleb( length($func_entries) + 1 ) . $self->_uleb($func_count) . $func_entries;
+        my $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_entries) + 1 ) . $self->_uleb($func_count) . $func_entries;
 
         # Publish the heap base, as in the multi-function path above.
         if ( $name eq '_BROCKEN_ENTRY' ) {
@@ -300,14 +292,14 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
             $export_entries .= $self->_uleb(6) . '_start' . pack( 'C', 0x00 ) . $self->_uleb(1);
             $export_count++;
         }
-        my $export_sec
-            = pack( 'C', 7 ) . $self->_uleb( length($export_entries) + 1 ) . $self->_uleb($export_count) . $export_entries;
+        my $export_sec = pack( 'C', 7 ) . $self->_uleb( length($export_entries) + 1 ) . $self->_uleb($export_count) . $export_entries;
 
         # Code Section (ID 10), same shape again.
-        my $code_item = $self->_uleb( length($locals) + length($body) ) . $locals . $body;
+        my $code_item    = $self->_uleb( length($locals) + length($body) ) . $locals . $body;
         my $code_entries = $code_item;
         my $code_count   = 1;
         if ($has_start) {
+
             # _start is a bare body with no locals of its own, so its code item
             # is the size followed by the body directly. The `drop` is only
             # correct when the entry left a value behind; a () -> () entry
@@ -319,8 +311,7 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
             $code_entries .= $self->_uleb( length($start_body) ) . $start_body;
             $code_count++;
         }
-        my $code_sec
-            = pack( 'C', 10 ) . $self->_uleb( length($code_entries) + 1 ) . $self->_uleb($code_count) . $code_entries;
+        my $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_entries) + 1 ) . $self->_uleb($code_count) . $code_entries;
         die 'Wasm code section too large' if length($code_sec) > 268435456;
         sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
         binmode $fh;
