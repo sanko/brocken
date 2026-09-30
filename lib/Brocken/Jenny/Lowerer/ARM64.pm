@@ -2736,6 +2736,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
                     my $val  = $inst->operands->[0];
+                    my $tag  = $self->_type_tag( $val->type );
                     my $size = 16;
                     my $dyn  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
@@ -2746,7 +2747,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         )
                     );
                     my $payload_mem
-                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 0 }, type => $val->type );
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 8 }, type => $val->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
@@ -2754,30 +2755,30 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                             comment  => 'box: store payload'
                         )
                     );
-                    my $tag_mem = Brocken::Jenny::MIR::MachineOperand->new(
+                    my $hdr_mem = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
-                        value => { base => $inst->name, disp => 8 },
+                        value => { base => $inst->name, disp => 0 },
                         type  => Brocken::Lindsay::IR::Type::i64()
                     );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'store_imm',
                             operands => [
-                                $tag_mem,
+                                $hdr_mem,
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'imm',
-                                    value => $self->_type_tag( $val->type ),
+                                    value => $self->_box_header($tag),
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 )
                             ],
-                            comment => 'box: store tag'
+                            comment => 'box: store header'
                         )
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
                     my $dyn = $inst->operands->[0];
                     my $mem
-                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $dyn->name, disp => 0 }, type => $inst->type );
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $dyn->name, disp => 8 }, type => $inst->type );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4608,14 +4609,21 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
     }
 
     method _type_tag($type) {
-        return 1 if $type->kind eq 'int' && $type->bits <= 32;
+        return 1 if $type->kind eq 'int' && $type->bits <= 32;    # i1, i8, i16, i32
         return 2 if $type->kind eq 'int' && $type->bits == 64;
         return 6 if $type->kind eq 'int' && $type->bits == 128;
-        return 3 if $type->kind eq 'float';
+        return 3 if $type->kind eq 'float';                       # f32, f64
         return 4 if $type->kind eq 'ptr';
         return 5 if $type->kind eq 'dynamic';
         return 0;
     }
+
+    # The first 8 bytes of a fat scalar are the reference-counting header, not
+    # a spare field for the tag alone. Packed little-endian, which is every
+    # backend we generate for: u16 refcount at +0, u8 gc_flags at +2,
+    # u8 type_tag at +3, u32 aux at +4. A fresh box is owned by the value being
+    # assigned, so it starts at one reference and zero flags/aux.
+    method _box_header($tag) { return 1 | ( $tag << 24 ) }
 
     method _split_i128($ir_val) {
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {

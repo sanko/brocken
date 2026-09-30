@@ -295,25 +295,35 @@ When porting new features or fixing compiler bugs across platforms, always check
 Brocken represents dynamically typed variables (like Perl variables) through a 128-bit (16-byte) Fat Scalar layout mapped to the `dynamic` type in the Lindsay IR.
 
 ```
-+--------------------------------+--------------------------------+
-|       64-bit Type Tag          |         64-bit Payload         |
-|  (e.g., Integer, String, Ptr)  |   (Literal value or Pointer)   |
-+--------------------------------+--------------------------------+
++0       2       +2    1     +3    1     +4        4       +8            8
++--------+-------+------+------+--------+-------------+
+|  RC    | Flags | Tag  | Aux / Pad   |  Payload     |
++--------+-------+------+--------+-------------+
 ```
 
 ### 5.1 Memory Layout
-1. **Type Tag (8 bytes)**: A 64-bit unsigned integer identifying the scalar type:
-   * `1` $\rightarrow$ Undefined / Null
-   * `2` $\rightarrow$ Boolean
-   * `3` $\rightarrow$ Native Integer (64-bit)
-   * `4` $\rightarrow$ Native Float (double)
-   * `5` $\rightarrow$ String Pointer (points to null-terminated char array)
-   * `6` $\rightarrow$ Array / List Reference
-2. **Payload (8 bytes)**: A 64-bit slot that holds either the literal native value (such as a 64-bit integer or double) or a pointer to heap-allocated objects (such as a string descriptor or array metadata).
+
+The first eight bytes are a reference-counting header shared by every dynamically typed value, and the payload follows it at offset 8. The header fields are laid out little-endian, which holds for every backend Brocken generates for (`x86_64`, `aarch64`, `riscv64` and `wasm`).
+
+1. **Reference Count (2 bytes at offset 0)**: A 16-bit unsigned count of live references. `box` initialises it to `1`, since the boxed value is owned by the variable it is assigned to. A count that would exceed `65535` pins the object, preventing collection.
+2. **GC Flags (1 byte at offset 2)**: Bit 0 marks a cycle suspect, bit 1 marks a buffered object, bit 2 marks a leaf.
+3. **Type Tag (1 byte at offset 3)**: An 8-bit unsigned identifier for the payload's dynamic type:
+   * `0` $\rightarrow$ Unknown / Reserved
+   * `1` $\rightarrow$ Native Integer (up to 32 bits)
+   * `2` $\rightarrow$ Native Integer (64 bits)
+   * `3` $\rightarrow$ Native Float
+   * `4` $\rightarrow$ Pointer
+   * `5` $\rightarrow$ Dynamic (a nested fat scalar)
+   * `6` $\rightarrow$ Native Integer (128 bits)
+4. **Aux / Padding (4 bytes at offset 4)**: Reserved for per-type metadata, such as the cached character length of a string. A `box` stores zero here.
+5. **Payload (8 bytes at offset 8)**: A 64-bit slot holding either the literal native value (such as a 64-bit integer or double) or a pointer to heap-allocated objects (such as a string descriptor or array metadata).
+
+Because the header is written as a single 64-bit word, a fresh box stores `1 | (tag << 24)`: the reference count, the tag byte at offset 3, and zeroed flags and aux.
 
 ### 5.2 Boxing and Unboxing Operations
-* **`box <type> <val> to dynamic`**: Allocates stack space or a temporary register pair, loads the type identifier into the high 64 bits, copies the native value into the low 64 bits, and returns the 128-bit structure.
-* **`unbox dynamic <val> to <type>`**: Compares the high 64-bit type tag against the requested type using an architecture-specific assertion. On match, it returns the low 64-bit payload directly. If there is a type mismatch, it branches to a type-coercion helper or throws an exception.
+
+* **`box <type> <val> to dynamic`**: Allocates 16 bytes, writes the payload at offset 8, writes the packed reference-counting header at offset 0 with a count of `1`, and returns the 128-bit structure. On `wasm` the cell comes from `Brocken::Runtime::bump_alloc` like any other escaping block; the other backends use `alloca`.
+* **`unbox dynamic <val> to <type>`**: Loads the payload from offset 8 at the width of the requested type. The type tag at offset 3 is available to an architecture-specific assertion, which can branch to a type-coercion helper or throw on a mismatch.
 
 ---
 
