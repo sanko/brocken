@@ -1327,7 +1327,24 @@ class Brocken::Katsuro::Lowerer {
         # Promote narrower operand to match wider type width so the MIR
         # lowerer sees consistent operand widths (critical for i128/halving).
         if ( $lhs->type->kind eq $rhs->type->kind && $lhs->type->bits != $rhs->type->bits && $lhs->type->kind ne 'dynamic' ) {
-            if ( $lhs->type->bits < $rhs->type->bits ) {
+            if ( $lhs->type->kind eq 'float' ) {
+
+                # A decimal literal is lexed as f64, so `if ($f32 == 1.5)` hands
+                # us an f64 against an f32.  There is no fptrunc/fpext in the IR,
+                # so the only sound unification is to re-tag the literal to the
+                # width of the other operand; widening the loaded value instead
+                # would reinterpret a four-byte pattern as eight.
+                if ( $rhs->isa('Brocken::Lindsay::IR::Constant') ) {
+                    $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
+                }
+                elsif ( $lhs->isa('Brocken::Lindsay::IR::Constant') ) {
+                    $lhs = $self->maybe_convert_type( $lhs, $rhs->type );
+                }
+                else {
+                    $lhs = $self->maybe_convert_type( $lhs, $rhs->type );
+                }
+            }
+            elsif ( $lhs->type->bits < $rhs->type->bits ) {
                 $lhs = $self->maybe_convert_type( $lhs, $rhs->type );
             }
             else {
@@ -1378,6 +1395,7 @@ class Brocken::Katsuro::Lowerer {
         }
         return $builder->build_icmp( 'eq', $lhs, $rhs, undef, $line, $col ) if $op eq '==';
         return $builder->build_icmp( 'ne', $lhs, $rhs, undef, $line, $col ) if $op eq '!=';
+
         if ( $op eq '<' ) {
             return $builder->build_icmp( $lhs->type->is_signed ? 'slt' : 'ult', $lhs, $rhs, undef, $line, $col );
         }
@@ -1492,6 +1510,20 @@ class Brocken::Katsuro::Lowerer {
         # but i8(-1) sign-extends correctly to wider types.
         if ( $op eq '-' && $operand->type->kind eq 'int' && $operand->type->bits == 1 ) {
             $operand = $self->maybe_convert_type( $operand, Brocken::Lindsay::IR::Type::i8() );
+        }
+
+        # Fold negation of a float literal, so `-1.5` is a negative constant
+        # rather than an fneg of a positive one. Beyond saving a runtime op,
+        # it is load-bearing for f32: the result of an unfolded neg is not a
+        # Constant, so there is nothing to re-tag and `my f32 $a = -1.0;`
+        # died trying to widen it. Left to floats deliberately -- folding
+        # `-5` for an i64 as well is a separate question, since an unsigned
+        # neg is defined as wrapping.
+        if ( $op eq '-' &&
+            $operand->isa('Brocken::Lindsay::IR::Constant') &&
+            $operand->type->kind eq 'float' )
+        {
+            return Brocken::Lindsay::IR::Constant->new( type => $operand->type, value => -( $operand->value ) );
         }
         return $builder->build_neg( $operand, undef, $line, $col ) if $op eq '-';
         if ( $op eq '!' ) {
@@ -1792,6 +1824,24 @@ class Brocken::Katsuro::Lowerer {
                 return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => int( $val->value ) );
             }
             return $builder->build_fptosi( $val, $target_type, undef, $line, $col );
+        }
+
+        # Float width, which is what a decimal literal runs into: it arrives as
+        # f64, and `my f32 $t = 1.5;` would otherwise store eight bytes into a
+        # four-byte slot. A *literal* is again not a number that needs
+        # converting -- the constant holds a plain Perl number and each backend
+        # packs it at the width its type asks for -- so re-tagging is the whole
+        # conversion, and it is also where the rounding to f32 happens.
+        if ( $val->type->kind eq 'float' && $target_type->kind eq 'float' ) {
+            return $val if $val->type->bits == $target_type->bits;
+            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value );
+            }
+            Carp::croak( "No float-to-float conversion from " .
+                    $val->type->bits .
+                    " bits to " .
+                    $target_type->bits .
+                    "; the IR has no fptrunc or fpext, and a float of one width cannot be stored in a slot of the other" );
         }
         $val;
     }
