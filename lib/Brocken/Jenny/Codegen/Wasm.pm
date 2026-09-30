@@ -383,13 +383,20 @@ class Brocken::Jenny::Codegen::Wasm {
         return $out;
     }
 
+    # Signed LEB128. The shift has to stay in integer arithmetic: dividing by
+    # 128 with POSIX::floor goes through a double, which carries 53 bits of
+    # mantissa, so any value past 2**53 was rounded before the next group was
+    # taken. INT64_MAX came out as ff 80 80 80 80 80 80 80 80 01, which the
+    # validator rejects outright as an over-long var_i64.
+    #
+    # Perl's >> shifts the unsigned representation, so a negative value needs
+    # the -((-v + 127) >> 7) form to still round toward negative infinity.
     method _sleb ($v) {
-        require POSIX;
-        $v = -( ~( $v & 0xFFFFFFFFFFFFFFFF ) + 1 ) if $v >= 0x8000000000000000;
+        $v -= 18446744073709551616 if $v >= 9223372036854775808;
         my $out = '';
         while (1) {
             my $byte = $v & 0x7f;
-            $v = POSIX::floor( $v / 128 );
+            $v = $v >= 0 ? $v >> 7 : -( ( -$v + 127 ) >> 7 );
             if ( ( $v == 0 && !( $byte & 0x40 ) ) || ( $v == -1 && ( $byte & 0x40 ) ) ) {
                 $out .= pack( 'C', $byte );
                 last;
