@@ -205,7 +205,7 @@ BROCKEN
     },
 );
 
-# --- Field layout -------------------------------------------------------------
+# Field layout
 #
 # The struct layout is C's, because that is what an FFI caller allocates and
 # indexes by. Fields are laid out in declaration order at the next offset that
@@ -260,7 +260,7 @@ for my $case (
     is( scalar @bad, 0, "C layout: $name" ) or diag join( '; ', @bad );
 }
 
-# --- Wasm ---------------------------------------------------------------------
+# Wasm
 sub run_wasm {
     my ( $src, $name ) = @_;
     my $module  = Brocken::Compiler->new->compile($src);
@@ -280,7 +280,7 @@ SKIP: {
     }
 }
 
-# --- Native -------------------------------------------------------------------
+# Native
 {
     my $brocken = Brocken->new;
 SKIP: {

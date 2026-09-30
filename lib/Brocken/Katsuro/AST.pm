@@ -1,13 +1,11 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-
 class Brocken::Katsuro::AST::Node v0.0.1 {
     field $file : param : reader = '';
     field $line : param : reader = 0;
     field $col  : param : reader = 0;
-}
-class Brocken::Katsuro::AST::Program v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+} class Brocken::Katsuro::AST::Program v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $statements : param : reader = [];    # Array of Statement Nodes
     }
 

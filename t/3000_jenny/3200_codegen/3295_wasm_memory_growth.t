@@ -46,7 +46,7 @@ sub run_wasm {
     return $out;
 }
 
-# --- The lowering: checkable without wasmtime -------------------------------
+# The lowering: checkable without wasmtime
 # `lower_intrinsic` built a store *before* dispatching on the intrinsic name, so
 # every intrinsic that was not `ptr_add`..`load_i64` emitted a store with
 # undefined operands ahead of its real instruction. `store_i64` got away with it
@@ -108,7 +108,7 @@ sub opcodes_of {
     ok( !$sizes->{memory_grow}, '_init does not eagerly grow' );
 }
 
-# --- Execution --------------------------------------------------------------
+# Execution
 my @cases = (
 
     # 30000 eight-byte objects is 240000 bytes: four times the single page the
@@ -223,7 +223,7 @@ BROCKEN
     isnt( $arr, '', 'an array past the cap is refused rather than writing past the heap' );
 }
 
-# --- Native -----------------------------------------------------------------
+# Native
 # A native build has a fixed host-carved region rather than a page it can grow,
 # so `memory_size` reports 0 and `memory_grow` lowers to a constant -1. Both are
 # asserted through behaviour rather than a hardcoded heap base: on native the base

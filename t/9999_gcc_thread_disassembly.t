@@ -54,7 +54,7 @@ CCODE
     close $sfh;
     ok( -f $c_path, "C source written: $c_path" );
 
-    # ---- Step 1: Assembly dump via gcc -S ----
+    # Step 1: Assembly dump via gcc -S
     note("=== Step 1: gcc -S (assembly output) ===");
     my $asm_out = `$cc -lpthread -S -o $s_path $c_path 2>&1`;
     my $rc1     = $? >> 8;
@@ -73,7 +73,7 @@ CCODE
         ok( 0, 'gcc -S succeeded' );
     }
 
-    # ---- Step 2: Compile full binary ----
+    # Step 2: Compile full binary
     note("=== Step 2: gcc -o (full binary) ===");
     my $compile = `$cc -lpthread -o $bin_path $c_path 2>&1`;
     my $rc2     = $? >> 8;
@@ -85,7 +85,7 @@ CCODE
         ok( 0, 'gcc compilation succeeded' );
     }
 
-    # ---- Step 3: Run the binary ----
+    # Step 3: Run the binary
     note("=== Step 3: Run binary ===");
     my $run = `$bin_path 2>&1`;
     my $rc3 = $? >> 8;
@@ -99,7 +99,7 @@ CCODE
         ok( 0, 'Binary execution succeeded' );
     }
 
-    # ---- Step 4: ELF dump (program headers, dynamic section, section headers) ----
+    # Step 4: ELF dump (program headers, dynamic section, section headers)
     note("=== Step 4: ELF Information ===");
     my $elf_ok = 0;
     if ( system('readelf --version >/dev/null 2>&1') == 0 ) {
@@ -137,7 +137,7 @@ CCODE
     }
     ok( $elf_ok, 'ELF dump completed' );
 
-    # ---- Step 5: Hex dump of raw binary ----
+    # Step 5: Hex dump of raw binary
     note("=== Step 5: Hex dump ===");
     open my $bfh, '<:raw', $bin_path or do {
         diag("Cannot open $bin_path for reading: $!");
@@ -169,7 +169,7 @@ CCODE
     }
     ok( 1, 'Hex dump completed' );
 
-    # ---- Cleanup ----
+    # Cleanup
     note("=== Cleanup ===");
     for my $f ( $c_path, $s_path, $bin_path ) {
         unlink $f if defined $f && -f $f;

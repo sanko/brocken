@@ -131,7 +131,7 @@ BROCKEN
     },
 );
 
-# --- Registration order ------------------------------------------------------
+# Registration order
 #
 # The bug was an ordering bug, so check the order directly rather than trusting
 # that the bodies happen to come out right. A declared method must be lowered
@@ -169,7 +169,7 @@ BROCKEN
     is( scalar @xs, 1, 'a declared method does not collide with a generated reader' );
 }
 
-# --- Wasm ---------------------------------------------------------------------
+#  Wasm
 sub run_wasm {
     my ( $src, $name ) = @_;
     my $module  = Brocken::Compiler->new->compile($src);
@@ -189,7 +189,7 @@ SKIP: {
     }
 }
 
-# --- Native -------------------------------------------------------------------
+#  Native
 {
     my $brocken = Brocken->new();
 SKIP: {

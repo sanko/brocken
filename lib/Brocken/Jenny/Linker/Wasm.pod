@@ -12,8 +12,8 @@ Generates WebAssembly (WASM) binaries in the standard .wasm format. Produces a m
 section, a memory section, a global section holding the heap base, an export section, and a code section.
 
 The memory declares one page, 64KB, or more if the heap base needs it: the runtime writes a 24-byte heap header
-immediately above the base, so a base near the end of the last page would put the header itself out of bounds. The
-page count is therefore derived from the base rather than fixed.
+immediately above the base, so a base near the end of the last page would put the header itself out of bounds. The page
+count is therefore derived from the base rather than fixed.
 
 A module is not executable on its own, so it is run by a WebAssembly runtime such as wasmtime or node rather than by
 the operating system. Two exports are available: C<_start>, which is what C<wasmtime run module.wasm> calls, and
@@ -39,25 +39,25 @@ that every frame shares, which is what allows a function other than the entry on
 
 =head2 C<new( heap_base =E<gt> $bytes )>
 
-The base address of the bump allocator's region, defaulting to 1024. A base is needed because the runtime's heap
-header is written at the base itself, and 0 is unusable as the allocator reserves it to mean "out of memory".
+The base address of the bump allocator's region, defaulting to 1024. A base is needed because the runtime's heap header
+is written at the base itself, and 0 is unusable as the allocator reserves it to mean "out of memory".
 
-C<_BROCKEN_ENTRY> takes the base as a parameter, so this only decides what the C<_start> stub passes. Deriving the
-base from the end of a module's own static data, rather than from a fixed default, is left until those sections exist.
+C<_BROCKEN_ENTRY> takes the base as a parameter, so this only decides what the C<_start> stub passes. Deriving the base
+from the end of a module's own static data, rather than from a fixed default, is left until those sections exist.
 
 =head1 ENTRY POINTS
 
 C<_start> is emitted as C<() -> ()>, because a WASI command's entry point may not take parameters, so it cannot pass
-the heap base the way C<_BROCKEN_ENTRY> does. It supplies the base itself, and discards the entry's return value
-rather than propagating it.
+the heap base the way C<_BROCKEN_ENTRY> does. It supplies the base itself, and discards the entry's return value rather
+than propagating it.
 
 That discard is worth being explicit about, because it is the visible consequence: a program's return value does not
 become its exit status, and both a program returning 0 and one returning 1 exit 0. Propagating it would mean importing
 C<wasi_snapshot_preview1.proc_exit>, and a module with an import section cannot be instantiated by
 C<WebAssembly.instantiate> without import objects, which would break every direct-invocation caller.
 
-C<_BROCKEN_ENTRY> is still exported alongside it, so C<wasmtime run --invoke _BROCKEN_ENTRY module.wasm 1024>
-continues to work and a caller may still choose its own base.
+C<_BROCKEN_ENTRY> is still exported alongside it, so C<wasmtime run --invoke _BROCKEN_ENTRY module.wasm 1024> continues
+to work and a caller may still choose its own base.
 
 
 =head1 LICENSE & LEGAL

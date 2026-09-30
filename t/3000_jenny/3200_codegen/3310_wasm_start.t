@@ -7,7 +7,7 @@ use Brocken::Compiler;
 use Brocken::Jenny;
 use Test2::Tools::Brocken qw[temp_path];
 no warnings qw[experimental::class experimental::builtin portable];
-use feature               qw[class];
+use feature qw[class];
 
 # A WASI command entry, so `wasmtime run module.wasm` works.
 #
@@ -35,16 +35,17 @@ my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 
 sub build_wasm {
     my ( $src, $name, $linker ) = @_;
-    my $module = Brocken::Compiler->new->compile($src);
+    my $module  = Brocken::Compiler->new->compile($src);
     my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
-    my $file = temp_path($name) . '.wasm';
-    my $l = $linker // Brocken::Jenny::Linker::Wasm->new;
+    my $file    = temp_path($name) . '.wasm';
+    my $l       = $linker // Brocken::Jenny::Linker::Wasm->new;
     $l->write_executable( $file, $codegen->emit_functions( $module->functions ), $platform );
     return $file;
 }
 
 # A linker whose `_start` traps instead of calling the entry.
 class TrapStart : isa(Brocken::Jenny::Linker::Wasm) {
+
     method _start_body($entry_index) {
         return pack( 'C', 0x00 ) . pack( 'C', 0x00 ) . pack( 'C', 0x0B );
     }
@@ -102,17 +103,17 @@ sub initial_pages {
     my ($file) = @_;
     my $sec = memory_section($file);
     return 0 unless length $sec;
-    my ( undef, $pos ) = read_uleb( $sec, 0 );   # count of memories
-    my ( $flags, $p2 ) = read_uleb( $sec, $pos );
-    my ( $min ) = read_uleb( $sec, $p2 );
+    my ( undef,  $pos ) = read_uleb( $sec, 0 );      # count of memories
+    my ( $flags, $p2 )  = read_uleb( $sec, $pos );
+    my ($min) = read_uleb( $sec, $p2 );
     return $min;
 }
 
-# --- The export is present, alongside the old one ---------------------------
+# The export is present, alongside the old one
 {
     my $file = build_wasm( 'return 42;', 'start_export' );
-    my $m = read_wasm($file);
-    like( $m, qr/_start/, 'the module exports a _start' );
+    my $m    = read_wasm($file);
+    like( $m, qr/_start/,         'the module exports a _start' );
     like( $m, qr/_BROCKEN_ENTRY/, 'and still exports _BROCKEN_ENTRY, so the existing --invoke convention is untouched' );
 
     # The initial page count has to cover the base plus the 24-byte heap
@@ -122,8 +123,8 @@ sub initial_pages {
 
     # A base past a single page must ask for more, rather than seeding the
     # header into memory the module does not own.
-    my $big = temp_path('start_bigbase') . '.wasm';
-    my $module = Brocken::Compiler->new->compile('return 42;');
+    my $big     = temp_path('start_bigbase') . '.wasm';
+    my $module  = Brocken::Compiler->new->compile('return 42;');
     my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
     Brocken::Jenny::Linker::Wasm->new( heap_base => 200000 )->write_executable( $big, $codegen->emit_functions( $module->functions ), $platform );
     is( initial_pages($big), 4, 'a 200000 base asks for 4 pages, since 200024 bytes needs more than three' );
@@ -131,28 +132,26 @@ sub initial_pages {
     unlink $file;
 }
 
-# --- Both paths agree on the memory section ---------------------------------
+# Both paths agree on the memory section
 # The single-function path takes a bare record from emit_function. Its name is
 # not the entry, so no _start is added, but the memory section must still be
 # the same bytes: that section is what the runtime reads to decide how much
 # heap it actually has.
 {
-    my $file = build_wasm( 'return 42;', 'start_multipath' );
-    my $multi = memory_section($file);
-
-    my $module = Brocken::Compiler->new->compile('return 42;');
-    my $ir     = ( grep { $_->name eq '_BROCKEN_ENTRY' } $module->functions->@* )[0];
-    my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+    my $file        = build_wasm( 'return 42;', 'start_multipath' );
+    my $multi       = memory_section($file);
+    my $module      = Brocken::Compiler->new->compile('return 42;');
+    my $ir          = ( grep { $_->name eq '_BROCKEN_ENTRY' } $module->functions->@* )[0];
+    my $codegen     = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
     my $single_file = temp_path('start_singlepath') . '.wasm';
     Brocken::Jenny::Linker::Wasm->new->write_executable( $single_file, $codegen->emit_function($ir), $platform );
     my $single = memory_section($single_file);
-
     is( $single, $multi, 'the single-function path declares the same memory as the multi-function path' );
     isnt( $single, '', 'and the single-function module really does have a memory section to compare' );
     unlink $file, $single_file;
 }
 
-# --- `wasmtime run` reaches the entry ---------------------------------------
+# `wasmtime run` reaches the entry
 # Exit status alone proves nothing here: wasmtime exits 0 for a module with no
 # _start at all, and it exits 0 for this one whether or not the program
 # succeeded, because the return value is dropped. So the control is a linker
@@ -160,20 +159,16 @@ sub initial_pages {
 # which is what makes the real module's clean exit mean the program ran.
 SKIP: {
     skip 'wasmtime not available', 4 unless $wasmtime_path && -f $wasmtime_path;
-
-    my $ok = build_wasm( "my [i64; 100] \$a;\n\$a[0] = 7;\n\$a[99] = 9;\nreturn \$a[0] + \$a[99];", 'start_runs' );
-    my $out = qx["$wasmtime_path" run "$ok" 2>&1];
+    my $ok     = build_wasm( "my [i64; 100] \$a;\n\$a[0] = 7;\n\$a[99] = 9;\nreturn \$a[0] + \$a[99];", 'start_runs' );
+    my $out    = qx["$wasmtime_path" run "$ok" 2>&1];
     my $status = $?;
-    is( $status, 0, 'wasmtime run executes the module as a command, with no _start argument on the command line' )
-        or diag $out;
+    is( $status, 0, 'wasmtime run executes the module as a command, with no _start argument on the command line' ) or diag $out;
     unlike( $out, qr/unreachable/, 'a heap-using program does not trap on the _start path' );
     unlink $ok;
-
     my $trap = build_wasm( 'return 42;', 'start_trap', TrapStart->new );
     my $tout = qx["$wasmtime_path" run "$trap" 2>&1];
     isnt( $?, 0, 'a _start that traps fails the run, so a clean exit really does mean the entry ran' );
     like( $tout, qr/unreachable/, 'and the failure is the trap, not a parse error' );
     unlink $trap;
 }
-
 done_testing;

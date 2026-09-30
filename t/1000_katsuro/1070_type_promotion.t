@@ -58,7 +58,7 @@ my @cases = (
     },
 );
 
-# --- Wasm --------------------------------------------------------------------
+# Wasm
 sub run_wasm {
     my ( $src, $name ) = @_;
     my $module  = Brocken::Compiler->new->compile($src);
@@ -78,7 +78,7 @@ SKIP: {
     }
 }
 
-# --- Native ------------------------------------------------------------------
+# Native
 {
     my $brocken = Brocken->new();
 SKIP: {

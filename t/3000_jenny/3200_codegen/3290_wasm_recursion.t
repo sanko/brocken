@@ -43,7 +43,7 @@ sub build_wasm {
     return $out;
 }
 
-# --- Structure: checkable without wasmtime ---------------------------------
+# Structure: checkable without wasmtime
 {
     my $fib = <<'BROCKEN';
 sub fib(i64 $n) -> i64 {
@@ -165,7 +165,7 @@ BROCKEN
     is( $wraps, $geps, 'every variable index is narrowed to the i32 address space' );
 }
 
-# --- Execution --------------------------------------------------------------
+# Execution
 my $FIB = <<'BROCKEN';
 sub fib(i64 $n) -> i64 {
     if ($n < 2) { return $n; }

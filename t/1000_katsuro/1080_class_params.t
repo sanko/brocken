@@ -115,7 +115,7 @@ BROCKEN
     },
 );
 
-# --- IR shape -----------------------------------------------------------------
+# IR shape
 #
 # A class-typed parameter has to arrive at the backend as a plain pointer; a
 # `P` reaching an encoder as an unknown type would fail much later and much less
@@ -135,7 +135,7 @@ BROCKEN
     is( scalar( $get_x->params->@* ), 1, 'a class-typed parameter is still one parameter' );
 }
 
-# --- Negative -----------------------------------------------------------------
+#  Negative
 {
     my $module = eval { Brocken::Compiler->new->compile( $POINT . "sub get_x(ptr \$q) -> i64 { return \$q->x(); }\nreturn 0;\n" ); };
     ok( !$module, 'a bare ptr parameter still cannot be resolved' );
@@ -148,7 +148,7 @@ BROCKEN
     like( $@, qr/Unknown type 'Nope'/, 'reported as an unknown type' );
 }
 
-# --- Wasm ---------------------------------------------------------------------
+# Wasm
 sub run_wasm {
     my ( $src, $name ) = @_;
     my $module  = Brocken::Compiler->new->compile($src);
@@ -168,7 +168,7 @@ SKIP: {
     }
 }
 
-# --- Native -------------------------------------------------------------------
+# Native
 {
     my $brocken = Brocken->new();
 SKIP: {

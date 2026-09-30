@@ -2,7 +2,6 @@ use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class experimental::builtin];
 use Brocken::Katsuro::Platform::ABI;
-
 class Brocken::Katsuro::Platform v0.0.1 {
     use Config qw[%Config];
 
@@ -342,6 +341,6 @@ class Brocken::Katsuro::Platform v0.0.1 {
     method return_register()                       { $self->abi->return_register }
     method fp_return_register()                    { $self->abi->fp_return_register }
     method fiber_reg()                             { $self->abi->fiber_reg }
-}
-#
-1;
+    }
+    #
+    1;
