@@ -184,6 +184,21 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
     # Standard Linux x86_64 static image base; PIE/BSD use base 0 for ASLR.
     method image_base () { return $self->type eq 'shared' ? 0 : 0x400000; }
 
+    # Asks a compiler where it keeps $lib and returns the path it prints, or
+    # undef when there is no such compiler, or it says nothing.
+    #
+    # This used to be backticks with a `2>/dev/null` redirect.
+    sub _cc_print_file_name ( $cc, $lib ) {
+        my $fh;
+        my $pid = eval { open( $fh, '-|', $cc, '-pthread', "-print-file-name=$lib" ) };
+        return undef if $@ || !$pid;
+        my $got = do { local $/ = undef; <$fh> };
+        close $fh;
+        return undef if $@ || !defined $got;
+        $got =~ s/\s+\z//;
+        return length $got ? $got : undef;
+    }
+
     # Given an ELF shared library path, returns its DT_SONAME (or undef).
     sub _elf_soname ($path) {
         open my $fh, '<:raw', $path or return undef;
@@ -761,28 +776,29 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         my $libpthread = $platform->libpthread_name;
         if ( defined $libpthread ) {
 
-            # Try compiler query to find the actual pthread library.
+            # Try compiler query to find the actual pthread library. The query
+            # goes through a pipe rather than backticks because the
+            # `2>/dev/null` redirect it used to carry is a POSIX-ism that
+            # cmd.exe rejects: on Windows the redirect failed, the compiler was
+            # never actually consulted, and every link printed three "The system
+            # cannot find the path specified." lines. Now a host with no compiler
+            # for the target just falls through to the platform default.
+            my $fallback = $libpthread;
             for my $cc (qw(clang gcc cc)) {
-                my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;
-                chomp $out if defined $out;
-                if ( $out && $out ne 'libpthread.so' && -e $out ) {
+                my @libs_to_ask = 'libpthread.so';
+                push @libs_to_ask, 'libthread_xu.so' if $platform->is_dragonflybsd;
+                for my $ask (@libs_to_ask) {
+
+                    # A compiler echoes the bare file name back when it has no
+                    # such library, which is the "not found" answer.
+                    my $out = _cc_print_file_name( $cc, $ask );
+                    next if !$out || $out eq $ask || !-e $out;
                     my $soname = _elf_soname($out);
-                    if ($soname) {
-                        $libpthread = $soname;
-                        last;
-                    }
+                    next unless $soname;
+                    $libpthread = $soname;
+                    last;
                 }
-                if ( $platform->is_dragonflybsd ) {
-                    my $out_xu = `$cc -pthread -print-file-name=libthread_xu.so 2>/dev/null`;
-                    chomp $out_xu if defined $out_xu;
-                    if ( $out_xu && $out_xu ne 'libthread_xu.so' && -e $out_xu ) {
-                        my $soname = _elf_soname($out_xu);
-                        if ($soname) {
-                            $libpthread = $soname;
-                            last;
-                        }
-                    }
-                }
+                last if $libpthread ne $fallback;
             }
 
             # The threading library must be loaded before libc.so so it can properly intercept
