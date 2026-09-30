@@ -5,7 +5,9 @@ package Brocken::Jenny::Codegen::RISCV64::Encodings {
         all => [
             qw[
                 JAL JALR
-                SRAI_B FSGNJ FMINMAX FSQRT FMV_W_X FMV_D_X FCVT_D_L FCVT_L_D
+                SRAI_B FSGNJ FMINMAX FSQRT FMV_W_X FMV_D_X
+                FCVT_S_W FCVT_S_L FCVT_D_W FCVT_D_L
+                FCVT_W_S FCVT_W_D FCVT_L_S FCVT_L_D
                 FP_FMT OP_IMM OP LOAD STORE FLOAD FSTORE FP_OP BCC LUI
                 FCB_RESUME_OFF
             ]
@@ -44,8 +46,19 @@ package Brocken::Jenny::Codegen::RISCV64::Encodings {
         FMV_D_X => 0xF2000000,    # FMV.D.X: float <- int reg (funct7=1111001)
 
         # Conversions
-        FCVT_D_L => 0xD2201000,    # FCVT.D.L: int64 -> float64 (funct7=1101010, rs2=010)
-        FCVT_L_D => 0xC2201000,    # FCVT.L.D: float64 -> int64 (funct7=1100010, rs2=010)
+        # FCVT.<fmt>.<int>: funct7=1101000 (fmt=00 S), rs2 selects the integer
+        # width (00000 W, 00010 L); the format bit (bit 25) is set for D.
+        FCVT_S_W => 0xD0001000,    # FCVT.S.W: int32 -> float32
+        FCVT_S_L => 0xD0201000,    # FCVT.S.L: int64 -> float32
+        FCVT_D_W => 0xD2001000,    # FCVT.D.W: int32 -> float64
+        FCVT_D_L => 0xD2201000,    # FCVT.D.L: int64 -> float64
+
+        # FCVT.<int>.<fmt>: funct7=1100000 (fmt=00 S), rs2 selects the integer
+        # width (00000 W, 00010 L); the format bit (bit 25) is set for D.
+        FCVT_W_S => 0xC0001000,    # FCVT.W.S: float32 -> int32
+        FCVT_W_D => 0xC2001000,    # FCVT.W.D: float64 -> int32
+        FCVT_L_S => 0xC0201000,    # FCVT.L.S: float32 -> int64
+        FCVT_L_D => 0xC2201000,    # FCVT.L.D: float64 -> int64
 
         # Branch & Upper Immediate
         BCC => 0x63,               # BCC: base for BEQ/BNE/BLT/BGE/BLTU/BGEU (1100011, funct3 selects cond)

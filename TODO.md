@@ -453,6 +453,15 @@ here was reproduced against a natively compiled and executed binary, not read of
       four-byte value. The single-precision forms are the same opcodes under `F3`; the prefix is
       now taken from the float operand's type, matching how `fload`/`fstore`/`fmov` already
       choose. `cf4fef9`
+- [x] **RISC-V int<->float conversion always used the double form** - the same bug as the x86-64
+      one above, found by the RISC-V CI lane failing `1076_float_conversion.t` while x86-64
+      passed. `Codegen/RISCV64.pm` hardcoded `FCVT_D_L`/`FCVT_L_D` (int64<->float64) for every
+      `scvtf`/`fcvtzs`; the lowerer emits a bare opcode, so an f32 was converted as if its
+      register held a double and returned 0. An f32 subtest failed and every f64 one passed,
+      which is the signature of a width-selection bug. Now selects on both the float format
+      (`S`/`D`) and the integer width (`W`/`L`), mirroring ARM64. New constants in
+      `Codegen/RISCV64/Encodings.pm`; coverage in `t/3000_jenny/3200_codegen/3296_riscv_fcvt_width.t`
+      (codegen-level, host-independent) plus the existing executing `1076_float_conversion.t`.
 
 ### Open
 
@@ -471,10 +480,17 @@ here was reproduced against a natively compiled and executed binary, not read of
       form. `mov` already does this correctly at `:768`; copy that logic.
       **Note:** this is why `t/1000_katsuro/1076_float_conversion.t` deliberately keeps its
       comparisons at or below 2^31 - the float fix is real, the compare underneath it is not.
-- [ ] **f32 conversions are unverified on ARM64, RISCV64, and Wasm** - only x86-64 can be
-      executed here, and only x86-64 was fixed. ARM64/RISCV64 encode the width in the
-      instruction (`fcvtzs`, `scvtf`) rather than in a prefix, so they are *probably* fine, but
-      "probably" is not verified. Blocked on the `run_cross` harness (below).
+- [ ] **f32 conversions are unverified on ARM64 and Wasm** - x86-64 and RISC-V64 are now fixed
+      and covered (see above). ARM64 encodes the width in the instruction (`fcvtzs`, `scvtf`) and
+      its codegen already selects on both widths, so it is *probably* fine; Wasm has its own
+      conversion ops. Neither can be executed here, so both remain unverified until `run_cross`
+      exists.
+- [ ] **The ELF64 linker probes for `clang` and warns when it is absent** - on the RISC-V lane
+      every `write_executable` prints `Can't exec "clang": No such file or directory at
+      lib/Brocken/Jenny/Linker/ELF64.pm line 193`. The probe (`_cc_print_file_name`) handles the
+      failure correctly and uses `gcc`, but the warning is noise in CI logs. The probe should
+      test for the compiler (or suppress the warning) before opening the pipe. Deferred per
+      request.
 - [ ] **`fmov` is not accepted by the entry-shuffle fixup** - `lib/Brocken/Jenny/RegAlloc.pm`
       around line 573 only recognises `mov`, so an `fmov` is silently dropped. This is why float
       parameters/entry shuffling is still unimplemented.
