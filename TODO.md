@@ -462,6 +462,11 @@ here was reproduced against a natively compiled and executed binary, not read of
       (`S`/`D`) and the integer width (`W`/`L`), mirroring ARM64. New constants in
       `Codegen/RISCV64/Encodings.pm`; coverage in `t/3000_jenny/3200_codegen/3296_riscv_fcvt_width.t`
       (codegen-level, host-independent) plus the existing executing `1076_float_conversion.t`.
+- [x] **The ELF64 linker warned when a probe compiler was absent** - every `write_executable` on
+      the RISC-V lane printed `Can't exec "clang": No such file or directory at
+      lib/Brocken/Jenny/Linker/ELF64.pm line 193`. `_cc_print_file_name` now resolves a bare
+      compiler name with `IPC::Cmd::can_run` and returns early when it is not installed; an
+      explicit path is still used as given so the stub-compiler test is unaffected.
 
 ### Open
 
@@ -485,12 +490,6 @@ here was reproduced against a natively compiled and executed binary, not read of
       its codegen already selects on both widths, so it is *probably* fine; Wasm has its own
       conversion ops. Neither can be executed here, so both remain unverified until `run_cross`
       exists.
-- [ ] **The ELF64 linker probes for `clang` and warns when it is absent** - on the RISC-V lane
-      every `write_executable` prints `Can't exec "clang": No such file or directory at
-      lib/Brocken/Jenny/Linker/ELF64.pm line 193`. The probe (`_cc_print_file_name`) handles the
-      failure correctly and uses `gcc`, but the warning is noise in CI logs. The probe should
-      test for the compiler (or suppress the warning) before opening the pipe. Deferred per
-      request.
 - [ ] **`fmov` is not accepted by the entry-shuffle fixup** - `lib/Brocken/Jenny/RegAlloc.pm`
       around line 573 only recognises `mov`, so an `fmov` is silently dropped. This is why float
       parameters/entry shuffling is still unimplemented.
