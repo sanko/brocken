@@ -774,7 +774,7 @@ Offset  Size    Purpose
 8       8       Payload (Raw 64-bit Int/Float, or Pointer to Heap Data)
 ```
 
-Currently, `box` allocates this 16-byte struct via `alloca`. The payload and tag are stored as adjacent 8-byte fields. `unbox` reads them back.
+Currently, `box` allocates this 16-byte struct via `alloca` (from `Brocken::Runtime::bump_alloc` on `wasm`, where a box escapes the frame). It writes the payload at offset 8 and the packed header at offset 0 with a reference count of 1. `unbox` reads the payload back from offset 8.
 
 ### 4.3 Reference Counting
 

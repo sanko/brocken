@@ -782,6 +782,15 @@ the matrix deliberately stays on 24.04 rather than queue a leg forever.
       at all and left a silently truncated function behind, which is the same
       shape of fault as this entry.
 
+- [ ] **Float-to-unsigned-integer conversions rely on signed truncation.**
+      Because `fptosi` (and underlying native instructions like `CVTTSD2SI`) are
+      signed-only, converting a float to an unsigned integer (e.g., `u32`) works
+      by zero-extending the unsigned target into an `i64` first. While this is
+      safe for in-bounds values, out-of-bounds floats (e.g., `9999999999999.0`
+      cast to `u32`) will wrap or yield the "Integer Indefinite" value
+      (`0x8000000000000000` on x86-64) rather than saturating. This is C-like
+      undefined behavior, but should be guarded with bounds checks in the future.
+
 - [x] **An unknown physical register name silently becomes register 0.**
       `reg_id` in all three native codegens ended in a bare `return 0`, so a name
       it did not recognise encoded as `rax`/`xmm0` on x86-64, `x0`/`v0` on

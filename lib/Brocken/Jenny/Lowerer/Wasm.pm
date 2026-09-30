@@ -2482,18 +2482,41 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                         )
                     );
 
-                    # store payload at [%dyn + 0]. The payload slot is eight
+                    # store header at [%dyn + 0]. The eight header bytes are
+                    # written as one 64-bit word so refcount, flags, tag and
+                    # aux land where `unbox` and the runtime expect them.
+                    $mbb->add_instruction( $self->_wasm_push_vreg( $inst->name, 'box: push dyn' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i32_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                            comment  => 'box: offset 0'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'box: add offset' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i64_const',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $self->_box_header($tag),
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
+                            ],
+                            comment => 'box: header'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_store', operands => [], comment => 'box: store header' ) );
+
+                    # store payload at [%dyn + 8]. The payload slot is eight
                     # bytes wide, so a 64-bit value has to be stored with the
                     # 64-bit form; a fixed i32 store left an i64 literal on the
                     # stack as i64 and the module failed to validate.
                     my $vbits         = ( $val->type && $val->type->kind eq 'int' ) ? $val->type->bits : 32;
                     my $payload_store = $vbits > 32                                 ? 'i64_store'      : 'i32_store';
-                    $mbb->add_instruction( $self->_wasm_push_vreg( $inst->name, 'box: push dyn' ) );
-                    $mbb->add_instruction( $self->_wasm_push( $val, 'box: push val' ) );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => $payload_store, operands => [], comment => 'box: store payload' ) );
-
-                    # store tag at [%dyn + 8]
                     $mbb->add_instruction( $self->_wasm_push_vreg( $inst->name, 'box: push dyn' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2504,24 +2527,28 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                     );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'box: add offset' ) );
+                    $mbb->add_instruction( $self->_wasm_push( $val, 'box: push val' ) );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $tag ) ],
-                            comment  => 'box: tag'
-                        )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store tag' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => $payload_store, operands => [], comment => 'box: store payload' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
                     my $dyn = $inst->operands->[0];
 
                     # Read the payload back at the width it was written at, which
-                    # is the width of the unboxed value.
+                    # is the width of the unboxed value. The payload follows the
+                    # eight-byte reference-counting header.
                     my $ibits        = ( $inst->type && $inst->type->kind eq 'int' ) ? $inst->type->bits : 32;
                     my $payload_load = $ibits > 32                                   ? 'i64_load'        : 'i32_load';
                     $mbb->add_instruction( $self->_wasm_push( $dyn, 'unbox: push dyn' ) );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'i32_const',
+                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8 ) ],
+                            comment  => 'unbox: offset 8'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'unbox: add offset' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => $payload_load, operands => [], comment => 'unbox: load payload' ) );
                     $mbb->add_instruction(
@@ -3039,6 +3066,13 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
         return 5 if $type->kind eq 'dynamic';
         return 0;
     }
+
+    # The first 8 bytes of a fat scalar are the reference-counting header, not
+    # a spare field for the tag alone. Packed little-endian, which is every
+    # backend we generate for: u16 refcount at +0, u8 gc_flags at +2,
+    # u8 type_tag at +3, u32 aux at +4. A fresh box is owned by the value being
+    # assigned, so it starts at one reference and zero flags/aux.
+    method _box_header($tag) { return 1 | ( $tag << 24 ) }
 
     method _split_i128($ir_val) {
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
