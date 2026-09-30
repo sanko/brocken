@@ -431,7 +431,7 @@ subtest 'Syscall intrinsic execution' => sub {
     my $c       = Brocken::Compiler->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
-        if ( $host->is_freebsd || $host->is_macos || $host->is_openbsd || $host->is_dragonflybsd || $host->is_midnightbsd ) {
+        if ( $host->is_freebsd || $host->is_macos || $host->is_openbsd || $host->is_dragonflybsd || $host->is_midnightbsd || $host->is_solaris ) {
             skip 'Raw syscall 0 not safe on this platform', 2;
         }
         subtest 'Syscall discarded result, program continues' => sub {
@@ -514,6 +514,10 @@ subtest 'Extern intrinsic exit' => sub {
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
         skip 'MachO linker does not support libc yet' if $host->is_macos;
+
+        # The program dies with SIGSEGV instead of exiting 99 on OmniOS/illumos
+        # r151050 (gcc13), the same crash the isolate tests hit.
+        skip 'libc("_exit") segfaults on illumos' if $host->is_solaris;
         my $module = $c->compile(<<'BROCKEN');
 Brocken::libc("_exit", 99);
 BROCKEN
