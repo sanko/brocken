@@ -31,11 +31,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
         $alloc->remove_redundant_caller_restores($mf);
-        $alloc->fix_entry_shuffle(
-            $mf, \%assignment,
-            [ $platform->abi->param_registers->@*, $platform->abi->fp_param_registers->@* ],
-            $int_res->{spill_temp}
-        );
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
+        $alloc->fix_call_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -92,11 +89,8 @@ class Brocken::Jenny::Codegen::ARM64 {
             $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
             $alloc->remove_redundant_moves( $mf, \%assignment );
             $alloc->remove_redundant_caller_restores($mf);
-            $alloc->fix_entry_shuffle(
-                $mf, \%assignment,
-                [ $platform->abi->param_registers->@*, $platform->abi->fp_param_registers->@* ],
-                $int_res->{spill_temp}
-            );
+            $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
+            $alloc->fix_call_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
             my %callee_seen;
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
@@ -153,11 +147,8 @@ class Brocken::Jenny::Codegen::ARM64 {
         $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
         $alloc->remove_redundant_moves( $mf, \%assignment );
         $alloc->remove_redundant_caller_restores($mf);
-        $alloc->fix_entry_shuffle(
-            $mf, \%assignment,
-            [ $platform->abi->param_registers->@*, $platform->abi->fp_param_registers->@* ],
-            $int_res->{spill_temp}
-        );
+        $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
+        $alloc->fix_call_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
