@@ -188,9 +188,21 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
     # undef when there is no such compiler, or it says nothing.
     #
     # This used to be backticks with a `2>/dev/null` redirect.
+    #
+    # The compiler is resolved before the pipe is opened: a bare name that is
+    # not on PATH makes open's child fail to exec and print
+    # `Can't exec "...": No such file or directory` to the inherited STDERR,
+    # which is noise in every link on a host that lacks one of the probe
+    # compilers (the RISC-V lane has no clang). A path is used as given so the
+    # caller can still point at a stub or an out-of-tree toolchain.
     sub _cc_print_file_name ( $cc, $lib ) {
+        my $exe = $cc;
+        if ( $cc !~ m{[\\/]} && !-e $cc ) {
+            require IPC::Cmd;
+            $exe = IPC::Cmd::can_run($cc) or return undef;
+        }
         my $fh;
-        my $pid = eval { open( $fh, '-|', $cc, '-pthread', "-print-file-name=$lib" ) };
+        my $pid = eval { open( $fh, '-|', $exe, '-pthread', "-print-file-name=$lib" ) };
         return undef if $@ || !$pid;
         my $got = do { local $/ = undef; <$fh> };
         close $fh;
