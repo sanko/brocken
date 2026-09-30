@@ -63,6 +63,16 @@ subtest 'RISCV64 encodings sanity' => sub {
     is( er64('FP_OP'),  0x53,       'FP_OP' );
     is( er64('BCC'),    0x63,       'BCC' );
     is( er64('LUI'),    0x37,       'LUI' );
+
+    # The int/float converters select the fcvt format from the operand widths.
+    is( er64('FCVT_S_W'), 0xD0001000, 'FCVT.S.W int32 -> f32' );
+    is( er64('FCVT_S_L'), 0xD0201000, 'FCVT.S.L int64 -> f32' );
+    is( er64('FCVT_D_W'), 0xD2001000, 'FCVT.D.W int32 -> f64' );
+    is( er64('FCVT_D_L'), 0xD2201000, 'FCVT.D.L int64 -> f64' );
+    is( er64('FCVT_W_S'), 0xC0001000, 'FCVT.W.S f32 -> int32' );
+    is( er64('FCVT_W_D'), 0xC2001000, 'FCVT.W.D f64 -> int32' );
+    is( er64('FCVT_L_S'), 0xC0201000, 'FCVT.L.S f32 -> int64' );
+    is( er64('FCVT_L_D'), 0xC2201000, 'FCVT.L.D f64 -> int64' );
 };
 subtest 'Wasm encodings sanity' => sub {
     is( ew('BLOCK'),       0x02, 'BLOCK' );
