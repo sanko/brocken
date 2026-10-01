@@ -2140,7 +2140,12 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                         else {
                             my $lhs_opnd = $self->_lower_opnd_wide( $lhs, $inst->type );
-                            my $rhs_opnd = $self->_lower_opnd_wide( $rhs, $inst->type );
+                            my $rhs_opnd = $self->_materialize_wide_imm(
+                                $mbb,
+                                $self->_lower_opnd_wide( $rhs, $inst->type ),
+                                $inst->type ? $inst->type->bits : undef,
+                                $inst->name . '_imm'
+                            );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -2966,8 +2971,13 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         }
                     }
                     else {
-                        my $lhs_op  = $self->_lower_opnd($lhs);
-                        my $rhs_op  = $self->_lower_opnd($rhs);
+                        my $lhs_op = $self->_lower_opnd($lhs);
+                        my $rhs_op = $self->_materialize_wide_imm(
+                            $mbb,
+                            $self->_lower_opnd($rhs),
+                            $lhs->type ? $lhs->type->bits : undef,
+                            $inst->name . '_rhs'
+                        );
                         my $result  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         my $cmp_lhs = $lhs_op;
                         if ( $lhs_op->kind eq 'imm' ) {
@@ -3387,8 +3397,16 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'sub',
-                                    operands => [ $dst, $self->_lower_opnd($val) ],
-                                    comment  => 'neg (0 - val)'
+                                    operands => [
+                                        $dst,
+                                        $self->_materialize_wide_imm(
+                                            $mbb,
+                                            $self->_lower_opnd($val),
+                                            $inst->type ? $inst->type->bits : undef,
+                                            $inst->name . '_imm'
+                                        )
+                                    ],
+                                    comment => 'neg (0 - val)'
                                 )
                             );
                         }
@@ -4903,6 +4921,23 @@ class Brocken::Jenny::Lowerer::X86_64 {
             return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value, type => $ir_val->type );
         }
         return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type );
+    }
+
+    # x86-64's ALU and compare opcodes take at most a 32-bit immediate, and the
+    # `cmp r/m64, imm32` and `add r/m64, imm32` forms sign-extend it, so a
+    # 64-bit constant outside signed 32 bits cannot be encoded as an operand at
+    # all.  Such a constant is loaded into a register first; the `mov` that
+    # loads it takes the full 64-bit immediate (Codegen::X86_64's `mov` handler
+    # emits `movabs`).  Constants that do fit are returned untouched so the
+    # usual one-instruction form is kept.
+    method _materialize_wide_imm( $mbb, $opnd, $bits, $name ) {
+        return $opnd unless $opnd->kind eq 'imm';
+        return $opnd unless defined $bits && $bits >= 64;
+        return $opnd unless $opnd->value > 0x7FFFFFFF || $opnd->value < -0x80000000;
+        my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $opnd->type );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $tmp, $opnd ], comment => 'materialise 64-bit immediate' ) );
+        return $tmp;
     }
 
     # Find the IR Alloca that produces the given pointer name and return its

@@ -32,6 +32,13 @@ machine operations while following the System V AMD64 calling convention.
 The L<_materialize> method loads floating-point constants into XMM registers by first loading the bit pattern as an
 integer GP register, then transferring to XMM via C<fmov_gp2f> (MOVQ/MOVD).
 
+=head2 64-Bit Integer Immediates
+
+x86-64's ALU and compare opcodes take at most a 32-bit immediate, and the 64-bit forms sign-extend it, so a constant
+outside signed 32 bits cannot be encoded as an operand at all. The L<_materialize_wide_imm> method loads one into a
+virtual register first (the C<mov> encoder emits C<movabs>); a constant that fits is left as an immediate so the usual
+single-instruction form is kept.
+
 =head2 ABI Handling
 
 Uses B<rdi> (arg 1), B<rsi> (arg 2), B<rdx> (arg 3), B<rcx> (arg 4), B<r8> (arg 5), B<r9> (arg 6). The C<caller_regs>
