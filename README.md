@@ -154,8 +154,8 @@ sub parse_port( i64 $raw ) -> i64 {
 ```
 
 The `catch` block receives the thrown value, and a `try` with no `catch` is a `try`-`finally` that only cleans up.
-The `setjmp` and `longjmp` behind this live in the runtime, not in generated code, which is what lets a `return`
-out of a `try` still run the `finally`.
+The `setjmp` and `longjmp` behind this live in the runtime, not in generated code, which is what lets a `return` out
+of a `try` still run the `finally`.
 
 Classes hold typed fields and methods, and the runtime generates a constructor, a reader, and a writer for each field.
 A `: param` field becomes a constructor argument. A class value is a `ptr`, and construction is a call on the class
@@ -242,9 +242,9 @@ my $ext = $brocken->ext;
 
 Returns the file extension the output needs on this platform: `.exe` on Windows and an empty string everywhere else.
 
-Note that this is a method, so it cannot be interpolated into a string directly. `"$brocken->ext"` is the
-class, the object and the letters `-`ext>, while `"$brocken->{ext}"` or `$brocken->ext` in a concatenation
-is the extension.
+Note that this is a method, so it cannot be interpolated into a string directly. `"$brocken->ext"` is the class,
+the object and the letters `-`ext>, while `"$brocken->{ext}"` or `$brocken->ext` in a concatenation is the
+extension.
 
 ## `tmpdir( ... )`
 
@@ -252,9 +252,9 @@ is the extension.
 $brocken->tmpdir
 ```
 
-Returns a [File::Temp::Dir](https://metacpan.org/pod/File%3A%3ATemp%3A%3ADir) object for a temporary directory created for this instance and removed when it goes out
-of scope. It stringifies to a path, which is why `$brocken->tmpdir . '/fib'` is the way to build a filename. It
-is where the output goes when the caller does not want to name a path.
+Returns a [File::Temp::Dir](https://metacpan.org/pod/File%3A%3ATemp%3A%3ADir) object for a temporary directory created for this instance and removed when it goes out of
+scope. It stringifies to a path, which is why `$brocken->tmpdir . '/fib'` is the way to build a filename. It is
+where the output goes when the caller does not want to name a path.
 
 ## `debug_level( ... )`
 
@@ -323,12 +323,12 @@ parameter's address takeable, but there is no source form for it.
 There are three code generators here: x86-64, AArch64, and RISC-V. The test suite exercises the native one and runs a
 foreign one under `qemu` when a sysroot is configured, skipping it when there is none. The WebAssembly modules --
 [Brocken::Jenny::Codegen::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ACodegen%3A%3AWasm), [Brocken::Jenny::Linker::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ALinker%3A%3AWasm), and [Brocken::Jenny::Lowerer::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ALowerer%3A%3AWasm) -- are in the
-tree and a wasm32 triple parses into a [Brocken::Katsuro::Platform::Wasm](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3APlatform%3A%3AWasm), but the constructor here has no branch
-for it, so `Brocken->new` dies with `Unsupported platform` rather than returning a compiler. The isolated-thread
-and fiber runtimes are ahead of this.
+tree and a wasm32 triple parses into a [Brocken::Katsuro::Platform::Wasm](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3APlatform%3A%3AWasm), but the constructor here has no branch for
+it, so `Brocken->new` dies with `Unsupported platform` rather than returning a compiler. The isolated-thread and
+fiber runtimes are ahead of this.
 
-The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool:
-a program that legitimately needs more has to be compiled with a larger `fuel`.
+The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool: a
+program that legitimately needs more has to be compiled with a larger `fuel`.
 
 # LICENSE & LEGAL
 

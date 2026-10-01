@@ -31,7 +31,9 @@ registers to a1-a7, which would be clobbered by argument-setup MOV instructions 
 
 =item * B<Return>: a0
 
-=item * B<FP return>: v0
+=item * B<FP parameters>: fa0-fa7 (f10-f17)
+
+=item * B<FP return>: fa0 (f10)
 
 =item * B<FP caller-saved>: f0-f7, f10-f17, f28-f31
 

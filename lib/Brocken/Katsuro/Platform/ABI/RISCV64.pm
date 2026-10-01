@@ -20,12 +20,16 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform:
         );
         return $data{$category} // [];
     }
-    method frame_reg()          {'s0'}
-    method stack_reg()          {'sp'}
-    method param_registers()    { [qw(a0 a1 a2 a3 a4 a5 a6 a7)] }
-    method fp_param_registers() { [qw(f0 f1 f2 f3 f4 f5 f6 f7)] }
+    method frame_reg()       {'s0'}
+    method stack_reg()       {'sp'}
+    method param_registers() { [qw(a0 a1 a2 a3 a4 a5 a6 a7)] }
+
+    # The floating-point file starts at fa0 rather than f0: fa0-fa7 are f10-f17,
+    # while f0-f7 are the scratch registers ft0-ft7.  The two files are indexed
+    # independently, so an integer overflow is not charged to this one.
+    method fp_param_registers() { [qw(f10 f11 f12 f13 f14 f15 f16 f17)] }
     method return_register()    {'a0'}
-    method fp_return_register() {'f0'}
+    method fp_return_register() {'f10'}
     method fiber_reg()          {'s11'}
 
     # Arguments past the last of a0-a7 arrive on the stack.  RISC-V's `call`
