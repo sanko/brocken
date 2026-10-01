@@ -239,9 +239,9 @@ sub x86_outgoing_area () {
             next unless calls_named( $mf, 'over' );
             my $alloc = Brocken::Jenny::RegAlloc::LinearScan->new;
             my $int   = $alloc->allocate( $mf, $platform, 0 );
-            $alloc->insert_spill_code( $mf, $int->{spill_slots}, $int->{spill_temp}, $platform->stack_reg, 0 );
+            $alloc->insert_spill_code( $mf, $int->{spill_slots}, $int->{spill_temp}, $platform->stack_reg, 0, $int->{spill_addr_temp} );
             my $fp = $alloc->allocate( $mf, $platform, 1 );
-            $alloc->insert_spill_code( $mf, $fp->{spill_slots}, $fp->{spill_temp}, $platform->stack_reg, 1 );
+            $alloc->insert_spill_code( $mf, $fp->{spill_slots}, $fp->{spill_temp}, $platform->stack_reg, 1, $fp->{spill_addr_temp} );
             my $caller_base = $codegen->_caller_save_base( $int->{spill_slots}, $fp->{spill_slots} );
             $alloc->insert_caller_save_code( $mf, [ $platform->registers('caller')->@* ],    $platform->stack_reg, 0, $caller_base );
             $alloc->insert_caller_save_code( $mf, [ $platform->fp_registers('caller')->@* ], $platform->stack_reg, 1, $caller_base );

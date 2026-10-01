@@ -2,6 +2,7 @@ use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
 use List::Util ();
+use Carp ();
 
 class Brocken::Jenny::RegAlloc::LiveInterval {
     field $name  : param : reader;
@@ -14,7 +15,49 @@ class Brocken::Jenny::RegAlloc::LinearScan {
     method allocate( $mf, $platform, $is_float = 0 ) {
         $mf->compute_cfg unless $mf->entry_block->successors->@*;
         my @intervals = $self->_compute_live_intervals( $mf, $platform, $is_float );
-        return $self->_linear_scan( $mf, \@intervals, $platform, $is_float );
+
+        # The address scratch is reserved on a second pass, and only when the
+        # first one actually produced a collision.  Reserving it up front is not
+        # an option: almost every function has some addressable memory operand,
+        # so the reserve would shrink the allocatable pool of nearly every
+        # function by one register and change assignments that were correct
+        # before.  Deciding after allocation is safe because the first pass has
+        # already chosen its registers, so the second pass cannot be invalidated
+        # by the decision it makes.
+        my $res = $self->_linear_scan( $mf, \@intervals, $platform, $is_float, 0 );
+        if ( !defined $res->{spill_addr_temp} && $self->_has_addr_hazard( $mf, $res->{spill_slots} ) ) {
+            $res = $self->_linear_scan( $mf, \@intervals, $platform, $is_float, 1 );
+        }
+        return $res;
+    }
+
+    # Does any instruction need a reloaded address and a reloaded value at once?
+    #
+    # This mirrors the decision insert_spill_code makes per instruction: a
+    # memory operand whose base is spilled has to be reloaded into a register,
+    # and if the same instruction also has a spilled register operand that goes
+    # into the value scratch, the two have to be different registers.  A load
+    # with only a spilled destination does not collide, because the destination
+    # write consumes the address rather than needing it alongside the value.
+    method _has_addr_hazard( $mf, $spill_slots ) {
+        return 0 unless $spill_slots && keys %$spill_slots;
+        for my $bb ( $mf->blocks->@* ) {
+            for my $inst ( $bb->instructions->@* ) {
+                my $addr_spilled = 0;
+                my $val_spilled  = 0;
+                for my $op ( $inst->operands->@* ) {
+                    if ( $op->kind eq 'mem' ) {
+                        my $base = $op->value->{base} // '';
+                        $addr_spilled = 1 if defined $spill_slots->{$base};
+                    }
+                    elsif ( $op->kind eq 'virt_reg' ) {
+                        $val_spilled = 1 if defined $spill_slots->{ $op->value };
+                    }
+                }
+                return 1 if $addr_spilled && $val_spilled;
+            }
+        }
+        return 0;
     }
 
     method _vreg_name( $op, $is_float ) {
@@ -268,7 +311,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return @intervals;
     }
 
-    method _linear_scan( $mf, $intervals, $platform, $is_float ) {
+    method _linear_scan( $mf, $intervals, $platform, $is_float, $need_addr_scratch = 0 ) {
         my @caller_regs = $is_float ? $platform->fp_registers('caller')->@* : $platform->registers('caller')->@*;
         my @callee_regs = $is_float ? $platform->fp_registers('callee')->@* : $platform->registers('callee')->@*;
         my $skip_reg    = $is_float ? $platform->fp_return_register         : $platform->return_register;
@@ -360,10 +403,68 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         }
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         @callee_regs = grep { !$defined_phys{$_} } @callee_regs;
+
+        # A second scratch, for the address of a spilled memory operand.
+        #
+        # One scratch is not always enough: an instruction can need a reloaded
+        # address *and* a reloaded value at the same time, which is what a store
+        # through a spilled address is (the address is one spilled value and the
+        # stored value is another).  Reloading both into one scratch made the
+        # second overwrite the first, so the instruction addressed memory
+        # through whatever the value happened to be -- usually a small integer,
+        # which is an unmapped address.
+        #
+        # Taking the register out of the pool is what makes this expensive, and
+        # it is expensive: which virtual registers a function can hold depends on
+        # how many registers are left, so one register fewer re-shuffles the
+        # assignment of a function that was already correct.  Every register
+        # below is therefore drawn first from the registers this function cannot
+        # use anyway, which costs the assignment nothing, and only falls back to
+        # the pool when there is no such register left.  The register is
+        # reserved at all only when the function can need it; see
+        # _has_addr_hazard for why that is decided after the first pass.
         my $spill_temp = pop @caller_regs;
-        my @regs       = ( @caller_regs, @callee_regs );
+
+        # A register that is in neither pool and that the scan above did not pin
+        # is free to clobber: nothing in the function holds a value in it.  The
+        # return register is the usual one, since it is excluded from both pools
+        # by construction, and the reloads using it are always immediately
+        # followed by the instruction that consumes them.
+        my @spare;
+        if ($need_addr_scratch) {
+            my %pool = map { $_ => 1 } ( @caller_regs, @callee_regs, $spill_temp );
+            my $all = $is_float
+                ? [ $platform->fp_registers('caller')->@*, $platform->fp_registers('callee')->@* ]
+                : [ $platform->registers('caller')->@*,   $platform->registers('callee')->@* ];
+            my %seen;
+            for my $r ( ( defined $skip_reg ? ($skip_reg) : () ), @$all ) {
+                next if $seen{$r}++ || $pool{$r} || $defined_phys{$r};
+                next if defined $fiber_reg && $r eq $fiber_reg;
+                push @spare, $r;
+            }
+        }
+
+        my $spill_addr_temp = pop @spare;
+        my $addr_is_callee  = 0;
+        if ( !defined $spill_addr_temp && $need_addr_scratch ) {
+            # Nothing is free, so the register has to come out of the pool.  The
+            # callee set first: it is in no argument file, so a caller-register
+            # shortage cannot turn into a different stack argument layout.  The
+            # price is an extra prologue save.
+            $spill_addr_temp = pop @callee_regs;
+            $addr_is_callee   = 1;
+        }
+        if ( !defined $spill_addr_temp && $need_addr_scratch ) {
+            $spill_addr_temp = pop @caller_regs;
+            $addr_is_callee   = 0;
+        }
+        Carp::croak('no register available for the spill address scratch')
+            if $need_addr_scratch && !defined $spill_addr_temp;
+
+        my @regs = ( @caller_regs, @callee_regs );
         my %assignment;
         my %used_callee;
+        $used_callee{$spill_addr_temp} = 1 if $addr_is_callee;
         my %spill_slots;
         my @active;
         my $next_spill = 0;
@@ -392,16 +493,24 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 push @active, $int;
             }
         }
-        return { assignment => \%assignment, used_callee => [ sort keys %used_callee ], spill_slots => \%spill_slots, spill_temp => $spill_temp, };
+        return { assignment => \%assignment, used_callee => [ sort keys %used_callee ], spill_slots => \%spill_slots, spill_temp => $spill_temp, spill_addr_temp => $spill_addr_temp, };
     }
 
-    method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0 ) {
+    method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0, $spill_addr_temp = undef ) {
         return unless $spill_slots && keys %$spill_slots;
+
         my $load_op     = $is_float ? 'fload'  : 'load';
-        my $store_op    = $is_float ? 'fstore' : 'store';
-        my %reads_dst   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not bne beq);
-        my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
-        my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
+        my $store_op      = $is_float ? 'fstore' : 'store';
+        my %reads_dst     = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not bne beq);
+        my %can_mem_src   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
+        my $temp_op = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
+
+        # Falls back to the value scratch when no address scratch was reserved.
+        # That is safe for the same reason the memory base falls back below: the
+        # reservation happens exactly when an address and a value would be live
+        # together, so sharing is only reached when nothing else is live in it.
+        my $addr_reg  = defined $spill_addr_temp ? $spill_addr_temp : $spill_temp;
+        my $addr_op   = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $addr_reg, type => undef ) };
         my $mem_op
             = sub ($o) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => undef ) };
         my $load_inst = sub ($o) {
@@ -409,6 +518,17 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 opcode   => $load_op,
                 operands => [ $temp_op->(), $mem_op->($o) ],
                 comment  => 'spill-reload'
+            );
+        };
+
+        # The address of a spilled memory operand is reloaded into the address
+        # scratch, not the value scratch, so an instruction that also reloads a
+        # value keeps both live at once.
+        my $load_addr_inst = sub ($o) {
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => $load_op,
+                operands => [ $addr_op->(), $mem_op->($o) ],
+                comment  => 'spill-reload-addr'
             );
         };
         my $store_inst = sub ($o) {
@@ -435,8 +555,9 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     next unless $op->kind eq 'mem';
                     my $base = $op->value->{base} // '';
                     if ( defined( my $off = $spill_slots->{$base} ) ) {
-                        $smem_off = $off;
-                        $op->value->{base} = $spill_temp;
+
+                        $smem_off           = $off;
+                        $op->value->{base} = $addr_reg;
                     }
                 }
                 if ( !keys %sp && !defined $smem_off ) {
@@ -462,7 +583,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     $ops[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[1]->type );
                 }
                 my @load_offsets;
-                push @load_offsets, $smem_off if defined $smem_off;
                 if ($dd) {
                     if ( $can_mem_src{$opcode} ) {
                         push @load_offsets, $d_off if $reads_dst{$opcode};
@@ -481,6 +601,9 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     push @load_offsets, $sp{$i};
                     $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[$i]->type );
                 }
+                # Address first: it lands in its own scratch and stays valid
+                # while the value scratch is reused below.
+                push @new, $load_addr_inst->($smem_off) if defined $smem_off;
                 push @new, $load_inst->($_) for @load_offsets;
                 push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
                 if ($d_sp) {
@@ -962,7 +1085,7 @@ Performs full register allocation on the MIR function.
 
 =head2 insert_spill_code
 
-    $allocator->insert_spill_code($mf, $spill_slots, $spill_temp, $stack_reg, $is_float?)
+    $allocator->insert_spill_code($mf, $spill_slots, $spill_temp, $stack_reg, $is_float?, $spill_addr_temp)
 
 Inserts load/store instructions for each spilled virtual register.
 
