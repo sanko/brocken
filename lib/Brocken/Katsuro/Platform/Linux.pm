@@ -68,5 +68,4 @@ class Brocken::Katsuro::Platform::Linux : isa(Brocken::Katsuro::Platform) {
         $syscalls;
     }
 }
-
 1;

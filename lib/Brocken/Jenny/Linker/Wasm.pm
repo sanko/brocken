@@ -179,5 +179,4 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         return $out;
     }
 }
-
 1;

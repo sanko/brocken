@@ -6,5 +6,4 @@ use Brocken::Katsuro::Platform;
 class Brocken::Katsuro::Platform::BSD : isa(Brocken::Katsuro::Platform) {
     method is_bsd() {1}
 }
-
 1;

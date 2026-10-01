@@ -27,5 +27,4 @@ class Brocken::Katsuro::Platform::ABI {
     method fp_return_register()                    {undef}
     method fiber_reg()                             {undef}
 }
-
 1;

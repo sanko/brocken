@@ -56,5 +56,4 @@ class Brocken::Katsuro::Platform::OpenBSD : isa(Brocken::Katsuro::Platform::BSD)
         };
     }
 }
-
 1;

@@ -20,5 +20,4 @@ package Brocken::Jenny v0.0.1 {
     use Brocken::Jenny::Linker::ELF64;
     use Brocken::Jenny::Linker::Wasm;
 };
-
 1;

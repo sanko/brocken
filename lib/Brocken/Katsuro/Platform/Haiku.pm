@@ -108,5 +108,4 @@ class Brocken::Katsuro::Platform::Haiku : isa(Brocken::Katsuro::Platform) {
         return $num;
     }
 }
-
 1;

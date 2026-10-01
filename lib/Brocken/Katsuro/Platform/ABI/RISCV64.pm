@@ -87,5 +87,4 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform:
         return $data{$category} // [];
     }
 }
-
 1;

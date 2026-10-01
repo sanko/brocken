@@ -56,5 +56,4 @@ class Brocken::Katsuro::Platform::MacOS : isa(Brocken::Katsuro::Platform) {
         return $map{ $self->arch };
     }
 }
-
 1;

@@ -2,7 +2,7 @@ use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
 use List::Util ();
-use Carp ();
+use Carp       ();
 
 class Brocken::Jenny::RegAlloc::LiveInterval {
     field $name  : param : reader;
@@ -433,9 +433,8 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         my @spare;
         if ($need_addr_scratch) {
             my %pool = map { $_ => 1 } ( @caller_regs, @callee_regs, $spill_temp );
-            my $all = $is_float
-                ? [ $platform->fp_registers('caller')->@*, $platform->fp_registers('callee')->@* ]
-                : [ $platform->registers('caller')->@*,   $platform->registers('callee')->@* ];
+            my $all  = $is_float ? [ $platform->fp_registers('caller')->@*, $platform->fp_registers('callee')->@* ] :
+                [ $platform->registers('caller')->@*, $platform->registers('callee')->@* ];
             my %seen;
             for my $r ( ( defined $skip_reg ? ($skip_reg) : () ), @$all ) {
                 next if $seen{$r}++ || $pool{$r} || $defined_phys{$r};
@@ -443,24 +442,22 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 push @spare, $r;
             }
         }
-
         my $spill_addr_temp = pop @spare;
         my $addr_is_callee  = 0;
         if ( !defined $spill_addr_temp && $need_addr_scratch ) {
+
             # Nothing is free, so the register has to come out of the pool.  The
             # callee set first: it is in no argument file, so a caller-register
             # shortage cannot turn into a different stack argument layout.  The
             # price is an extra prologue save.
             $spill_addr_temp = pop @callee_regs;
-            $addr_is_callee   = 1;
+            $addr_is_callee  = 1;
         }
         if ( !defined $spill_addr_temp && $need_addr_scratch ) {
             $spill_addr_temp = pop @caller_regs;
-            $addr_is_callee   = 0;
+            $addr_is_callee  = 0;
         }
-        Carp::croak('no register available for the spill address scratch')
-            if $need_addr_scratch && !defined $spill_addr_temp;
-
+        Carp::croak('no register available for the spill address scratch') if $need_addr_scratch && !defined $spill_addr_temp;
         my @regs = ( @caller_regs, @callee_regs );
         my %assignment;
         my %used_callee;
@@ -493,24 +490,29 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 push @active, $int;
             }
         }
-        return { assignment => \%assignment, used_callee => [ sort keys %used_callee ], spill_slots => \%spill_slots, spill_temp => $spill_temp, spill_addr_temp => $spill_addr_temp, };
+        return {
+            assignment      => \%assignment,
+            used_callee     => [ sort keys %used_callee ],
+            spill_slots     => \%spill_slots,
+            spill_temp      => $spill_temp,
+            spill_addr_temp => $spill_addr_temp,
+        };
     }
 
     method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0, $spill_addr_temp = undef ) {
         return unless $spill_slots && keys %$spill_slots;
-
         my $load_op     = $is_float ? 'fload'  : 'load';
-        my $store_op      = $is_float ? 'fstore' : 'store';
-        my %reads_dst     = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not bne beq);
-        my %can_mem_src   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
-        my $temp_op = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
+        my $store_op    = $is_float ? 'fstore' : 'store';
+        my %reads_dst   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not bne beq);
+        my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
+        my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
 
         # Falls back to the value scratch when no address scratch was reserved.
         # That is safe for the same reason the memory base falls back below: the
         # reservation happens exactly when an address and a value would be live
         # together, so sharing is only reached when nothing else is live in it.
-        my $addr_reg  = defined $spill_addr_temp ? $spill_addr_temp : $spill_temp;
-        my $addr_op   = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $addr_reg, type => undef ) };
+        my $addr_reg = defined $spill_addr_temp ? $spill_addr_temp : $spill_temp;
+        my $addr_op  = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $addr_reg, type => undef ) };
         my $mem_op
             = sub ($o) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => undef ) };
         my $load_inst = sub ($o) {
@@ -555,8 +557,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     next unless $op->kind eq 'mem';
                     my $base = $op->value->{base} // '';
                     if ( defined( my $off = $spill_slots->{$base} ) ) {
-
-                        $smem_off           = $off;
+                        $smem_off = $off;
                         $op->value->{base} = $addr_reg;
                     }
                 }
@@ -601,6 +602,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     push @load_offsets, $sp{$i};
                     $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[$i]->type );
                 }
+
                 # Address first: it lands in its own scratch and stays valid
                 # while the value scratch is reused below.
                 push @new, $load_addr_inst->($smem_off) if defined $smem_off;
@@ -1030,5 +1032,4 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         return ( $frame + 15 ) & ~15;
     }
 }
-
 1;

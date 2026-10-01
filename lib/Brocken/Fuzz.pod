@@ -24,27 +24,27 @@ Brocken::Fuzz - Random program generator and differential runner
 
 =head1 DESCRIPTION
 
-Generates small random Brocken programs, compiles each one, links it, runs it, and checks the result against what
-the generator believes it should be. It is the compiler's own test suite written as a program rather than as a set
-of fixtures, and the point is breadth: a few thousand generated programs will find a lowering bug that a hundred
+Generates small random Brocken programs, compiles each one, links it, runs it, and checks the result against what the
+generator believes it should be. It is the compiler's own test suite written as a program rather than as a set of
+fixtures, and the point is breadth: a few thousand generated programs will find a lowering bug that a hundred
 hand-written tests will not.
 
-The design is differential where it can be and oracle-based where it cannot. A generated program that is supposed
-to print a value has that value recorded at generation time, and the runner compares. A generated program that is
-supposed to crash is run and its exit is checked. A program with no recorded expectation is only required to
-compile, link, and run, which is still a useful assertion because all three can fail independently.
+The design is differential where it can be and oracle-based where it cannot. A generated program that is supposed to
+print a value has that value recorded at generation time, and the runner compares. A generated program that is supposed
+to crash is run and its exit is checked. A program with no recorded expectation is only required to compile, link, and
+run, which is still a useful assertion because all three can fail independently.
 
 Every case is identified by a seed and an index rather than by its text, so a failure can be reproduced with
 C<run_case> in a different process, on a different machine, days later. That reproducibility is the single most
-important property of this module and the reason C<run_case> re-seeds C<srand> rather than reusing whatever state
-the generator was in.
+important property of this module and the reason C<run_case> re-seeds C<srand> rather than reusing whatever state the
+generator was in.
 
 =head1 CONSTRUCTOR
 
 =head2 C<seed( )>
 
-The random seed. This is the root of reproducibility: given the same seed, the same case index, and the same
-C<max_ops> and C<max_vars>, the same program is generated in any process on any platform.
+The random seed. This is the root of reproducibility: given the same seed, the same case index, and the same C<max_ops>
+and C<max_vars>, the same program is generated in any process on any platform.
 
 =head2 C<bail_on_fail( )>
 
@@ -52,9 +52,9 @@ Constructor parameter, off by default. When true, the first failure stops the ru
 warned about and stepped over. This is what a continuous-integration caller wants; leaving it off is what a person
 sitting at a terminal wants, since it collects several failures before saying anything.
 
-The remaining fields, C<brocken>, C<codegen>, C<linker>, C<host>, C<host_str>, C<tmpdir>, and C<ext>, are readers
-for the compiler and back-end objects the object builds for itself. They exist so a caller can reach the same
-back end the fuzzer used, and none of them is a parameter.
+The remaining fields, C<brocken>, C<codegen>, C<linker>, C<host>, C<host_str>, C<tmpdir>, and C<ext>, are readers for
+the compiler and back-end objects the object builds for itself. They exist so a caller can reach the same back end the
+fuzzer used, and none of them is a parameter.
 
 =head1 METHODS
 
@@ -62,26 +62,26 @@ back end the fuzzer used, and none of them is a parameter.
 
     my $results = $fuzzer->fuzz( $count, $max_ops, $max_vars );
 
-Generates and runs C<$count> cases, 100 by default, and returns an arrayref of result hashrefs, one per case.
-Failures are also warned about as they happen, so the return value is for machine consumption and the warnings are
-for a person watching. Progress is reported every thirty seconds rather than every case, because a case is fast
-and a progress line per case would drown the output.
+Generates and runs C<$count> cases, 100 by default, and returns an arrayref of result hashrefs, one per case. Failures
+are also warned about as they happen, so the return value is for machine consumption and the warnings are for a person
+watching. Progress is reported every thirty seconds rather than every case, because a case is fast and a progress line
+per case would drown the output.
 
 =head2 C<fuzz_until_time( )>
 
     $fuzzer->fuzz_until_time( 300, $max_ops, $max_vars );
 
 The same loop with no case count, stopping after a wall-clock budget, five minutes by default. Returns an empty
-arrayref; the summary line carries the counts. This is the mode to leave running overnight, and the reason it
-returns nothing is that a time-bounded run has no fixed number of results to return.
+arrayref; the summary line carries the counts. This is the mode to leave running overnight, and the reason it returns
+nothing is that a time-bounded run has no fixed number of results to return.
 
 =head2 C<run_case( )>
 
     my $result = $fuzzer->run_case( 17, $max_ops, $max_vars );
 
-Regenerates and runs one case by index. The generator is re-seeded and then advanced to the requested index, so
-the result depends only on C<(seed, case_num, max_ops, max_vars)> and not on how many cases were run before it.
-The result hashref gains C<case_num>, C<max_ops>, C<max_vars>, and C<case_id> on top of the usual keys.
+Regenerates and runs one case by index. The generator is re-seeded and then advanced to the requested index, so the
+result depends only on C<(seed, case_num, max_ops, max_vars)> and not on how many cases were run before it. The result
+hashref gains C<case_num>, C<max_ops>, C<max_vars>, and C<case_id> on top of the usual keys.
 
 =head2 C<generate_program( )>
 
@@ -91,14 +91,14 @@ entry point for inspecting what the generator produces, and for feeding a genera
 =head1 CASE IDENTIFIERS
 
 C<encode_case_id> packs a seed, a case number, and the two generation parameters into a single string, and
-C<decode_case_id> unpacks it. A failure message carries this string, which is the thing to paste into a bug report:
-it identifies the case completely without shipping the source along with it, and C<run_case> turns it back into a
+C<decode_case_id> unpacks it. A failure message carries this string, which is the thing to paste into a bug report: it
+identifies the case completely without shipping the source along with it, and C<run_case> turns it back into a
 reproducible run.
 
 =head1 WHAT IT GENERATES
 
-C<generate_program> builds a program from a pool of typed variables and a set of statement generators, and the
-pool of generators is where most of the coverage comes from. Among them:
+C<generate_program> builds a program from a pool of typed variables and a set of statement generators, and the pool of
+generators is where most of the coverage comes from. Among them:
 
 =over
 
@@ -128,14 +128,14 @@ the arithmetic answer.
 
 =back
 
-Every generated program is valid Brocken. The generator is careful about the language's actual limits, which means
-it never produces a case the parser would reject, so a C<compile_fail> status is a real finding rather than the
-generator being wrong.
+Every generated program is valid Brocken. The generator is careful about the language's actual limits, which means it
+never produces a case the parser would reject, so a C<compile_fail> status is a real finding rather than the generator
+being wrong.
 
 =head1 RESULT STATUSES
 
-A result hashref always has C<status>, C<source>, and C<host>, and the failing ones add C<reason>. The statuses
-are the stages of the pipeline, which is what makes them useful: they localise a failure to a layer.
+A result hashref always has C<status>, C<source>, and C<host>, and the failing ones add C<reason>. The statuses are the
+stages of the pipeline, which is what makes them useful: they localise a failure to a layer.
 
 =over
 
@@ -150,8 +150,8 @@ L<Brocken::Compiler> threw. The C<reason> is prefixed C<Compile:>.
 =item C<codegen_fail>
 
 L<Brocken::Jenny> threw while emitting functions. The C<reason> is prefixed C<Codegen:>. The distinction from
-C<compile_fail> matters, because a codegen failure is usually a back-end bug against a valid IR rather than a front
-end problem.
+C<compile_fail> matters, because a codegen failure is usually a back-end bug against a valid IR rather than a front end
+problem.
 
 =item C<link_fail>
 
@@ -171,9 +171,9 @@ The program ran and did not match. This is the interesting one, and it is where 
 
 =head1 RUNNING THE PROGRAM
 
-Cases are run with a ten second timeout, and the exit status is captured along with stdout and stderr on request.
-The expectation is a recorded value rather than a comparison against another compiler, so this is an oracle test:
-the generator knows what C<$a + $b> was supposed to be, and checks that the program agrees.
+Cases are run with a ten second timeout, and the exit status is captured along with stdout and stderr on request. The
+expectation is a recorded value rather than a comparison against another compiler, so this is an oracle test: the
+generator knows what C<$a + $b> was supposed to be, and checks that the program agrees.
 
 A program that is meant to crash is checked for a crash, and a C<DIV_ZERO> hit is tracked separately from a genuine
 crash, because a division by zero is a defined outcome in this language rather than a fault. A case that divides by
@@ -181,29 +181,28 @@ zero is still expected to run, and expecting it to abort would be a false failur
 
 =head1 STATUS
 
-Expect breakage. This is a development tool and it is written as one: it reports what it finds and stops, rather
-than failing gracefully in a way that hides a compiler bug.
+Expect breakage. This is a development tool and it is written as one: it reports what it finds and stops, rather than
+failing gracefully in a way that hides a compiler bug.
 
-Every case shells out to a real executable. A run is a compile, a link, a process spawn, and a wait, so throughput
-is dominated by process cost rather than by the compiler, and a thousand cases is a matter of minutes rather than
-seconds. Nothing is done in-process because the alternative would mean running untrusted generated machine code
-inside the compiler's address space, which is a worse trade than a fork per case.
+Every case shells out to a real executable. A run is a compile, a link, a process spawn, and a wait, so throughput is
+dominated by process cost rather than by the compiler, and a thousand cases is a matter of minutes rather than seconds.
+Nothing is done in-process because the alternative would mean running untrusted generated machine code inside the
+compiler's address space, which is a worse trade than a fork per case.
 
-The generator draws from C<rand>, and C<run_case> re-seeds to stay reproducible. That means two fuzzer objects in
-one process share the global generator's state, so interleaving C<fuzz> and C<run_case> on two objects is not
-reproducible even though each is reproducible alone. The C<seed> field is per object and the C<rand> stream is per
-process, and the code does not bridge that gap.
+The generator draws from C<rand>, and C<run_case> re-seeds to stay reproducible. That means two fuzzer objects in one
+process share the global generator's state, so interleaving C<fuzz> and C<run_case> on two objects is not reproducible
+even though each is reproducible alone. The C<seed> field is per object and the C<rand> stream is per process, and the
+code does not bridge that gap.
 
-C<bail_on_fail> defaults to off, so a scripted run will keep going and can report many failures from one
-invocation. A caller that wants the first failure and a non-zero exit has to pass it.
+C<bail_on_fail> defaults to off, so a scripted run will keep going and can report many failures from one invocation. A
+caller that wants the first failure and a non-zero exit has to pass it.
 
-C<fuzz_until_time> reports iterations per second, and the figure includes the process spawn, so it is a measure of
-the harness rather than of the compiler.
+C<fuzz_until_time> reports iterations per second, and the figure includes the process spawn, so it is a measure of the
+harness rather than of the compiler.
 
-The generator does not produce programs that use the 128-bit types, the floating-point types, or a Wasm target,
-because those paths are known not to work and including them would produce a steady stream of known failures that
-hide the interesting ones. The consequence is that the float and 128-bit lowering paths have no random coverage at
-all.
+The generator does not produce programs that use the 128-bit types, the floating-point types, or a Wasm target, because
+those paths are known not to work and including them would produce a steady stream of known failures that hide the
+interesting ones. The consequence is that the float and 128-bit lowering paths have no random coverage at all.
 
 =head1 LICENSE & LEGAL
 
@@ -219,10 +218,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

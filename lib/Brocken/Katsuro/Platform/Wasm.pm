@@ -11,5 +11,4 @@ class Brocken::Katsuro::Platform::Wasm : isa(Brocken::Katsuro::Platform) {
     method format()     {'wasm'}
     method lib_prefix() {''}
 }
-
 1;

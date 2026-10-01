@@ -13,22 +13,22 @@ Brocken::Jenny::Codegen::ARM64::Encodings - AArch64 opcode and register constant
 
 =head1 DESCRIPTION
 
-AArch64 is a fixed-width instruction set: every instruction is 32 bits, and the operation is chosen by a field in
-the middle of the word rather than by the opcode byte. That makes the encoding table larger and more regular than
-x86-64's, and it is why this module has 141 constants where the x86-64 one has 16.
+AArch64 is a fixed-width instruction set: every instruction is 32 bits, and the operation is chosen by a field in the
+middle of the word rather than by the opcode byte. That makes the encoding table larger and more regular than x86-64's,
+and it is why this module has 141 constants where the x86-64 one has 16.
 
 Most of the table is a base opcode with the fields left at zero. Assembling an instruction is then a matter of OR-ing
 the register numbers and an immediate into their bit positions:
 
     my $word = ADD_X | ( $rm << 16 ) | ( $rn << 5 ) | $rd;
 
-The comments in this module give the bit layout of each word in groups, which is the encoding manual's notation and
-is the most useful form of the information here. Each base is a 32-bit value, so C<pack 'V'> writes it out directly.
+The comments in this module give the bit layout of each word in groups, which is the encoding manual's notation and is
+the most useful form of the information here. Each base is a 32-bit value, so C<pack 'V'> writes it out directly.
 
 =head1 REGISTERS
 
-C<X0> through C<X30> are the integer registers, each constant equal to its own number, and C<SP> is 31. Three
-aliases exist because AArch64 gives three registers a second name that means something specific:
+C<X0> through C<X30> are the integer registers, each constant equal to its own number, and C<SP> is 31. Three aliases
+exist because AArch64 gives three registers a second name that means something specific:
 
 =over
 
@@ -43,66 +43,65 @@ The link register, where C<bl> writes the return address. It is the first thing 
 =item C<SP> is 31, not C<X31>
 
 C<X31> is not a general register. In most encodings it reads as the zero register when it is a source and lets you
-write C<SP> when it is a destination, which is why C<MOV_X> and C<MOV_W> above encode a move through the zero
-register.
+write C<SP> when it is a destination, which is why C<MOV_X> and C<MOV_W> above encode a move through the zero register.
 
 =back
 
 =head1 EXPORTS
 
-All 141 are exported by default, through C<@EXPORT>, C<@EXPORT_OK>, and the C<:all> tag. The set is large enough
-that naming what you use is worth doing.
+All 141 are exported by default, through C<@EXPORT>, C<@EXPORT_OK>, and the C<:all> tag. The set is large enough that
+naming what you use is worth doing.
 
 =head1 CONSTANTS
 
 =head2 Control flow
 
-C<B> is 0x14000000, an unconditional branch, and C<BL> is 0x94000000, a branch that writes the return address to
-C<LR> as it goes. C<BL> is how one Brocken function calls another.
+C<B> is 0x14000000, an unconditional branch, and C<BL> is 0x94000000, a branch that writes the return address to C<LR>
+as it goes. C<BL> is how one Brocken function calls another.
 
-C<BR> and C<BLR> are the register forms, 0xD61F0000 and 0xD63F0000. C<RET> is 0xD65F03C0, a branch to C<LR>, which
-is how a function returns.
+C<BR> and C<BLR> are the register forms, 0xD61F0000 and 0xD63F0000. C<RET> is 0xD65F03C0, a branch to C<LR>, which is
+how a function returns.
 
 C<CBZ> and C<CBNZ> compare a register against zero and branch, with no condition flags involved, and their C<sf> bit
-decides 32-bit against 64-bit. C<ADR> and C<ADRP> compute addresses PC-relative, the second at page granularity,
-which is what the linker uses to reach a string in rodata.
+decides 32-bit against 64-bit. C<ADR> and C<ADRP> compute addresses PC-relative, the second at page granularity, which
+is what the linker uses to reach a string in rodata.
 
 =head2 Integer arithmetic, register form
 
-The 32-bit set is C<ADD_W>, C<SUB_W>, C<AND_W>, C<ORR_W>, C<EOR_W>, and C<MUL_W>, and the 64-bit set is the same
-with C<_X>: C<ADD_X>, C<SUB_X>, C<AND_X>, C<ORR_X>, C<EOR_X>, and C<MUL_X>. The C<W> and C<X> suffixes mean 32-bit
-and 64-bit operand size, which AArch64 spells in the top bit of the instruction.
+The 32-bit set is C<ADD_W>, C<SUB_W>, C<AND_W>, C<ORR_W>, C<EOR_W>, and C<MUL_W>, and the 64-bit set is the same with
+C<_X>: C<ADD_X>, C<SUB_X>, C<AND_X>, C<ORR_X>, C<EOR_X>, and C<MUL_X>. The C<W> and C<X> suffixes mean 32-bit and
+64-bit operand size, which AArch64 spells in the top bit of the instruction.
 
-Beyond the basics: C<MUL_W>, C<MUL_X>, and C<UMULH_X> for multiplication, where C<UMULH_X> is the high half and is
-what a 128-bit multiply result needs. C<SDIV_X>, C<SDIV_W>, C<UDIV_X>, and C<UDIV_W> for division, signed and
-unsigned. C<ADCS_X> and C<SBCS_X> are the carry and borrow forms, add-with-carry and subtract-with-borrow, kept
-under their historical names for compatibility.
+Beyond the basics: C<MUL_W>, C<MUL_X>, and C<UMULH_X> for multiplication, where C<UMULH_X> is the high half and is what
+a 128-bit multiply result needs. C<SDIV_X>, C<SDIV_W>, C<UDIV_X>, and C<UDIV_W> for division, signed and unsigned.
+C<ADCS_X> and C<SBCS_X> are the carry and borrow forms, add-with-carry and subtract-with-borrow, kept under their
+historical names for compatibility.
 
 C<ADD_X_EXT> is the extended-register form of C<ADD>, which takes a shift and an extend mode in the middle of the
-instruction and so can add a byte- or half-scaled register. C<UXTX_OPT> is the option value for that field that
-selects unsigned 64-bit extend with a shift of three, the option a plain C<add> uses.
+instruction and so can add a byte- or half-scaled register. C<UXTX_OPT> is the option value for that field that selects
+unsigned 64-bit extend with a shift of three, the option a plain C<add> uses.
 
 =head2 Integer arithmetic, immediate form
 
-C<ADD_IMM> and C<SUB_IMM> are the immediate forms with the operand-size bit left dynamic, so a 32-bit or 64-bit add
-is the same constant OR'd with C<SF> rather than two constants. C<ADD_IMM_64> and C<SUB_IMM_64> are the
-already-resolved 64-bit versions, and the same pattern applies to C<CMP_IMM> and C<CMP_IMM_64>. C<CMP_REG> is the
-register-to-register compare, which writes flags and therefore has no immediate form.
+C<ADD_IMM> and C<SUB_IMM> are the immediate forms with the operand-size bit left dynamic, so a 32-bit or 64-bit add is
+the same constant OR'd with C<SF> rather than two constants. C<ADD_IMM_64> and C<SUB_IMM_64> are the already-resolved
+64-bit versions, and the same pattern applies to C<CMP_IMM> and C<CMP_IMM_64>. C<CMP_REG> is the register-to-register
+compare, which writes flags and therefore has no immediate form.
 
 C<UBFM> and C<SBFM> and their C<_W> variants are the bitfield instructions, used for shifting by an arbitrary amount
 and for extracting and inserting bit ranges. AArch64 has no separate shift instruction, which is why a shift is a
 bitfield op here.
 
-C<MOVZ_32>, C<MOVZ_64>, C<MOVK_32>, and C<MOVK_64> build a 64-bit constant sixteen bits at a time: C<movz> writes
-one half and zero-extends, C<movk> keeps what is there and overwrites one half, and a constant that needs more than
-sixteen bits is a C<movz> followed by one C<movk> per remaining half. This is how a 64-bit immediate is materialized
-without a literal pool, which matters because the compiler has no pool.
+C<MOVZ_32>, C<MOVZ_64>, C<MOVK_32>, and C<MOVK_64> build a 64-bit constant sixteen bits at a time: C<movz> writes one
+half and zero-extends, C<movk> keeps what is there and overwrites one half, and a constant that needs more than sixteen
+bits is a C<movz> followed by one C<movk> per remaining half. This is how a 64-bit immediate is materialized without a
+literal pool, which matters because the compiler has no pool.
 
 =head2 Stack and pointer arithmetic
 
 C<SUB_SP> and C<ADD_SP> adjust the stack pointer by an immediate, and C<MOV_SP> copies it. All three encode C<SP> in
-both the source and destination fields, which is why they are separate constants rather than C<ADD_IMM_64> with
-fields filled in.
+both the source and destination fields, which is why they are separate constants rather than C<ADD_IMM_64> with fields
+filled in.
 
 =head2 Loads and stores
 
@@ -128,8 +127,8 @@ because AArch64 sign extension is a separate bit, not a property of the width.
 
 =head2 Floating point
 
-C<FLDR_32>, C<FLDR_64>, C<FSTR_32>, and C<FSTR_64> plus the four C<_REG> forms are the floating-point loads and
-stores, C<imm13> scaled offsets in the unsigned form.
+C<FLDR_32>, C<FLDR_64>, C<FSTR_32>, and C<FSTR_64> plus the four C<_REG> forms are the floating-point loads and stores,
+C<imm13> scaled offsets in the unsigned form.
 
 C<FADD>, C<FSUB>, C<FMUL>, C<FDIV>, C<FMIN>, and C<FMAX> are the arithmetic operations, and C<FABS_32>, C<FNEG_32>,
 C<FSQRT_32>, and C<FMOV_32> are the single-operand ones. C<FCMP_32> and C<FCMP_64> compare and set flags.
@@ -138,39 +137,39 @@ These are 32-bit base values. C<FP_SZ> is 0x00400000, the format bit that turns 
 64-bit operation is the constant OR'd with C<FP_SZ> rather than a second constant for every operation.
 
 C<FMOV_GP2F_32> and C<FMOV_GP2F_64> move a value from a general register into a floating-point one, which is the
-bit-level reinterpretation a C<my i64 $x> to C<my f64 $y> conversion needs. That pair is what pins the return
-address register in a function that mixes integer and floating-point work, and it is the reason the x86-64 allocator
-is sensitive to register pressure in mixed code.
+bit-level reinterpretation a C<my i64 $x> to C<my f64 $y> conversion needs. That pair is what pins the return address
+register in a function that mixes integer and floating-point work, and it is the reason the x86-64 allocator is
+sensitive to register pressure in mixed code.
 
 =head2 Conditionals, conversions, and traps
 
-C<CSINC> is conditional-select-increment, which is how a comparison becomes a value without a branch: the
-condition picks between the two sources. Combined with a compare it gives C<cset>.
+C<CSINC> is conditional-select-increment, which is how a comparison becomes a value without a branch: the condition
+picks between the two sources. Combined with a compare it gives C<cset>.
 
 C<SCVTF_D_X> and C<FCVTZS_X_D> were the integer-to-float and float-to-integer conversions. Both are marked unused in
-the source, because the back end now builds those encodings type-aware and derives the width from the operand
-rather than selecting a constant. C<UXTB> is the zero-extend-byte used to narrow a value.
+the source, because the back end now builds those encodings type-aware and derives the width from the operand rather
+than selecting a constant. C<UXTB> is the zero-extend-byte used to narrow a value.
 
 C<BRK> is 0xD4200000 and C<SVC> is 0xD4000001, the breakpoint and supervisor-call traps. These are how a compiled
 program reaches the host for a syscall, and they are gated by the capability check on the ICB.
 
 =head2 Stack deltas
 
-C<FCB_RESUME_OFF> is 112, the offset from a function's stack pointer to where a fiber control block records its
-resume point. It is a data value rather than an opcode and is the one constant here that is not part of an encoding.
+C<FCB_RESUME_OFF> is 112, the offset from a function's stack pointer to where a fiber control block records its resume
+point. It is a data value rather than an opcode and is the one constant here that is not part of an encoding.
 
 =head1 STATUS
 
 Expect breakage. Two things to know.
 
-This module's C<@EXPORT> list contains a name that does not exist. The list ends with C<SCVTF_D_X FCVTZS_X_D>, but
-the constant is defined as C<FCVTTZS_X_D>, with the extra C<T>. Every other exported name resolves; this one means
-C<< use Brocken::Jenny::Codegen::ARM64::Encodings qw[FCVTZS_X_D] >> dies with an undefined-subroutine error rather
-than failing to import. Nothing hits it, because the back end builds C<fcvtzs> type-aware and never asks for the
-constant, and because these constants are also in C<@EXPORT> so a bare C<use> never resolves them by name.
+This module's C<@EXPORT> list contains a name that does not exist. The list ends with C<SCVTF_D_X FCVTZS_X_D>, but the
+constant is defined as C<FCVTTZS_X_D>, with the extra C<T>. Every other exported name resolves; this one means C<< use
+Brocken::Jenny::Codegen::ARM64::Encodings qw[FCVTZS_X_D] >> dies with an undefined-subroutine error rather than failing
+to import. Nothing hits it, because the back end builds C<fcvtzs> type-aware and never asks for the constant, and
+because these constants are also in C<@EXPORT> so a bare C<use> never resolves them by name.
 
-The other gap is that this is a table of what the back end has needed so far. There is no C<SMULL> or C<SMLALH>,
-no C<csel> distinct from C<CSINC>, no bitfield deposit and extract beyond the C<BFM> family, no floating-point
+The other gap is that this is a table of what the back end has needed so far. There is no C<SMULL> or C<SMLALH>, no
+C<csel> distinct from C<CSINC>, no bitfield deposit and extract beyond the C<BFM> family, no floating-point
 compare-and-branch pair, and no C<ADR> arithmetic beyond the PC-relative form.
 
 =head1 LICENSE & LEGAL
@@ -187,10 +186,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

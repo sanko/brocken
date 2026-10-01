@@ -21,5 +21,4 @@ class Brocken::Katsuro::Platform::Windows : isa(Brocken::Katsuro::Platform) {
         return $name . '-' . $version . $self->lib_ext;
     }
 }
-
 1;

@@ -3,7 +3,6 @@ use feature qw[class];
 no warnings qw[experimental::class];
 
 class Brocken::Jenny::Linker::Layout {
-
     field $file_align    : param : reader = 0x200;
     field $section_align : param : reader = 0x1000;
     field @sections;
@@ -36,5 +35,4 @@ class Brocken::Jenny::Linker::Layout {
     }
     method sections() {@sections}
 }
-
 1;

@@ -32,5 +32,4 @@ class Brocken::Katsuro::Platform::ABI::X86_64_Win64 : isa(Brocken::Katsuro::Plat
     method param_registers()    { [qw(rcx rdx r8 r9)] }
     method fp_param_registers() { [qw(xmm0 xmm1 xmm2 xmm3)] }
 }
-
 1;

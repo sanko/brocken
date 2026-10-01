@@ -15,12 +15,11 @@ Brocken::Jenny::Codegen::Wasm::Encodings - WebAssembly opcode constants
 =head1 DESCRIPTION
 
 WebAssembly's code section is a stream of single-byte opcodes followed by LEB128 operands, so unlike the other three
-back ends this table is close to a literal transcription of the specification's opcode numbering. Almost every
-constant here is the byte from the binary format, and the operands after it are what the code generator has to
-supply.
+back ends this table is close to a literal transcription of the specification's opcode numbering. Almost every constant
+here is the byte from the binary format, and the operands after it are what the code generator has to supply.
 
-There are 120 of them, covering control flow, locals, memory access, constants, the full comparison and arithmetic
-set for i32, i64, f32, and f64, and the conversions between them.
+There are 120 of them, covering control flow, locals, memory access, constants, the full comparison and arithmetic set
+for i32, i64, f32, and f64, and the conversions between them.
 
 =head1 EXPORTS
 
@@ -30,9 +29,8 @@ All 120 are exported by default, through C<@EXPORT>, C<@EXPORT_OK>, and the C<:a
 
 =head2 Control and variables
 
-C<UNREACHABLE> is 0x00, C<BLOCK> is 0x02 and C<END_BLOCK> is 0x0B, the structured control instructions. C<BR> is
-0x0C and C<BR_IF> is 0x0D, which branch out of a block, and C<RETURN> is 0x0F, which leaves the function. C<CALL>
-is 0x10.
+C<UNREACHABLE> is 0x00, C<BLOCK> is 0x02 and C<END_BLOCK> is 0x0B, the structured control instructions. C<BR> is 0x0C
+and C<BR_IF> is 0x0D, which branch out of a block, and C<RETURN> is 0x0F, which leaves the function. C<CALL> is 0x10.
 
 Note that C<BR> and C<BR_IF> branch to a C<block>, not to a label in the C-language sense. Structured control is the
 whole difference between this and the other three back ends, and it is why a Brocken C<while> loop compiles to a
@@ -60,51 +58,50 @@ C<I64_STORE8>, C<I64_STORE16>, C<I64_STORE32> are 0x3A to 0x3E.
 
 =head2 Constants
 
-C<I32_CONST> is 0x41, C<I64_CONST> is 0x42, C<F32_CONST> is 0x43, and C<F64_CONST> is 0x44. The first two take a
-signed LEB128, the second pair takes a fixed-width IEEE bit pattern, which is why an f64 constant here is a byte
-swizzle rather than a number.
+C<I32_CONST> is 0x41, C<I64_CONST> is 0x42, C<F32_CONST> is 0x43, and C<F64_CONST> is 0x44. The first two take a signed
+LEB128, the second pair takes a fixed-width IEEE bit pattern, which is why an f64 constant here is a byte swizzle
+rather than a number.
 
 =head2 Comparison
 
-Eleven i32 comparisons from C<I32_EQZ> at 0x45 to C<I32_GE_U> at 0x4F, and the eleven i64 equivalents from
-C<I64_EQZ> at 0x50 to C<I64_GE_U> at 0x5A. Each family has the S and U variants of the four orderings, because
-WebAssembly compares integers as either signed or unsigned and says which.
+Eleven i32 comparisons from C<I32_EQZ> at 0x45 to C<I32_GE_U> at 0x4F, and the eleven i64 equivalents from C<I64_EQZ>
+at 0x50 to C<I64_GE_U> at 0x5A. Each family has the S and U variants of the four orderings, because WebAssembly
+compares integers as either signed or unsigned and says which.
 
-The float comparisons are six per width, not eleven, from C<F32_EQ> at 0x5B to C<F32_GE> at 0x60 and C<F64_EQ> at
-0x61 to C<F64_GE> at 0x66. There is no C<eqz> for a float: NaN compares false against everything including itself,
-which is not what C<eqz> would mean.
+The float comparisons are six per width, not eleven, from C<F32_EQ> at 0x5B to C<F32_GE> at 0x60 and C<F64_EQ> at 0x61
+to C<F64_GE> at 0x66. There is no C<eqz> for a float: NaN compares false against everything including itself, which is
+not what C<eqz> would mean.
 
 =head2 Integer arithmetic
 
-C<I32_ADD> through C<I32_SHR_U>, 0x6A to 0x76, and C<I64_ADD> through C<I64_SHR_U>, 0x7C to 0x88. Both families
-carry the signed and unsigned divide and remainder variants.
+C<I32_ADD> through C<I32_SHR_U>, 0x6A to 0x76, and C<I64_ADD> through C<I64_SHR_U>, 0x7C to 0x88. Both families carry
+the signed and unsigned divide and remainder variants.
 
-Both are written with a C<_U> or C<_S> on the shifts as well, since a right shift has to know whether to bring in
-sign bits.
+Both are written with a C<_U> or C<_S> on the shifts as well, since a right shift has to know whether to bring in sign
+bits.
 
 =head2 Floating point
 
-C<F32_ABS>, C<F32_NEG>, C<F32_COPYSIGN>, C<F32_SQRT>, then C<F32_ADD>, C<F32_SUB>, C<F32_MUL>, C<F32_DIV>,
-C<F32_MIN>, and C<F32_MAX> from 0x8B to 0x97. The f64 equivalents run from 0x99 to 0xA5.
+C<F32_ABS>, C<F32_NEG>, C<F32_COPYSIGN>, C<F32_SQRT>, then C<F32_ADD>, C<F32_SUB>, C<F32_MUL>, C<F32_DIV>, C<F32_MIN>,
+and C<F32_MAX> from 0x8B to 0x97. The f64 equivalents run from 0x99 to 0xA5.
 
-C<MIN> and C<MAX> are not C<add> and a comparison: in WebAssembly they follow IEEE 754 minimumNumber, which
-propagates NaN. A Brocken program relying on C<fmin> to be a comparison has a different answer here than it would on
-x86-64.
+C<MIN> and C<MAX> are not C<add> and a comparison: in WebAssembly they follow IEEE 754 minimumNumber, which propagates
+NaN. A Brocken program relying on C<fmin> to be a comparison has a different answer here than it would on x86-64.
 
 =head2 Conversions
 
-C<I32_WRAP_I64> is 0xA7, narrowing an i64 by discarding the top bits. C<I64_TRUNC_F64_S> is 0xA8, narrowing a float
-to an integer and trapping if it does not fit. C<I64_EXTEND_I32_S> and C<I64_EXTEND_I32_U> are 0xAC and 0xAD,
-widening with the sign or zero fill, and C<F64_CONVERT_I64_S> is 0xBB, integer to float.
+C<I32_WRAP_I64> is 0xA7, narrowing an i64 by discarding the top bits. C<I64_TRUNC_F64_S> is 0xA8, narrowing a float to
+an integer and trapping if it does not fit. C<I64_EXTEND_I32_S> and C<I64_EXTEND_I32_U> are 0xAC and 0xAD, widening
+with the sign or zero fill, and C<F64_CONVERT_I64_S> is 0xBB, integer to float.
 
 The trap-on-overflow behaviour of the truncating conversions is worth knowing about: the other direction, the
 saturating C<I64_TRUNC_SAT_F64_S> and the rounding C<I64_TRUNC_SAT_F64_S> family, are not in this table.
 
 =head2 Value types
 
-C<VALTYPE_I32> is 0x7F, C<VALTYPE_I64> is 0x7E, C<VALTYPE_F32> is 0x7D, and C<VALTYPE_F64> is 0x7C. These go in
-the function signature and in a C<block>'s result type rather than in the instruction stream, and they count down
-from 0x7F, which is the specification's numbering.
+C<VALTYPE_I32> is 0x7F, C<VALTYPE_I64> is 0x7E, C<VALTYPE_F32> is 0x7D, and C<VALTYPE_F64> is 0x7C. These go in the
+function signature and in a C<block>'s result type rather than in the instruction stream, and they count down from
+0x7F, which is the specification's numbering.
 
 There is no C<VALTYPE_V128>, because there is no vector type in the language.
 
@@ -112,8 +109,8 @@ There is no C<VALTYPE_V128>, because there is no vector type in the language.
 
 Expect breakage, and note that nothing can reach any of this yet.
 
-The constructor in L<Brocken> has no WebAssembly branch, so C<Brocken-E<gt>new> dies with C<Unsupported platform>
-for a wasm32 triple even though L<Brocken::Katsuro::Platform::Wasm> parses it and this module, along with
+The constructor in L<Brocken> has no WebAssembly branch, so C<Brocken-E<gt>new> dies with C<Unsupported platform> for a
+wasm32 triple even though L<Brocken::Katsuro::Platform::Wasm> parses it and this module, along with
 L<Brocken::Jenny::Lowerer::Wasm> and L<Brocken::Jenny::Linker::Wasm>, is in the tree. This is the most complete of the
 four encoding tables and the least reachable, which is the odd shape of the project right now.
 
@@ -122,8 +119,8 @@ exports that type has to agree with, and none of that is here. There is no C<i32
 C<rotr>, no bit-scan instructions, and the memory instructions all need an alignment hint and an offset that this
 module does not carry.
 
-The float C<MIN> and C<MAX> note above is not a gap but a real semantic difference between targets, and a program
-that compares floats in a loop will not get the same answer compiled for wasm as it does natively.
+The float C<MIN> and C<MAX> note above is not a gap but a real semantic difference between targets, and a program that
+compares floats in a loop will not get the same answer compiled for wasm as it does natively.
 
 =head1 LICENSE & LEGAL
 
@@ -139,10 +136,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

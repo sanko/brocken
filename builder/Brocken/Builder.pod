@@ -159,10 +159,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

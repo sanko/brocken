@@ -83,5 +83,4 @@ class Brocken::Compiler {
         return $parser->parse_program();
     }
 }
-
 1;

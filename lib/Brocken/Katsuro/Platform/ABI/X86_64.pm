@@ -58,5 +58,4 @@ class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::
         return $map{$name};
     }
 }
-
 1;

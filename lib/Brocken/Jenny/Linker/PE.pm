@@ -844,5 +844,4 @@ class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
         close $fh;
     }
 }
-
 1;

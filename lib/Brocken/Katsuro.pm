@@ -15,5 +15,4 @@ package Brocken::Katsuro v0.0.1 {
     use Brocken::Katsuro::Platform::ABI::AArch64;
     use Brocken::Katsuro::Platform::ABI::RISCV64;
 };
-
 1;

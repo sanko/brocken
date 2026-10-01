@@ -18,24 +18,24 @@ Brocken::Jenny::Codegen::ARM64::Inst - AArch64 instruction emitters
 
 =head1 DESCRIPTION
 
-The half of the AArch64 back end that builds actual instructions. Where L<Brocken::Jenny::Codegen::ARM64::Encodings>
-is a table of base opcodes and register numbers, this module is the set of functions that put an opcode and its
-operands into the right bit fields and hand back a 32-bit word.
+The half of the AArch64 back end that builds actual instructions. Where L<Brocken::Jenny::Codegen::ARM64::Encodings> is
+a table of base opcodes and register numbers, this module is the set of functions that put an opcode and its operands
+into the right bit fields and hand back a 32-bit word.
 
 Every emitter is a one-line expression of ORs and shifts, and that is the whole design: there is no assembler, no
-register allocator, and no intermediate representation here. The caller has already decided which registers to use
-and passes them in, so an emitter is a function from operands to a word:
+register allocator, and no intermediate representation here. The caller has already decided which registers to use and
+passes them in, so an emitter is a function from operands to a word:
 
     add_imm( $rd, $rn, $imm12 )   # 0x91000000 base, rd at 4:0, rn at 9:5, imm12 at 22:10
     sub_imm( $rd, $rn, $imm12 )   # same layout, op bit set
     cmp_imm( $rn, $imm12 )        # SUBS XZR, rn, imm12
 
-C<cmp_imm> takes no destination: it is the flag-setting form with the implicit C<XZR> destination, so
-C<cmp_imm(X0, 1)> is 0xF100041F, which is C<subs xzr, x0, #1>.
+C<cmp_imm> takes no destination: it is the flag-setting form with the implicit C<XZR> destination, so C<cmp_imm(X0, 1)>
+is 0xF100041F, which is C<subs xzr, x0, #1>.
 
-The immediates are masked rather than checked. C<add_imm> masks C<$imm12> to twelve bits and C<movz_64> masks
-C<$imm16> to sixteen, so an out-of-range immediate is silently truncated instead of diagnosed. A caller that cares
-has to range-check before calling.
+The immediates are masked rather than checked. C<add_imm> masks C<$imm12> to twelve bits and C<movz_64> masks C<$imm16>
+to sixteen, so an out-of-range immediate is silently truncated instead of diagnosed. A caller that cares has to
+range-check before calling.
 
 =head1 REGISTERS
 
@@ -49,26 +49,25 @@ The frame pointer, which a prologue saves the caller's frame pointer into and a 
 
 =item C<X30> is also C<LR>
 
-The link register, where C<bl> and C<blr> write the return address. It is the first thing a prologue saves and the
-last thing an epilogue restores.
+The link register, where C<bl> and C<blr> write the return address. It is the first thing a prologue saves and the last
+thing an epilogue restores.
 
 =back
 
 Both aliases are plain constants equal to the register number, so C<LR> and C<X30> are interchangeable in any call and
-neither is a distinct register. Passing C<SP> where a general register is expected produces a word that encodes
-C<sp> rather than C<x31>, which is almost never what a caller means.
+neither is a distinct register. Passing C<SP> where a general register is expected produces a word that encodes C<sp>
+rather than C<x31>, which is almost never what a caller means.
 
 =head1 LOAD AND STORE
 
-The pair instructions C<stp_pre>, C<stp_post>, C<ldp_pre>, and C<ldp_post> each move two registers and adjust the
-base. The C<pre> and C<post> names are the pre-index and post-index forms: C<pre> updates the base and then
-transfers, C<post> transfers and then updates. The offset is scaled by eight and the scaled value is masked to seven
-bits, which is the signed 7-bit scaled immediate range, so -512 to 504 in steps of eight.
+The pair instructions C<stp_pre>, C<stp_post>, C<ldp_pre>, and C<ldp_post> each move two registers and adjust the base.
+The C<pre> and C<post> names are the pre-index and post-index forms: C<pre> updates the base and then transfers,
+C<post> transfers and then updates. The offset is scaled by eight and the scaled value is masked to seven bits, which
+is the signed 7-bit scaled immediate range, so -512 to 504 in steps of eight.
 
-The single-register forms C<str_64>, C<ldr_64>, C<str_32>, and C<ldr_32> use the unscaled-immediate encoding with
-their own scale factors: eight for the 64-bit pair and four for the 32-bit pair, both masked to twelve bits. The
-C<_64> and C<_32> suffixes are the access size and not the register size, so C<str_32> stores the low half of a
-register.
+The single-register forms C<str_64>, C<ldr_64>, C<str_32>, and C<ldr_32> use the unscaled-immediate encoding with their
+own scale factors: eight for the 64-bit pair and four for the 32-bit pair, both masked to twelve bits. The C<_64> and
+C<_32> suffixes are the access size and not the register size, so C<str_32> stores the low half of a register.
 
 C<ldr_lit> and C<ldr_lit_64> are the literal-pool forms, taking an absolute offset rather than a base register. The
 offset is scaled by four and masked to nineteen bits, which is the PC-relative literal range, or 1 MiB.
@@ -76,8 +75,8 @@ offset is scaled by four and masked to nineteen bits, which is the PC-relative l
 =head1 WIDE MOVES
 
 C<movz_64>, C<movz_32>, C<movk_64>, and C<movk_32> are the two halves of building a 64-bit constant: C<movz> puts a
-16-bit value in a halfword and zeroes the rest, C<movk> replaces a halfword and leaves the others alone. The
-optional third argument is the halfword selector, 0 through 3, packed into the C<hw> field at bits 23:21.
+16-bit value in a halfword and zeroes the rest, C<movk> replaces a halfword and leaves the others alone. The optional
+third argument is the halfword selector, 0 through 3, packed into the C<hw> field at bits 23:21.
 
     movz_64( X0, 0x1234 )        # 0xd2824680
     movk_64( X0, 0x5678, 1 )     # 0xf2aacf00, replaces halfword 1, leaves the rest
@@ -86,21 +85,21 @@ C<mov_64> is the register-to-register move, C<add_imm($rd, $rn, 0)>.
 
 =head1 ADDRESSING
 
-C<adr> and C<adrp> are the PC-relative address forms, and the difference between them is the scale. C<adr> forms a
-full byte address in a 21-bit field, scaling by four. C<adrp> forms a page address, scaling by 4096, and takes
-both the target and the program counter so it can take the difference of the two page numbers rather than the
-difference of the addresses. C<adrp> is what a position-independent executable uses to find its own data.
+C<adr> and C<adrp> are the PC-relative address forms, and the difference between them is the scale. C<adr> forms a full
+byte address in a 21-bit field, scaling by four. C<adrp> forms a page address, scaling by 4096, and takes both the
+target and the program counter so it can take the difference of the two page numbers rather than the difference of the
+addresses. C<adrp> is what a position-independent executable uses to find its own data.
 
     adrp( X0, $target, $pc )     # page of $target, relative to the page of $pc
 
 =head1 BRANCHES AND SYSTEM
 
-C<br> is an unconditional jump to a register, C<blr> is an indirect call, and C<b> and C<bl> are the PC-relative
-forms taking a byte offset scaled by four and masked to 26 bits. C<ret()> is the bare C<ret> defaulting to C<LR>,
-encoded as the literal word 0xD65F03C0, which is why it takes no argument.
+C<br> is an unconditional jump to a register, C<blr> is an indirect call, and C<b> and C<bl> are the PC-relative forms
+taking a byte offset scaled by four and masked to 26 bits. C<ret()> is the bare C<ret> defaulting to C<LR>, encoded as
+the literal word 0xD65F03C0, which is why it takes no argument.
 
-C<brk> is a breakpoint trap and C<svc> a supervisor call, both taking a 16-bit immediate. C<uxtb> sign-extends a
-byte, encoded as the C<ubfm> form with the immediate pair that selects bits 0 through 7.
+C<brk> is a breakpoint trap and C<svc> a supervisor call, both taking a 16-bit immediate. C<uxtb> sign-extends a byte,
+encoded as the C<ubfm> form with the immediate pair that selects bits 0 through 7.
 
 =head1 VERIFIED ENCODINGS
 
@@ -118,25 +117,25 @@ Each of these was assembled and checked against the A64 encoding:
 
 =head1 STATUS
 
-Expect breakage. This is the smallest and least flexible layer of the back end, and the gaps are the reason the
-AArch64 target supports less than the x86-64 one does.
+Expect breakage. This is the smallest and least flexible layer of the back end, and the gaps are the reason the AArch64
+target supports less than the x86-64 one does.
 
 There is no floating-point emitter at all. No C<fadd>, C<fmul>, C<fcvt>, C<scvtf>, or C<fcmp>, and no C<D> or C<S>
-register constants, so a Brocken program that uses C<f32> or C<f64> cannot be assembled for this target even though
-the type exists in the IR. The float instructions are missing rather than wrong.
+register constants, so a Brocken program that uses C<f32> or C<f64> cannot be assembled for this target even though the
+type exists in the IR. The float instructions are missing rather than wrong.
 
-There is also no multiply, no divide, and no shift. C<add_imm> and C<sub_imm> cover the only arithmetic, and a
-program needing C<$a * $b> has nothing to emit it with. Conditional branches are absent too, so a lowering that
-produces a conditional edge has no C<csel>, C<cset>, or C<b.cond> to put it in.
+There is also no multiply, no divide, and no shift. C<add_imm> and C<sub_imm> cover the only arithmetic, and a program
+needing C<$a * $b> has nothing to emit it with. Conditional branches are absent too, so a lowering that produces a
+conditional edge has no C<csel>, C<cset>, or C<b.cond> to put it in.
 
-The load and store set covers only the unsigned-offset and literal forms. There is no register-offset addressing,
-no pre-index or post-index single-register form, and no sign-extending load, so the full addressing repertoire of
-A64 is not reachable.
+The load and store set covers only the unsigned-offset and literal forms. There is no register-offset addressing, no
+pre-index or post-index single-register form, and no sign-extending load, so the full addressing repertoire of A64 is
+not reachable.
 
-Nothing here validates its arguments. The immediate masks truncate, the register numbers are not range-checked, and
-an emitter given a bad operand produces a plausible-looking word that is simply the wrong instruction, with no
-error at any layer. This is the layer where a silent miscompile is most likely to originate, so a new emitter
-should come with a test that asserts the exact word.
+Nothing here validates its arguments. The immediate masks truncate, the register numbers are not range-checked, and an
+emitter given a bad operand produces a plausible-looking word that is simply the wrong instruction, with no error at
+any layer. This is the layer where a silent miscompile is most likely to originate, so a new emitter should come with a
+test that asserts the exact word.
 
 =head1 LICENSE & LEGAL
 
@@ -152,10 +151,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

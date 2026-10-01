@@ -1426,5 +1426,4 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
         return $output_file;
     }
 }
-
 1;

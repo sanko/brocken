@@ -9,5 +9,4 @@ class Brocken::Katsuro::Platform::MidnightBSD : isa(Brocken::Katsuro::Platform::
     method libpthread_name() {'libthr.so.3'}
     method interpreter()     {'/libexec/ld-elf.so.1'}
 }
-
 1;

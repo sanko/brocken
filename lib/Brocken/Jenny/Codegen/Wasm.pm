@@ -449,5 +449,4 @@ class Brocken::Jenny::Codegen::Wasm {
         return $dwarf->build_all;
     }
 }
-
 1;

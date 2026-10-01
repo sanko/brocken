@@ -155,8 +155,8 @@ Errors are C<throw> and a C<try> block that catches them, with an optional C<fin
     }
 
 The C<catch> block receives the thrown value, and a C<try> with no C<catch> is a C<try>-C<finally> that only cleans up.
-The C<setjmp> and C<longjmp> behind this live in the runtime, not in generated code, which is what lets a C<return>
-out of a C<try> still run the C<finally>.
+The C<setjmp> and C<longjmp> behind this live in the runtime, not in generated code, which is what lets a C<return> out
+of a C<try> still run the C<finally>.
 
 Classes hold typed fields and methods, and the runtime generates a constructor, a reader, and a writer for each field.
 A C<: param> field becomes a constructor argument. A class value is a C<ptr>, and construction is a call on the class
@@ -245,17 +245,17 @@ writes the file.
 
 Returns the file extension the output needs on this platform: C<.exe> on Windows and an empty string everywhere else.
 
-Note that this is a method, so it cannot be interpolated into a string directly. C<"$brocken-E<gt>ext"> is the
-class, the object and the letters C<->ext>, while C<"$brocken-E<gt>{ext}"> or C<$brocken-E<gt>ext> in a concatenation
-is the extension.
+Note that this is a method, so it cannot be interpolated into a string directly. C<"$brocken-E<gt>ext"> is the class,
+the object and the letters C<->ext>, while C<"$brocken-E<gt>{ext}"> or C<$brocken-E<gt>ext> in a concatenation is the
+extension.
 
 =head2 C<tmpdir( ... )>
 
     $brocken->tmpdir
 
-Returns a L<File::Temp::Dir> object for a temporary directory created for this instance and removed when it goes out
-of scope. It stringifies to a path, which is why C<$brocken-E<gt>tmpdir . '/fib'> is the way to build a filename. It
-is where the output goes when the caller does not want to name a path.
+Returns a L<File::Temp::Dir> object for a temporary directory created for this instance and removed when it goes out of
+scope. It stringifies to a path, which is why C<$brocken-E<gt>tmpdir . '/fib'> is the way to build a filename. It is
+where the output goes when the caller does not want to name a path.
 
 =head2 C<debug_level( ... )>
 
@@ -321,12 +321,12 @@ C<say> and C<print> compile and link, and are exercised natively, but the test s
 There are three code generators here: x86-64, AArch64, and RISC-V. The test suite exercises the native one and runs a
 foreign one under C<qemu> when a sysroot is configured, skipping it when there is none. The WebAssembly modules --
 L<Brocken::Jenny::Codegen::Wasm>, L<Brocken::Jenny::Linker::Wasm>, and L<Brocken::Jenny::Lowerer::Wasm> -- are in the
-tree and a wasm32 triple parses into a L<Brocken::Katsuro::Platform::Wasm>, but the constructor here has no branch
-for it, so C<Brocken-E<gt>new> dies with C<Unsupported platform> rather than returning a compiler. The isolated-thread
-and fiber runtimes are ahead of this.
+tree and a wasm32 triple parses into a L<Brocken::Katsuro::Platform::Wasm>, but the constructor here has no branch for
+it, so C<Brocken-E<gt>new> dies with C<Unsupported platform> rather than returning a compiler. The isolated-thread and
+fiber runtimes are ahead of this.
 
-The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool:
-a program that legitimately needs more has to be compiled with a larger C<fuel>.
+The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool: a
+program that legitimately needs more has to be compiled with a larger C<fuel>.
 
 =head1 LICENSE & LEGAL
 
@@ -342,10 +342,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut
