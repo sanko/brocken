@@ -28,6 +28,15 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 : isa(Brocken::Katsuro::Platform:
     method fp_return_register() {'f0'}
     method fiber_reg()          {'s11'}
 
+    # Arguments past the last of a0-a7 arrive on the stack.  RISC-V's `call`
+    # puts the return address in ra rather than pushing it, so nothing sits
+    # below the arguments: on entry sp points directly at the first stack
+    # argument and the offset does not skip a return address the way x86-64's
+    # does.  The call instruction does not move sp either, so the caller-side
+    # offset is the same.
+    method stack_param_offset($index)        { 8 * $index }
+    method caller_stack_param_offset($index) { 8 * $index }
+
     # RISC-V ABI register mappings to x0-x31 (zero=0, ra=1, sp=2, etc.)
     method dwarf_reg_num($name) {
         my %map = (
