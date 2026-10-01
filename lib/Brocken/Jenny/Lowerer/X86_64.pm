@@ -3686,7 +3686,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             }
                             else {
                                 my $disp = $stack_param_base_calls + $reg->[1] * 8;
-                                my $val  = $self->_lower_opnd( $args[$i] );
+                                my $val  = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
                                 my $mem  = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
                                     value => { base => $rsp_tmp->value, disp => $disp },
@@ -3737,7 +3737,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 );
                             }
                             else {
-                                my $val = $self->_lower_opnd( $args[$i] );
+                                my $val = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => $is_float ? 'fmov' : 'mov',

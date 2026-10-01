@@ -485,6 +485,18 @@ here was reproduced against a natively compiled and executed binary, not read of
       collision, or one with a stack store, immediate, spilled source or spill temp, is left as
       written. Coverage: `t/3000_jenny/3200_codegen/3298_float_param_registers.t` (float, variable
       arguments, executing).
+- [x] **A float literal could not be passed directly as an argument** - the call path lowered
+      every argument with `_lower_opnd`, which returns a float `Constant` as a raw immediate, and
+      `fmov` cannot encode one, so `g(1.5)` died with `Unexpected operand kind: imm`. The return
+      path already routed float constants through `_materialize` (bit pattern into a general
+      register, then `fmov_gp2f`); the argument path now does the same on x86-64, ARM64 and
+      RISC-V64. Materialising exposed a second fault: `RegAlloc`'s reserved-physical-register scan
+      read the register class off the operand type, but a call-argument copy is a `fmov` with an
+      untyped physical destination, so the argument's XMM stayed allocatable and a later literal's
+      temporary landed on it (`1+2+3+4` arrived as 9). The class is now taken from the opcode when
+      the type is absent. Coverage:
+      `t/3000_jenny/3200_codegen/3299_float_literal_arguments.t` (codegen-level plus executing).
+      `dev`'s literal-argument float parameter tests can now be adopted as-is.
 
 ### Open
 
@@ -508,12 +520,6 @@ here was reproduced against a natively compiled and executed binary, not read of
       its codegen already selects on both widths, so it is *probably* fine; Wasm has its own
       conversion ops. Neither can be executed here, so both remain unverified until `run_cross`
       exists.
-- [ ] **A float literal cannot be passed directly as an argument** - `sub g(f32 $x) { ... }
-      g(1.5)` dies with `Unexpected operand kind: imm (op_value=1.5)` at
-      `lib/Brocken/Jenny/Codegen/X86_64.pm:686`. Passing a float *variable* works and executes
-      correctly (see the fixed call-shuffle item above), so this is specifically the argument
-      path's lack of a float branch for immediates, not float parameters in general. It is the
-      one thing keeping `dev`'s literal-argument float parameter tests from being adopted as-is.
 - [ ] **No float-width cast exists, by design** - `maybe_convert_type` croaks with "No
       float-to-float conversion ... the IR has no fptrunc or fpext" for a *non-constant*
       mismatch. This matches `dev`'s choice to fail loudly rather than silently reinterpret bits,

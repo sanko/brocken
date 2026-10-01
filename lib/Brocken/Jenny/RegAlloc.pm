@@ -284,7 +284,15 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     next unless @ops >= 1;
                     my $dst = $ops[0];
                     next unless $dst->kind eq 'phys_reg';
-                    my $is_dst_float = $dst->type ? ( $dst->type->kind eq 'float' ? 1 : 0 ) : 0;
+
+                    # The float class cannot always be read off the type: a
+                    # call-argument copy is `fmov <phys xmm>, <float virt>` and
+                    # the destination carries no type, so the register it names
+                    # would stay allocatable and a float literal materialised
+                    # into a temporary could land on top of an argument already
+                    # placed there.  Trust the opcode when the type is absent.
+                    my $is_dst_float
+                        = $dst->type ? ( $dst->type->kind eq 'float' ? 1 : 0 ) : ( $inst->opcode =~ /^(?:fmov|fload|fmov_gp2f)$/ ? 1 : 0 );
                     next if $is_float != $is_dst_float;
                     next if $inst->opcode eq 'store' || $inst->opcode eq 'store_imm';
                     next unless defined $dst->value;
@@ -688,14 +696,13 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             my $inst = $step->{cap} ? $step->{cap}{inst} : undef;
             if ($inst) {
                 my $src = $inst->operands->[1];
-                $inst->operands->[1]
-                    = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src}, type => $src->type );
+                $inst->operands->[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src}, type => $src->type );
                 push @new, $inst;
             }
             else {
-                        push @new,
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => $step->{opcode},
+                push @new,
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => $step->{opcode},
                     operands => [
                         Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{dst} ),
                         Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src} )
@@ -759,12 +766,12 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 $first-- while $first > 0 && $is_arg->( $insts[ $first - 1 ] );
                 my @run = @insts[ $first .. $last ];
                 next unless @run > 1;
-
                 my @items;
                 my $understood = 1;
+
                 for my $inst (@run) {
                     my ( $dst, $src ) = $inst->operands->@*;
-                    my ( $w, $r ) = ( [], [] );
+                    my ( $w,   $r )   = ( [], [] );
                     if ( $inst->opcode eq 'lea_rodata' ) {
                         my $d = $reg_of->($dst);
                         ( $understood = 0 ), last unless defined $d;
@@ -779,21 +786,19 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     }
                     push @items,
                         {
-                        inst    => $inst,
-                        writes  => $w,
-                        reads   => $r,
-                        is_fp   => ( $inst->opcode eq 'fmov' ? 1 : 0 ),
-                        opcode  => $inst->opcode,
-                        type    => $src ? $src->type : undef,
+                        inst   => $inst,
+                        writes => $w,
+                        reads  => $r,
+                        is_fp  => ( $inst->opcode eq 'fmov' ? 1 : 0 ),
+                        opcode => $inst->opcode,
+                        type   => $src ? $src->type : undef,
                         };
                 }
                 next unless $understood;
-
                 my %touch;
                 $touch{$_} = 1 for map { $_->@* } map { ( $_->{writes}, $_->{reads} ) } @items;
                 next if $int_temp && $touch{$int_temp};
                 next if $fp_temp  && $touch{$fp_temp};
-
                 my $hazard = 0;
                 for my $x (@items) {
                     for my $y (@items) {
@@ -804,7 +809,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     }
                 }
                 next unless $hazard;
-
                 my @rem = @items;
                 my @plan;
                 my $scheduled = 1;
@@ -812,7 +816,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                 while (@rem) {
                     my $chosen;
                     for my $k ( 0 .. $#rem ) {
-                        my %w = map { $_ => 1 } $rem[$k]{writes}->@*;
+                        my %w     = map { $_ => 1 } $rem[$k]{writes}->@*;
                         my $clash = 0;
                         for my $j ( 0 .. $#rem ) {
                             next if $j == $k;
@@ -821,7 +825,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                         if ( !$clash ) { $chosen = $k; last; }
                     }
                     if ( defined $chosen ) { push @plan, splice @rem, $chosen, 1; next; }
-                    if ( --$budget < 0 ) { $scheduled = 0; last; }
+                    if ( --$budget < 0 )   { $scheduled = 0;                      last; }
                     my ($head) = grep { $_->{reads}->@* } @rem;
                     if ( !$head ) { $scheduled = 0; last; }
                     my $temp = $head->{is_fp} ? $fp_temp : $int_temp;
@@ -830,7 +834,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     $head->{reads} = [$temp];
                 }
                 next unless $scheduled;
-
                 my @new;
                 for my $step (@plan) {
                     if ( $step->{park} ) {
@@ -846,7 +849,8 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                         next;
                     }
                     my $inst = $step->{inst};
-                    $inst->operands->[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{reads}->[0], type => $step->{type} );
+                    $inst->operands->[1]
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{reads}->[0], type => $step->{type} );
                     push @new, $inst;
                 }
                 splice @insts, $first, scalar(@run), @new;
@@ -935,13 +939,19 @@ Elides MOV instructions where source and destination map to the same physical re
 
     $allocator->fix_entry_shuffle($mf, $assignment, $temp_reg, $fp_temp_reg)
 
-Schedules the entry-block parameter captures as a parallel move. A capture whose destination is still a pending source is deferred; a cycle is broken by parking one source in the reserved spill temp of that capture's register class ($temp_reg for an integer capture, $fp_temp_reg for a floating-point one).
+Schedules the entry-block parameter captures as a parallel move. A capture whose destination is still a pending source
+is deferred; a cycle is broken by parking one source in the reserved spill temp of that capture's register class
+($temp_reg for an integer capture, $fp_temp_reg for a floating-point one).
 
 =head2 fix_call_shuffle
 
     $allocator->fix_call_shuffle($mf, $assignment, $int_temp, $fp_temp)
 
-Schedules the register argument copies before a call as a parallel move. The lowerer writes them in reverse order, which is not a fix for a copy whose source is another copy's destination; a copy whose destination no remaining copy reads is emitted first, and a cycle is broken with the spill temp of the matching class ($int_temp or $fp_temp). A run without a collision, or one containing a stack store, an immediate, a spilled source, or a spill temp, is left untouched.
+Schedules the register argument copies before a call as a parallel move. The lowerer writes them in reverse order,
+which is not a fix for a copy whose source is another copy's destination; a copy whose destination no remaining copy
+reads is emitted first, and a cycle is broken with the spill temp of the matching class ($int_temp or $fp_temp). A run
+without a collision, or one containing a stack store, an immediate, a spilled source, or a spill temp, is left
+untouched.
 
 =head2 compute_unified_frame
 

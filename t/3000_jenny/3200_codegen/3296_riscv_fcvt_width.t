@@ -18,14 +18,12 @@ use feature qw[class];
 # This is a codegen-level check so it runs on any host: t/1000_katsuro/
 # 1076_float_conversion.t exercises the same path natively, but only on a
 # RISC-V runner.
-
 my $plat = Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu');
 my $cg   = Brocken::Jenny::Codegen::RISCV64->new( platform => $plat );
-
-my $I32 = Brocken::Lindsay::IR::Type::i32();
-my $I64 = Brocken::Lindsay::IR::Type::i64();
-my $F32 = Brocken::Lindsay::IR::Type::f32();
-my $F64 = Brocken::Lindsay::IR::Type::f64();
+my $I32  = Brocken::Lindsay::IR::Type::i32();
+my $I64  = Brocken::Lindsay::IR::Type::i64();
+my $F32  = Brocken::Lindsay::IR::Type::f32();
+my $F64  = Brocken::Lindsay::IR::Type::f64();
 
 # rs1 [19:15] and rd [11:7] are chosen by the register allocator; every other
 # field (funct7, fmt, rs2, rm, opcode) identifies the instruction.
@@ -36,7 +34,7 @@ sub conversion_signatures ($func) {
     return map { $_ & $SIGNATURE } unpack( 'V*', $bytes );
 }
 
-sub sitofp_func ($it, $ft) {
+sub sitofp_func ( $it, $ft ) {
     my $func = Brocken::Lindsay::IR::Function->new( name => 'sitofp', return_type => $ft );
     my $b    = Brocken::Lindsay::IR::Builder->new();
     $b->position_at_end( $func->append_block('entry') );
@@ -48,7 +46,7 @@ sub sitofp_func ($it, $ft) {
     return $func;
 }
 
-sub fptosi_func ($ft, $it) {
+sub fptosi_func ( $ft, $it ) {
     my $func = Brocken::Lindsay::IR::Function->new( name => 'fptosi', return_type => $it );
     my $b    = Brocken::Lindsay::IR::Builder->new();
     $b->position_at_end( $func->append_block('entry') );
@@ -59,33 +57,28 @@ sub fptosi_func ($ft, $it) {
     $b->build_ret($conv);
     return $func;
 }
-
 subtest 'int -> float selects the float and integer width' => sub {
     for my $case (
         [ $I32, $F32, FCVT_S_W, 'i32 -> f32 is FCVT.S.W' ],
         [ $I64, $F32, FCVT_S_L, 'i64 -> f32 is FCVT.S.L' ],
         [ $I32, $F64, FCVT_D_W, 'i32 -> f64 is FCVT.D.W' ],
         [ $I64, $F64, FCVT_D_L, 'i64 -> f64 is FCVT.D.L' ],
-        )
-    {
+    ) {
         my ( $it, $ft, $base, $label ) = @$case;
         my @sigs = conversion_signatures( sitofp_func( $it, $ft ) );
         ok( scalar( grep { $_ == ( $base | FP_OP ) } @sigs ), $label );
     }
 };
-
 subtest 'float -> int selects the float and integer width' => sub {
     for my $case (
         [ $F32, $I32, FCVT_W_S, 'f32 -> i32 is FCVT.W.S' ],
         [ $F64, $I32, FCVT_W_D, 'f64 -> i32 is FCVT.W.D' ],
         [ $F32, $I64, FCVT_L_S, 'f32 -> i64 is FCVT.L.S' ],
         [ $F64, $I64, FCVT_L_D, 'f64 -> i64 is FCVT.L.D' ],
-        )
-    {
+    ) {
         my ( $ft, $it, $base, $label ) = @$case;
         my @sigs = conversion_signatures( fptosi_func( $ft, $it ) );
         ok( scalar( grep { $_ == ( $base | FP_OP ) } @sigs ), $label );
     }
 };
-
 done_testing;
