@@ -4875,8 +4875,15 @@ class Brocken::Jenny::Lowerer::ARM64 {
                 comment  => 'fmc: bit pattern'
             )
         );
+
+        # The destination is a physical register, which carries no type of its
+        # own, and `fmov_gp2f` takes the width of the move from there.  Left
+        # untyped an f32 came out as the double-register form; unlike RISC-V
+        # there is no NaN-boxing, so the low half still read correctly, but the
+        # width now comes from the literal like every other move.
+        my $dest_typed = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $dest->value, type => $ir_val->type );
         $mbb->add_instruction(
-            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fmov_gp2f', operands => [ $dest, $gp ], comment => 'fmc: gp->fp' ) );
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fmov_gp2f', operands => [ $dest_typed, $gp ], comment => 'fmc: gp->fp' ) );
     }
 
     # The same bit pattern, stored straight to a stack slot, for the argument
