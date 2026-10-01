@@ -6,6 +6,11 @@ use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Compiler;
+use Brocken::Katsuro::Platform;
+use Brocken::Jenny::Codegen::RISCV64;
+use Brocken::Jenny::Codegen::RISCV64::Encodings qw[:all];
+use Brocken::Jenny::Codegen::ARM64;
+use Brocken::Jenny::Codegen::ARM64::Encodings qw[FMOV_GP2F_32 FMOV_GP2F_64];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -44,6 +49,38 @@ is(
     undef,
     'a float literal argument is materialised, not handed to the encoder as an immediate'
 );
+
+# The executing sweep below only runs on the host it is built for, so the width
+# of the materialising move is checked here by encoding an f32 argument on any
+# host.  The destination is a physical register and carries no type, so the
+# move's width is read off it; left untyped an f32 came out double-width.  On
+# RISC-V that is `fmv.d.x`, which does not NaN-box the operand, so the callee
+# read a canonical NaN and every f32 subtest of the sweep failed while every
+# f64 one passed.  ARM64 has no NaN-boxing, so its double-register form still
+# read the low half correctly, but the width should still come from the literal.
+sub entry_words ( $cg_class, $arch ) {
+    my $plat   = Brocken::Katsuro::Platform::parse($arch);
+    my $cg     = $cg_class->new( platform => $plat );
+    my $module = Brocken::Compiler->new->compile( 'sub g(f32 $a) -> i64 { my f32 $s = $a; my i64 $j = $s; return $j; }' . ' return g(1.0);' );
+    my @words;
+    for my $func ( $module->functions->@* ) {
+        next unless $func->name eq '_BROCKEN_ENTRY';
+        push @words, unpack( 'V*', $cg->emit_function($func) );
+    }
+    return @words;
+}
+{
+    my @words = entry_words( 'Brocken::Jenny::Codegen::RISCV64', 'riscv64-unknown-linux-gnu' );
+    my $SIG   = 0xFE00007F;                                                                       # funct7 plus opcode identify the instruction
+    ok( scalar( grep { ( $_ & $SIG ) == ( FMV_W_X | FP_OP ) } @words ),      'RISC-V f32 argument uses FMV.W.X' );
+    ok( !( scalar( grep { ( $_ & $SIG ) == ( FMV_D_X | FP_OP ) } @words ) ), 'RISC-V f32 argument does not use FMV.D.X' );
+}
+{
+    my @words = entry_words( 'Brocken::Jenny::Codegen::ARM64', 'aarch64-unknown-linux-gnu' );
+    my $SIG   = 0xFFFFFC00;                                                                       # the register fields are the only variable bits
+    ok( scalar( grep { ( $_ & $SIG ) == ( FMOV_GP2F_32 & $SIG ) } @words ),      'ARM64 f32 argument uses FMOV.S' );
+    ok( !( scalar( grep { ( $_ & $SIG ) == ( FMOV_GP2F_64 & $SIG ) } @words ) ), 'ARM64 f32 argument does not use FMOV.D' );
+}
 SKIP: {
     skip 'Not native', 1 unless $brocken->platform->is_native;
     my $fp_args = scalar $brocken->platform->abi->fp_param_registers->@*;

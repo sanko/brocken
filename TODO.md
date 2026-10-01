@@ -521,6 +521,18 @@ here was reproduced against a natively compiled and executed binary, not read of
       `sub dst, C`, had the same fault and is fixed the same way. Coverage:
       `t/1000_katsuro/1077_imm64.t` (executing: comparison boundary, add/sub/mul, a
       64-bit `and` mask, and a negative out-of-range literal).
+- [x] **An f32 literal argument read back as NaN on RISC-V** - found by the RISC-V CI lane
+      failing `3299_float_literal_arguments.t` (every `f32` subtest, no `f64`). The literal is
+      retagged to the parameter's type, but `_place_float_constant` moved its bit pattern into the
+      argument register through an *untyped* physical operand, so `Codegen/RISCV64.pm` took the
+      move's width from `$dst->type`, defaulted to 64 bits, and emitted `fmv.d.x`. RISC-V reads a
+      single-precision operand whose upper 32 bits are not all ones as a canonical NaN, so the
+      callee saw NaN and the sum comparison failed. x86-64 already typed its destination
+      (`_materialize_into`); RISC-V and ARM64 now do too. ARM64 has no NaN-boxing, so its
+      double-register form was not observably wrong, but the width now comes from the literal
+      there as well. Coverage: host-independent codegen-level checks in
+      `3299_float_literal_arguments.t` that encode an f32 argument for RISC-V and ARM64 and require
+      `fmv.w.x`/`fmov.s`, not `fmv.d.x`/`fmov.d`.
 
 ### Open
 

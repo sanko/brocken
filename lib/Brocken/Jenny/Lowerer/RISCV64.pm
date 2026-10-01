@@ -4253,8 +4253,15 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                 comment  => 'fmc: bit pattern'
             )
         );
+
+        # The destination is a physical register, which carries no type of its
+        # own, and `fmov_gp2f` takes the width of the move from there.  Left
+        # untyped an f32 literal arrives as `fmv.d.x`, and RISC-V reads a
+        # non-NaN-boxed single-precision operand as a canonical NaN, so the
+        # callee saw NaN rather than the literal.
+        my $dest_typed = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $dest->value, type => $ir_val->type );
         $mbb->add_instruction(
-            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fmov_gp2f', operands => [ $dest, $gp ], comment => 'fmc: gp->fp' ) );
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fmov_gp2f', operands => [ $dest_typed, $gp ], comment => 'fmc: gp->fp' ) );
     }
 
     # The same bit pattern, stored straight to a stack slot, for the argument
