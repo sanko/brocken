@@ -613,12 +613,11 @@ class Brocken::Jenny::Codegen::X86_64 {
         my $alloca_frame = 0;
         my %reg_id_map   = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
         for my $i ( 0 .. 15 ) { $reg_id_map{"xmm$i"} = $i }
-        my $reg_id        = sub ($r) { return 0 unless defined $r; return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
-        my $spill_frame   = $self->_compute_spill_frame( $mf, 'rsp' );
-        my $callee_size   = scalar(@$used_callee) * 8;
-        my $unified_frame = ( $callee_size + $spill_frame + 15 ) & ~15;
-        my $is_leaf       = 1;
-        my $total_alloca  = 0;
+        my $reg_id       = sub ($r) { return 0 unless defined $r; return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
+        my $spill_frame  = $self->_compute_spill_frame( $mf, 'rsp' );
+        my $callee_size  = scalar(@$used_callee) * 8;
+        my $is_leaf      = 1;
+        my $total_alloca = 0;
 
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
@@ -632,13 +631,22 @@ class Brocken::Jenny::Codegen::X86_64 {
         }
         my $shadow_space = ( $platform->is_windows && !$is_leaf ) ? 32 : 0;
 
+        # The outgoing argument area sits at the bottom of the frame, below the
+        # alloca and spill areas, because a callee reads the arguments the
+        # register set could not carry at fixed offsets off the caller's stack
+        # pointer and `call` does not move it.  It is reserved in the prologue
+        # rather than pushed at the call site so that rsp-relative spill slots
+        # stay valid across the call and rsp is 16-byte aligned at every call.
+        my $call_arg_frame = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
+        $call_arg_frame = $shadow_space if $call_arg_frame < $shadow_space;
+
         # Ensure the spill area (which includes caller-saved register slots) does not
         # overlap with the callee-saved register save area at the top of the frame.
-        # On Win64, rsp-relative displacements are shifted by (total_alloca + shadow_space)
+        # On Win64, rsp-relative displacements are shifted by (total_alloca + call_arg_frame)
         # during encoding (see mem_modrm).  Without this extra padding the caller-save
         # slots can land at the same rsp-relative offset as the callee saves.
-        $spill_frame += $shadow_space if $shadow_space;
-        my $total_frame = ( $callee_size + $spill_frame + $shadow_space + $total_alloca + 15 ) & ~15;
+        $spill_frame += $call_arg_frame;
+        my $total_frame = ( $callee_size + $spill_frame + $call_arg_frame + $total_alloca + 15 ) & ~15;
         my $needs_frame = $total_frame > 0 || $used_callee->@* > 0 || $total_alloca > 0;
         if ( $is_leaf && !$needs_frame ) {
 
@@ -675,7 +683,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             for my $i ( 0 .. $#$used_callee ) {
                 my $reg = $used_callee->[$i];
                 my $rid = $reg_id->($reg);
-                my $off = $total_frame - $shadow_space - ( $i * 8 ) - 8;
+                my $off = $total_frame - $call_arg_frame - ( $i * 8 ) - 8;
                 my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
                 $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x89, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
             }
@@ -696,11 +704,27 @@ class Brocken::Jenny::Codegen::X86_64 {
                 my $pat  = join '|', map quotemeta, @regs;
                 qr/^($pat)$/;
             };
-            my $base_kind = $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg';
-            my $base_r    = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind, value => $addr->{base} ) );
-            my $bid       = $reg_id->($base_r);
-            my $disp      = $addr->{disp} // 0;
-            $disp += $total_alloca + $shadow_space if $base_r eq 'rsp';
+
+            # The base of an ordinary memory operand is a virtual register for a
+            # spill slot, because the allocator assigned a register to it.  A raw
+            # one names the physical stack register instead, and the
+            # available-register set deliberately does not contain it, so it has
+            # to be recognized here: looked up in the allocation table as if it
+            # were a virtual register, rsp resolved to whatever register the
+            # allocator had handed out under that name and the access went to the
+            # wrong place.
+            my $base_kind
+                = !ref $addr->{base} && $addr->{base} eq $platform->stack_reg ? 'phys_reg' : ( $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg' );
+            my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind, value => $addr->{base} ) );
+            my $bid    = $reg_id->($base_r);
+            my $disp   = $addr->{disp} // 0;
+
+            # A raw displacement is positioned by the calling convention: an
+            # outgoing argument already sits where the callee will look for it,
+            # so the outgoing area is not added again.  Every other rsp-relative
+            # operand is a spill slot placed where the allocator asked, which is
+            # inside the spill area above the outgoing arguments.
+            $disp += $total_alloca + $call_arg_frame if $base_r eq 'rsp' && !$addr->{raw};
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                 my $iid     = $reg_id->($index_r);
@@ -740,7 +764,7 @@ class Brocken::Jenny::Codegen::X86_64 {
             my $rex_b = ( $bid >= 8 ) ? 1 : 0;
             return ( $modrm, \@extra, 0, $rex_b );
         };
-        my $alloca_top = $shadow_space;
+        my $alloca_top = $call_arg_frame;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 if ( $source_map && $inst->ir_inst_idx >= 0 && !exists $source_map->{ $inst->ir_inst_idx } ) {
@@ -1508,7 +1532,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         for my $i ( reverse 0 .. $#$used_callee ) {
                             my $reg = $used_callee->[$i];
                             my $rid = $reg_id->($reg);
-                            my $off = $total_frame - $shadow_space - ( $i * 8 ) - 8;
+                            my $off = $total_frame - $call_arg_frame - ( $i * 8 ) - 8;
                             my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
                             $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x8B, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
                         }
@@ -1543,12 +1567,48 @@ class Brocken::Jenny::Codegen::X86_64 {
                     next unless $op->kind eq 'mem';
                     my $addr = $op->value;
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
+
+                    # A raw displacement is positioned by the calling
+                    # convention rather than by the allocator: an incoming
+                    # argument sits above the frame and an outgoing one below
+                    # it.  Neither is a spill slot, and counting it here would
+                    # both size the spill area wrong and overlap the outgoing
+                    # argument area.  _compute_call_arg_frame sizes the latter.
+                    next if $addr->{raw};
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
                     $found    = 1;
                 }
             }
         }
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+    }
+
+    # Size of the outgoing argument area at the bottom of the frame, holding the
+    # arguments the register set could not carry.  A callee reads those at fixed
+    # offsets off the caller's stack pointer, so the area has to be reserved
+    # before the call rather than pushed at the call site: that keeps the
+    # register allocator's stack-relative spill slots valid across the call and
+    # leaves rsp 16-byte aligned at every public interface.
+    method _compute_call_arg_frame( $mf, $stack_reg ) {
+        my $max_disp = -1;
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                for my $op ( $inst->operands->@* ) {
+                    next unless $op->kind eq 'mem';
+                    my $addr = $op->value;
+
+                    # Only the caller's outgoing arguments occupy this area; an
+                    # entry-relative load reads an incoming argument, which
+                    # belongs to whoever called here and is measured from the
+                    # entry stack pointer anyway.
+                    next unless $addr->{raw} && $addr->{raw} ne 'entry';
+                    next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
+                    $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
+                }
+            }
+        }
+        return 0 if $max_disp < 0;
+        return ( $max_disp + 8 + 15 ) & ~15;
     }
 
     method _caller_save_base( $gp_spill, $fp_spill ) {

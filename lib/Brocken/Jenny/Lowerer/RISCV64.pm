@@ -73,7 +73,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                 )
                             );
                             $stk_idx += 2;
-                            $gp_idx += 2;
+                            $gp_idx  += 2;
                             next;
                         }
                         my $lo_reg_name = $gp_regs[ $gp_idx++ ];
@@ -3204,11 +3204,8 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                                 # source, so an integer literal is given one
                                 # first.
                                 if ( !$is_float && $val->kind eq 'imm' ) {
-                                    my $scratch = Brocken::Jenny::MIR::MachineOperand->new(
-                                        kind  => 'virt_reg',
-                                        value => '%arg_' . $i,
-                                        type  => $arg_type
-                                    );
+                                    my $scratch
+                                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%arg_' . $i, type => $arg_type );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mv',
@@ -4269,7 +4266,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
         my $bits        = $ir_val->type->bits;
         my $value       = $ir_val->value;
         my $bit_pattern = $bits >= 64 ? unpack( 'Q', pack( 'd', $value ) ) : unpack( 'V', pack( 'f', $value ) );
-        my $gp_type     = $bits >= 64 ? Brocken::Lindsay::IR::Type::i64() : Brocken::Lindsay::IR::Type::i32();
+        my $gp_type     = $bits >= 64 ? Brocken::Lindsay::IR::Type::i64()  : Brocken::Lindsay::IR::Type::i32();
         my $gp          = $self->_float_bits_scratch($gp_type);
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4286,11 +4283,7 @@ class Brocken::Jenny::Lowerer::RISCV64 {
     # literal, named so the allocator keeps them apart.
     method _float_bits_scratch($gp_type) {
         state $fb = 0;
-        return Brocken::Jenny::MIR::MachineOperand->new(
-            kind  => 'virt_reg',
-            value => '%fmcfp_gp_' . $fb++,
-            type  => $gp_type
-        );
+        return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%fmcfp_gp_' . $fb++, type => $gp_type );
     }
 
     method _lower_opnd($ir_val) {
