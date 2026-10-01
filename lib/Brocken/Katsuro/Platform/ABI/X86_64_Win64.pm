@@ -31,5 +31,10 @@ class Brocken::Katsuro::Platform::ABI::X86_64_Win64 : isa(Brocken::Katsuro::Plat
     # Win64 parameter passing: rcx, rdx, r8, r9 (4 integer regs, versus 6 on SysV)
     method param_registers()    { [qw(rcx rdx r8 r9)] }
     method fp_param_registers() { [qw(xmm0 xmm1 xmm2 xmm3)] }
+
+    # Win64 numbers argument positions 1-4 across both register files: the
+    # first argument goes to rcx or xmm0, the second to rdx or xmm1, and so on;
+    # the fifth and later arguments go on the stack whatever their class.
+    method positional_arguments() { 1 }
 }
 1;

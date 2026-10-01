@@ -13,9 +13,11 @@ parameter passing, and DWARF register numbering.
 
 =over 4
 
-=item * B<Parameter registers>: rcx, rdx, r8, r9 (6 on SysV)
+=item * B<Parameter registers>: rcx, rdx, r8, r9 for integers; xmm0-xmm3 for floating-point arguments
 
-=item * B<FP parameter registers>: xmm0-xmm3 (8 on SysV)
+=item * B<Positional passing>: the two register files share argument positions 1-4, so the position, not the class,
+chooses the register and the fifth and later arguments go on the stack. SysV instead gives each class its own counter
+(six integer and eight floating-point registers).
 
 =item * B<Callee-saved integers>: rbx, rsi, rdi, r12-r15 (rsi/rdi are caller-saved on SysV)
 
@@ -34,6 +36,8 @@ parameter passing, and DWARF register numbering.
 =item * B<Callee-saved>: rbx, rsi, rdi, r12, r13, r14, r15
 
 =item * B<Parameters>: rcx, rdx, r8, r9
+
+=item * B<FP parameters>: xmm0-xmm3, chosen by the argument's position
 
 =item * B<Return>: rax
 
