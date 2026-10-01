@@ -36,6 +36,14 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             next unless $op->kind eq 'mem';
             my $base = $op->value->{base} // '';
 
+            # The physical stack register is named directly by a raw memory
+            # operand (an incoming or outgoing argument at a fixed stack
+            # pointer offset).  It has no interval: nothing ever defines it, so
+            # treating it as a virtual register would hand it an unrelated
+            # register and, under pressure, a spill slot whose reload would
+            # retarget the operand.
+            next if $base eq $platform->stack_reg;
+
             # Track virtual register names, but skip known physical register names
             # (like r12, which the lowerer uses directly in fiber memory operands).
             push @names, $base if $base ne '' && $base !~ $phys_re;
@@ -595,7 +603,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             return 0 unless $src && $src->kind eq 'phys_reg';
             return $dst && ( $dst->kind eq 'phys_reg' || $dst->kind eq 'virt_reg' ) ? 1 : 0;
         };
-
         my ( @prefix, @tokens );
         my @insts = $entry->instructions->@*;
 
@@ -615,7 +622,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             my $inst = $insts[$k];
             if ( $is_capture->($inst) ) {
                 my ( $dst, $src ) = $inst->operands->@*;
-                push @prefix, { inst => $inst, src => $src->value, is_fp => ( $inst->opcode eq 'fmov' ? 1 : 0 ) };
+                push @prefix, { inst   => $inst, src => $src->value, is_fp => ( $inst->opcode eq 'fmov' ? 1 : 0 ) };
                 push @tokens, { is_cap => 1 };
                 next;
             }

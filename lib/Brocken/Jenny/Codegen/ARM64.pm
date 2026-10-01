@@ -566,7 +566,7 @@ class Brocken::Jenny::Codegen::ARM64 {
             my $disp = $addr->{disp} // 0;
             return $disp unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
             return $disp + $total_frame if ( $addr->{raw} // '' ) eq 'entry';
-            return $disp if $addr->{raw};
+            return $disp                if $addr->{raw};
             return $disp + $call_arg_frame;
         };
         my $reg_id = sub ($r) {
@@ -939,15 +939,11 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $alloca_frame = ( $alloca_frame + 15 ) & ~15;
                 }
                 elsif ( $opcode eq 'load' ) {
-                    my $dst_r  = $resolve->($dst);
-                    my $did    = $reg_id->($dst_r);
-                    my $addr   = $src->value;
-                    my $base_r = $resolve->(
-                        Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => $base_kind->( $addr->{base} ),
-                            value => $addr->{base}
-                        )
-                    );
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $addr  = $src->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
                     my $signed = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->signed : 1;
@@ -968,15 +964,11 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                 }
                 elsif ( $opcode eq 'store' ) {
-                    my $src_r  = $resolve->($src);
-                    my $sid    = $reg_id->($src_r);
-                    my $addr   = $dst->value;
-                    my $base_r = $resolve->(
-                        Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => $base_kind->( $addr->{base} ),
-                            value => $addr->{base}
-                        )
-                    );
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $addr  = $dst->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid  = $reg_id->($base_r);
                     my $bits = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
                     if ( defined $addr->{index} ) {
@@ -995,13 +987,9 @@ class Brocken::Jenny::Codegen::ARM64 {
                 }
                 elsif ( $opcode eq 'store_imm' ) {
                     my ( $mem, $imm ) = $inst->operands->@*;
-                    my $addr   = $mem->value;
-                    my $base_r = $resolve->(
-                        Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => $base_kind->( $addr->{base} ),
-                            value => $addr->{base}
-                        )
-                    );
+                    my $addr = $mem->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid  = $reg_id->($base_r);
                     my $bits = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits : 64;
 
@@ -1124,15 +1112,11 @@ class Brocken::Jenny::Codegen::ARM64 {
                     $bytes .= pack( 'V', CSINC | ( 31 << 16 ) | ( 2 << 12 ) | ( 31 << 5 ) | $did );
                 }
                 elsif ( $opcode eq 'fload' ) {
-                    my $dst_r  = $resolve->($dst);
-                    my $did    = $reg_id->($dst_r);
-                    my $addr   = $src->value;
-                    my $base_r = $resolve->(
-                        Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => $base_kind->( $addr->{base} ),
-                            value => $addr->{base}
-                        )
-                    );
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $addr  = $src->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid  = $reg_id->($base_r);
                     my $bits = $dst->type ? $dst->type->bits : 64;
                     if ( defined $addr->{index} ) {
@@ -1149,16 +1133,12 @@ class Brocken::Jenny::Codegen::ARM64 {
                     }
                 }
                 elsif ( $opcode eq 'fstore' ) {
-                    my $mem    = $dst;
-                    my $src_r  = $resolve->($src);
-                    my $sid    = $reg_id->($src_r);
-                    my $addr   = $mem->value;
-                    my $base_r = $resolve->(
-                        Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => $base_kind->( $addr->{base} ),
-                            value => $addr->{base}
-                        )
-                    );
+                    my $mem   = $dst;
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $addr  = $mem->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid  = $reg_id->($base_r);
                     my $bits = $src->type ? $src->type->bits : 64;
                     if ( defined $addr->{index} ) {
@@ -1345,7 +1325,6 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', ADD_SP | ( $save_size << 10 ) );
                     }
                     else {
-
                         # No push.  The 64 bytes this used to subtract are
                         # x86-64's shadow space; AAPCS64 has none, and `bl`
                         # leaves the return address in x30, so sp is already

@@ -473,7 +473,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
         if ( !$is_leaf ) {
             push @to_save, 'ra';
         }
-        my $callee_size    = scalar(@to_save) * 8;
+        my $callee_size = scalar(@to_save) * 8;
 
         # The outgoing argument area sits at the bottom of the frame, below the
         # spill slots, because the callee reads those arguments from the entry
@@ -499,7 +499,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
             my $disp = $addr->{disp} // 0;
             return $disp unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
             return $disp + $total_frame if ( $addr->{raw} // '' ) eq 'entry';
-            return $disp if $addr->{raw};
+            return $disp                if $addr->{raw};
             return $disp + $call_arg_frame;
         };
         my $reg_id = sub ($r) {
@@ -879,10 +879,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $alloca_frame = ( $alloca_frame + 15 ) & ~15;
                 }
                 elsif ( $opcode eq 'load' ) {
-                    my $dst_r  = $resolve->($dst);
-                    my $did    = $reg_id->($dst_r);
-                    my $addr   = $src->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $addr  = $src->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
                     my $signed = $src->type && $src->type->kind eq 'int'     ? $src->type->signed : 1;
@@ -907,10 +908,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     }
                 }
                 elsif ( $opcode eq 'store' ) {
-                    my $src_r  = $resolve->($src);
-                    my $sid    = $reg_id->($src_r);
-                    my $addr   = $dst->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $addr  = $dst->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
                     my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
@@ -938,8 +940,9 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 }
                 elsif ( $opcode eq 'store_imm' ) {
                     my ( $mem, $imm ) = $inst->operands->@*;
-                    my $addr   = $mem->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                    my $addr = $mem->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits : 64;
                     my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
@@ -992,10 +995,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $store_bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                 }
                 elsif ( $opcode eq 'fload' ) {
-                    my $dst_r  = $resolve->($dst);
-                    my $did    = $reg_id->($dst_r);
-                    my $addr   = $src->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $addr  = $src->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $funct3 = ( $dst->type && $dst->type->bits <= 32 ) ? 2 : 3;
                     if ( defined $addr->{index} ) {
@@ -1017,10 +1021,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     }
                 }
                 elsif ( $opcode eq 'fstore' ) {
-                    my $src_r  = $resolve->($src);
-                    my $sid    = $reg_id->($src_r);
-                    my $addr   = $dst->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $addr  = $dst->value;
+                    my $base_r
+                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $funct3 = ( $src->type && $src->type->bits <= 32 ) ? 2 : 3;
                     if ( defined $addr->{index} ) {

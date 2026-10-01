@@ -92,12 +92,12 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             my $fb     = $ensure_frame_base->($mbb);
                             my $mem_lo = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'mem',
-                                value => { base => $fb, disp => $lo_disp },
+                                value => { base => $fb, disp => $lo_disp, raw => 'entry' },
                                 type  => Brocken::Lindsay::IR::Type::i64()
                             );
                             my $mem_hi = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'mem',
-                                value => { base => $fb, disp => $hi_disp },
+                                value => { base => $fb, disp => $hi_disp, raw => 'entry' },
                                 type  => Brocken::Lindsay::IR::Type::i64()
                             );
                             $mbb->add_instruction(
@@ -146,7 +146,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             my $fb   = $ensure_frame_base->($mbb);
                             my $mem  = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'mem',
-                                value => { base => $fb, disp => $disp },
+                                value => { base => $fb, disp => $disp, raw => 'entry' },
                                 type  => $param->type
                             );
                             $mbb->add_instruction(
@@ -3629,22 +3629,19 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             }
                         }
                     }
-                    my $has_stack_args = grep { ref $_ && $_->[0] eq 'stack' } @arg_regs;
-                    my $rsp_tmp;
-                    if ($has_stack_args) {
-                        $rsp_tmp = Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => 'virt_reg',
-                            value => '%rsp.' . $inst_idx,
-                            type  => Brocken::Lindsay::IR::Type::i64()
+
+                    # An argument that no register can carry is written at a raw
+                    # displacement off the physical stack pointer.  The area is
+                    # reserved in the frame rather than pushed at the call, so
+                    # the allocator's spill slots keep the displacements they
+                    # were given and rsp stays 16-byte aligned at the call.
+                    my $slot = sub ( $disp, $type ) {
+                        return Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $platform->stack_reg, disp => $disp, raw => 'stack' },
+                            ( defined $type ? ( type => $type ) : () )
                         );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mov',
-                                operands => [ $rsp_tmp, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rsp' ) ],
-                                comment  => 'capture RSP for overflow args'
-                            )
-                        );
-                    }
+                    };
 
                     # Emit in reverse order so arg0 (reg rcx/rdi) is set last,
                     # avoiding clobber of virt_regs that may have been allocated
@@ -3659,16 +3656,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 my ( $lo, $hi ) = $self->_split_i128( $args[$i] );
                                 my $lo_disp = $stack_param_base_calls + $reg->[1] * 8;
                                 my $hi_disp = $lo_disp + 8;
-                                my $mem_lo  = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'mem',
-                                    value => { base => $rsp_tmp->value, disp => $lo_disp },
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                my $mem_hi = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'mem',
-                                    value => { base => $rsp_tmp->value, disp => $hi_disp },
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
+                                my $mem_lo  = $slot->( $lo_disp, Brocken::Lindsay::IR::Type::i64() );
+                                my $mem_hi  = $slot->( $hi_disp, Brocken::Lindsay::IR::Type::i64() );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => $lo->kind eq 'imm' ? 'store_imm' : 'store',
@@ -3685,13 +3674,9 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 );
                             }
                             else {
-                                my $disp = $stack_param_base_calls + $reg->[1] * 8;
-                                my $val  = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
-                                my $mem  = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'mem',
-                                    value => { base => $rsp_tmp->value, disp => $disp },
-                                    type  => $arg_type
-                                );
+                                my $disp     = $stack_param_base_calls + $reg->[1] * 8;
+                                my $val      = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
+                                my $mem      = $slot->( $disp, $arg_type );
                                 my $stack_op = $is_float ? 'fstore' : ( $val->kind eq 'imm' ? 'store_imm' : 'store' );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4867,8 +4852,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
         # The destination is a physical register, which carries no type of its
         # own, and `fmov_gp2f` takes the width of the move from there.  Left
         # untyped it would encode 32 bits and truncate an f64 to its low half.
-        my $dest_typed
-            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $dest->value, type => $ir_val->type );
+        my $dest_typed = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $dest->value, type => $ir_val->type );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'mov',
@@ -4877,12 +4861,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
             )
         );
         $mbb->add_instruction(
-            Brocken::Jenny::MIR::MachineInstruction->new(
-                opcode   => 'fmov_gp2f',
-                operands => [ $dest_typed, $gp ],
-                comment  => 'fmg: gp->arg reg'
-            )
-        );
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fmov_gp2f', operands => [ $dest_typed, $gp ], comment => 'fmg: gp->arg reg' ) );
         return 1;
     }
 
