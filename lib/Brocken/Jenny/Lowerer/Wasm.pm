@@ -2799,5 +2799,4 @@ class Brocken::Jenny::Lowerer::Wasm {
         return undef;
     }
 }
-
 1;

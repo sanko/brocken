@@ -96,5 +96,4 @@ class Brocken::Jenny::MIR::MachineFunction {
         }
     }
 }
-
 1;

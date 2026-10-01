@@ -4922,5 +4922,4 @@ class Brocken::Jenny::Lowerer::X86_64 {
 }
 
 # Lowerer: Lindsay IR -> Machine IR (ARM64 / AArch64)
-
 1;

@@ -11,5 +11,4 @@ class Brocken::Katsuro::Platform::DragonflyBSD : isa(Brocken::Katsuro::Platform:
     method exit_name()               {'exit'}
     method needs_sched_setaffinity() {1}
 }
-
 1;

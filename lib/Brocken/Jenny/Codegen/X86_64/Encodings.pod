@@ -13,17 +13,17 @@ Brocken::Jenny::Codegen::X86_64::Encodings - x86-64 opcode constants
 
 =head1 DESCRIPTION
 
-The x86-64 instruction encoding is a small number of fixed opcode bytes with the interesting parts in the fields
-around them: a REX prefix for operand width and register extension, a ModR/M byte choosing the addressing mode and
-the operand registers, and sometimes an immediate. This module holds the fixed bytes.
+The x86-64 instruction encoding is a small number of fixed opcode bytes with the interesting parts in the fields around
+them: a REX prefix for operand width and register extension, a ModR/M byte choosing the addressing mode and the operand
+registers, and sometimes an immediate. This module holds the fixed bytes.
 
 Every constant here is an opcode, not an instruction. Encoding an instruction means combining these with the fields
 that vary, which is the job of L<Brocken::Jenny::Codegen::X86_64>. The comments in that file and in the back end's
 tests are where an instruction is actually assembled.
 
 There are sixteen of them, which is a deliberately short list. x86-64's encoding is regular enough that the back end
-carries the rest of the table inline, and a constant per instruction in a shared module would be a table that has to
-be kept in step with a code path nobody reads.
+carries the rest of the table inline, and a constant per instruction in a shared module would be a table that has to be
+kept in step with a code path nobody reads.
 
 =head1 EXPORTS
 
@@ -36,23 +36,21 @@ caller that would rather name what it uses can:
 
 =head2 REX prefix
 
-C<REX_W> is 0x08, the bit that makes an instruction operate on 64-bit operands rather than 32-bit, and it is OR'd
-into the 0x40 base of a REX prefix. C<REX_B> is 0x01, which extends the r/m field in ModR/M to name registers 8
-through 15.
+C<REX_W> is 0x08, the bit that makes an instruction operate on 64-bit operands rather than 32-bit, and it is OR'd into
+the 0x40 base of a REX prefix. C<REX_B> is 0x01, which extends the r/m field in ModR/M to name registers 8 through 15.
 
 These are the two REX bits the compiler needs. The R and X bits are not here: a Brocken value never needs an index
 register, because there are no array pointers indexed by a register in the compiled output.
 
 =head2 MOV
 
-C<MOV_EAX_IMM> is 0xB8, the base of the C<mov reg, imm> family. It is the one opcode here that encodes a register
-in its own byte rather than in ModR/M, so the target register ID is OR'd straight in: 0xB8 plus 10 is C<mov r10,
-imm32>.
+C<MOV_EAX_IMM> is 0xB8, the base of the C<mov reg, imm> family. It is the one opcode here that encodes a register in
+its own byte rather than in ModR/M, so the target register ID is OR'd straight in: 0xB8 plus 10 is C<mov r10, imm32>.
 
 C<MOV_RM_R> is 0x89 and C<MOV_R_RM> is 0x8B. These are the same operation in opposite directions and getting them
-backwards is a classic: 0x89 moves the register into the r/m operand, and 0x8B moves the r/m operand into the
-register. In C<< MOV_RM_R|dest_modrm >> the register named in ModR/M is the source and the r/m is the destination.
-The encoding is noted in the source because it has been wrong in this compiler before.
+backwards is a classic: 0x89 moves the register into the r/m operand, and 0x8B moves the r/m operand into the register.
+In C<< MOV_RM_R|dest_modrm >> the register named in ModR/M is the source and the r/m is the destination. The encoding
+is noted in the source because it has been wrong in this compiler before.
 
 C<MOV_IMM_RM> is 0xC7, C<mov r/m, imm32>, with the immediate sign-extended to the operand size.
 
@@ -61,8 +59,8 @@ C<MOV_IMM_RM> is 0xC7, C<mov r/m, imm32>, with the immediate sign-extended to th
 C<ARITH_IMM> is 0x81, the C<alu r/m, imm32> group. One opcode covers add, subtract, and, or, xor, and compare; the
 operation is chosen by a field in the following ModR/M byte rather than by the opcode itself.
 
-C<CMP_IMM8> is 0x83, the same group with an 8-bit sign-extended immediate. Comparing against a small constant is
-common enough to be worth a one-byte immediate and a shorter instruction, and this is that opcode.
+C<CMP_IMM8> is 0x83, the same group with an 8-bit sign-extended immediate. Comparing against a small constant is common
+enough to be worth a one-byte immediate and a shorter instruction, and this is that opcode.
 
 C<SHIFT_IMM> is 0xC1, the shift group by 8-bit immediate, covering left and right shifts and arithmetic right shift.
 
@@ -70,26 +68,26 @@ C<IMUL_IMM> is 0x69, C<imul r, r/m, imm32>, the three-operand signed multiply wi
 
 =head2 Control flow
 
-C<JMP_REL32> is 0xE9, a near jump with a 32-bit relative displacement. The displacement is added to the address of
-the following instruction, which is why the linker patches it as C<target - (site + 5)>.
+C<JMP_REL32> is 0xE9, a near jump with a 32-bit relative displacement. The displacement is added to the address of the
+following instruction, which is why the linker patches it as C<target - (site + 5)>.
 
-C<JE> is 0x84 and C<JNE> is 0x85. Both are the second byte of a two-byte C<0x0F 0x8x> opcode, so the 0x0F comes
-first and these are written as its second byte, not as a complete instruction. C<JE> branches when the zero flag is
-set and C<JNE> when it is clear.
+C<JE> is 0x84 and C<JNE> is 0x85. Both are the second byte of a two-byte C<0x0F 0x8x> opcode, so the 0x0F comes first
+and these are written as its second byte, not as a complete instruction. C<JE> branches when the zero flag is set and
+C<JNE> when it is clear.
 
 =head2 Frame and return
 
 C<RET_BYTE> is 0xC3, C<ret> near. A generated function ends with this.
 
-C<PUSH_BASE> is 0x50 and C<POP_BASE> is 0x58. A C<push> or C<pop> of any general register is its base plus the
-register number, so these are bases to OR a register ID into rather than opcodes in their own right. Register 0 is
-C<rsp>, which needs the single-byte C<push rsp> and C<pop rsp> encodings instead, and
-L<Brocken::Jenny::Codegen::X86_64> special-cases that.
+C<PUSH_BASE> is 0x50 and C<POP_BASE> is 0x58. A C<push> or C<pop> of any general register is its base plus the register
+number, so these are bases to OR a register ID into rather than opcodes in their own right. Register 0 is C<rsp>, which
+needs the single-byte C<push rsp> and C<pop rsp> encodings instead, and L<Brocken::Jenny::Codegen::X86_64>
+special-cases that.
 
 =head1 STATUS
 
-Expect breakage. The list is short by design and is not a complete x86-64 encoding; the back end assembles
-everything else inline.
+Expect breakage. The list is short by design and is not a complete x86-64 encoding; the back end assembles everything
+else inline.
 
 C<REX_R> and C<REX_X> are absent because nothing in the compiled output needs them, which is a statement about the
 current language surface rather than about x86-64. A language feature that indexes memory through a register-based
@@ -113,10 +111,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

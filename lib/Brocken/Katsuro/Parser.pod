@@ -24,14 +24,14 @@ Brocken::Katsuro::Parser - Recursive descent parser for the Katsuro language
 Turns the token stream L<Brocken::Katsuro::Lexer> produces into the tree defined in L<Brocken::Katsuro::AST>. This is
 where the grammar lives, and the tree it returns is the only thing L<Brocken::Katsuro::Lowerer> has to understand.
 
-Expressions are parsed by precedence climbing, which is most of the C<nud> and C<led> pair near the end of the
-module. Statements are parsed by hand, one C<parse_>-prefixed method per form, dispatched on the keyword in
-C<parse_statement>. That split is the usual division: a statement form is usually one keyword and a fixed shape,
-while an expression form is an operator and a precedence.
+Expressions are parsed by precedence climbing, which is most of the C<nud> and C<led> pair near the end of the module.
+Statements are parsed by hand, one C<parse_>-prefixed method per form, dispatched on the keyword in C<parse_statement>.
+That split is the usual division: a statement form is usually one keyword and a fixed shape, while an expression form
+is an operator and a precedence.
 
-The parser is a single position over the token array, with no lookahead beyond the token in front of it. A token
-that does not fit is an immediate C<Carp::croak>, so parsing stops at the first problem rather than collecting
-errors. A single good error with a source position is more useful than five that may be consequences of the first.
+The parser is a single position over the token array, with no lookahead beyond the token in front of it. A token that
+does not fit is an immediate C<Carp::croak>, so parsing stops at the first problem rather than collecting errors. A
+single good error with a source position is more useful than five that may be consequences of the first.
 
 Every node is built with the position of the token that started it, so an error from the lowerer can be traced to a
 line in the program rather than a line in the compiler.
@@ -54,8 +54,8 @@ without one reports errors beginning with a blank position, so pass it.
 
 =head2 C<features( )>
 
-A hashref of the language features the source has asked for with C<use feature>. This is not a reader; the parser
-reads the field directly. See L</"FEATURE GATES">.
+A hashref of the language features the source has asked for with C<use feature>. This is not a reader; the parser reads
+the field directly. See L</"FEATURE GATES">.
 
 =head1 STATEMENTS
 
@@ -71,29 +71,27 @@ C<parse_statement> dispatches on the first keyword of the statement:
     last, next  -> parse_loop_control
     say, print  -> parse_builtin_print
 
-Anything else is parsed as an expression, and a C<;> is then required. A C<{> in statement position is a bare
-block. An empty C<;> is allowed and produces no node, which is why a trailing C<;> at the end of a block is not a
-syntax error.
+Anything else is parsed as an expression, and a C<;> is then required. A C<{> in statement position is a bare block. An
+empty C<;> is allowed and produces no node, which is why a trailing C<;> at the end of a block is not a syntax error.
 
-An expression statement that is a bare identifier is rejected with a specific message, because in this language a
-bare name is a class or a constant rather than a value and is nearly always a forgotten method call:
+An expression statement that is a bare identifier is rejected with a specific message, because in this language a bare
+name is a class or a constant rather than a value and is nearly always a forgotten method call:
 
     Unexpected bare identifier 'Point' at d.brocken line 1, col 6 -- did you forget parentheses?
 
 =head2 C<my> declarations
 
-A declaration is C<my>, then optionally a type keyword, then a sigil-led name, then optionally C<=> and an
-expression, then C<;>. The type defaults to C<Any> when no type keyword is present, and the C<init> is C<undef> when
-there is no initializer, which the lowerer materializes as a zero value.
+A declaration is C<my>, then optionally a type keyword, then a sigil-led name, then optionally C<=> and an expression,
+then C<;>. The type defaults to C<Any> when no type keyword is present, and the C<init> is C<undef> when there is no
+initializer, which the lowerer materializes as a zero value.
 
 Three forms hang off C<my>: a plain C<my i64 $x = 0;>, a fixed-size array on C<my i64 [ $a, $b ];>, and a list
 destructuring declaration on C<my ( $a, $b ) = f();>.
 
 =head2 C<if>
 
-C<if> with a condition, a C<then> block, any number of C<elsif> C<cond => block> pairs, and an optional C<else>.
-The C<elsif> pairs are collected into an arrayref, not nested, so a chain of any length is one flat list in the
-tree.
+C<if> with a condition, a C<then> block, any number of C<elsif> C<cond => block> pairs, and an optional C<else>. The
+C<elsif> pairs are collected into an arrayref, not nested, so a chain of any length is one flat list in the tree.
 
 =head2 C<while>
 
@@ -102,46 +100,46 @@ braces: a C<while> with a single statement and no braces is a syntax error rathe
 
 =head2 C<return>, C<throw>
 
-C<return> takes an optional expression and C<throw> takes a required one. A bare C<return> and a C<return> of a
-value are the same node with C<init> either present or absent, and the distinction matters to the lowerer: a bare
-C<return> does not produce a value, and a C<return> of a zero does.
+C<return> takes an optional expression and C<throw> takes a required one. A bare C<return> and a C<return> of a value
+are the same node with C<init> either present or absent, and the distinction matters to the lowerer: a bare C<return>
+does not produce a value, and a C<return> of a zero does.
 
 =head2 C<try>
 
-C<try> with a body, an optional C<catch> block, and an optional C<finally> block. Either of the last two may be
-absent, so a C<try>/C<finally> with no handler is expressible and a C<try>/C<catch> with no C<finally> is the
-common case. The body is required.
+C<try> with a body, an optional C<catch> block, and an optional C<finally> block. Either of the last two may be absent,
+so a C<try>/C<finally> with no handler is expressible and a C<try>/C<catch> with no C<finally> is the common case. The
+body is required.
 
 =head2 C<last> and C<next>
 
-The loop-control statements, in Perl's spelling rather than the C spelling. C<last> becomes an
-C<AST::Stmt::Break> and C<next> becomes an C<AST::Stmt::Continue>; each takes a C<;> and no expression. Both are
-implemented by the lowerer, and both are verified by the test suite.
+The loop-control statements, in Perl's spelling rather than the C spelling. C<last> becomes an C<AST::Stmt::Break> and
+C<next> becomes an C<AST::Stmt::Continue>; each takes a C<;> and no expression. Both are implemented by the lowerer,
+and both are verified by the test suite.
 
 =head2 C<say> and C<print>
 
-C<say( ... );> and C<print( ... );>, both requiring parentheses and a trailing C<;>. C<say "hi";> without
-parentheses is a syntax error at the string:
+C<say( ... );> and C<print( ... );>, both requiring parentheses and a trailing C<;>. C<say "hi";> without parentheses
+is a syntax error at the string:
 
     Expected (, got STRING 'hi' at d.brocken line 1, col 5
 
-This is one of the two places in the language where a keyword-looking thing is a function rather than a statement
-form, and the requirement for parentheses is a consequence of that: the argument list is a call argument list, not
-a string concatenation.
+This is one of the two places in the language where a keyword-looking thing is a function rather than a statement form,
+and the requirement for parentheses is a consequence of that: the argument list is a call argument list, not a string
+concatenation.
 
 =head2 C<use feature>
 
     use feature "brocken_native_types";
 
 Recognized, and produces no node in the tree. The feature is recorded in the C<features> hashref and the statement
-disappears. This is the only C<use> form that parses; a C<use> of anything else is a syntax error naming the
-expected form.
+disappears. This is the only C<use> form that parses; a C<use> of anything else is a syntax error naming the expected
+form.
 
 =head1 EXPRESSIONS
 
-Expressions are parsed by precedence climbing. C<parse_expression> takes a minimum precedence and loops: it reads a
-nud (a null denotation, what an expression can start with) and then repeatedly applies a led (a left denotation,
-what can follow) while the next operator binds tighter than the floor it was given.
+Expressions are parsed by precedence climbing. C<parse_expression> takes a minimum precedence and loops: it reads a nud
+(a null denotation, what an expression can start with) and then repeatedly applies a led (a left denotation, what can
+follow) while the next operator binds tighter than the floor it was given.
 
 The precedences, loosest first, are:
 
@@ -150,17 +148,17 @@ The precedences, loosest first, are:
     SHIFT 30    SUM 35       PRODUCT 45
     UNARY 55    CALL 60     DEREF 65
 
-The word C<OP> in the nud/led naming is an artefact of the usual terminology: C<nud> and C<led> are named after the
-two halves of a van Wijngaarden grammar, where a C<nu>d starts a production and a C<led> continues one.
+The word C<OP> in the nud/led naming is an artefact of the usual terminology: C<nud> and C<led> are named after the two
+halves of a van Wijngaarden grammar, where a C<nu>d starts a production and a C<led> continues one.
 
-The C<.> concatenation operator is at C<SUM>, the same level as C<+> and C<->, so C<"a" . 1 + 2> groups left to
-right as C<("a" . 1) + 2>. The comparison keywords C<eq>, C<ne>, C<lt>, C<gt>, C<le>, C<ge>, and C<cmp> are at
-C<COMPARE>, the same level as C<==> and C<< < >>. C<cmp> is lexed as a keyword and parsed as a comparison, but it is
-a three-way comparison whose result is not an integer, and the lowerer's handling of it is the least settled part
-of the expression set.
+The C<.> concatenation operator is at C<SUM>, the same level as C<+> and C<->, so C<"a" . 1 + 2> groups left to right
+as C<("a" . 1) + 2>. The comparison keywords C<eq>, C<ne>, C<lt>, C<gt>, C<le>, C<ge>, and C<cmp> are at C<COMPARE>,
+the same level as C<==> and C<< < >>. C<cmp> is lexed as a keyword and parsed as a comparison, but it is a three-way
+comparison whose result is not an integer, and the lowerer's handling of it is the least settled part of the expression
+set.
 
-C<[> is at C<DEREF>, the same level as C<< -> >>, so C<< $a[0] >> and C<< $p->x >> bind to the same thing and
-C<< f(1)[0] >> indexes the result of a call.
+C<[> is at C<DEREF>, the same level as C<< -> >>, so C<< $a[0] >> and C<< $p->x >> bind to the same thing and C<<
+f(1)[0] >> indexes the result of a call.
 
 =head2 C<want>
 
@@ -169,32 +167,31 @@ C<want( )> is a prototype, not a cast. It is parsed by C<parse_want> and require
     sub f( $x ) { return want(Int); }        # a type
     sub f( $x ) { return want("scalar"); }   # a context string
 
-A string context is checked against C<list>, C<scalar>, and C<void>, and anything else is rejected with
-C<want() context must be 'list', 'scalar', or 'void'>. A non-string argument is taken as a type name without
-checking it against the type table, so C<want(Nonsense)> parses and is rejected later if at all. C<want |Int|>, with
-the C<|> spelling, is a syntax error: the parser expects a C<(>.
+A string context is checked against C<list>, C<scalar>, and C<void>, and anything else is rejected with C<want()
+context must be 'list', 'scalar', or 'void'>. A non-string argument is taken as a type name without checking it against
+the type table, so C<want(Nonsense)> parses and is rejected later if at all. C<want |Int|>, with the C<|> spelling, is
+a syntax error: the parser expects a C<(>.
 
 =head2 Call arguments
 
 Arguments in parentheses are parsed by C<parse_call_args_after_paren> into a list of C<{ key, value }> pairs, where
-C<key> is C<undef> for a positional argument. If any argument used the fat comma C<< => >>, the whole list is
-returned as a single-element list holding a C<Brocken::Katsuro::AST::Expr::Hash>; otherwise it is returned as a
-flat list of the value expressions.
+C<key> is C<undef> for a positional argument. If any argument used the fat comma C<< => >>, the whole list is returned
+as a single-element list holding a C<Brocken::Katsuro::AST::Expr::Hash>; otherwise it is returned as a flat list of the
+value expressions.
 
-A bare name on the left of a fat comma becomes a C<String> constant, so C<< f( x => 1 ) >> passes the string C<x>,
-not a variable named C<x>. That is deliberate: named arguments in this language are for constructors and other
-hash-like callees, where a bare name is almost always a key and not a variable. It does mean there is no way to
-pass a variable as a named key.
+A bare name on the left of a fat comma becomes a C<String> constant, so C<< f( x => 1 ) >> passes the string C<x>, not
+a variable named C<x>. That is deliberate: named arguments in this language are for constructors and other hash-like
+callees, where a bare name is almost always a key and not a variable. It does mean there is no way to pass a variable
+as a named key.
 
-Mixing named and positional arguments is not rejected here, so C<< f( 1, x => 2 ) >> parses and leaves the question
-of what the callee does with a positional first argument to the lowerer.
+Mixing named and positional arguments is not rejected here, so C<< f( 1, x => 2 ) >> parses and leaves the question of
+what the callee does with a positional first argument to the lowerer.
 
 =head1 FEATURE GATES
 
-Two type names are behind a feature gate rather than being unconditionally present. C<i128> and C<u128> are
-recognized as type keywords only when the source has asked for the C<brocken_native_types> feature with
-C<use feature "brocken_native_types">; otherwise C<is_type> declines to treat them as types, and the declaration
-parse fails.
+Two type names are behind a feature gate rather than being unconditionally present. C<i128> and C<u128> are recognized
+as type keywords only when the source has asked for the C<brocken_native_types> feature with C<use feature
+"brocken_native_types">; otherwise C<is_type> declines to treat them as types, and the declaration parse fails.
 
 The error for using one without the gate is not very good:
 
@@ -202,9 +199,9 @@ The error for using one without the gate is not very good:
     use feature "brocken_native_types";
     my i128 $x = 1;                          # fine
 
-The message says a variable name was expected, because from the parser's point of view the C<i128> was never a type
-and so the C<my> was left looking for one. Whether a 128-bit integer is then usable is a separate question
-answered by the lowerer and the register allocator, and it is not answered in the affirmative.
+The message says a variable name was expected, because from the parser's point of view the C<i128> was never a type and
+so the C<my> was left looking for one. Whether a 128-bit integer is then usable is a separate question answered by the
+lowerer and the register allocator, and it is not answered in the affirmative.
 
 =head1 ERRORS
 
@@ -214,30 +211,30 @@ Errors are C<Carp::croak>, so each one names the file, the line, and the column 
     Expected (, got STRING 'hi' at d.brocken line 1, col 5
     Expected ';' after print()
 
-The default message for C<consume> names what was expected and what was found, including the C<EOF> case, where
-the position is reported as the end of input. A message with a custom C<$msg> is used where the default would be
-less informative than the specific thing that went wrong.
+The default message for C<consume> names what was expected and what was found, including the C<EOF> case, where the
+position is reported as the end of input. A message with a custom C<$msg> is used where the default would be less
+informative than the specific thing that went wrong.
 
-Because the parser is a C<croak> and not an error object, there is no recovery and no error list. A program with
-three mistakes is fixed one mistake at a time.
+Because the parser is a C<croak> and not an error object, there is no recovery and no error list. A program with three
+mistakes is fixed one mistake at a time.
 
 =head1 STATUS
 
-Expect breakage. The keyword table in the lexer is much larger than the set of things parsed here, and the gap is
-the most important thing to know about this module: C<for>, C<foreach>, C<unless>, C<until>, C<redo>, C<our>,
-C<state>, C<role>, C<has>, C<fiber>, C<yield>, C<transfer>, C<defer>, and C<exit> all lex as keywords and have no
-case in C<parse_statement>, so a program using one gets an error about the following token rather than about the
-unimplemented construct.
+Expect breakage. The keyword table in the lexer is much larger than the set of things parsed here, and the gap is the
+most important thing to know about this module: C<for>, C<foreach>, C<unless>, C<until>, C<redo>, C<our>, C<state>,
+C<role>, C<has>, C<fiber>, C<yield>, C<transfer>, C<defer>, and C<exit> all lex as keywords and have no case in
+C<parse_statement>, so a program using one gets an error about the following token rather than about the unimplemented
+construct.
 
-The type table is the opposite case and worth knowing too: C<String>, C<Int>, C<Any>, and C<Bool> are all accepted
-as declared types and all compile, even though the values they describe are opaque pointers rather than something
-the language can inspect.
+The type table is the opposite case and worth knowing too: C<String>, C<Int>, C<Any>, and C<Bool> are all accepted as
+declared types and all compile, even though the values they describe are opaque pointers rather than something the
+language can inspect.
 
 The C<use> statement is recognized only in the C<use feature "NAME"> form, and the feature it sets is consulted in
 exactly one place, for the 128-bit types. A feature that is not C<brocken_native_types> is accepted and ignored.
 
-There is no C<do> or C<until> loop form, so C<While> nodes are always a plain C<while> in practice, and no
-C<unless> conditional even though the lexer has the keyword.
+There is no C<do> or C<until> loop form, so C<While> nodes are always a plain C<while> in practice, and no C<unless>
+conditional even though the lexer has the keyword.
 
 The C<Want> node is parsed and never given a lowerer, so a C<want> in a program is accepted and then dropped.
 
@@ -255,10 +252,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

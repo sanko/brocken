@@ -4,7 +4,6 @@ no warnings qw[experimental::class];
 use Brocken::Jenny::Linker;
 
 class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
-
     field $source_locs    : param : reader;
     field $text_base      : param : reader;
     field $source_file    : param : reader //= 'source.brocken';
@@ -46,8 +45,8 @@ class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
             $sections->{'.debug_aranges'} = $self->build_debug_aranges;
             if ( $self->eh_frame_base ) {
                 my ( $eh_frame, $fde_offsets ) = $self->build_eh_frame;
-                $sections->{'.eh_frame'}      = $eh_frame;
-                $sections->{'.eh_frame_hdr'}  = $self->build_eh_frame_hdr($fde_offsets);
+                $sections->{'.eh_frame'}     = $eh_frame;
+                $sections->{'.eh_frame_hdr'} = $self->build_eh_frame_hdr($fde_offsets);
             }
         }
         if ( $self->debug >= 4 ) {
@@ -76,7 +75,7 @@ class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
         for my $e (@entries) {
             my $addr = $text_base + $e->{offset};
             my $line = $e->{line};
-            my $file = $e->{file} // $source_file;
+            my $file = $e->{file}       // $source_file;
             my $fidx = $file_idx{$file} // 1;
 
             # Emit DW_LNS_set_file when file changes
@@ -169,17 +168,18 @@ class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
             $abbrev .= $self->_uleb(0x34) . $self->_uleb(0x0B);                                      # DW_AT_artificial -> data1
             $abbrev .= pack( 'CC', 0, 0 );
         }
+
         # Abbrev 6: DW_TAG_structure_type (0x13) with children
         $abbrev .= $self->_uleb(6) . $self->_uleb(0x13) . $self->_uleb(1);
-        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                        # DW_AT_name -> string
-        $abbrev .= $self->_uleb(0x0B) . $self->_uleb(0x0B);                                        # DW_AT_byte_size -> data1
+        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name -> string
+        $abbrev .= $self->_uleb(0x0B) . $self->_uleb(0x0B);                  # DW_AT_byte_size -> data1
         $abbrev .= pack( 'CC', 0, 0 );
 
         # Abbrev 7: DW_TAG_member (0x0D) no children
         $abbrev .= $self->_uleb(7) . $self->_uleb(0x0D) . $self->_uleb(0);
-        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                                        # DW_AT_name -> string
-        $abbrev .= $self->_uleb(0x49) . $self->_uleb(0x13);                                        # DW_AT_type -> ref4
-        $abbrev .= $self->_uleb(0x38) . $self->_uleb(0x0B);                                        # DW_AT_data_member_location -> data1
+        $abbrev .= $self->_uleb(0x03) . $self->_uleb(0x08);                  # DW_AT_name -> string
+        $abbrev .= $self->_uleb(0x49) . $self->_uleb(0x13);                  # DW_AT_type -> ref4
+        $abbrev .= $self->_uleb(0x38) . $self->_uleb(0x0B);                  # DW_AT_data_member_location -> data1
         $abbrev .= pack( 'CC', 0, 0 );
         $abbrev .= "\x00";
         return $abbrev;
@@ -191,10 +191,11 @@ class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
         my $cu_body = '';
         $cu_body
             .= $self->_uleb(1) . pack( 'L<', 0 ) . "$source_file\0" . pack( 'C', 2 ) . pack( 'Q<', $text_base ) . pack( 'Q<', $text_base + $max_pc );
-        $cu_body .= "Brocken v0.1\0";                                                                          # DW_AT_producer
-        $cu_body .= ".\0";                                                                                      # DW_AT_comp_dir
+        $cu_body .= "Brocken v0.1\0";                                        # DW_AT_producer
+        $cu_body .= ".\0";                                                   # DW_AT_comp_dir
         my $CU_HEADER_SIZE = 12;
         my $type_off       = {};
+
         for my $t ( [ 'Int', 5 ], [ 'Bool', 2 ], [ 'String', 1 ], [ 'Any', 1 ], [ 'ptr', 1 ], [ 'Array', 1 ] ) {
             $type_off->{ $t->[0] } = $CU_HEADER_SIZE + length($cu_body);
             $cu_body .= $self->_uleb(2) . "$t->[0]\0" . pack( 'CC', 8, $t->[1] );
@@ -203,26 +204,24 @@ class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
         # Emit DW_TAG_structure_type DIEs for each class in class_info (level >= 4)
         if ( $self->debug >= 4 ) {
             for my $cn ( sort keys %$class_info ) {
-            my $cd = $class_info->{$cn};
-            next unless ref $cd eq 'HASH' && exists $cd->{fields};
-            $type_off->{$cn} = $CU_HEADER_SIZE + length($cu_body);
-            $cu_body .= $self->_uleb(6);                                 # abbrev 6: structure_type
-            $cu_body .= "$cn\0";
-            $cu_body .= pack( 'C', $cd->{total_size} // 8 );             # DW_AT_byte_size
-            for my $fd ( $cd->{fields}->@* ) {
-                my $ftype = $type_off->{ $fd->{type} } // $type_off->{Any};
-                $cu_body .= $self->_uleb(7);                             # abbrev 7: member
-                $cu_body .= "$fd->{name}\0";
-                $cu_body .= pack( 'L<', $ftype );                        # DW_AT_type -> ref4
-                $cu_body .= pack( 'C', $fd->{offset} // 0 );             # DW_AT_data_member_location
-            }
-                $cu_body .= "\x00";                                           # end children
+                my $cd = $class_info->{$cn};
+                next unless ref $cd eq 'HASH' && exists $cd->{fields};
+                $type_off->{$cn} = $CU_HEADER_SIZE + length($cu_body);
+                $cu_body .= $self->_uleb(6);                        # abbrev 6: structure_type
+                $cu_body .= "$cn\0";
+                $cu_body .= pack( 'C', $cd->{total_size} // 8 );    # DW_AT_byte_size
+                for my $fd ( $cd->{fields}->@* ) {
+                    my $ftype = $type_off->{ $fd->{type} } // $type_off->{Any};
+                    $cu_body .= $self->_uleb(7);                     # abbrev 7: member
+                    $cu_body .= "$fd->{name}\0";
+                    $cu_body .= pack( 'L<', $ftype );                # DW_AT_type -> ref4
+                    $cu_body .= pack( 'C',  $fd->{offset} // 0 );    # DW_AT_data_member_location
+                }
+                $cu_body .= "\x00";                                  # end children
             }
         }
-
-        my $sf = $self->source_files // [$source_file];
+        my $sf       = $self->source_files // [$source_file];
         my %file_idx = map { $sf->[$_] => $_ + 1 } 0 .. $#$sf;
-
         for my $fn ( sort { $a->{start} <=> $b->{start} } @$func_ranges ) {
             my $die_off = $CU_HEADER_SIZE + length($cu_body);
             push @pubnames, { offset => $die_off, name => ( $fn->{name} =~ s/^M_//r ) };
@@ -252,12 +251,12 @@ class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
                 my $loc = "\x91" . $self->_sleb( -$v->{slot} );
                 $cu_body .= $self->_uleb( length($loc) ) . $loc;
                 $cu_body .= pack( 'L<', $type_off->{ $v->{type} } // $type_off->{Any} );
-                $cu_body .= pack( 'C', $f_idx );    # DW_AT_decl_file
-                $cu_body .= pack( 'S<', $v->{line} // 0 );    # DW_AT_decl_line
-                $cu_body .= pack( 'C', $v->{col} // 0 );      # DW_AT_decl_column
-                $cu_body .= pack( 'C', $v->{artificial} // 0 ); # DW_AT_artificial
+                $cu_body .= pack( 'C',  $f_idx );                                          # DW_AT_decl_file
+                $cu_body .= pack( 'S<', $v->{line}       // 0 );                           # DW_AT_decl_line
+                $cu_body .= pack( 'C',  $v->{col}        // 0 );                           # DW_AT_decl_column
+                $cu_body .= pack( 'C',  $v->{artificial} // 0 );                           # DW_AT_artificial
             }
-            $cu_body .= "\x00";    # end subprogram
+            $cu_body .= "\x00";                                                            # end subprogram
         }
         $cu_body .= "\x00";
 
@@ -499,18 +498,14 @@ class Brocken::Jenny::Linker::DWARF : isa(Brocken::Jenny::Linker) {
         my @table;
         for my $i ( 0 .. $#$func_ranges ) {
             my $fn = $func_ranges->[$i];
-            push @table, {
-                initial_loc => $text_base + $fn->{start},
-                fde_addr    => $eh_frame_base + $fde_offsets->[$i],
-            };
+            push @table, { initial_loc => $text_base + $fn->{start}, fde_addr => $eh_frame_base + $fde_offsets->[$i], };
         }
         @table = sort { $a->{initial_loc} <=> $b->{initial_loc} } @table;
         my $hdr = pack( 'C4', 1, 0x00, 0x03, 0x00 );
-        $hdr .= pack( 'Q<', $eh_frame_base );
-        $hdr .= pack( 'L<', scalar @table );
+        $hdr .= pack( 'Q<',    $eh_frame_base );
+        $hdr .= pack( 'L<',    scalar @table );
         $hdr .= pack( 'Q< Q<', $_->{initial_loc}, $_->{fde_addr} ) for @table;
         return $hdr;
     }
 };
-
 1;

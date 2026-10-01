@@ -42,10 +42,9 @@ use feature qw[class];
 # check then covers every backend, including the ones that cannot be executed
 # here, and states the invariant directly -- when an instruction is handed a
 # reloaded address and a reloaded value, the two sit in different registers.
-
 # Enough arguments to overrun the register file on each backend, low enough
 # that the ones that spill to the stack still land in a sane frame.
-my %COUNT = ( x86_64 => 16, aarch64 => 40, riscv64 => 32 );
+my %COUNT   = ( x86_64 => 16, aarch64 => 40, riscv64 => 32 );
 my @TARGETS = (
     [ 'x86_64-pc-windows-msvc',    'Brocken::Jenny::Lowerer::X86_64' ],
     [ 'x86_64-unknown-linux-gnu',  'Brocken::Jenny::Lowerer::X86_64' ],
@@ -58,7 +57,7 @@ my @TARGETS = (
 # losing or duplicating a single argument moves the result.
 sub sum_src($n) {
     my @args   = map { 7 * $_ } 1 .. $n;
-    my $params = join ', ', map {"i64 \$p$_"} 0 .. $n - 1;
+    my $params = join ', ',  map {"i64 \$p$_"} 0 .. $n - 1;
     my $body   = join ' + ', map {"\$p$_"} 0 .. $n - 1;
     return <<"BROCKEN";
 sub f($params) -> i64 {
@@ -68,7 +67,6 @@ sub f($params) -> i64 {
 return f(@{[ join ', ', @args ]});
 BROCKEN
 }
-
 sub expected_sum($n) { return ( 7 * $n * ( $n + 1 ) / 2 ) & 0xFF }
 
 # Walk the run of spill reloads in front of each instruction.  When a run holds
@@ -101,12 +99,11 @@ sub allocated( $triple, $class, $n ) {
     $alloc->insert_spill_code( $mf, $fp->{spill_slots}, $fp->{spill_temp}, $platform->stack_reg, 1, $fp->{spill_addr_temp} );
     return ( $mf, $int, $platform );
 }
-
 subtest 'A reloaded address and a reloaded value do not share a scratch' => sub {
     for my $target (@TARGETS) {
         my ( $triple, $class ) = @$target;
-        my $n                  = $COUNT{ ( split /-/, $triple )[0] };
-        my ( $mf, $int )       = allocated( $triple, $class, $n );
+        my $n = $COUNT{ ( split /-/, $triple )[0] };
+        my ( $mf, $int ) = allocated( $triple, $class, $n );
 
         # Without a spill there is nothing to check here, and a check that
         # passes because it never ran is worse than no check at all.
@@ -114,7 +111,6 @@ subtest 'A reloaded address and a reloaded value do not share a scratch' => sub 
         is( [ reload_reg_conflict($mf) ], [], "$triple: no instruction reuses one scratch for a reloaded address and a reloaded value" );
     }
 };
-
 subtest 'A sum of many spilled arguments comes back intact' => sub {
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
@@ -131,13 +127,12 @@ subtest 'A sum of many spilled arguments comes back intact' => sub {
         name          => "$n arguments summing to " . expected_sum($n) . " on $host->friendly",
     );
 };
-
 subtest 'Foreign targets execute the same sum' => sub {
     for my $target (@TARGETS) {
         my ($triple) = @$target;
         my $n        = $COUNT{ ( split /-/, $triple )[0] };
         my $platform = Brocken::Katsuro::Platform::parse($triple);
-        SKIP: {
+    SKIP: {
             skip "$triple not executable here", 1 unless cross_available($platform);
             my $brocken = Brocken->new( platform => $platform );
             my $module  = Brocken::Compiler->new->compile( sum_src($n) );
@@ -153,5 +148,4 @@ subtest 'Foreign targets execute the same sum' => sub {
         }
     }
 };
-
 done_testing;

@@ -1694,5 +1694,4 @@ class Brocken::Jenny::Codegen::X86_64 {
         return $dwarf->build_all;
     }
 }
-
 1;

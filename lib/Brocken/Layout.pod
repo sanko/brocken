@@ -23,16 +23,16 @@ Brocken::Layout - Type sizes, alignments, and struct field layout
 
 =head1 DESCRIPTION
 
-Brocken has to know how big a value is and where it sits in a struct, and it has to know the same thing on every
-target without writing the table four times. This module is that table.
+Brocken has to know how big a value is and where it sits in a struct, and it has to know the same thing on every target
+without writing the table four times. This module is that table.
 
-Every function here is called by its full name. This is a plain package of functions with no C<import> and no
-export list, deliberately: it is a low-level layout helper that the rest of the compiler reaches for directly, and
-importing C<type_size> into a caller who also has a C<$size> variable is a collision waiting to happen.
+Every function here is called by its full name. This is a plain package of functions with no C<import> and no export
+list, deliberately: it is a low-level layout helper that the rest of the compiler reaches for directly, and importing
+C<type_size> into a caller who also has a C<$size> variable is a collision waiting to happen.
 
-Every Brocken target is 64-bit, so C<ptr> is eight bytes everywhere, and the alignment and size tables here are
-uniform across x86-64, AArch64, and RISC-V. There is no per-architecture variant of this module, and that is the
-point: a struct laid out here lays out the same on all three.
+Every Brocken target is 64-bit, so C<ptr> is eight bytes everywhere, and the alignment and size tables here are uniform
+across x86-64, AArch64, and RISC-V. There is no per-architecture variant of this module, and that is the point: a
+struct laid out here lays out the same on all three.
 
 The table is the System V AMD64 ABI's, which is also what AArch64 and RISC-V use for scalar types.
 
@@ -63,20 +63,20 @@ struct in the runtime holds C<i64> error codes rather than C<i1>, so a narrower 
 
     my $padded = align( 9, 8 );    # 16
 
-Rounds C<$offset> up to the next multiple of C<$alignment>. An alignment of one or less returns C<$offset>
-unchanged, so this is safe to call unconditionally.
+Rounds C<$offset> up to the next multiple of C<$alignment>. An alignment of one or less returns C<$offset> unchanged,
+so this is safe to call unconditionally.
 
 =head2 C<type_alignment( $type )>
 
-Returns the required alignment of a type name, as a string key into the table: C<i1>, C<i8>, C<i16>, C<i32>,
-C<i64>, C<i128>, C<u8>, C<u16>, C<u32>, C<u64>, C<u128>, C<f32>, C<f64>, or C<ptr>.
+Returns the required alignment of a type name, as a string key into the table: C<i1>, C<i8>, C<i16>, C<i32>, C<i64>,
+C<i128>, C<u8>, C<u16>, C<u32>, C<u64>, C<u128>, C<f32>, C<f64>, or C<ptr>.
 
 Dies on an unknown name. The message is C<Layout: unknown type 'NAME'>.
 
 =head2 C<type_size( $type )>
 
-Returns the size of a type name in bytes, accepting the same names as C<type_alignment>. Dies on an unknown name
-with the same message.
+Returns the size of a type name in bytes, accepting the same names as C<type_alignment>. Dies on an unknown name with
+the same message.
 
 =head2 C<layout_fields( @fields )>
 
@@ -120,11 +120,11 @@ a constant value to a field and get it back
 =back
 
 Fields are placed in order, each at the next offset satisfying its own alignment, so padding appears wherever the
-alignment rules demand it. A field with no name, or with a name but no type, is a die: C<Layout: field has no name>
-or C<Layout: field 'NAME' has no type>.
+alignment rules demand it. A field with no name, or with a name but no type, is a die: C<Layout: field has no name> or
+C<Layout: field 'NAME' has no type>.
 
-The tail is padded out to the struct alignment. An array of C<ptr>, C<ptr>, C<i64> is 24 bytes rather than 23,
-which is what makes C<< $layout->{size} % $layout->{alignment} == 0 >> hold and lets the result be used as a stride.
+The tail is padded out to the struct alignment. An array of C<ptr>, C<ptr>, C<i64> is 24 bytes rather than 23, which is
+what makes C<< $layout->{size} % $layout->{alignment} == 0 >> hold and lets the result be used as a stride.
 
 =head1 STATUS
 
@@ -149,10 +149,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

@@ -69,5 +69,4 @@ class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform:
         return undef;
     }
 }
-
 1;

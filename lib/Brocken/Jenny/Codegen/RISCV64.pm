@@ -1423,5 +1423,4 @@ class Brocken::Jenny::Codegen::RISCV64 {
         return $dwarf->build_all;
     }
 }
-
 1;

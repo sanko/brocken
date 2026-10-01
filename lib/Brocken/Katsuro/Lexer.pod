@@ -20,18 +20,17 @@ Brocken::Katsuro::Lexer - Brocken tokenizer
 
 =head1 DESCRIPTION
 
-Turns Brocken source text into a flat array of tokens. This is a scanner, not a parser: it decides what the words
-are, and nothing about what they mean. L<Brocken::Katsuro::Parser> takes the array this returns and works out
-the program.
+Turns Brocken source text into a flat array of tokens. This is a scanner, not a parser: it decides what the words are,
+and nothing about what they mean. L<Brocken::Katsuro::Parser> takes the array this returns and works out the program.
 
-The lexer is a single method over a single position, in five ordered passes, each trying a regular expression
-against the rest of the source and consuming what it matched. The first pass that matches wins, which is why the
-order below is not arbitrary: a multi-character operator has to be tried before the single-character one that starts
-it, or C<< <=> >> would lex as C<< <= >> and C<< > >>.
+The lexer is a single method over a single position, in five ordered passes, each trying a regular expression against
+the rest of the source and consuming what it matched. The first pass that matches wins, which is why the order below is
+not arbitrary: a multi-character operator has to be tried before the single-character one that starts it, or C<< <=> >>
+would lex as C<< <= >> and C<< > >>.
 
 Each token is a plain hashref with four keys: C<type>, C<value>, C<line>, and C<col>. It is a hash rather than an
-object because the parser passes it around a lot and the shape is trivial, and because a debugger showing a hash
-tells you the whole token at a glance.
+object because the parser passes it around a lot and the shape is trivial, and because a debugger showing a hash tells
+you the whole token at a glance.
 
 The stream always ends with a C<EOF> token whose value is the empty string, so the parser can test for end of input
 without also testing the length of the array.
@@ -53,8 +52,8 @@ namespaces.
 
 =item C<VAR>
 
-A sigil-led name, C<$x>, C<@a>, or C<%h>. The sigil is part of the value, so the parser sees C<$x> as one token and
-the sigil as data.
+A sigil-led name, C<$x>, C<@a>, or C<%h>. The sigil is part of the value, so the parser sees C<$x> as one token and the
+sigil as data.
 
 =item C<NUM>
 
@@ -63,14 +62,14 @@ identifier.
 
 =item C<FLOAT>
 
-A decimal with a fractional part, C<1.5>. There is no exponent form: C<1e10> lexes as C<1> and then fails, and no
-float literal is negative, so a negative constant is a negation applied to a positive one.
+A decimal with a fractional part, C<1.5>. There is no exponent form: C<1e10> lexes as C<1> and then fails, and no float
+literal is negative, so a negative constant is a negation applied to a positive one.
 
 =item C<STRING>
 
 A double- or single-quoted string with the quotes removed and the body unescaped, so C<"hi"> has the value C<hi>.
-Escapes are recognised by C<\> followed by any character, so C<\n> keeps its backslash rather than becoming a
-newline, which is a placeholder for real escape handling.
+Escapes are recognised by C<\> followed by any character, so C<\n> keeps its backslash rather than becoming a newline,
+which is a placeholder for real escape handling.
 
 =item C<OP>
 
@@ -79,9 +78,9 @@ single-character set C<+ - * / % = < > ! & | ^ ~ ? : .>.
 
 =item Punctuation
 
-Braces, semicolon, parentheses, comma, and square brackets are their own token type, with the punctuation character
-as the type: the type is C<(> and not C<PUNCT>. That is a shortcut, and it means a token's type is compared against
-the character itself, which is why the parser's C<check> and C<consume> take both a type and a value.
+Braces, semicolon, parentheses, comma, and square brackets are their own token type, with the punctuation character as
+the type: the type is C<(> and not C<PUNCT>. That is a shortcut, and it means a token's type is compared against the
+character itself, which is why the parser's C<check> and C<consume> take both a type and a value.
 
 =item C<EOF>
 
@@ -91,9 +90,9 @@ The end of the stream.
 
 =head1 FIELD DEFAULTS AND WIDTH
 
-A decimal literal of more than eighteen digits, or a hexadecimal one of more than eight, becomes a
-L<Math::BigInt> rather than an NV. This is the lexer refusing to quietly lose precision on a 64-bit constant: an
-integer that does not fit is kept exact and handed to the lowerer to complain about, instead of becoming a float.
+A decimal literal of more than eighteen digits, or a hexadecimal one of more than eight, becomes a L<Math::BigInt>
+rather than an NV. This is the lexer refusing to quietly lose precision on a 64-bit constant: an integer that does not
+fit is kept exact and handed to the lowerer to complain about, instead of becoming a float.
 
 =head1 METHODS
 
@@ -107,8 +106,8 @@ method; everything else here is a helper.
 =head2 C<source( )> and C<filename( )>
 
 Not methods. The source text and the name to report in errors are constructor parameters: C<source> is required and
-C<filename> defaults to C<(eval)>, which is what a program compiled from a string reports. Neither has a reader, so
-a caller that wants the filename back has to keep it.
+C<filename> defaults to C<(eval)>, which is what a program compiled from a string reports. Neither has a reader, so a
+caller that wants the filename back has to keep it.
 
 =head1 ERRORS
 
@@ -122,20 +121,20 @@ which is a slightly confusing message to read the first time and is why the file
 =head1 STATUS
 
 Expect breakage. The keyword table is much longer than the parser, and that gap is visible from here: C<for>,
-C<foreach>, C<unless>, C<until>, C<redo>, C<map>, C<our>, C<state>, C<role>, C<has>, C<fiber>, C<yield>,
-C<transfer>, C<defer>, C<exit>, and C<use> all lex as C<KEYWORD> and then have no case in the parser, so using one
-gives a parse error rather than anything resembling a feature.
+C<foreach>, C<unless>, C<until>, C<redo>, C<map>, C<our>, C<state>, C<role>, C<has>, C<fiber>, C<yield>, C<transfer>,
+C<defer>, C<exit>, and C<use> all lex as C<KEYWORD> and then have no case in the parser, so using one gives a parse
+error rather than anything resembling a feature.
 
-The same is true of several of the type names: C<i128> and C<u128> are keywords here, which is why their rejection
-is a parser-level message rather than a lexer one.
+The same is true of several of the type names: C<i128> and C<u128> are keywords here, which is why their rejection is a
+parser-level message rather than a lexer one.
 
 There is no string interpolation, and no escape processing, as noted above. There is no C<__END__> or C<__DATA__>
 handling, so a program cannot embed a data section. Comments run only to end of line, and there is no C<Pod> or
 C<__END__> block to document a program in its own source.
 
-The single-character operator match is C<[+\-*\/%=<>!&|^~?:.]> and does not include C<@> or C<$> or C<#>, because
-those are reached by the identifier and whitespace passes first. A C<$> in a position where a sigil is not expected
-is therefore a lexical error rather than a stray operator, which is usually the right answer and occasionally is not.
+The single-character operator match is C<[+\-*\/%=<>!&|^~?:.]> and does not include C<@> or C<$> or C<#>, because those
+are reached by the identifier and whitespace passes first. A C<$> in a position where a sigil is not expected is
+therefore a lexical error rather than a stray operator, which is usually the right answer and occasionally is not.
 
 =head1 LICENSE & LEGAL
 
@@ -151,10 +150,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

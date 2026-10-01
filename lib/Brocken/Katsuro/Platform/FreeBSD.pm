@@ -10,5 +10,4 @@ class Brocken::Katsuro::Platform::FreeBSD : isa(Brocken::Katsuro::Platform::BSD)
     method interpreter()             {'/libexec/ld-elf.so.1'}
     method needs_sched_setaffinity() {1}
 }
-
 1;

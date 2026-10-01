@@ -4344,5 +4344,4 @@ class Brocken::Jenny::Lowerer::RISCV64 {
 }
 
 # Lowerer: Lindsay IR -> Machine IR (Wasm)
-
 1;

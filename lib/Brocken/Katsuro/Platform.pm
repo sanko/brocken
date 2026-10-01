@@ -343,5 +343,4 @@ class Brocken::Katsuro::Platform {
     method fp_return_register()                    { $self->abi->fp_return_register }
     method fiber_reg()                             { $self->abi->fiber_reg }
 }
-
 1;

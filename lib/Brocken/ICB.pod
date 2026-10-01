@@ -13,27 +13,27 @@ Brocken::ICB - Isolate Control Block layout constants
 
 =head1 DESCRIPTION
 
-An isolate's control block is the 144-byte structure at the base of its heap, holding everything the runtime needs
-to keep running: where the allocator is, how much fuel is left, what went wrong, and where exceptions are going.
-This module is the layout of that structure, as constants.
+An isolate's control block is the 144-byte structure at the base of its heap, holding everything the runtime needs to
+keep running: where the allocator is, how much fuel is left, what went wrong, and where exceptions are going. This
+module is the layout of that structure, as constants.
 
-It exists because two things have to agree on those offsets. The runtime, written in Brocken in F<src/runtime/core.brocken>,
-reaches its own fields with accessor functions, and the linker and the debug machinery in Perl need the same offsets
-as plain integers. Rather than let the two drift, this module computes the layout once through L<Brocken::Layout> from
-a single field list and generates a constant for every field.
+It exists because two things have to agree on those offsets. The runtime, written in Brocken in
+F<src/runtime/core.brocken>, reaches its own fields with accessor functions, and the linker and the debug machinery in
+Perl need the same offsets as plain integers. Rather than let the two drift, this module computes the layout once
+through L<Brocken::Layout> from a single field list and generates a constant for every field.
 
-The field list in F<lib/Brocken/ICB.pm> is therefore the single source of truth for ICB offsets in Perl. Reorder it
-and every constant below changes with it, which is the point.
+The field list in F<lib/Brocken/ICB.pm> is therefore the single source of truth for ICB offsets in Perl. Reorder it and
+every constant below changes with it, which is the point.
 
-This is also the one place in the tree that computes a struct layout at compile time of the Perl module, in a
-C<BEGIN> block, by generating and C<eval>ing subroutines. The generated subs return plain integers, so they inline
-to a constant at the point of use.
+This is also the one place in the tree that computes a struct layout at compile time of the Perl module, in a C<BEGIN>
+block, by generating and C<eval>ing subroutines. The generated subs return plain integers, so they inline to a constant
+at the point of use.
 
 =head1 THE LAYOUT
 
-All 17 fields are pointers or C<i64>s, both eight bytes on every target, so the block is 136 bytes of fields rounded
-up to 144. Offsets fall out of that uniform size, and a struct of nothing but pointers and 64-bit integers has no
-internal padding at all.
+All 17 fields are pointers or C<i64>s, both eight bytes on every target, so the block is 136 bytes of fields rounded up
+to 144. Offsets fall out of that uniform size, and a struct of nothing but pointers and 64-bit integers has no internal
+padding at all.
 
 The heap and collector state comes first, then the interpreter limits, then error and exception state:
 
@@ -75,8 +75,8 @@ Head of the buffers the collector has marked suspect but not yet reclaimed.
 
 =item 64 - C<FUEL>
 
-Remaining instruction budget, decremented as the program runs. When it hits zero the runtime raises
-C<ERR_NO_FUEL> rather than letting a runaway loop run forever.
+Remaining instruction budget, decremented as the program runs. When it hits zero the runtime raises C<ERR_NO_FUEL>
+rather than letting a runaway loop run forever.
 
 =item 72 - C<ERR_CODE>
 
@@ -161,10 +161,10 @@ C<ERR_OK>, C<ERR_OOM>, C<ERR_NO_FUEL>, C<ERR_SECURITY>, C<ERR_DIV_ZERO>, and C<E
 
 =head1 STATUS
 
-The field list is in the order the runtime initializes them, which is the order F<src/runtime/core.brocken> writes
-them in C<init_isolate>, and it stops at C<THROWN_VALUE>. Several things the project wants on an isolate are not here
-yet: an isolated-thread count, a root set beyond the fiber list, and the fields a fiber needs beyond a bare pointer.
-Those are ahead of this.
+The field list is in the order the runtime initializes them, which is the order F<src/runtime/core.brocken> writes them
+in C<init_isolate>, and it stops at C<THROWN_VALUE>. Several things the project wants on an isolate are not here yet:
+an isolated-thread count, a root set beyond the fiber list, and the fields a fiber needs beyond a bare pointer. Those
+are ahead of this.
 
 Note also that this table and the runtime's accessors are the same structure described twice. The accessors in
 F<src/runtime/core.brocken> use named C<get_*> and C<set_*> calls rather than raw offsets, which is why adding a field
@@ -186,10 +186,8 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
-
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
-
 
 =cut

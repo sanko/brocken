@@ -512,5 +512,4 @@ class Brocken::Lindsay::IR::Module {
         return $out;
     }
 }
-
 1;

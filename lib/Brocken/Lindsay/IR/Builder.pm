@@ -532,5 +532,4 @@ class Brocken::Lindsay::IR::Builder {
         return $insert_block->append_inst($inst);
     }
 }
-
 1;

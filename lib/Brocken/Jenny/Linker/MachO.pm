@@ -695,5 +695,4 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         return $output_file;
     }
 }
-
 1;

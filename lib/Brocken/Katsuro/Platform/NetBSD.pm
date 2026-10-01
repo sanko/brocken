@@ -56,5 +56,4 @@ class Brocken::Katsuro::Platform::NetBSD : isa(Brocken::Katsuro::Platform::BSD) 
         };
     }
 }
-
 1;
