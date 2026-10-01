@@ -284,15 +284,7 @@ class Brocken::Jenny::RegAlloc::LinearScan {
                     next unless @ops >= 1;
                     my $dst = $ops[0];
                     next unless $dst->kind eq 'phys_reg';
-
-                    # The float class cannot always be read off the type: a
-                    # call-argument copy is `fmov <phys xmm>, <float virt>` and
-                    # the destination carries no type, so the register it names
-                    # would stay allocatable and a float literal materialised
-                    # into a temporary could land on top of an argument already
-                    # placed there.  Trust the opcode when the type is absent.
-                    my $is_dst_float
-                        = $dst->type ? ( $dst->type->kind eq 'float' ? 1 : 0 ) : ( $inst->opcode =~ /^(?:fmov|fload|fmov_gp2f)$/ ? 1 : 0 );
+                    my $is_dst_float = $dst->type ? ( $dst->type->kind eq 'float' ? 1 : 0 ) : 0;
                     next if $is_float != $is_dst_float;
                     next if $inst->opcode eq 'store' || $inst->opcode eq 'store_imm';
                     next unless defined $dst->value;
