@@ -3737,14 +3737,16 @@ class Brocken::Jenny::Lowerer::X86_64 {
                                 );
                             }
                             else {
-                                my $val = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => $is_float ? 'fmov' : 'mov',
-                                        operands => [ $reg_op, $val ],
-                                        comment  => "arg $i to $reg_name"
-                                    )
-                                );
+                                if ( !$is_float || !$self->_materialize_into( $mbb, $args[$i], $reg_op ) ) {
+                                    my $val = $is_float ? $self->_materialize( $mbb, $args[$i] ) : $self->_lower_opnd( $args[$i] );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => $is_float ? 'fmov' : 'mov',
+                                            operands => [ $reg_op, $val ],
+                                            comment  => "arg $i to $reg_name"
+                                        )
+                                    );
+                                }
                             }
                         }
                     }
@@ -4834,6 +4836,54 @@ class Brocken::Jenny::Lowerer::X86_64 {
             return $fp;
         }
         return $self->_lower_opnd($ir_val);
+    }
+
+    # Build a floating-point constant straight into a named register.
+    #
+    # `_materialize` hands back a floating-point virtual register and the caller
+    # then copies it across, which leaves a floating-point temporary in the
+    # middle of the argument setup.  The allocator may put that temporary in any
+    # caller-saved register, including an argument register that an earlier
+    # argument has already been placed in, so a later literal overwrote the
+    # argument before the call read it.  With `g(1.0, 2.0)` both parameters came
+    # out as 1.0.  Building the value into the argument register itself leaves no
+    # floating-point temporary to collide with anything.
+    #
+    # The bit pattern still travels through a general-purpose register, since
+    # there is no instruction that loads a floating-point immediate.  That
+    # register is written and read by the two instructions below and nothing
+    # else, and the argument copies are emitted in reverse order, so the integer
+    # argument registers are all set after this pair has run.
+    method _materialize_into( $mbb, $ir_val, $dest ) {
+        return 0 unless $ir_val->isa('Brocken::Lindsay::IR::Constant');
+        return 0 unless $ir_val->type && $ir_val->type->kind eq 'float';
+        state $fmgi = 0;
+        my $bits        = $ir_val->type->bits;
+        my $value       = $ir_val->value;
+        my $bit_pattern = $bits >= 64 ? unpack( 'Q', pack( 'd', $value ) ) : unpack( 'V', pack( 'f', $value ) );
+        my $gp_type     = Brocken::Lindsay::IR::Type::i64();
+        my $gp          = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%fmgp_' . $fmgi++, type => $gp_type );
+
+        # The destination is a physical register, which carries no type of its
+        # own, and `fmov_gp2f` takes the width of the move from there.  Left
+        # untyped it would encode 32 bits and truncate an f64 to its low half.
+        my $dest_typed
+            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $dest->value, type => $ir_val->type );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'mov',
+                operands => [ $gp, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $bit_pattern, type => $gp_type ) ],
+                comment  => 'fmg: bit pattern'
+            )
+        );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'fmov_gp2f',
+                operands => [ $dest_typed, $gp ],
+                comment  => 'fmg: gp->arg reg'
+            )
+        );
+        return 1;
     }
 
     # Lower an IR operand, returning the lo half virt_reg for i128 non-constants
