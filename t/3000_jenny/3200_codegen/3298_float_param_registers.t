@@ -29,10 +29,12 @@ use feature qw[class];
 # parallel moves.
 #
 # The values are built at runtime from integers rather than written as float
-# literals, because a float literal passed straight to a parameter has its own
-# bug (TODO.md, `Unexpected operand kind: imm`).  The sum comes back through an
-# integer for the same reason 1076 keeps its comparisons small: comparing a
-# float against a literal is not what this test is about.
+# literals so the argument copies have register sources and the hazard can
+# form; a literal is materialised straight into the argument register and
+# cannot collide.  Literal arguments, including the materialisation they need,
+# are covered by 3299.  The sum comes back through an integer for the same
+# reason 1076 keeps its comparisons small: comparing a float against a literal
+# is not what this test is about.
 my $brocken = Brocken->new;
 SKIP: {
     skip 'Not native', 1 unless $brocken->platform->is_native;

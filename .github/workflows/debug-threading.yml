@@ -3,57 +3,6 @@ concurrency:
   cancel-in-progress: true
   group: '${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}'
 jobs:
-  openbsd:
-    name: OpenBSD
-    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
-    with:
-      checkout_submodules: recursive
-      matrix: |-
-        [
-          {"name":"Intel","platform_name":"openbsd","os":"openbsd","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","prepare":"pkg_add gmake curl truss"},
-          {"name":"ARM","platform_name":"openbsd","os":"openbsd","arch":"aarch64","toolchain":"gcc","perl_version":"5.42.0","prepare":"pkg_add gmake curl truss"}
-        ]
-      os_version: 7.8
-      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
-      task: |
-        export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
-        if command -v curl >/dev/null 2>&1; then curl -fsSL https://cpanmin.us -o /tmp/cpanmin.pl
-        elif command -v wget >/dev/null 2>&1; then wget -qO /tmp/cpanmin.pl https://cpanmin.us
-        else echo 'no http downloader available' >&2; exit 1; fi
-        perl /tmp/cpanmin.pl --notest App::cpanminus Module::Build::Tiny
-        rm -f /tmp/cpanmin.pl
-        export PATH="$(dirname "$(perl -e 'print $^X')"):$(perl -MConfig -e 'print "$Config{sitebin}:$Config{scriptdir}:"' 2>/dev/null):$PATH"
-        cpanm --installdeps --notest -v .
-        perl Build.PL
-        ./Build
-        #~ OpenBSD has no strace; truss is the native system call tracer.
-        truss -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
-        prove -Ilib -lv $TEST_FILES
-  omnios:
-    name: OmniOS
-    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
-    with:
-      checkout_submodules: recursive
-      matrix: |-
-        [
-          {"name":"Intel","platform_name":"omnios","os":"omnios","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","configure":"-A'ccflags=-D__EXTENSIONS__ -fno-lto'","prepare":"pkg install -v --accept developer/gcc13 system/header developer/build/make web/curl"}
-        ]
-      os_version: r151058
-      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
-      task: |
-        export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
-        if command -v curl >/dev/null 2>&1; then curl -fsSL https://cpanmin.us -o /tmp/cpanmin.pl
-        elif command -v wget >/dev/null 2>&1; then wget -qO /tmp/cpanmin.pl https://cpanmin.us
-        else echo 'no http downloader available' >&2; exit 1; fi
-        perl /tmp/cpanmin.pl --notest App::cpanminus Module::Build::Tiny
-        rm -f /tmp/cpanmin.pl
-        export PATH="$(dirname "$(perl -e 'print $^X')"):$(perl -MConfig -e 'print "$Config{sitebin}:$Config{scriptdir}:"' 2>/dev/null):$PATH"
-        cpanm --installdeps --notest -v .
-        perl Build.PL
-        ./Build
-        #~ truss ships with OmniOS; strace does not exist there.
-        truss -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
-        prove -Ilib -lv $TEST_FILES
   haiku:
     name: Haiku
     uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
@@ -64,7 +13,6 @@ jobs:
           {"name":"Intel","platform_name":"haiku","os":"haiku","arch":"x86_64","toolchain":"gcc","prepare":"pkgman install -y cmd:gcc cmd:make cmd:curl cmd:wget cmd:perl"}
         ]
       os_version: r1beta6
-      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
       task: |
         export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
         if command -v curl >/dev/null 2>&1; then curl -fsSL https://cpanmin.us -o /tmp/cpanmin.pl
@@ -79,6 +27,58 @@ jobs:
         #~ Haiku ships neither strace nor truss; run the probe untraced.
         perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
         prove -Ilib -lv $TEST_FILES
+      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
+  omnios:
+    name: OmniOS
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    with:
+      checkout_submodules: recursive
+      matrix: |-
+        [
+          {"name":"Intel","platform_name":"omnios","os":"omnios","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","configure":"-A'ccflags=-D__EXTENSIONS__ -fno-lto'","prepare":"pkg install -v --accept developer/gcc13 system/header developer/build/make web/curl"}
+        ]
+      os_version: r151058
+      task: |
+        export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
+        if command -v curl >/dev/null 2>&1; then curl -fsSL https://cpanmin.us -o /tmp/cpanmin.pl
+        elif command -v wget >/dev/null 2>&1; then wget -qO /tmp/cpanmin.pl https://cpanmin.us
+        else echo 'no http downloader available' >&2; exit 1; fi
+        perl /tmp/cpanmin.pl --notest App::cpanminus Module::Build::Tiny
+        rm -f /tmp/cpanmin.pl
+        export PATH="$(dirname "$(perl -e 'print $^X')"):$(perl -MConfig -e 'print "$Config{sitebin}:$Config{scriptdir}:"' 2>/dev/null):$PATH"
+        cpanm --installdeps --notest -v .
+        perl Build.PL
+        ./Build
+        #~ truss ships with OmniOS; strace does not exist there.
+        truss -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
+        prove -Ilib -lv $TEST_FILES
+      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
+  openbsd:
+    name: OpenBSD
+    uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
+    with:
+      checkout_submodules: recursive
+      matrix: |-
+        [
+          {"name":"Intel","platform_name":"openbsd","os":"openbsd","arch":"x86_64","toolchain":"gcc","perl_version":"5.42.0","prepare":"pkg_add gmake curl truss"},
+          {"name":"ARM","platform_name":"openbsd","os":"openbsd","arch":"aarch64","toolchain":"gcc","perl_version":"5.42.0","prepare":"pkg_add gmake curl truss"}
+        ]
+      os_version: 7.8
+      task: |
+        export AUTOMATED_TESTING=1 AUTHOR_TESTING=0
+        if command -v curl >/dev/null 2>&1; then curl -fsSL https://cpanmin.us -o /tmp/cpanmin.pl
+        elif command -v wget >/dev/null 2>&1; then wget -qO /tmp/cpanmin.pl https://cpanmin.us
+        else echo 'no http downloader available' >&2; exit 1; fi
+        perl /tmp/cpanmin.pl --notest App::cpanminus Module::Build::Tiny
+        rm -f /tmp/cpanmin.pl
+        export PATH="$(dirname "$(perl -e 'print $^X')"):$(perl -MConfig -e 'print "$Config{sitebin}:$Config{scriptdir}:"' 2>/dev/null):$PATH"
+        cpanm --installdeps --notest -v .
+        perl Build.PL
+        ./Build
+        #~ OpenBSD has no strace; truss is the native system call tracer.
+        truss -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
+        prove -Ilib -lv $TEST_FILES
+      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
 name: Debug Threading Issues
 on:
   workflow_dispatch: ~

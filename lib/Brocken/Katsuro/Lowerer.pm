@@ -1530,10 +1530,7 @@ class Brocken::Katsuro::Lowerer {
         # died trying to widen it. Left to floats deliberately -- folding
         # `-5` for an i64 as well is a separate question, since an unsigned
         # neg is defined as wrapping.
-        if ( $op eq '-' &&
-            $operand->isa('Brocken::Lindsay::IR::Constant') &&
-            $operand->type->kind eq 'float' )
-        {
+        if ( $op eq '-' && $operand->isa('Brocken::Lindsay::IR::Constant') && $operand->type->kind eq 'float' ) {
             return Brocken::Lindsay::IR::Constant->new( type => $operand->type, value => -( $operand->value ) );
         }
         return $builder->build_neg( $operand, undef, $line, $col ) if $op eq '-';

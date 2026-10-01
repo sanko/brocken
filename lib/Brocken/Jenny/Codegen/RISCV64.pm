@@ -1105,11 +1105,9 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $did   = $reg_id->($dst_r);
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
-                    my $fbits = $dst->type ? $dst->type->bits : 64;
-                    my $ibits = $src->type ? $src->type->bits : 64;
-                    my $base  = $fbits > 32
-                        ? ( $ibits > 32 ? FCVT_D_L : FCVT_D_W )
-                        : ( $ibits > 32 ? FCVT_S_L : FCVT_S_W );
+                    my $fbits = $dst->type  ? $dst->type->bits                      : 64;
+                    my $ibits = $src->type  ? $src->type->bits                      : 64;
+                    my $base  = $fbits > 32 ? ( $ibits > 32 ? FCVT_D_L : FCVT_D_W ) : ( $ibits > 32 ? FCVT_S_L : FCVT_S_W );
                     $bytes .= pack( 'V', $base | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                 }
                 elsif ( $opcode eq 'fcvtzs' ) {
@@ -1117,11 +1115,9 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $did   = $reg_id->($dst_r);
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
-                    my $fbits = $src->type ? $src->type->bits : 64;
-                    my $ibits = $dst->type ? $dst->type->bits : 64;
-                    my $base  = $fbits > 32
-                        ? ( $ibits > 32 ? FCVT_L_D : FCVT_W_D )
-                        : ( $ibits > 32 ? FCVT_L_S : FCVT_W_S );
+                    my $fbits = $src->type  ? $src->type->bits                      : 64;
+                    my $ibits = $dst->type  ? $dst->type->bits                      : 64;
+                    my $base  = $fbits > 32 ? ( $ibits > 32 ? FCVT_L_D : FCVT_W_D ) : ( $ibits > 32 ? FCVT_L_S : FCVT_W_S );
                     $bytes .= pack( 'V', $base | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                 }
                 elsif ( $opcode eq 'ctx_swap' ) {
