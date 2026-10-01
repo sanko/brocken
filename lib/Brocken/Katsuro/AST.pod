@@ -1,0 +1,202 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::AST - Abstract syntax tree node classes
+
+=head1 SYNOPSIS
+
+    use Brocken::Katsuro::Parser;
+
+    my $ast = Brocken::Katsuro::Parser->new(
+        tokens => $tokens, filename => 'prog.brocken',
+    )->parse_program;
+
+    for my $stmt ( $ast->statements->@* ) {
+        printf "%s at %s:%d\n", ref($stmt), $stmt->file, $stmt->line;
+    }
+
+=head1 DESCRIPTION
+
+The tree L<Brocken::Katsuro::Parser> produces and L<Brocken::Katsuro::Lowerer> consumes. Every node here is a
+C<core::class> class with C<: param : reader> fields, so a node is built with a flat list of named arguments and read
+back with accessor methods:
+
+    my $decl = Brocken::Katsuro::AST::Stmt::VarDecl->new(
+        sigil => '$', name => 'x', type => 'i64', line => 1, col => 1,
+    );
+    $decl->type;      # 'i64'
+
+There is no method on a node other than the field readers. The tree carries no behaviour, which is deliberate: the
+lowerer walks it and nothing else should have an opinion about its shape, so a rewrite that changes the tree does not
+have to change a method somewhere.
+
+Every node has three position fields, inherited from a common base: C<file>, C<line>, and C<col>. They are set by
+the parser for every node it builds, and they are what makes a Brocken error message point at a line in the user's
+program rather than a line in the compiler. Nothing reads them during lowering, but the debug information in the
+linked executable does, which is why they are on the base class rather than on the nodes that happen to need them
+today.
+
+=head1 THE BASE CLASS
+
+C<Brocken::Katsuro::AST::Node> is the parent of everything here and holds only those three position fields. It is a
+concrete class rather than an abstract one, so the parser can build one when it needs a node with no kind.
+
+=head1 TOP LEVEL
+
+C<Brocken::Katsuro::AST::Program> has one field, C<statements>, an arrayref of statement nodes in source order. This
+is the root the parser returns and the first thing the lowerer walks.
+
+A program is a flat list of statements, not a tree of blocks at the top level. A C<sub> or C<class> declaration
+anywhere in the program contributes to the program as a whole, and the lowerer hoists them, so top-level structure
+carries no meaning of its own.
+
+=head1 STATEMENTS
+
+=head2 C<VarDecl>
+
+A variable declaration. Fields: C<sigil>, which is C<@>, C<%>, or C<$>; C<name> without the sigil; C<type>, defaulting
+to C<Any>; and C<init>, the initial value expression or C<undef> when there is none. A declaration with no C<init> is
+the zero value, and the lowerer materializes it rather than leaving it undefined.
+
+=head2 C<ArrayDecl>
+
+A fixed-size array declaration, with C<name>, C<elem_type>, C<size_expr> as an expression rather than a number, and
+an optional C<init> array literal. C<$a> returns a constant, which is what makes the length a constant expression
+rather than something computed at run time.
+
+=head2 C<ListVarDecl>
+
+The list form of a variable declaration, C<my ($a, $b) = ...>, carrying a sigil and a list of names rather than one.
+
+=head2 C<Assign>
+
+An assignment: C<target>, the node being written; C<expr>, the value; and C<op>, which is C<=> by default or C<//=>
+for assign-or. The default is in the field rather than supplied by the parser, so a node built by hand is an
+ordinary assignment.
+
+=head2 C<Block>
+
+A braced sequence, with C<statements>. Both the branches of an C<if> and the body of a C<while> are this, which is
+why the block is a statement and not a marker.
+
+=head2 C<If>
+
+C<cond>, a C<then> block, an C<elsif> arrayref of C<[ cond, block ]> pairs, and an optional C<else> block. C<elsif>
+is a list rather than a nested C<If> so a chain of any length stays flat and the lowerer can walk it in one pass
+instead of recursing.
+
+=head2 C<While>
+
+C<cond> and C<body>, the latter an C<AST::Stmt::Block>. C<do> and C<until> produce this node too, with the
+difference carried in the condition rather than in the node type, which is what lets one back-end block serve every
+loop form.
+
+=head2 C<Break>, C<Continue>
+
+C<Break> and C<Continue>, with no fields beyond the position. They carry nothing else, because where the jump goes
+is decided by the loop the lowerer is currently inside, not by the statement.
+
+=head2 C<Return>
+
+C<expr>, optional. A bare C<return> and a C<return> with a value are the same node, distinguished by whether C<expr>
+is C<undef>, because a C<return> of nothing and a C<return> of a zero value must not compile the same way.
+
+=head2 C<SubDecl>
+
+A function declaration: C<name>, C<params> as an arrayref of parameter nodes, an optional C<return_type>, and
+C<body> as a block.
+
+=head2 C<ClassDecl>
+
+A class declaration: C<name> and a C<body> of declarations. The parser collects C<field>, C<method>, and C<ADJUST>
+declarations from the body; C<Brocken::Katsuro::Lowerer> turns them into a struct layout, a constructor, and the
+accessors.
+
+=head2 C<FieldDecl>
+
+A field declaration: C<name>, C<type>, an optional C<attributes> hashref, and a C<default>. The attributes are where
+C<: param> and C<: pack(N)> come from, and the default is an expression rather than a value so that a field can be
+initialised from another field.
+
+=head2 C<MethodDecl>
+
+A method declaration: C<name>, C<params>, an optional C<return_type>, and C<body>. A method is not a
+C<SubDecl> because it is bound to a class, and the lowerer needs to know that when it decides whether a name is a
+free function or a method on the current C<__CLASS__>.
+
+=head2 C<Adjust>
+
+An C<ADJUST> block attached to a class, with a C<body>.
+
+=head2 C<TryCatch>
+
+A C<try> with its three parts: C<body>, an optional C<catch> block, and an optional C<finally> block. Either of the
+last two may be absent, which is how a C<try>-C<finally> with no handler is expressed.
+
+=head2 C<Throw>
+
+A C<throw>, with C<value>. The value is an expression, so it is a constant in every program that compiles today.
+
+=head1 EXPRESSIONS
+
+C<BinOp> and C<UnOp> are the operators, with C<op>, and the operands. C<Const> is a literal, carrying both C<value>
+and C<type>, because a literal's type is part of the program rather than something the lowerer infers later.
+C<Var> is a variable reference, with the sigil and the name. C<Ident> is a bare name, which is a class or a constant
+rather than a variable.
+
+C<Paren> is a parenthesized expression, kept as a node so that precedence and the tree shape do not depend on how
+the source was spaced.
+
+C<FieldAccess> is C<< $p->x >>, with C<object> and C<field>. C<ArrayIndex> is C<< $a[0] >>, with C<array> and
+C<index>. C<MethodCall> is a call with named arguments, C<receiver>, C<method>, and C<args>.
+
+C<Call> is a plain call, C<func_name> and C<args>, which is also what C<say> and C<print> arrive as. C<ClassConst> is
+a bare class name. C<IntrinsicCall> is a compiler-known primitive that is not a source-level function, and
+C<Ternary> is the conditional expression. C<Want> is the C<want> of a prototype, and C<List> and C<Hash> are the
+list and hash literals.
+
+=head1 STATUS
+
+Expect breakage. Several nodes are declared here that the parser cannot yet produce, and the fields on the rest have
+grown as the lowerer needed them rather than from a design.
+
+C<VarDecl>'s C<sigil> is documented as accepting C<@>, C<%>, or C<$>, but a variable declaration in the source
+language only produces the C<$> case: array and hash declarations have their own nodes, and a C<@x> declaration is
+not something the parser accepts. The C<@> and C<%> values are there for the list and hash forms to use.
+
+C<If>'s C<elsif> pairs, C<TryCatch>'s absent handlers, and C<Return>'s absent C<expr> are all distinguished by
+absence, which works and is easy to get wrong in a caller. A node built by hand with C<elsif> left at its default is
+an C<if> with no C<elsif>, which is the same node as one that parsed with none.
+
+C<Stmt::Break> and C<Stmt::Continue> are the loop-control nodes, and the source spells them C<last> and C<next>
+rather than the C-language names, which is where the keyword list in L<Brocken::Katsuro::Lexer> has them. The
+lowerer implements both, including the reference-count decrements a jump past a variable's scope needs, so these
+two nodes are the most complete part of the tree. What is not there is a C<for> loop, whose keyword the lexer knows
+and the parser has no case for.
+
+The position fields are C<: param : reader> with a default, so a node can be built without them and silently reports
+line zero. That is convenient for tests and it means a missing position is not an error, it is just a bad message
+later.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
+
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut
