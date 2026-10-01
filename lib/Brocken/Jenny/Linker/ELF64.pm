@@ -9,14 +9,6 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
     field $_extern_got_offsets : reader = {};
 
-=pod
-
-=head1 NAME
-
-Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
-
-=cut
-
     # Structurally compliant segment layout grouping all read-only sections
     # in the RX segment, and keeping only writable sections in the RW segment.
     method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
@@ -1434,4 +1426,5 @@ Brocken::Jenny::Linker::ELF64 - 64-bit Executable and Linkable Format Generator
         return $output_file;
     }
 }
+
 1;

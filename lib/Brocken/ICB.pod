@@ -1,0 +1,195 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::ICB - Isolate Control Block layout constants
+
+=head1 SYNOPSIS
+
+    use Brocken::ICB qw[SIZE FUEL ERR_CODE ERR_NO_FUEL MEMORY_LIMIT];
+
+    my $word = read_i64( $heap_base + FUEL );
+    ERR_NO_FUEL();    # 2
+
+=head1 DESCRIPTION
+
+An isolate's control block is the 144-byte structure at the base of its heap, holding everything the runtime needs
+to keep running: where the allocator is, how much fuel is left, what went wrong, and where exceptions are going.
+This module is the layout of that structure, as constants.
+
+It exists because two things have to agree on those offsets. The runtime, written in Brocken in F<src/runtime/core.brocken>,
+reaches its own fields with accessor functions, and the linker and the debug machinery in Perl need the same offsets
+as plain integers. Rather than let the two drift, this module computes the layout once through L<Brocken::Layout> from
+a single field list and generates a constant for every field.
+
+The field list in F<lib/Brocken/ICB.pm> is therefore the single source of truth for ICB offsets in Perl. Reorder it
+and every constant below changes with it, which is the point.
+
+This is also the one place in the tree that computes a struct layout at compile time of the Perl module, in a
+C<BEGIN> block, by generating and C<eval>ing subroutines. The generated subs return plain integers, so they inline
+to a constant at the point of use.
+
+=head1 THE LAYOUT
+
+All 17 fields are pointers or C<i64>s, both eight bytes on every target, so the block is 136 bytes of fields rounded
+up to 144. Offsets fall out of that uniform size, and a struct of nothing but pointers and 64-bit integers has no
+internal padding at all.
+
+The heap and collector state comes first, then the interpreter limits, then error and exception state:
+
+=over
+
+=item 0 - C<HEAP_CURSOR>
+
+Where the next general allocation comes from.
+
+=item 8 - C<CURRENT_FCB>
+
+The fiber control block currently executing.
+
+=item 16 - C<FIBER_HEAD>
+
+The head of the fiber list, and so the root the collector traces from.
+
+=item 24 - C<IMMIX_CURSOR>
+
+Bump-allocation cursor within the current Immix block.
+
+=item 32 - C<IMMIX_LIMIT>
+
+End of the usable region in the current Immix block, in blocks. A bump allocation that would pass this has to go and
+find another block.
+
+=item 40 - C<FREE_BLOCKS>
+
+Head of the list of free Immix blocks.
+
+=item 48 - C<FREE16_HEAD>
+
+Head of the segregated 16-byte free list. This is the allocator's hot path: a small allocation pops here rather than
+touching the bump cursor.
+
+=item 56 - C<SUSPECT_BUFFER_HEAD>
+
+Head of the buffers the collector has marked suspect but not yet reclaimed.
+
+=item 64 - C<FUEL>
+
+Remaining instruction budget, decremented as the program runs. When it hits zero the runtime raises
+C<ERR_NO_FUEL> rather than letting a runaway loop run forever.
+
+=item 72 - C<ERR_CODE>
+
+The isolate's current error, as one of the C<ERR_*> constants below.
+
+=item 80 - C<CURRENT_BLOCK>
+
+The Immix block currently being allocated from.
+
+=item 88 - C<MEMORY_LIMIT>
+
+Heap byte ceiling for this isolate. Zero means no limit, which is the default.
+
+=item 96 - C<MEMORY_USED>
+
+Heap bytes currently in use, compared against C<MEMORY_LIMIT> on every allocation.
+
+=item 104 - C<CAPABILITIES>
+
+The capability bitmask, which the FFI and syscall gates read before acting. See C<$Brocken::CAP_FS_READ> and its
+neighbours in L<Brocken>.
+
+=item 112 - C<GATE_TABLE>
+
+Dispatch table mapping a gated operation to the check that guards it.
+
+=item 120 - C<HOST_ICB>
+
+The host isolate's control block, for a nested or child isolate to reach its parent.
+
+=item 128 - C<EXCEPTION_HANDLER_STACK>
+
+Top of the C<setjmp> chain that C<try> and C<catch> are built from.
+
+=item 136 - C<THROWN_VALUE>
+
+The value the in-flight C<throw> carried.
+
+=item 144 - C<SIZE>
+
+The size of the whole block, 144. This is what to reserve for an isolate.
+
+=back
+
+=head1 ERROR CODES
+
+C<ERR_CODE> holds one of these:
+
+=over
+
+=item * C<ERR_OK> - 0, no error
+
+=item * C<ERR_OOM> - 1, out of memory against C<MEMORY_LIMIT>
+
+=item * C<ERR_NO_FUEL> - 2, out of fuel
+
+=item * C<ERR_SECURITY> - 3, a capability check refused the operation
+
+=item * C<ERR_DIV_ZERO> - 4, integer division by zero
+
+=item * C<ERR_THROW> - 5, a Brocken-level C<throw>, carrying its value in C<THROWN_VALUE>
+
+=back
+
+=head1 FUNCTIONS
+
+Every constant is a subroutine taking no arguments and returning an integer, so it is written C<ERR_NO_FUEL()> when
+called and C<ERR_NO_FUEL> in a table or expression. All of them are in C<@Brocken::ICB::EXPORT_OK> and none are
+exported by default:
+
+    use Brocken::ICB qw[FUEL MEMORY_LIMIT SIZE];
+
+=head2 Offset constants
+
+C<HEAP_CURSOR>, C<CURRENT_FCB>, C<FIBER_HEAD>, C<IMMIX_CURSOR>, C<IMMIX_LIMIT>, C<FREE_BLOCKS>, C<FREE16_HEAD>,
+C<SUSPECT_BUFFER_HEAD>, C<FUEL>, C<ERR_CODE>, C<CURRENT_BLOCK>, C<MEMORY_LIMIT>, C<MEMORY_USED>, C<CAPABILITIES>,
+C<GATE_TABLE>, C<HOST_ICB>, C<EXCEPTION_HANDLER_STACK>, C<THROWN_VALUE>, and C<SIZE>.
+
+=head2 Error constants
+
+C<ERR_OK>, C<ERR_OOM>, C<ERR_NO_FUEL>, C<ERR_SECURITY>, C<ERR_DIV_ZERO>, and C<ERR_THROW>.
+
+=head1 STATUS
+
+The field list is in the order the runtime initializes them, which is the order F<src/runtime/core.brocken> writes
+them in C<init_isolate>, and it stops at C<THROWN_VALUE>. Several things the project wants on an isolate are not here
+yet: an isolated-thread count, a root set beyond the fiber list, and the fields a fiber needs beyond a bare pointer.
+Those are ahead of this.
+
+Note also that this table and the runtime's accessors are the same structure described twice. The accessors in
+F<src/runtime/core.brocken> use named C<get_*> and C<set_*> calls rather than raw offsets, which is why adding a field
+means changing both, and nothing in the test suite checks that the two agree. The first 17 C<set_*> calls in the
+runtime's C<init_isolate> do currently match this field list in order, but that agreement is a convention being
+maintained by hand rather than something enforced.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
+
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

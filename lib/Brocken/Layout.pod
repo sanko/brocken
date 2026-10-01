@@ -1,0 +1,158 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Layout - Type sizes, alignments, and struct field layout
+
+=head1 SYNOPSIS
+
+    use Brocken::Layout;
+
+    my $size  = Brocken::Layout::type_size('i64');         # 8
+    my $align = Brocken::Layout::type_alignment('f64');    # 8
+
+    my $layout = Brocken::Layout::layout_fields(
+        { name => 'cursor', type => 'ptr' },
+        { name => 'limit',  type => 'ptr' },
+        { name => 'fuel',   type => 'i64' },
+    );
+
+    $layout->{size};                # 24
+    $layout->{alignment};          # 8
+    $layout->{fields}[2]{offset};  # 16
+
+=head1 DESCRIPTION
+
+Brocken has to know how big a value is and where it sits in a struct, and it has to know the same thing on every
+target without writing the table four times. This module is that table.
+
+Every function here is called by its full name. This is a plain package of functions with no C<import> and no
+export list, deliberately: it is a low-level layout helper that the rest of the compiler reaches for directly, and
+importing C<type_size> into a caller who also has a C<$size> variable is a collision waiting to happen.
+
+Every Brocken target is 64-bit, so C<ptr> is eight bytes everywhere, and the alignment and size tables here are
+uniform across x86-64, AArch64, and RISC-V. There is no per-architecture variant of this module, and that is the
+point: a struct laid out here lays out the same on all three.
+
+The table is the System V AMD64 ABI's, which is also what AArch64 and RISC-V use for scalar types.
+
+=head1 THE TABLES
+
+Sizes and alignments are identical for every type, which is the usual scalar case:
+
+=over
+
+=item * C<i1>, C<i8>, C<u8> - one byte, alignment one
+
+=item * C<i16>, C<u16> - two bytes, alignment two
+
+=item * C<i32>, C<u32>, C<f32> - four bytes, alignment four
+
+=item * C<i64>, C<u64>, C<f64>, C<ptr> - eight bytes, alignment eight
+
+=item * C<i128>, C<u128> - sixteen bytes, alignment sixteen
+
+=back
+
+C<i1> is a byte-sized integer that the C<Layout> table knows about even though the parser will not declare one. A
+struct in the runtime holds C<i64> error codes rather than C<i1>, so a narrower type is not needed yet.
+
+=head1 FUNCTIONS
+
+=head2 C<align( $offset, $alignment )>
+
+    my $padded = align( 9, 8 );    # 16
+
+Rounds C<$offset> up to the next multiple of C<$alignment>. An alignment of one or less returns C<$offset>
+unchanged, so this is safe to call unconditionally.
+
+=head2 C<type_alignment( $type )>
+
+Returns the required alignment of a type name, as a string key into the table: C<i1>, C<i8>, C<i16>, C<i32>,
+C<i64>, C<i128>, C<u8>, C<u16>, C<u32>, C<u64>, C<u128>, C<f32>, C<f64>, or C<ptr>.
+
+Dies on an unknown name. The message is C<Layout: unknown type 'NAME'>.
+
+=head2 C<type_size( $type )>
+
+Returns the size of a type name in bytes, accepting the same names as C<type_alignment>. Dies on an unknown name
+with the same message.
+
+=head2 C<layout_fields( @fields )>
+
+    my $layout = layout_fields(
+        { name => 'a', type => 'ptr' },
+        { name => 'b', type => 'i64', desc => 'instruction budget' },
+        { name => 'c', type => 'i32', value => 0, id => 'ERR_OK' },
+    );
+
+Lays out a struct from an ordered list of field definitions and returns a layout hashref with three keys:
+
+=over
+
+=item C<fields>
+
+An arrayref of field hashrefs in the order given, each with C<name>, C<type>, C<offset>, C<size>, and C<alignment>,
+plus any extra keys the input carried.
+
+=item C<size>
+
+The total size in bytes, rounded up to the struct's own alignment. This is the number of bytes to reserve.
+
+=item C<alignment>
+
+The largest alignment among the fields, which is the struct's alignment.
+
+=back
+
+Each input field is a hashref that must have C<name> and C<type>. Three further keys change the result:
+
+=over
+
+=item * C<size> - use this size instead of the table's, for a field that is an array or a packed record
+
+=item * C<alignment> - use this alignment instead of the table's, which is how C<: pack(N)> on a Brocken class field
+is honoured
+
+=item * C<desc>, C<id>, C<value> - carried through to the output untouched, so a caller can attach documentation or
+a constant value to a field and get it back
+
+=back
+
+Fields are placed in order, each at the next offset satisfying its own alignment, so padding appears wherever the
+alignment rules demand it. A field with no name, or with a name but no type, is a die: C<Layout: field has no name>
+or C<Layout: field 'NAME' has no type>.
+
+The tail is padded out to the struct alignment. An array of C<ptr>, C<ptr>, C<i64> is 24 bytes rather than 23,
+which is what makes C<< $layout->{size} % $layout->{alignment} == 0 >> hold and lets the result be used as a stride.
+
+=head1 STATUS
+
+The 128-bit entries are here because the table is complete, not because the compiler can use them. As
+L<Brocken::Katsuro::Parser> documents, C<i128> and C<u128> do not parse as variable types, and
+L<Brocken::Jenny::RegAlloc> has no 128-bit concept, so a 128-bit value cannot be allocated or moved today. The
+alignment and size rules for a 128-bit field are correct and nothing else is.
+
+C<i1> is in the same position: known to the table, not produced by the frontend.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
+
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

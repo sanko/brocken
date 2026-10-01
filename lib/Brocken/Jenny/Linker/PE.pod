@@ -1,0 +1,58 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker::PE - 64-bit Portable Executable (PE32+) Generator
+
+=head1 DESCRIPTION
+
+Generates PE32+ binaries for 64-bit Windows (x86_64 and ARM64). Produces standard PE headers (DOS header, COFF header,
+optional header with subsystem/entry point), section table, and raw section data. Supports DWARF debug sections,
+relocations, and import directories.
+
+=head2 Sections Produced
+
+=over
+
+=item C<.text> - Executable code (RVA rounded to page alignment)
+
+=item C<.rdata> - Read-only data (import directory, strings)
+
+=item C<.pdata> - Exception handler data
+
+=item DWARF v5 debug sections (controlled by C<debug_level>)
+
+=back
+
+=head2 Debug Levels
+
+All debug features (DWARF sections, COFF symbols) are controlled by the C<debug_level> setter on the linker object
+(inherited from L<Brocken::Jenny::Linker>):
+
+    0  No debug output (no DWARF, no COFF)
+    1  .debug_line only (line numbers)
+    2  + .debug_info, .debug_abbrev (variable info)
+    3  + .debug_frame, .debug_aranges (unwind tables)
+    4  + .debug_names, .debug_str, struct DIEs (full DWARF)
+    5  + COFF symbols, ASLR disabled (GDB breakpoint support)
+
+=over
+
+=item COFF Symbols (level >= 5)
+
+A COFF symbol table including a C<.text> section-definition symbol (with one auxiliary record) and one
+C<IMAGE_SYM_CLASS_EXTERNAL> symbol per function. Long section names and function names share a single combined string
+table after the symbol table. This makes GDB's C<break E<lt>funcnameE<gt>> work on PE.
+
+Without COFF symbols (level < 5), GDB can still enumerate functions via C<info functions> using DWARF C<.debug_names>
+but cannot resolve breakpoints by name.
+
+=item ASLR (level >= 5)
+
+At level 5, the C<IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE> bit (0x0020) is cleared in the DLL characteristics, disabling
+ASLR so breakpoints set from COFF symbols resolve to the correct address at runtime. At levels < 5, ASLR remains
+enabled.
+
+=back
+
+=cut

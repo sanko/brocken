@@ -4345,49 +4345,4 @@ class Brocken::Jenny::Lowerer::RISCV64 {
 
 # Lowerer: Lindsay IR -> Machine IR (Wasm)
 
-=head1 NAME
-
-Brocken::Jenny::Lowerer::RISCV64 - RISCV64 MIR lowering pass
-
-=head1 DESCRIPTION
-
-Lowers Lindsay IR instructions to RISCV64 Machine IR (MIR). Each IR instruction is dispatched to an C<emit_op> handler
-that emits zero or more MIR C<MachineInstruction> entries.
-
-Key responsibilities:
-
-=over
-
-=item *
-
-Maps generic IR opcodes to RISCV64 MIR opcodes (addi, ld/sd, etc.)
-
-=item *
-
-Tags each emitted MIR instruction with the originating IR instruction index (C<ir_inst_idx>) for DWARF source-location
-tracking
-
-=item *
-
-Handles RISCV64 calling conventions (a0-a7 argument registers, stack layout)
-
-=item *
-
-Emits frame setup/teardown (sd of ra/fp, stack pointer adjustment)
-
-=back
-
-=head1 METHODS
-
-=head2 emit_op( $builder, $ir_inst, $ir_idx )
-
-Dispatches C<$ir_inst> (a L<Brocken::Lindsay::IR::Instruction>) to the appropriate lowering handler. C<$ir_idx> is the
-instruction index used for DWARF source-map tracking.
-
-=head2 lower_function( $ir_function, $mir_builder )
-
-Lowers an entire IR function to MIR by iterating its blocks and calling C<emit_op> for each instruction.
-
-=cut
-
 1;

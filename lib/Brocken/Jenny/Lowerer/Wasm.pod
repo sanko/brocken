@@ -1,0 +1,52 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Lowerer::Wasm - WebAssembly Lowerer (Lindsay IR to MIR)
+
+=head1 DESCRIPTION
+
+Lowers Lindsay IR to machine-level MIR for WebAssembly. Translates SSA instructions to WASM-compatible operations.
+
+=head2 Lowering Strategy
+
+=over 4
+
+=item B<Parameters> mapped to C<local.get> / C<local.set> by index (no physical registers)
+
+=item B<Arithmetic> lowered to WASM i32/i64 opcodes directly
+
+=item B<Boxing/Unboxing> packed into linear memory via C<i64.store> / C<i64.load>
+
+=item B<Refcounting> uses C<i64.atomic.rmw> for atomic increment and
+C<i64.atomic.rmw> + conditional free for decrement
+
+=item B<Memory> uses WASM linear memory with explicit alignment (4 for i32, 8 for i64)
+
+=back
+
+=head2 Limitations
+
+=over 4
+
+=item * No floating-point arithmetic support (WASM target missing float operations)
+
+=item * No alloca support (WASM has no dynamic stack allocation)
+
+=item * Control flow uses structured blocks with depth-based branch targeting
+
+=back
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut

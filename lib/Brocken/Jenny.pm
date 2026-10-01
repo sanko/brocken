@@ -21,31 +21,4 @@ package Brocken::Jenny v0.0.1 {
     use Brocken::Jenny::Linker::Wasm;
 };
 
-=pod
-
-=encoding utf-8
-
-=head1 NAME
-
-Brocken::Jenny - Machine Code Generation and Linking Layer
-
-=head1 DESCRIPTION
-
-Jenny is responsible for lowering Lindsay IR into native machine code (Jenny::Codegen) and packaging those bytes into
-executable binary formats like ELF, Mach-O, or PE (Jenny::Linker).
-
-=head1 LICENSE
-
-This software is Copyright (c) 2026 by Sanko Robinson.
-
-This is free software, licensed under:
-
-  The Artistic License 2.0 (GPL Compatible)
-
-=head1 AUTHOR
-
-Sanko Robinson <sanko@cpan.org>
-
-=cut
-
 1;

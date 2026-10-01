@@ -1,0 +1,11 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker::Layout - Binary Section Alignment and Placement
+
+=head1 DESCRIPTION
+
+This class calculates the physical file offsets and relative virtual addresses (RVAs) for binary sections.
+
+=cut

@@ -28,15 +28,4 @@ class Brocken::Katsuro::Platform::ABI {
     method fiber_reg()                             {undef}
 }
 
-=head1 NAME
-
-Brocken::Katsuro::Platform::ABI - Low-level Architecture Binary Interface details
-
-=head1 DESCRIPTION
-
-This class and its subclasses define the register sets and DWARF numbering for specific architectures. It abstracts the
-differences between calling conventions (e.g., which registers are preserved across calls).
-
-=cut
-
 1;
