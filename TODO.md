@@ -508,24 +508,22 @@ here was reproduced against a natively compiled and executed binary, not read of
       the type is absent. Coverage:
       `t/3000_jenny/3200_codegen/3299_float_literal_arguments.t` (codegen-level plus executing).
       `dev`'s literal-argument float parameter tests can now be adopted as-is.
+- [x] **x86-64 `cmp` and ALU immediates were truncated to 32 bits** - every
+      `cmp`/`add`/`sub`/`and`/`or`/`xor`/`mul` immediate was emitted as
+      `pack('CCCV', ...)`, a 32-bit field, and the 64-bit forms sign-extend it, so
+      any i64 constant outside signed 32 bits was read as a different number:
+      `my i64 $x = 4294967296; return $x == 4294967296 ? 1 : 0;` answered false and
+      `$x + 4294967296` lost the add. There is no 64-bit immediate form for these
+      opcodes at all, so the constant has to go through a register. The lowerer now
+      materialises one (`_materialize_wide_imm`) before the ALU or compare
+      instruction and leaves in-range immediates untouched; the `mov` encoder
+      already emitted `movabs`. The scalar `neg` path, which lowers `-C` to
+      `sub dst, C`, had the same fault and is fixed the same way. Coverage:
+      `t/1000_katsuro/1077_imm64.t` (executing: comparison boundary, add/sub/mul, a
+      64-bit `and` mask, and a negative out-of-range literal).
 
 ### Open
 
-- [ ] **x86-64 `cmp` and ALU immediates are truncated to 32 bits** - `Codegen/X86_64.pm:1325`
-      (`cmp`) and `:847` (`add`/`sub`/`and`/`or`/`xor`/`adc`/`sbb`) both emit
-      `pack( 'CCCV', ... )`, which packs a 32-bit unsigned value. Worse, x86-64's
-      `cmp r/m64, imm32` (`81 /7`) *sign-extends* the immediate, so there is no single-instruction
-      encoding for a 64-bit constant at all.
-      **Symptoms (both reproduced by executing a compiled binary):**
-      `my i64 $x = 4294967296; return $x == 4294967296 ? 1 : 0;` returns false, as does any i64
-      comparison against a literal >= 2^31; and `my i64 $x = 1; $x = $x + 4294967296;` loses the
-      add. In both cases the *value* is fine - `$x >> 32` and `$x != 0` match - so it is
-      the immediate operand, not the arithmetic. Boundary: 2147483647 works, 2147483648 does not.
-      **Fix:** when the immediate does not fit in signed 32 bits, materialise it with
-      `mov r64, imm64` (`48 B8+r` + `pack 'Q'`) into a scratch register and use the reg/reg
-      form. `mov` already does this correctly at `:768`; copy that logic.
-      **Note:** this is why `t/1000_katsuro/1076_float_conversion.t` deliberately keeps its
-      comparisons at or below 2^31 - the float fix is real, the compare underneath it is not.
 - [ ] **f32 conversions are unverified on ARM64 and Wasm** - x86-64 and RISC-V64 are now fixed
       and covered (see above). ARM64 encodes the width in the instruction (`fcvtzs`, `scvtf`) and
       its codegen already selects on both widths, so it is *probably* fine; Wasm has its own
