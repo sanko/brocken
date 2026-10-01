@@ -474,7 +474,12 @@ class Brocken::Jenny::Codegen::RISCV64 {
             push @to_save, 'ra';
         }
         my $callee_size    = scalar(@to_save) * 8;
-        my $unified_frame  = ( $callee_size + $spill_frame + 15 ) & ~15;
+
+        # The outgoing argument area sits at the bottom of the frame, below the
+        # spill slots, because the callee reads those arguments from the entry
+        # stack pointer and neither `jal ra` nor `jalr ra` moves it.
+        my $call_arg_frame = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
+        my $unified_frame  = ( $callee_size + $spill_frame + $call_arg_frame + 15 ) & ~15;
         my $extra_frame    = $unified_frame - $callee_size;
         my $aligned_alloca = ( $total_alloca + 15 ) & ~15;
         if ( $aligned_alloca > 0 && $extra_frame < 8 ) {
@@ -483,6 +488,20 @@ class Brocken::Jenny::Codegen::RISCV64 {
         }
         my $total_frame = $unified_frame + $aligned_alloca;
         $alloca_frame = $unified_frame;
+
+        # An incoming argument is measured from the stack pointer as it was on
+        # entry; the prologue has since moved it down by the whole frame, so the
+        # bias is added back.  A spill slot is nominally placed where the
+        # allocator asked, which is inside the spill area, so it is lifted above
+        # the outgoing area that now sits below it.  An outgoing argument is
+        # already where it belongs.
+        my $final_disp = sub ($addr) {
+            my $disp = $addr->{disp} // 0;
+            return $disp unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
+            return $disp + $total_frame if ( $addr->{raw} // '' ) eq 'entry';
+            return $disp if $addr->{raw};
+            return $disp + $call_arg_frame;
+        };
         my $reg_id = sub ($r) {
             return 0 unless defined $r;
             my %map = (
@@ -868,11 +887,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         die 'no temp register for indexed load' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = $final_disp->($addr);
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | LOAD );
                     }
                     else {
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = $final_disp->($addr);
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | LOAD );
                     }
                 }
@@ -894,13 +913,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         die 'no temp register for indexed store' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp   = $addr->{disp} // 0;
+                        my $disp   = $final_disp->($addr);
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                     }
                     else {
-                        my $disp   = $addr->{disp} // 0;
+                        my $disp   = $final_disp->($addr);
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
@@ -978,11 +997,11 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         die 'no temp register for indexed fload' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = $final_disp->($addr);
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | FLOAD );
                     }
                     else {
-                        my $disp = $addr->{disp} // 0;
+                        my $disp = $final_disp->($addr);
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | FLOAD );
                     }
                 }
@@ -1003,13 +1022,13 @@ class Brocken::Jenny::Codegen::RISCV64 {
                         die 'no temp register for indexed fstore' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp   = $addr->{disp} // 0;
+                        my $disp   = $final_disp->($addr);
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
                     }
                     else {
-                        my $disp   = $addr->{disp} // 0;
+                        my $disp   = $final_disp->($addr);
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
@@ -1268,12 +1287,49 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     next unless $op->kind eq 'mem';
                     my $addr = $op->value;
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
+
+                    # A raw displacement is positioned by the calling
+                    # convention rather than by the allocator: an incoming
+                    # argument sits above the frame and an outgoing one at the
+                    # bottom.  Neither is a spill slot, and counting it here
+                    # would both size the spill area wrong and overlap the
+                    # outgoing argument area.  _compute_call_arg_frame sizes
+                    # the latter.
+                    next if $addr->{raw};
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
                     $found    = 1;
                 }
             }
         }
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
+    }
+
+    # Size of the outgoing argument area at the bottom of the frame, holding
+    # the arguments the register set could not carry.  Callers write those at
+    # fixed stack pointer offsets, so the area has to be reserved before the
+    # call rather than pushed at the call site: that keeps the register
+    # allocator's stack-relative spill slots valid across the call and leaves sp
+    # 16-byte aligned at a public interface.
+    method _compute_call_arg_frame( $mf, $stack_reg ) {
+        my $max_disp = -1;
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                for my $op ( $inst->operands->@* ) {
+                    next unless $op->kind eq 'mem';
+                    my $addr = $op->value;
+
+                    # Only the caller's outgoing arguments occupy this area; an
+                    # entry-relative load reads an incoming argument, which
+                    # belongs to whoever called here and is measured from the
+                    # entry stack pointer anyway.
+                    next unless $addr->{raw} && $addr->{raw} ne 'entry';
+                    next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
+                    $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
+                }
+            }
+        }
+        return 0 if $max_disp < 0;
+        return ( $max_disp + 8 + 15 ) & ~15;
     }
 
     method _caller_save_base( $gp_spill, $fp_spill ) {
