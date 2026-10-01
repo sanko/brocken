@@ -1,0 +1,204 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Katsuro::Lowerer - Katsuro AST to Lindsay IR
+
+=head1 SYNOPSIS
+
+    use Brocken::Katsuro::Parser;
+    use Brocken::Katsuro::Lowerer;
+
+    my $ast = Brocken::Katsuro::Parser->new(
+        tokens => $tokens, filename => 'prog.brocken',
+    )->parse_program;
+
+    my $lowerer = Brocken::Katsuro::Lowerer->new( platform => $platform );
+    my $module  = $lowerer->lower_program($ast);
+
+    $module->set_class_info( $lowerer->classes );
+    $module->set_rodata( $lowerer->rodata );
+
+=head1 DESCRIPTION
+
+The back end of the front end. It walks the tree from L<Brocken::Katsuro::AST> and emits
+L<Brocken::Lindsay::IR>, the target-independent intermediate representation that L<Brocken::Jenny> turns into
+machine code. Nothing here knows what a register is; everything here is about deciding types, laying out memory,
+and turning a structured program into a control-flow graph of basic blocks.
+
+This is the largest module in the compiler, and the only one that makes the language's runtime promises concrete.
+A stack variable becomes a slot in the isolate's stack frame. A class becomes a struct with a computed size. A
+string literal becomes a label in a read-only data section. A function call becomes a fuel decrement, a capability
+check, and a call.
+
+=head1 THE CONTRACT
+
+C<lower_program> is the only method a caller needs, and the synopsis shows the whole contract. It returns a
+C<Brocken::Lindsay::IR::Module>. Two pieces of information do not live on that module and are read back off the
+lowerer and attached by the caller, because they are side tables rather than part of the IR proper:
+
+=over
+
+=item C<classes>
+
+A reader, a hashref keyed by class name whose value holds the field list, the computed C<total_size>, the method
+list, the C<ADJUST> block, and the struct type. Pass it to C<set_class_info> on the module, or the back end will not
+know how big a C<new> is.
+
+=item C<rodata>
+
+A reader, a hashref from label to the bytes of a string constant. Pass it to C<set_rodata>.
+
+=back
+
+The compiler front end does exactly this, so a caller that is not L<Brocken::Compiler> has to remember both
+attachments. A module with the classes left off it will compile a class program to a back end that asks for
+C<total_size> and gets nothing.
+
+=head1 FIELDS
+
+=head2 C<platform( )>
+
+A reader, and the target this module is being lowered for. It is passed to the IR so the back end knows the data
+model, and it is what lets the lowerer make target-dependent choices such as pointer width.
+
+=head2 C<fuel( )>, C<mem_limit( )>, C<capabilities( )>
+
+Constructor parameters for the isolation policy, defaulting to C<$Brocken::default_fuel>,
+C<$Brocken::default_mem_limit>, and C<$Brocken::default_capabilities>. These are not read back; the lowerer
+writes them into the isolate at the entry of the main function and then enforces them. See
+L</"RUNTIME POLICY">.
+
+=head2 C<module( )>
+
+The module being built, defaulting to a fresh C<Brocken::Lindsay::IR::Module> named C<main>.
+
+=head1 TYPES
+
+A source type keyword becomes an IR type through a table. The interesting rows are the ones where a source name is
+not the machine's name:
+
+    int     => i64      the default integer
+    bool    => i1       a boolean is one bit
+    Int     => i64
+    Float   => f64
+    Bool    => i1
+    String  => ptr      a string is a pointer to bytes
+    Any     => dynamic
+
+C<Any> becoming C<dynamic> rather than a pointer is what makes an untyped variable need reference counting: the
+lowerer tracks such variables in a C<needs_rc> set and decrements them on scope exit, because it cannot know from
+the type whether the value owns anything.
+
+=head1 RUNTIME POLICY
+
+The lowerer is where the three isolation limits are actually applied, and the order matters. At the entry of the
+main function it stores the configured values into the isolate's control block at the offsets
+C<Brocken::ICB::FUEL>, C<Brocken::ICB::MEM_LIMIT>, and C<Brocken::ICB::CAPABILITIES> relative to the heap base.
+
+This is worth stating plainly because the runtime alone does not do it. The runtime's C<init_isolate> zeroes those
+three words, and if a program were built without going through this lowerer it would run with no fuel and no
+capabilities. The lowerer overwrites all three at the top of C<main>, so the C<$Brocken::default_*> values are
+what a compiled program actually gets.
+
+Fuel is a counter, not a flag. Every function that has a heap base decrements C<[hb+FUEL]> at its entry and at
+every call site, and branches to a shared exhaustion block when the result would go at or below zero. That block
+stores C<ERR_NO_FUEL> into C<[hb+ERR_CODE]> and returns zero from the function it belongs to. A function without a
+heap base, which is a runtime function, is skipped rather than given a fuel check, since it has nowhere to keep the
+counter.
+
+The error code in the isolate is the thing to inspect, and it is not the process exit status. The exit status of a
+Brocken program is whatever C<main> returned, narrowed to the platform's exit-status width, so a program that
+returns 5,000,000 exits 64 and one that returns 100,000,000 exits 0. A program that runs out of fuel therefore
+exits with some truncated return value that has nothing to do with exhaustion, and a caller has to read
+C<[hb+ERR_CODE]> to find out. The store is also a select, so an error code already set is preserved: C<NO_FUEL>
+only overwrites C<OK>, and a program that threw first keeps C<ERR_THROW>.
+
+A denied capability takes the same exit path as exhausted fuel. The capability check reads
+C<[hb+CAPABILITIES]>, tests the bit the operation requires, and branches to the same exit block on failure, so a
+capability denial and running out of fuel are indistinguishable in the control flow and differ only in the error
+code left behind.
+
+=head1 CLASSES
+
+A class declaration is lowered to a struct: the fields are laid out in declaration order with their natural
+alignment, the size is accumulated into C<total_size>, and a constructor is synthesised that bump-allocates
+C<total_size> bytes from the heap and stores the field initialisers. C<$p->x> becomes a load at a computed offset
+from the pointer, not a call, so field access has no runtime cost beyond the addressing.
+
+A C<new> therefore is not a keyword in the source; C<< Point->new(x => 1) >> is a method call on the class name,
+and the class name resolves to a synthesised function. Method declarations become functions with the receiver as a
+hidden first parameter, and C<ADJUST> becomes a function the constructor calls after the fields are stored.
+
+C<__CLASS__> inside a method is bound to the class being lowered, which is how a method can reach a sibling method
+without naming its class.
+
+=head1 STRINGS
+
+A string literal does not become instructions. It is appended to a C<rodata> hashref under a generated label
+C<__str_N> with its bytes, and the program refers to the label. The caller passes that hashref to the module with
+C<set_rodata>, and the back end lays it out in the executable's read-only data. Two occurrences of the same string
+are two labels, since there is no interning pass.
+
+=head1 FUEL AND BLOCKS
+
+Control flow is built with real basic blocks rather than with structured loops, so a C<while> is a header block, a
+body, an iteration check, and an exit, and a C<last> is a branch to whichever exit block the enclosing loop pushed.
+The loop state is kept on three stacks, C<$_loop_header_blocks>, C<$_loop_check_blocks>, and
+C<$_loop_exit_blocks>, which is why a C<last> inside two nested loops needs to know how deep it is; it reads the
+top of the stack.
+
+Block names are made unique by C<unique_block_name>, which appends an incrementing counter from C<$block_id>. The
+names appear in the IR and in anything that dumps it, so they are unique but not stable between runs or between
+edits to the source.
+
+An C<if>/C<elsif>/C<else> chain is flattened into a series of conditional branches to a shared merge block, with
+the C<elsif> pairs walked in order by C<lower_elsif_chain>. This means there is no C<else> node in the IR, only a
+branch to the merge, which is what keeps the C<if> lowering the same shape regardless of how long the chain is.
+
+=head1 STATUS
+
+Expect breakage. This is the module where the unfinished parts of the language become visible as missing cases
+rather than as parse errors, so a construct can be accepted by the front end and then silently miscompile here.
+
+C<i128> and C<u128> have IR types and appear in the type table, so the parser can emit them, but the register
+allocator has no support for a 128-bit register class and the two are not usable in a compiled program. They are
+in the table because the type system is expected to grow, not because a program can use them today.
+
+A C<Want> prototype is parsed and there is no case for it here, so it contributes nothing to the output.
+
+C<cmp> parses as a three-way comparison, and how its result is represented is the least settled part of the
+expression lowering. The comparison keywords in general are lowered without a type check, so comparing incompatible
+operands is not diagnosed at this stage.
+
+C<Any> is C<dynamic> and needs reference counting, but the reference-count discipline is only applied to
+variables the lowerer can see declared as C<Any>. A pointer that arrives from a C<ptr> function and is stored in
+an untyped variable is counted, and one that is stored in a C<ptr> variable is not, which means the language has no
+single answer to when a value owns memory. The C<needs_rc> bookkeeping here is per-variable and does not follow
+aliases.
+
+The B<128-bit constant> path loads through C<Math::BigInt> in the lexer and then narrows in the IR, and the
+comment at the point where multiplication is lowered notes that the operand widths are kept consistent because
+halving depends on it. That is the kind of coupling that a rewrite of the constant handling would break.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
+
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut
