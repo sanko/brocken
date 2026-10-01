@@ -30,6 +30,7 @@ subtest 'LinearScan basic allocation' => sub {
     ok exists $alloc->{used_callee},       'has used_callee';
     ok exists $alloc->{spill_slots},       'has spill_slots';
     ok exists $alloc->{spill_temp},        'has spill_temp';
+    ok exists $alloc->{spill_addr_temp},   'has spill_addr_temp';
     ok defined $alloc->{assignment}{'%a'}, '%a assigned to a register';
     ok defined $alloc->{assignment}{'%b'}, '%b assigned to a register';
 };
