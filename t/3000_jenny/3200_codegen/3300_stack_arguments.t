@@ -1,6 +1,7 @@
 use v5.42;
 use Test2::V0 '!subtest';
 use lib 'lib', '../../../lib', '../../lib', '../lib';
+use Test2::Tools::Brocken qw[run_exec cross_available temp_path];
 use Brocken;
 use Brocken::Katsuro;
 use Brocken::Lindsay;
@@ -176,6 +177,84 @@ sub wide_func($count) {
 # lowers a function and reads the displacement of every stack operand, which is
 # the only way to see that the two halves of the convention agree on a target
 # this host cannot execute: the argument registers run out well past what a
-# native build here would carry, and there is no qemu or cross toolchain here
-# to observe the values a real call would have produced.
+# native build here would carry.
+#
+# The displacements alone are not the whole convention, though, and a check that
+# reads them cannot see the two ways the value itself went missing on these
+# targets while every offset stayed right.  So the pairs are also executed where
+# an emulator is available, and skipped where one is not.
+#
+# A float return belongs in the first floating-point return register.  Sent to a
+# general register instead, the function returned whatever the caller had left
+# there, and because that register is also where the first floating-point
+# argument arrives, a function returning its second argument returned its first.
+#
+# A capture of an argument from a register is a parallel move, and a parameter
+# that arrived on the stack is read in the middle of it.  The register allocator
+# reschedules the captures together, but it only sees the run that leads the
+# block, so it used to stop at that read and leave the captures behind it in
+# program order -- where one ran after another had already written the register
+# it read, and a value arrived as its neighbour's.
+exec_pairs();
+
+sub exec_pairs () {
+    for my $target (@TARGETS) {
+        my ( $triple, $class ) = @$target;
+        my $platform = Brocken::Katsuro::Platform::parse($triple);
+        next unless cross_available($platform);
+
+        # Both files full at once is the case the offsets alone never caught:
+        # the integer file overflows, so its read lands among the floating-point
+        # captures, and the last capture is the one that gets stranded.
+        for my $case ( [ 7, 7 ], [ 8, 8 ], [ 10, 10 ] ) {
+            my ( $nint, $nfloat ) = @$case;
+            my ( @params, @args, @terms, $sum );
+            $sum = 0;
+            my ( $ni, $nf ) = ( $nint, $nfloat );
+
+            # Interleaved, so the overflow is in the middle of the other file.
+            for my $k ( 0 .. $nint + $nfloat - 1 ) {
+                if ( $nf > 0 && ( $k % 2 == 1 || $ni == 0 ) ) {
+                    my $v = $nf--;
+                    push @params, "f64 \$f$v";
+                    push @args,   "$v.0";
+                    push @terms,  "\$f$v";
+                    $sum += $v;
+                }
+                else {
+                    my $v = $ni--;
+                    push @params, "i64 \$i$v";
+                    push @args,   "$v";
+                    push @terms,  "\$i$v";
+                    $sum += $v;
+                }
+            }
+            my $src = sprintf "sub g(%s) -> f64 { return %s; } return g(%s);",
+                join( ', ', @params ), join( ' + ', @terms ), join( ', ', @args );
+            my $name = sprintf '%s: %d integer and %d floating-point arguments arrive intact',
+                $triple, $nint, $nfloat;
+            run_case( $platform, $class, $src, $sum, $name );
+
+            # A float return read out of a general register came back as the
+            # first float the caller passed, which is a wrong answer that no
+            # offset check can see.
+            my $ret = "sub h(f64 \$a, f64 \$b) -> f64 { return \$b; } return h(1.0, 6.0);";
+            run_case( $platform, $class, $ret, 6,
+                "$triple: a floating-point return lands in the floating-point return register" );
+        }
+    }
+}
+
+sub run_case ( $platform, $class, $src, $want, $name ) {
+    my $brocken = eval { Brocken->new( platform => $platform ) } or return;
+    my $binary  = temp_path( 'stack_args_' . $platform->arch . '_' . abs($want) );
+    my $built   = eval {
+        my $m = Brocken::Compiler->new->compile($src);
+        $brocken->linker->write_executable( $binary, $brocken->codegen->emit_functions( $m->functions ), $platform );
+        1;
+    };
+    if ( !$built ) { diag( "$name: did not build: $@" ); return }
+    run_exec( $binary, platform => $platform, expected_exit => $want, name => $name );
+}
+
 done_testing;

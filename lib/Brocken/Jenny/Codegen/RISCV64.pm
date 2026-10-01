@@ -550,6 +550,17 @@ class Brocken::Jenny::Codegen::RISCV64 {
             return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: " . $op->kind;
         };
+
+        # The base of a memory operand is a virtual register for an ordinary
+        # spill slot, because the lowerer materializes the address with an
+        # `add` before using it.  A raw one names the physical stack register
+        # instead, and the allocation table is not where that name belongs:
+        # resolved as a virtual register it only came out right because nothing
+        # else happened to be called sp.
+        my $base_kind = sub ($name) {
+            return 'phys_reg' if !ref $name && $name eq $platform->stack_reg;
+            return 'virt_reg';
+        };
         if ( $total_frame > 0 ) {
             my $tf = $total_frame;
             if ( $tf <= 2047 ) {
@@ -871,7 +882,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $dst_r  = $resolve->($dst);
                     my $did    = $reg_id->($dst_r);
                     my $addr   = $src->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
                     my $signed = $src->type && $src->type->kind eq 'int'     ? $src->type->signed : 1;
@@ -899,7 +910,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $src_r  = $resolve->($src);
                     my $sid    = $reg_id->($src_r);
                     my $addr   = $dst->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
                     my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
@@ -928,7 +939,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                 elsif ( $opcode eq 'store_imm' ) {
                     my ( $mem, $imm ) = $inst->operands->@*;
                     my $addr   = $mem->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits : 64;
                     my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
@@ -984,7 +995,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $dst_r  = $resolve->($dst);
                     my $did    = $reg_id->($dst_r);
                     my $addr   = $src->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $funct3 = ( $dst->type && $dst->type->bits <= 32 ) ? 2 : 3;
                     if ( defined $addr->{index} ) {
@@ -1009,7 +1020,7 @@ class Brocken::Jenny::Codegen::RISCV64 {
                     my $src_r  = $resolve->($src);
                     my $sid    = $reg_id->($src_r);
                     my $addr   = $dst->value;
-                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{base} ) );
+                    my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $funct3 = ( $src->type && $src->type->bits <= 32 ) ? 2 : 3;
                     if ( defined $addr->{index} ) {
@@ -1448,7 +1459,7 @@ LDR/STR encoding bounds overflows.
 
 =head1 LICENSE
 
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+This software is Copyright (c) 2026 by Sanko Robinson.
 
 This is free software, licensed under:
 
