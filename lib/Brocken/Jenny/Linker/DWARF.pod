@@ -1,0 +1,153 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker::DWARF - Debug Information Generator
+
+=head1 DESCRIPTION
+
+Generates DWARF v5 compliant debug sections for source-level debugging with
+GDB (ELF) and integrated debuggers (PE). Accepts source-location entries
+(machine code offset to source line/col), function ranges, and variable/struct
+type metadata via C<class_info>.
+
+=head2 Sections Generated:
+
+=over 4
+
+=item * B<.debug_line>: Maps machine code offsets to source lines. Uses DWARF
+v5 line number program header with file entries and address/line opcodes.
+
+=item * B<.debug_info>: The main Debug Information Entry (DIE) tree. Includes
+compile unit, base types (Int, Bool, String, Any, ptr, Array), subprogram DIEs
+for each function, variable/parameter DIEs (with decl_line/decl_column/
+artificial attributes), and structure-type DIEs for user-defined classes.
+
+=item * B<.debug_abbrev>: Definitions of DIE abbreviations. Abbrev codes: 1
+(compile_unit), 2 (base_type), 3 (subprogram), 4 (formal_parameter), 5
+(variable), 6 (structure_type), 7 (member).
+
+=item * B<.debug_frame>: Stack unwinding and frame pointer recovery data. Uses
+platform-specific CFA (x64/RSP, ARM64/SP, RISCV64/SP) and frame-pointer
+registers (x64/RBP, ARM64/X29, RISCV64/S0).
+
+=item * B<.debug_aranges>: Rapid lookup table mapping text-section address
+ranges to compile units.
+
+=item * B<.debug_names>: Fast, hashed symbol lookup table (DWARF v5). Uses
+case-folding DJB hash. Generated when function pubnames are non-empty.
+
+=item * B<.debug_str>: Dedicated string table referenced by .debug_names.
+
+=item * B<.eh_frame>: Exception handling frame data (LSDA compatible). Uses
+'zR' augmentation with pcrel FDE encoding. Only generated when
+C<eh_frame_base> is non-zero.
+
+=back
+
+=head1 FIELDS
+
+=over
+
+=item C<source_locs>
+
+ArrayRef of hashrefs: C<{ offset, line }>. Machine code byte offsets relative
+to C<text_base> mapped to source line numbers. Used by C<build_debug_line>.
+
+=item C<text_base>
+
+Base address (file offset) of the .text section in the output binary.
+
+=item C<source_file>, C<source_files>
+
+Primary source filename (string) or list of filenames (arrayref). Referenced
+by DW_AT_name and directory/file entries in .debug_line.
+
+=item C<func_ranges>
+
+ArrayRef of hashrefs: C<{ name, start, end, source_file, params, locals }>.
+Each entry becomes a DW_TAG_subprogram DIE with child variable/parameter DIEs.
+
+=item C<class_info>
+
+Hashref from class name to C<{ fields, total_size }>. Used to emit
+DW_TAG_structure_type and DW_TAG_member DIEs (only at debug level >= 4).
+
+=item C<debug>
+
+Debug level (0-5). Controls which DWARF sections are built:
+
+    0  No sections
+    1  .debug_line only
+    2  + .debug_info, .debug_abbrev
+    3  + .debug_frame, .debug_aranges
+    4  + .debug_names, .debug_str
+    5  (same as 4)
+
+=item C<arch>
+
+Target architecture string: C<x64>, C<aarch64>, C<arm64>, or C<riscv64>.
+Determines DWARF register numbers, frame pointer, and return address.
+
+=item C<preserved_regs>
+
+List of register names preserved across calls. Used by C<build_debug_frame>
+to emit DW_CFA_offset instructions.
+
+=item C<platform>
+
+Optional L<Brocken::Katsuro::Platform> instance. If defined, used for DWARF
+register number resolution via C<< platform->abi->dwarf_reg_num >>.
+
+=back
+
+=head1 METHODS
+
+=head2 build_all
+
+Produces all requested debug sections as a hashref keyed by section name
+(e.g. C<{ '.debug_line' => ..., '.debug_info' => ... }>). Conditionally
+includes C<.debug_names>/.debug_str, C<.debug_frame>/.debug_aranges,
+and C<.eh_frame> when their data sources are non-empty.
+
+=head2 build_debug_line
+
+Builds the .debug_line section using DWARF v5 header format. For each
+source-location entry, emits Set Address (0x02) + Advance Line (0x03) + Copy
+(0x01) opcodes. Ends the sequence with a terminating entry.
+
+=head2 build_debug_abbrev
+
+Builds the .debug_abbrev section defining DIE abbreviations used by
+.debug_info. Abbrev 4 (formal_parameter) and 5 (variable) include
+DW_AT_decl_line, DW_AT_decl_column, and DW_AT_artificial attributes.
+
+=head2 build_debug_info
+
+Builds the .debug_info section: a DWARF v5 compile unit header followed by
+base-type DIEs, structure-type DIEs (from class_info), and subprogram DIEs
+with variable/parameter child DIEs. Each variable DIE carries source
+coordinates and artificial flag.
+
+=head2 build_debug_names
+
+Builds the .debug_names accelerated-lookup section (DWARF v5). Returns
+C<($names_data, $str_data)> or empty list if no pubnames exist. Uses
+case-folding DJB hashing for case-insensitive lookups.
+
+=head2 build_debug_aranges
+
+Builds a minimal .debug_aranges table covering the full text section range.
+
+=head2 build_debug_frame
+
+Builds .debug_frame: CIE (Common Information Entry) defining CFA rules for
+the target ABI, followed by one FDE (Frame Description Entry) per function
+with register preservation and frame-pointer setup instructions.
+
+=head2 build_eh_frame
+
+Builds .eh_frame for exception handling. Uses 'zR' augmentation with pcrel
+absolute-address FDE encoding. Only emitted when C<eh_frame_base> is non-zero.
+
+=cut

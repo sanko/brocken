@@ -1,0 +1,95 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Pass::Fiber - Fiber yield detection pass
+
+=head1 SYNOPSIS
+
+    use Brocken::Jenny::Pass::Fiber;
+
+    my $pass = Brocken::Jenny::Pass::Fiber->new;
+
+    if ( $pass->needs_lowering($ir_func) ) {
+        my $fibers = $pass->lower($ir_func);
+    }
+
+=head1 DESCRIPTION
+
+A fiber in the IR is marked by a L<Brocken::Lindsay::IR::Instruction::FiberYield> instruction. Before a function
+containing one can be compiled, it needs to be rewritten so that the yield is not an instruction in the middle of
+the body: a fiber switch has to become an ordinary call and return pair, with the resume point found by the
+callee's return address rather than by a jump into the middle of anything.
+
+This pass is where that rewrite is going to live, and it is where the decision gets made. Right now it only answers
+the question.
+
+The pass is a stub in the honest sense: C<lower> returns the function it was given, unchanged. Nothing calls it as
+part of C<Brocken::Jenny>'s pipeline, and no code generator knows a fiber switch exists. What exists is the
+detection, which is the part that has to be right before the rewrite can be, and the shape of the interface it will
+be reached through.
+
+=head1 METHODS
+
+=head2 C<needs_lowering( $ir_func )>
+
+    $pass->needs_lowering($ir_func)     # 1 or 0
+
+Returns true if the function contains at least one C<FiberYield> instruction, and false if it does not.
+
+The scan walks every block of the function and every instruction in each block. It does not stop at the first match
+in a block, but it does return on the first match in the function, so the common answer, a function with no fiber at
+all, costs a full walk and the uncommon one, a function with a fiber, costs a partial one.
+
+A function with no fiber is the overwhelmingly common case, and it is the case that must stay cheap, because a pass
+that runs on every function in every program is a pass that has to be fast even when it has nothing to do.
+
+=head2 C<has_yield( $ir_func )>
+
+    $pass->has_yield($ir_func)          # same answer as needs_lowering
+
+An alias for C<needs_lowering>, taking the same argument and returning the same thing. The two names say the same
+thing from two directions: C<needs_lowering> asks about this pass's work, and C<has_yield> asks about the program.
+The alias exists because the second phrasing is what a caller checking a function usually has in mind.
+
+=head2 C<lower( $ir_func )>
+
+    my $out = $pass->lower($ir_func);
+
+Returns the lowered function. At the moment this is the input function, unmodified, so the pass is currently a
+detector rather than a transformation. A caller that needs the rewrite has to wait for it.
+
+=head1 STATUS
+
+Expect breakage. This pass does not lower anything yet, and it is not wired into the compiler.
+
+The pieces it will need are not all in place. C<FiberYield> exists as an IR instruction, the ICB has a
+C<FIBER_HEAD> offset to hang a fiber list from, and F<src/runtime/core.brocken> carries fiber and exception-handling
+state, but there is no way to spell a fiber switch in Brocken source, no allocator support for saving a fiber's
+register state, and no back end that can emit a context switch. The isolated-thread and fiber runtime is the work
+that comes before this pass does anything.
+
+C<has_yield> is kept because F<t/3000_jenny/3400_fiber/3401_fiber_lowering.t> tests it against C<needs_lowering>,
+which is enough of a contract to keep the interface from drifting while the implementation is still ahead of this.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
+
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut

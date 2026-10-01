@@ -1,0 +1,52 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker::MachO - macOS Mach-O Binary Generator
+
+=head1 DESCRIPTION
+
+Generates macOS Mach-O executables for x86_64 and ARM64 architectures. Produces a minimal Mach-O with header, load
+commands (segment __TEXT, segment __DATA, entry point, optionally debug sections), and section data.
+
+On ARM64 macOS, automatically runs C<codesign> for ad-hoc signing after writing the binary.
+
+=head2 Structure
+
+=over 4
+
+=item B<Header> - Magic (MH_MAGIC_64), CPU type/subtype, file type (EXECUTE)
+
+=item B<Load Commands> - LC_SEGMENT_64 for __TEXT and __DATA, LC_MAIN for entry point, LC_SYMTAB/Symtab, LC_DYSYMTAB, LC_BUILD_VERSION
+
+=item B<Sections> - __TEXT,__text (code), __DATA,__data (data), optional debug sections
+
+=back
+
+=head1 METHODS
+
+=head2 write_executable
+
+    $linker->write_executable($output_file, $code_bytes, $platform, $type?, $debug_bytes?)
+
+Writes a Mach-O executable with proper section alignment and page size (16KB for ARM64, 4KB for x86_64).
+
+=head2 write_shared_library
+
+    $linker->write_shared_library($output_file, $code_bytes, $platform, $debug_bytes?)
+
+Not yet implemented for Mach-O.
+
+=head1 LICENSE
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software, licensed under:
+
+  The Artistic License 2.0 (GPL Compatible)
+
+=head1 AUTHOR
+
+Sanko Robinson <sanko@cpan.org>
+
+=cut

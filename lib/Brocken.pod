@@ -4,15 +4,329 @@
 
 =head1 NAME
 
-Brocken - Compiler for a small, perl inspired systems language
+Brocken - Compiler for a small, perl inspired, statically typed systems language
 
-=head1 Description
+=head1 SYNOPSIS
 
-Idk...
+Compiling a program is four calls. This is the whole path, start to finish:
 
-=head1 Status
+    use Brocken;
+    use Brocken::Compiler;
+
+    my $brocken = Brocken->new;
+
+    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+    sub fib( i64 $n ) -> i64 {
+        if ( $n < 2 ) { return $n; }
+        return fib( $n - 1 ) + fib( $n - 2 );
+    }
+
+    return fib( 10 );
+    BROCKEN
+
+    my $funcs = $brocken->codegen->emit_functions( $module->functions );
+    my $file  = $brocken->tmpdir . '/fib' . $brocken->ext;
+    $brocken->linker->write_executable( $file, $funcs, $brocken->platform );
+
+    system $file;    # exits 55, which is fib(10)
+
+The program compiled there is a recursive function, a conditional, and a return value. The compiled program returns 55,
+which is its exit status.
+
+C<Brocken-E<gt>new> takes no arguments to get the host platform, and the other three calls never change. A caller that
+wants an executable in a temporary directory rather than a named one uses the C<tmpdir> method, which is where C<$file>
+above comes from.
+
+=head1 DESCRIPTION
+
+Brocken is a compiler that reads source written in Brocken and writes a native executable. The language is a statically
+typed, C-flavored language with Perl-like sigils, integer and floating-point types, classes with typed fields,
+fixed-size arrays, and explicit control flow. The compiler is written in Perl and needs Perl 5.42 or later, but its
+output is machine code, not Perl.
+
+Compiling is four stages, each a separate module:
+
+=over
+
+=item 1. L<Brocken::Katsuro::Lexer> and L<Brocken::Katsuro::Parser> turn source text into an AST.
+
+=item 2. L<Brocken::Katsuro::Lowerer> turns the AST into L<Brocken::Lindsay::IR>, a target-independent IR built out of
+values, types, instructions, basic blocks, and functions.
+
+=item 3. L<Brocken::Jenny> lowers that IR to L<Brocken::Jenny::MIR>, assigns registers with
+L<Brocken::Jenny::RegAlloc>, and encodes the result. One code generator exists per target: L<Brocken::Jenny::Codegen::X86_64>,
+L<Brocken::Jenny::Codegen::ARM64>, and L<Brocken::Jenny::Codegen::RISCV64>.
+
+=item 4. L<Brocken::Jenny::Linker> emits the object file, in ELF, PE, or Mach-O form as the platform requires.
+
+=back
+
+The architecture and the binary format are chosen from the host platform, so a plain C<Brocken-E<gt>new> produces an
+executable for the machine it ran on. L<Brocken::Katsuro::Platform> is the layer that knows the register sets, the
+calling conventions, and the file naming rules for each target, and passing a platform to the constructor is how a
+cross compile is asked for.
+
+=head2 The runtime is compiled in
+
+F<src/runtime/core.brocken> is not an optional library. L<Brocken::Compiler> reads it, parses it, and merges its
+statements ahead of the caller's before anything is lowered, so every program carries the allocator, the collector, the
+fiber machinery, and the exception support with it.
+
+That is why a program does not have to ask for memory. C<new> on a class, C<alloca>, an array, and a list all allocate
+out of the same Immix heap, and the collector is what reclaims them. The heap base is the first argument to the entry
+point, and the runtime publishes it in a module global so that any function can allocate and not only the entry.
+
+Two runtime limits are configurable and one is a capability mask:
+
+=over
+
+=item * B<Fuel> bounds the instruction budget, so a runaway loop fails rather than hanging. It defaults to 1,000,000.
+
+=item * B<Memory limit> bounds heap bytes per isolate. Zero, the default, means no limit.
+
+=item * B<Capabilities> is a bitmask of what a compiled program is allowed to do. It defaults to all of them.
+
+=back
+
+They are set per compiler rather than per platform, through the three package variables below, or through the
+C<set_default_policy> method on L<Brocken::Compiler> for everything compiled afterwards.
+
+=head1 THE LANGUAGE
+
+All of this is subject to change. I am building from the back end first, so...
+
+Types are named and explicit. Integers are signed or unsigned, at the widths C<i8>, C<i16>, C<i32>, C<i64>, C<u8>,
+C<u16>, C<u32>, and C<u64>, and floats are C<f32> or C<f64>. There is also C<Bool> and C<ptr>:
+
+    my i64 $count = 7;
+    my f64 $ratio = 1.5;
+    my Bool $ready = false;
+    my u32 $n = 3;
+
+A declaration can leave the value out, which makes it a zero value:
+
+    my i64 $total;
+
+Arrays are fixed-size and written as a type and a length, with the length a constant expression:
+
+    my [i64; 4] $a;
+    $a[0] = 10;
+    $a[2] = 30;
+    return $a[2] + 5;    # 35
+
+Control flow is C<if> and C<while>. Both take a braced block, and C<elsif> chains on C<if>:
+
+    my i64 $i = 0;
+    my i64 $sum = 0;
+    while ( $i < 10 ) {
+        $sum = $sum + $i;
+        $i = $i + 1;
+    }
+    return $sum;    # 45
+
+Functions are declared with C<sub>, and the return type follows the parameter list:
+
+    sub classify( i64 $n ) -> i64 {
+        if ( $n < 0 ) { return -1; }
+        if ( $n == 0 ) { return 0; }
+        return 1;
+    }
+
+C<say> and C<print> are calls, so they take a parenthesized argument list and a semicolon:
+
+    say( "hello " . 42 );
+    print( 42 );
+
+Errors are C<throw> and a C<try> block that catches them, with an optional C<finally> that runs either way:
+
+    sub parse_port( i64 $raw ) -> i64 {
+        my i64 $n = 0;
+        try {
+            if ( $raw < 0 ) { throw 1; }
+            $n = $raw * 2;
+            return $n;
+        }
+        catch {
+            return -1;
+        }
+        finally {
+            # runs after the catch, including when the try returned
+        }
+    }
+
+The C<catch> block receives the thrown value, and a C<try> with no C<catch> is a C<try>-C<finally> that only cleans up.
+The C<setjmp> and C<longjmp> behind this live in the runtime, not in generated code, which is what lets a C<return>
+out of a C<try> still run the C<finally>.
+
+Classes hold typed fields and methods, and the runtime generates a constructor, a reader, and a writer for each field.
+A C<: param> field becomes a constructor argument. A class value is a C<ptr>, and construction is a call on the class
+name with named arguments:
+
+    class Point {
+        field i64 $x : param;
+        field i64 $y : param;
+
+        method sum() -> i64 {
+            return $x + $y;
+        }
+    }
+
+    my ptr $p = Point->new(x => 30, y => 12);
+    return $p->x + $p->y;    # 42
+
+Inside a method, a field is a bare C<$name> with no sigil-pair and no C<-E<gt>>, because the method is already in the
+class. Outside one, a field read is C<$p-E<gt>x>, and there is a writer for it too.
+
+=head1 PACKAGE VARIABLES
+
+These are the runtime defaults, read by L<Brocken::Compiler> and L<Brocken::Katsuro::Lowerer> when they construct
+themselves. Setting one changes every compiler built afterwards:
+
+=over
+
+=item C<$Brocken::default_fuel>
+
+The instruction budget given to the entry function. Defaults to C<1000000>.
+
+=item C<$Brocken::default_mem_limit>
+
+Maximum heap bytes per isolate. Defaults to C<0>, which is no limit.
+
+=item C<$Brocken::default_capabilities>
+
+The capability bitmask a compiled program starts with. Defaults to C<~0>, all capabilities enabled.
+
+=back
+
+The bits in that mask are:
+
+=over
+
+=item * C<$Brocken::CAP_FS_READ> - file system read
+
+=item * C<$Brocken::CAP_FS_WRITE> - file system write
+
+=item * C<$Brocken::CAP_NET> - network access
+
+=item * C<$Brocken::CAP_SYSTEM> - C<system()> and process spawn
+
+=item * C<$Brocken::CAP_FFI> - syscall, libc, and raw FFI
+
+=back
+
+=head1 METHODS
+
+=head2 C<platform( ... )>
+
+    $brocken->platform
+
+Returns the L<Brocken::Katsuro::Platform> this instance targets. It is the host platform unless one was passed to the
+constructor.
+
+=head2 C<codegen( ... )>
+
+    $brocken->codegen
+
+Returns the code generator chosen for the platform, one of L<Brocken::Jenny::Codegen::X86_64>,
+L<Brocken::Jenny::Codegen::ARM64>, or L<Brocken::Jenny::Codegen::RISCV64>. Its C<emit_functions> method takes the
+functions from a compiled module and returns the machine code for them.
+
+=head2 C<linker( ... )>
+
+    $brocken->linker
+
+Returns the linker chosen for the platform, one of L<Brocken::Jenny::Linker::ELF64>, L<Brocken::Jenny::Linker::MachO>,
+or L<Brocken::Jenny::Linker::PE>. Its C<write_executable> method takes a path, the emitted code, and the platform, and
+writes the file.
+
+=head2 C<ext( ... )>
+
+    my $ext = $brocken->ext;
+
+Returns the file extension the output needs on this platform: C<.exe> on Windows and an empty string everywhere else.
+
+Note that this is a method, so it cannot be interpolated into a string directly. C<"$brocken-E<gt>ext"> is the
+class, the object and the letters C<->ext>, while C<"$brocken-E<gt>{ext}"> or C<$brocken-E<gt>ext> in a concatenation
+is the extension.
+
+=head2 C<tmpdir( ... )>
+
+    $brocken->tmpdir
+
+Returns a L<File::Temp::Dir> object for a temporary directory created for this instance and removed when it goes out
+of scope. It stringifies to a path, which is why C<$brocken-E<gt>tmpdir . '/fib'> is the way to build a filename. It
+is where the output goes when the caller does not want to name a path.
+
+=head2 C<debug_level( ... )>
+
+    my $level = $brocken->debug_level;
+
+Returns the debug level this instance was constructed with. Defaults to C<0>.
+
+=head2 C<os( ... )>
+
+    my $os = $brocken->os;
+
+Returns the operating system this instance targets, as a normalized name. See C<is_windows>, C<is_macos>, C<is_linux>,
+and the rest on L<Brocken::Katsuro::Platform> for the predicates to ask with.
+
+=head2 C<arch( ... )>
+
+    my $arch = $brocken->arch;
+
+Returns the architecture this instance targets, as a normalized name: C<x86_64>, C<aarch64>, or C<riscv64>.
+
+=head1 CROSS COMPILING
+
+A cross compile is a platform passed to the constructor and then the same four calls:
+
+    my $brocken = Brocken->new(
+        platform => Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu'),
+    );
+
+The result is a real executable for the other architecture, written by the same linker call. It is not run by the
+compiler, and running it needs an emulator of the sort L<Test2::Tools::Brocken> knows about.
+
+=head1 STATUS
 
 Expect breakage.
+
+The language surface is narrower than it looks, and the gap between what the lexer knows and what the parser accepts is
+worth knowing about. The lexer carries a long keyword list, borrowed from Perl, but the parser implements only
+declarations, C<if>, C<while>, C<return>, C<say>, C<print>, C<throw>, C<try>, class and sub declarations, and
+expressions. Several of the things the lexer recognizes are not usable yet:
+
+=over
+
+=item * A class-typed value cannot be held in a local variable, because a variable declaration accepts only builtin type
+names. A class value is a C<ptr>:
+
+    my ptr $p = Point->new(x => 3, y => 4);
+
+=item * C<i128> and C<u128> are known to L<Brocken::Layout> and rejected by the parser, and the register allocator has
+no notion of them, so 128-bit values do not work at all yet. Stick to 64-bit integers.
+
+=item * Array literals are parsed as a declaration form rather than as an expression, so
+C<my [i64; 3] $a = [ 1, 2, 3 ]> is not accepted. Declare the array and assign to it instead.
+
+=item * There is no C<for> loop, and C<str> is not a usable parameter type, so a C<str> signature does not parse.
+
+=item * C<alloca> is not a keyword you can call. The lowerer emits an alloca per parameter, which is what makes a
+parameter's address takeable, but there is no source form for it.
+
+=back
+
+C<say> and C<print> compile and link, and are exercised natively, but the test suite only runs them on the host target.
+
+There are three code generators here: x86-64, AArch64, and RISC-V. The test suite exercises the native one and runs a
+foreign one under C<qemu> when a sysroot is configured, skipping it when there is none. The WebAssembly modules --
+L<Brocken::Jenny::Codegen::Wasm>, L<Brocken::Jenny::Linker::Wasm>, and L<Brocken::Jenny::Lowerer::Wasm> -- are in the
+tree and a wasm32 triple parses into a L<Brocken::Katsuro::Platform::Wasm>, but the constructor here has no branch
+for it, so C<Brocken-E<gt>new> dies with C<Unsupported platform> rather than returning a compiler. The isolated-thread
+and fiber runtimes are ahead of this.
+
+The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool:
+a program that legitimately needs more has to be compiled with a larger C<fuel>.
 
 =head1 LICENSE & LEGAL
 
@@ -28,8 +342,10 @@ licenses, at your option:
 The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
 International license, see F<LICENSE-CC>, when it is used apart from the code.
 
+
 =head1 AUTHOR
 
 Sanko Robinson - L<https://github.com/sanko>
+
 
 =cut

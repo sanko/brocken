@@ -1,0 +1,12 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Linker - Unified Binary Executable Generator
+
+=head1 DESCRIPTION
+
+The Linker class provides a platform-agnostic interface for taking machine code and data segments and packaging them
+into a final executable or shared library.
+
+=cut

@@ -1,0 +1,120 @@
+=encoding utf-8
+
+=head1 NAME
+
+Brocken::Jenny::Codegen::RISCV64::Encodings - RISC-V opcode constants
+
+=head1 SYNOPSIS
+
+    use Brocken::Jenny::Codegen::RISCV64::Encodings qw[OP_IMM ADDI LOAD BCC LUI];
+
+    my $word = OP_IMM | ( $imm << 20 ) | ( $rs1 << 15 ) | ( 0 << 12 ) | ( $rs2 << 20 ) | ( $rd );
+
+=head1 DESCRIPTION
+
+RISC-V instructions are also fixed at 32 bits, and the opcode is a seven-bit field in the low bits rather than a
+byte. The table here is small, 27 constants, because most of it is base opcodes for instruction classes rather than
+individual instructions: a single C<OP_IMM> covers add, and, or, xor, and every shift, with the operation selected
+by a three-bit field and an immediate by the rest of the word.
+
+That is a different shape from the AArch64 table, which spells out a constant per operation, and it is worth knowing
+which one a file follows before reading it. Here the class base is the constant and the operation is a field.
+
+=head1 EXPORTS
+
+All 27 are exported by default, through C<@EXPORT>, C<@EXPORT_OK>, and the C<:all> tag.
+
+=head1 CONSTANTS
+
+=head2 Control flow
+
+C<JAL> is 0x0000006F, jump and link, which is how a call is made: the return address goes in C<ra> and control
+jumps. C<JALR> is 0x00008067, the register-indirect form with the fields pre-filled for C<ret>, since C<jalr zero,
+zero, 0> is the canonical return instruction.
+
+C<BCC> is 0x63, the branch class, and the condition is a three-bit field, so equal, not-equal, less-than,
+greater-than and the unsigned forms are all this one opcode. C<LUI> is 0x37, load-upper-immediate, which writes the
+top twenty bits of a register and is the first half of building a 32-bit constant.
+
+=head2 Integer register-immediate and register-register
+
+C<OP_IMM> is 0x13, the register-immediate class: C<addi>, C<andi>, C<ori>, C<xori>, C<slli>, C<srli>, and C<srai>.
+C<SRAI_B> is 0x40000000, which is not a class but the fully formed arithmetic-right-shift with C<funct7> and
+C<funct3> already set, because a right shift needs the sign-preserving variant chosen and that is the one case where
+a bare field would be easy to get wrong.
+
+C<OP> is 0x33, the register-register class, covering C<add>, C<sub>, C<and>, C<or>, C<xor>, the shifts, and the
+multiply and divide instructions.
+
+=head2 Loads and stores
+
+C<LOAD> is 0x03 and C<STORE> is 0x23, the load and store classes, with the width in C<funct3>: byte, half, word, and
+double variants are one constant each plus a field. C<FLOAD> is 0x07 and C<FSTORE> is 0x27, the same for the
+floating-point widths, which are a separate instruction space from the integer loads.
+
+=head2 Floating point
+
+C<FP_OP> is 0x53, the OP-FP class, and C<FP_FMT> is 0x02000000, the bit that makes an instruction operate on f64
+rather than f32, in the same way the other encodings carry a size bit.
+
+C<FSGNJ> is 0x20000000, the sign-inject class, which is how sign manipulation and the moves between integer and
+floating-point views are built. C<FMINMAX> is 0x28000000, the minimum and maximum class. C<FSQRT> is 0x58000000,
+the square root. C<FMV_W_X> and C<FMV_D_X> are 0xF0000000 and 0xF2000000, the moves that reinterpret a bit pattern
+between the integer and floating-point register files.
+
+=head2 Conversions
+
+Eight constants, four each way, because RISC-V spells a conversion with both a source and a destination width and a
+direction, and there is no size bit to fold them together.
+
+C<FCVT_S_W> and C<FCVT_S_L> are int32 and int64 to f32. C<FCVT_D_W> and C<FCVT_D_L> are int32 and int64 to f64.
+C<FCVT_W_S> and C<FCVT_W_D> are f32 and f64 to int32, and C<FCVT_L_S> and C<FCVT_L_D> are f32 and f64 to int64.
+
+The C<W> and C<L> suffixes are the source width for the first group and the destination width for the second, which
+is RISC-V's naming, and is why the constant carries the C<rs2> field selecting that width. The floating-point side
+of each pair differs by a single bit, so a 64-bit conversion is the 32-bit constant with bit 25 set.
+
+Note that none of these are the trapping or rounding-direction variants. There is no C<FCVT_RNU>, and there is no
+round-to-odd, so a conversion rounds in the mode the control register already holds rather than one this module can
+name.
+
+=head2 Stack deltas
+
+C<FCB_RESUME_OFF> is 120, the offset from a function's stack pointer to where a fiber control block records its
+resume point. It is a data value, not an encoding, and the AArch64 and x86-64 tables carry their own.
+
+=head1 STATUS
+
+Expect breakage. The table covers what the back end emits and not much more.
+
+There is no C<FENCE> or C<FENCE.I>, which matters for a collector that moves memory between threads. There is no
+C<AMO> or C<LR>/C<SC> pair, so there is no atomic or compare-and-swap, and no C<CSR> instruction, so nothing here
+can read the floating-point rounding mode, count register, or C<cycle> counter. There is no compressed-encoding
+support: the C<e_flags> in the linker set C<EF_RISCV_RVC> because the ABI calls for it, but no C<C.*> instruction is
+emitted.
+
+The single-class opcodes also mean the table reads less completely than it looks. C<OP> says C<add> and not
+C<addi>, and C<OP_IMM> says neither, so a reader looking for a specific instruction in this file will not find it
+unless it happens to be one of the few that had a reason to be named.
+
+=head1 LICENSE & LEGAL
+
+This software is Copyright (c) 2026 by Sanko Robinson.
+
+This is free software. You may use, copy, modify, and distribute it under the terms of either of the following
+licenses, at your option:
+
+  The Artistic License 2.0 (GPL Compatible) - see F<LICENSE-A2>
+
+  The MIT License (GPL Compatible) - see F<LICENSE-MIT>
+
+The documentation, including the code examples in it, is licensed under the Creative Commons Attribution 4.0
+International license, see F<LICENSE-CC>, when it is used apart from the code.
+
+
+=head1 AUTHOR
+
+Sanko Robinson - L<https://github.com/sanko>
+
+
+=cut
