@@ -587,14 +587,41 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         # recognised only `mov` stopped at the first one and left the rest
         # unscheduled -- a capture that wrote a register could land before one
         # that read it, and an argument arrived as a copy of its neighbour.
-        my @prefix;
-        my @insts = $entry->instructions->@*;
-        for my $inst (@insts) {
-            last unless $inst->opcode eq 'mov' || $inst->opcode eq 'mv' || $inst->opcode eq 'fmov';
+        my $is_capture = sub {
+            my ($inst) = @_;
+            return 0 unless $inst;
+            return 0 unless $inst->opcode eq 'mov' || $inst->opcode eq 'mv' || $inst->opcode eq 'fmov';
             my ( $dst, $src ) = $inst->operands->@*;
-            last unless $src && $src->kind eq 'phys_reg';
-            last unless $dst && ( $dst->kind eq 'phys_reg' || $dst->kind eq 'virt_reg' );
-            push @prefix, { inst => $inst, src => $src->value, is_fp => ( $inst->opcode eq 'fmov' ? 1 : 0 ) };
+            return 0 unless $src && $src->kind eq 'phys_reg';
+            return $dst && ( $dst->kind eq 'phys_reg' || $dst->kind eq 'virt_reg' ) ? 1 : 0;
+        };
+
+        my ( @prefix, @tokens );
+        my @insts = $entry->instructions->@*;
+
+        # A load reads memory and writes a virtual register, so it neither
+        # reads nor clobbers a register the captures shuffle.  One can sit
+        # among them -- a parameter that arrived on the stack is read there --
+        # and the captures on either side of it belong to the same parallel
+        # move.  Treating the load as the end of the run instead stranded the
+        # captures after it: they kept their original order, so a
+        # floating-point capture ran after another had already written the
+        # register it read and an argument arrived as its neighbour.
+        #
+        # A load with no capture after it ends the run rather than widening it
+        # over the rest of the block, which by now carries the spill reloads
+        # that the captures are interleaved among.
+        for ( my $k = 0; $k < @insts; $k++ ) {
+            my $inst = $insts[$k];
+            if ( $is_capture->($inst) ) {
+                my ( $dst, $src ) = $inst->operands->@*;
+                push @prefix, { inst => $inst, src => $src->value, is_fp => ( $inst->opcode eq 'fmov' ? 1 : 0 ) };
+                push @tokens, { is_cap => 1 };
+                next;
+            }
+            last unless $inst->opcode eq 'load' || $inst->opcode eq 'fload';
+            last unless $is_capture->( $insts[ $k + 1 ] );
+            push @tokens, { is_cap => 0, inst => $inst };
         }
         return unless @prefix > 1;
 
@@ -683,27 +710,44 @@ class Brocken::Jenny::RegAlloc::LinearScan {
             push @plan, map { { cap => $_, src => $_->{src} } } @parked;
         }
         return unless @plan;
-        my @new;
+
+        # Group the plan so that a cycle parked in the temp travels with the
+        # capture that consumes it, and keep the register each capture reads.
+        my @groups;
+        my @pending;
         for my $step (@plan) {
-            my $inst = $step->{cap} ? $step->{cap}{inst} : undef;
-            if ($inst) {
-                my $src = $inst->operands->[1];
-                $inst->operands->[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src}, type => $src->type );
-                push @new, $inst;
+            if ( $step->{cap} ) {
+                push @groups, { lead => [@pending], inst => $step->{cap}{inst}, src => $step->{src} };
+                @pending = ();
+                next;
             }
-            else {
-                push @new,
-                    Brocken::Jenny::MIR::MachineInstruction->new(
-                    opcode   => $step->{opcode},
-                    operands => [
-                        Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{dst} ),
-                        Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src} )
-                    ],
-                    comment => 'entry-shuffle save ' . $step->{src}
-                    );
-            }
+            push @pending,
+                Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => $step->{opcode},
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{dst} ),
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{src} )
+                ],
+                comment => 'entry-shuffle save ' . $step->{src}
+                );
         }
-        splice $entry->instructions->@*, 0, scalar @prefix, @new;
+
+        # Each capture is re-emitted in the scheduled order but keeps the slot
+        # it already occupied, and a load read among the captures stays where
+        # it was: a stack parameter is addressed against the stack pointer the
+        # prologue left, so the load cannot be moved to suit the shuffle.
+        my @new;
+        for my $token (@tokens) {
+            if ( !$token->{is_cap} ) { push @new, $token->{inst}; next }
+            my $group = shift @groups;
+            last unless $group;
+            push @new, @{ $group->{lead} };
+            my $cap = $group->{inst};
+            my $src = $cap->operands->[1];
+            $cap->operands->[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $group->{src}, type => $src->type );
+            push @new, $cap;
+        }
+        splice $entry->instructions->@*, 0, scalar @tokens, @new;
     }
 
     # Schedule the argument copies before a call as a parallel move.
@@ -953,7 +997,7 @@ Computes the total stack frame size, aligned to 16 bytes.
 
 =head1 LICENSE
 
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+This software is Copyright (c) 2026 by Sanko Robinson.
 
 This is free software, licensed under:
 

@@ -57,7 +57,7 @@ Brocken uses a four-part "normalized" triple format: C<arch-vendor-os-env>.
 
 =head1 LICENSE
 
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+This software is Copyright (c) 2026 by Sanko Robinson.
 
 This is free software, licensed under:
 

@@ -1,12 +1,12 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Lindsay::IR;
-use Brocken::Lindsay::IR::Builder;
-use Brocken::ICB;
-use Carp ();
 
 class Brocken::Katsuro::Lowerer {
+    use Brocken::Lindsay::IR;
+    use Brocken::Lindsay::IR::Builder;
+    use Brocken::ICB;
+    use Carp ();
     field $module       : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
     field $platform     : reader : param = undef;
     field $fuel         : param = $Brocken::default_fuel;
@@ -55,7 +55,7 @@ class Brocken::Katsuro::Lowerer {
         Float  => Brocken::Lindsay::IR::Type::f64(),
         Bool   => Brocken::Lindsay::IR::Type::i1(),
         Any    => Brocken::Lindsay::IR::Type::dynamic(),
-        String => Brocken::Lindsay::IR::Type::ptr(),
+        String => Brocken::Lindsay::IR::Type::ptr()
     );
 
     # Native representation types for constants (never dynamic/boxed)
@@ -80,7 +80,7 @@ class Brocken::Katsuro::Lowerer {
         f32    => Brocken::Lindsay::IR::Type::f32(),
         f64    => Brocken::Lindsay::IR::Type::f64(),
         ptr    => Brocken::Lindsay::IR::Type::ptr(),
-        void   => Brocken::Lindsay::IR::Type::void(),
+        void   => Brocken::Lindsay::IR::Type::void()
     );
 
     method _loc($ast) {
@@ -2231,40 +2231,6 @@ class Brocken::Katsuro::Lowerer {
         $builder->build_store( $value_val, $field_ptr );
         $builder->build_ret();
     }
-}
-
-=head1 NAME
-
-Brocken::Katsuro::Lowerer - AST-to-IR lowering pass
-
-=head1 DESCRIPTION
-
-Walks the Katsuro AST produced by the parser and emits Lindsay IR instructions. Handles variable declarations (with
-debug name/type tagging), function definitions, control flow (if/while/return), operator lowering, class registration
-(building B<class_info> struct metadata), and runtime integration.
-
-=head1 FIELDS
-
-=over
-
-=item C<$classes :reader>
-
-Hashref of class definitions populated during lowering. Each key is a class name; each value is a hashref with
-C<fields> (array of C<< { name, type } >>). Attached to the IR Module via C<set_class_info> after lowering completes.
-
-=item C<$functions :reader>
-
-Hashref of lowered IR functions keyed by name. Used internally for call resolution.
-
-=back
-
-=head1 METHODS
-
-=head2 lower_program( $ast )
-
-Accepts a L<Brocken::Katsuro::AST::Program> and returns a L<Brocken::Lindsay::IR::Module> containing all lowered
-functions, global variables, and class metadata.
-
-=cut
-
+};
+#
 1;

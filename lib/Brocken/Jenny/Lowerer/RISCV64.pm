@@ -3340,7 +3340,24 @@ class Brocken::Jenny::Lowerer::RISCV64 {
                     if ( $inst->type->kind ne 'void' ) {
                         my $val = $inst->operands->[0];
                         my $abi = $self->_abi;
-                        if ( $val->type && $val->type->kind eq 'int' && $val->type->bits == 128 ) {
+                        if ( $inst->type->kind eq 'float' ) {
+
+                            # A floating-point result goes back in f0, not a0.
+                            # Sending it to a0 left whatever the caller happened
+                            # to have in f0 as the answer -- which, because f0
+                            # is also the first floating-point argument
+                            # register, meant a function returning its second
+                            # argument returned its first.
+                            my $fp_ret = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->fp_return_register );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'fmov',
+                                    operands => [ $fp_ret, $self->_materialize( $mbb, $val ) ],
+                                    comment  => '=> ' . $abi->fp_return_register
+                                )
+                            );
+                        }
+                        elsif ( $val->type && $val->type->kind eq 'int' && $val->type->bits == 128 ) {
                             my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
                             my $a1      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a1' );
                             my ( $lo, $hi ) = $self->_split_i128($val);

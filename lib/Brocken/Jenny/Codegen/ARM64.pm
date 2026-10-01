@@ -580,6 +580,19 @@ class Brocken::Jenny::Codegen::ARM64 {
             my $pat  = join '|', map quotemeta, @regs;
             qr/^($pat)$/;
         };
+
+        # The base of a memory operand is a virtual register for an ordinary
+        # spill slot, because the lowerer materializes the address with an
+        # `add` before using it.  A raw one names the physical stack register
+        # instead, and the available-register set deliberately does not contain
+        # it, so it has to be recognized here: looked up in the allocation
+        # table as if it were a virtual register, sp resolved to whatever
+        # register the allocator had handed out under that name, and the
+        # argument load went to the wrong place.
+        my $base_kind = sub ($name) {
+            return 'phys_reg' if !ref $name && $name eq $platform->stack_reg;
+            return ref $name || $name !~ $phys_re ? 'virt_reg' : 'phys_reg';
+        };
         my $current_opcode = '';
         my $resolve        = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
@@ -931,7 +944,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $addr   = $src->value;
                     my $base_r = $resolve->(
                         Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => ( $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg' ),
+                            kind  => $base_kind->( $addr->{base} ),
                             value => $addr->{base}
                         )
                     );
@@ -960,7 +973,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $addr   = $dst->value;
                     my $base_r = $resolve->(
                         Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => ( $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg' ),
+                            kind  => $base_kind->( $addr->{base} ),
                             value => $addr->{base}
                         )
                     );
@@ -985,7 +998,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $addr   = $mem->value;
                     my $base_r = $resolve->(
                         Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => ( $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg' ),
+                            kind  => $base_kind->( $addr->{base} ),
                             value => $addr->{base}
                         )
                     );
@@ -1116,7 +1129,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $addr   = $src->value;
                     my $base_r = $resolve->(
                         Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => ( $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg' ),
+                            kind  => $base_kind->( $addr->{base} ),
                             value => $addr->{base}
                         )
                     );
@@ -1142,7 +1155,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                     my $addr   = $mem->value;
                     my $base_r = $resolve->(
                         Brocken::Jenny::MIR::MachineOperand->new(
-                            kind  => ( $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg' ),
+                            kind  => $base_kind->( $addr->{base} ),
                             value => $addr->{base}
                         )
                     );
@@ -1332,18 +1345,22 @@ class Brocken::Jenny::Codegen::ARM64 {
                         $bytes .= pack( 'V', ADD_SP | ( $save_size << 10 ) );
                     }
                     else {
-                        $bytes .= pack( 'V', SUB_SP | ( 64 << 10 ) );
+
+                        # No push.  The 64 bytes this used to subtract are
+                        # x86-64's shadow space; AAPCS64 has none, and `bl`
+                        # leaves the return address in x30, so sp is already
+                        # pointing at the first outgoing argument.  Subtracting
+                        # anything put the arguments 64 bytes above where the
+                        # callee reads them from, which is only visible once
+                        # there is a ninth argument to read.
                         push @func_fixups, { offset => $current_offset->(), type => 'call_bl', target => $func_name };
                         $bytes .= pack( 'V', BL );
-                        $bytes .= pack( 'V', ADD_SP | ( 64 << 10 ) );
                     }
                 }
                 elsif ( $opcode eq 'call_indirect' ) {
-                    $bytes .= pack( 'V', SUB_SP | ( 64 << 10 ) );
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
                     $bytes .= pack( 'V', BLR | ( $sid << 5 ) );
-                    $bytes .= pack( 'V', ADD_SP | ( 64 << 10 ) );
                 }
                 elsif ( $opcode eq 'nop' ) {
                     $bytes .= pack( 'V', 0xD503201F );
@@ -1578,7 +1595,7 @@ guarantees that memory load/store offsets from SP remain small enough to fit wit
 
 =head1 LICENSE
 
-This software is Copyright (c) 2026 by Sanko Robinson E<lt>sanko@cpan.orgE<gt>.
+This software is Copyright (c) 2026 by Sanko Robinson.
 
 This is free software, licensed under:
 
