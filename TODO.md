@@ -593,11 +593,6 @@ here was reproduced against a natively compiled and executed binary, not read of
 
 ### Open
 
-- [ ] **Float-to-bool assignment is not normalized to 0/1** - `my bool $b = false; my f64 $x = 24.0;
-      $b = $x; return $b;` exits 24, not 0. The float->int narrowing behind the assignment produces
-      the integer value without masking it to the one-bit target, so a `bool` can hold any int. The
-      integer->bool path is correct (`my i64 $x = 24; $b = $x;` exits 0); only a float source is
-      affected. Found by the fuzzer (case 100, seed 20260713).
 - [ ] **Mixed-width signed/unsigned comparison compares at 32 bits** - the equal-width fix at
       `Katsuro/Lowerer.pm:1380` covers only `lbits == rbits`. When the widths differ, the narrower
       signed operand is promoted to the wider unsigned type (`i8` -> `u16`), but the value is still
@@ -648,6 +643,18 @@ here was reproduced against a natively compiled and executed binary, not read of
       signed LEB128 constant, where the unsigned form only happened to agree at 1024, and the
       memory section now covers the base plus the 24-byte runtime header it holds, so a base past
       64KB gets a second page instead of a header out of bounds.
+- [x] **Float-to-bool assignment is not normalized to 0/1** - `my bool $b = false; my f64 $x = 24.0;
+      $b = $x; return $b;` exited 24, not 0. The float->int conversion behind the assignment produced
+      the integer value without masking it to the one-bit destination, so a `bool` could hold any int;
+      an fptosi typed at a narrow destination still lowers to a full-width convert (a 32-bit
+      `cvttsd2si`, an `fcvtzs` to `w`), which left the bits above the destination intact. Fixed in
+      `Katsuro::Lowerer::maybe_convert_type`: the float->int branch now masks to the destination width
+      the way the int->int branch already did, folded for a constant and an explicit `and` for
+      everything else. A bool holds bit 0 of the truncated value, which is this compiler's existing
+      convention for a one-bit destination and what the integer path does (`i64 24` gives 0) -- it is
+      not truthiness, so `t/1000_katsuro/1076_float_conversion.t` asserts the integer cases beside the
+      float ones to keep the two sources from drifting apart again. That file fails on six of its
+      cases if the mask is removed. Checked on the host and under qemu on aarch64 and riscv64.
 
 ### Test-process lessons
 
