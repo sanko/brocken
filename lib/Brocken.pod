@@ -341,11 +341,12 @@ parameter's address takeable, but there is no source form for it.
 C<say> and C<print> compile and link, and are exercised natively, but the test suite only runs them on the host target.
 
 There are three code generators here: x86-64, AArch64, and RISC-V. The test suite exercises the native one and runs a
-foreign one under C<qemu> when a sysroot is configured, skipping it when there is none. The WebAssembly modules --
-L<Brocken::Jenny::Codegen::Wasm>, L<Brocken::Jenny::Linker::Wasm>, and L<Brocken::Jenny::Lowerer::Wasm> -- are in the
-tree and a wasm32 triple parses into a L<Brocken::Katsuro::Platform::Wasm>, but the constructor here has no branch for
-it, so C<Brocken-E<gt>new> dies with C<Unsupported platform> rather than returning a compiler. The isolated-thread and
-fiber runtimes are ahead of this.
+foreign one under C<qemu> when a sysroot is configured, skipping it when there is none. C<Brocken-E<gt>new> asks the
+platform for its back end rather than carrying a table of its own, so the WebAssembly modules --
+L<Brocken::Jenny::Codegen::Wasm>, L<Brocken::Jenny::Linker::Wasm>, and L<Brocken::Jenny::Lowerer::Wasm> -- are now
+reachable: a wasm32 triple parses into a L<Brocken::Katsuro::Platform::Wasm> and returns a compiler. The generated
+module is not valid bytecode yet, so nothing runs it; see F<TODO.md>. An architecture with no code generator is still
+refused with C<Unsupported platform>. The isolated-thread and fiber runtimes are ahead of this.
 
 The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool: a
 program that legitimately needs more has to be compiled with a larger C<fuel>.

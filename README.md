@@ -349,11 +349,12 @@ parameter's address takeable, but there is no source form for it.
 `say` and `print` compile and link, and are exercised natively, but the test suite only runs them on the host target.
 
 There are three code generators here: x86-64, AArch64, and RISC-V. The test suite exercises the native one and runs a
-foreign one under `qemu` when a sysroot is configured, skipping it when there is none. The WebAssembly modules --
-[Brocken::Jenny::Codegen::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ACodegen%3A%3AWasm), [Brocken::Jenny::Linker::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ALinker%3A%3AWasm), and [Brocken::Jenny::Lowerer::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ALowerer%3A%3AWasm) -- are in the
-tree and a wasm32 triple parses into a [Brocken::Katsuro::Platform::Wasm](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3APlatform%3A%3AWasm), but the constructor here has no branch for
-it, so `Brocken->new` dies with `Unsupported platform` rather than returning a compiler. The isolated-thread and
-fiber runtimes are ahead of this.
+foreign one under `qemu` when a sysroot is configured, skipping it when there is none. `Brocken->new` asks the
+platform for its back end rather than carrying a table of its own, so the WebAssembly modules --
+[Brocken::Jenny::Codegen::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ACodegen%3A%3AWasm), [Brocken::Jenny::Linker::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ALinker%3A%3AWasm), and [Brocken::Jenny::Lowerer::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ALowerer%3A%3AWasm) -- are now
+reachable: a wasm32 triple parses into a [Brocken::Katsuro::Platform::Wasm](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3APlatform%3A%3AWasm) and returns a compiler. The generated
+module is not valid bytecode yet, so nothing runs it; see `TODO.md`. An architecture with no code generator is still
+refused with `Unsupported platform`. The isolated-thread and fiber runtimes are ahead of this.
 
 The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool: a
 program that legitimately needs more has to be compiled with a larger `fuel`.

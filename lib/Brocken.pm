@@ -57,39 +57,14 @@ class Brocken v0.0.1 {
         $fuel         //= $Brocken::default_fuel;
         $mem_limit    //= $Brocken::default_mem_limit;
         $capabilities //= $Brocken::default_capabilities;
-        if ( $platform->is_arm64 && $platform->is_macos ) {
-            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
-            $linker  = Brocken::Jenny::Linker::MachO->new();
-        }
-        elsif ( $platform->is_arm64 && $platform->is_windows ) {
-            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
-            $linker  = Brocken::Jenny::Linker::PE->new();
-            $ext     = '.exe';
-        }
-        elsif ( $platform->is_arm64 ) {
-            $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
-            $linker  = Brocken::Jenny::Linker::ELF64->new();
-        }
-        elsif ( $platform->is_riscv64 ) {
-            $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
-            $linker  = Brocken::Jenny::Linker::ELF64->new();
-        }
-        elsif ( $platform->is_x64 && $platform->is_macos ) {
-            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-            $linker  = Brocken::Jenny::Linker::MachO->new();
-        }
-        elsif ( $platform->is_x64 && $platform->is_windows ) {
-            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-            $linker  = Brocken::Jenny::Linker::PE->new();
-            $ext     = '.exe';
-        }
-        elsif ( $platform->is_x64 ) {
-            $codegen = Brocken::Jenny::Codegen::X86_64->new( platform => $platform );
-            $linker  = Brocken::Jenny::Linker::ELF64->new();
-        }
-        else {
-            die 'Unsupported platform for Brocken: ' . $platform->friendly;
-        }
+
+        # The platform knows which back end targets it, and which extension the
+        # output needs, so there is no dispatch table to keep in step here.
+        my $codegen_class = $platform->codegen_class or die 'Unsupported platform for Brocken: ' . $platform->friendly;
+        my $linker_class  = $platform->linker_class  or die 'No linker for the ' . $platform->format . ' format: ' . $platform->friendly;
+        $codegen = $codegen_class->new( platform => $platform );
+        $linker  = $linker_class->new();
+        $ext     = $platform->bin_ext;
     }
     #
     method _core_brocken_path() {

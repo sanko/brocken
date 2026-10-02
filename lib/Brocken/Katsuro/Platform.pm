@@ -254,6 +254,32 @@ class Brocken::Katsuro::Platform {
     method is_solaris ()     {0}
     method is_wasm()         {0}
     method is_posix()        {1}
+
+    # The back end that targets this platform. Both are class names rather than
+    # objects, so the caller decides how to construct them, and this module stays
+    # free of a load-time dependency on the back end.
+    #
+    # Code generation follows the architecture, so a subclass that only changes
+    # the operating system inherits the right generator. The linker follows the
+    # binary format, which the subclasses already declare.
+    #
+    method codegen_class() {
+        return 'Brocken::Jenny::Codegen::Wasm'    if $self->is_wasm;
+        return 'Brocken::Jenny::Codegen::ARM64'   if $self->is_arm64;
+        return 'Brocken::Jenny::Codegen::RISCV64' if $self->is_riscv64;
+        return 'Brocken::Jenny::Codegen::X86_64'  if $self->is_x64;
+        return undef;
+    }
+
+    method linker_class() {
+        my %by_format = (
+            elf   => 'Brocken::Jenny::Linker::ELF64',
+            macho => 'Brocken::Jenny::Linker::MachO',
+            pe    => 'Brocken::Jenny::Linker::PE',
+            wasm  => 'Brocken::Jenny::Linker::Wasm',
+        );
+        return $by_format{ $self->format };
+    }
     #
     method libc_name()               {'libc.so'}
     method libpthread_name()         {undef}
