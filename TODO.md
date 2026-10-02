@@ -668,21 +668,53 @@ here was reproduced against a natively compiled and executed binary, not read of
       where it previously produced an unloadable module. Found by differential smoke testing
       after a broad corpus (`my` locals throughout) turned up ~10 invalid-module failures at once;
       this is the class of bug the Phase F8b Wasm fuzz lane would have caught.
-- [ ] **An untyped variable cannot hold a float on any backend** - `my $x = 1.5; return $x;` is
-      wrong everywhere, and the two backends are wrong in different ways. The frontend emits
-      `Box %8 <- f64 1.5` (result type `dynamic`) followed by `Unbox %10 <- dynamic` (result type
-      **`i64`**), so the float-ness is gone before any backend sees it: the value is stored as an
-      IEEE double into the payload slot and read back as an integer. x86-64 truncates it, so
-      `my $x = 2.5; return $x;` exits 2; Wasm returns `0x400A000000000000`, the raw bits. The
-      `f64` on the box is also why `$x == 1.5` compares an integer against a truncated 1 and comes
-      out true on x86-64 by accident. This is a frontend gap, not a backend one: the fix is either
-      to make `Unbox` produce a float when the boxed value's tag says so, or to widen the box tag
-      to cover floats (the layout in "R0: Fix Fat Scalar Layout" has no float tag at all, tags
-      0-6 with 5 = Dynamic) and have unbox reinterpret on that tag. Until then an untyped variable
-      is integer-only, which the Wasm box test states explicitly rather than pinning down the
-      current wrong answer.
+- [x] **An untyped variable could not hold a float** - `my $x = 1.5; return $x == 1.5;` was wrong
+      everywhere, and no backend could have fixed it on its own. Two independent faults, each
+      hiding the other on a different backend:
+      (1) `lower_binop` unboxed a dynamic operand to `i64` before it knew what it was being compared
+      against, so `$x == 1.5` was built as a comparison of two integers and the float-ness of the
+      literal was gone before the comparison existed. A dynamic meeting a float operand now unboxes
+      to that float type; integers still unbox to `i64` so the existing width promotion is
+      untouched. (2) Every native backend's box payload store used `store_imm` for a constant, and
+      `store_imm` picks a 64-bit GP move for a memory operand that is not an `int`, so
+      `my $x = 1.5;` stored the integer `1`. All three now route a float payload through the FP
+      store, the idiom they already used for float locals.
+      These two faults used to cancel on x86-64 for the simplest case: it truncated the value and
+      the literal identically, so `trunc(trunc(1.5)) == trunc(1.5)` was true and the bug looked
+      like it worked. Fixing only the frontend turns that case **red**, which is why the integer
+      half is asserted beside the float half in `t/1000_katsuro/1077_untyped_float.t`.
+- [ ] **A boxed value is read at whatever width the context asks for** - the remaining half of the
+      float box work, and it needs the tag consulted at run time. The box header has carried a type
+      tag since `e1e9423` and every backend writes it, but nothing reads it, so a payload is loaded
+      as whatever the context asked for. Two directions, both wrong today:
+      (1) a float payload read as an integer: `my $x = 2.5; return $x == 2;` reads
+      `0x4004000000000000` and compares that against `2`. (2) an integer payload read as a double,
+      which was broken before the float work began and is its mirror image: `my $x = 3; my f64 $y
+      = $x; return $y == 3.0;` is false. (2) is the reason the int and float cases must be fixed
+      together -- teaching `Unbox` to produce a float when the tag says so would break every
+      integer box read in a float context.
+      Two approaches: widen the box tag to cover floats (the layout in "R0: Fix Fat Scalar Layout"
+      has no float tag at all, tags 0-6 with 5 = Dynamic) and have `Unbox` dispatch on it at run
+      time, or inline the same dispatch in each of the 4 backends. Inline duplicates the subtle
+      part across four lowerers; a runtime helper adds a call to every unbox and needs `load_f64`
+      plus the first floats in `src/runtime/core.brocken`. A runtime function returning `f64` is
+      already known to work on Wasm and to be callable from user code, so the helper route is
+      viable -- this needs measuring, not assuming, so decide it once there are benchmarks.
+- [ ] **Arithmetic between two untyped variables has no float case** - `my $x = 1.5; my $y = 2.5;
+      return $x + $y;` is `3` on every backend because with both sides dynamic there is nothing to
+      unbox to and both default to `i64`. This is not reachable by fixing `Unbox`: the `+` is built
+      as an integer add before any unbox exists, so the operand types have to be settled at run
+      time from the two tags. `1077_untyped_float.t` asserts the single-dynamic cases only and says
+      so; this one is deliberately not asserted.
+- [ ] **A boxed `f32` cannot be represented at all** - the payload is one 8-byte slot and the IR
+      has no `fptrunc`/`fpext`, so a float of one width cannot be stored in a slot of the other.
+      An `f32` payload writes 4 bytes and the unbox reads 8, or the unbox reads 4 of an 8-byte `f64`.
+      Every decimal literal is an `f64`, so nothing reaches a box as an `f32` unless it is declared
+      one on purpose. This is the gap tracked under `Brocken::Lindsay`, not here.
 - [ ] **`my $a = 3; my $b = 4; $b = $b; return $a;` still traps** - self-assignment of a boxed
-      variable, where the source and destination of the store are the same box. Every other
+      variable, where the source and destination of the store are the same box. Assigning one box to
+      another, `my $x = 3; my $y = $x;`, traps the same way on Wasm, and both do it for an integer
+      as readily as a float, so it is an aliasing fault and not a float one. Every other
       untyped-local shape now works (1..6 untyped variables, arithmetic on them, and untyped
       mixed with typed in either order), so this is narrow, but it is a real runtime trap and not
       a wrong answer: wasmtime reports `out of bounds memory access`. Suspect the GC path: the

@@ -2930,10 +2930,19 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     );
                     my $payload_mem
                         = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 8 }, type => $val->type );
+
+                    # A float payload goes out through the FP store. `store_imm`
+                    # cannot express one, so a float constant reached the box as
+                    # its integer value and the float was lost here.
+                    my $is_float    = $val->type && $val->type->kind eq 'float';
+                    my $store_op    = $is_float ? 'fstore'
+                        : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm'
+                        : 'store';
+                    my $payload_src = $is_float ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val);
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
-                            operands => [ $payload_mem, $self->_lower_opnd($val) ],
+                            opcode   => $store_op,
+                            operands => [ $payload_mem, $payload_src ],
                             comment  => 'box: store payload'
                         )
                     );
