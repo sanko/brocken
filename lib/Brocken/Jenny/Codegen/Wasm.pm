@@ -387,9 +387,15 @@ class Brocken::Jenny::Codegen::Wasm {
             \@func_fixups );
     }
 
+    # A pointer is a 64-bit value here, matching the way the IR models one, and
+    # is only narrowed to the i32 that a Wasm memory access wants at the point of
+    # the access. Keeping it 64-bit elsewhere is what stops an i32 address from
+    # meeting an i64 offset, or a pointer argument, and disagreeing.
     method _wasm_valtype($ir_type) {
-        return VALTYPE_I32 if $ir_type->kind eq 'int'   && $ir_type->bits <= 32;    # i32
-        return VALTYPE_I64 if $ir_type->kind eq 'int'   && $ir_type->bits == 64;    # i64
+        return VALTYPE_I32 if $ir_type->kind eq 'int' && $ir_type->bits <= 32;      # i32
+        return VALTYPE_I64 if $ir_type->kind eq 'int' && $ir_type->bits == 64;      # i64
+        return VALTYPE_I64 if $ir_type->kind eq 'ptr';                              # pointer
+        return VALTYPE_I64 if $ir_type->kind eq 'dynamic';                          # boxed value is an address
         return VALTYPE_F32 if $ir_type->kind eq 'float' && $ir_type->bits <= 32;    # f32
         return VALTYPE_F64 if $ir_type->kind eq 'float' && $ir_type->bits >= 64;    # f64
         return VALTYPE_I32;                                                         # default i32
