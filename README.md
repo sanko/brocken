@@ -43,9 +43,9 @@ output is machine code, not Perl.
 
 Compiling is three stages, each a separate namespace:
 
-- [Brocken::Katsuro](https://metacpan.org/pod/Brocken%3A%3AKatsuro) is the front end and contains both the lexer and parser which turns source text into an AST and then onto a target-independant IR.
-- [Brocken::Lindsay](https://metacpan.org/pod/Brocken%3A%3ALindsay) is the middleware, it lowers Katsuro's IR to an MIR, assigns registers according to the platform, and encodes the result.
-- [Brocken::Jenny](https://metacpan.org/pod/Brocken%3A%3AJenny) is the backend and it emits the object file, in ELF, PE, or Mach-O form as the platform requires.
+- [Brocken::Katsuro](https://metacpan.org/pod/Brocken%3A%3AKatsuro) is the front end and contains both the lexer and parser which turn source text into an AST and then onto a target-independent IR.
+- [Brocken::Lindsay](https://metacpan.org/pod/Brocken%3A%3ALindsay) is that IR: its types, values, instructions, blocks, and functions, plus the builder that constructs them.
+- [Brocken::Jenny](https://metacpan.org/pod/Brocken%3A%3AJenny) is the backend: it lowers the IR to MIR, assigns registers, encodes for each architecture, and emits the object file, in ELF, PE, Mach-O, or Wasm form as the platform requires.
 
 The architecture and the binary format are chosen from the host platform, so a plain `Brocken->new` produces an
 executable for the machine it ran on. [Brocken::Katsuro::Platform](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3APlatform) is the layer that knows the register sets, the
