@@ -7,6 +7,69 @@ use Brocken::Katsuro::Platform;
 class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
 
+    # The address the bump allocator starts handing out from. 1024 rather
+    # than 0, because 0 doubles as the out-of-memory answer: `bump_alloc`
+    # returns it on exhaustion and `check_alloc` traps on it, so a heap that
+    # began at 0 could never tell "the first block" from "no block".
+    field $heap_base :param = 1024;
+
+    # The runtime writes a 24-byte header at the base itself (cursor, limit,
+    # cap), so the initial memory has to cover the base plus that header. The
+    # fixed single page this used to emit covered the default base of 1024 by
+    # coincidence; a base above 64KB would have put the header itself out of
+    # bounds.
+    method _initial_pages () {
+        my $pages = int( ( $heap_base + 24 + 65535 ) / 65536 );
+        return $pages < 1 ? 1 : $pages;
+    }
+
+    # Shared by both emission paths below, so the page count cannot drift
+    # between them: the runtime reads this section to decide how much heap it
+    # has, and the two paths used to build their own.
+    method _memory_section () {
+        my $content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb( $self->_initial_pages );
+        return pack( 'C', 5 ) . $self->_uleb( length $content ) . $content;
+    }
+
+    # A `_start` export, so `wasmtime run module.wasm` runs the module as a
+    # WASI command instead of needing `--invoke _BROCKEN_ENTRY` and a heap base
+    # on the command line. The native linkers each have such a stub; this one
+    # did not.
+    #
+    # A WASI `_start` is `() -> ()`, so it cannot supply a heap base the way
+    # `_BROCKEN_ENTRY` takes one as a parameter, and passes the link-time one
+    # itself. The entry's return value is dropped: propagating it would mean
+    # importing wasi_snapshot_preview1.proc_exit, and this module emits no
+    # import section, which would also break every caller that instantiates it
+    # directly. So a program returning 42 and one returning 1 both exit 0. The
+    # `drop` is emitted only when the entry actually leaves a value behind,
+    # since dropping from an empty stack is itself a validation error.
+    #
+    # The base is pushed in the entry's own parameter type, which is i64
+    # because a Wasm pointer is 64 bits. `i32.const` would make the call a type
+    # error. `i32.const`/`i64.const` take a *signed* LEB128, hence _sleb rather
+    # than the _uleb used for indices and section sizes; for a base of 1024 the
+    # two encodings happen to agree, which is how the unsigned form could pass.
+    method _start_body( $entry_index, $entry = undef ) {
+        my $body = pack( 'C', 0x00 );    # no locals
+
+        my $vt = $entry ? $entry->{param_valtypes}[0] : undef;
+        my $is_i64 = defined $vt && $vt == 0x7E;
+        $body .= pack( 'C', $is_i64 ? 0x42 : 0x41 ) . $self->_sleb($heap_base);    # i64.const / i32.const
+
+        $body .= pack( 'C', 0x10 ) . $self->_uleb($entry_index);    # call <entry>
+
+        my $rt = $entry ? $entry->{return_valtype} : undef;
+        my $returns
+            = defined $rt
+            ? ( ref $rt eq 'ARRAY' ? scalar $rt->@* : $rt ne 'void' )
+            : 1;
+        $body .= pack( 'C', 0x1A ) if $returns;    # drop
+
+        $body .= pack( 'C', 0x0B );                # end
+        return $body;
+    }
+
     method write_executable ( $output_file, $codegen_output, $platform ) {
         if ( ref $codegen_output eq 'ARRAY' ) {
 
@@ -25,6 +88,21 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
                     fixups         => $fd->{fixups}         // [],
                     return_valtype => $fd->{return_valtype} // 0x7F,
                     param_valtypes => $fd->{param_valtypes} // [],
+                    };
+            }
+
+            # The WASI command stub, appended once the indices exist so it can
+            # name the entry. It carries no fixups: its call target is already
+            # known. Only the multi-function path has the metadata _start_body
+            # needs, so the single-function path below does not get one.
+            if ( defined( my $entry_index = $func_offsets{_BROCKEN_ENTRY} ) ) {
+                push @func_data,
+                    {
+                    name           => '_start',
+                    bytes          => $self->_start_body( $entry_index, $func_data[ $entry_index ] ),
+                    fixups         => [],
+                    return_valtype => 'void',
+                    param_valtypes => [],
                     };
             }
 
@@ -92,9 +170,8 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             }
             $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb( scalar @type_table ) . $type_sec;
 
-            # Memory Section (ID 5): 1 page (64KB)
-            my $mem_content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb(1);
-            my $mem_sec     = pack( 'C', 5 ) . $self->_uleb( length($mem_content) ) . $mem_content;
+            # Memory Section (ID 5)
+            my $mem_sec = $self->_memory_section;
 
             # Function Section (ID 3) -- map each function to its type
             my $func_sec = '';
@@ -151,9 +228,8 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         }
         $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb(1) . $type_sec;
 
-        # Memory Section (ID 5): 1 page (64KB)
-        my $mem_content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb(1);
-        my $mem_sec     = pack( 'C', 5 ) . $self->_uleb( length($mem_content) ) . $mem_content;
+        # Memory Section (ID 5)
+        my $mem_sec = $self->_memory_section;
 
         # Function Section (ID 3)
         my $func_sec = $self->_uleb(1) . $self->_uleb($type_idx);
@@ -185,6 +261,22 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             $byte |= 0x80 if $v;
             $out .= pack( 'C', $byte );
         } while ($v);
+        return $out;
+    }
+
+    # Signed LEB128: the same 7-bit groups, but the last one carries the sign, so
+    # a value whose top group has bit 0x40 set needs an extra group the unsigned
+    # form would not spend. `i32.const`/`i64.const` take this encoding.
+    method _sleb ($v) {
+        my $out = '';
+        while (1) {
+            my $byte = $v & 0x7F;
+            $v >>= 7;
+            my $done = ( $v == 0 && !( $byte & 0x40 ) ) || ( $v == -1 && ( $byte & 0x40 ) );
+            $byte |= 0x80 unless $done;
+            $out .= pack( 'C', $byte );
+            last if $done;
+        }
         return $out;
     }
 }
