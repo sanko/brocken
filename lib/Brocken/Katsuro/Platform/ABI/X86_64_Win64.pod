@@ -41,6 +41,8 @@ chooses the register and the fifth and later arguments go on the stack. SysV ins
 
 =item * B<Return>: rax
 
+=item * B<Wide return>: rax:rdx for a 128-bit result
+
 =item * B<FP return>: xmm0
 
 =item * B<FP caller-saved>: xmm0-xmm5

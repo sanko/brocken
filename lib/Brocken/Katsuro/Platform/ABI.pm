@@ -33,6 +33,24 @@ class Brocken::Katsuro::Platform::ABI {
     # fifth argument goes on the stack whatever its class.
     method positional_arguments() {0}
 
+    # The pair of parameter registers a 128-bit argument takes when $spent
+    # integer registers have already been consumed, or an empty list when fewer
+    # than two remain and the value has to go on the stack.  The pair is always
+    # consecutive in the parameter list.
+    method param_pair_registers($spent) {
+        my @gp = $self->param_registers->@*;
+        return if $spent + 1 >= @gp;
+        return @gp[ $spent, $spent + 1 ];
+    }
+
+    # The two registers a 128-bit result is returned in, the return register
+    # first.  An ABI that returns a wide value in a different pair overrides
+    # this.
+    method return_pair_registers() {
+        my $first = $self->return_register;
+        return defined $first ? ($first) : ();
+    }
+
     # Where each argument goes, in order.  $classes is an arrayref with one
     # class name per argument: 'int', 'float', or 'i128'.  Each entry of the
     # result is the name of the register the argument is passed in, [ $lo, $hi ]
@@ -50,8 +68,10 @@ class Brocken::Katsuro::Platform::ABI {
         my @out;
         for my $class (@$classes) {
             if ( $class eq 'i128' ) {
-                if ( $gi + 1 < @gp ) {
-                    push @out, [ $gp[ $gi++ ], $gp[ $gi++ ] ];
+                my ( $lo, $hi ) = $self->param_pair_registers($gi);
+                if ( defined $hi ) {
+                    push @out, [ $lo, $hi ];
+                    $gi += 2;
                 }
                 else {
                     push @out, [ 'stack', $si ];

@@ -37,7 +37,8 @@ class Brocken::Jenny::Lowerer::ARM64 {
 
                         # A 128-bit value takes two consecutive registers, so it
                         # goes to the stack when fewer than two are left.
-                        if ( $gp_idx + 1 >= @gp_regs ) {
+                        my ( $lo_reg_name, $hi_reg_name ) = $self->_abi->param_pair_registers($gp_idx);
+                        if ( !defined $hi_reg_name ) {
                             my $lo_slot = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'mem',
                                 value => { base => $platform->stack_reg, disp => $self->_abi->stack_param_offset($stk_idx), raw => 'entry' },
@@ -76,11 +77,10 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             $gp_idx  += 2;
                             next;
                         }
-                        my $lo_reg_name = $gp_regs[ $gp_idx++ ];
-                        my $hi_reg_name = $gp_regs[ $gp_idx++ ];
-                        my $lo_reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
-                        my $hi_reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
-                        my $lo_dst      = Brocken::Jenny::MIR::MachineOperand->new(
+                        $gp_idx += 2;
+                        my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                        my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
+                        my $lo_dst = Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'virt_reg',
                             value => $param_name . '_lo',
                             type  => Brocken::Lindsay::IR::Type::i64()
@@ -3602,8 +3602,10 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             # A 128-bit value takes a consecutive register pair,
                             # so it goes to the stack whole when only one is left
                             # rather than straddling the two.
-                            if ( $gp_idx + 1 < @gp_regs ) {
-                                $where[$i] = [ 'reg', $gp_regs[ $gp_idx++ ], $gp_regs[ $gp_idx++ ] ];
+                            my ( $lo_reg_name, $hi_reg_name ) = $self->_abi->param_pair_registers($gp_idx);
+                            if ( defined $hi_reg_name ) {
+                                $where[$i] = [ 'reg', $lo_reg_name, $hi_reg_name ];
+                                $gp_idx += 2;
                             }
                             else {
                                 $where[$i] = [ 'stack', $stk_idx, $stk_idx + 1 ];
@@ -3777,21 +3779,22 @@ class Brocken::Jenny::Lowerer::ARM64 {
                             );
                         }
                         elsif ($is_i128) {
-                            my $x0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
-                            my $x1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x1' );
+                            my ( $lo_reg_name, $hi_reg_name ) = $abi->return_pair_registers;
+                            my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                            my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
                             my ( $lo, $hi ) = $self->_split_i128($inst);
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
-                                    operands => [ $lo, $x0 ],
-                                    comment  => "retval i128 lo from x0"
+                                    operands => [ $lo, $lo_reg ],
+                                    comment  => "retval i128 lo from $lo_reg_name"
                                 )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
-                                    operands => [ $hi, $x1 ],
-                                    comment  => "retval i128 hi from x1"
+                                    operands => [ $hi, $hi_reg ],
+                                    comment  => "retval i128 hi from $hi_reg_name"
                                 )
                             );
                         }
@@ -3824,21 +3827,22 @@ class Brocken::Jenny::Lowerer::ARM64 {
                         else {
                             my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128;
                             if ($is_i128) {
-                                my $ret_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
-                                my $x1      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x1' );
+                                my ( $lo_reg_name, $hi_reg_name ) = $abi->return_pair_registers;
+                                my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                                my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
                                 my ( $lo, $hi ) = $self->_split_i128($val);
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mov',
-                                        operands => [ $ret_reg, $lo ],
-                                        comment  => '=> ' . $abi->return_register . ' (i128 lo)'
+                                        operands => [ $lo_reg, $lo ],
+                                        comment  => '=> ' . $lo_reg_name . ' (i128 lo)'
                                     )
                                 );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mov',
-                                        operands => [ $x1, $hi ],
-                                        comment  => '=> x1 (i128 hi)'
+                                        operands => [ $hi_reg, $hi ],
+                                        comment  => '=> ' . $hi_reg_name . ' (i128 hi)'
                                     )
                                 );
                             }

@@ -26,9 +26,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
             }
             if ( $ir_func->blocks->[0] == $block && $ir_func->params->@* ) {
                 my @classes = map {
-                    $_->type && $_->type->kind eq 'float' ? 'float'
-                        : $_->type && $_->type->kind eq 'int' && $_->type->bits == 128 ? 'i128'
-                        : 'int';
+                    $_->type && $_->type->kind eq 'float' ? 'float' : $_->type && $_->type->kind eq 'int' && $_->type->bits == 128 ? 'i128' : 'int';
                 } $ir_func->params->@*;
                 my @param_regs       = $self->_abi->argument_locations( \@classes )->@*;
                 my $last             = $#{ $ir_func->params };
@@ -55,10 +53,10 @@ class Brocken::Jenny::Lowerer::X86_64 {
                 for ( my $i = 0; $i <= $last; $i++ ) {
                     my $param      = $ir_func->params->[$i];
                     my $param_name = defined $param->name ? $param->name : '%p' . $i;
-                    my $is_float  = $classes[$i] eq 'float';
-                    my $is_i128   = $classes[$i] eq 'i128';
-                    my $placement = $param_regs[$i];
-                    my $on_stack  = ref $placement && $placement->[0] eq 'stack';
+                    my $is_float   = $classes[$i] eq 'float';
+                    my $is_i128    = $classes[$i] eq 'i128';
+                    my $placement  = $param_regs[$i];
+                    my $on_stack   = ref $placement && $placement->[0] eq 'stack';
                     if ($is_i128) {
                         my $lo_tmp = Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'virt_reg',
@@ -3070,21 +3068,22 @@ class Brocken::Jenny::Lowerer::X86_64 {
                         else {
                             my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128;
                             if ($is_i128) {
-                                my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
-                                my $rdx = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' );
+                                my ( $lo_reg_name, $hi_reg_name ) = $abi->return_pair_registers;
+                                my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                                my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
                                 my ( $lo, $hi ) = $self->_split_i128($val);
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mov',
-                                        operands => [ $rax, $lo ],
-                                        comment  => '=> ' . $abi->return_register . ' (i128 lo)'
+                                        operands => [ $lo_reg, $lo ],
+                                        comment  => '=> ' . $lo_reg_name . ' (i128 lo)'
                                     )
                                 );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mov',
-                                        operands => [ $rdx, $hi ],
-                                        comment  => '=> rdx (i128 hi)'
+                                        operands => [ $hi_reg, $hi ],
+                                        comment  => '=> ' . $hi_reg_name . ' (i128 hi)'
                                     )
                                 );
                             }
@@ -3612,9 +3611,7 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     # Where every argument goes, in order, from the ABI.
                     my @classes = map {
                         my $t = $_->type;
-                        $t && $t->kind eq 'float' ? 'float'
-                            : $t && $t->kind eq 'int' && $t->bits == 128 ? 'i128'
-                            : 'int';
+                        $t && $t->kind eq 'float' ? 'float' : $t && $t->kind eq 'int' && $t->bits == 128 ? 'i128' : 'int';
                     } @args;
                     my @arg_regs = $abi->argument_locations( \@classes )->@*;
 
@@ -3744,21 +3741,22 @@ class Brocken::Jenny::Lowerer::X86_64 {
                             );
                         }
                         elsif ($is_i128) {
-                            my $rax = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $abi->return_register );
-                            my $rdx = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' );
+                            my ( $lo_reg_name, $hi_reg_name ) = $abi->return_pair_registers;
+                            my $lo_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lo_reg_name );
+                            my $hi_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $hi_reg_name );
                             my ( $lo, $hi ) = $self->_split_i128($inst);
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
-                                    operands => [ $lo, $rax ],
-                                    comment  => "retval i128 lo from rax"
+                                    operands => [ $lo, $lo_reg ],
+                                    comment  => "retval i128 lo from $lo_reg_name"
                                 )
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
-                                    operands => [ $hi, $rdx ],
-                                    comment  => "retval i128 hi from rdx"
+                                    operands => [ $hi, $hi_reg ],
+                                    comment  => "retval i128 hi from $hi_reg_name"
                                 )
                             );
                         }
