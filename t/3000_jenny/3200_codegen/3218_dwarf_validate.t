@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../../../lib';
 use Brocken;
-use Brocken::Compiler;
 use Config;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
@@ -18,7 +17,7 @@ my i64 $y = 20;
 my i64 $z = $x + $y;
 return $z;
 BROCKEN
-        my $module    = Brocken::Compiler->new->compile( $source, 'test_dwarf.brocken' );
+        my $module    = Brocken->new->compile( $source, 'test_dwarf.brocken' );
         my $ir_funcs  = $module->functions;
         my $funcs     = $brocken->codegen->emit_functions($ir_funcs);
         my $text_base = 0;

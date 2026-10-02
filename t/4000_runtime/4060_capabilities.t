@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'default capabilities allow syscall' => sub {
@@ -11,7 +10,7 @@ subtest 'default capabilities allow syscall' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Default caps should be ~0 (all bits set) from _BROCKEN_ENTRY prologue.
 # CAP_FFI = 16, so bit 4 should be set.
@@ -36,7 +35,7 @@ subtest 'zero capabilities block syscall' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Set capabilities to 0 (no capabilities)
 Brocken::store_i64(Brocken::ptr_add($hb, 104), 0);
@@ -66,7 +65,7 @@ subtest 'restoring CAP_FFI allows syscall again' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # First, block capabilities
 Brocken::store_i64(Brocken::ptr_add($hb, 104), 0);
@@ -99,7 +98,7 @@ subtest 'wrong capability bit does not satisfy CAP_FFI check' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Set capabilities to CAP_FS_READ (1) only — missing CAP_FFI (16)
 Brocken::store_i64(Brocken::ptr_add($hb, 104), 1);
@@ -123,7 +122,7 @@ subtest 'err_code starts at 0 for clean isolate' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Verify all sandbox fields are clean from _init
 my i64 $fuel    = Brocken::load_i64(Brocken::ptr_add($hb, 64));

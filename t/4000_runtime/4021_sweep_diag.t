@@ -13,7 +13,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 my $name = 'shl variable-shift ARM64 diagnostic: ';
@@ -22,7 +21,7 @@ SKIP: {
     my $host    = $brocken->platform;
     skip 'Not ARM64', 1 unless $host->is_arm64 && $host->is_native;
     my $rc = do {
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub always_shl_63() -> i64 { return Brocken::shl(1, 63); }
 
 sub diag_shl_param(i64 $p) -> i64 {

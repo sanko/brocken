@@ -3,13 +3,12 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 use Brocken::Lindsay::IR;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'Parser accepts eq/ne/lt/gt/le/ge/cmp as binary operators' => sub {
     for my $op (qw(eq ne lt gt le ge cmp)) {
-        my $ast = Brocken::Compiler->new->parse_only(<<BROCKEN);
+        my $ast = Brocken->new->parse_only(<<BROCKEN);
 my String \$a = "x";
 my String \$b = "y";
 my \$r = \$a $op \$b;
@@ -25,7 +24,7 @@ BROCKEN
     }
 };
 subtest 'Parser accepts length() as function call' => sub {
-    my $ast = Brocken::Compiler->new->parse_only(<<'BROCKEN');
+    my $ast = Brocken->new->parse_only(<<'BROCKEN');
 my String $s = "hello";
 my $len = length($s);
 return 0;
@@ -40,7 +39,7 @@ BROCKEN
     is( scalar $call->args->@*, 1,        'one argument' );
 };
 subtest 'String eq produces strcmp + icmp eq in IR' => sub {
-    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module = Brocken->new->compile(<<'BROCKEN');
 my String $a = "hello";
 my String $b = "hello";
 my $r = $a eq $b;
@@ -65,7 +64,7 @@ subtest 'String eq through codegen and native execution (constant strings)' => s
     my $host    = $brocken->platform;
 SKIP: {
         skip 'skip native execution test (not native host)', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my String $a = "hello";
 my String $b = "hello";
 my String $c = "world";
@@ -97,7 +96,7 @@ subtest 'String ne through native execution' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'skip native execution test (not native host)', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my String $a = "abc";
 my String $b = "def";
 if ($a ne $b) {
@@ -123,7 +122,7 @@ subtest 'String lt/gt/le/ge through native execution' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'skip native execution test (not native host)', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my String $a = "aaa";
 my String $b = "zzz";
 if ($a lt $b) { say("lt-yes"); } else { say("lt-no"); }
@@ -148,7 +147,7 @@ subtest 'String cmp through native execution' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'skip native execution test (not native host)', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my String $a = "aaa";
 my String $b = "zzz";
 my i64 $r1 = $a cmp $b;
@@ -169,7 +168,7 @@ BROCKEN
     }
 };
 subtest 'length() returns string length in IR' => sub {
-    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module = Brocken->new->compile(<<'BROCKEN');
 my String $s = "hello";
 my $len = length($s);
 return $len;
@@ -193,7 +192,7 @@ subtest 'length() through native execution' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'skip native execution test (not native host)', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my String $s = "hello";
 my i64 $len = length($s);
 say("" . $len);
@@ -215,7 +214,7 @@ subtest 'eq with empty strings' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'skip native execution test (not native host)', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my String $a = "";
 my String $b = "";
 if ($a eq $b) { say("empty-eq"); } else { say("empty-ne"); }

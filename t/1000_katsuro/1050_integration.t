@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'Return constant' => sub {
@@ -11,7 +10,7 @@ subtest 'Return constant' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile('return 42;');
+        my $module = Brocken->new->compile('return 42;');
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
         my $file   = $brocken->tmpdir . '/e2e_ret_const' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
@@ -25,7 +24,7 @@ subtest 'Variable decl, assign, return' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $x = 10;
 my i64 $y;
 $y = 32;
@@ -44,7 +43,7 @@ subtest 'Arithmetic with precedence' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $r = 1 + 2 * 3;
 return $r;
 BROCKEN
@@ -61,7 +60,7 @@ subtest 'If/else control flow' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $x = 1;
 if ($x) {
     return 42;
@@ -82,7 +81,7 @@ subtest 'If/else with false condition' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $x = 0;
 if ($x) {
     return 0;
@@ -103,7 +102,7 @@ subtest 'While loop' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $i = 0;
 my i64 $s = 0;
 while ($i < 10) {
@@ -125,7 +124,7 @@ subtest 'Comparison operators' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $a = 10;
 my i64 $b = 20;
 if ($a == $b) { return 1; }
@@ -145,7 +144,7 @@ subtest 'Function call' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub helper() -> i64 {
     return 42;
 }
@@ -164,7 +163,7 @@ subtest 'Factorial' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub factorial(i64 $n) -> i64 {
     my i64 $result = 1;
     my i64 $i = 1;
@@ -189,7 +188,7 @@ subtest 'Logical not via if' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $a = 0;
 if (! $a) { return 42; }
 return 0;
@@ -207,7 +206,7 @@ subtest 'Class constructor and reader method' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param :reader;
 }
@@ -227,7 +226,7 @@ subtest 'Class constructor and writer method' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 class Counter {
     field i64 $count :param :reader :writer;
 }
@@ -248,7 +247,7 @@ subtest 'Class with ADJUST block' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param :reader;
     ADJUST {
@@ -271,7 +270,7 @@ subtest 'Class with custom method' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param;
     method double() -> i64 { return $x * 2; }
@@ -292,7 +291,7 @@ subtest 'Direct field read access ($obj->field)' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param;
 }
@@ -312,7 +311,7 @@ subtest 'Direct field write access ($obj->field = value)' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param;
 }
@@ -333,7 +332,7 @@ BROCKEN
 subtest 'Implicit main' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $c       = Brocken::Compiler->new;
+    my $c       = Brocken->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
         my $module = $c->compile(<<'BROCKEN');
@@ -354,7 +353,7 @@ BROCKEN
 subtest 'Array element read and write' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $c       = Brocken::Compiler->new;
+    my $c       = Brocken->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
         my $module = $c->compile(<<'BROCKEN');
@@ -380,7 +379,7 @@ BROCKEN
 subtest 'Array with i128 native type' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $c       = Brocken::Compiler->new;
+    my $c       = Brocken->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
         my $module = $c->compile(<<'BROCKEN');
@@ -402,7 +401,7 @@ BROCKEN
 subtest 'Bitwise intrinsics band, bor, bxor, shl, shr' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $c       = Brocken::Compiler->new;
+    my $c       = Brocken->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
         my $module = $c->compile(<<'BROCKEN');
@@ -428,7 +427,7 @@ BROCKEN
 subtest 'Syscall intrinsic execution' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $c       = Brocken::Compiler->new;
+    my $c       = Brocken->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
         if ( $host->is_freebsd || $host->is_macos || $host->is_openbsd || $host->is_dragonflybsd || $host->is_midnightbsd || $host->is_solaris ) {
@@ -466,7 +465,7 @@ BROCKEN
 subtest 'Syscall by name' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $c       = Brocken::Compiler->new;
+    my $c       = Brocken->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
         skip 'Syscall numbers not resolved for Windows'            if $host->is_windows;
@@ -490,7 +489,7 @@ BROCKEN
 subtest 'Extern intrinsic calls libc function' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $c       = Brocken::Compiler->new;
+    my $c       = Brocken->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
         skip 'MachO linker does not support libc yet' if $host->is_macos;
@@ -510,7 +509,7 @@ BROCKEN
 subtest 'Extern intrinsic exit' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $c       = Brocken::Compiler->new;
+    my $c       = Brocken->new;
 SKIP: {
         skip 'Native executable test requires native platform' unless $host->is_native;
         skip 'MachO linker does not support libc yet' if $host->is_macos;
@@ -534,7 +533,7 @@ subtest 'while loop with last' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $i = 0;
 my i64 $s = 0;
 while ($i < 100) {
@@ -557,7 +556,7 @@ subtest 'while loop with next' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $i = 0;
 my i64 $s = 0;
 while ($i < 10) {
@@ -580,7 +579,7 @@ subtest 'Ternary expression' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $a = 1;
 my i64 $b = 0;
 my i64 $r = $a ? 42 : 0;

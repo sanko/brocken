@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'Any variable: declare, init, return' => sub {
@@ -11,7 +10,7 @@ subtest 'Any variable: declare, init, return' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 42;
 return $x;
 BROCKEN
@@ -28,7 +27,7 @@ subtest 'Any variable: two vars and arithmetic' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 10;
 my $y = 32;
 return $x + $y;
@@ -46,7 +45,7 @@ subtest 'Any variable: reassignment' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 10;
 $x = 42;
 return $x;
@@ -64,7 +63,7 @@ subtest 'Any variable: copy from one to another' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $a = 21;
 my $b = $a;
 return $a + $b;
@@ -82,7 +81,7 @@ subtest 'Any variable: mixed with i64 typed' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 10;
 my i64 $y = 32;
 return $x + $y;
@@ -100,7 +99,7 @@ subtest 'Any variable: in while loop' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $i = 0;
 my $s = 0;
 while ($i < 10) {
@@ -122,7 +121,7 @@ subtest 'Any variable: conditional with Any' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 10;
 my $y = 20;
 my $r;

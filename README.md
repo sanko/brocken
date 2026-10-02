@@ -8,11 +8,10 @@ Compiling a program is four calls. This is the whole path, start to finish:
 
 ```perl
 use Brocken;
-use Brocken::Compiler;
 
 my $brocken = Brocken->new;
 
-my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+my $module = $brocken->compile(<<'BROCKEN');
 sub fib( i64 $n ) -> i64 {
     if ( $n < 2 ) { return $n; }
     return fib( $n - 1 ) + fib( $n - 2 );
@@ -59,7 +58,7 @@ cross compile is asked for.
 
 ## The runtime is compiled in
 
-`src/runtime/core.brocken` is not an optional library. [Brocken::Compiler](https://metacpan.org/pod/Brocken%3A%3ACompiler) reads it, parses it, and merges its
+`src/runtime/core.brocken` is not an optional library. `compile` reads it, parses it, and merges its
 statements ahead of the caller's before anything is lowered, so every program carries the allocator, the collector, the
 fiber machinery, and the exception support with it.
 
@@ -74,7 +73,7 @@ Two runtime limits are configurable and one is a capability mask:
 - **Capabilities** is a bitmask of what a compiled program is allowed to do. It defaults to all of them.
 
 They are set per compiler rather than per platform, through the three package variables below, or through the
-`set_default_policy` method on [Brocken::Compiler](https://metacpan.org/pod/Brocken%3A%3ACompiler) for everything compiled afterwards.
+`set_default_policy` method on [Brocken](https://metacpan.org/pod/Brocken) for everything compiled afterwards.
 
 # THE LANGUAGE
 
@@ -180,7 +179,7 @@ class. Outside one, a field read is `$p->x`, and there is a writer for it too.
 
 # PACKAGE VARIABLES
 
-These are the runtime defaults, read by [Brocken::Compiler](https://metacpan.org/pod/Brocken%3A%3ACompiler) and [Brocken::Katsuro::Lowerer](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3ALowerer) when they construct
+These are the runtime defaults, read by [Brocken](https://metacpan.org/pod/Brocken) and [Brocken::Katsuro::Lowerer](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3ALowerer) when they construct
 themselves. Setting one changes every compiler built afterwards:
 
 - `$Brocken::default_fuel`
@@ -204,6 +203,43 @@ The bits in that mask are:
 - `$Brocken::CAP_FFI` - syscall, libc, and raw FFI
 
 # METHODS
+
+## `compile( $source, $filename )`
+
+```perl
+my $module = $brocken->compile( $source, $filename );
+```
+
+Parses and lowers `$source` for this instance's platform, merging the runtime in ahead of the caller's own statements.
+The optional `$filename` defaults to `(eval)` and is the name reported in diagnostics. Returns a
+[Brocken::Lindsay::IR::Module](https://metacpan.org/pod/Brocken%3A%3ALindsay%3A%3AIR%3A%3AModule) with class info and read-only data attached, ready to hand to `codegen`.
+
+## `parse_only( $source, $filename )`
+
+```perl
+my $ast = $brocken->parse_only( $source, $filename );
+```
+
+The parse half of `compile` on its own, returning the raw [Brocken::Katsuro::AST::Program](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3AAST%3A%3AProgram) without lowering. Useful
+for introspection and for testing the front end against the back end. The runtime is not merged in.
+
+## `set_default_policy( %opts )`
+
+```perl
+Brocken->set_default_policy( fuel => 100_000 );
+```
+
+Sets the runtime default for every compiler built afterwards. Accepts `fuel`, `mem_limit`, and `capabilities`, and
+leaves the ones not named alone. Each can still be overridden per instance through the constructor.
+
+## `fuel( ... )`, `mem_limit( ... )`, `capabilities( ... )`
+
+```perl
+my $fuel = $brocken->fuel;
+```
+
+The limits in force for this instance. Each falls back to the matching package variable described above when the
+constructor was not given one.
 
 ## `platform( ... )`
 
@@ -255,14 +291,6 @@ $brocken->tmpdir
 Returns a [File::Temp::Dir](https://metacpan.org/pod/File%3A%3ATemp%3A%3ADir) object for a temporary directory created for this instance and removed when it goes out of
 scope. It stringifies to a path, which is why `$brocken->tmpdir . '/fib'` is the way to build a filename. It is
 where the output goes when the caller does not want to name a path.
-
-## `debug_level( ... )`
-
-```perl
-my $level = $brocken->debug_level;
-```
-
-Returns the debug level this instance was constructed with. Defaults to `0`.
 
 ## `os( ... )`
 

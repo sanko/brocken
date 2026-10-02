@@ -5,7 +5,6 @@ use Brocken;
 use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
-use Brocken::Compiler;
 use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Codegen::RISCV64;
 use Brocken::Jenny::Codegen::RISCV64::Encodings qw[:all];
@@ -41,7 +40,7 @@ my $brocken = Brocken->new;
 is(
     dies {
         my $module
-            = Brocken::Compiler->new->compile( 'sub g(f64 $a, f64 $b, f64 $c, f64 $d) -> i64 {' .
+            = Brocken->new->compile( 'sub g(f64 $a, f64 $b, f64 $c, f64 $d) -> i64 {' .
                 ' my f64 $s = $a + $b + $c + $d; my i64 $j = $s; return $j; }' .
                 ' return g(1.0, 2.0, 3.0, 4.0);' );
         $brocken->codegen->emit_functions( $module->functions );
@@ -61,7 +60,7 @@ is(
 sub entry_words ( $cg_class, $arch ) {
     my $plat   = Brocken::Katsuro::Platform::parse($arch);
     my $cg     = $cg_class->new( platform => $plat );
-    my $module = Brocken::Compiler->new->compile( 'sub g(f32 $a) -> i64 { my f32 $s = $a; my i64 $j = $s; return $j; }' . ' return g(1.0);' );
+    my $module = Brocken->new->compile( 'sub g(f32 $a) -> i64 { my f32 $s = $a; my i64 $j = $s; return $j; }' . ' return g(1.0);' );
     my @words;
     for my $func ( $module->functions->@* ) {
         next unless $func->name eq '_BROCKEN_ENTRY';
@@ -120,7 +119,7 @@ done_testing;
 
 sub run {
     my ( $src, $tag ) = @_;
-    my $module = Brocken::Compiler->new->compile($src);
+    my $module = Brocken->new->compile($src);
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = $brocken->tmpdir . "/floatlit_$tag" . $brocken->ext;
     $brocken->linker->write_executable( $file, $funcs, $brocken->platform );

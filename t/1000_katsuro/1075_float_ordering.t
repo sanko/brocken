@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -17,7 +16,7 @@ sub answers ( $src, $want, $name ) {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
     return diag("not native") unless $host->is_native;
-    my $module = eval { Brocken::Compiler->new->compile($src) };
+    my $module = eval { Brocken->new->compile($src) };
     if ($@) { fail("$name: compile died: $@"); return }
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
     my $file  = $brocken->tmpdir . '/fo' . $brocken->ext;

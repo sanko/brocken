@@ -5,7 +5,6 @@ use Brocken;
 use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -66,7 +65,7 @@ done_testing;
 
 sub run {
     my ($src)  = @_;
-    my $module = Brocken::Compiler->new->compile($src);
+    my $module = Brocken->new->compile($src);
     my $funcs  = $brocken->codegen->emit_functions( $module->functions );
     my $file   = $brocken->tmpdir . '/fparams' . $brocken->ext;
     $brocken->linker->write_executable( $file, $funcs, $brocken->platform );

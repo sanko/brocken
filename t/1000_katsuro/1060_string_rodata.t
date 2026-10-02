@@ -3,12 +3,11 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 use Brocken::Lindsay::IR;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'String constant compiles and produces RodataRef in IR' => sub {
-    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module = Brocken->new->compile(<<'BROCKEN');
 my String $x = "hello";
 return 42;
 BROCKEN
@@ -28,7 +27,7 @@ BROCKEN
 subtest 'String constant through codegen and linker' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $module  = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module  = Brocken->new->compile(<<'BROCKEN');
 my String $x = "Hello, world!";
 say($x);
 return 0;
@@ -62,7 +61,7 @@ SKIP: {
     }
 };
 subtest 'String concat folds two RodataRef strings' => sub {
-    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module = Brocken->new->compile(<<'BROCKEN');
 my String $x = "hello " . "world";
 return 0;
 BROCKEN
@@ -75,7 +74,7 @@ BROCKEN
     ok( $found, 'found folded concatenated string in rodata' );
 };
 subtest 'Parser accepts . as binary operator' => sub {
-    my $ast = Brocken::Compiler->new->parse_only(<<'BROCKEN');
+    my $ast = Brocken->new->parse_only(<<'BROCKEN');
 my String $x = "a" . "b";
 return 0;
 BROCKEN
@@ -90,7 +89,7 @@ BROCKEN
 subtest 'String concat through codegen and linker (constant fold)' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $module  = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module  = Brocken->new->compile(<<'BROCKEN');
 say("Hello " . "world!");
 return 0;
 BROCKEN
@@ -120,7 +119,7 @@ SKIP: {
 subtest 'String . integer runtime concat (say "hello " . 42)' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $module  = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module  = Brocken->new->compile(<<'BROCKEN');
 say("hello " . 42);
 return 0;
 BROCKEN
@@ -145,7 +144,7 @@ SKIP: {
 subtest 'Integer . string runtime concat (say 42 . " hello")' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $module  = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module  = Brocken->new->compile(<<'BROCKEN');
 say(42 . " hello");
 return 0;
 BROCKEN
@@ -170,7 +169,7 @@ SKIP: {
 subtest 'Integer . integer runtime concat (say 5 . 10)' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $module  = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module  = Brocken->new->compile(<<'BROCKEN');
 say(5 . 10);
 return 0;
 BROCKEN

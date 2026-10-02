@@ -6,7 +6,6 @@ use Brocken::Katsuro;
 use Brocken::Katsuro::Platform;
 use Brocken::Lindsay;
 use Brocken::Jenny;
-use Brocken::Compiler;
 use Brocken::Jenny::Lowerer::X86_64;
 use Brocken::Jenny::Lowerer::ARM64;
 use Brocken::Jenny::Lowerer::RISCV64;
@@ -49,7 +48,7 @@ for my $arch ( sort keys %lowerer_for ) {
     my $platform = Brocken::Katsuro::Platform::parse($arch);
     my $abi      = $platform->abi;
     my $cls      = $lowerer_for{$arch};
-    my $module   = Brocken::Compiler->new->compile($src);
+    my $module   = Brocken->new->compile($src);
     my %mf;
     for my $func ( $module->functions->@* ) {
         next unless $func->blocks->@*;

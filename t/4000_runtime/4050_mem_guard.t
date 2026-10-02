@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'memory_limit=0 means unlimited' => sub {
@@ -11,7 +10,7 @@ subtest 'memory_limit=0 means unlimited' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # memory_limit is 0 (default from _init) — unlimited
 my i64 $limit = Brocken::load_i64(Brocken::ptr_add($hb, 88));
@@ -38,7 +37,7 @@ subtest 'setting memory_limit via store_i64' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Set memory_limit to 100 bytes
 Brocken::store_i64(Brocken::ptr_add($hb, 88), 100);
@@ -65,7 +64,7 @@ subtest 'allocation exceeding memory_limit triggers OOM' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Reset err_code and memory_used to 0
 Brocken::store_i64(Brocken::ptr_add($hb, 72), 0);
@@ -101,7 +100,7 @@ subtest 'memory_used increments on allocation' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Reset memory_used and memory_limit
 Brocken::store_i64(Brocken::ptr_add($hb, 96), 0);
@@ -131,7 +130,7 @@ subtest 'OOM on block boundary when memory_limit crossed' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Reset state
 Brocken::store_i64(Brocken::ptr_add($hb, 72), 0);

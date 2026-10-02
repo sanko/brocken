@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'Initial ICB cursor state after _init' => sub {
@@ -11,7 +10,7 @@ subtest 'Initial ICB cursor state after _init' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $hc = Brocken::Runtime::heap_cursor($hb);
 my ptr $ic = Brocken::Runtime::immix_cursor($hb);
@@ -53,7 +52,7 @@ subtest 'Cursor advances after Any allocation' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $before = Brocken::Runtime::immix_cursor($hb);
 my i64 $before_lr = Brocken::Runtime::line_remaining($hb);
@@ -82,7 +81,7 @@ subtest 'Multiple Any allocations advance cursor' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $before = Brocken::Runtime::immix_cursor($hb);
 # Allocate three Any variables: 3 * 16 = 48 bytes
@@ -107,7 +106,7 @@ subtest 'heap_cursor and immix_cursor start equal' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $hc = Brocken::Runtime::heap_cursor($hb);
 my ptr $ic = Brocken::Runtime::immix_cursor($hb);
@@ -128,7 +127,7 @@ subtest 'block_remaining starts at max and decreases' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $br1 = Brocken::Runtime::block_remaining($hb);
 # After first allocation, cursor moved 16, so block_remaining decreases by 16
@@ -159,7 +158,7 @@ subtest 'free16_count and free_blocks_count remain zero after allocation' => sub
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my $x = 42;
 my $y = 99;
@@ -184,7 +183,7 @@ subtest 'mem_status initial state is all zeros' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $s = Brocken::Runtime::mem_status($hb);
 # Expected: all bits 0 (line not full, block not full, no free objects/blocks)
@@ -204,7 +203,7 @@ subtest 'mem_status sets bit 0 when line is full' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Fill line 0: 240 bytes / 16 = 15 Any allocations
 my $a1=1;my $a2=2;my $a3=3;my $a4=4;my $a5=5;
@@ -229,7 +228,7 @@ subtest 'Block-scoped decref via bare block' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $before = Brocken::Runtime::free16_count($hb);
 # Declare Any in a bare block — block-scoped RC decref cleans it up at block exit
@@ -255,7 +254,7 @@ subtest 'mem_status sets bit 2 after decref (free16 nonempty)' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Reassign to an existing Any variable to trigger decref of old value
 my $x = 10;
@@ -279,7 +278,7 @@ subtest 'line_waste initial and after allocations' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $w0 = Brocken::Runtime::line_waste($hb);
 # Initially: line 0 starts at block+16, limit at block+256 → waste = 240
@@ -315,7 +314,7 @@ subtest 'live_count tracks allocation count' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $lc0 = Brocken::Runtime::live_count($hb);
 if ($lc0 != 0) { return 1; }
@@ -341,7 +340,7 @@ subtest 'live_count decrements on block-scoped decref' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Check live_count initial and during block
 my i64 $lc0 = Brocken::Runtime::live_count($hb);
@@ -370,7 +369,7 @@ subtest 'mark_line and sweep_block' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 144);
 # _init marks Line 0 — clear bitmap first
@@ -413,7 +412,7 @@ subtest 'recycle_block pushes empty block to free_blocks' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $fb0 = Brocken::Runtime::free_blocks_count($hb);
 my ptr $block = Brocken::ptr_add($hb, 144);
@@ -437,7 +436,7 @@ subtest 'live_count reaching 0 auto-recycles block' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 {
     # Allocate inside block — it'll be freed at block exit via block-scoped RC
@@ -497,7 +496,7 @@ if ($bm0 != 1) { return 4; }
 if ($bm1 != 0) { return 5; }
 return 0;
 BROCKEN
-        my $module = Brocken::Compiler->new->compile($source);
+        my $module = Brocken->new->compile($source);
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
         my $file   = $brocken->tmpdir . '/r_gc_multiblock1' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
@@ -544,7 +543,7 @@ my i64 $lc_old = Brocken::load_i64(Brocken::ptr_add($block0, 32752));
 if ($lc_old != 3) { return 4; }
 return 0;
 BROCKEN
-        my $module = Brocken::Compiler->new->compile($source);
+        my $module = Brocken->new->compile($source);
         my $funcs  = $brocken->codegen->emit_functions( $module->functions );
         my $file   = $brocken->tmpdir . '/r_gc_multiblock2' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );

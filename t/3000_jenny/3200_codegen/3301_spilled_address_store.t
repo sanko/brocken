@@ -5,7 +5,6 @@ use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Test2::Tools::Brocken qw[run_exec cross_available temp_path];
 use Brocken;
 use Brocken::Katsuro::Platform;
-use Brocken::Compiler;
 use Brocken::Jenny::RegAlloc;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
@@ -89,7 +88,7 @@ sub reload_reg_conflict($mf) {
 
 sub allocated( $triple, $class, $n ) {
     my $platform = Brocken::Katsuro::Platform::parse($triple);
-    my $module   = Brocken::Compiler->new->compile( sum_src($n) );
+    my $module   = Brocken->new->compile( sum_src($n) );
     my ($func)   = grep { $_->name eq 'f' } $module->functions->@*;
     my $mf       = $class->new( platform => $platform )->lower($func);
     my $alloc    = Brocken::Jenny::RegAlloc::LinearScan->new;
@@ -115,7 +114,7 @@ subtest 'A sum of many spilled arguments comes back intact' => sub {
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
     my $n       = $COUNT{ $host->arch } // 16;
-    my $module  = Brocken::Compiler->new->compile( sum_src($n) );
+    my $module  = Brocken->new->compile( sum_src($n) );
     my $funcs   = $brocken->codegen->emit_functions( $module->functions );
     my $out     = $brocken->tmpdir . '/spilled_address_store' . $brocken->ext;
     $brocken->linker->write_executable( $out, $funcs, $host );
@@ -135,7 +134,7 @@ subtest 'Foreign targets execute the same sum' => sub {
     SKIP: {
             skip "$triple not executable here", 1 unless cross_available($platform);
             my $brocken = Brocken->new( platform => $platform );
-            my $module  = Brocken::Compiler->new->compile( sum_src($n) );
+            my $module  = Brocken->new->compile( sum_src($n) );
             my $funcs   = $brocken->codegen->emit_functions( $module->functions );
             my $out     = temp_path( 'spilled_address_' . $platform->arch . $brocken->ext );
             $brocken->linker->write_executable( $out, $funcs, $platform );

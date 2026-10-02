@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -14,7 +13,7 @@ subtest 'Runtime incref called on Any init' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 99;
 return $x;
 BROCKEN
@@ -31,7 +30,7 @@ subtest 'Runtime decref called before function exit' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $x = 42;
 my $y = 0;
 $y = $x;
@@ -50,7 +49,7 @@ subtest 'Any var passed to helper function' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub double(i64 $n) -> i64 {
     return $n * 2;
 }
@@ -70,7 +69,7 @@ subtest 'Any var returned from helper function' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub make_val(i64 $n) -> i64 {
     return $n;
 }
@@ -94,7 +93,7 @@ SKIP: {
         # Regression: lower_return used to decref ALL RC locals before build_ret,
         # which freed the returned object (RC 1 -> 0) and returned a dangling pointer.
         # The fix adds build_incref($val) before the decref loop.
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub wrap(i64 $n) -> i64 {
     my $inner = $n;
     return $inner;
@@ -115,7 +114,7 @@ subtest 'Reassign Any var — incref new + decref old' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $a = 10;
 my $b = 20;
 $a = $b;
@@ -134,7 +133,7 @@ subtest 'Multiple Any vars survive scope cleanup' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my $a = 1;
 my $b = 2;
 my $c = 3;
@@ -154,7 +153,7 @@ subtest 'Call returning boxed Any — cross-function RC' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub make(i64 $n) -> i64 {
     return $n * 2;
 }
