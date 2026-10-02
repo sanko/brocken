@@ -2,6 +2,60 @@
 
 Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in place, we need to bridge the gap between abstract SSA and executable machine code.
 
+## Open work by namespace
+
+The sections below are ordered by when the work was found and why. This is the same
+open work seen from the other side: which namespace owns it. Each line points at the
+section carrying the detail, so nothing here is stated twice.
+
+### `Brocken::Katsuro` — front end
+
+Lexer, parser, AST, `Katsuro::Lowerer`, and the `Platform`/`ABI` classes. A fix here
+changes what every target is handed.
+
+- Dynamic (boxed) types at top level — [Upcoming](#upcoming)
+- Hash support — [Upcoming](#upcoming)
+- RC injection into the frontend lowerer (`build_incref` on assignment, `build_decref` on scope exit) — [R1](#r1-immediate-reference-counting-ir--runtime)
+- Float-to-bool assignment is not normalized to 0/1 — [Open](#open)
+- Mixed-width signed/unsigned comparison compares at 32 bits — [Open](#open)
+
+### `Brocken::Lindsay` — the IR
+
+Types, values, instructions, blocks, functions, and the builder. Work here needs an
+instruction or an IR pass, not a change to any one target.
+
+- Perceus: borrow inference, RC elision, reuse analysis, FBIP — [R4](#r4-perceus-rc-elision--reuse-lindsay-optimizer-pass)
+- `fptrunc`/`fpext`, so mixing `f32` and `f64` is not a hard error — [Open](#open)
+- `fptoui`, plus a chosen NaN and overflow rule for float→int — [Open](#open)
+- Source locations carried through to diagnostics — [Upcoming](#upcoming)
+- Channel instructions stay stubs until the data structure exists — [Channels](#channels-blocked-until-immix-allocator)
+
+### `Brocken::Jenny` — back end
+
+MIR, the per-target lowerers, register allocation, codegen, and the linkers. Work here
+is per architecture or per object format.
+
+- Fat scalar `box`/`unbox` layout at `[ptr+0]` and `[ptr+8]` — [R0](#r0-fix-fat-scalar-layout-prerequisite-for-all-rc-work)
+- Unsigned 128-bit div/rem — [128-bit Numerics](#128-bit-numerics-i128)
+- Big-endian targets, which no lowering handles — [128-bit Numerics](#128-bit-numerics-i128)
+- Mixed integer/floating arguments wrong on x86-64 Linux ELF — [Known Bugs](#known-bugs)
+- Floating-point callee-save on X86_64 — [Calling Conventions](#calling-conventions)
+- f32 conversions unverified on ARM64 and Wasm — [Open](#open)
+- The Wasm module exports `_BROCKEN_ENTRY`, not the WASI `_start` — [Open](#open)
+- Channel lowering past the stubs — [Channels](#channels-blocked-until-immix-allocator)
+- ARM64 macOS varargs register save area, needs a run on Apple Silicon — [Known Issues (Remaining)](#known-issues-remaining)
+- illumos isolate segfaults — [Untouched by this series](#untouched-by-this-series)
+- A stack map section for GC root enumeration — [R5](#r5-future-runtime-work)
+
+### Runtime and fuzzer
+
+Neither is a stage of the compiler, so neither is a namespace.
+
+- `incref`/`decref`, the Immix allocator, trial deletion — [Phase 4](#phase-4-self-hosted-memory-management-corebrocken)
+- Fiber stack scanning, UTF-8 strings, self-hosted PerlIO — [R5](#r5-future-runtime-work)
+- Fuzzer expansion, phases F0–F9 — [Fuzzer Expansion Plan](#fuzzer-expansion-plan)
+- How these bugs are found and what the tests have to execute — [Test-process lessons](#test-process-lessons)
+
 ## Active Sprint: Memory Management Runtime (R0–R1)
 
 ### R0: Fix Fat Scalar Box Layout
@@ -575,15 +629,19 @@ here was reproduced against a natively compiled and executed binary, not read of
       `Katsuro::Parser`. The stale claim that a 128-bit value cannot be declared in source, and so
       has no end-to-end test, is dropped: `t/1000_katsuro/1078_i128_surface_syntax.t` checks the
       rejection without the gate and runs a declare/widen/narrow round trip on the host.
-- [ ] **Multi-block Wasm call fixups use block-relative offsets** -
-      `lib/Brocken/Jenny/Codegen/Wasm.pm:284`/`:297` record each fixup relative to its own
-      block, but `emit_functions` (`:66-68`) only adds `$locals_size` when reassembling; the
-      block offsets at `:304-319` are applied to source maps, not to fixups. Every existing Wasm
-      test is single-block, so a multi-block program produces invalid relocations. This must be
-      fixed *before* the `_start` entry point can be backported from `dev` (`ca2086c`), since
-      `_start` is itself just another function.
-- [ ] **`Linker/Wasm.pm` claims to emit `_start` but does not** - the POD (`:192-203`) documents
-      a `_start` export; the code exports only `_BROCKEN_ENTRY`. Tracked with the fixup bug above.
+- [x] **Multi-block Wasm call fixups are rebased onto the assembled body** - a call index was
+      recorded against its own block and never rebased, so a call from any block but the first
+      pointed into the middle of the dispatch loop and the module did not validate. Fixed in
+      `09e6d0a`: each fixup now has `$block_start[$fx->{block}]` added to it before the linker
+      patches it. The rebase is needed even for a call in the entry block now that the dispatch
+      prologue precedes that block. Covered by `t/3000_jenny/3200_codegen/3271_multiblock_call_wasm.t`,
+      which calls a helper from `if.then` and runs the module under `wasmtime`; that test fails
+      if the rebase is removed, as does `3270_multi_func.t`.
+- [ ] **The Wasm module exports `_BROCKEN_ENTRY`, not the WASI `_start`** - the linker names the
+      entry export `_BROCKEN_ENTRY` (`lib/Brocken/Jenny/Linker/Wasm.pm:137`), while a WASI reactor
+      looks for `_start`, so the module cannot be run as a reactor until the export is added or
+      renamed. Backportable from `dev` (`ca2086c`); it is just another function, so the fixup work
+      above no longer gates it.
 
 ### Test-process lessons
 
