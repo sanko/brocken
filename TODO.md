@@ -552,10 +552,13 @@ here was reproduced against a natively compiled and executed binary, not read of
 - [ ] **Out-of-range and NaN float->int conversion is undefined** - `cvttss2si`/`cvttsd2si`
       return the "integer indefinite" value (all ones) for NaN and for overflow. No saturation or
       trap semantics have been chosen or tested.
-- [ ] **`i128` has no surface syntax** - `my i128 $x = 3;` fails to parse with "Expected
-      variable name after 'my'". `i128` exists throughout the IR and the lowerers but cannot be
-      declared in source, so the i128 conversion paths have no end-to-end test. May be
-      intentional; worth confirming.
+- [x] **`i128` surface syntax is feature-gated, not absent** - `my i128 $x = 3;` fails to parse
+      with "Expected variable name after 'my'", but only because `i128`/`u128` sit behind `use
+      feature 'brocken_native_types'`; with the gate the declaration parses, the lowerer splits
+      it across two registers, and the value executes. The gate is deliberate and documented in
+      `Katsuro::Parser`. The stale claim that a 128-bit value cannot be declared in source, and so
+      has no end-to-end test, is dropped: `t/1000_katsuro/1078_i128_surface_syntax.t` checks the
+      rejection without the gate and runs a declare/widen/narrow round trip on the host.
 - [ ] **Multi-block Wasm call fixups use block-relative offsets** -
       `lib/Brocken/Jenny/Codegen/Wasm.pm:284`/`:297` record each fixup relative to its own
       block, but `emit_functions` (`:66-68`) only adds `$locals_size` when reassembling; the
