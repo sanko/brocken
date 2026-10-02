@@ -24,6 +24,22 @@ class Brocken::Lindsay::IR::Type {
     sub u32              { state $t //= __PACKAGE__->new( kind => 'int', bits => 32,  signed => 0 ); $t }
     sub u64              { state $t //= __PACKAGE__->new( kind => 'int', bits => 64,  signed => 0 ); $t }
     sub u128             { state $t //= __PACKAGE__->new( kind => 'int', bits => 128, signed => 0 ); $t }
+
+    # The signed integer type of a given width. Needed wherever a value has to be
+    # sign-extended to a width and then reinterpreted at that width, because
+    # that cannot be written as a Sext with an unsigned destination: the
+    # backends size an extension from its source operand and sign-extend all
+    # the way out to 32 or 64 bits, with no way to stop at the destination
+    # width. Sign-extend to the signed type here, then zero-extend to the
+    # unsigned one.
+    sub signed_for($bits) {
+        return i8()   if $bits == 8;
+        return i16()  if $bits == 16;
+        return i32()  if $bits == 32;
+        return i64()  if $bits == 64;
+        return i128() if $bits == 128;
+        return __PACKAGE__->new( kind => 'int', bits => $bits, signed => 1 );
+    }
     sub f32              { state $t //= __PACKAGE__->new( kind => 'float', bits => 32 );    $t }
     sub f64              { state $t //= __PACKAGE__->new( kind => 'float', bits => 64 );    $t }
     sub ptr              { state $t //= __PACKAGE__->new( kind => 'ptr', bits => 64 );      $t }

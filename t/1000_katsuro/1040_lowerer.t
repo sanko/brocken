@@ -7,6 +7,7 @@ use lib 'lib', '../../lib', '../lib';
 use Brocken;
 use Brocken::Lindsay::IR;
 use Brocken::Katsuro::Platform;
+use Test2::Tools::Brocken qw[run_exec temp_path];
 
 sub find_function {
     my ( $mod, $name ) = @_;
@@ -693,6 +694,62 @@ BROCKEN
     like( $text, qr/sext\s+i8\s+.*\s+to\s+i32/, 'LHS (i8) sign-extended to i32' );
     like( $text, qr/sext\s+i8\s+.*\s+to\s+i32/, 'RHS (u8) sign-extended to i32' );
     like( $text, qr/icmp\s+slt\s+i32/,          'icmp uses i32 type with signed predicate' );
+};
+subtest 'Mixed-width signed/unsigned promotion lands at the target width' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+use feature 'brocken_native_types';
+my i8 $a = -61;
+my u16 $b = 65509;
+return $a >= $b ? 1 : 0;
+BROCKEN
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
+    my $text = $f->as_string();
+
+    # The two subtests above are the equal-width case. When the widths differ the
+    # promotion runs first and picks sext from the *source* signedness, so the
+    # narrower signed operand used to be sign-extended straight into an unsigned
+    # type. The backends size an extension from its source operand and sign-extend
+    # all the way out to 32 bits, so the sign survived into an unsigned comparison
+    # and 0xFFFFFFC3 was compared against 65509. Reaching the target width as a
+    # signed value and then zero-extending it is the value the unsigned type holds.
+    like( $text, qr/sext\s+i8\s+\S+\s+to\s+i16/,  'narrower signed operand reaches the target width as a signed value' );
+    like( $text, qr/zext\s+i16\s+\S+\s+to\s+u16/, 'then lands in the unsigned type with the bits above it cleared' );
+    like( $text, qr/icmp\s+uge\s+u16/,          'comparison is unsigned at u16' );
+};
+
+# The assertions above cannot tell whether the register ends up holding
+# 0x0000FFC3 or 0xFFFFFFC3, so every case is also executed. The narrower signed
+# operand is reinterpreted at the wider unsigned width before the compare.
+subtest 'Mixed-width signed/unsigned comparisons agree with the widened values' => sub {
+    my $host = Brocken->new;
+
+    # [ lhs type, lhs value, rhs type, rhs value, operator, expected exit ]
+    my @cases = (
+        [ 'i8',  -61, 'u16', 65509,      '>=', 0 ],
+        [ 'i8',  -61, 'u16', 65509,      '<',  1 ],
+        [ 'i8',  -61, 'u16', 65475,      '==', 1 ],
+        [ 'i8',  -1,  'u16', 65535,      '>=', 1 ],
+        [ 'i8',  100, 'u16', 100,        '==', 1 ],
+        [ 'i8',  127, 'u16', 32767,      '<',  1 ],
+        [ 'i16', -1,  'u32', 4294967295, '==', 1 ],
+        [ 'i16', -2,  'u32', 4294967294, '<',  0 ],
+        [ 'i8',  -61, 'u32', 4294967235, '==', 1 ],
+        [ 'i32', -1,  'u64', 18446744073709551615, '>=', 1 ],
+        [ 'i8',  -1,  'u8',  255,        '>=', 1 ],
+    );
+
+    for my $case (@cases) {
+        my ( $lt, $lv, $rt, $rv, $op, $want ) = @$case;
+        my $label = "$lt $lv $op $rt $rv";
+        my $src   = "my $lt \$a = $lv; my $rt \$b = $rv; return \$a $op \$b ? 1 : 0;";
+        my $mod   = eval { $host->compile( $src ) };
+        if ($@) { fail( "$label: compile died: $@" ); next }
+        my $file = temp_path('mixedwidth') . $host->ext;
+        $host->linker->write_executable( $file, $host->codegen->emit_functions( $mod->functions ), $host->platform );
+        run_exec( $file, expected_exit => $want, platform => $host->platform, name => "$label exits $want" );
+    }
 };
 subtest 'Bool negation promotes i1 to i8' => sub {
     my $c   = Brocken->new;
