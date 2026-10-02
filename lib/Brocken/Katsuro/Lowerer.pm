@@ -1826,12 +1826,23 @@ class Brocken::Katsuro::Lowerer {
             return $builder->build_sitofp( $val, $target_type, undef, $line, $col );
         }
 
-        # Float -> integer (fptosi)
+        # Float -> integer (fptosi). The conversion is masked to the target width for
+        # the same reason the int->int case above is: an fptosi typed at a narrow
+        # destination still lowers to a full-width convert (a 32-bit
+        # cvttsd2si, an fcvtzs to w, a trunc_sat), so without the mask the
+        # leftover bits survive into a slot that is only a byte wide, and a bool
+        # target kept the whole value instead of one bit.
         if ( $val->type->kind eq 'float' && $target_type->kind eq 'int' ) {
+            my $bits = $target_type->bits;
+            my $mask = $bits >= 64 ? undef : ( 1 << $bits ) - 1;
             if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
-                return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => int( $val->value ) );
+                my $cv = int( $val->value );
+                return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => defined $mask ? $cv & $mask : $cv );
             }
-            return $builder->build_fptosi( $val, $target_type, undef, $line, $col );
+            my $converted = $builder->build_fptosi( $val, $target_type, undef, $line, $col );
+            return $converted unless defined $mask;
+            my $mask_val = Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $mask );
+            return $builder->build_and( $converted, $mask_val, undef, $line, $col );
         }
 
         # Float width, which is what a decimal literal runs into: it arrives as
