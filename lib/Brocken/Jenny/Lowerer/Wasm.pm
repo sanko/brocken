@@ -2034,19 +2034,20 @@ class Brocken::Jenny::Lowerer::Wasm {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::CondBr') ) {
-                    $mbb->add_instruction( $self->_wasm_push( $inst->operands->[0], 'cond' ) );
+                    $self->_wasm_push_cond( $mbb, $inst->operands->[0] );
+
+                    # Both edges are named on the one branch. A Wasm branch ends
+                    # the block it is in, so a following jmp for the false edge
+                    # would sit past a terminator and never run; the code
+                    # generator needs the false target here to branch either way.
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'bne',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->true_block->name ) ],
-                            comment  => 'cond_br: true'
-                        )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'jmp',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->false_block->name ) ],
-                            comment  => 'cond_br: false'
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->true_block->name ),
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->false_block->name ),
+                            ],
+                            comment => 'cond_br'
                         )
                     );
                 }
@@ -2478,9 +2479,20 @@ class Brocken::Jenny::Lowerer::Wasm {
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => $map{$pred}, operands => [], comment => 'icmp ' . $pred ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'local_set',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
-                            comment  => 'icmp store'
+                            opcode => 'local_set',
+
+                            # A comparison yields 0 or 1 however wide what it
+                            # compared was, so the result is recorded as an i32.
+                            # Left to the width of its operands it would be held
+                            # in an i64, and a branch cannot test that.
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'virt_reg',
+                                    value => $inst->name,
+                                    type  => Brocken::Lindsay::IR::Type::i32()
+                                )
+                            ],
+                            comment => 'icmp store'
                         )
                     );
                 }
@@ -2846,6 +2858,17 @@ class Brocken::Jenny::Lowerer::Wasm {
         $mbb->add_instruction( $self->_wasm_push( $ir_val, $label ) );
         return if $self->_scalar_bits( $ir_val->type ) <= 32;
         $self->_wasm_wrap_addr( $mbb, 'addr: wrap' );
+    }
+
+    # A Wasm branch tests an i32, but the IR gives a comparison the width of
+    # what it compared, so a condition over 64-bit operands arrives holding an
+    # i64. The operand stack will not narrow it on the way to br_if, so it is
+    # narrowed here. Anything 32 bits or narrower is already an i32.
+    method _wasm_push_cond( $mbb, $ir_val ) {
+        $mbb->add_instruction( $self->_wasm_push( $ir_val, 'cond' ) );
+        my $bits = $self->_scalar_bits( $ir_val->type );
+        return unless $bits && $bits > 32;
+        $self->_wasm_wrap_addr( $mbb, 'cond: narrow' );
     }
 
     method _wasm_select( $type, $label ) {

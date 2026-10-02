@@ -93,7 +93,14 @@ class Brocken::Jenny::Codegen::Wasm {
 
         # Reserve a local for the linear-memory heap bump pointer
         $vreg_map{'%heap_ptr'} = $next_local++;
-        my @blocks = $mf->blocks->@*;
+
+        # A Wasm branch may only reach a label that encloses it, so an arbitrary
+        # control-flow graph cannot be laid out as a chain of nested blocks. Each
+        # block instead becomes a case of a dispatch loop, and this local holds
+        # the number of the one that runs next. Declared with no name in
+        # %vreg_map, so it is typed i32 like the state it carries.
+        my $state_local = $next_local++;
+        my @blocks      = $mf->blocks->@*;
         my %label_to_block_idx;
         for my $bi ( 0 .. $#blocks ) {
             for my $inst ( $blocks[$bi]->instructions->@* ) {
@@ -101,7 +108,39 @@ class Brocken::Jenny::Codegen::Wasm {
             }
         }
         my $num_non_entry = $#blocks;
-        my $entry_bytes   = '';
+
+        # Local numbers are handed out in the order the body below first mentions
+        # each value, but the declared type of a local has to be known while that
+        # body is emitted: a branch tests an i32, and a comparison result may be
+        # held in an i64 local that needs narrowing first. Assigning every local
+        # up front, from the same walk, keeps the declaration and the narrowing
+        # in step instead of leaving the two to be derived separately.
+        my $num_params = scalar( $ir_params->@* );
+        for my $mbb (@blocks) {
+            for my $inst ( $mbb->instructions->@* ) {
+                next unless $inst->opcode eq 'local_get' || $inst->opcode eq 'local_set';
+                $vreg_map{ $inst->operands->[0]->value } //= $next_local++;
+            }
+        }
+        my %lid_to_type;
+        {
+            my %lid_to_name = reverse %vreg_map;
+
+            # A parameter's type is carried by the parameter itself; only the
+            # values defined in the body appear in %ir_types. Without this a
+            # pointer parameter would fall through to the i32 default and be
+            # declared too narrow for the i64 that gets passed to it.
+            for my $i ( 0 .. $num_params - 1 ) {
+                my $pt = $ir_params->[$i]->type;
+                $lid_to_type{$i} = $pt ? $self->_wasm_valtype($pt) : VALTYPE_I32;
+            }
+            for my $lid ( $num_params .. $next_local - 1 ) {
+                my $name  = $lid_to_name{$lid} // '';
+                my $itype = $name ? $ir_types->{$name} : undef;
+                $lid_to_type{$lid} = $itype ? $self->_wasm_valtype($itype) : VALTYPE_I32;
+            }
+        }
+        my $entry_bytes = '';
         my @non_entry_bytes;
         my %raw_offsets;
         for my $bi ( 0 .. $#blocks ) {
@@ -115,12 +154,34 @@ class Brocken::Jenny::Codegen::Wasm {
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
                 if ( $opcode eq 'bne' ) {
-                    my $depth = $num_non_entry - $label_to_block_idx{ $ops[0]->value };
-                    $$buf .= pack( 'C', BR_IF ) . $self->_uleb($depth);
+
+                    # Each case body is emitted between the end of its own block
+                    # and the end of the next one out, so from inside case $bi the
+                    # enclosing labels are the $bi case blocks, then $exit, then
+                    # $loop: a branch to the dispatch is depth $bi + 1.
+                    #
+                    # Both outcomes re-dispatch, and the block number has to reach
+                    # the state local on either path, before the branch. A block
+                    # cannot carry that: it validates against a fresh operand
+                    # stack, so it would not see a condition pushed before it
+                    # opened. Choosing between the two indices here keeps the
+                    # condition reachable, and stashing it in the state local
+                    # first clears the stack for the select.
+                    my $true_idx  = $label_to_block_idx{ $ops[0]->value };
+                    my $false_idx = $label_to_block_idx{ $ops[1]->value };
+                    $$buf .= pack( 'C', LOCAL_SET ) . $self->_uleb($state_local);
+                    $$buf .= pack( 'C', I32_CONST ) . $self->_sleb($true_idx);
+                    $$buf .= pack( 'C', I32_CONST ) . $self->_sleb($false_idx);
+                    $$buf .= pack( 'C', LOCAL_GET ) . $self->_uleb($state_local);
+                    $$buf .= pack( 'C', SELECT_T ) . pack( 'C', 1 ) . pack( 'C', VALTYPE_I32 );
+                    $$buf .= pack( 'C', LOCAL_SET ) . $self->_uleb($state_local);
+                    $$buf .= pack( 'C', BR ) . $self->_uleb( $bi + 1 );
                 }
                 elsif ( $opcode eq 'jmp' ) {
-                    my $depth = $num_non_entry - $label_to_block_idx{ $ops[0]->value };
-                    $$buf .= pack( 'C', BR ) . $self->_uleb($depth);
+                    my $target_idx = $label_to_block_idx{ $ops[0]->value };
+                    $$buf .= pack( 'C', I32_CONST ) . $self->_sleb($target_idx);
+                    $$buf .= pack( 'C', LOCAL_SET ) . $self->_uleb($state_local);
+                    $$buf .= pack( 'C', BR ) . $self->_uleb( $bi + 1 );
                 }
                 elsif ( $opcode eq 'local_get' ) {
                     my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
@@ -310,24 +371,60 @@ class Brocken::Jenny::Codegen::Wasm {
             }
         }
 
-        # Assemble final function body and track block positions for source_map in one pass.
-        # Block layout: outermost-first openers, entry body, then innermost-first closers.
+        # Assemble the function body. A branch can only reach an enclosing label, so
+        # the blocks are not nested one inside the next: each one becomes a case
+        # of a dispatch loop. The openers run outermost-first ($loop, $exit, then
+        # $case0..$caseN with $case0 the outermost case), so $caseN and $default
+        # are innermost and close first.
         my @block_start;
-        my $pos = 0;
-        for my $bi ( 1 .. $num_non_entry ) {
-            $bytes .= pack( 'C', BLOCK ) . pack( 'C', 0x40 );
-            $pos += 2;
-        }
-        $block_start[0] = $pos;
-        $bytes .= $entry_bytes;
-        $pos += length($entry_bytes);
-        for my $bi ( reverse 1 .. $num_non_entry ) {
-            $bytes .= pack( 'C', END_BLOCK );
-            $pos += 1;
+        my $pos     = 0;
+        my $nblocks = scalar @blocks;
+        my $top     = $nblocks - 1;
+        my $emit    = sub ($chunk) { $bytes .= $chunk; $pos += length($chunk); };
+
+        # The first case runs on entry. A case that branches back to the dispatch
+        # leaves its target in the state local, so seeding it here rather than
+        # inside the loop is what keeps a re-dispatch from restarting at case 0.
+        $emit->( pack( 'C', I32_CONST ) . $self->_sleb(0) );
+        $emit->( pack( 'C', LOCAL_SET ) . $self->_uleb($state_local) );
+        $emit->( pack( 'C', LOOP ) . pack( 'C', 0x40 ) );                  # $loop
+        $emit->( pack( 'C', BLOCK ) . pack( 'C', 0x40 ) );                 # $exit
+        $emit->( pack( 'C', BLOCK ) . pack( 'C', 0x40 ) ) for 0 .. $top;
+
+        # The dispatch sits inside every case label, so a single br_table reaches
+        # all of them: case $top is depth 1, case 0 is depth $top + 1.
+        $emit->( pack( 'C', BLOCK ) . pack( 'C', 0x40 ) );                # $default
+        $emit->( pack( 'C', LOCAL_GET ) . $self->_uleb($state_local) );
+        $emit->( pack( 'C', BR_TABLE ) . $self->_uleb( $top + 1 ) );
+        $emit->( $self->_uleb( 1 + $top - $_ ) ) for 0 .. $top;
+        $emit->( $self->_uleb(0) );                                       # out of range: fall through to the trap
+        $emit->( pack( 'C', END_BLOCK ) );
+
+        # The state only ever holds a block number that was set here, so an
+        # out-of-range value is a codegen bug. Trap rather than return, which
+        # would have to supply a result of whatever type the function declares.
+        $emit->( pack( 'C', UNREACHABLE ) );
+        for my $bi ( reverse 0 .. $top ) {
+            $emit->( pack( 'C', END_BLOCK ) );
             $block_start[$bi] = $pos;
-            $bytes .= $non_entry_bytes[ $bi - 1 ];
-            $pos += length( $non_entry_bytes[ $bi - 1 ] );
+            $emit->( $bi == 0 ? $entry_bytes : $non_entry_bytes[ $bi - 1 ] );
+
+            # A block that runs off its end would otherwise fall into the next
+            # case, so every case ends by re-dispatching even when its own
+            # terminator already left.
+            $emit->( pack( 'C', I32_CONST ) . $self->_sleb(0) );
+            $emit->( pack( 'C', LOCAL_SET ) . $self->_uleb($state_local) );
+            $emit->( pack( 'C', BR ) . $self->_uleb( $bi + 1 ) );
         }
+        $emit->( pack( 'C', END_BLOCK ) );    # $exit
+        $emit->( pack( 'C', END_BLOCK ) );    # $loop
+
+        # Every path out of the dispatch leaves by returning, by trapping or by
+        # branching back to it, so falling out of the loop cannot happen. It has
+        # to be said anyway: unreachability does not carry out of a void block,
+        # so without this the frame is reachable with an empty stack and a
+        # function that returns a value fails to validate at its final end.
+        $emit->( pack( 'C', UNREACHABLE ) );
         if ($source_map) {
             for my $idx ( keys %raw_offsets ) {
                 my ( $bi, $buf_off ) = $raw_offsets{$idx}->@*;
@@ -340,21 +437,17 @@ class Brocken::Jenny::Codegen::Wasm {
         for my $fx (@func_fixups) {
             $fx->{offset} = $block_start[ $fx->{block} ] + $fx->{offset};
         }
-        my $num_params       = scalar( $ir_params->@* );
         my $num_extra_locals = $next_local - $num_params;
         my $locals_block     = '';
         if ( $num_extra_locals > 0 ) {
 
-            # Build reverse mapping: local_id => vreg name
-            my %lid_to_name = reverse %vreg_map;
-
-            # Scan locals sequentially and group consecutive same-type
+            # Group consecutive locals that share a declared type. The widths come
+            # from the table built before the body was emitted, so what is declared
+            # here is exactly what the body was compiled against.
             my @groups;
             my $prev_wt;
             for my $lid ( $num_params .. $next_local - 1 ) {
-                my $name  = $lid_to_name{$lid} // '';
-                my $itype = $name  ? $ir_types->{$name}           : undef;
-                my $wt    = $itype ? $self->_wasm_valtype($itype) : VALTYPE_I32;
+                my $wt = $lid_to_type{$lid} // VALTYPE_I32;
                 if ( !defined $prev_wt || $wt ne $prev_wt ) {
                     push @groups, [ $wt, 0 ];
                     $prev_wt = $wt;

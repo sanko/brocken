@@ -43,20 +43,15 @@ typed, C-flavored language with Perl-like sigils, integer and floating-point typ
 fixed-size arrays, and explicit control flow. The compiler is written in Perl and needs Perl 5.42 or later, but its
 output is machine code, not Perl.
 
-Compiling is four stages, each a separate module:
+Compiling is three stages, each a separate namespace:
 
 =over
 
-=item 1. L<Brocken::Katsuro::Lexer> and L<Brocken::Katsuro::Parser> turn source text into an AST.
+=item L<Brocken::Katsuro> is the front end and contains both the lexer and parser which turns source text into an AST and then onto a target-independant IR.
 
-=item 2. L<Brocken::Katsuro::Lowerer> turns the AST into L<Brocken::Lindsay::IR>, a target-independent IR built out of
-values, types, instructions, basic blocks, and functions.
+=item L<Brocken::Lindsay> is the middleware, it lowers Katsuro's IR to an MIR, assigns registers according to the platform, and encodes the result.
 
-=item 3. L<Brocken::Jenny> lowers that IR to L<Brocken::Jenny::MIR>, assigns registers with
-L<Brocken::Jenny::RegAlloc>, and encodes the result. One code generator exists per target: L<Brocken::Jenny::Codegen::X86_64>,
-L<Brocken::Jenny::Codegen::ARM64>, and L<Brocken::Jenny::Codegen::RISCV64>.
-
-=item 4. L<Brocken::Jenny::Linker> emits the object file, in ELF, PE, or Mach-O form as the platform requires.
+=item L<Brocken::Jenny> is the backend and it emits the object file, in ELF, PE, or Mach-O form as the platform requires.
 
 =back
 
@@ -345,7 +340,7 @@ foreign one under C<qemu> when a sysroot is configured, skipping it when there i
 platform for its back end rather than carrying a table of its own, so the WebAssembly modules --
 L<Brocken::Jenny::Codegen::Wasm>, L<Brocken::Jenny::Linker::Wasm>, and L<Brocken::Jenny::Lowerer::Wasm> -- are now
 reachable: a wasm32 triple parses into a L<Brocken::Katsuro::Platform::Wasm> and returns a compiler. The generated
-module is not valid bytecode yet, so nothing runs it; see F<TODO.md>. An architecture with no code generator is still
+module is valid bytecode, and C<wasmtime> validates and runs it. An architecture with no code generator is still
 refused with C<Unsupported platform>. The isolated-thread and fiber runtimes are ahead of this.
 
 The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool: a

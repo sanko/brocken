@@ -5,7 +5,7 @@ package Brocken::Jenny::Codegen::Wasm::Encodings {
     our %EXPORT_TAGS = (
         all => [
             qw[
-                UNREACHABLE BLOCK END_BLOCK BR BR_IF RETURN CALL LOCAL_GET LOCAL_SET
+                UNREACHABLE BLOCK END_BLOCK BR BR_IF BR_TABLE LOOP RETURN CALL LOCAL_GET LOCAL_SET
                 SELECT SELECT_T
                 I32_LOAD I64_LOAD F32_LOAD F64_LOAD
                 I32_LOAD8_U I32_LOAD16_U
@@ -41,9 +41,11 @@ package Brocken::Jenny::Codegen::Wasm::Encodings {
         # Control
         UNREACHABLE => 0x00,    # unreachable
         BLOCK       => 0x02,    # block <valtype> <bt>
+        LOOP        => 0x03,    # loop <valtype> <bt>
         END_BLOCK   => 0x0B,    # end
         BR          => 0x0C,    # br <labelidx>
         BR_IF       => 0x0D,    # br_if <labelidx>
+        BR_TABLE    => 0x0E,    # br_table <vec(labelidx)> <labelidx>
         RETURN      => 0x0F,    # return
         CALL        => 0x10,    # call <funcidx>
 
