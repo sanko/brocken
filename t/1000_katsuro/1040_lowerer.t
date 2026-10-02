@@ -1,7 +1,8 @@
-use Brocken;
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
+
+#~ use blib;
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
 use Brocken::Lindsay::IR;
@@ -173,7 +174,7 @@ subtest 'Bitwise intrinsics' => sub {
         [ bor  => 'or',   q{Brocken::bor(3, 6)} ],
         [ bxor => 'xor',  q{Brocken::bxor(3, 6)} ],
         [ shl  => 'shl',  q{Brocken::shl(3, 1)} ],
-        [ shr  => 'lshr', q{Brocken::shr(6, 1)} ],
+        [ shr  => 'lshr', q{Brocken::shr(6, 1)} ]
     ) {
         my ( $name, $op, $src ) = @$tc;
         my $c   = Brocken->new;

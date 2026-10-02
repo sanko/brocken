@@ -5,6 +5,7 @@ no warnings qw[experimental::class];
 class Brocken v0.0.1 {
     use Brocken::Katsuro;
     use Brocken::Lindsay;
+
     # The back ends are Brocken::Jenny's to load.  Naming them here as well only
     # duplicates that list, and a class added to the backend then has to be added
     # in two places before it can be reached.

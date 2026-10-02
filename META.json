@@ -299,7 +299,8 @@
          "file" : "lib/Brocken/Katsuro/Platform/Windows.pm"
       },
       "Brocken::Layout" : {
-         "file" : "lib/Brocken/Layout.pm"
+         "file" : "lib/Brocken/Layout.pm",
+         "version" : "v0.0.1"
       },
       "Brocken::Lindsay" : {
          "file" : "lib/Brocken/Lindsay.pm",
