@@ -41,15 +41,11 @@ typed, C-flavored language with Perl-like sigils, integer and floating-point typ
 fixed-size arrays, and explicit control flow. The compiler is written in Perl and needs Perl 5.42 or later, but its
 output is machine code, not Perl.
 
-Compiling is four stages, each a separate module:
+Compiling is three stages, each a separate namespace:
 
-- 1. [Brocken::Katsuro::Lexer](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3ALexer) and [Brocken::Katsuro::Parser](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3AParser) turn source text into an AST.
-- 2. [Brocken::Katsuro::Lowerer](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3ALowerer) turns the AST into [Brocken::Lindsay::IR](https://metacpan.org/pod/Brocken%3A%3ALindsay%3A%3AIR), a target-independent IR built out of
-values, types, instructions, basic blocks, and functions.
-- 3. [Brocken::Jenny](https://metacpan.org/pod/Brocken%3A%3AJenny) lowers that IR to [Brocken::Jenny::MIR](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3AMIR), assigns registers with
-[Brocken::Jenny::RegAlloc](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ARegAlloc), and encodes the result. One code generator exists per target: [Brocken::Jenny::Codegen::X86\_64](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ACodegen%3A%3AX86_64),
-[Brocken::Jenny::Codegen::ARM64](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ACodegen%3A%3AARM64), and [Brocken::Jenny::Codegen::RISCV64](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ACodegen%3A%3ARISCV64).
-- 4. [Brocken::Jenny::Linker](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ALinker) emits the object file, in ELF, PE, or Mach-O form as the platform requires.
+- [Brocken::Katsuro](https://metacpan.org/pod/Brocken%3A%3AKatsuro) is the front end and contains both the lexer and parser which turns source text into an AST and then onto a target-independant IR.
+- [Brocken::Lindsay](https://metacpan.org/pod/Brocken%3A%3ALindsay) is the middleware, it lowers Katsuro's IR to an MIR, assigns registers according to the platform, and encodes the result.
+- [Brocken::Jenny](https://metacpan.org/pod/Brocken%3A%3AJenny) is the backend and it emits the object file, in ELF, PE, or Mach-O form as the platform requires.
 
 The architecture and the binary format are chosen from the host platform, so a plain `Brocken->new` produces an
 executable for the machine it ran on. [Brocken::Katsuro::Platform](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3APlatform) is the layer that knows the register sets, the
@@ -58,9 +54,9 @@ cross compile is asked for.
 
 ## The runtime is compiled in
 
-`src/runtime/core.brocken` is not an optional library. `compile` reads it, parses it, and merges its
-statements ahead of the caller's before anything is lowered, so every program carries the allocator, the collector, the
-fiber machinery, and the exception support with it.
+`src/runtime/core.brocken` is not an optional library. `compile` reads it, parses it, and merges its statements ahead
+of the caller's before anything is lowered, so every program carries the allocator, the collector, the fiber machinery,
+and the exception support with it.
 
 That is why a program does not have to ask for memory. `new` on a class, `alloca`, an array, and a list all allocate
 out of the same Immix heap, and the collector is what reclaims them. The heap base is the first argument to the entry
@@ -179,8 +175,8 @@ class. Outside one, a field read is `$p->x`, and there is a writer for it too.
 
 # PACKAGE VARIABLES
 
-These are the runtime defaults, read by [Brocken](https://metacpan.org/pod/Brocken) and [Brocken::Katsuro::Lowerer](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3ALowerer) when they construct
-themselves. Setting one changes every compiler built afterwards:
+These are the runtime defaults, read by [Brocken](https://metacpan.org/pod/Brocken) and [Brocken::Katsuro::Lowerer](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3ALowerer) when they construct themselves.
+Setting one changes every compiler built afterwards:
 
 - `$Brocken::default_fuel`
 
@@ -315,7 +311,7 @@ A cross compile is a platform passed to the constructor and then the same four c
 
 ```perl
 my $brocken = Brocken->new(
-    platform => Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu'),
+    platform => Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu')
 );
 ```
 
@@ -353,7 +349,7 @@ foreign one under `qemu` when a sysroot is configured, skipping it when there is
 platform for its back end rather than carrying a table of its own, so the WebAssembly modules --
 [Brocken::Jenny::Codegen::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ACodegen%3A%3AWasm), [Brocken::Jenny::Linker::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ALinker%3A%3AWasm), and [Brocken::Jenny::Lowerer::Wasm](https://metacpan.org/pod/Brocken%3A%3AJenny%3A%3ALowerer%3A%3AWasm) -- are now
 reachable: a wasm32 triple parses into a [Brocken::Katsuro::Platform::Wasm](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3APlatform%3A%3AWasm) and returns a compiler. The generated
-module is not valid bytecode yet, so nothing runs it; see `TODO.md`. An architecture with no code generator is still
+module is valid bytecode, and `wasmtime` validates and runs it. An architecture with no code generator is still
 refused with `Unsupported platform`. The isolated-thread and fiber runtimes are ahead of this.
 
 The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool: a
