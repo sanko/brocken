@@ -234,6 +234,7 @@ subtest 'Wasm SIToFP and FPToSI lowering' => sub {
         ok( scalar @sets >= 1, 'Wasm FPToSI: local_set produced' );
     }
 };
+
 # A Wasm conversion opcode names both widths, so the source and the destination
 # pick it rather than the direction alone. Choosing it from the direction alone
 # emitted `i32.trunc_f32_s` for an f64 source, which is a module wasmtime
@@ -249,7 +250,6 @@ my @CONV = (
     { dir => 'fptosi', src => 'f32', dst => 'i64', op => 'i64_trunc_f32_s' },
     { dir => 'fptosi', src => 'f32', dst => 'i32', op => 'i32_trunc_f32_s' },
 );
-
 sub ty { my $m = shift; return Brocken::Lindsay::IR::Type->$m() }
 
 # Stored through a slot and loaded back so the conversion is a real instruction
@@ -261,50 +261,43 @@ sub conversion_function {
     my $func = Brocken::Lindsay::IR::Function->new(
         name        => ( $entry ? '_BROCKEN_ENTRY' : 'conv' ),
         return_type => ty( $c->{dst} ),
-        params      => (
-            $entry ? [ Brocken::Lindsay::IR::Value->new( type => ty('i64'), name => 'heap_base' ) ] : []
-        ),
+        params      => ( $entry ? [ Brocken::Lindsay::IR::Value->new( type => ty('i64'), name => 'heap_base' ) ] : [] ),
     );
     my $b = Brocken::Lindsay::IR::Builder->new();
     $b->position_at_end( $func->append_block('entry') );
     my $slot = $b->build_alloca( ty( $c->{src} ), '%slot' );
     $b->build_store( Brocken::Lindsay::IR::Constant->new( type => ty( $c->{src} ), value => $from ), $slot );
-    my $ld  = $b->build_load( ty( $c->{src} ), $slot, '%ld' );
-    my $cv  = $c->{dir} eq 'fptosi' ? $b->build_fptosi( $ld, ty( $c->{dst} ), '%cv' ) : $b->build_sitofp( $ld, ty( $c->{dst} ), '%cv' );
+    my $ld = $b->build_load( ty( $c->{src} ), $slot, '%ld' );
+    my $cv = $c->{dir} eq 'fptosi' ? $b->build_fptosi( $ld, ty( $c->{dst} ), '%cv' ) : $b->build_sitofp( $ld, ty( $c->{dst} ), '%cv' );
     $b->build_ret($cv);
     return $func;
 }
-
 subtest 'Wasm picks the conversion opcode for both widths' => sub {
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
     for my $c (@CONV) {
         my $mf  = $lowerer->lower( conversion_function($c) );
         my $ops = $mf->blocks->[0]->instructions;
         my @hit = grep { $_->opcode eq $c->{op} } $ops->@*;
-        ok( scalar @hit, "$c->{src} -> $c->{dst} emits $c->{op}" )
-            or diag( 'saw: ' . join( ', ', grep { $_->opcode =~ /(?:trunc|convert)/ } map { $_->opcode } $ops->@* ) );
+        ok( scalar @hit, "$c->{src} -> $c->{dst} emits $c->{op}" ) or
+            diag( 'saw: ' . join( ', ', grep { $_->opcode =~ /(?:trunc|convert)/ } map { $_->opcode } $ops->@* ) );
     }
 };
-
 subtest 'every int/float width pair compiles to a module that runs' => sub {
     my $host = Brocken::Katsuro::Platform::parse();
-    my $null = $host->is_windows ? 'NUL' : '/dev/null';
+    my $null = $host->is_windows ? 'NUL'                  : '/dev/null';
     my $wt   = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
     chomp $wt if $wt;
     skip_all('wasmtime not available') unless $wt && -f $wt;
-
     my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
     my $codegen  = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
     for my $c (@CONV) {
         my $module = temp_path( 'conv_' . $c->{src} . '_' . $c->{dst} ) . '.wasm';
-        Brocken::Jenny::Linker::Wasm->new->write_executable( $module,
-            $codegen->emit_functions( [ conversion_function( $c, 1 ) ] ), $platform );
+        Brocken::Jenny::Linker::Wasm->new->write_executable( $module, $codegen->emit_functions( [ conversion_function( $c, 1 ) ] ), $platform );
 
         # Validation is the assertion that matters: the byte for a conversion is
         # what decides whether the module is loadable at all.
         my $compile = qq["$wt" compile "$module" -o "$null" 2>&1];
         is( system($compile), 0, "$c->{src} -> $c->{dst} validates" ) or diag qx[$compile];
-
         my $got = qx["$wt" run --invoke _BROCKEN_ENTRY "$module" 1024 2>$null];
         chomp $got;
         is( $got, 42, "$c->{src} -> $c->{dst} round-trips 42" );

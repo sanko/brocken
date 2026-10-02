@@ -62,9 +62,9 @@ subtest 'a conversion is masked to the destination width' => sub {
         answers( "my bool \$b = false; my $ty \$t = -1.0; \$b = \$t; return \$b;", 1, "$ty -1.0 -> bool 1" );
         answers( "my bool \$b = false; my $ty \$t = 0.5; \$b = \$t; return \$b;",  0, "$ty 0.5 -> bool 0" );
     }
-    answers( 'my bool $b = false; my i64 $x = 24; $b = $x; return $b;',   0, 'i64 24 -> bool 0' );
-    answers( 'my bool $b = false; my i64 $x = 7; $b = $x; return $b;',    1, 'i64 7 -> bool 1' );
-    answers( 'my bool $b = false; my i64 $x = -1; $b = $x; return $b;',   1, 'i64 -1 -> bool 1' );
+    answers( 'my bool $b = false; my i64 $x = 24; $b = $x; return $b;',            0, 'i64 24 -> bool 0' );
+    answers( 'my bool $b = false; my i64 $x = 7; $b = $x; return $b;',             1, 'i64 7 -> bool 1' );
+    answers( 'my bool $b = false; my i64 $x = -1; $b = $x; return $b;',            1, 'i64 -1 -> bool 1' );
     answers( 'my i8 $x = 0; my f64 $t = 300.5; $x = $t; return $x == 44 ? 1 : 0;', 1, 'f64 300.5 -> i8 44' );
 };
 subtest 'integer to float, both widths' => sub {

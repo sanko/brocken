@@ -340,8 +340,8 @@ foreign one under C<qemu> when a sysroot is configured, skipping it when there i
 platform for its back end rather than carrying a table of its own, so the WebAssembly modules --
 L<Brocken::Jenny::Codegen::Wasm>, L<Brocken::Jenny::Linker::Wasm>, and L<Brocken::Jenny::Lowerer::Wasm> -- are now
 reachable: a wasm32 triple parses into a L<Brocken::Katsuro::Platform::Wasm> and returns a compiler. The generated
-module is valid bytecode, and C<wasmtime> validates it and runs it as a WASI command. An architecture with no code generator is still
-refused with C<Unsupported platform>. The isolated-thread and fiber runtimes are ahead of this.
+module is valid bytecode, and C<wasmtime> validates it and runs it as a WASI command. An architecture with no code
+generator is still refused with C<Unsupported platform>. The isolated-thread and fiber runtimes are ahead of this.
 
 The default fuel budget is what keeps a runaway loop from hanging a test run, and it is a wall, not a debugging tool: a
 program that legitimately needs more has to be compiled with a larger C<fuel>.

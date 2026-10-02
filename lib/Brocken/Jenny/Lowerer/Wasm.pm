@@ -1927,7 +1927,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                         }
                     }
                     else {
-                        my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        my $dst       = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         my $fptosi_op = $self->_fptosi_opcode( $val->type, $inst->type );
                         $mbb->add_instruction( $self->_wasm_push( $val, 'fptosi val' ) );
                         $mbb->add_instruction(
@@ -1944,27 +1944,56 @@ class Brocken::Jenny::Lowerer::Wasm {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Sext') ) {
                     my ($val)    = $inst->operands->@*;
                     my $src_bits = $val->type ? $val->type->bits : 64;
+                    my $dst_bits = $self->_scalar_bits( $inst->type ) || 64;
                     my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction( $self->_wasm_push( $val, 'sext val' ) );
 
-                    # Wasm sign-extends natively, but only from i32. A narrower
-                    # source has to be shifted up to bit 31 first, otherwise
-                    # extend_i32_s would sign the wrong bit.
-                    if ( $src_bits < 32 ) {
-                        my $shift = 32 - $src_bits;
+                    # Wasm sign-extends from i32 and from i64 only, and `extend_i32_s` reads
+                    # bit 31, so a narrower source is moved into place by hand:
+                    # mask it to its own width, shift up until the sign bit reaches
+                    # the top of the word, then shift back down with an arithmetic
+                    # shift, which is what replicates the sign into the bits above.
+                    #
+                    # Shifting up and stopping left the value sitting in the high
+                    # bits with the low bits clear, so `my i32 $k = 7; my i8 $j =
+                    # $k;` read back 0 -- the narrowing was fine and the comparison
+                    # promoting the i8 back to i64 was what broke. Wasm has no 8-
+                    # or 16-bit locals, so every narrow signed value comes through
+                    # here and this was wrong for all of them.
+                    if ( $dst_bits > 32 && $src_bits <= 32 ) {
+
+                        # The value is on the stack as an i32, so widen it before the
+                        # 64-bit shifts below. Zero-extending is right even for a
+                        # negative one: the mask keeps the low $src_bits and the
+                        # shift back down is what puts the sign in.
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'i32_const',
-                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $shift ) ],
-                                comment  => 'shift'
-                            )
-                        );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_shl', operands => [], comment => 'sext shl' ) );
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [], comment => 'sext widen' ) );
                     }
-                    if ( $src_bits < 64 ) {
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_s', operands => [], comment => 'sext extend' ) );
+                    if ( $src_bits < $dst_bits ) {
+                        my $p    = $dst_bits > 32 ? 'i64' : 'i32';
+                        my $move = $dst_bits - $src_bits;
+
+                        # Mask to the source width, shift the sign bit up to the top
+                        # of the word, then shift back down. Each shift pushes its own
+                        # amount, so the mask has to be the first thing on the stack.
+                        my @steps = (
+                            [ "${p}_const", ( 1 << $src_bits ) - 1 ],
+                            [ "${p}_and",   undef ],
+                            [ "${p}_const", $move ],
+                            [ "${p}_shl",   undef ],
+                            [ "${p}_const", $move ],
+                            [ "${p}_shr_s", undef ],
+                        );
+                        for my $step (@steps) {
+                            my ( $op, $imm ) = @$step;
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => $op,
+                                    operands => ( defined $imm ? [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $imm ) ] : [] ),
+                                    comment  => 'sext'
+                                )
+                            );
+                        }
                     }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
@@ -2919,13 +2948,11 @@ class Brocken::Jenny::Lowerer::Wasm {
     # `i32.trunc_f64_s`, f32 to i64 is `i64.trunc_f32_s`. Emitting one opcode for
     # the whole direction is what made an f32 module fail to validate.
     method _sitofp_opcode( $src, $dst ) {
-        return ( $self->_convert_width($dst) == 32 ? 'f32' : 'f64' ) . '_convert_'
-             . ( $self->_convert_width($src) == 32 ? 'i32' : 'i64' ) . '_s';
+        return ( $self->_convert_width($dst) == 32 ? 'f32' : 'f64' ) . '_convert_' . ( $self->_convert_width($src) == 32 ? 'i32' : 'i64' ) . '_s';
     }
 
     method _fptosi_opcode( $src, $dst ) {
-        return ( $self->_convert_width($dst) == 32 ? 'i32' : 'i64' ) . '_trunc_'
-             . ( $self->_convert_width($src) == 32 ? 'f32' : 'f64' ) . '_s';
+        return ( $self->_convert_width($dst) == 32 ? 'i32' : 'i64' ) . '_trunc_' . ( $self->_convert_width($src) == 32 ? 'f32' : 'f64' ) . '_s';
     }
 
     method _type_tag($type) {

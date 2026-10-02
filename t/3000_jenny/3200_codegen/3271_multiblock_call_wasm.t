@@ -23,10 +23,11 @@ subtest 'Wasm call from a non-entry block' => sub {
     my $host          = Brocken::Katsuro::Platform::parse();
     my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
     chomp $wasmtime_path if $wasmtime_path;
+
     # SKIP: so skip() has a block to last out of. Without the label it unwinds
     # the subtest closure itself, and the plan the subtest adds on the way out
     # collides with the trailing SKIP.
-    SKIP: {
+SKIP: {
         skip 'wasmtime not available', 2 unless $wasmtime_path && -f $wasmtime_path;
         my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
         my $b        = Brocken::Lindsay::IR::Builder->new();

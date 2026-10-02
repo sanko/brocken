@@ -6,6 +6,14 @@ First off, thank you for considering contributing! Brocken is a project that val
 
 This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
 
+## Testing and Debugging Tools
+
+Most of the suite needs nothing but a Perl 5.40+. Some parts are optional and skip cleanly when the tool is absent:
+
+- Wasm bugs are invisible to the MIR-level tests because those assert on IR shape and pass while the emitted module is wrong or unloadable. Anything only a Wasm runtime can catch needs a unit test that actually compiles and runs a module. One of our CI jobs installs `wasmtime` to verify but I need a way to apply MIR-level assertions as well.
+- [`wabt`](https://github.com/webassembly/wabt) provides `wasm2wat`, `wasm-objdump` and `wasm-validate`. When a Wasm lowering produces the wrong answer, disassembling the module (`wasm-objdump -d`, or `wasm2wat` into a `.wat` file) and reading the instructions is the practical way to see what was actually generated. Diffing two near-identical modules and reading the instruction that differs is often enough. Hand-decoding the bytes is not.
+- `BROCKEN_SYSROOT_AARCH64` / `BROCKEN_SYSROOT_RISCV64` point at cross sysroots and enable executing foreign-target output under `qemu`. Tests that need them skip when unset.
+
 ## How to Contribute
 
 We use a standard GitHub fork-and-pull-request workflow.
