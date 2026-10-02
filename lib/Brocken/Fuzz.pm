@@ -48,7 +48,6 @@ package Brocken::Fuzz {
         ADJUST {
             $seed //= int( rand(2147483647) );
             require Brocken;
-            require Brocken::Compiler;
             my $b = Brocken->new();
             $brocken  = $b;
             $codegen  = $b->codegen;
@@ -1515,8 +1514,12 @@ package Brocken::Fuzz {
                 = { source => $program->{source}, status => 'pass', expected => $program->{expected}, host => $self->host_str, seed => $self->seed };
             my $module;
             eval {
-                my $compiler = Brocken::Compiler->new();
-                $module = $compiler->compile( $program->{source} );
+                # compile() only reads the policy fields, so this instance can be
+                # shared.  Building a throwaway one per case would allocate a
+                # codegen, a linker, and a whole temporary directory, and
+                # File::Temp draws from rand(), which would shift the seeded
+                # stream and change which program each case number generates.
+                $module = $self->brocken->compile( $program->{source} );
             };
             if ( my $err = $@ ) {
                 return { %$result, status => 'compile_fail', reason => "Compile: $err" };

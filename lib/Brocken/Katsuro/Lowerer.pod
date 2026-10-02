@@ -51,9 +51,8 @@ A reader, a hashref from label to the bytes of a string constant. Pass it to C<s
 
 =back
 
-The compiler front end does exactly this, so a caller that is not L<Brocken::Compiler> has to remember both
-attachments. A module with the classes left off it will compile a class program to a back end that asks for
-C<total_size> and gets nothing.
+The compiler front end does exactly this, so a caller that is not L<Brocken> has to remember both attachments. A module
+with the classes left off it will compile a class program to a back end that asks for C<total_size> and gets nothing.
 
 =head1 FIELDS
 

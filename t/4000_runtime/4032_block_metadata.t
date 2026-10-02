@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -14,7 +13,7 @@ subtest 'clear_block_bitmap zeros both words' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 144);
 # Block has Line 0 marked from _init
@@ -38,7 +37,7 @@ subtest 'find_free_line returns first unmarked line' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 144);
 # Clear bitmap (Line 0 was marked by _init)
@@ -87,7 +86,7 @@ subtest 'find_free_line returns -1 when all lines marked' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 144);
 # Mark all 128 lines
@@ -114,7 +113,7 @@ subtest 'find_free_line with start_idx skips ahead' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 144);
 Brocken::Runtime::clear_block_bitmap($block);
@@ -148,7 +147,7 @@ subtest 'get_next_free and set_next_free' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 144);
 # _init sets next_free to 0
@@ -177,7 +176,7 @@ subtest '_init marks Line 0 in bitmap' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 144);
 # Check that Line 0 is marked in the bitmap after _init
@@ -202,7 +201,7 @@ subtest 'bump_alloc marks lines when advancing' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block0 = Brocken::ptr_add($hb, 144);
 # Allocate many times to ensure we cross at least one line boundary
@@ -241,7 +240,7 @@ subtest 'bump_alloc reuses free line via find_free_line' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 144);
 # Force cursor to near end of Line 127 to trigger block-full path
@@ -274,7 +273,7 @@ subtest 'bump_alloc falls back to legacy heap when bitmap full' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block0 = Brocken::ptr_add($hb, 144);
 my ptr $cb = Brocken::load_i64(Brocken::ptr_add($hb, 80));
@@ -313,7 +312,7 @@ subtest 'recycle_block clears bitmap and resets next_free' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, 144);
 # Mark several lines
@@ -349,7 +348,7 @@ subtest 'full sweep-reclaim cycle through bump_alloc' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block0 = Brocken::ptr_add($hb, 144);
 {
@@ -385,7 +384,7 @@ subtest 'live_count tracks allocations across line advances' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block0 = Brocken::ptr_add($hb, 144);
 # Many allocations to span multiple lines
@@ -416,7 +415,7 @@ subtest 'next_free advances as bump_alloc marks lines' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $block0 = Brocken::ptr_add($hb, 144);
 # Initially next_free = 0

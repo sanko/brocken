@@ -1,17 +1,18 @@
+use Brocken;
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
-use Brocken::Compiler;
+use Brocken;
 use Brocken::Katsuro::AST;
 subtest 'Empty program' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('');
     isa_ok( $prog, ['Brocken::Katsuro::AST::Program'] );
     is( $prog->statements->@*, 0, 'empty program has no statements' );
 };
 subtest 'Variable declarations' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my i64 $x = 42; my ptr $p; my $z;');
     is( $prog->statements->@*, 3, 'three statements' );
     my $s0 = $prog->statements->[0];
@@ -31,7 +32,7 @@ subtest 'Variable declarations' => sub {
     is( $s2->type, 'Any', 'default type Any' );
 };
 subtest 'Assignment statement' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my i64 $x; $x = 99;');
     is( $prog->statements->@*, 2, 'two statements' );
     my $s1 = $prog->statements->[1];
@@ -41,7 +42,7 @@ subtest 'Assignment statement' => sub {
     isa_ok( $s1->expr, ['Brocken::Katsuro::AST::Expr::Const'] );
 };
 subtest 'If/elsif/else' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 if (1) { my i64 $a; } elsif (2) { my i64 $b; } else { my i64 $c; }
 BROCKEN
@@ -56,7 +57,7 @@ BROCKEN
     isa_ok( $s->else,            ['Brocken::Katsuro::AST::Stmt::Block'] );
 };
 subtest 'While loop' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('while (true) { my i64 $x; }');
     is( $prog->statements->@*, 1, 'one statement' );
     my $s = $prog->statements->[0];
@@ -66,7 +67,7 @@ subtest 'While loop' => sub {
     isa_ok( $s->body, ['Brocken::Katsuro::AST::Stmt::Block'] );
 };
 subtest 'Return statement' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('return 42; return;');
     is( $prog->statements->@*, 2, 'two statements' );
     isa_ok( $prog->statements->[0],       ['Brocken::Katsuro::AST::Stmt::Return'] );
@@ -75,7 +76,7 @@ subtest 'Return statement' => sub {
     ok( !defined $prog->statements->[1]->expr, 'void return' );
 };
 subtest 'Subroutine declaration' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 sub add(i64 $a, i64 $b) -> i64 {
     return 0;
@@ -101,7 +102,7 @@ BROCKEN
     is( $s1->body->statements->@*, 0, 'forward decl has empty body' );
 };
 subtest 'Class declaration' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 class Channel {
     field i32 $capacity;
@@ -119,7 +120,7 @@ BROCKEN
     is( $s->fields->[1]->name, 'buffer' );
 };
 subtest 'Binary expressions (precedence)' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my i64 $r = 1 + 2 * 3;');
     my $init = $prog->statements->[0]->init;
     isa_ok( $init, ['Brocken::Katsuro::AST::Expr::BinOp'] );
@@ -131,7 +132,7 @@ subtest 'Binary expressions (precedence)' => sub {
     is( $init->rhs->rhs->value, 3,   'inner rhs is 3' );
 };
 subtest 'Comparison operators' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my i64 $r = $a == $b && $c < $d || $e != $f;');
     my $init = $prog->statements->[0]->init;
     isa_ok( $init, ['Brocken::Katsuro::AST::Expr::BinOp'] );
@@ -146,7 +147,7 @@ subtest 'Comparison operators' => sub {
     is( $init->rhs->op, '!=' );
 };
 subtest 'Shift operators << and >>' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my i64 $r = 1 << 2 + 3 >> 4;');
     my $init = $prog->statements->[0]->init;
     isa_ok( $init, ['Brocken::Katsuro::AST::Expr::BinOp'] );
@@ -159,7 +160,7 @@ subtest 'Shift operators << and >>' => sub {
     is( $init->rhs->value,   4,   'rhs of >> is 4' );
 };
 subtest 'Function calls' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('foo(1, 2); bar();');
     is( $prog->statements->@*, 2, 'two statements' );
     isa_ok( $prog->statements->[0], ['Brocken::Katsuro::AST::Expr::Call'] );
@@ -170,7 +171,7 @@ subtest 'Function calls' => sub {
     is( $prog->statements->[1]->args->@*,  0 );
 };
 subtest 'Intrinsic calls (Brocken::)' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my ptr $p = Brocken::ptr_add($base, 16);');
     my $init = $prog->statements->[0]->init;
     isa_ok( $init, ['Brocken::Katsuro::AST::Expr::IntrinsicCall'] );
@@ -181,7 +182,7 @@ subtest 'Intrinsic calls (Brocken::)' => sub {
     is( $init->args->[1]->value, 16 );
 };
 subtest 'Built-in say/print' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('say(42); print("hello");');
     is( $prog->statements->@*, 2, 'two statements' );
     isa_ok( $prog->statements->[0], ['Brocken::Katsuro::AST::Expr::Call'] );
@@ -191,7 +192,7 @@ subtest 'Built-in say/print' => sub {
     is( $prog->statements->[1]->args->[0]->value, 'hello' );
 };
 subtest 'Parenthesized expressions' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my i64 $r = (1 + 2) * 3;');
     my $init = $prog->statements->[0]->init;
     isa_ok( $init, ['Brocken::Katsuro::AST::Expr::BinOp'] );
@@ -202,7 +203,7 @@ subtest 'Parenthesized expressions' => sub {
     is( $init->rhs->value,    3 );
 };
 subtest 'Unary operators' => sub {
-    my $c       = Brocken::Compiler->new;
+    my $c       = Brocken->new;
     my $prog    = $c->parse_only('my i64 $r = -42; my i64 $b = !true;');
     my $s0_init = $prog->statements->[0]->init;
     isa_ok( $s0_init, ['Brocken::Katsuro::AST::Expr::UnOp'] );
@@ -214,7 +215,7 @@ subtest 'Unary operators' => sub {
     is( $s1_init->expr->value, 1 );
 };
 subtest 'Class with field attributes and defaults' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 class Point {
     field i64 $x :reader :param = 0;
@@ -254,7 +255,7 @@ BROCKEN
     is( $f2->default_op,     '//=' );
 };
 subtest 'Method declaration inside class' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 class Counter {
     field i64 $count :reader;
@@ -285,7 +286,7 @@ BROCKEN
     is( $m2->return_type,       'i64' );
 };
 subtest 'ADJUST block inside class' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 class Channel {
     field i32 $capacity :param;
@@ -302,7 +303,7 @@ BROCKEN
     isa_ok( $s->adjust->body, ['Brocken::Katsuro::AST::Stmt::Block'] );
 };
 subtest 'Field access and method call syntax' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 sub test() -> i64 {
     my ptr $p;
@@ -327,7 +328,7 @@ BROCKEN
     is( $ret->expr->args->@*, 0 );
 };
 subtest '__CLASS__ expression' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 sub test() {
     say(__CLASS__);
@@ -339,7 +340,7 @@ BROCKEN
     isa_ok( $stmt->args->[0], ['Brocken::Katsuro::AST::Expr::ClassConst'] );
 };
 subtest 'Full program: sub + class + vars + calls' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 class Channel {
     field i32 $capacity;
@@ -378,7 +379,7 @@ BROCKEN
 
 # Subtest: Array declaration
 subtest 'Array declaration' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 my [i64; 10] @arr;
 BROCKEN
@@ -393,7 +394,7 @@ BROCKEN
 
 # Subtest: Array element access (read)
 subtest 'Array element access' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 my [i64; 10] @arr;
 my i64 $x = @arr[3];
@@ -412,7 +413,7 @@ BROCKEN
 
 # Subtest: Array element write
 subtest 'Array element write' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 my [i64; 10] @arr;
 @arr[3] = 42;
@@ -428,7 +429,7 @@ BROCKEN
 
 # Subtest: use feature brocken_native_types
 subtest 'use feature brocken_native_types' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only(<<'BROCKEN');
 use feature 'brocken_native_types';
 my i128 $x = 0;
@@ -438,19 +439,19 @@ BROCKEN
     is( $prog->statements->[0]->type, 'i128', 'i128 type enabled by feature' );
 };
 subtest 'int type keyword' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my int $x = 42;');
     is( $prog->statements->@*,        1,     'one statement' );
     is( $prog->statements->[0]->type, 'int', 'int type recognized' );
 };
 subtest 'bool type keyword' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my bool $flag = 1;');
     is( $prog->statements->@*,        1,      'one statement' );
     is( $prog->statements->[0]->type, 'bool', 'bool type recognized' );
 };
 subtest 'u8-u64 type keywords' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my u8 $a; my u16 $b; my u32 $c; my u64 $d;');
     is( $prog->statements->@*,        4,     'four statements' );
     is( $prog->statements->[0]->type, 'u8',  'u8 type recognized' );
@@ -459,10 +460,10 @@ subtest 'u8-u64 type keywords' => sub {
     is( $prog->statements->[3]->type, 'u64', 'u64 type recognized' );
 };
 subtest 'u128 requires feature flag' => sub {
-    my $c = Brocken::Compiler->new;
+    my $c = Brocken->new;
     eval { $c->parse_only('my u128 $x;') };
     ok( $@, 'u128 without feature flag throws error' );
-    my $c2    = Brocken::Compiler->new;
+    my $c2    = Brocken->new;
     my $prog2 = $c2->parse_only(<<'BROCKEN');
 use feature 'brocken_native_types';
 my u128 $x;
@@ -471,7 +472,7 @@ BROCKEN
     is( $prog2->statements->[0]->type, 'u128', 'u128 type with feature flag' );
 };
 subtest 'Int and Bool aliases' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my Int $x; my Bool $b;');
     is( $prog->statements->@*,        2,      'two statements' );
     is( $prog->statements->[0]->type, 'Int',  'Int type recognized' );
@@ -480,7 +481,7 @@ subtest 'Int and Bool aliases' => sub {
 
 # === Source position tests ===
 subtest 'Source positions on expressions and statements' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only( <<'BROCKEN', 'test.br' );
 my i64 $x = 42;
 return $x;
@@ -522,7 +523,7 @@ BROCKEN
     is( $class->col,  1, 'Class col' );
 };
 subtest 'Source positions on expressions (in call)' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only( <<'BROCKEN', 'test.br' );
 my i64 $r = foo(1 + 2 * 3);
 BROCKEN
@@ -541,14 +542,14 @@ BROCKEN
     is( $inner->col,  19, 'BinOp col (+)' );
 };
 subtest 'Parser error includes position' => sub {
-    my $c = Brocken::Compiler->new;
+    my $c = Brocken->new;
     eval { $c->parse_only( 'my i64 $x = ;', 'test.br' ) };
     ok( $@, 'parse error thrown' );
     like( $@, qr/test\.br/, 'error mentions filename' );
     like( $@, qr/line 1/,   'error mentions line' );
 };
 subtest 'Default filename is (eval)' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('my i64 $x = 42;');
     is( $prog->statements->[0]->file, '(eval)', 'default file is (eval)' );
 };

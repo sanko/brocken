@@ -6,7 +6,6 @@ use Brocken;
 use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -56,7 +55,7 @@ my @TARGETS = (
 
 sub lowered( $triple, $class, $src ) {
     my $platform = Brocken::Katsuro::Platform::parse($triple);
-    my $module   = Brocken::Compiler->new->compile($src);
+    my $module   = Brocken->new->compile($src);
     my %mf;
     for my $func ( $module->functions->@* ) {
         next unless $func->blocks->@*;
@@ -231,7 +230,7 @@ sub x86_outgoing_area () {
         # Three past the register file, so the outgoing area has to grow past
         # the Win64 shadow space it is otherwise floored at.
         my ( $src, $n ) = overflow_src($triple);
-        my $module = Brocken::Compiler->new->compile($src);
+        my $module = Brocken->new->compile($src);
         for my $func ( $module->functions->@* ) {
             next unless $func->blocks->@*;
             my $fname = $func->name;
@@ -346,7 +345,7 @@ sub run_case ( $platform, $class, $src, $want, $name ) {
     my $brocken = eval { Brocken->new( platform => $platform ) } or return;
     my $binary  = temp_path( 'stack_args_' . $platform->arch . '_' . abs($want) );
     my $built   = eval {
-        my $m = Brocken::Compiler->new->compile($src);
+        my $m = Brocken->new->compile($src);
         $brocken->linker->write_executable( $binary, $brocken->codegen->emit_functions( $m->functions ), $platform );
         1;
     };

@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../../../lib';
 use Brocken;
-use Brocken::Compiler;
 use Brocken::Katsuro::Platform;
 use Config;
 use Fcntl    qw(O_RDONLY);
@@ -57,7 +56,7 @@ my i64 $y = 20;
 my i64 $z = $x + $y;
 return $z;
 BROCKEN
-        my $module    = Brocken::Compiler->new->compile( $source, 'test_levels.brocken' );
+        my $module    = Brocken->new->compile( $source, 'test_levels.brocken' );
         my $ir_funcs  = $module->functions;
         my $funcs     = $brocken->codegen->emit_functions($ir_funcs);
         my $text_base = 0;
@@ -136,7 +135,7 @@ my i64 $b = 20;
 my i64 $c = $a + $b;
 return $c;
 BROCKEN
-        my $module    = Brocken::Compiler->new->compile( $source, 'test_gdb.brocken' );
+        my $module    = Brocken->new->compile( $source, 'test_gdb.brocken' );
         my $ir_funcs  = $module->functions;
         my $funcs     = $brocken->codegen->emit_functions($ir_funcs);
         my $text_base = 0;
@@ -232,7 +231,7 @@ class Point {
 my ptr $p = Point->new(x => 10, y => 20);
 return $p->x;
 BROCKEN
-        my $module     = Brocken::Compiler->new->compile( $source, 'test_struct_die.brocken' );
+        my $module     = Brocken->new->compile( $source, 'test_struct_die.brocken' );
         my $class_info = $module->class_info;
         my $ir_funcs   = $module->functions;
         my $funcs      = $brocken->codegen->emit_functions($ir_funcs);
@@ -284,7 +283,7 @@ SKIP: {
 my i64 $x = 42;
 return $x;
 BROCKEN
-        my $module    = Brocken::Compiler->new->compile( $source, 'test_coff_levels.brocken' );
+        my $module    = Brocken->new->compile( $source, 'test_coff_levels.brocken' );
         my $ir_funcs  = $module->functions;
         my $funcs     = $brocken->codegen->emit_functions($ir_funcs);
         my $text_base = 0x140001000;

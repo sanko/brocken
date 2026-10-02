@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -24,9 +23,9 @@ use feature qw[class];
 # executes on the host.
 subtest 'the 128-bit names are feature-gated' => sub {
     for my $ty (qw[i128 u128]) {
-        my $err = eval { Brocken::Compiler->new->parse_only("my $ty \$x = 1;"); 1 } ? undef : $@;
+        my $err = eval { Brocken->new->parse_only("my $ty \$x = 1;"); 1 } ? undef : $@;
         like( $err, qr/Expected variable name after 'my'/, "$ty without the feature is rejected as a bare name" );
-        my $prog = eval { Brocken::Compiler->new->parse_only("use feature 'brocken_native_types';\nmy $ty \$x = 1;") };
+        my $prog = eval { Brocken->new->parse_only("use feature 'brocken_native_types';\nmy $ty \$x = 1;") };
         ok( $prog, "$ty parses once the feature is requested" ) or diag($@);
         is( $prog->statements->[0]->type, $ty, "$ty is a declaration type behind the gate" );
     }
@@ -46,7 +45,7 @@ subtest 'an i128 survives a declare/widen/narrow round trip' => sub {
 done_testing;
 
 sub answers ( $brocken, $src, $want, $name ) {
-    my $module = eval { Brocken::Compiler->new->compile($src) };
+    my $module = eval { Brocken->new->compile($src) };
     if ($@) { fail("$name: compile died: $@"); return; }
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
     my $file  = $brocken->tmpdir . '/i128syn' . $brocken->ext;

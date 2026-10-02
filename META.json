@@ -34,9 +34,6 @@
          "file" : "lib/Brocken.pm",
          "version" : "v0.0.1"
       },
-      "Brocken::Compiler" : {
-         "file" : "lib/Brocken/Compiler.pm"
-      },
       "Brocken::Fuzz" : {
          "file" : "lib/Brocken/Fuzz.pm"
       },

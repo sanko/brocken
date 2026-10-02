@@ -3,11 +3,10 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'try without catch/finally is a parse error' => sub {
-    my $c = Brocken::Compiler->new;
+    my $c = Brocken->new;
     like( dies { $c->compile('try { return 1; }') }, qr/catch.*finally/, 'try with neither catch nor finally croaks', );
 };
 subtest 'try/catch with no throw - normal flow' => sub {
@@ -16,7 +15,7 @@ subtest 'try/catch with no throw - normal flow' => sub {
 SKIP: {
         skip 'Not native',            2 unless $host->is_native;
         skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $x = 10;
 try {
     $x = 42;
@@ -39,7 +38,7 @@ subtest 'throw and catch' => sub {
 SKIP: {
         skip 'Not native',            2 unless $host->is_native;
         skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $result = 0;
 try {
     $result = 1;
@@ -64,7 +63,7 @@ subtest 'try/finally without catch' => sub {
 SKIP: {
         skip 'Not native',            2 unless $host->is_native;
         skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $x = 0;
 try {
     $x = 10;
@@ -87,7 +86,7 @@ subtest 'try/catch/finally - finally runs after catch' => sub {
 SKIP: {
         skip 'Not native',            2 unless $host->is_native;
         skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $x = 0;
 try {
     throw 1;
@@ -112,7 +111,7 @@ subtest 'unhandled throw sets err_code' => sub {
 SKIP: {
         skip 'Not native',            2 unless $host->is_native;
         skip 'Wasm: no sjlj support', 2 if $host->is_wasm;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 throw 42;
 return 0;
 BROCKEN

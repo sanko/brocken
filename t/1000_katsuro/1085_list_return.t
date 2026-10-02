@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 use Brocken::Katsuro::AST;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
@@ -12,7 +11,7 @@ subtest 'list return and unpack produces correct values' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub make_list() -> ptr {
     return (3, 4);
 }
@@ -32,7 +31,7 @@ subtest 'list return with three elements' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub make_list() -> ptr {
     return (10, 20, 30);
 }
@@ -52,7 +51,7 @@ subtest 'list return with single element' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub make_one() -> ptr {
     return (42);
 }
@@ -72,7 +71,7 @@ subtest 'list return with expression elements' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 sub make_list() -> ptr {
     my $x = 5;
     return ($x * 2, $x + 3);

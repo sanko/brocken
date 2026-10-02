@@ -7,7 +7,6 @@ use Brocken::Katsuro::Platform;
 use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Jenny::Lowerer::X86_64;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -35,7 +34,7 @@ is(
     [ 'rdi', 'rsi', 'xmm0', 'rdx', 'xmm1', 'rcx' ],
     'SysV keeps an independent counter per register file'
 );
-my $module = Brocken::Compiler->new->compile('sub g(i64 $x, f64 $y) -> f64 { return $y; } return g(7, 2.0);');
+my $module = Brocken->new->compile('sub g(i64 $x, f64 $y) -> f64 { return $y; } return g(7, 2.0);');
 my %mf;
 for my $func ( $module->functions->@* ) {
     next unless $func->blocks->@*;

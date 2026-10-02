@@ -128,7 +128,7 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
       Var, Ident, Paren, Call, IntrinsicCall, SubDecl, ClassDecl, FieldDecl, ArrayDecl, ArrayIndex
 - [x] **Parser:** Recursive descent (statements) + Pratt parser (expressions) -
       handles all v0.1 constructs including arrays, classes, methods, field access, `use feature`
-- [x] **Compiler orchestrator:** `Brocken::Compiler` - lex → parse → AST
+- [x] **Compiler orchestrator:** `Brocken` - lex → parse → AST
 - [x] **Tests:** 25 parser subtests; 26 lowerer subtests; 19 integration subtests (all passing)
 
 ### Completed: Lowering & Pipeline

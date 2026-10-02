@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -18,7 +17,7 @@ subtest 'get_gc_flags and set_gc_flags round-trip' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my $obj = 42;
 my ptr $addr = Brocken::ptr_add($obj, 0);
@@ -54,7 +53,7 @@ subtest 'push_suspect_buffer adds entry' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Suspect buffer should be empty
 my i64 $sc = Brocken::Runtime::suspect_count($hb);
@@ -87,7 +86,7 @@ subtest 'push_suspect_buffer skips already-buffered' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my $obj = 99;
 my ptr $addr = Brocken::ptr_add($obj, 0);
@@ -112,7 +111,7 @@ subtest 'pop_suspect_buffer returns obj and clears flags' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my $obj = 77;
 my ptr $addr = Brocken::ptr_add($obj, 0);
@@ -141,7 +140,7 @@ subtest 'pop_suspect_buffer from empty returns 0' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my ptr $popped = Brocken::Runtime::pop_suspect_buffer($hb);
 if (Brocken::ptr_cmp_eq($popped, 0) == 0) { return 1; }
@@ -160,7 +159,7 @@ subtest 'push/pop LIFO order' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my $a = 10;
 my $b = 20;
@@ -195,7 +194,7 @@ subtest 'gc_drain on empty buffer is a no-op' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 Brocken::Runtime::gc_drain($hb);
 # Buffer should still be empty
@@ -216,7 +215,7 @@ subtest 'gc_drain clears suspect buffer' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my $a = 10;
 my ptr $pa = Brocken::ptr_add($a, 0);
@@ -240,7 +239,7 @@ subtest 'gc_drain marks reachable suspects as Black' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # An Any var with RC > 0 should survive gc_drain
 my $obj = 42;
@@ -265,7 +264,7 @@ subtest 'gc_drain with multiple suspects' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my $a = 10;
 my $b = 20;
@@ -298,7 +297,7 @@ subtest 'decref R3 suspect push on RC > 0' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 # Allocate and copy to trigger incref/decref
 my $x = 42;
@@ -320,7 +319,7 @@ subtest 'multiple alloc/dealloc cycles stress bump_alloc' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $i = 0;
 my i64 $limit = 10;

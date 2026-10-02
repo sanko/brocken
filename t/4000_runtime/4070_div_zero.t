@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'signed div by zero sets err_code=4 and returns 0' => sub {
@@ -11,7 +10,7 @@ subtest 'signed div by zero sets err_code=4 and returns 0' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
 my i64 $x = 10;
 my i64 $y = 0;
@@ -32,7 +31,7 @@ subtest 'signed div by zero sets err_code=4' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
 sub do_div() -> i64 {
     my i64 $x = 42;
@@ -59,7 +58,7 @@ subtest 'unsigned div by zero returns 0' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
 my u64 $x = 10;
 my u64 $y = 0;
@@ -80,7 +79,7 @@ subtest 'signed rem by zero returns 0' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
 my i64 $x = 10;
 my i64 $y = 0;
@@ -101,7 +100,7 @@ subtest 'div by non-zero works normally' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
 my i64 $x = 42;
 my i64 $y = 7;
@@ -122,7 +121,7 @@ subtest 'div with constant zero divisor' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
 my i64 $x = 10;
 my i64 $r = $x / 0;

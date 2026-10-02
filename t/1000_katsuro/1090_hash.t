@@ -3,12 +3,11 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 use Brocken::Katsuro::AST;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'hash literal parses as Expr::Hash' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('sub foo() -> ptr { return (a => 1, b => 2); }');
     my $func = $prog->statements->[0];
     my $ret  = $func->body->statements->[0];
@@ -24,7 +23,7 @@ subtest 'hash literal parses as Expr::Hash' => sub {
     is( $expr->pairs->[1]->{value}->value, 2,   'second value is 2' );
 };
 subtest 'fat comma auto-quotes bareword key' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('sub foo() -> ptr { return (name => "hello"); }');
     my $ret  = $prog->statements->[0]->body->statements->[0];
     my $hash = $ret->expr;
@@ -34,21 +33,21 @@ subtest 'fat comma auto-quotes bareword key' => sub {
     is( $pair->{key}->value, 'name', 'key is string "name"' );
 };
 subtest 'bare paren without => is not hash' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('sub foo() -> ptr { return (42); }');
     my $ret  = $prog->statements->[0]->body->statements->[0];
     my $expr = $ret->expr;
     isa_ok( $expr, ['Brocken::Katsuro::AST::Expr::List'] );
 };
 subtest 'comma paren without => is list' => sub {
-    my $c    = Brocken::Compiler->new;
+    my $c    = Brocken->new;
     my $prog = $c->parse_only('sub foo() -> ptr { return (1, 2, 3); }');
     my $ret  = $prog->statements->[0]->body->statements->[0];
     my $expr = $ret->expr;
     isa_ok( $expr, ['Brocken::Katsuro::AST::Expr::List'] );
 };
 subtest 'hash literal produces ptr type' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 sub make_hash() -> ptr {
     return (x => 10, y => 20);
@@ -64,7 +63,7 @@ subtest 'named constructor with hash args' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 class Point {
     field i64 $x;
     field i64 $y;
@@ -85,7 +84,7 @@ subtest 'named constructor with :param fields' => sub {
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param;
     field i64 $y :param;

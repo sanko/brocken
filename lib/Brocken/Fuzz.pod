@@ -145,7 +145,7 @@ Compiled, linked, ran, and matched the expectation.
 
 =item C<compile_fail>
 
-L<Brocken::Compiler> threw. The C<reason> is prefixed C<Compile:>.
+L<Brocken> threw while parsing or lowering. The C<reason> is prefixed C<Compile:>.
 
 =item C<codegen_fail>
 

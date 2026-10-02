@@ -1,8 +1,9 @@
+use Brocken;
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
-use Brocken::Compiler;
+use Brocken;
 use Brocken::Lindsay::IR;
 use Brocken::Katsuro::Platform;
 
@@ -14,13 +15,13 @@ sub find_function {
     return undef;
 }
 subtest 'Empty program produces empty module' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile('');
     isa_ok( $mod, ['Brocken::Lindsay::IR::Module'] );
     is( $mod->name, 'main' );
 };
 subtest 'Function with no body becomes declare' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile('sub foo() -> i64;');
     my $f   = find_function( $mod, 'foo' );
     ok( $f, 'found function foo' );
@@ -31,7 +32,7 @@ subtest 'Function with no body becomes declare' => sub {
     is( $f->params->[1]->name,      '%__want' );
 };
 subtest 'Function with parameters' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 sub add(i64 $a, i64 $b) -> i64 {
     return 0;
@@ -52,7 +53,7 @@ BROCKEN
     is( $f->params->[3]->name,            '%b' );
 };
 subtest 'Return constant' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 return 42;
 BROCKEN
@@ -62,7 +63,7 @@ BROCKEN
     like( $text, qr/ret\s+i64\s+42/, 'returns constant 42' );
 };
 subtest 'Variable declaration and assignment' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $x = 10;
 my i64 $y;
@@ -78,7 +79,7 @@ BROCKEN
     like( $text, qr/load\s+i64/,       'load before return' );
 };
 subtest 'Binary arithmetic with precedence' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $r = 1 + 2 * 3;
 return $r;
@@ -90,7 +91,7 @@ BROCKEN
     like( $text, qr/add\s+i64\s+1,/,     'then add' );
 };
 subtest 'If/else control flow' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $x = 0;
 if ($x) {
@@ -108,7 +109,7 @@ BROCKEN
     like( $text, qr/if_end_\d+:/, 'merge label' );
 };
 subtest 'While loop' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $i = 0;
 while ($i < 10) {
@@ -124,7 +125,7 @@ BROCKEN
     like( $text, qr/while_end_\d+:/,    'exit label' );
 };
 subtest 'Comparison operators' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $a = 10;
 my i64 $b = 20;
@@ -143,7 +144,7 @@ BROCKEN
     like( $text, qr/icmp\s+sgt/, 'icmp sgt' );
 };
 subtest 'Unary negation and logical not' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $a = -5;
 if (! $a) { return 1; }
@@ -155,7 +156,7 @@ BROCKEN
     like( $text, qr/neg\s+i64/, 'neg for negation' );
 };
 subtest 'Intrinsic calls' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my ptr $p = 0;
 my ptr $q = Brocken::ptr_add($p, 16);
@@ -175,7 +176,7 @@ subtest 'Bitwise intrinsics' => sub {
         [ shr  => 'lshr', q{Brocken::shr(6, 1)} ],
     ) {
         my ( $name, $op, $src ) = @$tc;
-        my $c   = Brocken::Compiler->new;
+        my $c   = Brocken->new;
         my $mod = $c->compile("my i64 \$x = $src;\nreturn \$x;\n");
         my $f   = find_function( $mod, '_BROCKEN_ENTRY' );
         ok( $f, "found entry function for $name" );
@@ -184,7 +185,7 @@ subtest 'Bitwise intrinsics' => sub {
     }
 };
 subtest 'Syscall intrinsic' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $ret = Brocken::syscall(0, 0, 0, 0);
 return 0;
@@ -195,7 +196,7 @@ BROCKEN
     like( $text, qr/syscall\(/, 'syscall lowered to syscall IR' );
 };
 subtest 'Class field access via $self->field in method' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 class Point {
     field i64 $x;
@@ -211,7 +212,7 @@ BROCKEN
     like( $text, qr/load\s+i64/,    'load i64 from field' );
 };
 subtest 'Auto-generated :reader method' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 class Point {
     field i64 $x :reader;
@@ -223,7 +224,7 @@ BROCKEN
     is( $f->params->@*,             3,     'three params (__heap_base, __want, $self)' );
 };
 subtest 'Auto-generated :writer method' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 class Point {
     field i64 $x :writer;
@@ -235,7 +236,7 @@ BROCKEN
     is( $f->params->@*,             4,      'four params (__heap_base, __want, $self, $value)' );
 };
 subtest 'Named constructor with fields' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 class Point {
     field i64 $x;
@@ -251,7 +252,7 @@ BROCKEN
     like( $text, qr/store/,         'stores field value' );
 };
 subtest 'ADJUST block' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 class Point {
     field i64 $x;
@@ -268,7 +269,7 @@ BROCKEN
     like( $text, qr/icmp/, 'comparison in ADJUST' );
 };
 subtest 'Method declaration with params and return type' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 class Counter {
     field i64 $count;
@@ -286,7 +287,7 @@ BROCKEN
     like( $text, qr/add\s+i64/, 'arithmetic on $count' );
 };
 subtest 'Function calls' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 sub helper() -> i64 {
     return 42;
@@ -298,7 +299,7 @@ BROCKEN
     like( $text, qr/call\s+i64\s+\@helper/, 'call to helper' );
 };
 subtest 'Full pipeline: lex -> parse -> lower' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 sub factorial(i64 $n) -> i64 {
     my i64 $result = 1;
@@ -328,7 +329,7 @@ BROCKEN
     like( $text, qr/mul\s+i64/,                  'multiply' );
 };
 subtest 'Standalone field access as expression statement' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param;
@@ -344,7 +345,7 @@ BROCKEN
     like( $text, qr/load\s+i64/,    'load i64 from field' );
 };
 subtest 'Complex expression field access (function returning class)' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param;
@@ -368,7 +369,7 @@ BROCKEN
 
 # Subtest: Array declaration and element read
 subtest 'Array declaration and element read' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my [i64; 10] @arr;
 return @arr[3];
@@ -383,7 +384,7 @@ BROCKEN
 
 # Subtest: Array element write
 subtest 'Array element write' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my [i64; 5] @arr;
 @arr[2] = 42;
@@ -397,7 +398,7 @@ BROCKEN
     like( $text, qr/getelementptr\s+i64/,     'GEP for array access' );
 };
 subtest 'Top-level code becomes entry function' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $x = 10;
 my i64 $y = 20;
@@ -415,7 +416,7 @@ BROCKEN
     like( $text, qr/ret\s+i64/,        'return in entry' );
 };
 subtest 'Top-level code with array' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my [i64; 3] @arr;
 @arr[0] = 10;
@@ -430,7 +431,7 @@ BROCKEN
     like( $text, qr/ret\s+i64/,               'return in entry' );
 };
 subtest 'int type lowers to i64' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my int $x = 42;
 return $x;
@@ -444,7 +445,7 @@ BROCKEN
     like( $text, qr/ret\s+i64/,        'return i64' );
 };
 subtest 'bool type lowers to i1' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my bool $flag = 1;
 return 0;
@@ -455,7 +456,7 @@ BROCKEN
     like( $text, qr/alloca\s+i1/, 'bool variable is i1 alloca' );
 };
 subtest 'u64 type variable' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my u64 $x = 100;
 return $x;
@@ -469,7 +470,7 @@ BROCKEN
     like( $text, qr/ret\s+u64/,         'return u64' );
 };
 subtest 'u8 and u16 type variables' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my u8 $a = 10;
 my u16 $b = 20;
@@ -482,7 +483,7 @@ BROCKEN
     like( $text, qr/alloca\s+u16/, 'u16 variable is u16 alloca' );
 };
 subtest 'u32 type variable' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my u32 $x = 50;
 return 0;
@@ -493,7 +494,7 @@ BROCKEN
     like( $text, qr/alloca\s+u32/, 'u32 variable is u32 alloca' );
 };
 subtest 'Int alias (capital I) lowers to i64' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my Int $x = 7;
 return $x;
@@ -504,7 +505,7 @@ BROCKEN
     like( $text, qr/alloca\s+i64/, 'Int variable is i64 alloca' );
 };
 subtest 'Bool alias (capital B) lowers to i1' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my Bool $flag = 1;
 return 0;
@@ -515,7 +516,7 @@ BROCKEN
     like( $text, qr/alloca\s+i1/, 'Bool variable is i1 alloca' );
 };
 subtest 'unsigned widening emits zext' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my u8 $small = 200;
 my i64 $big = $small;
@@ -527,7 +528,7 @@ BROCKEN
     like( $text, qr/zext\s+u8/, 'unsigned widening uses zext' );
 };
 subtest 'bool widening emits zext (not sext)' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my bool $flag = 1;
 return $flag;
@@ -539,7 +540,7 @@ BROCKEN
     unlike( $text, qr/sext\s+i1/, 'bool widening does NOT use sext' );
 };
 subtest 'Shift operators << and >>' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i64 $a = 1 << 3;
 my i64 $b = 8 >> 1;
@@ -556,7 +557,7 @@ BROCKEN
     like( $text, qr/lshr\s+u32/, 'unsigned >> emits lshr' );
 };
 subtest 'signed widening emits sext' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my i8 $small = -5;
 my i64 $big = $small;
@@ -570,7 +571,7 @@ BROCKEN
 
 # === Error message position tests ===
 subtest 'Undefined variable error includes position' => sub {
-    my $c = Brocken::Compiler->new;
+    my $c = Brocken->new;
     eval { $c->compile( 'my i64 $x = $undefined;', 'test.br' ) };
     ok( $@, 'undefined variable error thrown' );
     like( $@, qr/test\.br/,  'error mentions filename' );
@@ -578,7 +579,7 @@ subtest 'Undefined variable error includes position' => sub {
     like( $@, qr/undefined/, 'error mentions variable name' );
 };
 subtest 'Undefined function error includes position' => sub {
-    my $c = Brocken::Compiler->new;
+    my $c = Brocken->new;
     eval { $c->compile( 'my i64 $x = nonexistent();', 'test.br' ) };
     ok( $@, 'undefined function error thrown' );
     like( $@, qr/test\.br/,    'error mentions filename' );
@@ -586,14 +587,14 @@ subtest 'Undefined function error includes position' => sub {
     like( $@, qr/nonexistent/, 'error mentions function name' );
 };
 subtest 'Undefined array variable error includes position' => sub {
-    my $c = Brocken::Compiler->new;
+    my $c = Brocken->new;
     eval { $c->compile( 'my i64 $x = $bad[0];', 'test.br' ) };
     ok( $@, 'undefined array variable error thrown' );
     like( $@, qr/test\.br/, 'error mentions filename' );
     like( $@, qr/line 1/,   'error mentions line' );
 };
 subtest 'Unknown class error includes position' => sub {
-    my $c = Brocken::Compiler->new;
+    my $c = Brocken->new;
     eval { $c->compile( 'my ptr $p = Nonexistent->new();', 'test.br' ) };
     ok( $@, 'unknown class error thrown' );
     like( $@, qr/test\.br/,    'error mentions filename' );
@@ -604,7 +605,7 @@ subtest 'syscall_by_name resolves to correct syscall number' => sub {
     my $platform = Brocken::Katsuro::Platform::parse();
     my $exit_num = $platform->syscall('exit');
     skip 'Platform does not resolve syscall names', 3 unless defined $exit_num;
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile( <<'BROCKEN', 'test.br', $platform );
 sub foo() -> i64 {
     return Brocken::syscall_by_name("exit", 42);
@@ -617,27 +618,27 @@ BROCKEN
     like( $ir, qr/i64 42/,                     'syscall arguments are preserved' );
 };
 subtest 'syscall_by_name errors without platform' => sub {
-    my $c = Brocken::Compiler->new;
+    my $c = Brocken->new;
     eval { $c->compile( 'return Brocken::syscall_by_name("exit", 0);', 'test.br' ) };
     ok( $@, 'error thrown without platform' );
     like( $@, qr/platform/, 'error mentions platform' );
 };
 subtest 'syscall_by_name errors on unknown syscall name' => sub {
     my $platform = Brocken::Katsuro::Platform::parse();
-    my $c        = Brocken::Compiler->new;
+    my $c        = Brocken->new;
     eval { $c->compile( 'return Brocken::syscall_by_name("nonexistent", 0);', 'test.br', $platform ) };
     ok( $@, 'error thrown for unknown syscall name' );
     like( $@, qr/nonexistent/, 'error mentions unknown name' );
 };
 subtest 'syscall_by_name errors on non-string first argument' => sub {
     my $platform = Brocken::Katsuro::Platform::parse();
-    my $c        = Brocken::Compiler->new;
+    my $c        = Brocken->new;
     eval { $c->compile( 'return Brocken::syscall_by_name(42, 0);', 'test.br', $platform ) };
     ok( $@, 'error thrown for non-string argument' );
     like( $@, qr/string/, 'error mentions string literal requirement' );
 };
 subtest 'libc intrinsic produces call to named function' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 sub foo() -> i64 {
     return Brocken::libc("write", 1, 0, 6);
@@ -651,13 +652,13 @@ BROCKEN
     like( $ir, qr/i64\s+6/,              'third arg (count=6) preserved' );
 };
 subtest 'libc intrinsic errors on non-string first argument' => sub {
-    my $c = Brocken::Compiler->new;
+    my $c = Brocken->new;
     eval { $c->compile( 'return Brocken::libc(42, 1, 0);', 'test.br' ) };
     ok( $@, 'error thrown for non-string argument' );
     like( $@, qr/string/, 'error mentions string literal requirement' );
 };
 subtest 'Mixed-signedness comparison widens operands (u8 vs i8)' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
 my u8 $a = 227;
@@ -675,7 +676,7 @@ BROCKEN
     like( $text, qr/icmp\s+ugt\s+u32/,          'icmp uses u32 type' );
 };
 subtest 'Mixed-signedness comparison widens operands (i8 vs u8, signed LHS)' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
 my i8 $a = -1;
@@ -693,7 +694,7 @@ BROCKEN
     like( $text, qr/icmp\s+slt\s+i32/,          'icmp uses i32 type with signed predicate' );
 };
 subtest 'Bool negation promotes i1 to i8' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my bool $b = true;
 my i64 $v = -$b;
@@ -706,7 +707,7 @@ BROCKEN
     like( $text, qr/neg\s+i8/,                 'neg operates on i8, not i1' );
 };
 subtest 'Bool negation double-negate preserves value' => sub {
-    my $c   = Brocken::Compiler->new;
+    my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
 my bool $b = true;
 $b = -$b;

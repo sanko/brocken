@@ -14,7 +14,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
-use Brocken::Compiler;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 my $name = 'shl(1,N) per-shift diagnostic: ';
@@ -23,7 +22,7 @@ SKIP: {
     my $host    = $brocken->platform;
     skip 'Not ARM64', 1 unless $host->is_arm64 && $host->is_native;
     my $rc = do {
-        my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+        my $module = Brocken->new->compile(<<'BROCKEN');
 my i64 $fail = 0;
 
 # --- Phase 1: test each shift independently ---

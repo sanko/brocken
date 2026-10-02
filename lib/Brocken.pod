@@ -11,11 +11,10 @@ Brocken - Compiler for a small, perl inspired, statically typed systems language
 Compiling a program is four calls. This is the whole path, start to finish:
 
     use Brocken;
-    use Brocken::Compiler;
 
     my $brocken = Brocken->new;
 
-    my $module = Brocken::Compiler->new->compile(<<'BROCKEN');
+    my $module = $brocken->compile(<<'BROCKEN');
     sub fib( i64 $n ) -> i64 {
         if ( $n < 2 ) { return $n; }
         return fib( $n - 1 ) + fib( $n - 2 );
@@ -68,9 +67,9 @@ cross compile is asked for.
 
 =head2 The runtime is compiled in
 
-F<src/runtime/core.brocken> is not an optional library. L<Brocken::Compiler> reads it, parses it, and merges its
-statements ahead of the caller's before anything is lowered, so every program carries the allocator, the collector, the
-fiber machinery, and the exception support with it.
+F<src/runtime/core.brocken> is not an optional library. C<compile> reads it, parses it, and merges its statements ahead
+of the caller's before anything is lowered, so every program carries the allocator, the collector, the fiber machinery,
+and the exception support with it.
 
 That is why a program does not have to ask for memory. C<new> on a class, C<alloca>, an array, and a list all allocate
 out of the same Immix heap, and the collector is what reclaims them. The heap base is the first argument to the entry
@@ -89,7 +88,7 @@ Two runtime limits are configurable and one is a capability mask:
 =back
 
 They are set per compiler rather than per platform, through the three package variables below, or through the
-C<set_default_policy> method on L<Brocken::Compiler> for everything compiled afterwards.
+C<set_default_policy> method on L<Brocken> for everything compiled afterwards.
 
 =head1 THE LANGUAGE
 
@@ -179,8 +178,8 @@ class. Outside one, a field read is C<$p-E<gt>x>, and there is a writer for it t
 
 =head1 PACKAGE VARIABLES
 
-These are the runtime defaults, read by L<Brocken::Compiler> and L<Brocken::Katsuro::Lowerer> when they construct
-themselves. Setting one changes every compiler built afterwards:
+These are the runtime defaults, read by L<Brocken> and L<Brocken::Katsuro::Lowerer> when they construct themselves.
+Setting one changes every compiler built afterwards:
 
 =over
 
@@ -215,6 +214,35 @@ The bits in that mask are:
 =back
 
 =head1 METHODS
+
+=head2 C<compile( $source, $filename )>
+
+    my $module = $brocken->compile( $source, $filename );
+
+Parses and lowers C<$source> for this instance's platform, merging the runtime in ahead of the caller's own statements.
+The optional C<$filename> defaults to C<(eval)> and is the name reported in diagnostics. Returns a
+L<Brocken::Lindsay::IR::Module> with class info and read-only data attached, ready to hand to C<codegen>.
+
+=head2 C<parse_only( $source, $filename )>
+
+    my $ast = $brocken->parse_only( $source, $filename );
+
+The parse half of C<compile> on its own, returning the raw L<Brocken::Katsuro::AST::Program> without lowering. Useful
+for introspection and for testing the front end against the back end. The runtime is not merged in.
+
+=head2 C<set_default_policy( %opts )>
+
+    Brocken->set_default_policy( fuel => 100_000 );
+
+Sets the runtime default for every compiler built afterwards. Accepts C<fuel>, C<mem_limit>, and C<capabilities>, and
+leaves the ones not named alone. Each can still be overridden per instance through the constructor.
+
+=head2 C<fuel( ... )>, C<mem_limit( ... )>, C<capabilities( ... )>
+
+    my $fuel = $brocken->fuel;
+
+The limits in force for this instance. Each falls back to the matching package variable described above when the
+constructor was not given one.
 
 =head2 C<platform( ... )>
 
@@ -257,12 +285,6 @@ Returns a L<File::Temp::Dir> object for a temporary directory created for this i
 scope. It stringifies to a path, which is why C<$brocken-E<gt>tmpdir . '/fib'> is the way to build a filename. It is
 where the output goes when the caller does not want to name a path.
 
-=head2 C<debug_level( ... )>
-
-    my $level = $brocken->debug_level;
-
-Returns the debug level this instance was constructed with. Defaults to C<0>.
-
 =head2 C<os( ... )>
 
     my $os = $brocken->os;
@@ -281,7 +303,7 @@ Returns the architecture this instance targets, as a normalized name: C<x86_64>,
 A cross compile is a platform passed to the constructor and then the same four calls:
 
     my $brocken = Brocken->new(
-        platform => Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu'),
+        platform => Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu')
     );
 
 The result is a real executable for the other architecture, written by the same linker call. It is not run by the
