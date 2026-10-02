@@ -687,12 +687,12 @@ here was reproduced against a natively compiled and executed binary, not read of
       lowering says what the machine does without counting bits. This is what let the two Wasm
       conversion entries above sit undetected: both were a correct-looking shape with the wrong width
       baked in, and neither `wasm2wat` nor a byte-pattern grep would have flagged them.
-- [ ] **Wasm debugging needs `wabt`, which is not installed by default** - `apt install wabt` provides
+- [x] **Wasm debugging needs `wabt`, which is not installed by default** - `apt install wabt` provides
       `wasm2wat`, `wasm-objdump` and `wasm-validate`. `wasm-objdump -d` on the emitted module, or
       `wasm2wat` into `.wat`, is the only practical way to see what a lowering actually produced:
       the `Sext` entry above was found by diffing two near-identical modules and reading the one
-      instruction that differed. Hand-decoding the bytes is not reliable enough for this. Worth
-      recording in the build docs so it does not have to be rediscovered.
+      instruction that differed. Hand-decoding the bytes is not reliable enough for this. Recorded
+      under "Testing and Debugging Tools" in `CONTRIBUTING.md`.
 - [ ] **`t/3000_jenny/3200_codegen/3280_sitofp_fptosi.t` could not have caught the two entries
       above** - it asserts on the *name* of a lowered opcode and never looks at its width, and it
       builds MIR rather than a module, so every one of its checks passed while all eight conversion
