@@ -28,7 +28,10 @@ class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform:
     method fp_param_registers() { [qw(v0 v1 v2 v3 v4 v5 v6 v7)] }
     method return_register()    {'x0'}
     method fp_return_register() {'v0'}
-    method fiber_reg()          {'x28'}
+
+    # A 128-bit result returns in x0:x1.
+    method return_pair_registers() { return (qw(x0 x1)) }
+    method fiber_reg()             {'x28'}
 
     # The register a floating-point entry-block shuffle may park a value in.
     #

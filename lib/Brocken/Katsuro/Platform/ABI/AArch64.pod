@@ -31,6 +31,8 @@ argument-setup MOV instructions in the Lowerer.
 
 =item * B<Return>: x0
 
+=item * B<Wide return>: x0:x1 for a 128-bit result
+
 =item * B<FP return>: v0
 
 =item * B<FP caller-saved>: v0-v7

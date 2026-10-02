@@ -84,7 +84,7 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 
 ### ABI Integration
 - [x] All 4 Lowerers query `param_registers()`, `return_register()`, `fp_return_register()` from `Platform::ABI`.
-- [ ] **Wide-type register pairs**  no `param_pair_registers()` or equivalent exists. i128 returns hard-code the second register (`rdx`/`x1`/`a1`) instead of querying the ABI.
+- [x] **Wide-type register pairs**  `Platform::ABI` now answers both halves of a 128-bit register pair: `param_pair_registers($spent)` returns the consecutive parameter registers a wide argument takes once `$spent` integer registers are in use, and `return_pair_registers()` returns the pair a wide result comes back in. The base class derives the parameter pair from `param_registers` and defaults the return pair to the single `return_register`; `X86_64` (and so `X86_64_Win64`), `AArch64`, and `RISCV64` name `rax:rdx`, `x0:x1`, and `a0:a1`. The entry-parameter and call-argument walks in the ARM64 and RISC-V lowerers and the i128 return paths in all three native lowerers query the ABI instead of naming the second register themselves. `t/3000_jenny/3200_codegen/3304_wide_return_register_pairs.t` checks the pairs and reads the lowering on every backend from any host.
 
 ### 128-bit Numerics (i128)
 - [x] i128 binops (add/sub/and/or/xor/shl/lshr/ashr/mul)  all 4 targets.
