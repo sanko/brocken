@@ -3491,10 +3491,22 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     # store [%dyn + 8], %val
                     my $mem_val
                         = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 8 }, type => $val->type );
+
+                    # A float payload goes out through the SSE store. Both
+                    # `store` and `store_imm` pick a 64-bit GP move for a
+                    # memory operand that is not an int, so `my $x = 1.5;`
+                    # stored the integer 1 into the box and the float was gone
+                    # before anything could read it back.
+                    my $is_float = $val->type && $val->type->kind eq 'float';
+                    my $store_op
+                        = $is_float ? 'fstore'
+                        : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm'
+                        : 'store';
+                    my $store_src = $is_float ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val);
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => ( $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store' ),
-                            operands => [ $mem_val, $self->_lower_opnd($val) ],
+                            opcode   => $store_op,
+                            operands => [ $mem_val, $store_src ],
                             comment  => 'box: store payload'
                         )
                     );

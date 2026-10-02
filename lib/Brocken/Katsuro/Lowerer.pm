@@ -1301,11 +1301,22 @@ class Brocken::Katsuro::Lowerer {
         my $op  = $ast->op;
         my ( $line, $col ) = ( $ast->line, $ast->col );
 
-        # Unbox dynamic operands to i64 for arithmetic/comparison
+        # An untyped variable is a box, and a box's payload may be a float, so
+        # unbox to whatever the other operand is rather than always to i64.
+        # Converting both sides to i64 first meant `$x == 1.5` was built as a
+        # comparison of two integers: the float-ness of the literal was gone
+        # before the comparison existed, so no backend could recover it.
         my $native = Brocken::Lindsay::IR::Type::i64();
         if ( $lhs->type->kind eq 'dynamic' || $rhs->type->kind eq 'dynamic' ) {
-            $lhs = $self->maybe_convert_type( $lhs, $native );
-            $rhs = $self->maybe_convert_type( $rhs, $native );
+            my $target = $native;
+
+            # Only a float operand changes the target. Integers keep unboxing
+            # to i64 and letting the width promotion below sort out the rest,
+            # which is what every existing integer path expects.
+            if    ( $lhs->type->kind eq 'dynamic' && $rhs->type->kind eq 'float' ) { $target = $rhs->type }
+            elsif ( $rhs->type->kind eq 'dynamic' && $lhs->type->kind eq 'float' ) { $target = $lhs->type }
+            $lhs = $self->maybe_convert_type( $lhs, $target );
+            $rhs = $self->maybe_convert_type( $rhs, $target );
         }
 
         # Unify types for mixed int/float operations: convert RHS to match LHS
