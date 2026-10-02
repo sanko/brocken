@@ -5,13 +5,10 @@ no warnings qw[experimental::class];
 class Brocken v0.0.1 {
     use Brocken::Katsuro;
     use Brocken::Lindsay;
+    # The back ends are Brocken::Jenny's to load.  Naming them here as well only
+    # duplicates that list, and a class added to the backend then has to be added
+    # in two places before it can be reached.
     use Brocken::Jenny;
-    use Brocken::Jenny::Codegen::X86_64;
-    use Brocken::Jenny::Codegen::ARM64;
-    use Brocken::Jenny::Codegen::RISCV64;
-    use Brocken::Jenny::Linker::MachO;
-    use Brocken::Jenny::Linker::PE;
-    use Brocken::Jenny::Linker::ELF64;
     use Brocken::Katsuro::Lexer;
     use Brocken::Katsuro::Parser;
     use Brocken::Katsuro::Lowerer;
