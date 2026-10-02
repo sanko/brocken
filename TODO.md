@@ -96,6 +96,10 @@ Now that the foundational IR (Lindsay) and Platform abstraction (Katsuro) are in
 - [x] **Signed i128 div/rem**  all targets use abs(inputs) + apply sign to output.
 - [x] **i128 `min`/`max`**  implemented on all 4 targets (X86_64, ARM64, RISCV64, Wasm).
 - [x] **Large-value i128 icmp tests**  added native (246 tests) and Wasm (328 tests) execution tests with Math::BigInt constants > 2^64.
+- [ ] **Unsigned 128-bit div/rem**  only the signed form is implemented; all targets use abs(inputs)
+      + sign on the output, so a `u128` division or remainder runs the signed path and gives the
+      wrong answer for operands with bit 127 set. The fuzzer omits `u128` generation until this
+      exists.
 - [ ] **Endianness**  no handling for big-endian targets.
 
 ### OS-level Threads (Isolates)
@@ -536,6 +540,18 @@ here was reproduced against a natively compiled and executed binary, not read of
 
 ### Open
 
+- [ ] **Float-to-bool assignment is not normalized to 0/1** - `my bool $b = false; my f64 $x = 24.0;
+      $b = $x; return $b;` exits 24, not 0. The float->int narrowing behind the assignment produces
+      the integer value without masking it to the one-bit target, so a `bool` can hold any int. The
+      integer->bool path is correct (`my i64 $x = 24; $b = $x;` exits 0); only a float source is
+      affected. Found by the fuzzer (case 100, seed 20260713).
+- [ ] **Mixed-width signed/unsigned comparison compares at 32 bits** - the equal-width fix at
+      `Katsuro/Lowerer.pm:1380` covers only `lbits == rbits`. When the widths differ, the narrower
+      signed operand is promoted to the wider unsigned type (`i8` -> `u16`), but the value is still
+      carried sign-extended in a 32-bit register, so the unsigned predicate sees `0xFFFFFFC3`
+      instead of `0x0000FFC3`. `my i8 $a = -61; my u16 $b = 65509; return $a >= $b ? 1 : 0;` exits
+      1; after the frontend's promotion it should be 0. Found by the fuzzer (case 295, seed
+      20260713).
 - [ ] **f32 conversions are unverified on ARM64 and Wasm** - x86-64 and RISC-V64 are now fixed
       and covered (see above). ARM64 encodes the width in the instruction (`fcvtzs`, `scvtf`) and
       its codegen already selects on both widths, so it is *probably* fine; Wasm has its own
@@ -592,6 +608,19 @@ here was reproduced against a natively compiled and executed binary, not read of
 ## Fuzzer Expansion Plan
 
 The current fuzzer (`lib/Brocken/Fuzz.pm`) only exercises i64 arithmetic + if/else. Expansion is needed to cover the compiler's full language surface and catch regressions across all pipeline stages (lexer, parser, lowerer, codegen, linker, runtime).
+
+### Known Findings (400-iteration run, seed 20260713)
+
+The fuzzer's integer evaluator was rewritten to mirror the frontend's promotion rules, and its
+type pool now generates only signed `i128`. A 400-iteration run reports 5 miscompiles and 1
+Windows spawn failure:
+
+- case 100 - float-to-bool assignment is not normalized (see Open bugs).
+- case 295 - mixed-width signed/unsigned comparison compares at 32 bits (see Open bugs).
+- cases 117, 195 - `i128` mixed with `f64`; not yet reduced to a minimal repro.
+- case 301 - ternary with a `u64` and a `bool` arm; not yet reduced.
+- case 335 - `system()` failed to spawn the child ("Inappropriate I/O control operation"). The
+  fuzzer retries a few times, which removes the transient cases, but not this one.
 
 ### Phase F0: Type Diversity (Fuzzer Expansion: Types)
 *Goal: Exercise code paths for all scalar types the compiler supports.*
