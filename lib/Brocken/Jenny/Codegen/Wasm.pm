@@ -222,6 +222,8 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i64_le_s' )         { $$buf .= pack( 'C', I64_LE_S ) }
                 elsif ( $opcode eq 'i64_ge_s' )         { $$buf .= pack( 'C', I64_GE_S ) }
                 elsif ( $opcode eq 'i64_lt_u' )         { $$buf .= pack( 'C', I64_LT_U ) }
+                elsif ( $opcode eq 'i32_wrap_i64' )     { $$buf .= pack( 'C', I32_WRAP_I64 ) }
+                elsif ( $opcode eq 'i64_extend_i32_s' ) { $$buf .= pack( 'C', I64_EXTEND_I32_S ) }
                 elsif ( $opcode eq 'i64_extend_i32_u' ) { $$buf .= pack( 'C', I64_EXTEND_I32_U ) }
                 elsif ( $opcode eq 'i64_gt_u' )         { $$buf .= pack( 'C', I64_GT_U ) }
                 elsif ( $opcode eq 'i64_le_u' )         { $$buf .= pack( 'C', I64_LE_U ) }
@@ -277,11 +279,14 @@ class Brocken::Jenny::Codegen::Wasm {
                     my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
                     $$buf .= pack( 'C', LOCAL_SET ) . $self->_uleb($lid);
                 }
+                elsif ( $opcode eq 'select' ) {
+                    $$buf .= pack( 'C', SELECT_T ) . pack( 'C', 1 ) . pack( 'C', $ops[0]->value );
+                }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $ops[0]->value;
                     my $fixup_pos = length($$buf);
                     $$buf .= pack( 'C', CALL ) . "\x80\x80\x80\x80\x00";    # call + placeholder LEB128
-                    push @func_fixups, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
+                    push @func_fixups, { type => 'call_idx', target => $func_name, block => $bi, offset => $fixup_pos + 1 };
                 }
                 elsif ( $opcode eq 'call_indirect' ) {
                     $$buf .= pack( 'C', UNREACHABLE );                      # unreachable (stub)
@@ -294,7 +299,13 @@ class Brocken::Jenny::Codegen::Wasm {
                     my $func_name = $ops[1]->value;
                     my $fixup_pos = length($$buf);
                     $$buf .= pack( 'C', CALL ) . "\x80\x80\x80\x80\x00";    # call + placeholder LEB128
-                    push @func_fixups, { type => 'call_idx', target => $func_name, offset => $fixup_pos + 1 };
+                    push @func_fixups, { type => 'call_idx', target => $func_name, block => $bi, offset => $fixup_pos + 1 };
+                }
+                else {
+                    # Silently emitting nothing here is how the encoder produces a
+                    # module that links but does not validate, so an opcode with no
+                    # encoding is a bug in the lowerer and has to be loud.
+                    die "Wasm code generator has no encoding for '$opcode'";
                 }
             }
         }
@@ -322,6 +333,12 @@ class Brocken::Jenny::Codegen::Wasm {
                 my ( $bi, $buf_off ) = $raw_offsets{$idx}->@*;
                 $source_map->{$idx} = $block_start[$bi] + $buf_off;
             }
+        }
+
+        # Call placeholders were recorded against per-block buffers, so rebase
+        # them onto the assembled body the linker will patch.
+        for my $fx (@func_fixups) {
+            $fx->{offset} = $block_start[ $fx->{block} ] + $fx->{offset};
         }
         my $num_params       = scalar( $ir_params->@* );
         my $num_extra_locals = $next_local - $num_params;
@@ -356,6 +373,12 @@ class Brocken::Jenny::Codegen::Wasm {
         my $ret_valtype;
         if ( $return_type && $return_type->kind eq 'int' && $return_type->bits == 128 ) {
             $ret_valtype = [ VALTYPE_I64, VALTYPE_I64 ];
+        }
+        elsif ( $return_type && $return_type->kind eq 'void' ) {
+
+            # A void function takes no results, which is not the same as taking an
+            # i32: the linker writes a result count, so this has to say so.
+            $ret_valtype = 'void';
         }
         else {
             $ret_valtype = $return_type ? $self->_wasm_valtype($return_type) : VALTYPE_I32;

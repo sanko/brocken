@@ -28,18 +28,27 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
                     };
             }
 
-            # Resolve cross-function call fixups
+            # Resolve cross-function call fixups. Each 5-byte placeholder is
+            # replaced by a shorter LEB128, so rebuild each function in a single
+            # ordered pass rather than splicing in place and invalidating the
+            # offsets of the fixups that follow.
             for my $fd (@func_data) {
-                for my $fixup ( $fd->{fixups}->@* ) {
+                my @fixups = sort { $a->{offset} <=> $b->{offset} } $fd->{fixups}->@*;
+                next unless @fixups;
+                my $bytes = $fd->{bytes};
+                my $out   = '';
+                my $pos   = 0;
+                for my $fixup (@fixups) {
                     next unless $fixup->{type} eq 'call_idx';
                     my $target_idx = $func_offsets{ $fixup->{target} };
                     die "Wasm write_executable: undefined function '$fixup->{target}'" unless defined $target_idx;
-                    my $leb = $self->_uleb($target_idx);
-                    my $pos = $fixup->{offset};
-
-                    # Replace the 5-byte placeholder with actual LEB128; string shrinks
-                    substr( $fd->{bytes}, $pos, 5, $leb );
+                    my $at = $fixup->{offset};
+                    die "Wasm write_executable: call fixup out of range in $fd->{name}" if $at < $pos || $at + 5 > length($bytes);
+                    $out .= substr( $bytes, $pos, $at - $pos );
+                    $out .= $self->_uleb($target_idx);
+                    $pos = $at + 5;
                 }
+                $fd->{bytes} = $out . substr( $bytes, $pos );
             }
 
             # Build type types (deduplicate by param + return types)
