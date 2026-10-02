@@ -1832,9 +1832,15 @@ class Brocken::Katsuro::Lowerer {
         # cvttsd2si, an fcvtzs to w, a trunc_sat), so without the mask the
         # leftover bits survive into a slot that is only a byte wide, and a bool
         # target kept the whole value instead of one bit.
+        #
+        # Only a destination narrower than 32 bits needs it. A 32- or 64-bit one
+        # is already the width the conversion produces, so masking would be a
+        # no-op there -- and the 32-bit mask is not representable, since
+        # 0xFFFFFFFF is -1 as a signed i32 and emitting it as an i32 constant is
+        # rejected as too large.
         if ( $val->type->kind eq 'float' && $target_type->kind eq 'int' ) {
             my $bits = $target_type->bits;
-            my $mask = $bits >= 64 ? undef : ( 1 << $bits ) - 1;
+            my $mask = $bits < 32 ? ( 1 << $bits ) - 1 : undef;
             if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
                 my $cv = int( $val->value );
                 return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => defined $mask ? $cv & $mask : $cv );

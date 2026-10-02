@@ -6,6 +6,8 @@ use Brocken::Katsuro;
 use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
+use Brocken::Jenny::Linker::Wasm;
+use Test2::Tools::Brocken qw[temp_path];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -230,6 +232,83 @@ subtest 'Wasm SIToFP and FPToSI lowering' => sub {
         my @sets       = grep { $_->opcode eq 'local_set' } $ops->@*;
         ok( defined $trunc_op, 'Wasm FPToSI: i64_trunc_f64_s produced' );
         ok( scalar @sets >= 1, 'Wasm FPToSI: local_set produced' );
+    }
+};
+# A Wasm conversion opcode names both widths, so the source and the destination
+# pick it rather than the direction alone. Choosing it from the direction alone
+# emitted `i32.trunc_f32_s` for an f64 source, which is a module wasmtime
+# refuses to compile, and nothing here noticed: the checks above look for an
+# opcode by name and never look at its width.
+my @CONV = (
+    { dir => 'sitofp', src => 'i64', dst => 'f64', op => 'f64_convert_i64_s' },
+    { dir => 'sitofp', src => 'i32', dst => 'f64', op => 'f64_convert_i32_s' },
+    { dir => 'sitofp', src => 'i64', dst => 'f32', op => 'f32_convert_i64_s' },
+    { dir => 'sitofp', src => 'i32', dst => 'f32', op => 'f32_convert_i32_s' },
+    { dir => 'fptosi', src => 'f64', dst => 'i64', op => 'i64_trunc_f64_s' },
+    { dir => 'fptosi', src => 'f64', dst => 'i32', op => 'i32_trunc_f64_s' },
+    { dir => 'fptosi', src => 'f32', dst => 'i64', op => 'i64_trunc_f32_s' },
+    { dir => 'fptosi', src => 'f32', dst => 'i32', op => 'i32_trunc_f32_s' },
+);
+
+sub ty { my $m = shift; return Brocken::Lindsay::IR::Type->$m() }
+
+# Stored through a slot and loaded back so the conversion is a real instruction
+# rather than a folded constant. 42.5 truncates to 42 and 42 converts to 42.0,
+# so every shape here is worth 42.
+sub conversion_function {
+    my ( $c, $entry ) = @_;
+    my $from = $c->{dir} eq 'fptosi' ? 42.5 : 42;
+    my $func = Brocken::Lindsay::IR::Function->new(
+        name        => ( $entry ? '_BROCKEN_ENTRY' : 'conv' ),
+        return_type => ty( $c->{dst} ),
+        params      => (
+            $entry ? [ Brocken::Lindsay::IR::Value->new( type => ty('i64'), name => 'heap_base' ) ] : []
+        ),
+    );
+    my $b = Brocken::Lindsay::IR::Builder->new();
+    $b->position_at_end( $func->append_block('entry') );
+    my $slot = $b->build_alloca( ty( $c->{src} ), '%slot' );
+    $b->build_store( Brocken::Lindsay::IR::Constant->new( type => ty( $c->{src} ), value => $from ), $slot );
+    my $ld  = $b->build_load( ty( $c->{src} ), $slot, '%ld' );
+    my $cv  = $c->{dir} eq 'fptosi' ? $b->build_fptosi( $ld, ty( $c->{dst} ), '%cv' ) : $b->build_sitofp( $ld, ty( $c->{dst} ), '%cv' );
+    $b->build_ret($cv);
+    return $func;
+}
+
+subtest 'Wasm picks the conversion opcode for both widths' => sub {
+    my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
+    for my $c (@CONV) {
+        my $mf  = $lowerer->lower( conversion_function($c) );
+        my $ops = $mf->blocks->[0]->instructions;
+        my @hit = grep { $_->opcode eq $c->{op} } $ops->@*;
+        ok( scalar @hit, "$c->{src} -> $c->{dst} emits $c->{op}" )
+            or diag( 'saw: ' . join( ', ', grep { $_->opcode =~ /(?:trunc|convert)/ } map { $_->opcode } $ops->@* ) );
+    }
+};
+
+subtest 'every int/float width pair compiles to a module that runs' => sub {
+    my $host = Brocken::Katsuro::Platform::parse();
+    my $null = $host->is_windows ? 'NUL' : '/dev/null';
+    my $wt   = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
+    chomp $wt if $wt;
+    skip_all('wasmtime not available') unless $wt && -f $wt;
+
+    my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+    my $codegen  = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+    for my $c (@CONV) {
+        my $module = temp_path( 'conv_' . $c->{src} . '_' . $c->{dst} ) . '.wasm';
+        Brocken::Jenny::Linker::Wasm->new->write_executable( $module,
+            $codegen->emit_functions( [ conversion_function( $c, 1 ) ] ), $platform );
+
+        # Validation is the assertion that matters: the byte for a conversion is
+        # what decides whether the module is loadable at all.
+        my $compile = qq["$wt" compile "$module" -o "$null" 2>&1];
+        is( system($compile), 0, "$c->{src} -> $c->{dst} validates" ) or diag qx[$compile];
+
+        my $got = qx["$wt" run --invoke _BROCKEN_ENTRY "$module" 1024 2>$null];
+        chomp $got;
+        is( $got, 42, "$c->{src} -> $c->{dst} round-trips 42" );
+        unlink $module if -e $module;
     }
 };
 done_testing;

@@ -29,7 +29,9 @@ package Brocken::Jenny::Codegen::Wasm::Encodings {
                 F64_ADD F64_SUB F64_MUL F64_DIV F64_MIN F64_MAX
                 F64_ABS F64_NEG F64_COPYSIGN F64_SQRT
                 I32_WRAP_I64 I64_EXTEND_I32_S I64_EXTEND_I32_U
-                F64_CONVERT_I64_S I64_TRUNC_F64_S
+                F64_CONVERT_I32_S F64_CONVERT_I64_S
+                F32_CONVERT_I32_S F32_CONVERT_I64_S
+                I32_TRUNC_F32_S I32_TRUNC_F64_S I64_TRUNC_F32_S I64_TRUNC_F64_S
                 VALTYPE_I32 VALTYPE_I64 VALTYPE_F32 VALTYPE_F64
             ]
         ]
@@ -182,11 +184,23 @@ package Brocken::Jenny::Codegen::Wasm::Encodings {
         F64_MAX      => 0xA5,    # f64.max
 
         # Conversions
+        #
+        # The int/float conversions each name both widths, so there is one
+        # constant per combination rather than one per direction. Verified
+        # against `wat2wasm` rather than read off a table: `i64.trunc_f64_s` is
+        # 0xB0, with 0xAE being `i64.trunc_f32_s` and 0xA8 `i32.trunc_f32_s`,
+        # and `f64.convert_i64_s` is 0xB9, with 0xBB being `f64.promote_f32`.
         I32_WRAP_I64      => 0xA7,    # i32.wrap_i64
-        I64_TRUNC_F64_S   => 0xA8,    # i64.trunc_f64_s
         I64_EXTEND_I32_S  => 0xAC,    # i64.extend_i32_s
         I64_EXTEND_I32_U  => 0xAD,    # i64.extend_i32_u
-        F64_CONVERT_I64_S => 0xBB,    # f64.convert_i64_s
+        I32_TRUNC_F32_S   => 0xA8,    # i32.trunc_f32_s
+        I32_TRUNC_F64_S   => 0xAA,    # i32.trunc_f64_s
+        I64_TRUNC_F32_S   => 0xAE,    # i64.trunc_f32_s
+        I64_TRUNC_F64_S   => 0xB0,    # i64.trunc_f64_s
+        F32_CONVERT_I32_S => 0xB2,    # f32.convert_i32_s
+        F32_CONVERT_I64_S => 0xB4,    # f32.convert_i64_s
+        F64_CONVERT_I32_S => 0xB7,    # f64.convert_i32_s
+        F64_CONVERT_I64_S => 0xB9,    # f64.convert_i64_s
 
         # Value Types (for locals block encoding)
         VALTYPE_I32 => 0x7F,          # i32 type identifier
