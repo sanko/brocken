@@ -3,6 +3,7 @@ use feature qw[class];
 no warnings qw[experimental::class];
 use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
+use Brocken::ICB ();
 
 class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
@@ -13,13 +14,22 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
     # began at 0 could never tell "the first block" from "no block".
     field $heap_base : param = 1024;
 
+    # The heap the entry preamble tells the runtime it owns. A native link
+    # backs that with an mmap that grows on demand, but a Wasm module declares
+    # its memory once, in the initial memory section, and the allocator happily
+    # hands out addresses across the whole heap it was promised. Reserving a
+    # single page while promising 1MB meant the arena bookkeeping ran off the
+    # end of linear memory: one boxed variable fit in what was actually there,
+    # and a second trapped on an address past the memory.
+    field $heap_size : param = Brocken::ICB::HEAP_SIZE;
+
     # The runtime writes a 24-byte header at the base itself (cursor, limit,
-    # cap), so the initial memory has to cover the base plus that header. The
-    # fixed single page this used to emit covered the default base of 1024 by
-    # coincidence; a base above 64KB would have put the header itself out of
-    # bounds.
+    # cap), so the initial memory has to cover the base, that header, and the
+    # whole heap. The fixed single page this used to emit covered the default
+    # base of 1024 by coincidence; a base above 64KB would have put the header
+    # itself out of bounds.
     method _initial_pages () {
-        my $pages = int( ( $heap_base + 24 + 65535 ) / 65536 );
+        my $pages = int( ( $heap_base + 24 + $heap_size + 65535 ) / 65536 );
         return $pages < 1 ? 1 : $pages;
     }
 

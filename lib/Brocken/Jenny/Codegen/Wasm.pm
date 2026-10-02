@@ -116,10 +116,13 @@ class Brocken::Jenny::Codegen::Wasm {
         # up front, from the same walk, keeps the declaration and the narrowing
         # in step instead of leaving the two to be derived separately.
         my $num_params = scalar( $ir_params->@* );
+        my %mir_local_type;
         for my $mbb (@blocks) {
             for my $inst ( $mbb->instructions->@* ) {
                 next unless $inst->opcode eq 'local_get' || $inst->opcode eq 'local_set';
-                $vreg_map{ $inst->operands->[0]->value } //= $next_local++;
+                my $mo = $inst->operands->[0];
+                $mir_local_type{ $mo->value } //= $mo->type;
+                $vreg_map{ $mo->value } //= $next_local++;
             }
         }
         my %lid_to_type;
@@ -134,9 +137,18 @@ class Brocken::Jenny::Codegen::Wasm {
                 my $pt = $ir_params->[$i]->type;
                 $lid_to_type{$i} = $pt ? $self->_wasm_valtype($pt) : VALTYPE_I32;
             }
+
+            # A name the lowerer invented is not in the IR at all: %heap_ptr,
+            # which carries the bump allocator between allocas, is defined
+            # straight into MIR as a pointer. The MIR operand still knows that,
+            # so ask it before giving up and declaring the local i32. Declaring
+            # it too narrow made every body that allocates fail validation
+            # outright -- "type mismatch: expected i32, found i64" at the first
+            # use of the address -- which is every untyped `my`, since an
+            # untyped variable is boxed and so needs an alloca.
             for my $lid ( $num_params .. $next_local - 1 ) {
                 my $name  = $lid_to_name{$lid} // '';
-                my $itype = $name ? $ir_types->{$name} : undef;
+                my $itype = $name ? ( $ir_types->{$name} // $mir_local_type{$name} ) : undef;
                 $lid_to_type{$lid} = $itype ? $self->_wasm_valtype($itype) : VALTYPE_I32;
             }
         }

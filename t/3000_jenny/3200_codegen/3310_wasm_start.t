@@ -6,6 +6,7 @@ use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Jenny::Linker::Wasm;
+use Brocken::ICB ();
 no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
 use Test2::Tools::Brocken qw(temp_path);
@@ -64,16 +65,38 @@ subtest 'Wasm module runs as a WASI command' => sub {
     unlink $module if -e $module;
 };
 
-# The runtime writes a 24-byte header at the base, so a base past the end of the
-# first page needs a second one. The single page this used to emit covered 1024
-# by coincidence.
-subtest 'Wasm memory covers the heap base' => sub {
-    is( Brocken::Jenny::Linker::Wasm->new->_initial_pages,                       1, 'the default base fits one page' );
-    is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536 )->_initial_pages, 2, 'a base past 64KB needs two pages' );
+# The memory has to cover three things: the base itself, the 24-byte runtime
+# header written there, and the whole heap the entry preamble promises
+# Brocken::Runtime::_init. That last part is what this used to miss -- the module
+# reserved one 64KB page while telling the runtime it had a megabyte, so a native
+# target got away with it (its mmap grows on demand) and a Wasm module handed
+# the allocator a range past the end of linear memory. One boxed variable fit in
+# the page that was really there; a second trapped.
+subtest 'Wasm memory covers the base, its header and the heap' => sub {
+    my $heap = Brocken::ICB::HEAP_SIZE;
+    my $want = sub {
+        my ($base) = @_;
+        return int( ( $base + 24 + $heap + 65535 ) / 65536 );
+    };
+    is( Brocken::Jenny::Linker::Wasm->new->_initial_pages,
+        $want->(1024), 'the default base reserves the whole heap' );
+    is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536 )->_initial_pages,
+        $want->(65536), 'a base past 64KB adds a page on top' );
+
+    # A heap smaller than the base still has to be reserved, and the header at
+    # the base must not fall off the end either.
+    is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536, heap_size => 16 )->_initial_pages,
+        2, 'a small heap still covers a base past the first page' );
+
+    my $pages = Brocken::Jenny::Linker::Wasm->new( heap_base => 70000 )->_initial_pages;
     my $module = temp_path('wasm_pages') . '.wasm';
     link_module( $module, Brocken::Jenny::Linker::Wasm->new( heap_base => 70000 ) );
     my $bytes = do { open my $fh, '<', $module or die $!; binmode $fh; local $/; <$fh> };
-    like $bytes, qr/\x05\x03\x01\x00\x02/, 'the emitted memory section declares two pages';
+
+    # id 5, a three-byte body, one memory, no maximum. The last byte is the
+    # initial page count, and it has to be the count _initial_pages promised.
+    my $page_byte = chr $pages;
+    like $bytes, qr/\x05\x03\x01\x00\Q$page_byte\E/, 'the emitted memory section declares the whole heap';
     unlink $module if -e $module;
 };
 done_testing;
