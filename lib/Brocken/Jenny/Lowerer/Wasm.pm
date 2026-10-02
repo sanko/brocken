@@ -10,8 +10,32 @@ class Brocken::Jenny::Lowerer::Wasm {
     method lower($ir_func) {
         my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
         my $inst_idx = 0;
+
+        # Seed the bump allocator from the heap base before anything is
+        # allocated. %heap_ptr is a lowering-only register: the allocator
+        # reads and adds to it, but nothing ever loaded the base into it, so it
+        # started at zero and the first alloca handed out address 0. That is the
+        # same address the entry preamble stores __heap_base into, and the same
+        # region the runtime keeps its globals and arena in, so a boxed value
+        # could be written over by -- or read back as -- one of those, and the
+        # address that came back was then used for the next store. The result was
+        # a trap on an address that tracked the box tag, or a silently wrong
+        # value. One boxed variable happened to survive it; a second did not.
+        my $heap_base_param;
+        for my $p ( $ir_func->params->@* ) {
+            next unless defined $p->name;
+            if ( $p->name eq '%__heap_base' ) { $heap_base_param = $p; last }
+        }
         for my $block ( $ir_func->blocks->@* ) {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
+            if ( $heap_base_param && $ir_func->blocks->[0] == $block ) {
+                $mbb->add_instruction(
+                    $self->_wasm_push_vreg( '%__heap_base', 'heap_ptr: seed from base', Brocken::Lindsay::IR::Type::ptr() )
+                );
+                $mbb->add_instruction(
+                    $self->_wasm_set_vreg( '%heap_ptr', 'heap_ptr: seed', Brocken::Lindsay::IR::Type::ptr() )
+                );
+            }
             if ( $ir_func->blocks->[0] != $block ) {
                 $mbb->add_instruction(
                     Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2351,8 +2375,23 @@ class Brocken::Jenny::Lowerer::Wasm {
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'box: add offset' ) );
                     $self->_wasm_wrap_addr( $mbb, 'box: addr' );
                     $mbb->add_instruction( $self->_wasm_push( $val, 'box: push val' ) );
+
+                    # The payload keeps the width of the value it boxes. i32_store
+                    # here truncated every boxed i64 to 32 bits, and because a
+                    # Wasm store declares the value it takes, pushing an i64 at
+                    # an i32_store is not a silent truncation but a validation
+                    # error -- so an untyped `my`, which is boxed as an i64, made
+                    # the whole module uncompilable. An untyped variable is the
+                    # common case, so this broke nearly every program.
+                    my $pay_op;
+                    if ( $val->type && $val->type->kind eq 'float' ) {
+                        $pay_op = $val->type->bits >= 64 ? 'f64_store' : 'f32_store';
+                    }
+                    else {
+                        $pay_op = $val->type && $val->type->bits >= 64 ? 'i64_store' : 'i32_store';
+                    }
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store payload' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => $pay_op, operands => [], comment => 'box: store payload' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Unbox') ) {
                     my $dyn = $inst->operands->[0];
@@ -2367,8 +2406,20 @@ class Brocken::Jenny::Lowerer::Wasm {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'unbox: add offset' ) );
                     $self->_wasm_wrap_addr( $mbb, 'unbox: addr' );
+
+                    # Mirrors the width the box wrote at payload offset 8. An
+                    # i32_load of a boxed i64 read back only the low half, so a
+                    # value that went in as 42 came out as 42 and one that went
+                    # in as 256 came out as 0.
+                    my $pay_ld;
+                    if ( $inst->type && $inst->type->kind eq 'float' ) {
+                        $pay_ld = $inst->type->bits >= 64 ? 'f64_load' : 'f32_load';
+                    }
+                    else {
+                        $pay_ld = $inst->type && $inst->type->bits >= 64 ? 'i64_load' : 'i32_load';
+                    }
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_load', operands => [], comment => 'unbox: load payload' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => $pay_ld, operands => [], comment => 'unbox: load payload' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'local_set',

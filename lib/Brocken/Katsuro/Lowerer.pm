@@ -470,7 +470,7 @@ class Brocken::Katsuro::Lowerer {
             my $heap_base = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
             my $_init_fn  = $functions->{'Brocken::Runtime::_init'};
             if ($_init_fn) {
-                my $heap_size = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0x100000 );
+                my $heap_size = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::HEAP_SIZE );
                 $builder->build_call( $_init_fn, [ $heap_base, $heap_size ], undef );
             }
 

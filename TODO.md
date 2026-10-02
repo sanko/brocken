@@ -639,6 +639,58 @@ here was reproduced against a natively compiled and executed binary, not read of
       `Katsuro::Parser`. The stale claim that a 128-bit value cannot be declared in source, and so
       has no end-to-end test, is dropped: `t/1000_katsuro/1078_i128_surface_syntax.t` checks the
       rejection without the gate and runs a declare/widen/narrow round trip on the host.
+- [x] **Wasm reserved 64KB of memory while telling the runtime it had 1MB** - the linker emitted a
+      single page from `_initial_pages`, which covered `heap_base` (1024) plus the 24-byte runtime
+      header and nothing more. The entry preamble separately passes `0x100000` to
+      `Brocken::Runtime::_init`, so the ICB's cursors and limits were set across a megabyte that
+      linear memory did not contain. A native target gets away with this because its mmap grows on
+      demand; a Wasm module declares its memory once. Nothing noticed until a program needed a
+      second heap allocation: one untyped (boxed) variable fit inside the page that was really
+      there, a second trapped, and the fault address tracked the box's type tag - the allocator
+      had been handed a range it should never have believed in. Fixed by sizing the initial memory
+      from the heap the runtime is actually promised: `Brocken::ICB::HEAP_SIZE` is now the single
+      source of truth for that 1MB, used both by the `_init` call in `Katsuro/Lowerer.pm` and by
+      `_initial_pages` in `Linker/Wasm.pm`. `my $a = 3; my $b = 4; return $a + $b;` and a corpus of
+      89 differential cases now agree with the host.
+- [x] **An untyped `my` did not produce a loadable module** - `my $x = 42; return $x;` is the most
+      ordinary statement in the language and the Wasm backend could not emit it. Four separate
+      faults, all of which had to be fixed before the module validated, and all of them in the
+      `box`/`unbox` path: (1) `Codegen/Wasm.pm` declared every local from the MIR function's
+      `%ir_types` table, but `%heap_ptr` is created by `Lowerer/Wasm.pm` and never appears there,
+      so it was declared i32 while its uses were i64 and the validator rejected the module;
+      (2) the box payload push was built into an instruction that was then never
+      `add_instruction`'d, so the box's payload came from whatever was on the stack;
+      (3) the box payload store and the matching unbox load were hardcoded to
+      `i32.store`/`i32.load`, while an untyped variable defaults to i64, so the value was
+      truncated to 4 bytes; (4) the stores were selected by the box's type rather than the value
+      being stored, so an f32 or f64 payload was written as an integer. All four are fixed in
+      `Codegen/Wasm.pm` and `Lowerer/Wasm.pm`, and `my $x = 42;` now returns 42 under wasmtime
+      where it previously produced an unloadable module. Found by differential smoke testing
+      after a broad corpus (`my` locals throughout) turned up ~10 invalid-module failures at once;
+      this is the class of bug the Phase F8b Wasm fuzz lane would have caught.
+- [ ] **An untyped variable cannot hold a float on any backend** - `my $x = 1.5; return $x;` is
+      wrong everywhere, and the two backends are wrong in different ways. The frontend emits
+      `Box %8 <- f64 1.5` (result type `dynamic`) followed by `Unbox %10 <- dynamic` (result type
+      **`i64`**), so the float-ness is gone before any backend sees it: the value is stored as an
+      IEEE double into the payload slot and read back as an integer. x86-64 truncates it, so
+      `my $x = 2.5; return $x;` exits 2; Wasm returns `0x400A000000000000`, the raw bits. The
+      `f64` on the box is also why `$x == 1.5` compares an integer against a truncated 1 and comes
+      out true on x86-64 by accident. This is a frontend gap, not a backend one: the fix is either
+      to make `Unbox` produce a float when the boxed value's tag says so, or to widen the box tag
+      to cover floats (the layout in "R0: Fix Fat Scalar Layout" has no float tag at all, tags
+      0-6 with 5 = Dynamic) and have unbox reinterpret on that tag. Until then an untyped variable
+      is integer-only, which the Wasm box test states explicitly rather than pinning down the
+      current wrong answer.
+- [ ] **`my $a = 3; my $b = 4; $b = $b; return $a;` still traps** - self-assignment of a boxed
+      variable, where the source and destination of the store are the same box. Every other
+      untyped-local shape now works (1..6 untyped variables, arithmetic on them, and untyped
+      mixed with typed in either order), so this is narrow, but it is a real runtime trap and not
+      a wrong answer: wasmtime reports `out of bounds memory access`. Suspect the GC path: the
+      store emits an `incref` on a box it is about to overwrite and a `decref` on the old
+      payload, and if the two end up ordering against each other the free list can hand back a
+      block that is still in use. Not yet reduced past the shape above; `decref` on Wasm is
+      `Brocken::Runtime::decref`, not the inline box path, so the first step is to dump the MIR
+      for the store and see whether the trap comes from the inline store or from the runtime call.
 - [x] **Multi-block Wasm call fixups are rebased onto the assembled body** - a call index was
       recorded against its own block and never rebased, so a call from any block but the first
       pointed into the middle of the dispatch loop and the module did not validate. Fixed in
@@ -834,16 +886,72 @@ Windows spawn failure:
 ### Phase F8: Cross-Platform Fuzzing
 *Goal: Catch platform-specific bugs (linker format, ABI, calling convention) across all targets.*
 
-- [ ] **Target selection** - `$fuzz->fuzz(target => 'x86_64-linux-gnu')` to compile/test against a non-host platform (requires cross-linker)
+- [ ] **Target selection** - `Brocken::Fuzz->new()` hardcodes the host: its `ADJUST` block does
+      `Brocken->new()` with no `platform`, and `test_program` then compiles, links and runs a
+      native binary. There is no way to name a target, so this is the prerequisite for every other
+      item in this phase. Add `Brocken->new( platform => $platform )` behind a `platform`/`target`
+      option, taking the target string through `Brocken::Katsuro::Platform::parse` the way the
+      tests do, and use `$fuzz->platform->ext` for the temp suffix (`.wasm` vs the host's) so a
+      Wasm run does not try to execute a module as a binary.
 - [ ] **Triple fuzzing** - Given a program, compile it for all 4 native targets (X86_64, ARM64, RISCV64, Wasm) and verify the exit code is the same on each (exit code is a scalar i64, platform-independent)
 - [ ] **Linker format rotation** - Fuzz ELF64, PE, Mach-O code paths with the same program; verify identical exit code (platform-permitting)
-- [ ] **Wasm fuzzing** - Test Wasm output via `wasmtime` or `node` runner (separate execution path in `test_program`)
+- [ ] **Wasm fuzzing** - Test Wasm output via `wasmtime` or `node` runner (separate execution path in `test_program`). See the dedicated section below; this is the entry that leads there.
+
+### Phase F8b: Wasm Fuzzing in CI
+*Goal: fuzz the Wasm backend on every fuzz run, the way the host backend already is. Recorded
+2026-10-02 after a differential smoke corpus found nine Wasm codegen bugs by hand that the fuzzer
+would have caught for free: untyped locals producing invalid modules from the `box` lowering, a
+boxed payload push dropped from the MIR, box stores hardcoded to 4 bytes against an 8-byte
+default, signed `div`/`rem` emitted for unsigned operands, `i64.trunc_f64_s`/`f64.convert_i64_s`
+named by direction instead of by width, `Sext` that cleared the low bits it was supposed to
+preserve, `%heap_ptr` never seeded from the heap base, an initial memory section a third the size
+of the heap the entry preamble promises `_init`, and a signed narrow load missing from the opcode
+table. All nine were invisible to `t/` and to the existing fuzz CI.*
+
+The host backend is fuzzed today by `.github/workflows/fuzz.yml`, which runs
+`bin/fuzz_runner.pl --time-limit N` on ubuntu/windows/macos. None of those lanes ever touches the
+Wasm codegen, lowerer or linker, so this whole backend is unfuzzed.
+
+- [ ] **Separate execution path in `Brocken::Fuzz::test_program`** - for a Wasm platform, write the
+      module with `Brocken::Jenny::Linker::Wasm->new->write_executable` and invoke
+      `_BROCKEN_ENTRY` through `wasmtime run --invoke _BROCKEN_ENTRY <mod> 1024` (falling back to
+      `node`), then read the entry's return value as the expected exit status. Do *not* use
+      `wasmtime run <mod>` and the process exit status: the `_start` stub the linker emits calls the
+      entry and deliberately drops its result (an exit status would mean importing
+      `wasi_snapshot_preview1.proc_exit`), so both `42` and `1` exit 0 and the comparison would
+      always trivially agree. This is the same invocation `t/1000_katsuro/1076_float_conversion.t`
+      already uses for its Wasm lane; factor that runner out rather than writing a third copy.
+- [ ] **Treat a Wasm trap as a failure, not a value** - a trap prints text (`wasm trap: out of
+      bounds memory access`) on stderr and leaves no number to compare. Compared as a string it
+      would bucket as an ordinary divergence with a useless expected/actual pair. Match the trap
+      prefix, record `reason => 'wasm trap'` with the message, and fail. Most of the nine bugs above
+      surfaced only as a trap, so this is the difference between a fuzz finding that is
+      actionable and one that is not.
+- [ ] **Install a Wasm runtime in the fuzz workflow** - `.github/workflows/fuzz.yml` needs
+      wasmtime on every lane; `bytecodealliance/wasmtime-setup` is the usual action, or
+      `cargo install wasmtime-cli`. Node is already present on the GitHub runners and covers the
+      decode-and-instantiate path, but it will not report a trap the way wasmtime does, so it is a
+      fallback for *validity* coverage rather than a replacement. A runner with neither should skip
+      the lane rather than silently pass it.
+- [ ] **Add a `wasm` entry to the fuzz job matrix** - the smallest change that gets the backend
+      fuzzed at all: extend the existing `strategy.matrix` in `.github/workflows/fuzz.yml` with a
+      `target` dimension (host plus `wasm32-unknown-wasi`) over the same OS list, and pass
+      `--platform "${{ matrix.target }}"` through to `bin/fuzz_runner.pl`. Every host lane
+      cross-checks Wasm against the host result, which is what makes the findings precise.
+- [ ] **Prefer differential Wasm/host comparison over a reference interpreter** - for Wasm the
+      expected value is already free: the host backend is the oracle, and the two must agree on the
+      entry's return value. That makes the Wasm lane much cheaper than F6's
+      `Brocken::Interpreter` and catches more, since it also covers the runtime and entry stub that
+      an interpreter would not model.
+- [ ] **Regression intake for Wasm fuzz findings** - Wasm failures should land in
+      `t/3000_jenny/3200_codegen/` as executing wasmtime tests, matching how each of the nine fixes
+      above got coverage, rather than only in the F5 minimizer output.
 
 ### Phase F9: Tooling & CI
 *Goal: Make fuzzing a regular, trusted part of development workflow.*
 
 - [ ] **`prove -lv t/5000_fuzz/5000_fuzz.t FUZZ_ITERATIONS=5000`** - Increase default iteration count; document how to run longer fuzz sessions
-- [ ] **GitHub Actions fuzz workflow** - Daily cron job running fuzzer for 30 minutes on Linux, macOS, Windows; posts failure diffs to issue tracker
+- [ ] **GitHub Actions fuzz workflow** - Daily cron job running fuzzer for 30 minutes on Linux, macOS, Windows; posts failure diffs to issue tracker. Extend this to the F8b `target` matrix so the same job covers the Wasm backend; the wasmtime setup belongs on the shared job, not a separate workflow.
 - [ ] **Fuzzer dashboard** - Parse fuzzer output logs to track: iterations, failures, stage breakdown, coverage (IR opcode histogram), throughput
 - [ ] **Fuzz-friendly `skip` mechanism** - Add `FUZZ_SKIP_KNOWN` env var pointing to a file of known-bug seeds (skip gracefully instead of failing on known issues)
 - [ ] **Fuzz test diff** - When a new fuzz regression test is added, show `prove` output diff to confirm it would have caught the bug
@@ -868,6 +976,7 @@ Windows spawn failure:
 | Operators | + - * / % & \| ^ | + << >> && \|\| ! ~ ternary |
 | Memory | none | arrays, struct fields, strings |
 | Pipeline tested | compile+codegen+link+exec | stage-identified failures |
+| Targets fuzzed | host backend only | + Wasm (differential against host), see Phase F8b |
 | Generation | pure random | seed corpus + mutation + cross-over |
 | Minimization | manual | automated delta debugging |
 | CI duration | 20 iters (seconds) | 30-60 min nightly + quick smoke test |
