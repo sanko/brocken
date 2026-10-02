@@ -1790,8 +1790,28 @@ class Brocken::Katsuro::Lowerer {
                 if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
                     return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $val->value );
                 }
-                return ( $val->type->is_signed && $val->type->bits > 1 ) ? $builder->build_sext( $val, $target_type, undef, $line, $col ) :
-                    $builder->build_zext( $val, $target_type, undef, $line, $col );
+                if ( !( $val->type->is_signed && $val->type->bits > 1 ) ) {
+                    return $builder->build_zext( $val, $target_type, undef, $line, $col );
+                }
+
+                # Sign-extending into an *unsigned* type is not expressible: the
+                # backends size an extension from its source operand and sign-extend
+                # all the way out to 32 or 64 bits, with no way to stop at the
+                # destination width, so the bits above it survive into whatever
+                # consumes them. The promotion picks sext from the *source*
+                # signedness, so that is exactly what happened to
+                # `my i8 $a = -61; my u16 $b = 65509; $a >= $b`: the narrower
+                # signed operand landed in an unsigned comparison still carrying
+                # its sign, comparing 0xFFFFFFC3 against 65509 and answering 1.
+                # Sign-extend to a signed type of the target width first, then
+                # zero-extend that width, which is the value the unsigned type
+                # actually holds. A 64-bit destination is already as wide as the
+                # register the extension lands in, so its sign is the whole value.
+                if ( $target_type->is_signed || $target_type->bits >= 64 ) {
+                    return $builder->build_sext( $val, $target_type, undef, $line, $col );
+                }
+                my $at_width = $builder->build_sext( $val, Brocken::Lindsay::IR::Type::signed_for( $target_type->bits ), undef, $line, $col );
+                return $builder->build_zext( $at_width, $target_type, undef, $line, $col );
             }
             if ( $val->type->bits > $target_type->bits ) {
                 my $bits = $target_type->bits;

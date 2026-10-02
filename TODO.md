@@ -593,13 +593,21 @@ here was reproduced against a natively compiled and executed binary, not read of
 
 ### Open
 
-- [ ] **Mixed-width signed/unsigned comparison compares at 32 bits** - the equal-width fix at
+- [x] **Mixed-width signed/unsigned comparison compares at 32 bits** - the equal-width fix at
       `Katsuro/Lowerer.pm:1380` covers only `lbits == rbits`. When the widths differ, the narrower
       signed operand is promoted to the wider unsigned type (`i8` -> `u16`), but the value is still
       carried sign-extended in a 32-bit register, so the unsigned predicate sees `0xFFFFFFC3`
       instead of `0x0000FFC3`. `my i8 $a = -61; my u16 $b = 65509; return $a >= $b ? 1 : 0;` exits
       1; after the frontend's promotion it should be 0. Found by the fuzzer (case 295, seed
       20260713).
+      Not the equal-width fix's fault after all: the promotion at `maybe_convert_type` picks sext
+      from the *source* signedness, so it asked for a sign-extension into an **unsigned** type,
+      which the IR cannot express. The backends size an extension from its source operand and
+      sign-extend all the way out to 32 bits, with no way to stop at the destination width, so the
+      sign survived into the compare. Now sign-extends to a signed type of the target width and then
+      zero-extends that width, via a new `IR::Type::signed_for`. Fixes it on every backend at once,
+      since all of them had the same blind spot. Covered in `1040_lowerer.t` at both levels across
+      i8/u8, i8/u16, i8/u32, i16/u32 and i32/u64.
 - [ ] **f32 conversions are unverified on ARM64 and Wasm** - x86-64 and RISC-V64 are now fixed
       and covered (see above). ARM64 encodes the width in the instruction (`fcvtzs`, `scvtf`) and
       its codegen already selects on both widths, so it is *probably* fine; Wasm has its own
