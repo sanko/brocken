@@ -41,7 +41,6 @@ is per architecture or per object format.
 - Mixed integer/floating arguments wrong on x86-64 Linux ELF — [Known Bugs](#known-bugs)
 - Floating-point callee-save on X86_64 — [Calling Conventions](#calling-conventions)
 - f32 conversions unverified on ARM64 and Wasm — [Open](#open)
-- The Wasm module exports `_BROCKEN_ENTRY`, not the WASI `_start` — [Open](#open)
 - Channel lowering past the stubs — [Channels](#channels-blocked-until-immix-allocator)
 - ARM64 macOS varargs register save area, needs a run on Apple Silicon — [Known Issues (Remaining)](#known-issues-remaining)
 - illumos isolate segfaults — [Untouched by this series](#untouched-by-this-series)
@@ -637,11 +636,18 @@ here was reproduced against a natively compiled and executed binary, not read of
       prologue precedes that block. Covered by `t/3000_jenny/3200_codegen/3271_multiblock_call_wasm.t`,
       which calls a helper from `if.then` and runs the module under `wasmtime`; that test fails
       if the rebase is removed, as does `3270_multi_func.t`.
-- [ ] **The Wasm module exports `_BROCKEN_ENTRY`, not the WASI `_start`** - the linker names the
-      entry export `_BROCKEN_ENTRY` (`lib/Brocken/Jenny/Linker/Wasm.pm:137`), while a WASI reactor
-      looks for `_start`, so the module cannot be run as a reactor until the export is added or
-      renamed. Backportable from `dev` (`ca2086c`); it is just another function, so the fixup work
-      above no longer gates it.
+- [x] **The Wasm module now runs as a WASI command** - the linker named the entry export
+      `_BROCKEN_ENTRY`, which takes a heap base as an i64 parameter, while a WASI reactor looks for
+      a `_start` that takes nothing, so the module could not be run as a command at all. The
+      multi-function path now appends a `_start` stub that pushes the link-time heap base in the
+      entry's own parameter type, calls it, and drops the result. Dropping rather than exiting
+      with the entry's value is deliberate: an exit status would mean importing
+      `wasi_snapshot_preview1.proc_exit`, which would also break every caller that instantiates
+      the module directly, so both 42 and 1 exit 0. `_BROCKEN_ENTRY` is still exported and still
+      takes a heap base, for `--invoke`. Two smaller things came with it: the base is a
+      signed LEB128 constant, where the unsigned form only happened to agree at 1024, and the
+      memory section now covers the base plus the 24-byte runtime header it holds, so a base past
+      64KB gets a second page instead of a header out of bounds.
 
 ### Test-process lessons
 

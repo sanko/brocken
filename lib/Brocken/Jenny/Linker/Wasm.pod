@@ -7,10 +7,19 @@ Brocken::Jenny::Linker::Wasm - WebAssembly Binary Generator
 =head1 DESCRIPTION
 
 Generates WebAssembly (WASM) binaries in the standard .wasm format. Produces a minimal executable with type section,
-function section, memory section (single page), export section (exporting _start), and code section.
+function section, memory section, export section, and code section.
 
-Currently supports a single linear memory of 1 page (64KB). The _start function is exported and executed by WASM
-runtimes.
+The compiled code is the body of an exported C<_BROCKEN_ENTRY>, which takes the heap base as an i64 parameter and
+returns a value. The multi-function path also exports a C<_start> that takes no arguments and passes the link-time
+heap base to the entry, so a WASI runtime runs the module as a command instead of the caller having to invoke the
+entry by hand.
+
+C<_start> drops the entry's return value rather than exiting with it. Turning that value into an exit status would
+mean importing C<wasi_snapshot_preview1.proc_exit>, which the module does not, so a program returning 42 and one
+returning 1 both exit 0.
+
+The memory section covers the heap base plus the 24-byte runtime header the base itself holds. That is one page for
+the default base of 1024, and more for a base past the end of the first page.
 
 =head1 METHODS
 
@@ -18,7 +27,7 @@ runtimes.
 
     $linker->write_executable($output_file, $code_bytes, $platform)
 
-Writes a .wasm binary with the compiled code as the body of _start.
+Writes a .wasm binary with the compiled code as the body of _BROCKEN_ENTRY.
 
 =head2 write_shared_library
 
