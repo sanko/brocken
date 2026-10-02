@@ -3,6 +3,9 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
 use Brocken;
+use Brocken::Katsuro::Platform;
+use Brocken::Jenny::Linker::Wasm;
+use Test2::Tools::Brocken qw[run_exec temp_path cross_available];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -15,19 +18,57 @@ use feature qw[class];
 #
 # Kept to values a single 32-bit compare can hold: `==` against a literal above
 # 2^31 is a separate x86-64 immediate bug, tracked in TODO.md.
+#
+# Every target that can actually execute runs these, not just the host. This
+# used to bail unless the host was native, which left the f32 paths on ARM64 and
+# Wasm unverified for as long as the entry existed -- not because they were
+# believed broken, but because nothing here could run them. Both can be run now:
+# the cross targets through BROCKEN_SYSROOT_*, and Wasm through wasmtime. Each is
+# added only when its tooling is actually present, so a machine without them pays
+# nothing and the host-only result is unchanged.
+sub _wasmtime {
+    my $exe = $^O eq 'MSWin32' ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
+    return undef unless defined $exe;
+    chomp $exe;
+    return ( length $exe && -f $exe ) ? $exe : undef;
+}
+my $WASMTIME = _wasmtime();
+my @TARGETS  = ( [ 'host', undef ] );
+for my $triple ( 'aarch64-unknown-linux-gnu', 'riscv64-unknown-linux-gnu' ) {
+    my $platform = eval { Brocken::Katsuro::Platform::parse($triple) };
+    push @TARGETS, [ $triple, $platform ] if $platform && cross_available($platform);
+}
+push @TARGETS, [ 'wasm32-unknown-wasi', Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi') ] if $WASMTIME;
+
 sub answers ( $src, $want, $name ) {
-    my $brocken = Brocken->new();
-    my $host    = $brocken->platform;
-    return diag("not native") unless $host->is_native;
-    my $module = eval { Brocken->new->compile($src) };
-    if ($@) { fail("$name: compile died: $@"); return }
-    my $funcs = $brocken->codegen->emit_functions( $module->functions );
-    my $file  = $brocken->tmpdir . '/fc' . $brocken->ext;
-    $brocken->linker->write_executable( $file, $funcs, $host );
-    system $file;
-    is( $? >> 8, $want, $name );
-    unlink $file;
-    return;
+    for my $target (@TARGETS) {
+        my ( $tag, $platform ) = @$target;
+        my $label = $tag eq 'host' ? $name : "$name [$tag]";
+        my $brocken = $platform ? Brocken->new( platform => $platform ) : Brocken->new();
+        my $module = eval { $brocken->compile($src) };
+        if ($@) { fail("$label: compile died: $@"); next }
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+
+        if ( $platform && $platform->arch =~ /^wasm/ ) {
+
+            # wasmtime reports the return value on the last line of stdout and
+            # its `--invoke` warnings on stderr, so both are read together and
+            # the last non-empty line taken. Avoids a shell-specific redirect.
+            my $module_file = temp_path('fc') . '.wasm';
+            Brocken::Jenny::Linker::Wasm->new->write_executable( $module_file, $funcs, $platform );
+            my $output = qx["$WASMTIME" run --invoke _BROCKEN_ENTRY "$module_file" 1024 2>&1];
+            my @lines  = grep { /\S/ } split /\n/, $output;
+            my $got    = @lines ? $lines[-1] : '';
+            is( $got + 0, $want, $label );
+            unlink $module_file if -e $module_file;
+        }
+        else {
+            my $file = temp_path('fc') . $brocken->ext;
+            $brocken->linker->write_executable( $file, $funcs, $platform );
+            run_exec( $file, expected_exit => $want, platform => $platform, name => $label );
+            unlink $file if -e $file;
+        }
+    }
 }
 subtest 'float to integer, both widths' => sub {
     for my $ty (qw[f32 f64]) {
