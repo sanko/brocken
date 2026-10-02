@@ -201,7 +201,7 @@ The error for using one without the gate is not very good:
 
 The message says a variable name was expected, because from the parser's point of view the C<i128> was never a type and
 so the C<my> was left looking for one. Whether a 128-bit integer is then usable is a separate question answered by the
-lowerer and the register allocator, and it is not answered in the affirmative.
+lowerer and the register allocator; on the native targets the answer is yes.
 
 =head1 ERRORS
 
