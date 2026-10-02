@@ -1770,23 +1770,17 @@ class Brocken::Jenny::Lowerer::Wasm {
                     }
                     else {
                         my $p;
-                        my $is_ptr = $inst->type && $inst->type->kind eq 'ptr';
                         if ( $inst->type && $inst->type->kind eq 'float' ) {
                             $p = $inst->type->bits >= 64 ? 'f64' : 'f32';
                         }
                         else {
-                            my $bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
+                            my $bits = $self->_scalar_bits( $inst->type ) || 32;
                             $p = $bits >= 64 ? 'i64' : 'i32';
                         }
-
-                        # A Wasm address is an i32, so pointer arithmetic is i32
-                        # even though the pointer is modelled as 64 bits. The
-                        # offset, though, is an ordinary integer and arrives at
-                        # whatever width the language gave it, so narrow it here
-                        # rather than leave the operands mismatched.
                         $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS' ) );
-                        if ($is_ptr) { $self->_wasm_push_addr( $mbb, $rhs, 'RHS' ) }
-                        else         { $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) ) }
+                        $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
+                        $self->_wasm_fit( $mbb, $lhs, $p );
+                        $self->_wasm_fit( $mbb, $rhs, $p );
 
                         # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
                         my %map = (
@@ -1822,10 +1816,19 @@ class Brocken::Jenny::Lowerer::Wasm {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Zext') ) {
                     my ($val)    = $inst->operands->@*;
-                    my $src_bits = $val->type ? $val->type->bits : 64;
+                    my $src_bits = $self->_scalar_bits( $val->type )  || 32;
+                    my $dst_bits = $self->_scalar_bits( $inst->type ) || 64;
                     my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction( $self->_wasm_push( $val, 'zext val' ) );
-                    if ( $src_bits < 64 ) {
+                    if ( $dst_bits > 32 && $src_bits <= 32 ) {
+
+                        # A narrow source arrives as an i32, and zero-extending it
+                        # is the whole of what a zext asks for. Widening it into
+                        # the i64 the destination holds is that same extension.
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [], comment => 'zext widen' ) );
+                    }
+                    elsif ( $src_bits < $dst_bits ) {
                         my $mask = ( 1 << $src_bits ) - 1;
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2052,7 +2055,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                     $size *= ( $inst->count ? $inst->count->value : 1 );
 
                     # save current heap_ptr as result
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap' ) );
+                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'local_set',
@@ -2062,17 +2065,17 @@ class Brocken::Jenny::Lowerer::Wasm {
                     );
 
                     # heap_ptr += size
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap' ) );
+                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
+                            opcode   => 'i64_const',
                             operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
                             comment  => "alloca: size $size"
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'alloca: add' ) );
-                    $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'alloca: save heap' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'alloca: add' ) );
+                    $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'alloca: save heap', Brocken::Lindsay::IR::Type::ptr() ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                     my $ptr = $inst->operands->[0];
@@ -2105,8 +2108,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                         }
                         else {
                             my $mem_ty   = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $inst->type;
-                            my $mem_bits = $mem_ty->bits;
-                            my $dst_bits = $inst->type && $inst->type->kind eq 'int' ? $inst->type->bits : 32;
+                            my $mem_bits = $self->_scalar_bits($mem_ty)       || 32;
+                            my $dst_bits = $self->_scalar_bits( $inst->type ) || 32;
                             if ( $dst_bits >= 64 ) {
                                 $op = $mem_bits > 32 ? 'i64_load' :
                                     ( $mem_bits > 16 ? 'i64_load32_u' : ( $mem_bits > 8 ? 'i64_load16_u' : 'i64_load8_u' ) );
@@ -2160,8 +2163,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                         }
                         else {
                             my $mem_ty   = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $val->type;
-                            my $mem_bits = $mem_ty->bits;
-                            my $val_bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 32;
+                            my $mem_bits = $self->_scalar_bits($mem_ty)      || 32;
+                            my $val_bits = $self->_scalar_bits( $val->type ) || 32;
                             if ( $val_bits >= 64 ) {
                                 $op = $mem_bits > 32 ? 'i64_store' :
                                     ( $mem_bits > 16 ? 'i64_store32' : ( $mem_bits > 8 ? 'i64_store16' : 'i64_store8' ) );
@@ -2195,16 +2198,16 @@ class Brocken::Jenny::Lowerer::Wasm {
                             if ( $scale > 1 ) {
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'i32_const',
+                                        opcode   => 'i64_const',
                                         operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $scale ) ],
                                         comment  => "gep: scale $scale"
                                     )
                                 );
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_mul', operands => [], comment => 'gep: mul' ) );
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_mul', operands => [], comment => 'gep: mul' ) );
                             }
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'gep: add' ) );
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'gep: add' ) );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'local_set',
@@ -2217,13 +2220,13 @@ class Brocken::Jenny::Lowerer::Wasm {
                     }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
+                            opcode   => 'i64_const',
                             operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $offset ) ],
                             comment  => "gep: const offset $offset"
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'gep: add' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'gep: add' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'local_set',
@@ -2237,7 +2240,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                     my $tag = $self->_type_tag( $val->type );
 
                     # save heap_ptr as result
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap' ) );
+                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'local_set',
@@ -2247,21 +2250,22 @@ class Brocken::Jenny::Lowerer::Wasm {
                     );
 
                     # heap_ptr += 16
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap' ) );
+                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
+                            opcode   => 'i64_const',
                             operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16 ) ],
                             comment  => 'box: bump 16'
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'box: add' ) );
-                    $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'box: save heap' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'box: add' ) );
+                    $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'box: save heap', Brocken::Lindsay::IR::Type::ptr() ) );
 
                     # store header (tag << 24) at [%dyn + 0]
                     my $header_val = $tag << 24;
                     $mbb->add_instruction( $self->_wasm_push_vreg( $inst->name, 'box: push dyn' ) );
+                    $self->_wasm_wrap_addr( $mbb, 'box: addr' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'i32_const',
@@ -2276,13 +2280,14 @@ class Brocken::Jenny::Lowerer::Wasm {
                     $mbb->add_instruction( $self->_wasm_push_vreg( $inst->name, 'box: push dyn' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
+                            opcode   => 'i64_const',
                             operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8 ) ],
                             comment  => 'box: offset 8'
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'box: add offset' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'box: add offset' ) );
+                    $self->_wasm_wrap_addr( $mbb, 'box: addr' );
                     $mbb->add_instruction( $self->_wasm_push( $val, 'box: push val' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_store', operands => [], comment => 'box: store payload' ) );
@@ -2292,13 +2297,14 @@ class Brocken::Jenny::Lowerer::Wasm {
                     $mbb->add_instruction( $self->_wasm_push( $dyn, 'unbox: push dyn' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
+                            opcode   => 'i64_const',
                             operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8 ) ],
                             comment  => 'unbox: offset 8'
                         )
                     );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_add', operands => [], comment => 'unbox: add offset' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'unbox: add offset' ) );
+                    $self->_wasm_wrap_addr( $mbb, 'unbox: addr' );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_load', operands => [], comment => 'unbox: load payload' ) );
                     $mbb->add_instruction(
@@ -2449,7 +2455,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                         next;
                     }
                     else {
-                        my $bits = $lhs->type && $lhs->type->kind eq 'int' ? $lhs->type->bits : 32;
+                        my $bits = $self->_scalar_bits( $lhs->type ) || 32;
                         $p = $bits >= 64 ? 'i64' : 'i32';
                     }
                     my %map = $float ? ( eq => "${p}_eq", ne => "${p}_ne", lt => "${p}_lt", gt => "${p}_gt", le => "${p}_le", ge => "${p}_ge" ) : (
@@ -2466,6 +2472,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                     );
                     $mbb->add_instruction( $self->_wasm_push( $lhs, 'icmp lhs' ) );
                     $mbb->add_instruction( $self->_wasm_push( $rhs, 'icmp rhs' ) );
+                    $self->_wasm_fit( $mbb, $lhs, $p );
+                    $self->_wasm_fit( $mbb, $rhs, $p );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => $map{$pred}, operands => [], comment => 'icmp ' . $pred ) );
                     $mbb->add_instruction(
@@ -2544,13 +2552,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
-                            comment  => 'fiber_create stub'
-                        )
-                    );
+                    $mbb->add_instruction( $self->_wasm_push_const( 0, $inst->type, 'fiber_create stub' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'fiber_create result' ) );
                 }
@@ -2584,13 +2586,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberId') ) {
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i32_const',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
-                            comment  => 'fiber_id stub'
-                        )
-                    );
+                    $mbb->add_instruction( $self->_wasm_push_const( 0, $inst->type, 'fiber_id stub' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'fiber_id result' ) );
                 }
@@ -2708,12 +2704,10 @@ class Brocken::Jenny::Lowerer::Wasm {
                             # signature the way a 32-bit register write zero-extends.
                             # The width that matters is the one the linker puts in the
                             # function type, which comes from the function, not from
-                            # this instruction: a helper declared to return a pointer
-                            # returns an i32 address even though the value it hands back
-                            # is a 64-bit integer.
+                            # this instruction.
                             my $rt       = $ir_func->return_type // $inst->type;
-                            my $ret_bits = $rt->kind eq 'int' ? $rt->bits : $rt->kind eq 'ptr' ? 32 : 0;
-                            my $val_bits = $val->type && $val->type->kind eq 'int' ? $val->type->bits : 0;
+                            my $ret_bits = $self->_scalar_bits($rt);
+                            my $val_bits = $self->_scalar_bits( $val->type );
                             if ( $ret_bits == 64 && $val_bits && $val_bits <= 32 ) {
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
@@ -2804,14 +2798,54 @@ class Brocken::Jenny::Lowerer::Wasm {
         return Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$opnd], comment => "push $label=" . $opnd->value );
     }
 
+    # A Wasm memory access takes an i32 address. A pointer is a 64-bit value and
+    # its arithmetic stays that width, so the address is narrowed here, right
+    # before the load or store that needs it, rather than at every step of the
+    # walk that got there.
+    method _wasm_wrap_addr( $mbb, $label ) {
+        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_wrap_i64', operands => [], comment => $label ) );
+    }
+
+    # A literal at the width the value it stands in for needs, so a stub that
+    # yields a pointer or a 64-bit integer is not left holding an i32.
+    method _wasm_push_const( $value, $type, $label ) {
+        my $op;
+        if   ( $type && $type->kind eq 'float' ) { $op = $type->bits >= 64                ? 'f64_const' : 'f32_const' }
+        else                                     { $op = $self->_scalar_bits($type) >= 64 ? 'i64_const' : 'i32_const' }
+        return Brocken::Jenny::MIR::MachineInstruction->new(
+            opcode   => $op,
+            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value ) ],
+            comment  => $label
+        );
+    }
+
+    # Reconcile a value that has just been pushed with the width the operation
+    # ahead of it expects. The IR lets a narrow value stand in for a wide one,
+    # which a 64-bit register hides and a Wasm operand stack does not: mixing an
+    # i32 with an i64 op is a type error, so the value is widened or narrowed
+    # here instead. Signedness decides which way an i32 widens.
+    method _wasm_fit( $mbb, $ir_val, $prefix ) {
+        my $want = $prefix eq 'i64' ? 64 : $prefix eq 'i32' ? 32 : 0;
+        return unless $want;
+        my $have = $self->_scalar_bits( $ir_val->type );
+        return unless $have && $have != $want;
+
+        # A 128-bit value arrives here already split by the caller, so only the
+        # 32/64 crossings are left to do.
+        if ( $want == 64 && $have <= 32 ) {
+            my $ext = ( $ir_val->type && !$ir_val->type->signed ) ? 'i64_extend_i32_u' : 'i64_extend_i32_s';
+            $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => $ext, operands => [], comment => 'fit: widen' ) );
+        }
+        elsif ( $want == 32 && $have >= 64 ) {
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_wrap_i64', operands => [], comment => 'fit: narrow' ) );
+        }
+    }
+
     method _wasm_push_addr( $mbb, $ir_val, $label ) {
         $mbb->add_instruction( $self->_wasm_push( $ir_val, $label ) );
-        my $type = $ir_val->type;
-
-        # Addresses are i32 already unless the value is a 64-bit integer; pointer
-        # typed values become i32 locals, so only widen back from a real i64.
-        return if !$type || $type->kind ne 'int' || $type->bits <= 32;
-        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_wrap_i64', operands => [], comment => 'addr: wrap' ) );
+        return if $self->_scalar_bits( $ir_val->type ) <= 32;
+        $self->_wasm_wrap_addr( $mbb, 'addr: wrap' );
     }
 
     method _wasm_select( $type, $label ) {
@@ -2824,10 +2858,23 @@ class Brocken::Jenny::Lowerer::Wasm {
 
     method _valtype($type) {
         return 0x7F if !$type;
-        return 0x7E if $type->kind eq 'int'   && $type->bits > 32;
+        return 0x7E if $type->kind eq 'int' && $type->bits > 32;
+        return 0x7E if $type->kind eq 'ptr';
+        return 0x7E if $type->kind eq 'dynamic';
         return 0x7C if $type->kind eq 'float' && $type->bits >= 64;
         return 0x7D if $type->kind eq 'float';
         return 0x7F;
+    }
+
+    # The width a value of this type occupies in a Wasm local or on the stack.
+    # A pointer counts as 64 bits because that is how the IR models it; it is
+    # narrowed to the i32 a memory access wants separately, at the access. A
+    # boxed value is an address to linear memory, so it counts the same way.
+    method _scalar_bits($type) {
+        return 0           if !$type;
+        return $type->bits if $type->kind eq 'int';
+        return 64          if $type->kind eq 'ptr' || $type->kind eq 'dynamic';
+        return 0;
     }
 
     method _type_tag($type) {

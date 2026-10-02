@@ -178,11 +178,11 @@ use feature qw[class];
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
     my $mf      = $lowerer->lower($func);
     my $ops     = $mf->blocks->[0]->instructions;
-    my @consts  = grep { $_->opcode eq 'i32_const' } $ops->@*;
-    my @adds    = grep { $_->opcode eq 'i32_add' } $ops->@*;
+    my @consts  = grep { $_->opcode eq 'i64_const' } $ops->@*;
+    my @adds    = grep { $_->opcode eq 'i64_add' } $ops->@*;
     my @sets    = grep { $_->opcode eq 'local_set' } $ops->@*;
-    ok( scalar @consts >= 1, 'Wasm const GEP: i32_const produced' );
-    ok( scalar @adds >= 1,   'Wasm const GEP: i32_add produced' );
+    ok( scalar @consts >= 1, 'Wasm const GEP: i64_const produced' );
+    ok( scalar @adds >= 1,   'Wasm const GEP: i64_add produced' );
     ok( scalar @sets >= 1,   'Wasm const GEP: local_set produced' );
 
     if (@consts) {
@@ -207,13 +207,13 @@ use feature qw[class];
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
     my $mf      = $lowerer->lower($func);
     my $ops     = $mf->blocks->[0]->instructions;
-    my @consts  = grep { $_->opcode eq 'i32_const' } $ops->@*;
-    my @muls    = grep { $_->opcode eq 'i32_mul' } $ops->@*;
-    my @adds    = grep { $_->opcode eq 'i32_add' } $ops->@*;
+    my @consts  = grep { $_->opcode eq 'i64_const' } $ops->@*;
+    my @muls    = grep { $_->opcode eq 'i64_mul' } $ops->@*;
+    my @adds    = grep { $_->opcode eq 'i64_add' } $ops->@*;
     my @sets    = grep { $_->opcode eq 'local_set' } $ops->@*;
-    ok( scalar @consts >= 1, 'Wasm var GEP: i32_const produced (scale)' );
-    ok( scalar @muls >= 1,   'Wasm var GEP: i32_mul produced (scale=4)' );
-    ok( scalar @adds >= 1,   'Wasm var GEP: i32_add produced' );
+    ok( scalar @consts >= 1, 'Wasm var GEP: i64_const produced (scale)' );
+    ok( scalar @muls >= 1,   'Wasm var GEP: i64_mul produced (scale=4)' );
+    ok( scalar @adds >= 1,   'Wasm var GEP: i64_add produced' );
     ok( scalar @sets >= 1,   'Wasm var GEP: local_set produced' );
 }
 done_testing;
