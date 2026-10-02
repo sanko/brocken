@@ -7,6 +7,8 @@ use Brocken;
 use Brocken::Lindsay;
 use Brocken::Katsuro;
 use Brocken::Jenny;
+use Brocken::Jenny::Linker::Wasm;
+use Test2::Tools::Brocken qw[temp_path];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 my $brocken   = Brocken->new();
@@ -303,6 +305,74 @@ SKIP: {
         my $output_file = $brocken->tmpdir . '/width_i8_neg' . $brocken->ext;
         $brocken->linker->write_executable( $output_file, $bytes, $platform );
         run_exec( $output_file, expected_exit => 0xFF, platform => $platform, name => 'i8 sext -1 returned 255' );
+    }
+};
+
+# Wasm sign-extends from i32 and i64 only, so a narrower source is moved into
+# place by a pair of shifts. The lowering shifted up and stopped there, which left
+# the value sitting in the high bits with the low bits clear: `my i32 $k = 7; my
+# i8 $j = $k;` read back 0, because the narrowing was fine and the comparison
+# promoting the i8 back to i64 was what broke. Wasm has no 8- or 16-bit locals,
+# so every narrow signed value goes through that path.
+subtest 'Wasm Sext shifts back down after moving the sign bit up' => sub {
+    my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
+
+    # ( source, destination ) widths whose sign extension is not a single opcode.
+    for my $pair ( [ 8, 64 ], [ 8, 32 ], [ 16, 64 ], [ 16, 32 ] ) {
+        my ( $src, $dst ) = @$pair;
+        my $src_type = $src == 8  ? $i8  : $i16;
+        my $dst_type = $dst == 32 ? $i32 : $i64;
+        my $func     = Brocken::Lindsay::IR::Function->new( name => 'sext', return_type => $dst_type );
+        my $builder  = Brocken::Lindsay::IR::Builder->new();
+        $builder->position_at_end( $func->append_block('entry') );
+
+        # Held in an alloca so the load is not folded into the constant.
+        my $slot = $builder->build_alloca( $src_type, '%slot' );
+        $builder->build_store( Brocken::Lindsay::IR::Constant->new( type => $src_type, value => 1 ), $slot );
+        my $ld = $builder->build_load( $src_type, $slot, '%ld' );
+        $builder->build_ret( $builder->build_sext( $ld, $dst_type, '%ext' ) );
+        my @ops    = $lowerer->lower($func)->blocks->[0]->instructions->@*;
+        my ($shl)  = grep { $_->opcode =~ /_shl$/ } @ops;
+        my ($shr)  = grep { $_->opcode =~ /_shr_s$/ } @ops;
+        my ($mask) = grep { $_->opcode =~ /_and$/ } @ops;
+        ok( defined $shl && defined $shr && defined $mask, "sext i${src} -> i${dst} masks, shifts up, then shifts back down" ) or
+            diag( 'saw: ' . join( ', ', map { $_->opcode } @ops ) );
+    }
+};
+subtest 'a narrow signed value survives a round trip on Wasm' => sub {
+    my $host = Brocken::Katsuro::Platform::parse();
+    my $null = $host->is_windows ? 'NUL'                  : '/dev/null';
+    my $wt   = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
+    chomp $wt if $wt;
+    skip_all('wasmtime not available') unless $wt && -f $wt;
+    my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+    my $codegen  = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+
+    # The comparison promotes each narrow value back to i64, which is where the
+    # broken lowering showed up, so every case here exercises the whole trip
+    # rather than just the narrowing.
+    my @cases = (
+        [ 'i8 7',      'my i32 $k = 7; my i8 $j = $k; return $j == 7 ? 1 : 0;' ],
+        [ 'i8 100',    'my i32 $k = 100; my i8 $j = $k; return $j == 100 ? 1 : 0;' ],
+        [ 'i8 -56',    'my i32 $k = 200; my i8 $j = $k; return $j == -56 ? 1 : 0;' ],
+        [ 'i8 -1',     'my i32 $k = 255; my i8 $j = $k; return $j == -1 ? 1 : 0;' ],
+        [ 'u8 44',     'my i32 $k = 300; my u8 $j = $k; return $j == 44 ? 1 : 0;' ],
+        [ 'i16 70000', 'my i32 $k = 70000; my i16 $j = $k; return $j == 4464 ? 1 : 0;' ],
+        [ 'i16 -1',    'my i32 $k = 65535; my i16 $j = $k; return $j == -1 ? 1 : 0;' ],
+        [ 'u16 4464',  'my i32 $k = 70000; my u16 $j = $k; return $j == 4464 ? 1 : 0;' ],
+    );
+    for my $c (@cases) {
+        my ( $name, $src ) = @$c;
+        my $module = temp_path( 'narrow_' . $name ) . '.wasm';
+        my $ir     = eval { Brocken->new( platform => $platform )->compile($src) };
+        if ($@) { fail("$name: compile died: $@"); next }
+        Brocken::Jenny::Linker::Wasm->new->write_executable( $module, $codegen->emit_functions( $ir->functions ), $platform );
+        my $compile = qq["$wt" compile "$module" -o "$null" 2>&1];
+        is( system($compile), 0, "$name compiles" ) or diag qx[$compile];
+        my $got = qx["$wt" run --invoke _BROCKEN_ENTRY "$module" 1024 2>$null];
+        chomp $got;
+        is( $got, 1, "$name reads back the same value" );
+        unlink $module if -e $module;
     }
 };
 done_testing;

@@ -11,7 +11,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
     # than 0, because 0 doubles as the out-of-memory answer: `bump_alloc`
     # returns it on exhaustion and `check_alloc` traps on it, so a heap that
     # began at 0 could never tell "the first block" from "no block".
-    field $heap_base :param = 1024;
+    field $heap_base : param = 1024;
 
     # The runtime writes a 24-byte header at the base itself (cursor, limit,
     # cap), so the initial memory has to cover the base plus that header. The
@@ -51,22 +51,15 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
     # than the _uleb used for indices and section sizes; for a base of 1024 the
     # two encodings happen to agree, which is how the unsigned form could pass.
     method _start_body( $entry_index, $entry = undef ) {
-        my $body = pack( 'C', 0x00 );    # no locals
-
-        my $vt = $entry ? $entry->{param_valtypes}[0] : undef;
+        my $body   = pack( 'C', 0x00 );                                            # no locals
+        my $vt     = $entry ? $entry->{param_valtypes}[0] : undef;
         my $is_i64 = defined $vt && $vt == 0x7E;
         $body .= pack( 'C', $is_i64 ? 0x42 : 0x41 ) . $self->_sleb($heap_base);    # i64.const / i32.const
-
-        $body .= pack( 'C', 0x10 ) . $self->_uleb($entry_index);    # call <entry>
-
-        my $rt = $entry ? $entry->{return_valtype} : undef;
-        my $returns
-            = defined $rt
-            ? ( ref $rt eq 'ARRAY' ? scalar $rt->@* : $rt ne 'void' )
-            : 1;
-        $body .= pack( 'C', 0x1A ) if $returns;    # drop
-
-        $body .= pack( 'C', 0x0B );                # end
+        $body .= pack( 'C', 0x10 ) . $self->_uleb($entry_index);                   # call <entry>
+        my $rt      = $entry      ? $entry->{return_valtype}                                : undef;
+        my $returns = defined $rt ? ( ref $rt eq 'ARRAY' ? scalar $rt->@* : $rt ne 'void' ) : 1;
+        $body .= pack( 'C', 0x1A ) if $returns;                                    # drop
+        $body .= pack( 'C', 0x0B );                                                # end
         return $body;
     }
 
@@ -99,7 +92,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
                 push @func_data,
                     {
                     name           => '_start',
-                    bytes          => $self->_start_body( $entry_index, $func_data[ $entry_index ] ),
+                    bytes          => $self->_start_body( $entry_index, $func_data[$entry_index] ),
                     fixups         => [],
                     return_valtype => 'void',
                     param_valtypes => [],

@@ -668,12 +668,31 @@ here was reproduced against a natively compiled and executed binary, not read of
       `i64.trunc_f32_s`. Fixed by naming a constant per width pair and letting the source and
       destination types choose it. Only the two f64/i64 shapes had ever produced a loadable module;
       all eight now validate and run.
-- [ ] **Signed narrowing to `i8` is wrong on Wasm** - `my i32 $k = 100; my i8 $j = $k;` reads back 0,
+- [x] **Signed narrowing to `i8` is wrong on Wasm** - `my i32 $k = 100; my i8 $j = $k;` reads back 0,
       while the same code with `u8` gives the right value, and `i32 300 -> i8` is 0 rather than 44.
       This is the int->int path, not the float one, and predates the entry above; float->i8 rides on
       it and still gives 0 for a value that fits. Wasm has no 8-bit locals, so an `i8` and a `u8`
       destination have to lower identically, and whatever distinguishes the two signed paths is where
       this goes wrong. Found by running the float conversions end to end through wasmtime.
+      The narrowing was never the broken part: `Sext` in `Lowerer/Wasm.pm` shifted the value up so the
+      sign bit reached bit 31 and stopped there, leaving the low bits clear, so any *positive* narrow
+      value read back as 0. It surfaced on `my i8 $j = $k;` because the comparison that follows
+      promotes the `i8` back to `i64` through exactly this path. Now masks to the source width, shifts
+      up, and shifts back down with an arithmetic shift, which is what replicates the sign. Covered in
+      `3290_numerics_width.t` at both levels, including negatives (`i8 -56`, `i8 -1`, `i16 -1`).
+- [ ] **Every conversion width is spelled as a literal byte or a shift arithmetic** - `Encodings.pm`
+      holds the opcodes and the fuzzer and tests spell widths out inline, so a wrong constant or a
+      transposed subtraction is invisible until a module fails to validate. Extract these into named
+      constants and utility functions for shift amounts and destination masks, so that reading the
+      lowering says what the machine does without counting bits. This is what let the two Wasm
+      conversion entries above sit undetected: both were a correct-looking shape with the wrong width
+      baked in, and neither `wasm2wat` nor a byte-pattern grep would have flagged them.
+- [ ] **Wasm debugging needs `wabt`, which is not installed by default** - `apt install wabt` provides
+      `wasm2wat`, `wasm-objdump` and `wasm-validate`. `wasm-objdump -d` on the emitted module, or
+      `wasm2wat` into `.wat`, is the only practical way to see what a lowering actually produced:
+      the `Sext` entry above was found by diffing two near-identical modules and reading the one
+      instruction that differed. Hand-decoding the bytes is not reliable enough for this. Worth
+      recording in the build docs so it does not have to be rediscovered.
 - [ ] **`t/3000_jenny/3200_codegen/3280_sitofp_fptosi.t` could not have caught the two entries
       above** - it asserts on the *name* of a lowered opcode and never looks at its width, and it
       builds MIR rather than a module, so every one of its checks passed while all eight conversion
