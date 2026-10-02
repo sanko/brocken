@@ -202,6 +202,8 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i32_add' )   { $$buf .= pack( 'C', I32_ADD ) }
                 elsif ( $opcode eq 'i32_sub' )   { $$buf .= pack( 'C', I32_SUB ) }
                 elsif ( $opcode eq 'i32_mul' )   { $$buf .= pack( 'C', I32_MUL ) }
+                elsif ( $opcode eq 'i32_div_s' ) { $$buf .= pack( 'C', I32_DIV_S ) }
+                elsif ( $opcode eq 'i32_div_u' ) { $$buf .= pack( 'C', I32_DIV_U ) }
                 elsif ( $opcode eq 'i32_rem_s' ) { $$buf .= pack( 'C', I32_REM_S ) }
                 elsif ( $opcode eq 'i32_rem_u' ) { $$buf .= pack( 'C', I32_REM_U ) }
                 elsif ( $opcode eq 'i32_and' )   { $$buf .= pack( 'C', I32_AND ) }
@@ -213,6 +215,7 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i64_add' )   { $$buf .= pack( 'C', I64_ADD ) }
                 elsif ( $opcode eq 'i64_sub' )   { $$buf .= pack( 'C', I64_SUB ) }
                 elsif ( $opcode eq 'i64_mul' )   { $$buf .= pack( 'C', I64_MUL ) }
+                elsif ( $opcode eq 'i64_div_s' ) { $$buf .= pack( 'C', I64_DIV_S ) }
                 elsif ( $opcode eq 'i64_div_u' ) { $$buf .= pack( 'C', I64_DIV_U ) }
                 elsif ( $opcode eq 'i64_rem_s' ) { $$buf .= pack( 'C', I64_REM_S ) }
                 elsif ( $opcode eq 'i64_rem_u' ) { $$buf .= pack( 'C', I64_REM_U ) }
@@ -228,17 +231,32 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'i64_load' ) {
                     $$buf .= pack( 'C', I64_LOAD ) . $self->_uleb(3) . $self->_uleb(0);
                 }
+                elsif ( $opcode eq 'i32_load8_s' ) {
+                    $$buf .= pack( 'C', I32_LOAD8_S ) . $self->_uleb(0) . $self->_uleb(0);
+                }
                 elsif ( $opcode eq 'i32_load8_u' ) {
                     $$buf .= pack( 'C', I32_LOAD8_U ) . $self->_uleb(0) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i32_load16_s' ) {
+                    $$buf .= pack( 'C', I32_LOAD16_S ) . $self->_uleb(1) . $self->_uleb(0);
                 }
                 elsif ( $opcode eq 'i32_load16_u' ) {
                     $$buf .= pack( 'C', I32_LOAD16_U ) . $self->_uleb(1) . $self->_uleb(0);
                 }
+                elsif ( $opcode eq 'i64_load8_s' ) {
+                    $$buf .= pack( 'C', I64_LOAD8_S ) . $self->_uleb(0) . $self->_uleb(0);
+                }
                 elsif ( $opcode eq 'i64_load8_u' ) {
                     $$buf .= pack( 'C', I64_LOAD8_U ) . $self->_uleb(0) . $self->_uleb(0);
                 }
+                elsif ( $opcode eq 'i64_load16_s' ) {
+                    $$buf .= pack( 'C', I64_LOAD16_S ) . $self->_uleb(1) . $self->_uleb(0);
+                }
                 elsif ( $opcode eq 'i64_load16_u' ) {
                     $$buf .= pack( 'C', I64_LOAD16_U ) . $self->_uleb(1) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'i64_load32_s' ) {
+                    $$buf .= pack( 'C', I64_LOAD32_S ) . $self->_uleb(2) . $self->_uleb(0);
                 }
                 elsif ( $opcode eq 'i64_load32_u' ) {
                     $$buf .= pack( 'C', I64_LOAD32_U ) . $self->_uleb(2) . $self->_uleb(0);

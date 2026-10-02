@@ -1783,12 +1783,33 @@ class Brocken::Jenny::Lowerer::Wasm {
                         $self->_wasm_fit( $mbb, $rhs, $p );
 
                         # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
+                        #
+                        # `div` and `rem` are the signed operations and have to
+                        # pick the signed opcode. They used to map to the
+                        # unsigned one, which agreed with the signed answer for
+                        # every positive operand and disagreed for every negative
+                        # one: `i64 -20 / 3` came out as a quotient of two's
+                        # complement bits. Only the signedness of the operands
+                        # separates the two, so a positive-operand test cannot
+                        # see the difference.
+                        #
+                        # Wasm has no float remainder and no float bitwise or
+                        # shift instruction, and the integer ones cannot be
+                        # applied to a float operand as-is. The native backend
+                        # treats these as operations on the bit pattern, which
+                        # is a defined thing there and has no Wasm counterpart,
+                        # so they are refused by name instead of being mapped to
+                        # an opcode like "f32_rem_u" that could never encode.
+                        if ( $p =~ /^f/ && $opcode =~ /\A(?:rem|urem|and|or|xor|shl|lshr|ashr)\z/ ) {
+                            die "Wasm has no $opcode for $p; float bitwise, shift and remainder "
+                                . "are not implemented on this target\n";
+                        }
                         my %map = (
                             add  => "${p}_add",
                             sub  => "${p}_sub",
                             mul  => "${p}_mul",
-                            div  => $p =~ /^f/ ? "${p}_div" : "${p}_div_u",
-                            rem  => "${p}_rem_u",
+                            div  => $p =~ /^f/ ? "${p}_div" : "${p}_div_s",
+                            rem  => "${p}_rem_s",
                             udiv => "${p}_div_u",
                             urem => "${p}_rem_u",
                             and  => "${p}_and",
@@ -2143,13 +2164,21 @@ class Brocken::Jenny::Lowerer::Wasm {
                             my $mem_ty   = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $inst->type;
                             my $mem_bits = $self->_scalar_bits($mem_ty)       || 32;
                             my $dst_bits = $self->_scalar_bits( $inst->type ) || 32;
+
+                            # The narrow forms have to match the sign of the
+                            # stored type. Choosing only on the width meant every
+                            # load zero-extended, so a signed i8 came back as its
+                            # unsigned twin: `i8 -20 / 3` divided 236 by 3
+                            # instead of -20 by 3, and `i8 -20 >> 2` shifted
+                            # 236. Only a negative operand shows it.
+                            my $sgn = ( $mem_ty && $mem_ty->kind eq 'int' && $mem_ty->is_signed ) ? 's' : 'u';
                             if ( $dst_bits >= 64 ) {
                                 $op = $mem_bits > 32 ? 'i64_load' :
-                                    ( $mem_bits > 16 ? 'i64_load32_u' : ( $mem_bits > 8 ? 'i64_load16_u' : 'i64_load8_u' ) );
+                                    ( $mem_bits > 16 ? "i64_load32_$sgn" : ( $mem_bits > 8 ? "i64_load16_$sgn" : "i64_load8_$sgn" ) );
                             }
                             else {
                                 $op = $mem_bits > 32 ? 'i32_load' :
-                                    ( $mem_bits > 16 ? 'i32_load' : ( $mem_bits > 8 ? 'i32_load16_u' : 'i32_load8_u' ) );
+                                    ( $mem_bits > 16 ? 'i32_load' : ( $mem_bits > 8 ? "i32_load16_$sgn" : "i32_load8_$sgn" ) );
                             }
                         }
                         $self->_wasm_push_addr( $mbb, $ptr, 'load: ptr' );
