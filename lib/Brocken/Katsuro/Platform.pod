@@ -35,6 +35,10 @@ Platforms are identified by 4-part normalized triples: C<arch-vendor-os-env>. Ex
 
 =item C<registers> - Query register sets (via ABI subclass)
 
+=item C<codegen_class> - The code generator class name for this platform's architecture, or C<undef> when there is none
+
+=item C<linker_class> - The linker class name for this platform's binary format
+
 =item Identity methods (C<is_linux>, C<is_macos>, C<is_windows>, etc.)
 
 =back

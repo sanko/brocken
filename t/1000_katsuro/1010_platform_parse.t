@@ -90,4 +90,29 @@ subtest 'platform properties' => sub {
     ok !$linux->is_bsd, 'linux is not bsd';
     ok !$macos->is_bsd, 'macos is not bsd (darwin is mach-based)';
 };
+subtest 'back end selection' => sub {
+    my %expect = (
+        'x86_64-unknown-linux-gnu'  => [ 'Brocken::Jenny::Codegen::X86_64',  'Brocken::Jenny::Linker::ELF64', '' ],
+        'aarch64-unknown-linux-gnu' => [ 'Brocken::Jenny::Codegen::ARM64',   'Brocken::Jenny::Linker::ELF64', '' ],
+        'riscv64-unknown-linux-gnu' => [ 'Brocken::Jenny::Codegen::RISCV64', 'Brocken::Jenny::Linker::ELF64', '' ],
+        'x86_64-pc-windows-msvc'    => [ 'Brocken::Jenny::Codegen::X86_64',  'Brocken::Jenny::Linker::PE',    '.exe' ],
+        'aarch64-pc-windows-msvc'   => [ 'Brocken::Jenny::Codegen::ARM64',   'Brocken::Jenny::Linker::PE',    '.exe' ],
+        'aarch64-apple-darwin'      => [ 'Brocken::Jenny::Codegen::ARM64',   'Brocken::Jenny::Linker::MachO', '' ],
+        'x86_64-apple-darwin'       => [ 'Brocken::Jenny::Codegen::X86_64',  'Brocken::Jenny::Linker::MachO', '' ],
+        'x86_64-unknown-freebsd'    => [ 'Brocken::Jenny::Codegen::X86_64',  'Brocken::Jenny::Linker::ELF64', '' ],
+        'wasm32-unknown-wasi'       => [ 'Brocken::Jenny::Codegen::Wasm',    'Brocken::Jenny::Linker::Wasm',  '.wasm' ],
+    );
+    for my $triple ( sort keys %expect ) {
+        my ( $codegen, $linker, $ext ) = @{ $expect{$triple} };
+        my $p = Brocken::Katsuro::Platform::parse($triple);
+        is $p->codegen_class, $codegen, "$triple: codegen_class";
+        is $p->linker_class,  $linker,  "$triple: linker_class";
+        is $p->bin_ext,       $ext,     "$triple: bin_ext";
+    }
+};
+subtest 'back end selection for an unsupported architecture' => sub {
+    my $p = Brocken::Katsuro::Platform::parse('i386-pc-linux-gnu');
+    is $p->codegen_class, undef,                           'no code generator targets i386';
+    is $p->linker_class,  'Brocken::Jenny::Linker::ELF64', 'the linker still follows the format';
+};
 done_testing;
