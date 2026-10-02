@@ -654,7 +654,32 @@ here was reproduced against a natively compiled and executed binary, not read of
       convention for a one-bit destination and what the integer path does (`i64 24` gives 0) -- it is
       not truthiness, so `t/1000_katsuro/1076_float_conversion.t` asserts the integer cases beside the
       float ones to keep the two sources from drifting apart again. That file fails on six of its
-      cases if the mask is removed. Checked on the host and under qemu on aarch64 and riscv64.
+      cases if the mask is removed. Checked on the host and under qemu on aarch64 and riscv64. The
+      mask applies only below 32 bits: a 32- or 64-bit destination is already the width the
+      conversion produces, and the 32-bit mask is not representable at all, since 0xFFFFFFFF is -1 as
+      a signed i32 and emitting it as an i32 constant is rejected as too large.
+- [x] **Wasm emits one conversion opcode for every int/float width pair** - a Wasm conversion names
+      both widths, but `Lowerer/Wasm.pm` picked the opcode from the direction alone, so an f64 to i32
+      was emitted as `i64.trunc_f64_s` and an f32 source was truncated as if it were f64. Both are
+      modules wasmtime refuses to compile. The opcodes were also wrong in `Encodings.pm`:
+      `I64_TRUNC_F64_S` was 0xA8, which is `i32.trunc_f32_s`, and `F64_CONVERT_I64_S` was 0xBB, which
+      is `f64.promote_f32`. Both numbers were checked against `wat2wasm` rather than read off a table:
+      `i64.trunc_f64_s` is 0xB0 and `f64.convert_i64_s` is 0xB9, with 0xAE being
+      `i64.trunc_f32_s`. Fixed by naming a constant per width pair and letting the source and
+      destination types choose it. Only the two f64/i64 shapes had ever produced a loadable module;
+      all eight now validate and run.
+- [ ] **Signed narrowing to `i8` is wrong on Wasm** - `my i32 $k = 100; my i8 $j = $k;` reads back 0,
+      while the same code with `u8` gives the right value, and `i32 300 -> i8` is 0 rather than 44.
+      This is the int->int path, not the float one, and predates the entry above; float->i8 rides on
+      it and still gives 0 for a value that fits. Wasm has no 8-bit locals, so an `i8` and a `u8`
+      destination have to lower identically, and whatever distinguishes the two signed paths is where
+      this goes wrong. Found by running the float conversions end to end through wasmtime.
+- [ ] **`t/3000_jenny/3200_codegen/3280_sitofp_fptosi.t` could not have caught the two entries
+      above** - it asserts on the *name* of a lowered opcode and never looks at its width, and it
+      builds MIR rather than a module, so every one of its checks passed while all eight conversion
+      shapes emitted an unloadable module. It now checks the opcode each width pair selects and,
+      where wasmtime is present, compiles and runs a module for each. This is the general shape of the
+      gap: CI has no wasmtime, so anything only a Wasm runtime can catch is uncaught there.
 
 ### Test-process lessons
 

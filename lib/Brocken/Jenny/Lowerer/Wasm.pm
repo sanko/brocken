@@ -1854,8 +1854,9 @@ class Brocken::Jenny::Lowerer::Wasm {
                     else {
                         $mbb->add_instruction( $self->_wasm_push( $val, 'sitofp val' ) );
                     }
+                    my $sitofp_op = $self->_sitofp_opcode( $val->type, $inst->type );
                     $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'f64_convert_i64_s', operands => [], comment => 'sitofp' ) );
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => $sitofp_op, operands => [], comment => 'sitofp' ) );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$dst], comment => 'store ' . $inst->name )
                     );
@@ -1873,9 +1874,10 @@ class Brocken::Jenny::Lowerer::Wasm {
                             value => $inst->name . '_hi',
                             type  => Brocken::Lindsay::IR::Type::i64()
                         );
+                        my $fptosi_op = $self->_fptosi_opcode( $val->type, $inst->type );
                         $mbb->add_instruction( $self->_wasm_push( $val, 'fptosi val' ) );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_trunc_f64_s', operands => [], comment => 'fptosi' ) );
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $fptosi_op, operands => [], comment => 'fptosi' ) );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'local_set',
@@ -1926,9 +1928,10 @@ class Brocken::Jenny::Lowerer::Wasm {
                     }
                     else {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        my $fptosi_op = $self->_fptosi_opcode( $val->type, $inst->type );
                         $mbb->add_instruction( $self->_wasm_push( $val, 'fptosi val' ) );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_trunc_f64_s', operands => [], comment => 'fptosi' ) );
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $fptosi_op, operands => [], comment => 'fptosi' ) );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'local_set',
@@ -2898,6 +2901,31 @@ class Brocken::Jenny::Lowerer::Wasm {
         return $type->bits if $type->kind eq 'int';
         return 64          if $type->kind eq 'ptr' || $type->kind eq 'dynamic';
         return 0;
+    }
+
+    # The width one side of an int/float conversion occupies, as 32 or 64. A
+    # float is not counted by `_scalar_bits`, which is for the integer and
+    # pointer widths a local holds, so its own `bits` is read here. Anything
+    # wider than 32 -- a pointer, an i128 asked for one word at a time -- is a
+    # 64-bit operand in Wasm either way.
+    method _convert_width($type) {
+        return 64 if !$type;
+        return $type->bits == 32 ? 32 : 64 if $type->kind eq 'float';
+        return $self->_scalar_bits($type) > 32 ? 64 : 32;
+    }
+
+    # A Wasm conversion opcode names both widths, so the source and the
+    # destination pick it rather than the direction alone: f64 to i32 is
+    # `i32.trunc_f64_s`, f32 to i64 is `i64.trunc_f32_s`. Emitting one opcode for
+    # the whole direction is what made an f32 module fail to validate.
+    method _sitofp_opcode( $src, $dst ) {
+        return ( $self->_convert_width($dst) == 32 ? 'f32' : 'f64' ) . '_convert_'
+             . ( $self->_convert_width($src) == 32 ? 'i32' : 'i64' ) . '_s';
+    }
+
+    method _fptosi_opcode( $src, $dst ) {
+        return ( $self->_convert_width($dst) == 32 ? 'i32' : 'i64' ) . '_trunc_'
+             . ( $self->_convert_width($src) == 32 ? 'f32' : 'f64' ) . '_s';
     }
 
     method _type_tag($type) {
