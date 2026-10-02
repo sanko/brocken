@@ -40,7 +40,6 @@ is per architecture or per object format.
 - Big-endian targets, which no lowering handles — [128-bit Numerics](#128-bit-numerics-i128)
 - Mixed integer/floating arguments wrong on x86-64 Linux ELF — [Known Bugs](#known-bugs)
 - Floating-point callee-save on X86_64 — [Calling Conventions](#calling-conventions)
-- f32 conversions unverified on ARM64 and Wasm — [Open](#open)
 - Channel lowering past the stubs — [Channels](#channels-blocked-until-immix-allocator)
 - ARM64 macOS varargs register save area, needs a run on Apple Silicon — [Known Issues (Remaining)](#known-issues-remaining)
 - illumos isolate segfaults — [Untouched by this series](#untouched-by-this-series)
@@ -608,11 +607,13 @@ here was reproduced against a natively compiled and executed binary, not read of
       zero-extends that width, via a new `IR::Type::signed_for`. Fixes it on every backend at once,
       since all of them had the same blind spot. Covered in `1040_lowerer.t` at both levels across
       i8/u8, i8/u16, i8/u32, i16/u32 and i32/u64.
-- [ ] **f32 conversions are unverified on ARM64 and Wasm** - x86-64 and RISC-V64 are now fixed
-      and covered (see above). ARM64 encodes the width in the instruction (`fcvtzs`, `scvtf`) and
-      its codegen already selects on both widths, so it is *probably* fine; Wasm has its own
-      conversion ops. Neither can be executed here, so both remain unverified until `run_cross`
-      exists.
+- [x] **f32 conversions are unverified on ARM64 and Wasm** - x86-64 and RISC-V64 were already fixed
+      and covered (see above). Both of these are now executed and pass. ARM64 does encode the width in
+      the instruction (`fcvtzs`, `scvtf`) and its codegen already selects on both widths, so the
+      "probably fine" guess held. `1076_float_conversion.t` used to bail unless the host was native,
+      which is the only reason these went unverified for so long; it now runs every case on the host,
+      on aarch64/riscv64 when `BROCKEN_SYSROOT_*` makes them runnable, and on Wasm when `wasmtime` is
+      installed, adding a target only when its tooling is actually present. 38 cases x 4 targets pass.
 - [ ] **No float-width cast exists, by design** - `maybe_convert_type` croaks with "No
       float-to-float conversion ... the IR has no fptrunc or fpext" for a *non-constant*
       mismatch. This matches `dev`'s choice to fail loudly rather than silently reinterpret bits,
