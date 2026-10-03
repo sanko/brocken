@@ -1120,11 +1120,43 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $bytes .= pack( 'v', $imm->value & 0xFFFF );
                     }
                     else {
-                        my $rex = 0x40 | ( $bits >= 64 ? 0x08 : 0 ) | $rex_x | $rex_b;
-                        if ($rex) { $bytes .= pack( 'C', $rex ) }
-                        $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
-                        $bytes .= join '', $extra->@*;
-                        $bytes .= pack( 'V', $imm->value );
+                        # `mov r/m64, imm32` sign-extends its 32-bit immediate,
+                        # so a 64-bit value outside signed 32-bit range cannot be
+                        # put in memory with it: 4294967296 was stored as 0 and
+                        # 4294967295 as -1. There is no `mov r/m64, imm64` to fall
+                        # back on, so the value goes out as its two 32-bit halves,
+                        # each of which is exact. A 32-bit store does not
+                        # sign-extend, and the destination needs no register of
+                        # its own, so this costs one extra instruction and
+                        # nothing else. Only a freshly written slot wants this:
+                        # the halves are not written atomically, which does not
+                        # matter for a value no other thread can see yet.
+                        my $value = $imm->value;
+                        $value = $value->numify if ref($value) && $value->isa('Math::BigInt');
+                        if ( $bits >= 64 && ( $value > 0x7FFFFFFF || $value < -0x80000000 ) ) {
+                            my $base_disp = $mem->value->{disp} // 0;
+                            my @halves = ( [ $base_disp, $value & 0xFFFFFFFF ], [ $base_disp + 4, ( $value >> 32 ) & 0xFFFFFFFF ] );
+                            for my $half (@halves) {
+                                my $half_mem
+                                    = Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { %{ $mem->value }, disp => $half->[0] },
+                                    type  => Brocken::Lindsay::IR::Type::i32()
+                                    );
+                                my ( $hmodrm, $hextra, $hrex_x, $hrex_b ) = $mem_modrm->( $half_mem, 0 );
+                                $bytes .= pack( 'C', 0x40 | $hrex_x | $hrex_b );    # no REX.W: a 32-bit store
+                                $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $hmodrm );
+                                $bytes .= join '', $hextra->@*;
+                                $bytes .= pack( 'V', $half->[1] );
+                            }
+                        }
+                        else {
+                            my $rex = 0x40 | ( $bits >= 64 ? 0x08 : 0 ) | $rex_x | $rex_b;
+                            if ($rex) { $bytes .= pack( 'C', $rex ) }
+                            $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $modrm );
+                            $bytes .= join '', $extra->@*;
+                            $bytes .= pack( 'V', $value );
+                        }
                     }
                 }
 

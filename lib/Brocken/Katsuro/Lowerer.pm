@@ -2136,7 +2136,14 @@ class Brocken::Katsuro::Lowerer {
         my @elements;
         for my $elem ( $ast->elements->@* ) {
             my $val = $self->lower_expression($elem);
-            push @elements, $val->type->kind eq 'dynamic' ? $val : $self->maybe_convert_type( $val, $dynamic_type, $line, $col );
+            if ( $val->type->kind eq 'dynamic' ) {
+                $builder->build_incref( $val, $line, $col );
+                push @elements, $val;
+            }
+            else {
+                my $boxed = $self->maybe_convert_type( $val, $dynamic_type, $line, $col );
+                push @elements, $boxed;
+            }
         }
         my $count         = scalar @elements;
         my $hb            = $builder->build_load( $ptr_type, $symbols->{'__heap_base'}, undef, $line, $col );
