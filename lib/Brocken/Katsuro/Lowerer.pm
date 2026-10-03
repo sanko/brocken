@@ -1708,6 +1708,15 @@ class Brocken::Katsuro::Lowerer {
             $builder->build_store( $args[1], $args[0], $line, $col );
             return undef;
         }
+
+        # A boxed float has to be read as a float. load_i64 on an f64 payload
+        # hands back the bit pattern instead of the value, which is what an
+        # unbox in an integer context used to see.
+        return $builder->build_load( Brocken::Lindsay::IR::Type::f64(), $args[0], undef, $line, $col ) if $name eq 'load_f64';
+        if ( $name eq 'store_f64' ) {
+            $builder->build_store( $args[1], $args[0], $line, $col );
+            return undef;
+        }
         return $builder->build_load( Brocken::Lindsay::IR::Type::i16(), $args[0], undef, $line, $col ) if $name eq 'load_u16';
         if ( $name eq 'store_u16' ) {
             $builder->build_store( $args[1], $args[0], $line, $col );

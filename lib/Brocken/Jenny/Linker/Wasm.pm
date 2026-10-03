@@ -41,6 +41,25 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         return pack( 'C', 5 ) . $self->_uleb( length $content ) . $content;
     }
 
+    # Global Section (ID 6): one mutable i64, the linear-memory frame bump
+    # pointer. It has to be a global rather than a local because a Wasm local
+    # belongs to one function. The bump pointer is shared by every function --
+    # the caller carves its frame, then the callee carries on from where the
+    # caller left off -- so a per-function copy let a callee hand out the same
+    # addresses its caller was still using, and the caller's saved parameter
+    # slots were overwritten mid-call. That is what made a runtime helper that
+    # called another runtime helper read a clobbered pointer and fault.
+    #
+    # The initialiser is a constant; the entry sets it from the real heap base
+    # before the first allocation.
+    method _global_section () {
+
+        # valtype 0x7E = i64, mutability 0x01 = var, init expr = i64.const 0; end
+        my $entry   = pack( 'C', 0x7E ) . pack( 'C', 0x01 ) . pack( 'C', 0x42 ) . $self->_sleb(0) . pack( 'C', 0x0B );
+        my $content = $self->_uleb(1) . $entry;
+        return pack( 'C', 6 ) . $self->_uleb( length $content ) . $content;
+    }
+
     # A `_start` export, so `wasmtime run module.wasm` runs the module as a
     # WASI command instead of needing `--invoke _BROCKEN_ENTRY` and a heap base
     # on the command line. The native linkers each have such a stub; this one
@@ -176,6 +195,9 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
             # Memory Section (ID 5)
             my $mem_sec = $self->_memory_section;
 
+            # Global Section (ID 6)
+            my $global_sec = $self->_global_section;
+
             # Function Section (ID 3) -- map each function to its type
             my $func_sec = '';
             for my $fd (@func_data) {
@@ -206,7 +228,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
 
             # WASM magic number \0asm + version 1 (MVP)
             print $fh "\0asm\x01\x00\x00\x00";
-            print $fh $type_sec, $func_sec, $mem_sec, $export_sec, $code_sec;
+            print $fh $type_sec, $func_sec, $mem_sec, $global_sec, $export_sec, $code_sec;
             close $fh;
             return;
         }
@@ -234,6 +256,9 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         # Memory Section (ID 5)
         my $mem_sec = $self->_memory_section;
 
+        # Global Section (ID 6)
+        my $global_sec = $self->_global_section;
+
         # Function Section (ID 3)
         my $func_sec = $self->_uleb(1) . $self->_uleb($type_idx);
         $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) ) . $func_sec;
@@ -250,7 +275,7 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
         binmode $fh;
         print $fh "\0asm\x01\x00\x00\x00";
-        print $fh $type_sec, $func_sec, $mem_sec, $export_sec, $code_sec;
+        print $fh $type_sec, $func_sec, $mem_sec, $global_sec, $export_sec, $code_sec;
         close $fh;
     }
 

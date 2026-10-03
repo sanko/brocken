@@ -6,6 +6,7 @@ package Brocken::Jenny::Codegen::Wasm::Encodings {
         all => [
             qw[
                 UNREACHABLE BLOCK END_BLOCK BR BR_IF BR_TABLE LOOP RETURN CALL LOCAL_GET LOCAL_SET
+                GLOBAL_GET GLOBAL_SET
                 SELECT SELECT_T
                 I32_LOAD I64_LOAD F32_LOAD F64_LOAD
 I32_LOAD8_S I32_LOAD8_U I32_LOAD16_S I32_LOAD16_U
@@ -54,6 +55,8 @@ I32_LOAD8_S I32_LOAD8_U I32_LOAD16_S I32_LOAD16_U
         # Variable
         LOCAL_GET => 0x20,      # local.get <localidx>
         LOCAL_SET => 0x21,      # local.set <localidx>
+        GLOBAL_GET => 0x23,    # global.get <globalidx>
+        GLOBAL_SET => 0x24,    # global.set <globalidx>
 
         # Parametric
         SELECT   => 0x1B,       # select
