@@ -695,46 +695,43 @@ here was reproduced against a natively compiled and executed binary, not read of
       the literal identically, so `trunc(trunc(1.5)) == trunc(1.5)` was true and the bug looked
       like it worked. Fixing only the frontend turns that case **red**, which is why the integer
       half is asserted beside the float half in `t/1000_katsuro/1077_untyped_float.t`.
-- [ ] **A boxed value is read at whatever width the context asks for** - the remaining half of the
-      float box work, and it needs the tag consulted at run time. The box header has carried a type
-      tag since `e1e9423` and every backend writes it, but nothing reads it, so a payload is loaded
-      as whatever the context asked for. Two directions, both wrong today:
-      (1) a float payload read as an integer: `my $x = 2.5; return $x == 2;` reads
-      `0x4004000000000000` and compares that against `2`. (2) an integer payload read as a double,
-      which was broken before the float work began and is its mirror image: `my $x = 3; my f64 $y
-      = $x; return $y == 3.0;` is false. (2) is the reason the int and float cases must be fixed
-      together -- teaching `Unbox` to produce a float when the tag says so would break every
-      integer box read in a float context.
-      Two approaches: widen the box tag to cover floats (the layout in "R0: Fix Fat Scalar Layout"
-      has no float tag at all, tags 0-6 with 5 = Dynamic) and have `Unbox` dispatch on it at run
-      time, or inline the same dispatch in each of the 4 backends. Inline duplicates the subtle
-      part across four lowerers; a runtime helper adds a call to every unbox and needs `load_f64`
-      plus the first floats in `src/runtime/core.brocken`. A runtime function returning `f64` is
-      already known to work on Wasm and to be callable from user code, so the helper route is
-      viable -- this needs measuring, not assuming, so decide it once there are benchmarks.
-- [ ] **Arithmetic between two untyped variables has no float case** - `my $x = 1.5; my $y = 2.5;
-      return $x + $y;` is `3` on every backend because with both sides dynamic there is nothing to
-      unbox to and both default to `i64`. This is not reachable by fixing `Unbox`: the `+` is built
-      as an integer add before any unbox exists, so the operand types have to be settled at run
-      time from the two tags. `1077_untyped_float.t` asserts the single-dynamic cases only and says
-      so; this one is deliberately not asserted.
+- [x] **A boxed value is read at whatever width the context asks for** - the remaining half of the
+      float box work, and it needed the tag consulted at run time. The box header has carried a type
+      tag since `e1e9423` and every backend writes it, but nothing read it, so a payload was loaded
+      as whatever the context asked for. Two directions, both wrong:
+      (1) a float payload read as an integer: `my $x = 2.5; return $x == 2;` read
+      `0x4004000000000000` and compared that against `2`. (2) an integer payload read as a double:
+      `my $x = 3; my f64 $y = $x; return $y == 3.0;` was false. Both are now fixed at the runtime
+      boundary: `Brocken::Runtime::unbox_i64` and `unbox_f64` read the tag first and widen or
+      truncate the payload to what the context asked for, so `my $x = 3; my f64 $y = $x;` is 3.0 and
+      `my $x = 2.5; my i64 $y = $x;` is 2. The inline `Unbox` is kept only for `f32` and `i128`,
+      which have no tag to dispatch on. Covered by the "a payload is read as what the box actually
+      holds" subtest in `t/1000_katsuro/1077_untyped_float.t`.
+- [x] **Arithmetic between two untyped variables has no float case** - `my $x = 1.5; my $y = 2.5;
+      return $x + $y;` used to be `3` on every backend because with both sides dynamic there was
+      nothing to unbox to and both defaulted to `i64`. Two dynamic operands now compute in `f64`
+      (`lower_binop` interns both as `f64` when neither side pins a type), so `$x + $y` is 4.0 and
+      `$x < $y` orders as floats. This is Perl's scalar rule and the cost is the same one Perl makes:
+      an untyped value above 2^53 is no longer exact, documented in `docs/spec.md` §2.3.1. Covered by
+      the "arithmetic between two untyped values" and "untyped value meeting an integer" subtests in
+      `t/1000_katsuro/1077_untyped_float.t`.
 - [ ] **A boxed `f32` cannot be represented at all** - the payload is one 8-byte slot and the IR
       has no `fptrunc`/`fpext`, so a float of one width cannot be stored in a slot of the other.
       An `f32` payload writes 4 bytes and the unbox reads 8, or the unbox reads 4 of an 8-byte `f64`.
       Every decimal literal is an `f64`, so nothing reaches a box as an `f32` unless it is declared
       one on purpose. This is the gap tracked under `Brocken::Lindsay`, not here.
-- [ ] **`my $a = 3; my $b = 4; $b = $b; return $a;` still traps** - self-assignment of a boxed
+- [x] **`my $a = 3; my $b = 4; $b = $b; return $a;` still traps** - self-assignment of a boxed
       variable, where the source and destination of the store are the same box. Assigning one box to
-      another, `my $x = 3; my $y = $x;`, traps the same way on Wasm, and both do it for an integer
-      as readily as a float, so it is an aliasing fault and not a float one. Every other
-      untyped-local shape now works (1..6 untyped variables, arithmetic on them, and untyped
-      mixed with typed in either order), so this is narrow, but it is a real runtime trap and not
-      a wrong answer: wasmtime reports `out of bounds memory access`. Suspect the GC path: the
-      store emits an `incref` on a box it is about to overwrite and a `decref` on the old
-      payload, and if the two end up ordering against each other the free list can hand back a
-      block that is still in use. Not yet reduced past the shape above; `decref` on Wasm is
-      `Brocken::Runtime::decref`, not the inline box path, so the first step is to dump the MIR
-      for the store and see whether the trap comes from the inline store or from the runtime call.
+      another, `my $x = 3; my $y = $x;`, trapped the same way on Wasm, and both did it for an integer
+      as readily as a float, so it was an aliasing fault and not a float one. The suspicion recorded
+      here was the GC path: the store emits an `incref` on a box it is about to overwrite and a
+      `decref` on the old payload, and if the two order against each other the free list can hand
+      back a block that is still in use. The later frame-reclaim and box-payload work
+      (`0dfa9a4`, `b5b34f4`) settled it: a ten-shape sweep now returns the right value for
+      self-assignment, one box initialised from another, a chain of moves, and the float case, with
+      no trap. The stack-bound box the old note worried about no longer outlives the frame it was
+      read in for these shapes. Covered by the `assignment between untyped variables` subtest in
+      `t/3000_jenny/3200_codegen/3306_wasm_box_untyped_locals.t`.
 - [x] **Multi-block Wasm call fixups are rebased onto the assembled body** - a call index was
       recorded against its own block and never rebased, so a call from any block but the first
       pointed into the middle of the dispatch loop and the module did not validate. Fixed in
