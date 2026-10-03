@@ -173,6 +173,21 @@ SKIP: {
         answers( 'my $a = 3; my i64 $b = 7; return $a + $b;', 10, 'untyped then typed' );
         answers( 'my i64 $a = 3; my $b = 1; return $a + $b;', 4,  'typed then untyped' );
     };
+
+    # Assigning one box to another used to trap: the store increfs the box it is
+    # about to replace and decrefs the old payload, and with the source and the
+    # destination the same box, or with a chain of moves, the two orderings
+    # disagreed about a block that was still live and the free list handed it
+    # out again. These are the shapes TODO.md recorded as still trapping.
+    subtest 'assignment between untyped variables' => sub {
+        answers( 'my $a = 3; my $b = 4; $b = $b; return $a;',          3, 'self-assignment leaves the other value' );
+        answers( 'my $a = 1; $a = $a; $a = $a; return $a;',            1, 'repeated self-assignment' );
+        answers( 'my $a = 3; my $b = 4; $b = $a; return $b;',          3, 'one untyped variable assigned from another' );
+        answers( 'my $x = 3; my $y = $x; return $y;',                  3, 'initialising one box from another' );
+        answers( 'my $a = 1; my $b = 2; my $c = 3; $c = $a; return $c;', 1, 'assignment into a third box' );
+        answers( 'my $a = 1; my $b = 2; my $c = 3; $a = $b; $b = $c; return $a + $b + $c;', 8, 'a chain of moves' );
+        answers( 'my $x = 2.5; my $y = $x; return $y == 2.5 ? 1 : 0;', 1, 'a float box copied between variables' );
+    };
     subtest 'the payload is stored at the width of the value' => sub {
         answers( 'my $x = 42; return $x + 1;',             43, 'an i64 payload is 8 bytes wide' );
         answers( 'my $x = 0; my $y = 42; return $y - $x;', 42, 'subtraction through two boxes' );
