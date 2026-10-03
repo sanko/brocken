@@ -350,6 +350,10 @@ my i64 @arr = [1,2,3];  # sized from literal count
 
 String comparison (`eq`, `ne`, `lt`, `gt`, `le`, `ge`, `cmp`) is deferred - see §2.17.
 
+#### 2.3.1 Numeric Exactness
+
+Untyped arithmetic (`my $x;`) promotes operands to `f64` (Perl-like). Integer values above `2^53` are not represented exactly in untyped arithmetic due to double-precision floating point limits. Integer-only operators (`<<`, `>>`, `&`, `|`, `^`, `&&`, `||`, `%`) operate on integer values and remain exact for values that fit in `i64` (Wasm has no float shift/remainder). Typed arithmetic (`my i64 $x; my f64 $y;`) is exact for integer types within their range; mixing typed operands follows the same promotion rules (integer promoted to float when meeting float). Decimal literals are parsed as `f64`. Note: `f32` is not supported as a distinct target type in current lowering.
+
 ### 2.4 Control Flow
 
 ```perl
