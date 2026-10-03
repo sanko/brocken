@@ -36,8 +36,44 @@ class Brocken::Jenny::Lowerer::Wasm {
         for my $block ( $ir_func->blocks->@* ) {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
             if ( $heap_base_param && $is_entry && $ir_func->blocks->[0] == $block ) {
+
+                # Seed at the arena base, not at %__heap_base itself. The ICB
+                # that %__heap_base points at is 144 bytes of runtime state and
+                # the Immix block header starts right after it, so handing out
+                # frames from the base itself made the first few allocas land on
+                # top of it: the block metadata at base+144, and -- the visible
+                # one -- the fuel counter at base+64, which every function reads
+                # to decide whether to keep recursing. That is why fib(8)
+                # returned 21 and fib(9) returned 0: eight frames of 24 bytes
+                # each just reached the end of the header, and the ninth
+                # overwrote the fuel the next call was about to read. 144 + 16
+                # is the arena base the runtime itself starts its heap cursor at
+                # (Brocken::Runtime::_init).
                 $mbb->add_instruction( $self->_wasm_push_vreg( '%__heap_base', 'heap_ptr: seed from base', Brocken::Lindsay::IR::Type::ptr() ) );
+                $mbb->add_instruction(
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode   => 'i64_const',
+                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 160 ) ],
+                        comment  => 'heap_ptr: skip ICB and block header'
+                    )
+                );
+                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'heap_ptr: arena base' ) );
                 $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'heap_ptr: seed', Brocken::Lindsay::IR::Type::ptr() ) );
+            }
+
+            # Every other function brackets its frame: keep the frame pointer it
+            # was called with, and hand it back on the way out. Sharing one
+            # module global removes the collision between a callee's frame and
+            # its caller's, but on its own the bump only ever grows -- nothing
+            # ever lowered it back -- so a loop that called a function 40000
+            # times walked the pointer off the end of the 1MB heap and trapped
+            # with "out of bounds memory access". A callee restores the value it
+            # was given, so each frame is released when its call returns and
+            # recursion nests instead of accumulating. The caller's frame sits
+            # below the saved pointer, so it is untouched.
+            if ( !$is_entry && $ir_func->blocks->[0] == $block ) {
+                $mbb->add_instruction( $self->_wasm_push_global( '%heap_ptr', 'heap_ptr: save incoming' ) );
+                $mbb->add_instruction( $self->_wasm_set_vreg( '%__heap_save', 'heap_ptr: save incoming', Brocken::Lindsay::IR::Type::ptr() ) );
             }
             if ( $ir_func->blocks->[0] != $block ) {
                 $mbb->add_instruction(
@@ -2853,6 +2889,15 @@ class Brocken::Jenny::Lowerer::Wasm {
                                 );
                             }
                         }
+                    }
+
+                    # Give the frame back before returning. The return value is
+                    # already on the operand stack and global.set does not touch
+                    # that stack, so this cannot disturb it. The entry has no
+                    # caller to hand the frame back to and keeps its own.
+                    if ( !$is_entry ) {
+                        $mbb->add_instruction( $self->_wasm_push_vreg( '%__heap_save', 'heap_ptr: restore', Brocken::Lindsay::IR::Type::ptr() ) );
+                        $mbb->add_instruction( $self->_wasm_set_global( '%heap_ptr', 'heap_ptr: restore' ) );
                     }
                     $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => '' ) );
                 }
