@@ -96,11 +96,8 @@ SKIP: {
         # out to: interpolating the empty $wasmtime left `sh` an empty command
         # to run and it reported "Permission denied", failing the check for a
         # reason that had nothing to do with the module.
-        my $status
-            = $runner eq 'wasmtime'
-            ? system( qq["$wasmtime" compile "$file" -o "$null" 2>&1] )
-            : system( 'node', '-e',
-            "const fs=require('fs');process.exit(WebAssembly.validate(fs.readFileSync('$file'))?0:1);" );
+        my $status = $runner eq 'wasmtime' ? system(qq["$wasmtime" compile "$file" -o "$null" 2>&1]) :
+            system( 'node', '-e', "const fs=require('fs');process.exit(WebAssembly.validate(fs.readFileSync('$file'))?0:1);" );
         is $status, 0, $name or diag 'the module did not validate';
     }
     unlink $file if -e $file;

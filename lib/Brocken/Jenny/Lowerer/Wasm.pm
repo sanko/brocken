@@ -57,7 +57,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                         comment  => 'heap_ptr: skip ICB and block header'
                     )
                 );
-                $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'heap_ptr: arena base' ) );
+                $mbb->add_instruction(
+                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'heap_ptr: arena base' ) );
                 $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'heap_ptr: seed', Brocken::Lindsay::IR::Type::ptr() ) );
             }
 

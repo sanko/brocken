@@ -1247,10 +1247,11 @@ class Brocken::Katsuro::Lowerer {
 
     method lower_list_var_decl($ast) {
         my ( $line, $col ) = ( $ast->line, $ast->col );
-        my $i64_type = Brocken::Lindsay::IR::Type::i64();
-        my $ptr_type = Brocken::Lindsay::IR::Type::ptr();
-        my @targets  = $ast->targets->@*;
-        my $list_ptr = $self->lower_expression( $ast->expr );
+        my $i64_type     = Brocken::Lindsay::IR::Type::i64();
+        my $ptr_type     = Brocken::Lindsay::IR::Type::ptr();
+        my $dynamic_type = Brocken::Lindsay::IR::Type::dynamic();
+        my @targets      = $ast->targets->@*;
+        my $list_ptr     = $self->lower_expression( $ast->expr );
         for my $i ( 0 .. $#targets ) {
             my $t       = $targets[$i];
             my $ir_type = $self->type_from_name( $t->{type} );
@@ -1261,8 +1262,13 @@ class Brocken::Katsuro::Lowerer {
             }
             my $offset    = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $i * 8 );
             my $elem_addr = $builder->build_add( $list_ptr, $offset, undef, $line, $col );
-            my $elem_raw  = $builder->build_load( $i64_type, $elem_addr, undef, $line, $col );
-            my $elem_val  = $self->maybe_convert_type( $elem_raw, $ir_type );
+
+            # The slot already holds a box pointer (see `lower_list_expr`), so it
+            # is read as a dynamic and not boxed again. Reading it as an i64 and
+            # converting to `Any` put a second box around the first, so every
+            # unbox downstream read a pointer where it expected a payload.
+            my $elem_dyn = $builder->build_load( $dynamic_type, $elem_addr, undef, $line, $col );
+            my $elem_val = $t->{type} eq 'Any' ? $elem_dyn : $self->maybe_convert_type( $elem_dyn, $ir_type, $line, $col );
             if ( $t->{type} eq 'Any' ) {
                 $builder->build_incref( $elem_val, $line, $col );
             }
@@ -1301,30 +1307,56 @@ class Brocken::Katsuro::Lowerer {
         my $op  = $ast->op;
         my ( $line, $col ) = ( $ast->line, $ast->col );
 
-        # An untyped variable is a box, and a box's payload may be a float, so
-        # unbox to whatever the other operand is rather than always to i64.
+        # A float has no bits to shift and no bit pattern to mask, so these operators
+        # have no float form and an untyped operand meeting one stays integral.
+        # `%` is here for the same reason as Perl's: it is an integer modulus.
+        my $integer_only = $op eq '<<' || $op eq '>>' || $op eq '&' || $op eq '|' || $op eq '^' || $op eq '&&' || $op eq '||' || $op eq '%';
+
+        # An untyped variable is a box, and a box's payload may be a float, so an
+        # untyped operand is read at whatever width the other operand is rather
+        # than always as an i64.
+        #
         # Converting both sides to i64 first meant `$x == 1.5` was built as a
         # comparison of two integers: the float-ness of the literal was gone
         # before the comparison existed, so no backend could recover it.
-        my $native = Brocken::Lindsay::IR::Type::i64();
+        #
+        # When the other operand is itself an integer there is still nothing to
+        # go on, because the box might hold a float either way, so arithmetic on
+        # an untyped operand is done in f64. That is Perl's scalar rule, under
+        # which `1.5 + 1` is 2.5. The alternative -- unboxing to i64 and reading a
+        # float payload as its bit pattern -- made `1.5 + 2.5` wrong, and wrong in
+        # a way that looked right for a good while: IEEE-754 orders positive floats
+        # the same way their bit patterns order as integers, so `$x + $y`, `$x < $y`
+        # and `$x == $y` all came out right by accident and only `$x > $y` showed
+        # the fault.
         if ( $lhs->type->kind eq 'dynamic' || $rhs->type->kind eq 'dynamic' ) {
-            my $target = $native;
-
-            # Only a float operand changes the target. Integers keep unboxing
-            # to i64 and letting the width promotion below sort out the rest,
-            # which is what every existing integer path expects.
-            if    ( $lhs->type->kind eq 'dynamic' && $rhs->type->kind eq 'float' ) { $target = $rhs->type }
-            elsif ( $rhs->type->kind eq 'dynamic' && $lhs->type->kind eq 'float' ) { $target = $lhs->type }
+            my $target
+                = $integer_only             ? Brocken::Lindsay::IR::Type::i64() :
+                $lhs->type->kind eq 'float' ? $lhs->type :
+                $rhs->type->kind eq 'float' ? $rhs->type :
+                Brocken::Lindsay::IR::Type::f64();
             $lhs = $self->maybe_convert_type( $lhs, $target );
             $rhs = $self->maybe_convert_type( $rhs, $target );
         }
 
-        # Unify types for mixed int/float operations: convert RHS to match LHS
-        # type.  This ensures the MIR lowerer sees two operands of the same
-        # type kind (both float or both int) and can emit the correct opcode
-        # (fadd vs add, fcmp vs icmp, etc.).
+        # Unify types for mixed int/float operations: both sides end up the same
+        # type kind (both float or both int) so the MIR lowerer can emit the
+        # correct opcode (fadd vs add, fcmp vs icmp, etc.).
+        #
+        # The integer side is promoted up to the float, not the other way round.
+        # Converting the float to the integer type truncated it, so
+        # `my i64 $a = 1; my f64 $b = 1.5; $a == $b` compared 1 against 1 and
+        # answered true, `$a < $b` compared 1 against 1 and answered false, and
+        # `my i64 $a = 2; $a * $b` computed 2 * 1. Every one of those was wrong
+        # in fully typed code, on every backend, and no backend could recover
+        # the fraction once the lowering had thrown it away.
         if ( $lhs->type->kind ne $rhs->type->kind && $lhs->type->kind ne 'dynamic' && $rhs->type->kind ne 'dynamic' ) {
-            $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
+            if ( $lhs->type->kind eq 'int' && $rhs->type->kind eq 'float' ) {
+                $lhs = $self->maybe_convert_type( $lhs, $rhs->type );
+            }
+            else {
+                $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
+            }
         }
 
         # Shift operations use LHS type for result width regardless of RHS.
@@ -1800,6 +1832,31 @@ class Brocken::Katsuro::Lowerer {
 
             # Reinterpret: dynamic -> ptr is a no-op; Any vars ARE pointers to fat scalars
             return $val if $target_type->kind eq 'ptr';
+
+            # A direct unbox is a blind payload load: it reads the eight bytes at
+            # offset 8 at whatever width the context asked for, without looking
+            # at the tag. So a float payload read into an i64 came back as its
+            # bit pattern, and an integer payload read into an f64 came back as
+            # a denormal built out of a small integer. The runtime helpers read
+            # the tag first and convert, which is what makes the value mean what
+            # the box actually holds: unbox_f64 widens an integer payload,
+            # unbox_i64 truncates a float payload toward zero.
+            #
+            # f32 and i128 keep the direct load. There is no fptrunc/fpext in the
+            # IR to narrow what unbox_f64 returns, and unbox_i64 would only ever
+            # hand back the low eight bytes of an i128 payload. Both were already
+            # excluded as unsupported; this does not make them worse.
+            my $kind = $target_type->kind;
+            my $bits = $target_type->bits;
+            if ( $kind eq 'float' && $bits == 64 ) {
+                my $fn = $functions->{'Brocken::Runtime::unbox_f64'} or Carp::croak("Runtime function unbox_f64 not found at line $line, col $col");
+                return $builder->build_call( $fn, [$val], undef, $line, $col );
+            }
+            if ( $kind eq 'int' && $bits <= 64 ) {
+                my $fn   = $functions->{'Brocken::Runtime::unbox_i64'} or Carp::croak("Runtime function unbox_i64 not found at line $line, col $col");
+                my $wide = $builder->build_call( $fn, [$val], undef, $line, $col );
+                return $bits == 64 ? $wide : $self->maybe_convert_type( $wide, $target_type, $line, $col );
+            }
             return $builder->build_unbox( $val, $target_type, undef, $line, $col );
         }
 
@@ -2053,11 +2110,33 @@ class Brocken::Katsuro::Lowerer {
 
     method lower_list_expr($ast) {
         my ( $line, $col ) = ( $ast->line, $ast->col );
-        my $i64_type = Brocken::Lindsay::IR::Type::i64();
-        my $ptr_type = Brocken::Lindsay::IR::Type::ptr();
+        my $i64_type     = Brocken::Lindsay::IR::Type::i64();
+        my $ptr_type     = Brocken::Lindsay::IR::Type::ptr();
+        my $dynamic_type = Brocken::Lindsay::IR::Type::dynamic();
+
+        # A list slot is one untagged eight-byte cell, and the reader
+        # (`lower_list_var_decl`) has no way to know what it was written as. So a
+        # slot cannot hold a float: the bits of 1.5 read back as an integer are
+        # 4607182418800017408, not 1.5. Every element is boxed on the way in, which
+        # puts the tag next to the payload and lets the reader convert the box
+        # into whatever the target declared.
+        #
+        # This is also the representation the rest of the runtime already assumes.
+        # `gc_scan_list` reads each slot and treats it as a pointer when it looks
+        # like one, and the reader already increfs an `Any` target on the
+        # assumption that the slot holds a box.
+        #
+        # An element that is already untyped is stored as it stands rather than
+        # boxed again, so `my ($a, $b) = ($x, $x)` puts the one box each slot can
+        # hold rather than a box around a pointer to a box. That stops the second
+        # box, not the second problem: the slot does not take a reference of its
+        # own, so a box built in the function that builds the list is released
+        # when that function returns. That is separate from the slot
+        # representation and is listed under Known Bugs in TODO.md.
         my @elements;
         for my $elem ( $ast->elements->@* ) {
-            push @elements, $self->lower_expression($elem);
+            my $val = $self->lower_expression($elem);
+            push @elements, $val->type->kind eq 'dynamic' ? $val : $self->maybe_convert_type( $val, $dynamic_type, $line, $col );
         }
         my $count         = scalar @elements;
         my $hb            = $builder->build_load( $ptr_type, $symbols->{'__heap_base'}, undef, $line, $col );
