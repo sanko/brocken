@@ -2921,7 +2921,14 @@ class Brocken::Jenny::Lowerer::Wasm {
                 $op = $ir_val->type->bits >= 64 ? 'f64_const' : 'f32_const';
             }
             else {
-                my $bits = $ir_val->type && $ir_val->type->kind eq 'int' ? $ir_val->type->bits : 32;
+
+                # A pointer or a boxed value is a 64-bit operand in Wasm just as
+                # an i64 is, so a constant standing in for one -- the zero a
+                # fuel-exit stub returns from a function declared `-> ptr` or
+                # `-> Any` -- must be pushed as an i64. Reading only `int` here
+                # made that stub push an i32 against a 64-bit return type and
+                # the module failed to validate.
+                my $bits = $self->_scalar_bits( $ir_val->type ) || 32;
                 $op = $bits >= 64 ? 'i64_const' : 'i32_const';
             }
             my $value = $ir_val->value;
