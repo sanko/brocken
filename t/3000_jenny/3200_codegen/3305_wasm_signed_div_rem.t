@@ -75,7 +75,17 @@ sub validates ( $src, $name ) {
     Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
 SKIP: {
         skip 'no wasm binary runner available', 1 unless $runner;
-        is system(qq["$wasmtime" compile "$file" -o "$null" 2>&1]), 0, $name or diag qx["$wasmtime" compile "$file" -o "$null" 2>&1];
+
+        # `$runner` may be node, in which case there is no wasmtime to shell
+        # out to: interpolating the empty $wasmtime left `sh` an empty command
+        # to run and it reported "Permission denied", failing the check for a
+        # reason that had nothing to do with the module.
+        my $status
+            = $runner eq 'wasmtime'
+            ? system( qq["$wasmtime" compile "$file" -o "$null" 2>&1] )
+            : system( 'node', '-e',
+            "const fs=require('fs');process.exit(WebAssembly.validate(fs.readFileSync('$file'))?0:1);" );
+        is $status, 0, $name or diag 'the module did not validate';
     }
     unlink $file if -e $file;
     return;
