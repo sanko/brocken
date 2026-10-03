@@ -1828,8 +1828,7 @@ class Brocken::Jenny::Lowerer::Wasm {
                         # so they are refused by name instead of being mapped to
                         # an opcode like "f32_rem_u" that could never encode.
                         if ( $p =~ /^f/ && $opcode =~ /\A(?:rem|urem|and|or|xor|shl|lshr|ashr)\z/ ) {
-                            die "Wasm has no $opcode for $p; float bitwise, shift and remainder "
-                                . "are not implemented on this target\n";
+                            die "Wasm has no $opcode for $p; float bitwise, shift and remainder " . "are not implemented on this target\n";
                         }
                         my %map = (
                             add  => "${p}_add",

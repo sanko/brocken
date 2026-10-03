@@ -716,7 +716,7 @@ BROCKEN
     # signed value and then zero-extending it is the value the unsigned type holds.
     like( $text, qr/sext\s+i8\s+\S+\s+to\s+i16/,  'narrower signed operand reaches the target width as a signed value' );
     like( $text, qr/zext\s+i16\s+\S+\s+to\s+u16/, 'then lands in the unsigned type with the bits above it cleared' );
-    like( $text, qr/icmp\s+uge\s+u16/,          'comparison is unsigned at u16' );
+    like( $text, qr/icmp\s+uge\s+u16/,            'comparison is unsigned at u16' );
 };
 
 # The assertions above cannot tell whether the register ends up holding
@@ -727,25 +727,24 @@ subtest 'Mixed-width signed/unsigned comparisons agree with the widened values' 
 
     # [ lhs type, lhs value, rhs type, rhs value, operator, expected exit ]
     my @cases = (
-        [ 'i8',  -61, 'u16', 65509,      '>=', 0 ],
-        [ 'i8',  -61, 'u16', 65509,      '<',  1 ],
-        [ 'i8',  -61, 'u16', 65475,      '==', 1 ],
-        [ 'i8',  -1,  'u16', 65535,      '>=', 1 ],
-        [ 'i8',  100, 'u16', 100,        '==', 1 ],
-        [ 'i8',  127, 'u16', 32767,      '<',  1 ],
-        [ 'i16', -1,  'u32', 4294967295, '==', 1 ],
-        [ 'i16', -2,  'u32', 4294967294, '<',  0 ],
-        [ 'i8',  -61, 'u32', 4294967235, '==', 1 ],
+        [ 'i8',  -61, 'u16', 65509,                '>=', 0 ],
+        [ 'i8',  -61, 'u16', 65509,                '<',  1 ],
+        [ 'i8',  -61, 'u16', 65475,                '==', 1 ],
+        [ 'i8',  -1,  'u16', 65535,                '>=', 1 ],
+        [ 'i8',  100, 'u16', 100,                  '==', 1 ],
+        [ 'i8',  127, 'u16', 32767,                '<',  1 ],
+        [ 'i16', -1,  'u32', 4294967295,           '==', 1 ],
+        [ 'i16', -2,  'u32', 4294967294,           '<',  0 ],
+        [ 'i8',  -61, 'u32', 4294967235,           '==', 1 ],
         [ 'i32', -1,  'u64', 18446744073709551615, '>=', 1 ],
-        [ 'i8',  -1,  'u8',  255,        '>=', 1 ],
+        [ 'i8',  -1,  'u8',  255,                  '>=', 1 ],
     );
-
     for my $case (@cases) {
         my ( $lt, $lv, $rt, $rv, $op, $want ) = @$case;
         my $label = "$lt $lv $op $rt $rv";
         my $src   = "my $lt \$a = $lv; my $rt \$b = $rv; return \$a $op \$b ? 1 : 0;";
-        my $mod   = eval { $host->compile( $src ) };
-        if ($@) { fail( "$label: compile died: $@" ); next }
+        my $mod   = eval { $host->compile($src) };
+        if ($@) { fail("$label: compile died: $@"); next }
         my $file = temp_path('mixedwidth') . $host->ext;
         $host->linker->write_executable( $file, $host->codegen->emit_functions( $mod->functions ), $host->platform );
         run_exec( $file, expected_exit => $want, platform => $host->platform, name => "$label exits $want" );

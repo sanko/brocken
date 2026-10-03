@@ -2935,9 +2935,7 @@ class Brocken::Jenny::Lowerer::ARM64 {
                     # cannot express one, so a float constant reached the box as
                     # its integer value and the float was lost here.
                     my $is_float    = $val->type && $val->type->kind eq 'float';
-                    my $store_op    = $is_float ? 'fstore'
-                        : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm'
-                        : 'store';
+                    my $store_op    = $is_float ? 'fstore' : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store';
                     my $payload_src = $is_float ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val);
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(

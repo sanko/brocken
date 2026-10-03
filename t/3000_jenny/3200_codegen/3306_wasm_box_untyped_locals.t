@@ -43,7 +43,6 @@ use feature qw[class];
 # had been handed a range it should never have believed in. A native target gets
 # away with the same mismatch because its mmap grows on demand.
 # `Brocken::ICB::HEAP_SIZE` is now the single source of truth for that 1MB.
-
 my $host     = Brocken::Katsuro::Platform::parse();
 my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $brocken  = Brocken->new( platform => $platform );
@@ -70,9 +69,10 @@ sub answers ( $src, $want, $name ) {
         @lines = grep {/\S/} split /\n/, $output;
     }
     else {
-        my $js = "const fs=require('fs');const buf=fs.readFileSync('$file');"
-            . 'WebAssembly.instantiate(buf).then(r=>{process.exit(r.instance.exports._BROCKEN_ENTRY(1024));})'
-            . '.catch(e=>{console.error(e);process.exit(1);});';
+        my $js
+            = "const fs=require('fs');const buf=fs.readFileSync('$file');" .
+            'WebAssembly.instantiate(buf).then(r=>{process.exit(Number(r.instance.exports._BROCKEN_ENTRY(BigInt(1024))));})' .
+            '.catch(e=>{console.error(e);process.exit(1);});';
         system( 'node', '-e', $js );
         @lines = ( ( $? >> 8 ) );
     }
@@ -89,10 +89,9 @@ sub validates ( $src, $name ) {
     if ($@) { fail("$name: compile died: $@"); return }
     my $file = temp_path('wasm_box') . '.wasm';
     Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
-    SKIP: {
+SKIP: {
         skip 'no wasm binary runner available', 1 unless $runner;
-        is system( qq["$wasmtime" compile "$file" -o "$null" 2>&1] ), 0, $name
-            or diag qx["$wasmtime" compile "$file" -o "$null" 2>&1];
+        is system(qq["$wasmtime" compile "$file" -o "$null" 2>&1]), 0, $name or diag qx["$wasmtime" compile "$file" -o "$null" 2>&1];
     }
     unlink $file if -e $file;
     return;
@@ -100,9 +99,10 @@ sub validates ( $src, $name ) {
 
 # The declared memory has to cover the heap the entry preamble promises _init,
 # or the allocator will eventually hand out an address past the end of it.
-sub memory_covers_heap ( $name ) {
+sub memory_covers_heap ($name) {
     my $file = temp_path('wasm_box') . '.wasm';
-    Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $brocken->compile('return 42;')->functions ), $platform );
+    Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $brocken->compile('return 42;')->functions ),
+        $platform );
     my $bytes = do { open my $fh, '<:raw', $file or die $!; local $/; <$fh> };
     unlink $file if -e $file;
 
@@ -123,8 +123,7 @@ sub memory_covers_heap ( $name ) {
         $pos += $size;
     }
     ok( defined $pages, 'the module has a memory section' );
-    cmp_ok( $pages * 65536, '>=', Brocken::ICB::HEAP_SIZE,
-        "$name (${pages} page(s))" );
+    cmp_ok( $pages * 65536, '>=', Brocken::ICB::HEAP_SIZE, "$name (${pages} page(s))" );
     return;
 }
 
@@ -139,57 +138,49 @@ sub _uleb ( $bytes, $pos ) {
     }
     return ( $pos, $result );
 }
-
 SKIP: {
     skip 'Neither wasmtime nor node are installed', 1 unless $runner;
-
     subtest 'a single untyped variable' => sub {
-        answers( 'return 42;', 42, 'the simplest program runs' );
-        answers( 'my $x = 42; return 42;', 42, 'a boxed variable is never read' );
-        answers( 'my $x = 42; return $x;', 42, 'a boxed 64-bit value reads back whole' );
+        answers( 'return 42;',                             42, 'the simplest program runs' );
+        answers( 'my $x = 42; return 42;',                 42, 'a boxed variable is never read' );
+        answers( 'my $x = 42; return $x;',                 42, 'a boxed 64-bit value reads back whole' );
         answers( 'my $x = 42; my i64 $y = $x; return $y;', 42, 'a boxed value widens to i64' );
     };
-
     subtest 'two or more untyped variables allocate' => sub {
 
         # Each of these needs a second heap allocation. One fit inside the page
         # that was really reserved; the second did not.
-        answers( 'my $a = 3; my $b = 4; return $a + $b;', 7, 'two untyped variables add' );
-        answers( 'my $a = 3; my $b = 4; return $a;', 3, 'the first of two reads back' );
-        answers( 'my $a = 3; my $b = 4; return $b;', 4, 'the second of two reads back' );
-        answers( 'my $a = 3; my $b = 4; return 42;', 42, 'two untyped variables, neither read' );
+        answers( 'my $a = 3; my $b = 4; return $a + $b;', 7,  'two untyped variables add' );
+        answers( 'my $a = 3; my $b = 4; return $a;',      3,  'the first of two reads back' );
+        answers( 'my $a = 3; my $b = 4; return $b;',      4,  'the second of two reads back' );
+        answers( 'my $a = 3; my $b = 4; return 42;',      42, 'two untyped variables, neither read' );
     };
-
     subtest 'many untyped variables' => sub {
         for my $n ( 1 .. 6 ) {
-            my $decls = join ' ', map { "my \$v$_ = 1;" } 1 .. $n;
-            my $sum  = join ' + ', map { "\$v$_" } 1 .. $n;
+            my $decls = join ' ',   map {"my \$v$_ = 1;"} 1 .. $n;
+            my $sum   = join ' + ', map {"\$v$_"} 1 .. $n;
             answers( "$decls return $sum;", $n, "$n untyped variables sum to $n" );
         }
     };
-
     subtest 'untyped and typed variables mix' => sub {
         answers( 'my $a = 3; my i64 $b = 7; return $a + $b;', 10, 'untyped then typed' );
-        answers( 'my i64 $a = 3; my $b = 1; return $a + $b;',  4, 'typed then untyped' );
+        answers( 'my i64 $a = 3; my $b = 1; return $a + $b;', 4,  'typed then untyped' );
     };
-
     subtest 'the payload is stored at the width of the value' => sub {
-        answers( 'my $x = 42; return $x + 1;', 43, 'an i64 payload is 8 bytes wide' );
+        answers( 'my $x = 42; return $x + 1;',             43, 'an i64 payload is 8 bytes wide' );
         answers( 'my $x = 0; my $y = 42; return $y - $x;', 42, 'subtraction through two boxes' );
 
         # A 64-bit value that does not fit in the low half, which is what a
         # 4-byte store would have truncated to zero.
         answers( 'my $x = 4294967296; return $x >> 32;', 1, 'a payload above 32 bits survives' );
     };
-
     subtest 'the generated modules validate' => sub {
-        validates( 'my $x = 42; return $x;',                    'one untyped variable validates' );
-        validates( 'my $a = 3; my $b = 4; return $a + $b;',     'two untyped variables validate' );
-        validates( 'my $x = 4294967296; return $x >> 32;',     'a wide untyped value validates' );
+        validates( 'my $x = 42; return $x;',                'one untyped variable validates' );
+        validates( 'my $a = 3; my $b = 4; return $a + $b;', 'two untyped variables validate' );
+        validates( 'my $x = 4294967296; return $x >> 32;',  'a wide untyped value validates' );
     };
-
     subtest 'the declared memory covers the promised heap' => sub {
-        memory_covers_heap('the memory section reserves the whole heap' );
+        memory_covers_heap('the memory section reserves the whole heap');
     };
 }
 
@@ -199,5 +190,4 @@ SKIP: {
 # sees it, and x86-64 truncates to an integer where Wasm returns the raw bits.
 # That is a frontend gap, recorded in TODO.md; asserting either behaviour here
 # would only pin down which way it is currently wrong.
-
 done_testing;

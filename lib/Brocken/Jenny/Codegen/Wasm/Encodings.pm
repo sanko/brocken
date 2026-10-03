@@ -9,8 +9,8 @@ package Brocken::Jenny::Codegen::Wasm::Encodings {
                 GLOBAL_GET GLOBAL_SET
                 SELECT SELECT_T
                 I32_LOAD I64_LOAD F32_LOAD F64_LOAD
-I32_LOAD8_S I32_LOAD8_U I32_LOAD16_S I32_LOAD16_U
-        I64_LOAD8_S I64_LOAD8_U I64_LOAD16_S I64_LOAD16_U I64_LOAD32_S I64_LOAD32_U
+                I32_LOAD8_S I32_LOAD8_U I32_LOAD16_S I32_LOAD16_U
+                I64_LOAD8_S I64_LOAD8_U I64_LOAD16_S I64_LOAD16_U I64_LOAD32_S I64_LOAD32_U
                 I32_STORE I64_STORE F32_STORE F64_STORE
                 I32_STORE8 I32_STORE16
                 I64_STORE8 I64_STORE16 I64_STORE32
@@ -53,10 +53,10 @@ I32_LOAD8_S I32_LOAD8_U I32_LOAD16_S I32_LOAD16_U
         CALL        => 0x10,    # call <funcidx>
 
         # Variable
-        LOCAL_GET => 0x20,      # local.get <localidx>
-        LOCAL_SET => 0x21,      # local.set <localidx>
-        GLOBAL_GET => 0x23,    # global.get <globalidx>
-        GLOBAL_SET => 0x24,    # global.set <globalidx>
+        LOCAL_GET  => 0x20,     # local.get <localidx>
+        LOCAL_SET  => 0x21,     # local.set <localidx>
+        GLOBAL_GET => 0x23,     # global.get <globalidx>
+        GLOBAL_SET => 0x24,     # global.set <globalidx>
 
         # Parametric
         SELECT   => 0x1B,       # select
@@ -67,16 +67,16 @@ I32_LOAD8_S I32_LOAD8_U I32_LOAD16_S I32_LOAD16_U
         I64_LOAD     => 0x29,    # i64.load <align> <offset>
         F32_LOAD     => 0x2A,    # f32.load <align> <offset>
         F64_LOAD     => 0x2B,    # f64.load <align> <offset>
-I32_LOAD8_S  => 0x2C,    # i32.load8_s
-    I32_LOAD8_U  => 0x2D,    # i32.load8_u
-    I32_LOAD16_S => 0x2E,    # i32.load16_s
-    I32_LOAD16_U => 0x2F,    # i32.load16_u
-    I64_LOAD8_S  => 0x30,    # i64.load8_s
-    I64_LOAD8_U  => 0x31,    # i64.load8_u
-    I64_LOAD16_S => 0x32,    # i64.load16_s
-    I64_LOAD16_U => 0x33,    # i64.load16_u
-    I64_LOAD32_S => 0x34,    # i64.load32_s
-    I64_LOAD32_U => 0x35,    # i64.load32_u
+        I32_LOAD8_S  => 0x2C,    # i32.load8_s
+        I32_LOAD8_U  => 0x2D,    # i32.load8_u
+        I32_LOAD16_S => 0x2E,    # i32.load16_s
+        I32_LOAD16_U => 0x2F,    # i32.load16_u
+        I64_LOAD8_S  => 0x30,    # i64.load8_s
+        I64_LOAD8_U  => 0x31,    # i64.load8_u
+        I64_LOAD16_S => 0x32,    # i64.load16_s
+        I64_LOAD16_U => 0x33,    # i64.load16_u
+        I64_LOAD32_S => 0x34,    # i64.load32_s
+        I64_LOAD32_U => 0x35,    # i64.load32_u
 
         # Memory - Store
         I32_STORE   => 0x36,     # i32.store <align> <offset>
