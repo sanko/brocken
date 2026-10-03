@@ -11,30 +11,33 @@ class Brocken::Jenny::Lowerer::Wasm {
         my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
         my $inst_idx = 0;
 
-        # Seed the bump allocator from the heap base before anything is
-        # allocated. %heap_ptr is a lowering-only register: the allocator
-        # reads and adds to it, but nothing ever loaded the base into it, so it
-        # started at zero and the first alloca handed out address 0. That is the
-        # same address the entry preamble stores __heap_base into, and the same
-        # region the runtime keeps its globals and arena in, so a boxed value
-        # could be written over by -- or read back as -- one of those, and the
-        # address that came back was then used for the next store. The result was
-        # a trap on an address that tracked the box tag, or a silently wrong
-        # value. One boxed variable happened to survive it; a second did not.
+        # Point the frame bump pointer at the heap base once, in the entry, before
+        # anything is allocated. %heap_ptr is a lowering-only register: the
+        # allocator reads it and adds to it, but nothing ever loaded the base
+        # into it, so it started at zero and the first alloca handed out address
+        # 0. That is the same address the entry preamble stores __heap_base
+        # into, and the same region the runtime keeps its globals and arena in,
+        # so a boxed value could be written over by -- or read back as -- one of
+        # those, and the address that came back was then used for the next
+        # store. The result was a trap on an address that tracked the box tag, or
+        # a silently wrong value. One boxed variable happened to survive it; a
+        # second did not.
+        #
+        # Only the entry seeds it. The pointer is a module global, so every
+        # function shares one; re-seeding it on every call would hand the callee
+        # the addresses the caller had just handed out, which is the collision
+        # the global exists to remove.
         my $heap_base_param;
         for my $p ( $ir_func->params->@* ) {
             next unless defined $p->name;
             if ( $p->name eq '%__heap_base' ) { $heap_base_param = $p; last }
         }
+        my $is_entry = ( $ir_func->name // '' ) eq '_BROCKEN_ENTRY';
         for my $block ( $ir_func->blocks->@* ) {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
-            if ( $heap_base_param && $ir_func->blocks->[0] == $block ) {
-                $mbb->add_instruction(
-                    $self->_wasm_push_vreg( '%__heap_base', 'heap_ptr: seed from base', Brocken::Lindsay::IR::Type::ptr() )
-                );
-                $mbb->add_instruction(
-                    $self->_wasm_set_vreg( '%heap_ptr', 'heap_ptr: seed', Brocken::Lindsay::IR::Type::ptr() )
-                );
+            if ( $heap_base_param && $is_entry && $ir_func->blocks->[0] == $block ) {
+                $mbb->add_instruction( $self->_wasm_push_vreg( '%__heap_base', 'heap_ptr: seed from base', Brocken::Lindsay::IR::Type::ptr() ) );
+                $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'heap_ptr: seed', Brocken::Lindsay::IR::Type::ptr() ) );
             }
             if ( $ir_func->blocks->[0] != $block ) {
                 $mbb->add_instruction(
@@ -2899,6 +2902,7 @@ class Brocken::Jenny::Lowerer::Wasm {
     # operand, and falls back to i32 when there is none, so an untyped temporary
     # used with 64-bit operations would be declared too narrow.
     method _wasm_push_vreg( $name, $label, $type = undef ) {
+        return $self->_wasm_push_global( $name, $label ) if $name eq '%heap_ptr';
         return Brocken::Jenny::MIR::MachineInstruction->new(
             opcode   => 'local_get',
             operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $type ) ],
@@ -2907,9 +2911,29 @@ class Brocken::Jenny::Lowerer::Wasm {
     }
 
     method _wasm_set_vreg( $name, $label, $type = undef ) {
+        return $self->_wasm_set_global( $name, $label ) if $name eq '%heap_ptr';
         return Brocken::Jenny::MIR::MachineInstruction->new(
             opcode   => 'local_set',
             operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $type ) ],
+            comment  => $label
+        );
+    }
+
+    # %heap_ptr lives in a module global rather than a function local. See
+    # Brocken::Jenny::Linker::Wasm::_global_section for why a per-function copy
+    # let a callee hand out addresses its caller was still using.
+    method _wasm_push_global( $name, $label ) {
+        return Brocken::Jenny::MIR::MachineInstruction->new(
+            opcode   => 'global_get',
+            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'global', value => 0 ) ],
+            comment  => $label
+        );
+    }
+
+    method _wasm_set_global( $name, $label ) {
+        return Brocken::Jenny::MIR::MachineInstruction->new(
+            opcode   => 'global_set',
+            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'global', value => 0 ) ],
             comment  => $label
         );
     }

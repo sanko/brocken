@@ -91,8 +91,9 @@ class Brocken::Jenny::Codegen::Wasm {
             $vreg_map{ $ir_params->[$i]->name } = $i;
         }
 
-        # Reserve a local for the linear-memory heap bump pointer
-        $vreg_map{'%heap_ptr'} = $next_local++;
+        # %heap_ptr is a module global now, not a local: see
+        # Brocken::Jenny::Linker::Wasm::_global_section. It is deliberately left
+        # out of %vreg_map so no local slot is spent on it.
 
         # A Wasm branch may only reach a label that encloses it, so an arbitrary
         # control-flow graph cannot be laid out as a chain of nested blocks. Each
@@ -198,6 +199,12 @@ class Brocken::Jenny::Codegen::Wasm {
                 elsif ( $opcode eq 'local_get' ) {
                     my $lid = $vreg_map{ $ops[0]->value } //= $next_local++;
                     $$buf .= pack( 'C', LOCAL_GET ) . $self->_uleb($lid);
+                }
+                elsif ( $opcode eq 'global_get' ) {
+                    $$buf .= pack( 'C', GLOBAL_GET ) . $self->_uleb(0);
+                }
+                elsif ( $opcode eq 'global_set' ) {
+                    $$buf .= pack( 'C', GLOBAL_SET ) . $self->_uleb(0);
                 }
                 elsif ( $opcode eq 'i32_const' ) {
                     $$buf .= pack( 'C', I32_CONST ) . $self->_sleb( $ops[0]->value );

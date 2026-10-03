@@ -1,29 +1,28 @@
-# core.brocken -- Brocken v0.1 Runtime Primitives
+# core.brocken: Brocken v0.1 Runtime Primitives
 # Automatically compiled alongside user code.
 #
 # ICB (Isolate Control Block) layout: see lib/Brocken/ICB.pm for offsets.
-# Accessor functions below (get_*/set_*) are the single source of truth
-# for ICB field offsets within Brocken runtime code.
+# Accessor functions below (get_*/set_*) are the single source of truth for ICB field offsets within Brocken runtime
+# code.
 #
 # Immix block layout (32 KB = 32768 bytes per block):
 #   [block + 0..15]:     bitmap (128-bit line bitmap, bit N = line N in use)
 #   [block + 16..255]:   Line 0  (240 usable bytes)
 #   [block + 256..511]:  Line 1  (256 bytes)
 #   ...
-#   [block + 32512..32751]: Line 127 (240 usable bytes — last 16 bytes are metadata)
-#   [block + 32752..32759]:  live_count (i64) — number of live allocations in block
-#   [block + 32760..32767]:  next_free (i64) — next line index to start scanning for free lines
+#   [block + 32512..32751]: Line 127 (240 usable bytes - last 16 bytes are metadata)
+#   [block + 32752..32759]:  live_count (i64) - number of live allocations in block
+#   [block + 32760..32767]:  next_free (i64) - next line index to start scanning for free lines
 #   Total per block: 16 + 240 + 126*256 + 240 + 16 = 32768
 #
 # Objects freed by decref (when RC reaches 0) are pushed onto free16_head.
 # The next pointer is stored at [obj + 8] (payload area of the freed object).
-# bump_alloc checks free16_head first (hot path), then falls back to line-aware
-# bump allocation within the current Immix block (cold path).
-# When a block's live_count reaches 0, the entire block is recycled to free_blocks.
+# bump_alloc checks free16_head first (hot path), then falls back to line-aware bump allocation within the current
+# Immix block (cold path). When a block's live_count reaches 0, the entire block is recycled to free_blocks.
 
-# ===== ICB accessor functions =====
-# Offsets match lib/Brocken/ICB.pm constants. If the ICB layout changes,
-# update these functions and regenerate ICB.pm via Brocken::Layout.
+# ICB accessor functions
+# Offsets match lib/Brocken/ICB.pm constants. If the ICB layout changes, update these functions and regenerate ICB.pm
+# via Brocken::Layout.
 sub Brocken::Runtime::get_heap_cursor(ptr $hb) -> ptr {
     return Brocken::load_i64($hb);
 }
@@ -135,12 +134,11 @@ sub Brocken::Runtime::set_thrown_value(ptr $hb, i64 $val) {
 
 # Initialize ICB and Immix heap metadata.
 sub Brocken::Runtime::_init(ptr $heap_base, i64 $heap_size) {
-    # Block starts after the ICB (144 bytes). Cannot read current_block from ICB
-    # yet -- it hasn't been initialized. Compute directly.
+    # Block starts after the ICB (144 bytes). Cannot read current_block from ICB yet, it hasn't been initialized.
+    # Compute directly.
     my ptr $block_base = Brocken::ptr_add($heap_base, 144);
     my ptr $line0_data = Brocken::ptr_add($block_base, 16);
-    # Zero the block metadata: bitmap at [block+0..15], live_count at [block+32752],
-    # next_free at [block+32760].
+    # Zero the block metadata: bitmap at [block+0..15], live_count at [block+32752], next_free at [block+32760].
     Brocken::store_i64($block_base, 0);
     Brocken::store_i64(Brocken::ptr_add($block_base, 8), 0);
     Brocken::store_i64(Brocken::ptr_add($block_base, 32752), 0);
@@ -291,9 +289,8 @@ sub Brocken::Runtime::incref(ptr $obj) {
 }
 
 # Decrement the reference count of a fat scalar at $obj.
-# When RC reaches 0, pushes the object onto the segregated free list
-# for immediate reuse (hot path) AND decrements the containing block's
-# live_count. If live_count reaches 0, the entire block is recycled to free_blocks.
+# When RC reaches 0, pushes the object onto the segregated free list for immediate reuse (hot path) AND decrements the
+# containing block's live_count. If live_count reaches 0, the entire block is recycled to free_blocks.
 sub Brocken::Runtime::decref(ptr $obj, ptr $heap_base) {
     if (Brocken::ptr_cmp_eq($obj, 0)) {
         return;
@@ -314,13 +311,13 @@ sub Brocken::Runtime::decref(ptr $obj, ptr $heap_base) {
         $lc = Brocken::i64_sub($lc, 1);
         Brocken::store_i64($lc_ptr, $lc);
         if (Brocken::ptr_cmp_eq($lc, 0)) {
-            # Block fully empty — recycle to free_blocks
+            # Block fully empty - recycle to free_blocks
             my ptr $fb_head = Brocken::Runtime::get_free_blocks($heap_base);
             Brocken::store_i64($block_base, $fb_head);
             Brocken::Runtime::set_free_blocks($heap_base, $block_base);
         }
     } elsif (Brocken::ptr_cmp_gt($new_rc, 0) && Brocken::ptr_cmp_eq($heap_base, 0) == 0) {
-        # R3: RC > 0 after decrement — suspect for cycle detection.
+        # R3: RC > 0 after decrement - suspect for cycle detection.
         my i64 $flags = Brocken::Runtime::get_gc_flags($obj);
         if (Brocken::ptr_cmp_eq(Brocken::band($flags, 4), 0) && Brocken::ptr_cmp_eq(Brocken::band($flags, 2), 0)) {
             Brocken::Runtime::push_suspect_buffer($obj, $heap_base);
@@ -340,8 +337,7 @@ sub Brocken::Runtime::want_is_void(i64 $__want) -> i64 {
     return Brocken::band($__want, 4);
 }
 
-# ===== Heap introspection (Group A — read-only) =====
-
+#  Heap introspection (Group A - read-only)
 sub Brocken::Runtime::heap_cursor(ptr $heap_base) -> ptr {
     return Brocken::Runtime::get_heap_cursor($heap_base);
 }
@@ -385,8 +381,7 @@ sub Brocken::Runtime::free_blocks_count(ptr $heap_base) -> i64 {
     return $count;
 }
 
-# ===== Group C — High-level helpers =====
-
+#  Group C - High-level helpers
 sub Brocken::Runtime::mem_status(ptr $heap_base) -> i64 {
     my i64 $result = 0;
     my ptr $cursor = Brocken::Runtime::get_immix_cursor($heap_base);
@@ -416,8 +411,7 @@ sub Brocken::Runtime::line_waste(ptr $heap_base) -> i64 {
     return Brocken::ptr_sub($limit, $cursor);
 }
 
-# ===== Group D — Immix bitmap operations =====
-
+#  Group D - Immix bitmap operations
 sub Brocken::Runtime::mark_line(ptr $block, i64 $line_idx) {
     if (Brocken::ptr_cmp_gt(64, $line_idx)) {
         my i64 $old = Brocken::load_i64($block);
@@ -506,8 +500,7 @@ sub Brocken::Runtime::set_next_free(ptr $block, i64 $idx) {
     return;
 }
 
-# ===== R3: Bacon/Rajan Trial Deletion (Cycle Detection) =====
-
+# R3: Bacon/Rajan Trial Deletion (Cycle Detection)
 sub Brocken::Runtime::get_gc_flags(ptr $obj) -> i64 {
     my i64 $header = Brocken::load_i64($obj);
     return Brocken::band(Brocken::shr($header, 16), 255);
@@ -634,7 +627,8 @@ sub Brocken::Runtime::gc_restore_refs(ptr $obj) {
             }
             $i = Brocken::i64_add($i, 1);
         }
-    } elsif (Brocken::ptr_cmp_eq($tag, 8)) {
+    }
+    elsif (Brocken::ptr_cmp_eq($tag, 8)) {
         my i64 $count = Brocken::load_i64(Brocken::ptr_add($obj, 8));
         my i64 $total = Brocken::shl($count, 1);
         my i64 $i = 0;
@@ -781,4 +775,45 @@ sub Brocken::Runtime::suspect_count(ptr $hb) -> i64 {
         $p = Brocken::load_i64(Brocken::ptr_add($p, 8));
     }
     return $count;
+}
+
+# Box tag and payload readers
+#
+# A box is a header word followed by the payload: the header carries the tag in its top byte, so the tag is the header
+# shifted down by 24, and the payload starts 8 bytes in. These three are the whole of "what is this dynamic value, and
+# what is in it".
+sub Brocken::Runtime::box_tag(ptr $dyn) -> i64 {
+    my i64 $header = Brocken::load_i64($dyn);
+    return Brocken::shr(Brocken::band($header, 4278190080), 24);
+}
+
+# Read a boxed payload as an integer, truncating a float toward zero. A payload
+# narrower than i64 needs no extra care, because a narrow read of a wide
+# little-endian payload is exactly a truncation.
+sub Brocken::Runtime::unbox_i64(ptr $dyn) -> i64 {
+    my ptr $payload = Brocken::ptr_add($dyn, 8);
+    my i64 $tag = Brocken::Runtime::box_tag($dyn);
+    if ($tag == 3) {
+        my f64 $f = Brocken::load_f64($payload);
+        my i64 $n = $f;
+        return $n;
+    }
+    if ($tag == 1) {
+        my i32 $n32 = Brocken::load_i32($payload);
+        my i64 $n = $n32;
+        return $n;
+    }
+    return Brocken::load_i64($payload);
+}
+
+# Read a boxed payload as a double, widening an integer payload.
+sub Brocken::Runtime::unbox_f64(ptr $dyn) -> f64 {
+    my ptr $payload = Brocken::ptr_add($dyn, 8);
+    my i64 $tag = Brocken::Runtime::box_tag($dyn);
+    if ($tag == 3) {
+        return Brocken::load_f64($payload);
+    }
+    my i64 $n = Brocken::Runtime::unbox_i64($dyn);
+    my f64 $f = $n;
+    return $f;
 }
