@@ -87,4 +87,90 @@ BROCKEN
         unlink $file;
     }
 };
+
+# A list slot is one untagged eight-byte cell, so a list could not carry a float
+# at all: the bits of 1.5 read back as an integer are 4607182418800017408. Every
+# element is now boxed on the way in, which is the representation `gc_scan_list`
+# and the `Any` incref on the reading side already assumed.
+subtest 'list elements keep their own kind' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 3 unless $host->is_native;
+
+        # A list built from an untyped value is not asserted here: `my $u = 7;
+        # return ($u, 2);` puts the box in the slot without taking a reference to
+        # it, so the box is released when `mk` returns and the slot reads back as
+        # whatever is left in that memory -- 58 on the code before this file's
+        # change and 0 after it. Nothing else in this file reads an untyped value
+        # back out of a list, and the ownership question behind it is a separate
+        # fault from a slot not recording what an element was. Both are in TODO.md.
+        my @cases = (
+            [ <<'BROCKEN', 4, 'a list of floats' ],
+sub make_list() -> ptr {
+    return (1.5, 2.5);
+}
+my ($a, $b) = make_list();
+return $a + $b;
+BROCKEN
+            [ <<'BROCKEN', 5, 'a list of an integer and a float' ],
+sub make_list() -> ptr {
+    return (3, 2.5);
+}
+my ($a, $b) = make_list();
+return $a + $b;
+BROCKEN
+            [ <<'BROCKEN', 4, 'a float list unpacked into f64 targets' ],
+sub make_list() -> ptr {
+    return (1.5, 2.5);
+}
+my (f64 $a, f64 $b) = make_list();
+return $a + $b;
+BROCKEN
+        );
+        my $i = 0;
+        for my $case (@cases) {
+            my ( $src, $want, $name ) = @$case;
+            my $module = Brocken->new->compile($src);
+            my $file   = $brocken->tmpdir . "/list_kind_$i" . $brocken->ext;
+            $brocken->linker->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $host );
+            system $file;
+            is( $? >> 8, $want, $name );
+            unlink $file;
+            $i++;
+        }
+    }
+};
+subtest 'a float element is not read back as its bit pattern' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken->new->compile(<<'BROCKEN');
+sub make_list() -> ptr {
+    return (2.5);
+}
+my ($a) = make_list();
+return $a == 2.5 ? 1 : 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/list_float_eq' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 1, 'a float element compares equal to itself' );
+        unlink $file;
+        my $again = Brocken->new->compile(<<'BROCKEN');
+sub make_list() -> ptr {
+    return (2.5);
+}
+my ($a) = make_list();
+return $a == 4611686018427387904 ? 1 : 0;
+BROCKEN
+        my $file2 = $brocken->tmpdir . '/list_float_bits' . $brocken->ext;
+        $brocken->linker->write_executable( $file2, $brocken->codegen->emit_functions( $again->functions ), $host );
+        system $file2;
+        is( $? >> 8, 0, 'and not equal to its own bit pattern' );
+        unlink $file2;
+    }
+};
 done_testing;
