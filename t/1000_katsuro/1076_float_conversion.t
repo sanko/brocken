@@ -43,12 +43,11 @@ push @TARGETS, [ 'wasm32-unknown-wasi', Brocken::Katsuro::Platform::parse('wasm3
 sub answers ( $src, $want, $name ) {
     for my $target (@TARGETS) {
         my ( $tag, $platform ) = @$target;
-        my $label = $tag eq 'host' ? $name : "$name [$tag]";
-        my $brocken = $platform ? Brocken->new( platform => $platform ) : Brocken->new();
-        my $module = eval { $brocken->compile($src) };
+        my $label   = $tag eq 'host' ? $name                                 : "$name [$tag]";
+        my $brocken = $platform      ? Brocken->new( platform => $platform ) : Brocken->new();
+        my $module  = eval { $brocken->compile($src) };
         if ($@) { fail("$label: compile died: $@"); next }
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-
         if ( $platform && $platform->arch =~ /^wasm/ ) {
 
             # wasmtime reports the return value on the last line of stdout and
@@ -57,14 +56,18 @@ sub answers ( $src, $want, $name ) {
             my $module_file = temp_path('fc') . '.wasm';
             Brocken::Jenny::Linker::Wasm->new->write_executable( $module_file, $funcs, $platform );
             my $output = qx["$WASMTIME" run --invoke _BROCKEN_ENTRY "$module_file" 1024 2>&1];
-            my @lines  = grep { /\S/ } split /\n/, $output;
+            my @lines  = grep {/\S/} split /\n/, $output;
             my $got    = @lines ? $lines[-1] : '';
             is( $got + 0, $want, $label );
             unlink $module_file if -e $module_file;
         }
         else {
             my $file = temp_path('fc') . $brocken->ext;
-            $brocken->linker->write_executable( $file, $funcs, $platform );
+
+            # The linker's platform is the one the instance was built with,
+            # not this loop's `$platform`, which is undef for the host target:
+            # MachO reads `->arch` and `->os` off it to pick the slice.
+            $brocken->linker->write_executable( $file, $funcs, $brocken->platform );
             run_exec( $file, expected_exit => $want, platform => $platform, name => $label );
             unlink $file if -e $file;
         }

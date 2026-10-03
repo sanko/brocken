@@ -94,7 +94,6 @@ class Brocken::Jenny::Codegen::Wasm {
         # %heap_ptr is a module global now, not a local: see
         # Brocken::Jenny::Linker::Wasm::_global_section. It is deliberately left
         # out of %vreg_map so no local slot is spent on it.
-
         # A Wasm branch may only reach a label that encloses it, so an arbitrary
         # control-flow graph cannot be laid out as a chain of nested blocks. Each
         # block instead becomes a case of a dispatch loop, and this local holds
@@ -123,7 +122,7 @@ class Brocken::Jenny::Codegen::Wasm {
                 next unless $inst->opcode eq 'local_get' || $inst->opcode eq 'local_set';
                 my $mo = $inst->operands->[0];
                 $mir_local_type{ $mo->value } //= $mo->type;
-                $vreg_map{ $mo->value } //= $next_local++;
+                $vreg_map{ $mo->value }       //= $next_local++;
             }
         }
         my %lid_to_type;

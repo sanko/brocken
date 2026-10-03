@@ -79,56 +79,59 @@ push @TARGETS, [ 'wasm32-unknown-wasi', Brocken::Katsuro::Platform::parse('wasm3
 sub answers ( $src, $want, $name ) {
     for my $target (@TARGETS) {
         my ( $tag, $platform ) = @$target;
-        my $label = $tag eq 'host' ? $name : "$name [$tag]";
-        my $brocken = $platform ? Brocken->new( platform => $platform ) : Brocken->new();
-        my $module = eval { $brocken->compile($src) };
+        my $label   = $tag eq 'host' ? $name                                 : "$name [$tag]";
+        my $brocken = $platform      ? Brocken->new( platform => $platform ) : Brocken->new();
+        my $module  = eval { $brocken->compile($src) };
         if ($@) { fail("$label: compile died: $@"); next }
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
-
         if ( $platform && $platform->arch =~ /^wasm/ ) {
             my $module_file = temp_path('uf') . '.wasm';
             Brocken::Jenny::Linker::Wasm->new->write_executable( $module_file, $funcs, $platform );
             my $output = qx["$WASMTIME" run --invoke _BROCKEN_ENTRY "$module_file" 1024 2>&1];
-            my @lines  = grep { /\S/ } split /\n/, $output;
+            my @lines  = grep {/\S/} split /\n/, $output;
             my $got    = @lines ? $lines[-1] : '';
             is( $got + 0, $want, $label );
             unlink $module_file if -e $module_file;
         }
         else {
             my $file = temp_path('uf') . $brocken->ext;
-            $brocken->linker->write_executable( $file, $funcs, $platform );
+
+            # The linker's platform is the one the instance was built with,
+            # not this loop's `$platform`, which is undef for the host target:
+            # MachO reads `->arch` and `->os` off it to pick the slice.
+            $brocken->linker->write_executable( $file, $funcs, $brocken->platform );
             run_exec( $file, expected_exit => $want, platform => $platform, name => $label );
             unlink $file if -e $file;
         }
     }
 }
 subtest 'an untyped variable holding an integer is unchanged' => sub {
-    answers( 'my $x = 7; return $x == 7 ? 1 : 0;',            1, 'int untyped == 7' );
-    answers( 'my $x = 7; return $x * 2 == 14 ? 1 : 0;',       1, 'int untyped * 2' );
-    answers( 'my $x = 7; return $x + 1 == 8 ? 1 : 0;',        1, 'int untyped + 1' );
+    answers( 'my $x = 7; return $x == 7 ? 1 : 0;',                 1, 'int untyped == 7' );
+    answers( 'my $x = 7; return $x * 2 == 14 ? 1 : 0;',            1, 'int untyped * 2' );
+    answers( 'my $x = 7; return $x + 1 == 8 ? 1 : 0;',             1, 'int untyped + 1' );
     answers( 'my $x = 7; my i64 $y = $x; return $y == 7 ? 1 : 0;', 1, 'int untyped -> i64' );
 };
 subtest 'an untyped variable holding a float compares as a float' => sub {
-    answers( 'my $x = 1.5; return $x == 1.5 ? 1 : 0;',        1, 'untyped f64 == 1.5' );
-    answers( 'my $x = 1.5; return $x != 1.5 ? 1 : 0;',        0, 'untyped f64 != 1.5' );
-    answers( 'my $x = 2.5; return $x == 2.5 ? 1 : 0;',        1, 'untyped f64 == 2.5' );
-    answers( 'my $x = 1.5; return $x < 2.0 ? 1 : 0;',         1, 'untyped f64 < 2.0' );
-    answers( 'my $x = 1.5; return $x > 2.0 ? 1 : 0;',         0, 'untyped f64 > 2.0' );
-    answers( 'my $x = 1.5; return $x * 2.0 == 3.0 ? 1 : 0;',  1, 'untyped f64 * 2.0' );
-    answers( 'my $x = 1.5; return $x + 1.0 == 2.5 ? 1 : 0;',  1, 'untyped f64 + 1.0' );
+    answers( 'my $x = 1.5; return $x == 1.5 ? 1 : 0;',       1, 'untyped f64 == 1.5' );
+    answers( 'my $x = 1.5; return $x != 1.5 ? 1 : 0;',       0, 'untyped f64 != 1.5' );
+    answers( 'my $x = 2.5; return $x == 2.5 ? 1 : 0;',       1, 'untyped f64 == 2.5' );
+    answers( 'my $x = 1.5; return $x < 2.0 ? 1 : 0;',        1, 'untyped f64 < 2.0' );
+    answers( 'my $x = 1.5; return $x > 2.0 ? 1 : 0;',        0, 'untyped f64 > 2.0' );
+    answers( 'my $x = 1.5; return $x * 2.0 == 3.0 ? 1 : 0;', 1, 'untyped f64 * 2.0' );
+    answers( 'my $x = 1.5; return $x + 1.0 == 2.5 ? 1 : 0;', 1, 'untyped f64 + 1.0' );
 };
 subtest 'the comparison is a float comparison, not a truncated one' => sub {
 
     # 1.5 and 1.4 truncate to the same integer, so comparing them as integers
     # calls them equal. Only a float comparison can tell them apart.
-    answers( 'my $x = 1.5; return $x == 1.4 ? 1 : 0;',        0, '1.5 vs 1.4, not equal' );
-    answers( 'my $x = 1.5; return $x == 1.6 ? 1 : 0;',        0, '1.5 vs 1.6, not equal' );
-    answers( 'my $x = 1.5; return $x == 2.5 ? 1 : 0;',        0, '1.5 vs 2.5, not equal' );
-    answers( 'my $x = 0.1; return $x == 0.2 ? 1 : 0;',        0, '0.1 vs 0.2, not equal' );
+    answers( 'my $x = 1.5; return $x == 1.4 ? 1 : 0;', 0, '1.5 vs 1.4, not equal' );
+    answers( 'my $x = 1.5; return $x == 1.6 ? 1 : 0;', 0, '1.5 vs 1.6, not equal' );
+    answers( 'my $x = 1.5; return $x == 2.5 ? 1 : 0;', 0, '1.5 vs 2.5, not equal' );
+    answers( 'my $x = 0.1; return $x == 0.2 ? 1 : 0;', 0, '0.1 vs 0.2, not equal' );
 };
 subtest 'an untyped variable holding a float converts to a declared float' => sub {
-    answers( 'my $x = 1.5; my f64 $y = $x; return $y == 1.5 ? 1 : 0;',      1, 'untyped -> f64' );
-    answers( 'my f64 $f = 1.5; my $x = $f; return $x == 1.5 ? 1 : 0;',      1, 'f64 -> untyped' );
+    answers( 'my $x = 1.5; my f64 $y = $x; return $y == 1.5 ? 1 : 0;',                 1, 'untyped -> f64' );
+    answers( 'my f64 $f = 1.5; my $x = $f; return $x == 1.5 ? 1 : 0;',                 1, 'f64 -> untyped' );
     answers( 'my $x = 1.5; my f64 $y = $x; my f64 $z = $y; return $z == 1.5 ? 1 : 0;', 1, 'untyped -> f64 -> f64' );
 };
 subtest 'a boxed float survives a store and a call' => sub {
@@ -142,8 +145,8 @@ subtest 'a float box and an integer box do not bleed into each other' => sub {
     # the float payload store wrote its integer form instead, it would still be
     # 8 bytes and every neighbouring access would still line up, so only the
     # value proves it.
-    answers( 'my $x = 1.5; my $y = 3; return $y == 3 && $x == 1.5 ? 1 : 0;', 1, 'float box first' );
-    answers( 'my $x = 3; my $y = 1.5; return $x == 3 && $y == 1.5 ? 1 : 0;', 1, 'integer box first' );
+    answers( 'my $x = 1.5; my $y = 3; return $y == 3 && $x == 1.5 ? 1 : 0;',     1, 'float box first' );
+    answers( 'my $x = 3; my $y = 1.5; return $x == 3 && $y == 1.5 ? 1 : 0;',     1, 'integer box first' );
     answers( 'my $x = 100; my $y = 1.5; return $x == 100 && $y == 1.5 ? 1 : 0;', 1, 'wide integer then float' );
 };
 done_testing;

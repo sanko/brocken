@@ -78,17 +78,14 @@ subtest 'Wasm memory covers the base, its header and the heap' => sub {
         my ($base) = @_;
         return int( ( $base + 24 + $heap + 65535 ) / 65536 );
     };
-    is( Brocken::Jenny::Linker::Wasm->new->_initial_pages,
-        $want->(1024), 'the default base reserves the whole heap' );
-    is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536 )->_initial_pages,
-        $want->(65536), 'a base past 64KB adds a page on top' );
+    is( Brocken::Jenny::Linker::Wasm->new->_initial_pages,                       $want->(1024),  'the default base reserves the whole heap' );
+    is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536 )->_initial_pages, $want->(65536), 'a base past 64KB adds a page on top' );
 
     # A heap smaller than the base still has to be reserved, and the header at
     # the base must not fall off the end either.
     is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536, heap_size => 16 )->_initial_pages,
         2, 'a small heap still covers a base past the first page' );
-
-    my $pages = Brocken::Jenny::Linker::Wasm->new( heap_base => 70000 )->_initial_pages;
+    my $pages  = Brocken::Jenny::Linker::Wasm->new( heap_base => 70000 )->_initial_pages;
     my $module = temp_path('wasm_pages') . '.wasm';
     link_module( $module, Brocken::Jenny::Linker::Wasm->new( heap_base => 70000 ) );
     my $bytes = do { open my $fh, '<', $module or die $!; binmode $fh; local $/; <$fh> };

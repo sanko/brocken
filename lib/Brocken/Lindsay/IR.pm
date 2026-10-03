@@ -13,17 +13,17 @@ class Brocken::Lindsay::IR::Type {
     field $_field_offsets : reader : param = [];       # computed byte offsets
 
     # Singletons for common types to save memory and allow `==` comparison
-    sub i1               { state $t //= __PACKAGE__->new( kind => 'int', bits => 1,   signed => 1 ); $t }
-    sub i8               { state $t //= __PACKAGE__->new( kind => 'int', bits => 8,   signed => 1 ); $t }
-    sub i16              { state $t //= __PACKAGE__->new( kind => 'int', bits => 16,  signed => 1 ); $t }
-    sub i32              { state $t //= __PACKAGE__->new( kind => 'int', bits => 32,  signed => 1 ); $t }
-    sub i64              { state $t //= __PACKAGE__->new( kind => 'int', bits => 64,  signed => 1 ); $t }
-    sub i128             { state $t //= __PACKAGE__->new( kind => 'int', bits => 128, signed => 1 ); $t }
-    sub u8               { state $t //= __PACKAGE__->new( kind => 'int', bits => 8,   signed => 0 ); $t }
-    sub u16              { state $t //= __PACKAGE__->new( kind => 'int', bits => 16,  signed => 0 ); $t }
-    sub u32              { state $t //= __PACKAGE__->new( kind => 'int', bits => 32,  signed => 0 ); $t }
-    sub u64              { state $t //= __PACKAGE__->new( kind => 'int', bits => 64,  signed => 0 ); $t }
-    sub u128             { state $t //= __PACKAGE__->new( kind => 'int', bits => 128, signed => 0 ); $t }
+    sub i1   { state $t //= __PACKAGE__->new( kind => 'int', bits => 1,   signed => 1 ); $t }
+    sub i8   { state $t //= __PACKAGE__->new( kind => 'int', bits => 8,   signed => 1 ); $t }
+    sub i16  { state $t //= __PACKAGE__->new( kind => 'int', bits => 16,  signed => 1 ); $t }
+    sub i32  { state $t //= __PACKAGE__->new( kind => 'int', bits => 32,  signed => 1 ); $t }
+    sub i64  { state $t //= __PACKAGE__->new( kind => 'int', bits => 64,  signed => 1 ); $t }
+    sub i128 { state $t //= __PACKAGE__->new( kind => 'int', bits => 128, signed => 1 ); $t }
+    sub u8   { state $t //= __PACKAGE__->new( kind => 'int', bits => 8,   signed => 0 ); $t }
+    sub u16  { state $t //= __PACKAGE__->new( kind => 'int', bits => 16,  signed => 0 ); $t }
+    sub u32  { state $t //= __PACKAGE__->new( kind => 'int', bits => 32,  signed => 0 ); $t }
+    sub u64  { state $t //= __PACKAGE__->new( kind => 'int', bits => 64,  signed => 0 ); $t }
+    sub u128 { state $t //= __PACKAGE__->new( kind => 'int', bits => 128, signed => 0 ); $t }
 
     # The signed integer type of a given width. Needed wherever a value has to be
     # sign-extended to a width and then reinterpreted at that width, because
@@ -40,10 +40,10 @@ class Brocken::Lindsay::IR::Type {
         return i128() if $bits == 128;
         return __PACKAGE__->new( kind => 'int', bits => $bits, signed => 1 );
     }
-    sub f32              { state $t //= __PACKAGE__->new( kind => 'float', bits => 32 );    $t }
-    sub f64              { state $t //= __PACKAGE__->new( kind => 'float', bits => 64 );    $t }
-    sub ptr              { state $t //= __PACKAGE__->new( kind => 'ptr', bits => 64 );      $t }
-    sub void             { state $t //= __PACKAGE__->new( kind => 'void' );                 $t }
+    sub f32              { state $t //= __PACKAGE__->new( kind => 'float', bits => 32 ); $t }
+    sub f64              { state $t //= __PACKAGE__->new( kind => 'float', bits => 64 ); $t }
+    sub ptr              { state $t //= __PACKAGE__->new( kind => 'ptr', bits => 64 ); $t }
+    sub void             { state $t //= __PACKAGE__->new( kind => 'void' ); $t }
     sub dynamic          { state $t //= __PACKAGE__->new( kind => 'dynamic', bits => 128 ); $t }
     method is_signed()   { $kind eq 'int' ? $signed  : 1 }
     method is_unsigned() { $kind eq 'int' ? !$signed : 0 }

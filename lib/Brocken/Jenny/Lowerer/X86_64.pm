@@ -3497,11 +3497,8 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     # memory operand that is not an int, so `my $x = 1.5;`
                     # stored the integer 1 into the box and the float was gone
                     # before anything could read it back.
-                    my $is_float = $val->type && $val->type->kind eq 'float';
-                    my $store_op
-                        = $is_float ? 'fstore'
-                        : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm'
-                        : 'store';
+                    my $is_float  = $val->type && $val->type->kind eq 'float';
+                    my $store_op  = $is_float ? 'fstore' : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store';
                     my $store_src = $is_float ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val);
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3516,9 +3513,18 @@ class Brocken::Jenny::Lowerer::X86_64 {
                     my $mem
                         = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $dyn->name, disp => 8 }, type => $inst->type );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+
+                    # A float payload has to come back in through the SSE load.
+                    # The plain `load` is a 64-bit GP move, so it wrote the f64
+                    # bits into a general-purpose register: the float compare
+                    # then read whatever the register held before, and any
+                    # unrelated value living in that register (the frame
+                    # pointer, here) was overwritten with 0x3ff8000000000000
+                    # and dereferenced on the next instruction.
+                    my $is_float = $inst->type && $inst->type->kind eq 'float';
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'load',
+                            opcode   => $is_float ? 'fload' : 'load',
                             operands => [ $dst, $mem ],
                             comment  => 'unbox: load payload'
                         )
