@@ -2,16 +2,71 @@ package Test2::Tools::Brocken v0.0.1 {
     use v5.40;
     use Exporter 'import';
     use Test2::API qw[context];
-    use Carp       qw[croak];
+
+    # The assertion functions are used in their function form rather than through
+    # a context object, so they land in whatever context the calling test already
+    # has -- a subtest, say -- instead of opening a nested one of their own.
+    use Test2::Tools::Basic   qw[fail diag skip];
+    use Test2::Tools::Compare qw[is];
+    use Carp                  qw[croak];
     use File::Spec;
     use File::Temp;
-    our %EXPORT_TAGS = ( all => [ our @EXPORT_OK = qw[run_exec temp_path cross_available] ] );
+    our @EXPORT_OK = qw[run_exec temp_path cross_available wasm_runner wasmtime_binary node_binary wasm_platform wasm_entry_value
+        wasm_validates validates executable_targets answers phys_operands];
+    our %EXPORT_TAGS = ( all => [@EXPORT_OK] );
     #
     sub temp_path ($basename) {
         state $TMPDIR //= File::Temp->newdir( CLEANUP => 1, TMPDIR => 1 );
         my $dir = $TMPDIR->dirname;
         $dir =~ s/\\/\//g;
         return $dir . '/' . $basename;
+    }
+
+    # Looks a binary up on PATH and returns where it was found, or nothing. The
+    # test suite carries no absolute path of its own, so a missing tool leaves the
+    # caller free to skip rather than fail.
+    #
+    # The suffixes in PATHEXT are what `where` searches and this does not, so
+    # they are tried explicitly. Without that, `wasmtime` is not found on a
+    # Windows host at all, because the file on disk is `wasmtime.exe`.
+    sub _find_binary ($exe) {
+        my @suffixes = ( '', ( $^O eq 'MSWin32' ? split /;/, ( $ENV{PATHEXT} // '.COM;.EXE;.BAT;.CMD' ) : () ) );
+        for my $dir ( File::Spec->path ) {
+            for my $suffix (@suffixes) {
+                my $found = File::Spec->catfile( $dir, $exe . $suffix );
+                return $found if -f $found;
+            }
+        }
+        return undef;
+    }
+    sub wasmtime_binary () { state $found //= _find_binary('wasmtime') }
+    sub node_binary ()     { state $found //= _find_binary('node') }
+
+    # Which runner can execute a Wasm module here. wasmtime is preferred; node can
+    # instantiate a module without it, which is enough to read the entry's return
+    # value. Nothing at all means the Wasm target cannot be exercised, and the
+    # caller is expected to skip.
+    sub wasm_runner () {
+        return 'wasmtime' if wasmtime_binary();
+        return 'node'     if node_binary();
+        return undef;
+    }
+
+    sub wasm_platform () {
+        require Brocken::Katsuro::Platform;
+        return Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
+    }
+
+    # Whether a linked `.wasm` is accepted by a validator, as a system() status:
+    # zero when the module is valid. Nothing at all when no runner is present, so
+    # the caller can skip rather than report a module as broken.
+    sub wasm_validates ($file) {
+        my $runner = wasm_runner() or return undef;
+        if ( $runner eq 'wasmtime' ) {
+            my $null = $^O eq 'MSWin32' ? 'NUL' : '/dev/null';
+            return system qq["@{[ wasmtime_binary() ]}" compile "$file" -o "$null" 2>&1];
+        }
+        return system( node_binary(), '-e', "const fs=require('fs');process.exit(WebAssembly.validate(fs.readFileSync('$file'))?0:1);" );
     }
 
     # A qemu binary and the sysroot it needs are named for the host that has
@@ -76,10 +131,127 @@ package Test2::Tools::Brocken v0.0.1 {
     }
 
     sub _which ($exe) {
-        for my $dir ( File::Spec->path ) {
-            return 1 if -x File::Spec->catfile( $dir, $exe );
+        return _find_binary($exe) ? 1 : 0;
+    }
+
+    # Every target a snippet can be run on here: the host always, a cross target
+    # only when its emulator and sysroot are present, and Wasm only when a runner
+    # for it is. A target that cannot be executed is left out rather than
+    # reported as a failure, since its absence says nothing about the compiler.
+    sub executable_targets () {
+        require Brocken::Katsuro::Platform;
+        my @targets = ( [ 'host', undef ] );
+        for my $triple ( 'aarch64-unknown-linux-gnu', 'riscv64-unknown-linux-gnu' ) {
+            my $platform = eval { Brocken::Katsuro::Platform::parse($triple) };
+            push @targets, [ $triple, $platform ] if $platform && cross_available($platform);
         }
-        return 0;
+        push @targets, [ 'wasm32-unknown-wasi', wasm_platform() ] if wasm_runner();
+        return @targets;
+    }
+
+    # Runs a linked `.wasm` and returns the value `_BROCKEN_ENTRY` returned,
+    # followed by whatever the runner printed. The entry returns an i64 that the
+    # test compares as a number, so it is the last line rather than the whole
+    # output: a runner writes its own warnings alongside the value.
+    sub wasm_entry_value ( $file, %args ) {
+        my $runner = $args{runner} // wasm_runner();
+        return ( undef, "no Wasm runner is available\n" ) unless $runner;
+        my $memory = $args{memory} // 1024;
+        my $output;
+        if ( $runner eq 'wasmtime' ) {
+            $output = qx["@{[ wasmtime_binary() ]}" run --invoke _BROCKEN_ENTRY "$file" $memory 2>&1];
+        }
+        else {
+            my $js
+                = "const fs=require('fs');const buf=fs.readFileSync('$file');" .
+                'WebAssembly.instantiate(buf).then(r=>{process.exit(Number(' .
+                "r.instance.exports._BROCKEN_ENTRY(BigInt($memory))));})" .
+                '.catch(e=>{console.error(e);process.exit(1);});';
+            system( node_binary(), '-e', $js );
+            $output = ( $? >> 8 ) . "\n";
+        }
+        my @lines = grep {/\S/} split /\n/, $output;
+        return ( @lines ? $lines[-1] : '', $output );
+    }
+
+    # Compiles a snippet and asserts the value it returns, on every target that
+    # can be run here. `targets` defaults to `executable_targets`, and each entry
+    # is a `[ tag, platform ]` pair, with an undefined platform meaning the host.
+    # A Wasm platform is linked to a `.wasm` and run through whichever runner is
+    # available; anything else is run as a native executable and compared on its
+    # exit status. `basename` names the file each target is written to.
+    sub answers ( $src, $want, $name, %args ) {
+        require Brocken;
+        require Brocken::Jenny::Linker::Wasm;
+        my @targets  = @{ $args{targets} // [ executable_targets() ] };
+        my $basename = $args{basename} // 'brocken';
+        for my $target (@targets) {
+            my ( $tag, $platform ) = @$target;
+            my $label   = $tag eq 'host' ? $name                                 : "$name [$tag]";
+            my $brocken = $platform      ? Brocken->new( platform => $platform ) : Brocken->new();
+            my $module  = eval { $brocken->compile($src) };
+            if ($@) { fail("$label: compile died: $@"); next }
+            my $funcs = $brocken->codegen->emit_functions( $module->functions );
+            if ( $platform && $platform->arch =~ /^wasm/ ) {
+                my $file = temp_path($basename) . '.wasm';
+                Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $funcs, $platform );
+                my ( $got, $output ) = wasm_entry_value($file);
+                is( $got + 0, $want, $label ) or diag($output);
+                unlink $file if -e $file;
+                next;
+            }
+
+            # The linker's platform is the one the instance was built with, not
+            # this loop's `$platform`, which is undef for the host target:
+            # MachO reads `->arch` and `->os` off it to pick the slice.
+            my $file = temp_path($basename) . $brocken->ext;
+            $brocken->linker->write_executable( $file, $funcs, $brocken->platform );
+            run_exec( $file, expected_exit => $want, platform => $platform, name => $label );
+            unlink $file if -e $file;
+        }
+        return;
+    }
+
+    # Compiles a snippet for the Wasm target, links it, and asserts that the
+    # module validates. This is the check that catches an operand width or a
+    # stack type the validator objects to, which is a different failure from
+    # returning a wrong number: the module never runs at all. `answers` covers
+    # the running side.
+    sub validates ( $src, $name, %args ) {
+        require Brocken;
+        require Brocken::Jenny::Linker::Wasm;
+        my $platform = $args{platform} // wasm_platform();
+        my $brocken  = $args{brocken}  // Brocken->new( platform => $platform );
+        my $basename = $args{basename} // 'brocken';
+        my $module   = eval { $brocken->compile($src) };
+        if ($@) { fail("$name: compile died: $@"); return }
+        my $file = temp_path($basename) . '.wasm';
+        Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
+    SKIP: {
+            skip 'no Wasm runner is available', 1 unless wasm_runner();
+            my $status = wasm_validates($file);
+            is( $status, 0, $name ) or diag('the module did not validate');
+        }
+        unlink $file if -e $file;
+        return;
+    }
+
+    # The physical registers named by operand `$which` of every `$opcode`
+    # instruction in a machine function, in the order they appear. A test that
+    # cares which register an argument landed in reads it through here rather
+    # than walking the block and instruction lists itself.
+    sub phys_operands ( $mf, $opcode, $which ) {
+        my @names;
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $inst ( $mbb->instructions->@* ) {
+                next unless $inst->opcode eq $opcode;
+                my @ops = $inst->operands->@*;
+                next unless @ops > $which;
+                my $op = $ops[$which];
+                push @names, $op->value if $op->kind eq 'phys_reg';
+            }
+        }
+        return @names;
     }
 
     sub run_exec ( $file, %args ) {

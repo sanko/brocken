@@ -5,7 +5,7 @@ use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Brocken;
 use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Linker::Wasm;
-use Test2::Tools::Brocken qw[temp_path];
+use Test2::Tools::Brocken qw[temp_path answers validates];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -52,57 +52,6 @@ chomp $wasmtime if $wasmtime;
 my $node = $host->is_windows ? `where node 2>NUL` : `which node 2>/dev/null`;
 chomp $node if $node;
 my $runner = $wasmtime && -x $wasmtime ? 'wasmtime' : ( $node && -x $node ? 'node' : undef );
-
-# Every case returns its result biased into 0..255, because the entry returns an
-# i64 and the comparison happens on whatever the runner printed.
-sub answers ( $src, $want, $name ) {
-    my $module = eval { $brocken->compile($src) };
-    if ($@) { fail("$name: compile died: $@"); return }
-    my $file = temp_path('wasm_box') . '.wasm';
-    Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
-    my @lines;
-    if ( $runner eq 'wasmtime' ) {
-
-        # wasmtime writes its warnings alongside the entry's return value, so the
-        # value is the last non-empty line rather than the whole output.
-        my $output = qx["$wasmtime" run --invoke _BROCKEN_ENTRY "$file" 1024 2>&1];
-        @lines = grep {/\S/} split /\n/, $output;
-    }
-    else {
-        my $js
-            = "const fs=require('fs');const buf=fs.readFileSync('$file');" .
-            'WebAssembly.instantiate(buf).then(r=>{process.exit(Number(r.instance.exports._BROCKEN_ENTRY(BigInt(1024))));})' .
-            '.catch(e=>{console.error(e);process.exit(1);});';
-        system( 'node', '-e', $js );
-        @lines = ( ( $? >> 8 ) );
-    }
-    my $got = @lines ? $lines[-1] : '';
-    is( $got, $want, $name );
-    unlink $file if -e $file;
-    return;
-}
-
-# The module has to validate as well as run: a module that traps is a different
-# bug from one that returns the wrong answer, and worth telling apart.
-sub validates ( $src, $name ) {
-    my $module = eval { $brocken->compile($src) };
-    if ($@) { fail("$name: compile died: $@"); return }
-    my $file = temp_path('wasm_box') . '.wasm';
-    Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
-SKIP: {
-        skip 'no wasm binary runner available', 1 unless $runner;
-
-        # `$runner` may be node, in which case there is no wasmtime to shell
-        # out to: interpolating the empty $wasmtime left `sh` an empty command
-        # to run and it reported "Permission denied", failing the check for a
-        # reason that had nothing to do with the module.
-        my $status = $runner eq 'wasmtime' ? system(qq["$wasmtime" compile "$file" -o "$null" 2>&1]) :
-            system( 'node', '-e', "const fs=require('fs');process.exit(WebAssembly.validate(fs.readFileSync('$file'))?0:1);" );
-        is $status, 0, $name or diag 'the module did not validate';
-    }
-    unlink $file if -e $file;
-    return;
-}
 
 # The declared memory has to cover the heap the entry preamble promises _init,
 # or the allocator will eventually hand out an address past the end of it.

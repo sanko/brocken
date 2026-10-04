@@ -5,7 +5,7 @@ use lib 'lib', '../../../lib', '../../lib', '../lib';
 use Brocken;
 use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Linker::Wasm;
-use Test2::Tools::Brocken qw[temp_path];
+use Test2::Tools::Brocken qw[temp_path answers];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -45,25 +45,6 @@ my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $brocken  = Brocken->new( platform => $platform );
 my $wasmtime = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime if $wasmtime;
-
-# Returns its result biased into 0..255, because the entry returns an i64 and the
-# comparison happens on whatever the runner printed.
-sub answers ( $src, $want, $name ) {
-    skip_all('wasmtime not available') unless $wasmtime && -f $wasmtime;
-    my $module = eval { $brocken->compile($src) };
-    if ($@) { fail("$name: compile died: $@"); return }
-    my $file = temp_path('wasm_frame') . '.wasm';
-    Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
-
-    # wasmtime writes its warnings alongside the entry's return value, so the
-    # value is the last non-empty line rather than the whole output.
-    my $output = qx["$wasmtime" run --invoke _BROCKEN_ENTRY "$file" 1024 2>&1];
-    my @lines  = grep {/\S/} split /\n/, $output;
-    unlink $file if -e $file;
-    my $got = @lines ? $lines[-1] : '';
-    is( $got, $want, $name ) or diag $output;
-    return;
-}
 subtest 'a nested call does not reuse the caller\'s frame' => sub {
 
     # Two frames, live at the same time. `inner` is called from a function that

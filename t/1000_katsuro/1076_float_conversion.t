@@ -2,10 +2,7 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
-use Brocken;
-use Brocken::Katsuro::Platform;
-use Brocken::Jenny::Linker::Wasm;
-use Test2::Tools::Brocken qw[run_exec temp_path cross_available];
+use Test2::Tools::Brocken qw[answers];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -19,60 +16,9 @@ use feature qw[class];
 # Kept to values a single 32-bit compare can hold: `==` against a literal above
 # 2^31 is a separate x86-64 immediate bug, tracked in TODO.md.
 #
-# Every target that can actually execute runs these, not just the host. This
-# used to bail unless the host was native, which left the f32 paths on ARM64 and
-# Wasm unverified for as long as the entry existed -- not because they were
-# believed broken, but because nothing here could run them. Both can be run now:
-# the cross targets through BROCKEN_SYSROOT_*, and Wasm through wasmtime. Each is
-# added only when its tooling is actually present, so a machine without them pays
-# nothing and the host-only result is unchanged.
-sub _wasmtime {
-    my $exe = $^O eq 'MSWin32' ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
-    return undef unless defined $exe;
-    chomp $exe;
-    return ( length $exe && -f $exe ) ? $exe : undef;
-}
-my $WASMTIME = _wasmtime();
-my @TARGETS  = ( [ 'host', undef ] );
-for my $triple ( 'aarch64-unknown-linux-gnu', 'riscv64-unknown-linux-gnu' ) {
-    my $platform = eval { Brocken::Katsuro::Platform::parse($triple) };
-    push @TARGETS, [ $triple, $platform ] if $platform && cross_available($platform);
-}
-push @TARGETS, [ 'wasm32-unknown-wasi', Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi') ] if $WASMTIME;
-
-sub answers ( $src, $want, $name ) {
-    for my $target (@TARGETS) {
-        my ( $tag, $platform ) = @$target;
-        my $label   = $tag eq 'host' ? $name                                 : "$name [$tag]";
-        my $brocken = $platform      ? Brocken->new( platform => $platform ) : Brocken->new();
-        my $module  = eval { $brocken->compile($src) };
-        if ($@) { fail("$label: compile died: $@"); next }
-        my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        if ( $platform && $platform->arch =~ /^wasm/ ) {
-
-            # wasmtime reports the return value on the last line of stdout and
-            # its `--invoke` warnings on stderr, so both are read together and
-            # the last non-empty line taken. Avoids a shell-specific redirect.
-            my $module_file = temp_path('fc') . '.wasm';
-            Brocken::Jenny::Linker::Wasm->new->write_executable( $module_file, $funcs, $platform );
-            my $output = qx["$WASMTIME" run --invoke _BROCKEN_ENTRY "$module_file" 1024 2>&1];
-            my @lines  = grep {/\S/} split /\n/, $output;
-            my $got    = @lines ? $lines[-1] : '';
-            is( $got + 0, $want, $label );
-            unlink $module_file if -e $module_file;
-        }
-        else {
-            my $file = temp_path('fc') . $brocken->ext;
-
-            # The linker's platform is the one the instance was built with,
-            # not this loop's `$platform`, which is undef for the host target:
-            # MachO reads `->arch` and `->os` off it to pick the slice.
-            $brocken->linker->write_executable( $file, $funcs, $brocken->platform );
-            run_exec( $file, expected_exit => $want, platform => $platform, name => $label );
-            unlink $file if -e $file;
-        }
-    }
-}
+# `answers` runs this on every target it can drive: the host, the cross targets
+# when BROCKEN_SYSROOT_* is set, and Wasm when a runner is on PATH. A target
+# whose tooling is absent is left out, so a host-only machine still runs.
 subtest 'float to integer, both widths' => sub {
     for my $ty (qw[f32 f64]) {
         answers( "my $ty \$t = 1.5; my i32 \$j = \$t; return \$j == 1 ? 1 : 0;",   1, "$ty 1.5 -> i32 1" );
