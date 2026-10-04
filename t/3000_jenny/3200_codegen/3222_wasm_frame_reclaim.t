@@ -11,7 +11,7 @@ use feature qw[class];
 
 # Where Wasm frames come from, and where they go when the call returns.
 #
-# 3311_wasm_frame_layout.t pins down that the frame bump pointer is a module
+# 3321_wasm_frame_layout.t pins down that the frame bump pointer is a module
 # global, so a callee carries on from where its caller stopped rather than
 # handing out the same addresses again. That fixes the collision, but it leaves
 # two faults behind, and both are about which addresses the pointer covers and
