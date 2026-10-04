@@ -27,7 +27,6 @@ SKIP: {
         unlink $file;
     }
 }
-
 subtest 'a returned box survives the callee exit decref' => sub {
     run_case( <<'BROCKEN', 8, 'return a local, add in the caller' );
 sub mk() -> Any { my $u = 7; return $u; }
@@ -40,7 +39,6 @@ my $a = mk();
 return $a - 6;
 BROCKEN
 };
-
 subtest 'a box passed through a parameter comes back alive' => sub {
     run_case( <<'BROCKEN', 5, 'identity through an Any parameter' );
 sub id(Any $v) -> Any { return $v; }
@@ -53,7 +51,6 @@ sub mk() -> Any { my $u = 11; return $u; }
 return id(mk());
 BROCKEN
 };
-
 subtest 'two calls do not free each others boxes' => sub {
     run_case( <<'BROCKEN', 6, 'two independent Any returns' );
 sub mk() -> Any { my $u = 3; return $u; }
@@ -62,5 +59,4 @@ my $b = mk();
 return $a + $b;
 BROCKEN
 };
-
 done_testing;

@@ -51,7 +51,6 @@ SKIP: {
     unlink $file if -e $file;
     return;
 }
-
 SKIP: {
     skip 'Neither wasmtime nor node are installed', 1 unless $runner;
     subtest 'a pointer-returning function' => sub {
@@ -61,12 +60,10 @@ SKIP: {
         validates( 'sub f() -> Any { my $x = 5; return $x; } return 0;', 'an Any return validates' );
     };
     subtest 'a list returned from a subroutine' => sub {
-        validates( 'sub make_list() -> ptr { return (3, 4); } my ($a, $b) = make_list(); return $a + $b;',
-            'a two-element list validates' );
+        validates( 'sub make_list() -> ptr { return (3, 4); } my ($a, $b) = make_list(); return $a + $b;', 'a two-element list validates' );
         validates( 'sub make_list() -> ptr { return (10, 20, 30); } my ($x, $y, $z) = make_list(); return $x + $y + $z;',
             'a three-element list validates' );
-        validates( 'sub make_one() -> ptr { return (42); } my ($v) = make_one(); return $v;',
-            'a single-element list validates' );
+        validates( 'sub make_one() -> ptr { return (42); } my ($v) = make_one(); return $v;', 'a single-element list validates' );
         validates( 'sub make_list() -> ptr { my $x = 5; return ($x * 2, $x + 3); } my ($a, $b) = make_list(); return $a + $b;',
             'a list of expressions validates' );
         validates( 'sub make_list() -> ptr { my $u = 7; return ($u, 2); } my ($a, $b) = make_list(); return $a + $b;',

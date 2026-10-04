@@ -180,13 +180,13 @@ SKIP: {
     # disagreed about a block that was still live and the free list handed it
     # out again. These are the shapes TODO.md recorded as still trapping.
     subtest 'assignment between untyped variables' => sub {
-        answers( 'my $a = 3; my $b = 4; $b = $b; return $a;',          3, 'self-assignment leaves the other value' );
-        answers( 'my $a = 1; $a = $a; $a = $a; return $a;',            1, 'repeated self-assignment' );
-        answers( 'my $a = 3; my $b = 4; $b = $a; return $b;',          3, 'one untyped variable assigned from another' );
-        answers( 'my $x = 3; my $y = $x; return $y;',                  3, 'initialising one box from another' );
-        answers( 'my $a = 1; my $b = 2; my $c = 3; $c = $a; return $c;', 1, 'assignment into a third box' );
+        answers( 'my $a = 3; my $b = 4; $b = $b; return $a;',                               3, 'self-assignment leaves the other value' );
+        answers( 'my $a = 1; $a = $a; $a = $a; return $a;',                                 1, 'repeated self-assignment' );
+        answers( 'my $a = 3; my $b = 4; $b = $a; return $b;',                               3, 'one untyped variable assigned from another' );
+        answers( 'my $x = 3; my $y = $x; return $y;',                                       3, 'initialising one box from another' );
+        answers( 'my $a = 1; my $b = 2; my $c = 3; $c = $a; return $c;',                    1, 'assignment into a third box' );
         answers( 'my $a = 1; my $b = 2; my $c = 3; $a = $b; $b = $c; return $a + $b + $c;', 8, 'a chain of moves' );
-        answers( 'my $x = 2.5; my $y = $x; return $y == 2.5 ? 1 : 0;', 1, 'a float box copied between variables' );
+        answers( 'my $x = 2.5; my $y = $x; return $y == 2.5 ? 1 : 0;',                      1, 'a float box copied between variables' );
     };
     subtest 'the payload is stored at the width of the value' => sub {
         answers( 'my $x = 42; return $x + 1;',             43, 'an i64 payload is 8 bytes wide' );
@@ -208,10 +208,13 @@ SKIP: {
     # from the arena.
     subtest 'a box returned from a function survives the callee' => sub {
         answers( 'sub mk() -> Any { my $u = 7; return $u; } my $a = mk(); return $a + 1;', 8, 'return a local, use it in the caller' );
-        answers( 'sub mk() -> Any { my $u = 7; my $v = 9; return $u + $v; } my $a = mk(); return $a - 6;', 10, 'the returned box holds a computed value' );
+        answers( 'sub mk() -> Any { my $u = 7; my $v = 9; return $u + $v; } my $a = mk(); return $a - 6;',
+            10, 'the returned box holds a computed value' );
         answers( 'sub id(Any $v) -> Any { return $v; } my $x = 5; return id($x);', 5, 'a box passed through an Any parameter' );
-        answers( 'sub mk() -> Any { my $u = 3; return $u; } my $a = mk(); my $b = mk(); return $a + $b;', 6, 'two Any returns do not free each other' );
-        answers( 'sub mk() -> ptr { my $u = 7; return ($u, 2); } my ($a, $b) = mk(); return $a + $b;', 9, 'an untyped list element survives its maker' );
+        answers( 'sub mk() -> Any { my $u = 3; return $u; } my $a = mk(); my $b = mk(); return $a + $b;',
+            6, 'two Any returns do not free each other' );
+        answers( 'sub mk() -> ptr { my $u = 7; return ($u, 2); } my ($a, $b) = mk(); return $a + $b;',
+            9, 'an untyped list element survives its maker' );
     };
     subtest 'the generated modules validate' => sub {
         validates( 'my $x = 42; return $x;',                'one untyped variable validates' );

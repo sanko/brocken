@@ -489,8 +489,7 @@ class Brocken::Katsuro::Lowerer {
             # Wasm link caps the arena at the heap size it reserved just below
             # the frames.
             my $effective_mem_limit = $mem_limit;
-            $effective_mem_limit = Brocken::ICB::HEAP_SIZE
-                if !$effective_mem_limit && $platform && $platform->can('is_wasm') && $platform->is_wasm;
+            $effective_mem_limit = Brocken::ICB::HEAP_SIZE if !$effective_mem_limit && $platform && $platform->can('is_wasm') && $platform->is_wasm;
             my $mem_limit_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $effective_mem_limit );
             my $hb_mem          = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
             my $mem_off = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::MEMORY_LIMIT );
@@ -1320,10 +1319,17 @@ class Brocken::Katsuro::Lowerer {
         my $op  = $ast->op;
         my ( $line, $col ) = ( $ast->line, $ast->col );
 
-        # A float has no bits to shift and no bit pattern to mask, so these operators
-        # have no float form and an untyped operand meeting one stays integral.
-        # `%` is here for the same reason as Perl's: it is an integer modulus.
-        my $integer_only = $op eq '<<' || $op eq '>>' || $op eq '&' || $op eq '|' || $op eq '^' || $op eq '&&' || $op eq '||' || $op eq '%';
+        # A float has no bits to shift and no bit pattern to mask, so these
+        # operators have no float form. `%` is an integer modulus here for the
+        # same reason it is one in Perl.
+        #
+        # `&&` and `||` are deliberately not in this list. They are a truth test
+        # rather than an integer operator, and a float is true when it is not
+        # zero; both are handled by comparison below. Truncating instead would
+        # make `my f64 $a = 0.5; my f64 $b = 1.0; $a && $b` false, because 0.5
+        # truncates to 0.
+        my $bool_op      = $op eq '&&' || $op eq '||';
+        my $integer_only = !$bool_op && ( $op eq '<<' || $op eq '>>' || $op eq '&' || $op eq '|' || $op eq '^' || $op eq '%' );
 
         # An untyped variable is a box, and a box's payload may be a float, so an
         # untyped operand is read at whatever width the other operand is rather
@@ -1345,11 +1351,45 @@ class Brocken::Katsuro::Lowerer {
         if ( $lhs->type->kind eq 'dynamic' || $rhs->type->kind eq 'dynamic' ) {
             my $target
                 = $integer_only             ? Brocken::Lindsay::IR::Type::i64() :
+                $bool_op                    ? Brocken::Lindsay::IR::Type::f64() :
                 $lhs->type->kind eq 'float' ? $lhs->type :
                 $rhs->type->kind eq 'float' ? $rhs->type :
                 Brocken::Lindsay::IR::Type::f64();
             $lhs = $self->maybe_convert_type( $lhs, $target );
             $rhs = $self->maybe_convert_type( $rhs, $target );
+        }
+
+        # A typed float meeting one of the integer-only operators is
+        # truncated toward zero first, which is what Perl does: `12.7 & 10.3` is
+        # `12 & 10`, `-3.9 & 7.0` is `-3 & 7` rather than `-4 & 7`, and
+        # `1.0 << 2.9` shifts by 2.
+        #
+        # The conversion belongs here rather than further down because the mixed
+        # int/float unification promotes the integer side back up to float, which
+        # would leave `my i64 $a = 12; my f64 $b = 10.3; $a | $b` with two
+        # doubles again.
+        if ($integer_only) {
+            my $i64_type = Brocken::Lindsay::IR::Type::i64();
+            $lhs = $self->maybe_convert_type( $lhs, $i64_type ) if $lhs->type->kind eq 'float';
+            $rhs = $self->maybe_convert_type( $rhs, $i64_type ) if $rhs->type->kind eq 'float';
+        }
+
+        # `&&` and `||` take a float the other way round: true when it is not
+        # zero, so the operand becomes a `!= 0.0` comparison. Truncation would
+        # be wrong in both directions, since 0.5 and -0.5 both truncate to 0.
+        #
+        # Reading an untyped operand as f64 above is what lets one comparison
+        # serve either kind of box: `unbox_f64` widens an integer payload, so
+        # `my $x = 5; $x && $y` is `5.0 != 0.0` and true and `my $x = 0; $x && $y`
+        # is `0.0 != 0.0` and false, without the tag being read twice.
+        if ($bool_op) {
+            my $truthy = sub {
+                my ($side) = @_;
+                my $zero = Brocken::Lindsay::IR::Constant->new( type => $side->type, value => 0.0 );
+                return $builder->build_icmp( 'ne', $side, $zero, undef, $line, $col );
+            };
+            $lhs = $truthy->($lhs) if $lhs->type->kind eq 'float';
+            $rhs = $truthy->($rhs) if $rhs->type->kind eq 'float';
         }
 
         # Unify types for mixed int/float operations: both sides end up the same
