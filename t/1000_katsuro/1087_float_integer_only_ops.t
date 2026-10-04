@@ -2,10 +2,7 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
-use Brocken;
-use Brocken::Katsuro::Platform;
-use Brocken::Jenny::Linker::Wasm;
-use Test2::Tools::Brocken qw[run_exec temp_path cross_available];
+use Test2::Tools::Brocken qw[answers];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -29,53 +26,8 @@ use feature qw[class];
 # several other readings of the operator, so `12.0 & 10.0` cannot tell a
 # truncation apart from a mask of the raw IEEE-754 bits. `12.7` separates them.
 #
-# Every target that can actually execute runs these, for the same reason
-# 1076_float_conversion.t and 1077_untyped_float.t do: the cross targets through
-# BROCKEN_SYSROOT_*, and Wasm through wasmtime. Each is added only when its
-# tooling is present.
-sub _wasmtime {
-    my $exe = $^O eq 'MSWin32' ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
-    return undef unless defined $exe;
-    chomp $exe;
-    return ( length $exe && -f $exe ) ? $exe : undef;
-}
-my $WASMTIME = _wasmtime();
-my @TARGETS  = ( [ 'host', undef ] );
-for my $triple ( 'aarch64-unknown-linux-gnu', 'riscv64-unknown-linux-gnu' ) {
-    my $platform = eval { Brocken::Katsuro::Platform::parse($triple) };
-    push @TARGETS, [ $triple, $platform ] if $platform && cross_available($platform);
-}
-push @TARGETS, [ 'wasm32-unknown-wasi', Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi') ] if $WASMTIME;
-
-sub answers ( $src, $want, $name ) {
-    for my $target (@TARGETS) {
-        my ( $tag, $platform ) = @$target;
-        my $label   = $tag eq 'host' ? $name                                 : "$name [$tag]";
-        my $brocken = $platform      ? Brocken->new( platform => $platform ) : Brocken->new();
-        my $module  = eval { $brocken->compile($src) };
-        if ($@) { fail("$label: compile died: $@"); next }
-        my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        if ( $platform && $platform->arch =~ /^wasm/ ) {
-            my $module_file = temp_path('fb') . '.wasm';
-            Brocken::Jenny::Linker::Wasm->new->write_executable( $module_file, $funcs, $platform );
-            my $output = qx["$WASMTIME" run --invoke _BROCKEN_ENTRY "$module_file" 1024 2>&1];
-            my @lines  = grep {/\S/} split /\n/, $output;
-            my $got    = @lines ? $lines[-1] : '';
-            is( $got + 0, $want, $label );
-            unlink $module_file if -e $module_file;
-        }
-        else {
-            my $file = temp_path('fb') . $brocken->ext;
-
-            # The linker's platform is the one the instance was built with,
-            # not this loop's `$platform`, which is undef for the host target:
-            # MachO reads `->arch` and `->os` off it to pick the slice.
-            $brocken->linker->write_executable( $file, $funcs, $brocken->platform );
-            run_exec( $file, expected_exit => $want, platform => $platform, name => $label );
-            unlink $file if -e $file;
-        }
-    }
-}
+# `answers` runs this on the host, on the cross targets when BROCKEN_SYSROOT_* is
+# set, and on Wasm when a runner is on PATH.
 subtest 'a float operand is truncated, then the integer operator applies' => sub {
     answers( 'my f64 $a = 12.7; my f64 $b = 10.3; return $a & $b;',  8,  'f64 & f64' );
     answers( 'my f64 $a = 12.7; my f64 $b = 10.3; return $a | $b;',  14, 'f64 | f64' );

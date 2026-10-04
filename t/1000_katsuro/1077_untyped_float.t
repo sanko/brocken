@@ -2,114 +2,45 @@ use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use lib 'lib', '../../lib', '../lib';
-use Brocken;
-use Brocken::Katsuro::Platform;
-use Brocken::Jenny::Linker::Wasm;
-use Test2::Tools::Brocken qw[run_exec temp_path cross_available];
+use Test2::Tools::Brocken qw[answers];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# An untyped variable is a box, and the box has always had room for a float --
-# the header carried a type tag -- but nothing ever put one there or read one
-# back.
+# An untyped variable is a box: an 8-byte payload plus a type tag, and a float
+# occupies that payload.
 #
-# Three faults had to be fixed before an untyped variable could hold a float and
-# do arithmetic with one, and each one hid another on a different backend.
+# Reading a dynamic operand consults the tag and gives the caller the width the
+# context asks for. `Brocken::Runtime::unbox_f64` widens an integer payload,
+# `unbox_i64` truncates a float payload toward zero. Arithmetic on an untyped
+# operand is done in f64, which is Perl's scalar rule -- `1.5 + 1` is 2.5 --
+# because the box may hold a float and nothing in the expression says which.
 #
-# In the frontend, `lower_binop` unboxed a dynamic operand to i64 before it knew
-# what it was meeting, so `$x == 1.5` was built as a comparison of two integers
-# and `$x + $y` read a float payload as its bit pattern. A dynamic operand is now
-# read as whatever the context asks for: `Brocken::Runtime::unbox_f64` widens an
-# integer payload, `unbox_i64` truncates a float payload toward zero, and both
-# consult the tag first. Arithmetic on an untyped operand is done in f64, which is
-# Perl's scalar rule -- `1.5 + 1` is 2.5 -- because the box might hold a float
-# either way and nothing else would say so.
+# A mixed integer/float operation promotes the integer up instead of converting
+# the float down, so in fully typed code `my i64 $a = 1; my f64 $b = 1.5;
+# $a == $b` compares 1 against 1.5, and `$a < $b` answers true.
 #
-# Two of these faults used to cancel out on x86-64 for the simplest case: it
-# truncated the literal and the value identically, so `trunc(trunc(1.5)) ==
-# trunc(1.5)` was true and the bug looked like it worked. Fixing only the
-# frontend makes that case *fail*, which is why the integer half is asserted
-# alongside the float half here.
+# A list slot is one untagged eight-byte cell with no recorded element type, so
+# every element is boxed on the way in. That is the representation `gc_scan_list`
+# and the `Any` incref on the reading side already assume. See
+# 1085_list_return.t.
 #
-# Two more faults were not about floats at all but sat in the way:
-#
-# A mixed integer/float operation converted the *float* operand to the integer
-# type rather than promoting the integer up, so in fully typed code
-# `my i64 $a = 1; my f64 $b = 1.5; $a == $b` compared 1 against 1 and answered
-# true, `$a < $b` compared 1 against 1 and answered false, and
-# `my i64 $a = 2; $a * $b` computed 2. Nothing about an untyped value was
-# involved; the fraction was thrown away in the lowering.
-#
-# A list slot is one untagged eight-byte cell with no recorded element type, so a
-# list could not carry a float at all: the bits of 1.5 read back as an integer
-# are 4607182418800017408. Every element is now boxed on the way in, which is the
-# representation `gc_scan_list` and the `Any` incref on the reading side
-# already assumed. See 1085_list_return.t.
-#
-# A float has no bits to shift and no bit pattern to mask, so `<< >> & | ^`
-# and `%` keep an integer target when they meet an untyped operand: Perl
-# truncates a float before an integer-only operator applies, so `my $x = 12.7;
+# A float has no bits to shift and no pattern to mask, so `<< >> & | ^` and `%`
+# keep an integer target and truncate the float before it applies: `my $x = 12.7;
 # $x | 10` is `12 | 10`. `&&` and `||` are a truth test rather than an integer
 # operator, so an untyped operand meeting one is read as `f64` and compared
-# against zero instead. Both are asserted in 1087_float_integer_only_ops.t.
+# against zero. Both are asserted in 1087_float_integer_only_ops.t.
 #
-# Assigning a box to another box and self-assigning are excluded here too. Both
-# trap on Wasm for integers as well as floats, so they belong to the aliasing
-# gap rather than to anything about floats.
+# Two cases are excluded here:
 #
-# `f32` is excluded as well, and was already broken before any of this. The box
-# payload is a single 8-byte slot and the IR has no fptrunc/fpext, so a float of
-# one width cannot be put in a slot of the other -- the limitation is stated in
-# Katsuro/Lowerer.pm. An f32 payload writes 4 bytes and the unbox reads 8, or the
-# unbox reads 4 of an 8-byte f64. Every decimal literal is an f64, so nothing
-# reaches a box as an f32 unless it is declared one on purpose.
+# - Assigning a box to another box, and self-assigning. Both trap on Wasm for
+#   integers as well as for floats, so they belong to the aliasing gap.
+# - `f32`. The box payload is a single 8-byte slot and the IR has no
+#   fptrunc/fpext, so a float of one width cannot be put in a slot of the other;
+#   the limitation is stated in Katsuro/Lowerer.pm. Every decimal literal is an
+#   f64, so nothing reaches a box as an f32 unless it is declared one on purpose.
 #
-# Every target that can actually execute runs these, for the same reason
-# 1076_float_conversion.t does: the cross targets through BROCKEN_SYSROOT_*, and
-# Wasm through wasmtime. Each is added only when its tooling is present.
-sub _wasmtime {
-    my $exe = $^O eq 'MSWin32' ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
-    return undef unless defined $exe;
-    chomp $exe;
-    return ( length $exe && -f $exe ) ? $exe : undef;
-}
-my $WASMTIME = _wasmtime();
-my @TARGETS  = ( [ 'host', undef ] );
-for my $triple ( 'aarch64-unknown-linux-gnu', 'riscv64-unknown-linux-gnu' ) {
-    my $platform = eval { Brocken::Katsuro::Platform::parse($triple) };
-    push @TARGETS, [ $triple, $platform ] if $platform && cross_available($platform);
-}
-push @TARGETS, [ 'wasm32-unknown-wasi', Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi') ] if $WASMTIME;
-
-sub answers ( $src, $want, $name ) {
-    for my $target (@TARGETS) {
-        my ( $tag, $platform ) = @$target;
-        my $label   = $tag eq 'host' ? $name                                 : "$name [$tag]";
-        my $brocken = $platform      ? Brocken->new( platform => $platform ) : Brocken->new();
-        my $module  = eval { $brocken->compile($src) };
-        if ($@) { fail("$label: compile died: $@"); next }
-        my $funcs = $brocken->codegen->emit_functions( $module->functions );
-        if ( $platform && $platform->arch =~ /^wasm/ ) {
-            my $module_file = temp_path('uf') . '.wasm';
-            Brocken::Jenny::Linker::Wasm->new->write_executable( $module_file, $funcs, $platform );
-            my $output = qx["$WASMTIME" run --invoke _BROCKEN_ENTRY "$module_file" 1024 2>&1];
-            my @lines  = grep {/\S/} split /\n/, $output;
-            my $got    = @lines ? $lines[-1] : '';
-            is( $got + 0, $want, $label );
-            unlink $module_file if -e $module_file;
-        }
-        else {
-            my $file = temp_path('uf') . $brocken->ext;
-
-            # The linker's platform is the one the instance was built with,
-            # not this loop's `$platform`, which is undef for the host target:
-            # MachO reads `->arch` and `->os` off it to pick the slice.
-            $brocken->linker->write_executable( $file, $funcs, $brocken->platform );
-            run_exec( $file, expected_exit => $want, platform => $platform, name => $label );
-            unlink $file if -e $file;
-        }
-    }
-}
+# `answers` runs this on the host, on the cross targets when BROCKEN_SYSROOT_* is
+# set, and on Wasm when a runner is on PATH.
 subtest 'an untyped variable holding an integer is unchanged' => sub {
     answers( 'my $x = 7; return $x == 7 ? 1 : 0;',                 1, 'int untyped == 7' );
     answers( 'my $x = 7; return $x * 2 == 14 ? 1 : 0;',            1, 'int untyped * 2' );
