@@ -9,11 +9,9 @@ class Brocken::Katsuro::Platform::ABI::AArch64 v0.0.1 : isa(Brocken::Katsuro::Pl
     method registers( $category = 'available' ) {
         my %data = (
 
-            # Order matters: x9-x15 (non-param caller regs) come before x1-x7 (param caller regs)
-            # to avoid register allocator assigning vregs to param regs that get clobbered
-            # by argument-setup mov instructions in the Lowerer.
-            # x18 is the platform register per AAPCS64 - reserved on Android/iOS/macOS
-            # x19-x28 are callee-saved
+            # Order matters: x9-x15 (non-param caller regs) come before x1-x7 (param caller regs) to avoid register
+            # allocator assigning vregs to param regs that get clobbered by argument-setup mov instructions in the
+            # Lowerer. x18 is the platform register per AAPCS64 - reserved on Android/iOS/macOS x19-x28 are callee-saved
             available => [qw[x0 x9 x10 x11 x12 x13 x14 x15 x1 x2 x3 x4 x5 x6 x7 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28]],
             caller    => [qw[x0 x9 x10 x11 x12 x13 x14 x15 x1 x2 x3 x4 x5 x6 x7]],
             callee    => [qw[x19 x20 x21 x22 x23 x24 x25 x26 x27 x28]]
@@ -33,21 +31,18 @@ class Brocken::Katsuro::Platform::ABI::AArch64 v0.0.1 : isa(Brocken::Katsuro::Pl
 
     # The register a floating-point entry-block shuffle may park a value in.
     #
-    # The allocator's floating-point spill temporary is the last caller-saved
-    # register, which is v7 here, and v0-v7 are also the parameter registers.
-    # Parking an entry capture in one of them overwrote a parameter that had
-    # already arrived, so a function taking eight floating-point arguments read
-    # its first one as its last.  v31 is call-clobbered, is outside every
-    # register set the allocator draws from, and so can hold a value across the
-    # rest of the shuffle.
+    # The allocator's floating-point spill temporary is the last caller-saved register, which is v7 here, and v0-v7 are
+    # also the parameter registers.
+    # Parking an entry capture in one of them overwrote a parameter that had already arrived, so a function taking eight
+    # floating-point arguments read its first one as its last.  v31 is call-clobbered, is outside every register set the
+    # allocator draws from, and so can hold a value across the rest of the shuffle.
     method fp_entry_shuffle_temp() {'v31'}
 
-    # Arguments past the last of x0-x7 arrive on the stack.  AArch64's `bl`
-    # leaves the return address in x30 rather than pushing it, so nothing sits
-    # below the arguments: on entry sp points directly at the first stack
-    # argument and the offset does not skip a return address the way x86-64's
-    # does.  The call instruction does not move sp either, so the caller-side
-    # offset is the same.
+    # Arguments past the last of x0-x7 arrive on the stack.  AArch64's `bl` leaves the return address in x30 rather than
+    # pushing it, so nothing sits
+    # below the arguments: on entry sp points directly at the first stack argument and the offset does not skip a return
+    # address the way x86-64's does.  The call instruction does not move sp either, so the caller-side offset is the
+    # same.
     method stack_param_offset($index)        { 8 * $index }
     method caller_stack_param_offset($index) { 8 * $index }
 

@@ -80,8 +80,8 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
 
     method write_executable ( $output_file, $code_data, $platform, $shared = false, $debug_bytes = undef ) {
 
-        # Multi-function support: if $code_data is an arrayref of {name, bytes, fixups},
-        # concatenate all blobs, compute function offsets, and track external fixups.
+        # Multi-function support: if $code_data is an arrayref of {name, bytes, fixups}, concatenate all blobs, compute
+        # function offsets, and track external fixups.
         my @func_fixups;
         my %func_offsets;
         my $code_bytes;
@@ -387,8 +387,8 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
             while ( length($bind_info) % 8 != 0 ) { $bind_info .= "\0"; }
         }
 
-        # Hand-assemble both defined exports and undefined external imports
-        # to make sure dyld dynamic linking validations are strictly met.
+        # Hand-assemble both defined exports and undefined external imports to make sure dyld dynamic linking
+        # validations are strictly met.
         my ( $trie, $symtab, $strtab, $lc_id_dylib ) = ( '', '', '', '' );
         my ( $num_syms, $le_off, $trie_size, $symtab_size, $strtab_size ) = ( 0, 0, 0, 0, 0 );
         my @syms;

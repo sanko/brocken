@@ -15,27 +15,21 @@ use feature qw[class];
 
 # Float literals passed straight to a parameter.
 #
-# A float argument is copied into its register with `fmov`.  Unlike an integer
-# immediate, which `mov` can encode in the instruction, there is no x86
-# instruction that loads a floating-point immediate into an XMM register, so a
-# literal has to be materialised first: its bit pattern goes into a general
-# register and is then moved across with `fmov_gp2f`.  The call path skipped
-# that and handed the raw immediate to the encoder, which refused it
-# (`Unexpected operand kind: imm`).  The return path already materialised, so
-# only the arguments were wrong.
+# A float argument is copied into its register with `fmov`.  Unlike an integer immediate, which `mov` can encode in the
+# instruction, there is no x86 instruction that loads a floating-point immediate into an XMM register, so a
+# literal has to be materialised first: its bit pattern goes into a general register and is then moved across with
+# `fmov_gp2f`.  The call path skipped that and handed the raw immediate to the encoder, which refused it (`Unexpected
+# operand kind: imm`).  The return path already materialised, so only the arguments were wrong.
 #
-# The temporary the materialisation uses is an ordinary virtual register.  A
-# call-argument copy is `fmov <xmm>, <virt>` and the destination carries no
-# type, so the allocator did not know the register held a live argument and
-# could hand the same XMM to a later literal's temporary.  With four literals
-# the first argument then read back as its neighbour, and `1+2+3+4` arrived as
-# 9 instead of 10.  The destination register is now taken from the instruction
-# for the float class, not only from its type.
+# The temporary the materialisation uses is an ordinary virtual register.  A call-argument copy is `fmov <xmm>, <virt>`
+# and the destination carries no type, so the allocator did not know the register held a live argument and could hand
+# the same XMM to a later literal's temporary.  With four literals the first argument then read back as its neighbour,
+# and `1+2+3+4` arrived as 9 instead of 10.  The destination register is now taken from the instruction for the float
+# class, not only from its type.
 #
-# The codegen-level check encodes a program with literal arguments without
-# running it, which is what caught the original encoding failure.  The
-# executing sweep then proves the values survive: distinct values make a
-# clobbered argument change the sum.
+# The codegen-level check encodes a program with literal arguments without running it, which is what caught the original
+# encoding failure.  The
+# executing sweep then proves the values survive: distinct values make a clobbered argument change the sum.
 my $brocken = Brocken->new;
 is(
     dies {
@@ -49,14 +43,12 @@ is(
     'a float literal argument is materialised, not handed to the encoder as an immediate'
 );
 
-# The executing sweep below only runs on the host it is built for, so the width
-# of the materialising move is checked here by encoding an f32 argument on any
-# host.  The destination is a physical register and carries no type, so the
-# move's width is read off it; left untyped an f32 came out double-width.  On
-# RISC-V that is `fmv.d.x`, which does not NaN-box the operand, so the callee
-# read a canonical NaN and every f32 subtest of the sweep failed while every
-# f64 one passed.  ARM64 has no NaN-boxing, so its double-register form still
-# read the low half correctly, but the width should still come from the literal.
+# The executing sweep below only runs on the host it is built for, so the width of the materialising move is checked
+# here by encoding an f32 argument on any host.  The destination is a physical register and carries no type, so the
+# move's width is read off it; left untyped an f32 came out double-width.  On RISC-V that is `fmv.d.x`, which does not
+# NaN-box the operand, so the callee read a canonical NaN and every f32 subtest of the sweep failed while every f64 one
+# passed.  ARM64 has no NaN-boxing, so its double-register form still read the low half correctly, but the width should
+# still come from the literal.
 sub entry_words ( $cg_class, $arch ) {
     my $plat   = Brocken::Katsuro::Platform::parse($arch);
     my $cg     = $cg_class->new( platform => $plat );

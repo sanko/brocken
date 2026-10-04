@@ -63,8 +63,8 @@ class Brocken::Jenny::MIR::MachineFunction v0.0.1 {
                 }
                 elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
 
-                    # Wasm CondBr: bne has 1 operand (label only, condition on implicit stack)
-                    # x86_64/ARM64/RISCV64 CondBr: bne/beq have 2 operands (cond, label)
+                    # Wasm CondBr: bne has 1 operand (label only, condition on implicit stack) x86_64/ARM64/RISCV64
+                    # CondBr: bne/beq have 2 operands (cond, label)
                     # Wasm Select: beq has 2 operands (condition, label) - same as x86_64
                     my $target_idx = @ops == 2 ? 1 : 0;
                     my $target     = $ops[$target_idx]->value;

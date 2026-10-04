@@ -7,8 +7,7 @@ no warnings qw[experimental::class];
 
 # Regression tests for bugs found by the fuzzer.
 # Each test is a specific Brocken program that triggered a miscompilation.
-# Keep these as standalone programs so they remain valid regression tests
-# even if the fuzzer's internal logic changes.
+# Keep these as standalone programs so they remain valid regression tests even if the fuzzer's internal logic changes.
 sub test_prog {
     my ( $name, $source, $expected ) = @_;
     my $fuzz   = Brocken::Fuzz->new();
@@ -133,12 +132,10 @@ return $v1;
 PROG
 };
 
-# Bug: udiv/sdiv codegen clobbers RAX and RDX internally (MOV RAX,dst;
-# XOR RDX,RDX / CQO; DIV/IDIV src; MOV dst,RAX) without the register
-# allocator knowing about it.  If the allocator assigned a live virtual
-# register to RAX or RDX, its value would be silently corrupted.
-# Fix: exclude RAX and RDX from allocation when udiv/sdiv/umulh/div128_64
-# are present in the function.
+# Bug: udiv/sdiv codegen clobbers RAX and RDX internally (MOV RAX,dst; XOR RDX,RDX / CQO; DIV/IDIV src; MOV dst,RAX)
+# without the register allocator knowing about it.  If the allocator assigned a live virtual register to RAX or RDX, its
+# value would be silently corrupted.
+# Fix: exclude RAX and RDX from allocation when udiv/sdiv/umulh/div128_64 are present in the function.
 subtest 'register clobber (rax/rdx) regressions' => sub {
 
     # Simple case: v2 is used both as divisor and as return value.
@@ -182,17 +179,14 @@ return $v4;
 PROG
 };
 
-# Bug: shift opcode codegen (shl/lshr/ashr) uses %cl for the shift count
-# inline (MOV src->ecx; SHL dst,%cl) without the register allocator
-# knowing. If the allocator assigned a live virtual register to rcx,
-# its value would be silently corrupted by the MOV to ecx. This is
-# the same class of bug as the rax/rdx clobber for div.
+# Bug: shift opcode codegen (shl/lshr/ashr) uses %cl for the shift count inline (MOV src->ecx; SHL dst,%cl) without the
+# register allocator knowing. If the allocator assigned a live virtual register to rcx, its value would be silently
+# corrupted by the MOV to ecx. This is the same class of bug as the rax/rdx clobber for div.
 # Fix: exclude rcx from allocation when shl/lshr/ashr are present.
 subtest 'register clobber (rcx) regressions' => sub {
 
-    # Many live values across a shift to exhaust registers, forcing
-    # some value into rcx before the fix. Return $h=8 which must
-    # survive the shift.
+    # Many live values across a shift to exhaust registers, forcing some value into rcx before the fix. Return $h=8
+    # which must survive the shift.
     test_prog( 'many live values across shift', <<'PROG', 8 );
 my i64 $a = 1;
 my i64 $b = 2;
@@ -395,26 +389,23 @@ return $v2;
 PROG
 };
 
-# Bug: _gen_while could corrupt $vars when returning { code => undef }
-# after detecting a non-terminating loop. The simulation ran body closures
-# that modified $vars, but $vars was not restored when the loop was skipped.
+# Bug: _gen_while could corrupt $vars when returning { code => undef } after detecting a non-terminating loop. The
+# simulation ran body closures that modified $vars, but $vars was not restored when the loop was skipped.
 # Subsequent statements computed expected values against corrupted state.
 # Fix: save/restore $vars in _gen_while before/after simulation.
 subtest 'ghost while loop does not corrupt fuzzer state' => sub {
     my $f = Brocken::Fuzz->new( seed => 20260705 );
 
-    # Case 10 with this seed triggered a ghost while loop. Before the fix,
-    # the corrupted $vars caused expected=18 (wrong). Correct expected is
-    # 238 (= 2205418478 & 0xFF).
+    # Case 10 with this seed triggered a ghost while loop. Before the fix, the corrupted $vars caused expected=18
+    # (wrong). Correct expected is 238 (= 2205418478 & 0xFF).
     my $result = $f->run_case( 10, 10, 4 );
     ok $result->{status} eq 'pass', 'case 10 passes (expected=238)' or diag "got $result->{status}: $result->{reason}";
 };
 
-# Bug: _eval_i64_typed returned $lv for unsigned % signed_negative when RHS
-# is wider, but the compiler promotes the narrow LHS to the wider signed type
-# and does a signed remainder.  Same issue in _eval_cmp_typed for comparisons.
-# Fix: width-guard in both methods -- when RHS is wider, do a signed op/comparison;
-# otherwise (RHS same/narrower) treat the negative RHS as huge unsigned.
+# Bug: _eval_i64_typed returned $lv for unsigned % signed_negative when RHS is wider, but the compiler promotes the
+# narrow LHS to the wider signed type and does a signed remainder.  Same issue in _eval_cmp_typed for comparisons.
+# Fix: width-guard in both methods -- when RHS is wider, do a signed op/comparison; otherwise (RHS same/narrower) treat
+# the negative RHS as huge unsigned.
 subtest 'unsigned LHS vs wider signed RHS (div/rem/cmp)' => sub {
 
     # u8 % i64: compiler promotes u8 to i64 (zext), does signed remainder.
@@ -626,8 +617,8 @@ return $v1;
 PROG
 };
 
-# Bug: _gen_logic_assign evaluated ||/&& as Perl logical (truthy→0/1),
-# but Brocken lowers them to bitwise MIR or/and (X86_64 Lowerer.pm:226-227).
+# Bug: _gen_logic_assign evaluated ||/&& as Perl logical (truthy→0/1), but Brocken lowers them to bitwise MIR or/and
+# (X86_64 Lowerer.pm:226-227).
 # These tests verify the bitwise semantics.
 # Fuzzer seed 20260702, cases 6/8/15.
 subtest '|| and && are bitwise (not logical) in Brocken' => sub {
@@ -683,8 +674,8 @@ PROG
 };
 
 # Phase F7: Loop iteration guard prevents infinite while loops.
-# Without the guard, a while loop whose body never modifies the
-# condition variables hangs the compiled binary indefinitely.
+# Without the guard, a while loop whose body never modifies the condition variables hangs the compiled binary
+# indefinitely.
 subtest 'loop iteration guard prevents infinite while with next' => sub {
     local $Brocken::default_fuel = 6;
     test_prog( 'next-only loop exits via guard and returns constant', <<'PROG', 42 );

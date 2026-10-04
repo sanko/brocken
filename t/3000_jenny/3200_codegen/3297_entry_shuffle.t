@@ -18,25 +18,21 @@ use feature qw[class];
 #     mov <dst>, rdx      # arg 2
 #     mov <dst>, rcx      # arg 3
 #
-# Those captures do not run in isolation.  They all read the caller's registers
-# before any of them is overwritten, so they are one parallel move, and the
-# register allocator is free to pick a destination that is still a pending
-# source -- which is what it did with four integer parameters, producing the
-# cycle `rcx <- rdi, rdx <- rsi, rsi <- rdx, rdi <- rcx`.
+# Those captures do not run in isolation.  They all read the caller's registers before any of them is overwritten, so
+# they are one parallel move, and the register allocator is free to pick a destination that is still a pending source --
+# which is what it did with four integer parameters, producing the cycle `rcx <- rdi, rdx <- rsi, rsi <- rdx, rdi <-
+# rcx`.
 #
 # Parking every clobbered source in one temp and then emitting the consumers
-# does not work: both parks are emitted before both consumers, so the second
-# park overwrites the first and the fourth argument arrives holding the second.
-# A temp that is not reserved from allocation is worse still: it can itself be
-# picked as a capture destination.  The shuffle is scheduled as a real parallel
-# move instead, so a group of any size can be ordered.
+# does not work: both parks are emitted before both consumers, so the second park overwrites the first and the fourth
+# argument arrives holding the second.
+# A temp that is not reserved from allocation is worse still: it can itself be picked as a capture destination.  The
+# shuffle is scheduled as a real parallel move instead, so a group of any size can be ordered.
 #
-# A free function is the honest way to pin this down: no field layout, no
-# sub-word store width, no constructor, just the argument registers themselves.
-# It has to be swept by arity rather than tested at one width, since the
-# failing arity is whatever fills the argument register set -- four on Win64,
-# six on SysV, and a cycle at the point where the allocator starts permuting
-# them at all.
+# A free function is the honest way to pin this down: no field layout, no sub-word store width, no constructor, just the
+# argument registers themselves.
+# It has to be swept by arity rather than tested at one width, since the failing arity is whatever fills the argument
+# register set -- four on Win64, six on SysV, and a cycle at the point where the allocator starts permuting them at all.
 my $brocken = Brocken->new;
 SKIP: {
     skip 'Not native', 1 unless $brocken->platform->is_native;

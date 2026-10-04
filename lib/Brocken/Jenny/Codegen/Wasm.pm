@@ -91,13 +91,12 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
         }
 
         # %heap_ptr is a module global now, not a local: see
-        # Brocken::Jenny::Linker::Wasm::_global_section. It is deliberately left
-        # out of %vreg_map so no local slot is spent on it.
-        # A Wasm branch may only reach a label that encloses it, so an arbitrary
-        # control-flow graph cannot be laid out as a chain of nested blocks. Each
-        # block instead becomes a case of a dispatch loop, and this local holds
-        # the number of the one that runs next. Declared with no name in
-        # %vreg_map, so it is typed i32 like the state it carries.
+        # Brocken::Jenny::Linker::Wasm::_global_section. It is deliberately left out of %vreg_map so no local slot is
+        # spent on it.
+        # A Wasm branch may only reach a label that encloses it, so an arbitrary control-flow graph cannot be laid out
+        # as a chain of nested blocks. Each block instead becomes a case of a dispatch loop, and this local holds the
+        # number of the one that runs next. Declared with no name in %vreg_map, so it is typed i32 like the state it
+        # carries.
         my $state_local = $next_local++;
         my @blocks      = $mf->blocks->@*;
         my %label_to_block_idx;
@@ -108,11 +107,10 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
         }
         my $num_non_entry = $#blocks;
 
-        # Local numbers are handed out in the order the body below first mentions
-        # each value, but the declared type of a local has to be known while that
-        # body is emitted: a branch tests an i32, and a comparison result may be
-        # held in an i64 local that needs narrowing first. Assigning every local
-        # up front, from the same walk, keeps the declaration and the narrowing
+        # Local numbers are handed out in the order the body below first mentions each value, but the declared type of a
+        # local has to be known while that
+        # body is emitted: a branch tests an i32, and a comparison result may be held in an i64 local that needs
+        # narrowing first. Assigning every local up front, from the same walk, keeps the declaration and the narrowing
         # in step instead of leaving the two to be derived separately.
         my $num_params = scalar( $ir_params->@* );
         my %mir_local_type;
@@ -128,23 +126,19 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
         {
             my %lid_to_name = reverse %vreg_map;
 
-            # A parameter's type is carried by the parameter itself; only the
-            # values defined in the body appear in %ir_types. Without this a
-            # pointer parameter would fall through to the i32 default and be
-            # declared too narrow for the i64 that gets passed to it.
+            # A parameter's type is carried by the parameter itself; only the values defined in the body appear in
+            # %ir_types. Without this a pointer parameter would fall through to the i32 default and be declared too
+            # narrow for the i64 that gets passed to it.
             for my $i ( 0 .. $num_params - 1 ) {
                 my $pt = $ir_params->[$i]->type;
                 $lid_to_type{$i} = $pt ? $self->_wasm_valtype($pt) : VALTYPE_I32;
             }
 
-            # A name the lowerer invented is not in the IR at all: %heap_ptr,
-            # which carries the bump allocator between allocas, is defined
-            # straight into MIR as a pointer. The MIR operand still knows that,
-            # so ask it before giving up and declaring the local i32. Declaring
-            # it too narrow made every body that allocates fail validation
-            # outright -- "type mismatch: expected i32, found i64" at the first
-            # use of the address -- which is every untyped `my`, since an
-            # untyped variable is boxed and so needs an alloca.
+            # A name the lowerer invented is not in the IR at all: %heap_ptr, which carries the bump allocator between
+            # allocas, is defined straight into MIR as a pointer. The MIR operand still knows that, so ask it before
+            # giving up and declaring the local i32. Declaring it too narrow made every body that allocates fail
+            # validation outright -- "type mismatch: expected i32, found i64" at the first use of the address -- which
+            # is every untyped `my`, since an untyped variable is boxed and so needs an alloca.
             for my $lid ( $num_params .. $next_local - 1 ) {
                 my $name  = $lid_to_name{$lid} // '';
                 my $itype = $name ? ( $ir_types->{$name} // $mir_local_type{$name} ) : undef;
@@ -166,18 +160,15 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
                 my @ops    = $inst->operands->@*;
                 if ( $opcode eq 'bne' ) {
 
-                    # Each case body is emitted between the end of its own block
-                    # and the end of the next one out, so from inside case $bi the
-                    # enclosing labels are the $bi case blocks, then $exit, then
-                    # $loop: a branch to the dispatch is depth $bi + 1.
+                    # Each case body is emitted between the end of its own block and the end of the next one out, so
+                    # from inside case $bi the enclosing labels are the $bi case blocks, then $exit, then $loop: a
+                    # branch to the dispatch is depth $bi + 1.
                     #
-                    # Both outcomes re-dispatch, and the block number has to reach
-                    # the state local on either path, before the branch. A block
-                    # cannot carry that: it validates against a fresh operand
-                    # stack, so it would not see a condition pushed before it
-                    # opened. Choosing between the two indices here keeps the
-                    # condition reachable, and stashing it in the state local
-                    # first clears the stack for the select.
+                    # Both outcomes re-dispatch, and the block number has to reach the state local on either path,
+                    # before the branch. A block
+                    # cannot carry that: it validates against a fresh operand stack, so it would not see a condition
+                    # pushed before it opened. Choosing between the two indices here keeps the condition reachable, and
+                    # stashing it in the state local first clears the stack for the select.
                     my $true_idx  = $label_to_block_idx{ $ops[0]->value };
                     my $false_idx = $label_to_block_idx{ $ops[1]->value };
                     $$buf .= pack( 'C', LOCAL_SET ) . $self->_uleb($state_local);
@@ -404,28 +395,25 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
                     push @func_fixups, { type => 'call_idx', target => $func_name, block => $bi, offset => $fixup_pos + 1 };
                 }
                 else {
-                    # Silently emitting nothing here is how the encoder produces a
-                    # module that links but does not validate, so an opcode with no
-                    # encoding is a bug in the lowerer and has to be loud.
+                    # Silently emitting nothing here is how the encoder produces a module that links but does not
+                    # validate, so an opcode with no encoding is a bug in the lowerer and has to be loud.
                     die "Wasm code generator has no encoding for '$opcode'";
                 }
             }
         }
 
         # Assemble the function body. A branch can only reach an enclosing label, so
-        # the blocks are not nested one inside the next: each one becomes a case
-        # of a dispatch loop. The openers run outermost-first ($loop, $exit, then
-        # $case0..$caseN with $case0 the outermost case), so $caseN and $default
-        # are innermost and close first.
+        # the blocks are not nested one inside the next: each one becomes a case of a dispatch loop. The openers run
+        # outermost-first ($loop, $exit, then $case0..$caseN with $case0 the outermost case), so $caseN and $default are
+        # innermost and close first.
         my @block_start;
         my $pos     = 0;
         my $nblocks = scalar @blocks;
         my $top     = $nblocks - 1;
         my $emit    = sub ($chunk) { $bytes .= $chunk; $pos += length($chunk); };
 
-        # The first case runs on entry. A case that branches back to the dispatch
-        # leaves its target in the state local, so seeding it here rather than
-        # inside the loop is what keeps a re-dispatch from restarting at case 0.
+        # The first case runs on entry. A case that branches back to the dispatch leaves its target in the state local,
+        # so seeding it here rather than inside the loop is what keeps a re-dispatch from restarting at case 0.
         $emit->( pack( 'C', I32_CONST ) . $self->_sleb(0) );
         $emit->( pack( 'C', LOCAL_SET ) . $self->_uleb($state_local) );
         $emit->( pack( 'C', LOOP ) . pack( 'C', 0x40 ) );                  # $loop
@@ -441,18 +429,16 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
         $emit->( $self->_uleb(0) );                                       # out of range: fall through to the trap
         $emit->( pack( 'C', END_BLOCK ) );
 
-        # The state only ever holds a block number that was set here, so an
-        # out-of-range value is a codegen bug. Trap rather than return, which
-        # would have to supply a result of whatever type the function declares.
+        # The state only ever holds a block number that was set here, so an out-of-range value is a codegen bug. Trap
+        # rather than return, which would have to supply a result of whatever type the function declares.
         $emit->( pack( 'C', UNREACHABLE ) );
         for my $bi ( reverse 0 .. $top ) {
             $emit->( pack( 'C', END_BLOCK ) );
             $block_start[$bi] = $pos;
             $emit->( $bi == 0 ? $entry_bytes : $non_entry_bytes[ $bi - 1 ] );
 
-            # A block that runs off its end would otherwise fall into the next
-            # case, so every case ends by re-dispatching even when its own
-            # terminator already left.
+            # A block that runs off its end would otherwise fall into the next case, so every case ends by
+            # re-dispatching even when its own terminator already left.
             $emit->( pack( 'C', I32_CONST ) . $self->_sleb(0) );
             $emit->( pack( 'C', LOCAL_SET ) . $self->_uleb($state_local) );
             $emit->( pack( 'C', BR ) . $self->_uleb( $bi + 1 ) );
@@ -460,11 +446,10 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
         $emit->( pack( 'C', END_BLOCK ) );    # $exit
         $emit->( pack( 'C', END_BLOCK ) );    # $loop
 
-        # Every path out of the dispatch leaves by returning, by trapping or by
-        # branching back to it, so falling out of the loop cannot happen. It has
-        # to be said anyway: unreachability does not carry out of a void block,
-        # so without this the frame is reachable with an empty stack and a
-        # function that returns a value fails to validate at its final end.
+        # Every path out of the dispatch leaves by returning, by trapping or by branching back to it, so falling out of
+        # the loop cannot happen. It has
+        # to be said anyway: unreachability does not carry out of a void block, so without this the frame is reachable
+        # with an empty stack and a function that returns a value fails to validate at its final end.
         $emit->( pack( 'C', UNREACHABLE ) );
         if ($source_map) {
             for my $idx ( keys %raw_offsets ) {
@@ -482,9 +467,8 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
         my $locals_block     = '';
         if ( $num_extra_locals > 0 ) {
 
-            # Group consecutive locals that share a declared type. The widths come
-            # from the table built before the body was emitted, so what is declared
-            # here is exactly what the body was compiled against.
+            # Group consecutive locals that share a declared type. The widths come from the table built before the body
+            # was emitted, so what is declared here is exactly what the body was compiled against.
             my @groups;
             my $prev_wt;
             for my $lid ( $num_params .. $next_local - 1 ) {
@@ -521,9 +505,8 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
             \@func_fixups );
     }
 
-    # A pointer is a 64-bit value here, matching the way the IR models one, and
-    # is only narrowed to the i32 that a Wasm memory access wants at the point of
-    # the access. Keeping it 64-bit elsewhere is what stops an i32 address from
+    # A pointer is a 64-bit value here, matching the way the IR models one, and is only narrowed to the i32 that a Wasm
+    # memory access wants at the point of the access. Keeping it 64-bit elsewhere is what stops an i32 address from
     # meeting an i64 offset, or a pointer argument, and disagreeing.
     method _wasm_valtype($ir_type) {
         return VALTYPE_I32 if $ir_type->kind eq 'int' && $ir_type->bits <= 32;      # i32
@@ -546,14 +529,12 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
         return $out;
     }
 
-    # Signed LEB128. The shift has to stay in integer arithmetic: dividing by
-    # 128 with POSIX::floor goes through a double, which carries 53 bits of
-    # mantissa, so any value past 2**53 was rounded before the next group was
-    # taken. INT64_MAX came out as ff 80 80 80 80 80 80 80 80 01, which the
-    # validator rejects outright as an over-long var_i64.
+    # Signed LEB128. The shift has to stay in integer arithmetic: dividing by 128 with POSIX::floor goes through a
+    # double, which carries 53 bits of mantissa, so any value past 2**53 was rounded before the next group was taken.
+    # INT64_MAX came out as ff 80 80 80 80 80 80 80 80 01, which the validator rejects outright as an over-long var_i64.
     #
-    # Perl's >> shifts the unsigned representation, so a negative value needs
-    # the -((-v + 127) >> 7) form to still round toward negative infinity.
+    # Perl's >> shifts the unsigned representation, so a negative value needs the -((-v + 127) >> 7) form to still round
+    # toward negative infinity.
     method _sleb ($v) {
         $v -= 18446744073709551616 if $v >= 9223372036854775808;
         my $out = '';

@@ -12,9 +12,8 @@ use feature qw[class];
 #
 # A call from a block other than the entry one. The call index is a fixup that
 # Codegen::Wasm records against its own block and rebases onto the block start,
-# so the block-relative offset is only right once that rebase happens: an
-# offset left relative to the block, or one added to the wrong base, points the
-# call at the middle of the dispatch loop and the module will not validate.
+# so the block-relative offset is only right once that rebase happens: an offset left relative to the block, or one
+# added to the wrong base, points the call at the middle of the dispatch loop and the module will not validate.
 #
 # The call in 3270_multi_func.t sits in the entry block, where the two bases
 # coincide, so it cannot tell a correct rebase from a missing one.
@@ -24,9 +23,8 @@ subtest 'Wasm call from a non-entry block' => sub {
     my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
     chomp $wasmtime_path if $wasmtime_path;
 
-    # SKIP: so skip() has a block to last out of. Without the label it unwinds
-    # the subtest closure itself, and the plan the subtest adds on the way out
-    # collides with the trailing SKIP.
+    # SKIP: so skip() has a block to last out of. Without the label it unwinds the subtest closure itself, and the plan
+    # the subtest adds on the way out collides with the trailing SKIP.
 SKIP: {
         skip 'wasmtime not available', 2 unless $wasmtime_path && -f $wasmtime_path;
         my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');

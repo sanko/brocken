@@ -89,20 +89,18 @@ BROCKEN
 };
 
 # A list slot is one untagged eight-byte cell, so a list could not carry a float
-# at all: the bits of 1.5 read back as an integer are 4607182418800017408. Every
-# element is now boxed on the way in, which is the representation `gc_scan_list`
-# and the `Any` incref on the reading side already assumed.
+# at all: the bits of 1.5 read back as an integer are 4607182418800017408. Every element is now boxed on the way in,
+# which is the representation `gc_scan_list` and the `Any` incref on the reading side already assumed.
 subtest 'list elements keep their own kind' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
 SKIP: {
         skip 'Not native', 4 unless $host->is_native;
 
-        # An untyped element is boxed on the way into the slot and the box has to
-        # survive the return of the function that built the list. It is increfed
-        # when it is stored, so the exit decref of the local `$u` no longer leaves
-        # the slot pointing at a freed box (it used to read back as whatever was
-        # left in that memory -- 58 before the list-slot ownership fix, 0 after it).
+        # An untyped element is boxed on the way into the slot and the box has to survive the return of the function
+        # that built the list. It is increfed when it is stored, so the exit decref of the local `$u` no longer leaves
+        # the slot pointing at a freed box (it used to read back as whatever was left in that memory -- 58 before the
+        # list-slot ownership fix, 0 after it).
         my @cases = (
             [ <<'BROCKEN', 4, 'a list of floats' ],
 sub make_list() -> ptr {

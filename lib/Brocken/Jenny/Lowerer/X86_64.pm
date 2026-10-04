@@ -3491,11 +3491,9 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     my $mem_val
                         = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 8 }, type => $val->type );
 
-                    # A float payload goes out through the SSE store. Both
-                    # `store` and `store_imm` pick a 64-bit GP move for a
-                    # memory operand that is not an int, so `my $x = 1.5;`
-                    # stored the integer 1 into the box and the float was gone
-                    # before anything could read it back.
+                    # A float payload goes out through the SSE store. Both `store` and `store_imm` pick a 64-bit GP move
+                    # for a memory operand that is not an int, so `my $x = 1.5;` stored the integer 1 into the box and
+                    # the float was gone before anything could read it back.
                     my $is_float  = $val->type && $val->type->kind eq 'float';
                     my $store_op  = $is_float ? 'fstore' : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store';
                     my $store_src = $is_float ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val);
@@ -3515,11 +3513,9 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
 
                     # A float payload has to come back in through the SSE load.
                     # The plain `load` is a 64-bit GP move, so it wrote the f64
-                    # bits into a general-purpose register: the float compare
-                    # then read whatever the register held before, and any
-                    # unrelated value living in that register (the frame
-                    # pointer, here) was overwritten with 0x3ff8000000000000
-                    # and dereferenced on the next instruction.
+                    # bits into a general-purpose register: the float compare then read whatever the register held
+                    # before, and any unrelated value living in that register (the frame pointer, here) was overwritten
+                    # with 0x3ff8000000000000 and dereferenced on the next instruction.
                     my $is_float = $inst->type && $inst->type->kind eq 'float';
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3632,11 +3628,9 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     } @args;
                     my @arg_regs = $abi->argument_locations( \@classes )->@*;
 
-                    # An argument that no register can carry is written at a raw
-                    # displacement off the physical stack pointer.  The area is
-                    # reserved in the frame rather than pushed at the call, so
-                    # the allocator's spill slots keep the displacements they
-                    # were given and rsp stays 16-byte aligned at the call.
+                    # An argument that no register can carry is written at a raw displacement off the physical stack
+                    # pointer.  The area is reserved in the frame rather than pushed at the call, so the allocator's
+                    # spill slots keep the displacements they were given and rsp stays 16-byte aligned at the call.
                     my $slot = sub ( $disp, $type ) {
                         return Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'mem',
@@ -3645,9 +3639,8 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                         );
                     };
 
-                    # Emit in reverse order so arg0 (reg rcx/rdi) is set last,
-                    # avoiding clobber of virt_regs that may have been allocated
-                    # to the same param register as a later argument.
+                    # Emit in reverse order so arg0 (reg rcx/rdi) is set last, avoiding clobber of virt_regs that may
+                    # have been allocated to the same param register as a later argument.
                     for my $i ( reverse 0 .. $#args ) {
                         my $arg_type = $args[$i]->type;
                         my $is_float = $arg_type  && $arg_type->kind eq 'float';
@@ -3883,8 +3876,8 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     );
 
                     # Zero-initialize callee-save slots before setting specific values.
-                    # The alloca does not zero memory, so uninitialized slots would
-                    # load garbage into callee registers on the fiber's first entry.
+                    # The alloca does not zero memory, so uninitialized slots would load garbage into callee registers
+                    # on the fiber's first entry.
                     for my $off ( 0, 8, 24, 32, 40, 72 ) {
                         my $f = Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'mem',
@@ -4505,7 +4498,8 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     my $reg     = $self->_lower_opnd($isolate);
                     if ( $platform->is_windows ) {
 
-                        # WaitForSingleObject(handle, INFINITE), GetExitCodeThread(handle, &retval), then CloseHandle(handle)
+                        # WaitForSingleObject(handle, INFINITE), GetExitCodeThread(handle, &retval), then
+                        # CloseHandle(handle)
                         my $tag       = $inst->name // 'anon' . int($inst);
                         my $retv_slot = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $tag . '.rv', type => $ptr );
                         $mbb->add_instruction(
@@ -4828,20 +4822,16 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
 
     # Build a floating-point constant straight into a named register.
     #
-    # `_materialize` hands back a floating-point virtual register and the caller
-    # then copies it across, which leaves a floating-point temporary in the
-    # middle of the argument setup.  The allocator may put that temporary in any
-    # caller-saved register, including an argument register that an earlier
-    # argument has already been placed in, so a later literal overwrote the
-    # argument before the call read it.  With `g(1.0, 2.0)` both parameters came
-    # out as 1.0.  Building the value into the argument register itself leaves no
-    # floating-point temporary to collide with anything.
+    # `_materialize` hands back a floating-point virtual register and the caller then copies it across, which leaves a
+    # floating-point temporary in the middle of the argument setup.  The allocator may put that temporary in any
+    # caller-saved register, including an argument register that an earlier argument has already been placed in, so a
+    # later literal overwrote the argument before the call read it.  With `g(1.0, 2.0)` both parameters came out as 1.0.
+    # Building the value into the argument register itself leaves no floating-point temporary to collide with anything.
     #
-    # The bit pattern still travels through a general-purpose register, since
-    # there is no instruction that loads a floating-point immediate.  That
-    # register is written and read by the two instructions below and nothing
-    # else, and the argument copies are emitted in reverse order, so the integer
-    # argument registers are all set after this pair has run.
+    # The bit pattern still travels through a general-purpose register, since there is no instruction that loads a
+    # floating-point immediate.  That register is written and read by the two instructions below and nothing else, and
+    # the argument copies are emitted in reverse order, so the integer argument registers are all set after this pair
+    # has run.
     method _materialize_into( $mbb, $ir_val, $dest ) {
         return 0 unless $ir_val->isa('Brocken::Lindsay::IR::Constant');
         return 0 unless $ir_val->type && $ir_val->type->kind eq 'float';
@@ -4852,9 +4842,8 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
         my $gp_type     = Brocken::Lindsay::IR::Type::i64();
         my $gp          = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%fmgp_' . $fmgi++, type => $gp_type );
 
-        # The destination is a physical register, which carries no type of its
-        # own, and `fmov_gp2f` takes the width of the move from there.  Left
-        # untyped it would encode 32 bits and truncate an f64 to its low half.
+        # The destination is a physical register, which carries no type of its own, and `fmov_gp2f` takes the width of
+        # the move from there.  Left untyped it would encode 32 bits and truncate an f64 to its low half.
         my $dest_typed = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $dest->value, type => $ir_val->type );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4868,8 +4857,8 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
         return 1;
     }
 
-    # Lower an IR operand, returning the lo half virt_reg for i128 non-constants
-    # when the operation expects a narrower width (e.g. u32 - u128: use u128 lo).
+    # Lower an IR operand, returning the lo half virt_reg for i128 non-constants when the operation expects a narrower
+    # width (e.g. u32 - u128: use u128 lo).
     method _lower_opnd_wide( $ir_val, $op_type ) {
         if ( $ir_val->isa('Brocken::Lindsay::IR::Constant') ) {
             my $value = $ir_val->value;
@@ -4883,9 +4872,8 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
         if ( $ir_val->type && $ir_val->type->kind eq 'int' && $ir_val->type->bits >= 128 ) {
 
             # Wide value used as a scalar operand: return the lo half.
-            # The $op_type check is not used because the operand is always
-            # consumed as a single 64-bit value (e.g., shift count, store to
-            # narrow alloca), never as a 128-bit pair.
+            # The $op_type check is not used because the operand is always consumed as a single 64-bit value (e.g.,
+            # shift count, store to narrow alloca), never as a 128-bit pair.
             return Brocken::Jenny::MIR::MachineOperand->new(
                 kind  => 'virt_reg',
                 value => $ir_val->name . '_lo',
@@ -4908,13 +4896,11 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
         return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type );
     }
 
-    # x86-64's ALU and compare opcodes take at most a 32-bit immediate, and the
-    # `cmp r/m64, imm32` and `add r/m64, imm32` forms sign-extend it, so a
-    # 64-bit constant outside signed 32 bits cannot be encoded as an operand at
-    # all.  Such a constant is loaded into a register first; the `mov` that
-    # loads it takes the full 64-bit immediate (Codegen::X86_64's `mov` handler
-    # emits `movabs`).  Constants that do fit are returned untouched so the
-    # usual one-instruction form is kept.
+    # x86-64's ALU and compare opcodes take at most a 32-bit immediate, and the `cmp r/m64, imm32` and `add r/m64,
+    # imm32` forms sign-extend it, so a 64-bit constant outside signed 32 bits cannot be encoded as an operand at all.
+    # Such a constant is loaded into a register first; the `mov` that loads it takes the full 64-bit immediate
+    # (Codegen::X86_64's `mov` handler emits `movabs`).  Constants that do fit are returned untouched so the usual
+    # one-instruction form is kept.
     method _materialize_wide_imm( $mbb, $opnd, $bits, $name ) {
         return $opnd unless $opnd->kind eq 'imm';
         return $opnd unless defined $bits && $bits >= 64;
@@ -4925,10 +4911,9 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
         return $tmp;
     }
 
-    # Find the IR Alloca that produces the given pointer name and return its
-    # allocated_type.  Used by Store lowering to determine the correct memory
-    # access width (the value being stored may have a wider IR type than the
-    # variable, e.g., i64 constant stored into a u16 slot).
+    # Find the IR Alloca that produces the given pointer name and return its allocated_type.  Used by Store lowering to
+    # determine the correct memory access width (the value being stored may have a wider IR type than the variable,
+    # e.g., i64 constant stored into a u16 slot).
     method _find_alloca_stored_type( $ir_func, $ptr_name ) {
         for my $block ( $ir_func->blocks->@* ) {
             for my $inst ( $block->instructions->@* ) {

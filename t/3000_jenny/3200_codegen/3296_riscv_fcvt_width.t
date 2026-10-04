@@ -9,15 +9,13 @@ use Brocken::Jenny::Codegen::RISCV64::Encodings qw[:all];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# The RISC-V converter hardcoded FCVT.D.L / FCVT.L.D for every int/float
-# conversion, ignoring the float width. An f32 was therefore converted as if
-# its register held a double, so f32 conversions returned garbage while f64
-# worked. The lowerer emits a bare `scvtf`/`fcvtzs`, so the format (and the
-# integer width) has to be chosen here, exactly as the ARM64 backend does.
+# The RISC-V converter hardcoded FCVT.D.L / FCVT.L.D for every int/float conversion, ignoring the float width. An f32
+# was therefore converted as if its register held a double, so f32 conversions returned garbage while f64 worked. The
+# lowerer emits a bare `scvtf`/`fcvtzs`, so the format (and the integer width) has to be chosen here, exactly as the
+# ARM64 backend does.
 #
-# This is a codegen-level check so it runs on any host: t/1000_katsuro/
-# 1076_float_conversion.t exercises the same path natively, but only on a
-# RISC-V runner.
+# This is a codegen-level check so it runs on any host: t/1000_katsuro/ 1076_float_conversion.t exercises the same path
+# natively, but only on a RISC-V runner.
 my $plat = Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu');
 my $cg   = Brocken::Jenny::Codegen::RISCV64->new( platform => $plat );
 my $I32  = Brocken::Lindsay::IR::Type::i32();
@@ -25,8 +23,8 @@ my $I64  = Brocken::Lindsay::IR::Type::i64();
 my $F32  = Brocken::Lindsay::IR::Type::f32();
 my $F64  = Brocken::Lindsay::IR::Type::f64();
 
-# rs1 [19:15] and rd [11:7] are chosen by the register allocator; every other
-# field (funct7, fmt, rs2, rm, opcode) identifies the instruction.
+# rs1 [19:15] and rd [11:7] are chosen by the register allocator; every other field (funct7, fmt, rs2, rm, opcode)
+# identifies the instruction.
 my $SIGNATURE = 0xFFF0707F;
 
 sub conversion_signatures ($func) {

@@ -235,11 +235,9 @@ subtest 'Wasm SIToFP and FPToSI lowering' => sub {
     }
 };
 
-# A Wasm conversion opcode names both widths, so the source and the destination
-# pick it rather than the direction alone. Choosing it from the direction alone
-# emitted `i32.trunc_f32_s` for an f64 source, which is a module wasmtime
-# refuses to compile, and nothing here noticed: the checks above look for an
-# opcode by name and never look at its width.
+# A Wasm conversion opcode names both widths, so the source and the destination pick it rather than the direction alone.
+# Choosing it from the direction alone emitted `i32.trunc_f32_s` for an f64 source, which is a module wasmtime refuses
+# to compile, and nothing here noticed: the checks above look for an opcode by name and never look at its width.
 my @CONV = (
     { dir => 'sitofp', src => 'i64', dst => 'f64', op => 'f64_convert_i64_s' },
     { dir => 'sitofp', src => 'i32', dst => 'f64', op => 'f64_convert_i32_s' },
@@ -252,9 +250,8 @@ my @CONV = (
 );
 sub ty { my $m = shift; return Brocken::Lindsay::IR::Type->$m() }
 
-# Stored through a slot and loaded back so the conversion is a real instruction
-# rather than a folded constant. 42.5 truncates to 42 and 42 converts to 42.0,
-# so every shape here is worth 42.
+# Stored through a slot and loaded back so the conversion is a real instruction rather than a folded constant. 42.5
+# truncates to 42 and 42 converts to 42.0, so every shape here is worth 42.
 sub conversion_function {
     my ( $c, $entry ) = @_;
     my $from = $c->{dir} eq 'fptosi' ? 42.5 : 42;

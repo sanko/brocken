@@ -47,11 +47,10 @@ package Brocken::ICB v0.0.1 {
     ];
 
     # The heap the runtime is told it owns, in bytes. The entry preamble passes
-    # this to Brocken::Runtime::_init, so any target whose memory has to be
-    # reserved up front -- a Wasm initial memory section, unlike a native mmap
-    # that grows on demand -- has to cover it. Wasm reserved one 64KB page while
-    # asking for 1MB here, so the arena bookkeeping the runtime keeps ran past
-    # the end of linear memory and a second boxed variable trapped.
+    # this to Brocken::Runtime::_init, so any target whose memory has to be reserved up front -- a Wasm initial memory
+    # section, unlike a native mmap that grows on demand -- has to cover it. Wasm reserved one 64KB page while asking
+    # for 1MB here, so the arena bookkeeping the runtime keeps ran past the end of linear memory and a second boxed
+    # variable trapped.
     use constant HEAP_SIZE => 0x100000;
 };
 #

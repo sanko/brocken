@@ -6,12 +6,10 @@ use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# x86-64's ALU and compare opcodes take at most a 32-bit immediate and the
-# 64-bit forms sign-extend it, so `cmp r64, imm32` reads any constant outside
-# signed 32 bits as a different number, and there is no 64-bit immediate form
-# for `add`/`sub`/`and`/`or`/`xor`/`mul` at all.  Such a constant has to go
-# through a register.  These tests execute a compiled binary, because the
-# fault is in the emitted encoding and cannot be seen in the IR or MIR.
+# x86-64's ALU and compare opcodes take at most a 32-bit immediate and the 64-bit forms sign-extend it, so `cmp r64,
+# imm32` reads any constant outside signed 32 bits as a different number, and there is no 64-bit immediate form for
+# `add`/`sub`/`and`/`or`/`xor`/`mul` at all.  Such a constant has to go through a register.  These tests execute a
+# compiled binary, because the fault is in the emitted encoding and cannot be seen in the IR or MIR.
 sub compiles_to ( $src, $want, $name ) {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
@@ -42,8 +40,8 @@ subtest 'arithmetic with an out-of-range literal' => sub {
     compiles_to( 'my i64 $x = 4294967297; $x = $x - 4294967296; return $x;', 1, 'sub of 2^32 keeps its value' );
     compiles_to( 'my i64 $x = 3; $x = $x * 4294967296; return $x >> 32;',    3, 'mul by 2^32 keeps its value' );
 
-    # A 64-bit AND mask whose low 32 bits are zero is sign-extended to all ones
-    # by the imm32 form, which would clear every bit instead of the low ones.
+    # A 64-bit AND mask whose low 32 bits are zero is sign-extended to all ones by the imm32 form, which would clear
+    # every bit instead of the low ones.
     compiles_to( 'my i64 $x = 4294967297; $x = $x & 4294967296; return $x >> 32;', 1, 'and with a 2^32 mask keeps the high bit' );
 
     # Negative values outside signed 32 bits take the same path.

@@ -25,13 +25,11 @@ class Brocken::Lindsay::IR::Type v0.0.1 {
     sub u64  { state $t //= __PACKAGE__->new( kind => 'int', bits => 64,  signed => 0 ); $t }
     sub u128 { state $t //= __PACKAGE__->new( kind => 'int', bits => 128, signed => 0 ); $t }
 
-    # The signed integer type of a given width. Needed wherever a value has to be
-    # sign-extended to a width and then reinterpreted at that width, because
-    # that cannot be written as a Sext with an unsigned destination: the
-    # backends size an extension from its source operand and sign-extend all
-    # the way out to 32 or 64 bits, with no way to stop at the destination
-    # width. Sign-extend to the signed type here, then zero-extend to the
-    # unsigned one.
+    # The signed integer type of a given width. Needed wherever a value has to be sign-extended to a width and then
+    # reinterpreted at that width, because
+    # that cannot be written as a Sext with an unsigned destination: the backends size an extension from its source
+    # operand and sign-extend all the way out to 32 or 64 bits, with no way to stop at the destination width.
+    # Sign-extend to the signed type here, then zero-extend to the unsigned one.
     sub signed_for($bits) {
         return i8()   if $bits == 8;
         return i16()  if $bits == 16;

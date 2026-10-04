@@ -9,29 +9,26 @@ no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
 use Test2::Tools::Brocken qw(temp_path);
 
-# The linker asks the compiler where it keeps libpthread before it records a
-# DT_NEEDED for it. That query used to be backticks with a `2>/dev/null`
+# The linker asks the compiler where it keeps libpthread before it records a DT_NEEDED for it. That query used to be
+# backticks with a `2>/dev/null`
 # redirect:
 #
 #     my $out = `$cc -pthread -print-file-name=libpthread.so 2>/dev/null`;
 #
-# `2>/dev/null` is a POSIX-ism. cmd.exe has no idea what to do with the path
-# /dev/null, so the shell never got as far as running the compiler: the probe
-# came back empty on every platform, the soname was never resolved, and every
-# link printed three "The system cannot find the path specified." lines.
+# `2>/dev/null` is a POSIX-ism. cmd.exe has no idea what to do with the path /dev/null, so the shell never got as far as
+# running the compiler: the probe came back empty on every platform, the soname was never resolved, and every link
+# printed three "The system cannot find the path specified." lines.
 #
 # The replacement runs the compiler through a pipe with no shell in between.
 # The compiler here is a stub, because what is under test is the plumbing and
-# not any particular toolchain: if this subtest leaned on whatever gcc happens
-# to have installed, it would skip on the very machines where the bug lives and
-# pass vacuously against the broken code.
+# not any particular toolchain: if this subtest leaned on whatever gcc happens to have installed, it would skip on the
+# very machines where the bug lives and pass vacuously against the broken code.
 my $probe = \&Brocken::Jenny::Linker::ELF64::_cc_print_file_name;
 is ref($probe), 'CODE', 'the shell-free query helper is available';
 my $host = Brocken::Katsuro::Platform::parse();
 
 # A stub compiler that prints whatever BROCKEN_STUB_OUT names, which is how a
-# real compiler answers -print-file-name: an existing path when it has the
-# library, the bare name back when it does not.
+# real compiler answers -print-file-name: an existing path when it has the library, the bare name back when it does not.
 my $stub = temp_path('stub_cc') . ( $host->is_windows ? '.bat' : '' );
 {
     my $body = $host->is_windows ? '@echo off' . "\n" . 'echo %BROCKEN_STUB_OUT%' . "\n" : '#!/bin/sh' . "\n" . 'echo "$BROCKEN_STUB_OUT"' . "\n";
@@ -51,8 +48,8 @@ my $target = temp_path('libpthread_stub.so');
 subtest 'the query reaches the compiler and its answer comes back' => sub {
     local $ENV{BROCKEN_STUB_OUT} = $target;
 
-    # With the old backticks form this was the empty string on Windows: the
-    # shell died on the /dev/null redirect before the compiler ever ran.
+    # With the old backticks form this was the empty string on Windows: the shell died on the /dev/null redirect before
+    # the compiler ever ran.
     my $out = $probe->( $stub, 'libpthread.a' );
     ok defined $out && length $out, 'the compiler actually ran and answered';
     is $out, $target, 'the answer arrived intact, with the trailing newline stripped';
@@ -77,9 +74,8 @@ subtest 'a library the compiler lacks is echoed back and rejected' => sub {
 };
 subtest 'a missing compiler falls through quietly' => sub {
 
-    # The old form ran this through cmd.exe, which printed "not recognized as
-    # an internal or external command". The pipe form has no shell, so a
-    # program that is not installed is simply an empty answer.
+    # The old form ran this through cmd.exe, which printed "not recognized as an internal or external command". The pipe
+    # form has no shell, so a program that is not installed is simply an empty answer.
     my $out = eval { $probe->( 'brocken_no_such_compiler_xyz', 'libpthread.so' ) };
     ok !$@, 'probing for a compiler that is not installed does not die';
     is $out, undef, 'and reports that it found nothing';

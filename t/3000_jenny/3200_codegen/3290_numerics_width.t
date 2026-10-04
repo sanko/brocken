@@ -308,12 +308,11 @@ SKIP: {
     }
 };
 
-# Wasm sign-extends from i32 and i64 only, so a narrower source is moved into
-# place by a pair of shifts. The lowering shifted up and stopped there, which left
-# the value sitting in the high bits with the low bits clear: `my i32 $k = 7; my
-# i8 $j = $k;` read back 0, because the narrowing was fine and the comparison
-# promoting the i8 back to i64 was what broke. Wasm has no 8- or 16-bit locals,
-# so every narrow signed value goes through that path.
+# Wasm sign-extends from i32 and i64 only, so a narrower source is moved into place by a pair of shifts. The lowering
+# shifted up and stopped there, which left
+# the value sitting in the high bits with the low bits clear: `my i32 $k = 7; my i8 $j = $k;` read back 0, because the
+# narrowing was fine and the comparison promoting the i8 back to i64 was what broke. Wasm has no 8- or 16-bit locals, so
+# every narrow signed value goes through that path.
 subtest 'Wasm Sext shifts back down after moving the sign bit up' => sub {
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
 
@@ -348,9 +347,8 @@ subtest 'a narrow signed value survives a round trip on Wasm' => sub {
     my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
     my $codegen  = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
 
-    # The comparison promotes each narrow value back to i64, which is where the
-    # broken lowering showed up, so every case here exercises the whole trip
-    # rather than just the narrowing.
+    # The comparison promotes each narrow value back to i64, which is where the broken lowering showed up, so every case
+    # here exercises the whole trip rather than just the narrowing.
     my @cases = (
         [ 'i8 7',      'my i32 $k = 7; my i8 $j = $k; return $j == 7 ? 1 : 0;' ],
         [ 'i8 100',    'my i32 $k = 100; my i8 $j = $k; return $j == 100 ? 1 : 0;' ],

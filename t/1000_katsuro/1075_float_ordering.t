@@ -6,12 +6,10 @@ use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# Ordering a float has no signed/unsigned split, and each backend spells the
-# ordered predicates plainly. The frontend used to pick the integer s/u forms
-# off is_signed, which no backend has in its float table, so every ordered
-# float comparison -- `<`, `>`, `<=`, `>=` on any float width -- evaluated
-# false. Equality happened to survive because `eq`/`ne` are spelled the same
-# for both, which is why this went unnoticed next to the working `==`.
+# Ordering a float has no signed/unsigned split, and each backend spells the ordered predicates plainly. The frontend
+# used to pick the integer s/u forms off is_signed, which no backend has in its float table, so every ordered float
+# comparison -- `<`, `>`, `<=`, `>=` on any float width -- evaluated false. Equality happened to survive because
+# `eq`/`ne` are spelled the same for both, which is why this went unnoticed next to the working `==`.
 sub answers ( $src, $want, $name ) {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;

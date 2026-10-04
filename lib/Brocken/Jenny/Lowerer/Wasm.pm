@@ -11,22 +11,17 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
         my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
         my $inst_idx = 0;
 
-        # Point the frame bump pointer at the heap base once, in the entry, before
-        # anything is allocated. %heap_ptr is a lowering-only register: the
-        # allocator reads it and adds to it, but nothing ever loaded the base
-        # into it, so it started at zero and the first alloca handed out address
-        # 0. That is the same address the entry preamble stores __heap_base
-        # into, and the same region the runtime keeps its globals and arena in,
-        # so a boxed value could be written over by -- or read back as -- one of
-        # those, and the address that came back was then used for the next
-        # store. The result was a trap on an address that tracked the box tag, or
-        # a silently wrong value. One boxed variable happened to survive it; a
-        # second did not.
+        # Point the frame bump pointer at the heap base once, in the entry, before anything is allocated. %heap_ptr is a
+        # lowering-only register: the allocator reads it and adds to it, but nothing ever loaded the base into it, so it
+        # started at zero and the first alloca handed out address 0. That is the same address the entry preamble stores
+        # __heap_base into, and the same region the runtime keeps its globals and arena in, so a boxed value could be
+        # written over by -- or read back as -- one of those, and the address that came back was then used for the next
+        # store. The result was a trap on an address that tracked the box tag, or a silently wrong value. One boxed
+        # variable happened to survive it; a second did not.
         #
-        # Only the entry seeds it. The pointer is a module global, so every
-        # function shares one; re-seeding it on every call would hand the callee
-        # the addresses the caller had just handed out, which is the collision
-        # the global exists to remove.
+        # Only the entry seeds it. The pointer is a module global, so every function shares one; re-seeding it on every
+        # call would hand the callee the addresses the caller had just handed out, which is the collision the global
+        # exists to remove.
         my $heap_base_param;
         for my $p ( $ir_func->params->@* ) {
             next unless defined $p->name;
@@ -37,27 +32,21 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
             if ( $heap_base_param && $is_entry && $ir_func->blocks->[0] == $block ) {
 
-                # Seed at the arena base, not at %__heap_base itself. The ICB
-                # that %__heap_base points at is 144 bytes of runtime state and
-                # the Immix block header starts right after it, so handing out
-                # frames from the base itself made the first few allocas land on
-                # top of it: the block metadata at base+144, and -- the visible
-                # one -- the fuel counter at base+64, which every function reads
-                # to decide whether to keep recursing. That is why fib(8)
-                # returned 21 and fib(9) returned 0: eight frames of 24 bytes
-                # each just reached the end of the header, and the ninth
+                # Seed at the arena base, not at %__heap_base itself. The ICB that %__heap_base points at is 144 bytes
+                # of runtime state and the Immix block header starts right after it, so handing out frames from the base
+                # itself made the first few allocas land on
+                # top of it: the block metadata at base+144, and -- the visible one -- the fuel counter at base+64,
+                # which every function reads to decide whether to keep recursing. That is why fib(8) returned 21 and
+                # fib(9) returned 0: eight frames of 24 bytes each just reached the end of the header, and the ninth
                 # overwrote the fuel the next call was about to read.
                 #
-                # The frame region cannot share the arena. An Immix block runs
-                # from base+144 for HEAP_SIZE bytes, and `bump_alloc` hands out
-                # boxed values and lists from it. Seeding the frames at the same
-                # base then made the first `bump_alloc` return the address the
-                # frame was already using, so a box overwrote `%__heap_base.addr`
-                # with its own header (tag << 24). A later `decref` read that
-                # header back as the heap base and faulted at tag+48 -- the
-                # address in the trap tracked the *box tag*, 0x2000031 for an
-                # i64 and 0x7000030 for a list, which is how the aliasing was
-                # identified. Frames now sit above the whole arena.
+                # The frame region cannot share the arena. An Immix block runs from base+144 for HEAP_SIZE bytes, and
+                # `bump_alloc` hands out boxed values and lists from it. Seeding the frames at the same base then made
+                # the first `bump_alloc` return the address the frame was already using, so a box overwrote
+                # `%__heap_base.addr` with its own header (tag << 24). A later `decref` read that header back as the
+                # heap base and faulted at tag+48 -- the address in the trap tracked the *box tag*, 0x2000031 for an i64
+                # and 0x7000030 for a list, which is how the aliasing was identified. Frames now sit above the whole
+                # arena.
                 $mbb->add_instruction( $self->_wasm_push_vreg( '%__heap_base', 'heap_ptr: seed from base', Brocken::Lindsay::IR::Type::ptr() ) );
                 $mbb->add_instruction(
                     Brocken::Jenny::MIR::MachineInstruction->new(
@@ -71,16 +60,13 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                 $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'heap_ptr: seed', Brocken::Lindsay::IR::Type::ptr() ) );
             }
 
-            # Every other function brackets its frame: keep the frame pointer it
-            # was called with, and hand it back on the way out. Sharing one
-            # module global removes the collision between a callee's frame and
-            # its caller's, but on its own the bump only ever grows -- nothing
-            # ever lowered it back -- so a loop that called a function 40000
-            # times walked the pointer off the end of the 1MB heap and trapped
-            # with "out of bounds memory access". A callee restores the value it
-            # was given, so each frame is released when its call returns and
-            # recursion nests instead of accumulating. The caller's frame sits
-            # below the saved pointer, so it is untouched.
+            # Every other function brackets its frame: keep the frame pointer it was called with, and hand it back on
+            # the way out. Sharing one module global removes the collision between a callee's frame and its caller's,
+            # but on its own the bump only ever grows -- nothing ever lowered it back -- so a loop that called a
+            # function 40000 times walked the pointer off the end of the 1MB heap and trapped with "out of bounds memory
+            # access". A callee restores the value it was given, so each frame is released when its call returns and
+            # recursion nests instead of accumulating. The caller's frame sits below the saved pointer, so it is
+            # untouched.
             if ( !$is_entry && $ir_func->blocks->[0] == $block ) {
                 $mbb->add_instruction( $self->_wasm_push_global( '%heap_ptr', 'heap_ptr: save incoming' ) );
                 $mbb->add_instruction( $self->_wasm_set_vreg( '%__heap_save', 'heap_ptr: save incoming', Brocken::Lindsay::IR::Type::ptr() ) );
@@ -1857,26 +1843,19 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
 
                         # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
                         #
-                        # `div` and `rem` are the signed operations and have to
-                        # pick the signed opcode. They used to map to the
-                        # unsigned one, which agreed with the signed answer for
-                        # every positive operand and disagreed for every negative
-                        # one: `i64 -20 / 3` came out as a quotient of two's
-                        # complement bits. Only the signedness of the operands
-                        # separates the two, so a positive-operand test cannot
-                        # see the difference.
+                        # `div` and `rem` are the signed operations and have to pick the signed opcode. They used to map
+                        # to the unsigned one, which agreed with the signed answer for every positive operand and
+                        # disagreed for every negative
+                        # one: `i64 -20 / 3` came out as a quotient of two's complement bits. Only the signedness of the
+                        # operands separates the two, so a positive-operand test cannot see the difference.
                         #
-                        # Wasm has no float remainder and no float bitwise or
-                        # shift instruction, and the integer ones cannot be
-                        # applied to a float operand as-is.
+                        # Wasm has no float remainder and no float bitwise or shift instruction, and the integer ones
+                        # cannot be applied to a float operand as-is.
                         #
-                        # A float never arrives here from the frontend: `lower_binop`
-                        # truncates one toward zero before an integer-only
-                        # operator applies, so this target is handed an integer
-                        # operation. The guard stays for IR that reaches the
-                        # backend by another route, and to refuse by name rather
-                        # than map onto an opcode like "f32_rem_u", which could
-                        # never encode.
+                        # A float never arrives here from the frontend: `lower_binop` truncates one toward zero before
+                        # an integer-only operator applies, so this target is handed an integer operation. The guard
+                        # stays for IR that reaches the backend by another route, and to refuse by name rather than map
+                        # onto an opcode like "f32_rem_u", which could never encode.
                         if ( $p =~ /^f/ && $opcode =~ /\A(?:rem|urem|and|or|xor|shl|lshr|ashr)\z/ ) {
                             die "Wasm has no $opcode for $p; float bitwise, shift and remainder " . "are not implemented on this target\n";
                         }
@@ -1919,9 +1898,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                     $mbb->add_instruction( $self->_wasm_push( $val, 'zext val' ) );
                     if ( $dst_bits > 32 && $src_bits <= 32 ) {
 
-                        # A narrow source arrives as an i32, and zero-extending it
-                        # is the whole of what a zext asks for. Widening it into
-                        # the i64 the destination holds is that same extension.
+                        # A narrow source arrives as an i32, and zero-extending it is the whole of what a zext asks for.
+                        # Widening it into the i64 the destination holds is that same extension.
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [], comment => 'zext widen' ) );
                     }
@@ -2045,24 +2023,21 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                     my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction( $self->_wasm_push( $val, 'sext val' ) );
 
-                    # Wasm sign-extends from i32 and from i64 only, and `extend_i32_s` reads
-                    # bit 31, so a narrower source is moved into place by hand:
-                    # mask it to its own width, shift up until the sign bit reaches
-                    # the top of the word, then shift back down with an arithmetic
-                    # shift, which is what replicates the sign into the bits above.
+                    # Wasm sign-extends from i32 and from i64 only, and `extend_i32_s` reads bit 31, so a narrower
+                    # source is moved into place by hand: mask it to its own width, shift up until the sign bit reaches
+                    # the top of the word, then shift back down with an arithmetic shift, which is what replicates the
+                    # sign into the bits above.
                     #
-                    # Shifting up and stopping left the value sitting in the high
-                    # bits with the low bits clear, so `my i32 $k = 7; my i8 $j =
-                    # $k;` read back 0 -- the narrowing was fine and the comparison
-                    # promoting the i8 back to i64 was what broke. Wasm has no 8-
-                    # or 16-bit locals, so every narrow signed value comes through
-                    # here and this was wrong for all of them.
+                    # Shifting up and stopping left the value sitting in the high bits with the low bits clear, so `my
+                    # i32 $k = 7; my i8 $j = $k;` read back 0 -- the narrowing was fine and the comparison promoting the
+                    # i8 back to i64 was what broke. Wasm has no 8- or 16-bit locals, so every narrow signed value comes
+                    # through here and this was wrong for all of them.
                     if ( $dst_bits > 32 && $src_bits <= 32 ) {
 
-                        # The value is on the stack as an i32, so widen it before the
-                        # 64-bit shifts below. Zero-extending is right even for a
-                        # negative one: the mask keeps the low $src_bits and the
-                        # shift back down is what puts the sign in.
+                        # The value is on the stack as an i32, so widen it before the 64-bit shifts below.
+                        # Zero-extending is right even for a
+                        # negative one: the mask keeps the low $src_bits and the shift back down is what puts the sign
+                        # in.
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_extend_i32_u', operands => [], comment => 'sext widen' ) );
                     }
@@ -2070,9 +2045,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                         my $p    = $dst_bits > 32 ? 'i64' : 'i32';
                         my $move = $dst_bits - $src_bits;
 
-                        # Mask to the source width, shift the sign bit up to the top
-                        # of the word, then shift back down. Each shift pushes its own
-                        # amount, so the mask has to be the first thing on the stack.
+                        # Mask to the source width, shift the sign bit up to the top of the word, then shift back down.
+                        # Each shift pushes its own amount, so the mask has to be the first thing on the stack.
                         my @steps = (
                             [ "${p}_const", ( 1 << $src_bits ) - 1 ],
                             [ "${p}_and",   undef ],
@@ -2165,10 +2139,9 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::CondBr') ) {
                     $self->_wasm_push_cond( $mbb, $inst->operands->[0] );
 
-                    # Both edges are named on the one branch. A Wasm branch ends
-                    # the block it is in, so a following jmp for the false edge
-                    # would sit past a terminator and never run; the code
-                    # generator needs the false target here to branch either way.
+                    # Both edges are named on the one branch. A Wasm branch ends the block it is in, so a following jmp
+                    # for the false edge would sit past a terminator and never run; the code generator needs the false
+                    # target here to branch either way.
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'bne',
@@ -2241,12 +2214,10 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                             my $mem_bits = $self->_scalar_bits($mem_ty)       || 32;
                             my $dst_bits = $self->_scalar_bits( $inst->type ) || 32;
 
-                            # The narrow forms have to match the sign of the
-                            # stored type. Choosing only on the width meant every
-                            # load zero-extended, so a signed i8 came back as its
-                            # unsigned twin: `i8 -20 / 3` divided 236 by 3
-                            # instead of -20 by 3, and `i8 -20 >> 2` shifted
-                            # 236. Only a negative operand shows it.
+                            # The narrow forms have to match the sign of the stored type. Choosing only on the width
+                            # meant every load zero-extended, so a signed i8 came back as its
+                            # unsigned twin: `i8 -20 / 3` divided 236 by 3 instead of -20 by 3, and `i8 -20 >> 2`
+                            # shifted 236. Only a negative operand shows it.
                             my $sgn = ( $mem_ty && $mem_ty->kind eq 'int' && $mem_ty->is_signed ) ? 's' : 'u';
                             if ( $dst_bits >= 64 ) {
                                 $op = $mem_bits > 32 ? 'i64_load' :
@@ -2379,13 +2350,10 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                     my $tag       = $self->_type_tag( $val->type );
                     if ($heap_base) {
 
-                        # Allocate from the Immix arena, not this frame's
-                        # `%heap_ptr` region. A frame's bump region is reclaimed
-                        # when it returns, so a box handed back to the caller was
-                        # freed before the caller could read it -- a returned
-                        # list trapped at its first element. `bump_alloc` takes
-                        # the heap base and a size and returns the block, the
-                        # same call the native backends and the list and hash
+                        # Allocate from the Immix arena, not this frame's `%heap_ptr` region. A frame's bump region is
+                        # reclaimed when it returns, so a box handed back to the caller was freed before the caller
+                        # could read it -- a returned list trapped at its first element. `bump_alloc` takes the heap
+                        # base and a size and returns the block, the same call the native backends and the list and hash
                         # builders already make.
                         $mbb->add_instruction( $self->_wasm_push( $heap_base, 'box: arg 0 heap_base' ) );
                         $mbb->add_instruction(
@@ -2463,13 +2431,11 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                     $self->_wasm_wrap_addr( $mbb, 'box: addr' );
                     $mbb->add_instruction( $self->_wasm_push( $val, 'box: push val' ) );
 
-                    # The payload keeps the width of the value it boxes. i32_store
-                    # here truncated every boxed i64 to 32 bits, and because a
-                    # Wasm store declares the value it takes, pushing an i64 at
-                    # an i32_store is not a silent truncation but a validation
-                    # error -- so an untyped `my`, which is boxed as an i64, made
-                    # the whole module uncompilable. An untyped variable is the
-                    # common case, so this broke nearly every program.
+                    # The payload keeps the width of the value it boxes. i32_store here truncated every boxed i64 to 32
+                    # bits, and because a Wasm store declares the value it takes, pushing an i64 at an i32_store is not
+                    # a silent truncation but a validation error -- so an untyped `my`, which is boxed as an i64, made
+                    # the whole module uncompilable. An untyped variable is the common case, so this broke nearly every
+                    # program.
                     my $pay_op;
                     if ( $val->type && $val->type->kind eq 'float' ) {
                         $pay_op = $val->type->bits >= 64 ? 'f64_store' : 'f32_store';
@@ -2494,10 +2460,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'unbox: add offset' ) );
                     $self->_wasm_wrap_addr( $mbb, 'unbox: addr' );
 
-                    # Mirrors the width the box wrote at payload offset 8. An
-                    # i32_load of a boxed i64 read back only the low half, so a
-                    # value that went in as 42 came out as 42 and one that went
-                    # in as 256 came out as 0.
+                    # Mirrors the width the box wrote at payload offset 8. An i32_load of a boxed i64 read back only the
+                    # low half, so a value that went in as 42 came out as 42 and one that went in as 256 came out as 0.
                     my $pay_ld;
                     if ( $inst->type && $inst->type->kind eq 'float' ) {
                         $pay_ld = $inst->type->bits >= 64 ? 'f64_load' : 'f32_load';
@@ -2680,10 +2644,10 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode => 'local_set',
 
-                            # A comparison yields 0 or 1 however wide what it
-                            # compared was, so the result is recorded as an i32.
-                            # Left to the width of its operands it would be held
-                            # in an i64, and a branch cannot test that.
+                            # A comparison yields 0 or 1 however wide what it compared was, so the result is recorded as
+                            # an i32.
+                            # Left to the width of its operands it would be held in an i64, and a branch cannot test
+                            # that.
                             operands => [
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'virt_reg',
@@ -2911,11 +2875,10 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                         else {
                             $mbb->add_instruction( $self->_wasm_push( $val, 'retval' ) );
 
-                            # Wasm returns are typed, so reconcile the value with the
-                            # signature the way a 32-bit register write zero-extends.
-                            # The width that matters is the one the linker puts in the
-                            # function type, which comes from the function, not from
-                            # this instruction.
+                            # Wasm returns are typed, so reconcile the value with the signature the way a 32-bit
+                            # register write zero-extends.
+                            # The width that matters is the one the linker puts in the function type, which comes from
+                            # the function, not from this instruction.
                             my $rt       = $ir_func->return_type // $inst->type;
                             my $ret_bits = $self->_scalar_bits($rt);
                             my $val_bits = $self->_scalar_bits( $val->type );
@@ -2940,10 +2903,9 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                         }
                     }
 
-                    # Give the frame back before returning. The return value is
-                    # already on the operand stack and global.set does not touch
-                    # that stack, so this cannot disturb it. The entry has no
-                    # caller to hand the frame back to and keeps its own.
+                    # Give the frame back before returning. The return value is already on the operand stack and
+                    # global.set does not touch that stack, so this cannot disturb it. The entry has no caller to hand
+                    # the frame back to and keeps its own.
                     if ( !$is_entry ) {
                         $mbb->add_instruction( $self->_wasm_push_vreg( '%__heap_save', 'heap_ptr: restore', Brocken::Lindsay::IR::Type::ptr() ) );
                         $mbb->add_instruction( $self->_wasm_set_global( '%heap_ptr', 'heap_ptr: restore' ) );
@@ -2969,11 +2931,9 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                 $op = $ir_val->type->bits >= 64 ? 'f64_const' : 'f32_const';
             }
             else {
-                # A pointer or a boxed value is a 64-bit operand in Wasm just as
-                # an i64 is, so a constant standing in for one -- the zero a
-                # fuel-exit stub returns from a function declared `-> ptr` or
-                # `-> Any` -- must be pushed as an i64. Reading only `int` here
-                # made that stub push an i32 against a 64-bit return type and
+                # A pointer or a boxed value is a 64-bit operand in Wasm just as an i64 is, so a constant standing in
+                # for one -- the zero a fuel-exit stub returns from a function declared `-> ptr` or `-> Any` -- must be
+                # pushed as an i64. Reading only `int` here made that stub push an i32 against a 64-bit return type and
                 # the module failed to validate.
                 my $bits = $self->_scalar_bits( $ir_val->type ) || 32;
                 $op = $bits >= 64 ? 'i64_const' : 'i32_const';
@@ -2997,9 +2957,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
         );
     }
 
-    # The type matters: the code generator declares a local from the type on the
-    # operand, and falls back to i32 when there is none, so an untyped temporary
-    # used with 64-bit operations would be declared too narrow.
+    # The type matters: the code generator declares a local from the type on the operand, and falls back to i32 when
+    # there is none, so an untyped temporary used with 64-bit operations would be declared too narrow.
     method _wasm_push_vreg( $name, $label, $type = undef ) {
         return $self->_wasm_push_global( $name, $label ) if $name eq '%heap_ptr';
         return Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3019,8 +2978,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
     }
 
     # %heap_ptr lives in a module global rather than a function local. See
-    # Brocken::Jenny::Linker::Wasm::_global_section for why a per-function copy
-    # let a callee hand out addresses its caller was still using.
+    # Brocken::Jenny::Linker::Wasm::_global_section for why a per-function copy let a callee hand out addresses its
+    # caller was still using.
     method _wasm_push_global( $name, $label ) {
         return Brocken::Jenny::MIR::MachineInstruction->new(
             opcode   => 'global_get',
@@ -3045,10 +3004,9 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
         return Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$opnd], comment => "push $label=" . $opnd->value );
     }
 
-    # A Wasm memory access takes an i32 address. A pointer is a 64-bit value and
-    # its arithmetic stays that width, so the address is narrowed here, right
-    # before the load or store that needs it, rather than at every step of the
-    # walk that got there.
+    # A Wasm memory access takes an i32 address. A pointer is a 64-bit value and its arithmetic stays that width, so the
+    # address is narrowed here, right before the load or store that needs it, rather than at every step of the walk that
+    # got there.
     method _wasm_wrap_addr( $mbb, $label ) {
         $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i32_wrap_i64', operands => [], comment => $label ) );
     }
@@ -3066,11 +3024,10 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
         );
     }
 
-    # Reconcile a value that has just been pushed with the width the operation
-    # ahead of it expects. The IR lets a narrow value stand in for a wide one,
-    # which a 64-bit register hides and a Wasm operand stack does not: mixing an
-    # i32 with an i64 op is a type error, so the value is widened or narrowed
-    # here instead. Signedness decides which way an i32 widens.
+    # Reconcile a value that has just been pushed with the width the operation ahead of it expects. The IR lets a narrow
+    # value stand in for a wide one,
+    # which a 64-bit register hides and a Wasm operand stack does not: mixing an i32 with an i64 op is a type error, so
+    # the value is widened or narrowed here instead. Signedness decides which way an i32 widens.
     method _wasm_fit( $mbb, $ir_val, $prefix ) {
         my $want = $prefix eq 'i64' ? 64 : $prefix eq 'i32' ? 32 : 0;
         return unless $want;
@@ -3095,9 +3052,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
         $self->_wasm_wrap_addr( $mbb, 'addr: wrap' );
     }
 
-    # A Wasm branch tests an i32, but the IR gives a comparison the width of
-    # what it compared, so a condition over 64-bit operands arrives holding an
-    # i64. The operand stack will not narrow it on the way to br_if, so it is
+    # A Wasm branch tests an i32, but the IR gives a comparison the width of what it compared, so a condition over
+    # 64-bit operands arrives holding an i64. The operand stack will not narrow it on the way to br_if, so it is
     # narrowed here. Anything 32 bits or narrower is already an i32.
     method _wasm_push_cond( $mbb, $ir_val ) {
         $mbb->add_instruction( $self->_wasm_push( $ir_val, 'cond' ) );
@@ -3125,9 +3081,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
     }
 
     # The width a value of this type occupies in a Wasm local or on the stack.
-    # A pointer counts as 64 bits because that is how the IR models it; it is
-    # narrowed to the i32 a memory access wants separately, at the access. A
-    # boxed value is an address to linear memory, so it counts the same way.
+    # A pointer counts as 64 bits because that is how the IR models it; it is narrowed to the i32 a memory access wants
+    # separately, at the access. A boxed value is an address to linear memory, so it counts the same way.
     method _scalar_bits($type) {
         return 0           if !$type;
         return $type->bits if $type->kind eq 'int';
@@ -3135,11 +3090,9 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
         return 0;
     }
 
-    # The width one side of an int/float conversion occupies, as 32 or 64. A
-    # float is not counted by `_scalar_bits`, which is for the integer and
-    # pointer widths a local holds, so its own `bits` is read here. Anything
-    # wider than 32 -- a pointer, an i128 asked for one word at a time -- is a
-    # 64-bit operand in Wasm either way.
+    # The width one side of an int/float conversion occupies, as 32 or 64. A float is not counted by `_scalar_bits`,
+    # which is for the integer and pointer widths a local holds, so its own `bits` is read here. Anything wider than 32
+    # -- a pointer, an i128 asked for one word at a time -- is a 64-bit operand in Wasm either way.
     method _convert_width($type) {
         return 64 if !$type;
         return $type->bits == 32 ? 32 : 64 if $type->kind eq 'float';
@@ -3147,9 +3100,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
     }
 
     # A Wasm conversion opcode names both widths, so the source and the
-    # destination pick it rather than the direction alone: f64 to i32 is
-    # `i32.trunc_f64_s`, f32 to i64 is `i64.trunc_f32_s`. Emitting one opcode for
-    # the whole direction is what made an f32 module fail to validate.
+    # destination pick it rather than the direction alone: f64 to i32 is `i32.trunc_f64_s`, f32 to i64 is
+    # `i64.trunc_f32_s`. Emitting one opcode for the whole direction is what made an f32 module fail to validate.
     method _sitofp_opcode( $src, $dst ) {
         return ( $self->_convert_width($dst) == 32 ? 'f32' : 'f64' ) . '_convert_' . ( $self->_convert_width($src) == 32 ? 'i32' : 'i64' ) . '_s';
     }

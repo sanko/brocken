@@ -27,9 +27,8 @@ class Brocken::Fuzz v0.0.1 {
         return qq{"$s"};
     }
 
-    # Flag set when simulation encounters a fatal error (div-by-zero)
-    # that would crash the real program.  Checked in generate_program
-    # to set expected=255 for programs that will crash.
+    # Flag set when simulation encounters a fatal error (div-by-zero) that would crash the real program.  Checked in
+    # generate_program to set expected=255 for programs that will crash.
     my $expect_crash = 0;
 
     # Flag set when simulation detects division by zero.  The runtime now
@@ -60,8 +59,8 @@ class Brocken::Fuzz v0.0.1 {
     }
     method seed() { return $seed }
 
-    # Encode a (seed, case_num, max_ops, max_vars) tuple into a compact
-    # reversible hex string for use as a single-argument case identifier.
+    # Encode a (seed, case_num, max_ops, max_vars) tuple into a compact reversible hex string for use as a
+    # single-argument case identifier.
     method fuzz( $count = 100, $max_ops = 20, $max_vars = 5 ) {
         srand( $self->seed );
         my @results;
@@ -128,10 +127,9 @@ class Brocken::Fuzz v0.0.1 {
         return [];
     }
 
-    # Run a single specific fuzz case by index.  Reseeds srand to guarantee
-    # deterministic output regardless of other objects or intervening calls
-    # to rand().  Any (seed, case_num, max_ops, max_vars) tuple always
-    # produces the same program, in any process or session.
+    # Run a single specific fuzz case by index.  Reseeds srand to guarantee deterministic output regardless of other
+    # objects or intervening calls to rand().  Any (seed, case_num, max_ops, max_vars) tuple always produces the same
+    # program, in any process or session.
     method run_case( $case_num, $max_ops = 20, $max_vars = 5 ) {
         srand( $self->seed );
         my $program;
@@ -151,8 +149,8 @@ class Brocken::Fuzz v0.0.1 {
     }
 
     # Generate a random Brocken program with typed variables.
-    # May include sub declarations, inter-procedural calls (Phase F2),
-    # arrays (Phase F3a), and class instances (Phase F3b).
+    # May include sub declarations, inter-procedural calls (Phase F2), arrays (Phase F3a), and class instances (Phase
+    # F3b).
     method generate_program( $max_ops = 15, $max_vars = 5 ) {
         $expect_crash = 0;
         $div_zero_hit = 0;
@@ -388,9 +386,8 @@ class Brocken::Fuzz v0.0.1 {
         return { code => "{\n$body_code\n}" };
     }
 
-    # Generate a block that creates and destroys scoped Any-typed variables,
-    # exercising bump_alloc (allocation) and decref (R3 suspect push on
-    # RC > 0) during scope exit.
+    # Generate a block that creates and destroys scoped Any-typed variables, exercising bump_alloc (allocation) and
+    # decref (R3 suspect push on RC > 0) during scope exit.
     method _gen_gc_stress( $vars, $var_types, $var_names ) {
         my $n_new = $self->_rand_int(3) + 2;    # 2-4 new vars
         my @block_lines;
@@ -575,9 +572,8 @@ class Brocken::Fuzz v0.0.1 {
     }
 
     # Generate a while loop with tracked expected values.
-    # The condition compares two different int vars; the body contains
-    # 1-3 simple statements (assignments, last, or next).  Simulation
-    # detects non-terminating loops (max 1000 iterations) and skips.
+    # The condition compares two different int vars; the body contains 1-3 simple statements (assignments, last, or
+    # next).  Simulation detects non-terminating loops (max 1000 iterations) and skips.
     method _gen_while( $vars, $var_types, $var_names ) {
         my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
         return { code => undef } if @int_names < 2;
@@ -593,10 +589,9 @@ class Brocken::Fuzz v0.0.1 {
         return { code => undef } if $cond_rhs eq $cond_lhs;
         my $cmp = $self->_rand_cmpop();
 
-        # Snapshot the pre-loop state.  Body items are applied as they are
-        # generated so later items are chosen against current values, then
-        # the snapshot is restored and the simulation below is the only
-        # thing that decides the expected values.
+        # Snapshot the pre-loop state.  Body items are applied as they are generated so later items are chosen against
+        # current values, then the snapshot is restored and the simulation below is the only thing that decides the
+        # expected values.
         my @saved_vars_keys = keys %$vars;
         my %saved_vars;
         @saved_vars{@saved_vars_keys} = @$vars{@saved_vars_keys};
@@ -617,10 +612,9 @@ class Brocken::Fuzz v0.0.1 {
         @$vars{@saved_vars_keys} = @saved_vars{@saved_vars_keys};
 
         # Simulate the loop to update expected variable values.
-        # If we hit max_iter without the condition becoming false,
-        # this is probably a non-terminating loop, skip it.
-        # A wall-clock timeout prevents pathological BigInt iterations
-        # from hanging the simulation (e.g. on slow CI hardware).
+        # If we hit max_iter without the condition becoming false, this is probably a non-terminating loop, skip it.
+        # A wall-clock timeout prevents pathological BigInt iterations from hanging the simulation (e.g. on slow CI
+        # hardware).
         my $max_iter    = 1000;
         my $n_sim       = 0;
         my $sim_start   = time;
@@ -660,8 +654,8 @@ class Brocken::Fuzz v0.0.1 {
         return { code => "while (\$$cond_lhs $cmp \$$cond_rhs) {\n$body_code\n}" };
     }
 
-    # Generate a single loop body item: assignment (via _gen_body_assign) or
-    # a conditional last/next.  Returns { code, type, apply/guard }.
+    # Generate a single loop body item: assignment (via _gen_body_assign) or a conditional last/next.  Returns { code,
+    # type, apply/guard }.
     method _gen_loop_body_item( $vars, $var_types, $var_names ) {
         my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
         return $self->_gen_body_assign( $vars, $var_types, $var_names ) if @int_names < 2;
@@ -682,9 +676,8 @@ class Brocken::Fuzz v0.0.1 {
         return { type => $ctrl, guard => $guard, code => $code };
     }
 
-    # Generate a single replayable body statement for use inside while/nested
-    # blocks.  Returns { code => '...', apply => sub { ... } } where apply()
-    # updates $vars to match the Brocken compiler's effect.
+    # Generate a single replayable body statement for use inside while/nested blocks.  Returns { code => '...', apply =>
+    # sub { ... } } where apply() updates $vars to match the Brocken compiler's effect.
     method _gen_body_assign( $vars, $var_types, $var_names ) {
         my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
         return { code => undef } if @int_names < 1;
@@ -743,9 +736,8 @@ class Brocken::Fuzz v0.0.1 {
         }
     }
 
-    # Generate an if/else whose branches contain 1-2 body statements
-    # instead of a single assignment.  Uses _gen_body_assign for
-    # simulation and replay, same as _gen_while.
+    # Generate an if/else whose branches contain 1-2 body statements instead of a single assignment.  Uses
+    # _gen_body_assign for simulation and replay, same as _gen_while.
     method _gen_nested_if( $vars, $var_types, $var_names ) {
         my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
         return { code => undef } if @int_names < 2;
@@ -810,9 +802,8 @@ class Brocken::Fuzz v0.0.1 {
         };
     }
 
-    # Generate a ternary expression: $dst = $cond ? $t_val : $f_val
-    # The condition compares two arbitrary int vars; the true/false branches
-    # are existing variable values.
+    # Generate a ternary expression: $dst = $cond ? $t_val : $f_val The condition compares two arbitrary int vars; the
+    # true/false branches are existing variable values.
     method _gen_ternary_assign( $vars, $var_types, $var_names ) {
         my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
         return { code => undef } if @int_names < 3;
@@ -831,8 +822,8 @@ class Brocken::Fuzz v0.0.1 {
         return { code => "\$$dst = \$$lhs $cmp \$$rhs ? \$$t_val : \$$f_val;" };
     }
 
-    # Generate a logical expression: $dst = $lhs && $rhs or $dst = $lhs || $rhs
-    # Uses the &&/|| operators which lower to bitwise and/or on i1-equivalent values.
+    # Generate a logical expression: $dst = $lhs && $rhs or $dst = $lhs || $rhs Uses the &&/|| operators which lower to
+    # bitwise and/or on i1-equivalent values.
     method _gen_logic_assign( $vars, $var_types, $var_names ) {
         my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
         return { code => undef } if @int_names < 2;
@@ -909,8 +900,8 @@ class Brocken::Fuzz v0.0.1 {
         return { code => $code, name => $name, meta => { fields => \@fields } };
     }
 
-    # Generate a constructor call: my ptr $obj = ClassName->new(field => val, ...);
-    # Returns { code => '...', instance => { class => Name, fields => { field => val } } }
+    # Generate a constructor call: my ptr $obj = ClassName->new(field => val, ...); Returns { code => '...', instance =>
+    # { class => Name, fields => { field => val } } }
     method _gen_class_construct( $cname, $meta, $vars, $var_types, $var_names, $ivname ) {
         my @args;
         for my $f ( $meta->{fields}->@* ) {
@@ -987,15 +978,15 @@ class Brocken::Fuzz v0.0.1 {
         return { code => "\$$ivname->$set_method($val_code);" };
     }
 
-    # Float binary ops (+, -, *, / only; no shift/bitwise for float)
-    # Generate a say() statement with string concat patterns.
-    # Exercises: string constant emission, constant fold, runtime concat
-    # (strlen+malloc+strcpy+strcat), int-to-string (_stringify), and puts.
+    # Float binary ops (+, -, *, / only; no shift/bitwise for float) Generate a say() statement with string concat
+    # patterns.
+    # Exercises: string constant emission, constant fold, runtime concat (strlen+malloc+strcpy+strcat), int-to-string
+    # (_stringify), and puts.
     # Returns { code => '...', expected_output => '...' }.
     method _gen_say_stmt( $vars, $var_types, $var_names ) {
 
-        # Only widths below 128 are stringified: the runtime's int-to-string
-        # handles at most 64 bits, so saying a 128-bit value is a known gap.
+        # Only widths below 128 are stringified: the runtime's int-to-string handles at most 64 bits, so saying a
+        # 128-bit value is a known gap.
         my @int_names = grep { $var_types->{$_}{signed} ne 'f' && ( $var_types->{$_}{bits} // 64 ) < 128 } $var_names->@*;
         my @str_pool  = qw[hello world foo bar baz test ok hi yo];
         my $n_ints    = scalar @int_names;
@@ -1086,9 +1077,8 @@ class Brocken::Fuzz v0.0.1 {
     }
 
     # Generate a mixed int/float binop assignment.
-    # One operand is int, the other is f64.  The LHS determines the result
-    # type; the Brocken compiler converts RHS to match via maybe_convert_type
-    # (sitofp for int->float, fptosi for float->int).
+    # One operand is int, the other is f64.  The LHS determines the result type; the Brocken compiler converts RHS to
+    # match via maybe_convert_type (sitofp for int->float, fptosi for float->int).
     method _gen_mixed_binop_assign( $vars, $var_types, $var_names ) {
         my @f64_vars = grep { $var_types->{$_}{signed} eq 'f' } $var_names->@*;
         my @int_vars = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
@@ -1147,8 +1137,8 @@ class Brocken::Fuzz v0.0.1 {
     }
 
     # Canonicalise an integer value to its raw bit pattern in [0, 2^bits).
-    # Values arrive as Perl integers, as negative Perl IVs standing in for
-    # high unsigned 64-bit values, or as Math::BigInt.
+    # Values arrive as Perl integers, as negative Perl IVs standing in for high unsigned 64-bit values, or as
+    # Math::BigInt.
     method _int_raw ( $val, $bits ) {
         require Math::BigInt;
         my $n   = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new($val);
@@ -1193,13 +1183,10 @@ class Brocken::Fuzz v0.0.1 {
         return 0;
     }
 
-    # Evaluate a binary operation the way the frontend does.  The result
-    # width is the wider operand (LHS on a tie) and its signedness decides
-    # division and remainder; the narrower operand is sign- or zero-extended
-    # to that width first.  Shifts are the exception: they keep the LHS
-    # width and shift arithmetic or logical according to its signedness.
-    # Math::BigInt carries the arithmetic so every width up to 128 bits
-    # shares one path.
+    # Evaluate a binary operation the way the frontend does.  The result width is the wider operand (LHS on a tie) and
+    # its signedness decides division and remainder; the narrower operand is sign- or zero-extended to that width first.
+    # Shifts are the exception: they keep the LHS width and shift arithmetic or logical according to its signedness.
+    # Math::BigInt carries the arithmetic so every width up to 128 bits shares one path.
     method _eval_i64_typed ( $op, $lv, $rv, $lt, $rt ) {
         require Math::BigInt;
         my $lbits = $lt->{bits}   // 64;
@@ -1242,10 +1229,9 @@ class Brocken::Fuzz v0.0.1 {
         return undef;
     }
 
-    # Evaluate a comparison the way the frontend does: the same promotion as
-    # the binary operations, plus the x86-64 quirk for same-width types
-    # under 64 bits with different signedness, where both operands are
-    # extended by the LHS signedness to 32 bits before the compare.
+    # Evaluate a comparison the way the frontend does: the same promotion as the binary operations, plus the x86-64
+    # quirk for same-width types under 64 bits with different signedness, where both operands are extended by the LHS
+    # signedness to 32 bits before the compare.
     method _eval_cmp_typed ( $cmp, $lv, $rv, $lt, $rt ) {
         require Math::BigInt;
         my $lbits = $lt->{bits}   // 64;
@@ -1317,13 +1303,11 @@ class Brocken::Fuzz v0.0.1 {
     }
 
     # Clamp a Perl value to the range of a given type.
-    # For all integer types, the alloca is byte-granular and Store truncates
-    # to the alloca byte width, so i1/i8 clamp to a single byte (0xFF),
-    # i16 to 0xFFFF, etc.  This matches Brocken's maybe_convert_type behavior
-    # which does NOT narrow int-to-int (full lower bytes are retained).
-    # Signed types additionally apply two's-complement wrapping.
-    # f64 values force float conversion (0.0 + $val) to match sitofp semantics
-    # when int results are stored to f64 destinations by _gen_binop_assign etc.
+    # For all integer types, the alloca is byte-granular and Store truncates to the alloca byte width, so i1/i8 clamp to
+    # a single byte (0xFF), i16 to 0xFFFF, etc.  This matches Brocken's maybe_convert_type behavior which does NOT
+    # narrow int-to-int (full lower bytes are retained).
+    # Signed types additionally apply two's-complement wrapping. f64 values force float conversion (0.0 + $val) to match
+    # sitofp semantics when int results are stored to f64 destinations by _gen_binop_assign etc.
     method _clamp_to_type( $val, $bits, $signed ) {
         return $val & 1                                                  if $bits == 1;
         return 0.0 + $val                                                if $signed eq 'f';
@@ -1347,9 +1331,8 @@ class Brocken::Fuzz v0.0.1 {
     }
 
     # Clamp a value to signed/unsigned 128-bit range using Math::BigInt.
-    # Defensively adds max to negative values before AND so that older
-    # BigInt versions (pre-2.x) that don't two's-complement & on negatives
-    # still produce the correct unsigned representation.
+    # Defensively adds max to negative values before AND so that older BigInt versions (pre-2.x) that don't
+    # two's-complement & on negatives still produce the correct unsigned representation.
     method _clamp_i128( $val, $signed ) {
         require Math::BigInt;
         my $n    = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new( int($val) );
@@ -1381,8 +1364,8 @@ class Brocken::Fuzz v0.0.1 {
         return Math::BigInt->new( int( rand(200) ) - 100 );
     }
 
-    # Generate a random f64-compatible value (non-negative integer stored as
-    # Perl float; avoids negative-literal parse concerns in declarations).
+    # Generate a random f64-compatible value (non-negative integer stored as Perl float; avoids negative-literal parse
+    # concerns in declarations).
     method _rand_f64_val() {
         return int( rand(100) );
     }
@@ -1409,11 +1392,9 @@ class Brocken::Fuzz v0.0.1 {
         }
     }
 
-    # Run a system() command and retry when Windows fails to spawn the child
-    # with the transient "Inappropriate I/O control operation" error.  That
-    # failure arrives as a warning rather than an exception, so warnings are
-    # captured and a few attempts are made before giving up.  A timeout is
-    # reported through the returned error, as before.
+    # Run a system() command and retry when Windows fails to spawn the child with the transient "Inappropriate I/O
+    # control operation" error.  That failure arrives as a warning rather than an exception, so warnings are captured
+    # and a few attempts are made before giving up.  A timeout is reported through the returned error, as before.
     method _system_retry ( $timeout, $code ) {
         my $status;
         for my $attempt ( 1 .. 5 ) {
@@ -1440,8 +1421,8 @@ class Brocken::Fuzz v0.0.1 {
 
     # Run a compiled executable, optionally with args and output capture.
     # Returns { exit_code, stdout, stderr, error }.
-    # When capture is not requested, uses the no-shell system($file, @$argv)
-    # path for reliable exit-code propagation on all platforms.
+    # When capture is not requested, uses the no-shell system($file, @$argv) path for reliable exit-code propagation on
+    # all platforms.
     method _exec_program( $file, %opts ) {
         my $timeout        = $opts{timeout}        // 10;
         my $argv           = $opts{args}           // [];
@@ -1510,11 +1491,10 @@ class Brocken::Fuzz v0.0.1 {
             = { source => $program->{source}, status => 'pass', expected => $program->{expected}, host => $self->host_str, seed => $self->seed };
         my $module;
         eval {
-            # compile() only reads the policy fields, so this instance can be
-            # shared.  Building a throwaway one per case would allocate a
-            # codegen, a linker, and a whole temporary directory, and
-            # File::Temp draws from rand(), which would shift the seeded
-            # stream and change which program each case number generates.
+            # compile() only reads the policy fields, so this instance can be shared.  Building a throwaway one per case
+            # would allocate a codegen, a linker, and a whole temporary directory, and
+            # File::Temp draws from rand(), which would shift the seeded stream and change which program each case
+            # number generates.
             $module = $self->brocken->compile( $program->{source} );
         };
         if ( my $err = $@ ) {
@@ -1598,13 +1578,12 @@ class Brocken::Fuzz v0.0.1 {
         return $result;
     }
 
-    # Phase F2: Multi-function program support
-    # Generate a random sub declaration with typed params, local vars,
-    # body statements, and a return statement.
-    # Returns a metadata hashref suitable for _gen_call_assign / _simulate_call,
-    # or undef if generation failed (e.g. no valid body statements).
-    # The pool includes recursive names (factorial, sum_to) which are dispatched
-    # to _gen_recursive_sub_by_name instead of the regular body generator.
+    # Phase F2: Multi-function program support Generate a random sub declaration with typed params, local vars, body
+    # statements, and a return statement.
+    # Returns a metadata hashref suitable for _gen_call_assign / _simulate_call, or undef if generation failed (e.g. no
+    # valid body statements).
+    # The pool includes recursive names (factorial, sum_to) which are dispatched to _gen_recursive_sub_by_name instead
+    # of the regular body generator.
     method _gen_sub_decl($used_names) {
         my @POOL  = qw[helper adder getval compute transform fold double triple factorial sum_to];
         my @avail = grep { !$used_names->{$_} } @POOL;
@@ -1710,11 +1689,9 @@ class Brocken::Fuzz v0.0.1 {
     }
 
     # Generate a function-call assignment: $dst = funcname($arg1, ...).
-    # Picks a random previously-defined sub, matches args to param types
-    # (preferring compatible existing vars, falling back to literals),
-    # and simulates the call for expected-value tracking.
-    # Recursive subs always use small literal arguments (0-10) to avoid
-    # deep stack recursion in the compiled binary.
+    # Picks a random previously-defined sub, matches args to param types (preferring compatible existing vars, falling
+    # back to literals), and simulates the call for expected-value tracking.
+    # Recursive subs always use small literal arguments (0-10) to avoid deep stack recursion in the compiled binary.
     method _gen_call_assign( $vars, $var_types, $var_names, $subs_meta ) {
         return { code => undef } if scalar( $subs_meta->@* ) < 1;
         my $dst = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
@@ -1752,8 +1729,7 @@ class Brocken::Fuzz v0.0.1 {
     }
 
     # Simulate a call to a sub defined by _gen_sub_decl or _gen_recursive_sub.
-    # For regular subs, snapshots body_vars, binds params, applies body_items,
-    # reads return_var, then restores snapshot.
+    # For regular subs, snapshots body_vars, binds params, applies body_items, reads return_var, then restores snapshot.
     # For recursive subs, delegates to the recursive_sim coderef.
     method _simulate_call( $sub_meta, $args_av ) {
         if ( $sub_meta->{recursive_sim} ) {
@@ -1774,8 +1750,7 @@ class Brocken::Fuzz v0.0.1 {
     }
 
     # Return a random integer type (no float) suitable for sub body variables.
-    # This keeps sub body operations simple (int-only binop/unop from
-    # _gen_body_assign).
+    # This keeps sub body operations simple (int-only binop/unop from _gen_body_assign).
     method _gen_sub_body_type() {
         my @types   = ( [ 1, 1 ], [ 8, 1 ], [ 8, 0 ], [ 16, 1 ], [ 16, 0 ], [ 32, 1 ], [ 32, 0 ], [ 64, 1 ], [ 64, 0 ], [ 128, 1 ], );
         my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2, 1 );

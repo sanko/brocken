@@ -6,8 +6,8 @@ use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# These tests exercise the runtime allocator indirectly through the
-# Brocken source compiler. Classes allocate instances via bump_alloc.
+# These tests exercise the runtime allocator indirectly through the Brocken source compiler. Classes allocate instances
+# via bump_alloc.
 subtest 'Class instance allocation via new' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;

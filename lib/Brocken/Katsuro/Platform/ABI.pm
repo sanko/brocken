@@ -25,36 +25,32 @@ class Brocken::Katsuro::Platform::ABI v0.0.1 {
     method fp_return_register()                    {undef}
     method fiber_reg()                             {undef}
 
-    # Whether the two register classes share their positions.  SysV, AArch64,
-    # and RISC-V keep an independent counter per class; Win64 numbers
-    # positions 1-4 across both, so the position decides the register and the
-    # fifth argument goes on the stack whatever its class.
+    # Whether the two register classes share their positions.  SysV, AArch64, and RISC-V keep an independent counter per
+    # class; Win64 numbers positions 1-4 across both, so the position decides the register and the fifth argument goes
+    # on the stack whatever its class.
     method positional_arguments() {0}
 
-    # The pair of parameter registers a 128-bit argument takes when $spent
-    # integer registers have already been consumed, or an empty list when fewer
-    # than two remain and the value has to go on the stack.  The pair is always
-    # consecutive in the parameter list.
+    # The pair of parameter registers a 128-bit argument takes when $spent integer registers have already been consumed,
+    # or an empty list when fewer than two remain and the value has to go on the stack.  The pair is always consecutive
+    # in the parameter list.
     method param_pair_registers($spent) {
         my @gp = $self->param_registers->@*;
         return if $spent + 1 >= @gp;
         return @gp[ $spent, $spent + 1 ];
     }
 
-    # The two registers a 128-bit result is returned in, the return register
-    # first.  An ABI that returns a wide value in a different pair overrides
-    # this.
+    # The two registers a 128-bit result is returned in, the return register first.  An ABI that returns a wide value in
+    # a different pair overrides this.
     method return_pair_registers() {
         my $first = $self->return_register;
         return defined $first ? ($first) : ();
     }
 
     # Where each argument goes, in order.  $classes is an arrayref with one
-    # class name per argument: 'int', 'float', or 'i128'.  Each entry of the
-    # result is the name of the register the argument is passed in, [ $lo, $hi ]
-    # for a 128-bit argument that takes a consecutive register pair, or
-    # [ 'stack', $slot ] for an argument the registers cannot carry.  A 128-bit
-    # stack argument names its low slot and occupies the next one as well.
+    # class name per argument: 'int', 'float', or 'i128'.  Each entry of the result is the name of the register the
+    # argument is passed in, [ $lo, $hi ] for a 128-bit argument that takes a consecutive register pair, or [ 'stack',
+    # $slot ] for an argument the registers cannot carry.  A 128-bit stack argument names its low slot and occupies the
+    # next one as well.
     method argument_locations($classes) {
         return $self->positional_arguments ? $self->_positional_argument_locations($classes) : $self->_independent_argument_locations($classes);
     }

@@ -44,10 +44,9 @@ Brocken::store_i64(Brocken::ptr_add($hb, 72), 0);
 # Now attempt a syscall (exit with code 42)
 # The cap check should intercept this and set err_code=3
 my i64 $ret = Brocken::syscall(60, 42, 0, 0);
-# We should never reach here — the cap violation branches to fuel_exit
-# which returns 0, but the program continues because fuel_exit_block
-# returns from _BROCKEN_ENTRY. The ret value from syscall should be 0
-# (from the exit block), and err_code should be 3.
+# We should never reach here — the cap violation branches to fuel_exit which returns 0, but the program continues
+# because fuel_exit_block returns from _BROCKEN_ENTRY. The ret value from syscall should be 0 (from the exit block), and
+# err_code should be 3.
 my i64 $err = Brocken::load_i64(Brocken::ptr_add($hb, 72));
 if ($err != 3) { return 1; }
 return 0;

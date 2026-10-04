@@ -59,10 +59,8 @@ class Brocken::Jenny::Linker::DWARF v0.0.1 : isa(Brocken::Jenny::Linker) {
     }
 
     # Generates the line number program.
-    # Uses standard DWARF opcodes:
-    # - 0x02: Set Address (Extended)
-    # - 0x03: Advance Line (Signed)
-    # - 0x01: Copy (Append row to matrix)
+    # Uses standard DWARF opcodes: - 0x02: Set Address (Extended) - 0x03: Advance Line (Signed) - 0x01: Copy (Append row
+    # to matrix)
     method build_debug_line () {
         my @entries   = sort { $a->{offset} <=> $b->{offset} } @$source_locs;
         my $program   = '';
@@ -400,10 +398,8 @@ class Brocken::Jenny::Linker::DWARF v0.0.1 : isa(Brocken::Jenny::Linker) {
     # Call Frame Information (CFI) for stack unwinding.
     method build_debug_frame () {
 
-        # Basic CIE (Common Information Entry)
-        # - code_alignment_factor: 1
-        # - data_alignment_factor: -8
-        # - return_address_register: 16 (x64), 30 (ARM64), or 1 (RISC-V ra)
+        # Basic CIE (Common Information Entry) - code_alignment_factor: 1 - data_alignment_factor: -8 -
+        # return_address_register: 16 (x64), 30 (ARM64), or 1 (RISC-V ra)
         my $cie_ra   = $arch =~ /aarch64|arm64/i ? 30 : ( $arch eq 'riscv64' ? 1 : 16 );
         my $cie_cfa  = $arch =~ /aarch64|arm64/i ? 31 : ( $arch eq 'riscv64' ? 2 : 7 );
         my $cie_fp   = $arch =~ /aarch64|arm64/i ? 29 : ( $arch eq 'riscv64' ? 8 : 6 );

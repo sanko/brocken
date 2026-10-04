@@ -9,16 +9,13 @@ use feature               qw[class];
 use Test2::Tools::Brocken qw[temp_path];
 
 # i64.const immediates are signed LEB128. The encoder used to reach for
-# POSIX::floor($v / 128), which divides through a double: a double carries 53
-# bits of mantissa, so every value past 2**53 was rounded before the next group
-# was taken. INT64_MAX came out as ff 80 80 80 80 80 80 80 80 01 -- one group
-# too many, and the validator rejected it outright as an over-long var_i64, so
-# a module mentioning that constant would not compile at all. Anything in the
-# 2**53..2**63 range that did compile came back with the wrong value.
+# POSIX::floor($v / 128), which divides through a double: a double carries 53 bits of mantissa, so every value past
+# 2**53 was rounded before the next group was taken. INT64_MAX came out as ff 80 80 80 80 80 80 80 80 01 -- one group
+# too many, and the validator rejected it outright as an over-long var_i64, so a module mentioning that constant would
+# not compile at all. Anything in the 2**53..2**63 range that did compile came back with the wrong value.
 #
-# These cases are checked by running the module, not by decoding the bytes: a
-# decoder written next to the encoder is exactly the thing that agrees with a
-# broken encoder.
+# These cases are checked by running the module, not by decoding the bytes: a decoder written next to the encoder is
+# exactly the thing that agrees with a broken encoder.
 my $i64           = Brocken::Lindsay::IR::Type::i64();
 my $host          = Brocken::Katsuro::Platform::parse();
 my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
@@ -39,31 +36,28 @@ sub build {
     return $out;
 }
 
-# Runs main() and returns the value wasmtime printed on stdout, or undef when
-# the module was rejected. stderr is discarded because --invoke emits an
-# unrelated experimental warning there. Redirect to the devnull path rather
-# than to an open filehandle: an interpolated filehandle stringifies to
-# "GLOB(0x...)", and the shell then creates a file by that name in the cwd.
+# Runs main() and returns the value wasmtime printed on stdout, or undef when the module was rejected. stderr is
+# discarded because --invoke emits an unrelated experimental warning there. Redirect to the devnull path rather
+# than to an open filehandle: an interpolated filehandle stringifies to "GLOB(0x...)", and the shell then creates a file
+# by that name in the cwd.
 sub run ($path) {
     my $out = qx["$wasmtime_path" run --invoke main "$path" 2>$null];
     chomp $out;
     return $out =~ /^\s*(-?\d+)\s*$/ ? $1 + 0 : undef;
 }
 
-# 2**53 is the first magnitude a double can no longer represent exactly, so
-# these straddle the boundary the old division lost. Cases are written as
-# literal decimals: a bare 64-bit hex literal exceeds IV range and lands in
-# Perl as an NV, so 0xF0F0F0F0F0F0F0F0 would silently become a float and the
-# comparison itself would be inexact.
+# 2**53 is the first magnitude a double can no longer represent exactly, so these straddle the boundary the old division
+# lost. Cases are written as
+# literal decimals: a bare 64-bit hex literal exceeds IV range and lands in Perl as an NV, so 0xF0F0F0F0F0F0F0F0 would
+# silently become a float and the comparison itself would be inexact.
 my @cases = (
     [ 'zero'  => 0 ], [ 'small' => 42 ], [ 'negative' => -13 ], [ '2**31' => 2147483648 ], [ '2**32 - 1' => 4294967295 ], [ '2**32' => 4294967296 ],
     [ '2**40' => 1099511627776 ], [ '2**53 - 1' => 9007199254740991 ], [ '2**53' => 9007199254740992 ], [ '2**53 + 1' => 9007199254740993 ],
     [ '2**62'         =>  4611686018427387904 ], [ 'INT64_MAX' =>  9223372036854775807 ], [ 'INT64_MIN'     => -9223372036854775808 ],
     [ 'INT64_MIN + 1' => -9223372036854775807 ], [ '-2**62'    => -4611686018427387904 ], [ 'high bits set' => -1 ],
 
-    # -(2**64 - 0x0F0F0F0F0F0F0F0): the top bit set, so negative, with a
-    # repeating nibble pattern that would be obvious if the low groups were
-    # dropped or rounded.
+    # -(2**64 - 0x0F0F0F0F0F0F0F0): the top bit set, so negative, with a repeating nibble pattern that would be obvious
+    # if the low groups were dropped or rounded.
     [ '0xF0F0..F0F0 as i64' => -1085102592571150096 ],
 
     # -(2**64 - 0xFFFFFFFF00000000): only the top 32 bits set.

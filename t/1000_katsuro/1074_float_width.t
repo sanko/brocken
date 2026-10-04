@@ -6,14 +6,13 @@ use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# A float literal is lexed as f64. `my f32 $t = 1.5;` therefore has to be
-# re-tagged on the way into the slot, because the backends take a float
-# store/load/move width from an operand's type: without the re-tag the store
-# is a double-width write into a four-byte slot, and the matching load reads
-# the low half of the pattern, which for a small value is the zero mantissa.
+# A float literal is lexed as f64. `my f32 $t = 1.5;` therefore has to be re-tagged on the way into the slot, because
+# the backends take a float store/load/move width from an operand's type: without the re-tag the store is a double-width
+# write into a four-byte slot, and the matching load reads the low half of the pattern, which for a small value is the
+# zero mantissa.
 #
-# These assert the program's *answer*, not the shape of the IR. The existing
-# float tests are all MIR-level, which is why this class of fault survived
+# These assert the program's *answer*, not the shape of the IR. The existing float tests are all MIR-level, which is why
+# this class of fault survived
 # them: an MIR-level test passes while the emitted code computes 0.0f.
 sub compiles_to ( $src, $want, $name ) {
     my $brocken = Brocken->new();
@@ -43,8 +42,7 @@ subtest 'f32 keeps its width when returned' => sub {
 subtest 'a float of one width cannot be stored in a slot of the other' => sub {
 
     # There is no fptrunc or fpext in the IR, so this has to be refused
-    # rather than silently reinterpreted: the value is loaded, so there is
-    # nothing to re-tag.
+    # rather than silently reinterpreted: the value is loaded, so there is nothing to re-tag.
     for my $case (
         [ 'my f64 $a = 1.5; my f32 $t = $a; return 0;', 'f64 loaded into an f32 slot' ],
         [ 'my f32 $a = 1.5; my f64 $t = $a; return 0;', 'f32 loaded into an f64 slot' ],

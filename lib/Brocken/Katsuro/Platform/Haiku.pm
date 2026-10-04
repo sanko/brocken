@@ -9,8 +9,8 @@ class Brocken::Katsuro::Platform::Haiku v0.0.1 : isa(Brocken::Katsuro::Platform)
     method exit_name()   {'exit'}
 
     # Haiku's syscall numbers are unstable and not officially exposed.
-    # We use a heuristic by disassembling libroot.so functions to find the
-    # 'mov eax, imm' instruction that precedes the syscall.
+    # We use a heuristic by disassembling libroot.so functions to find the 'mov eax, imm' instruction that precedes the
+    # syscall.
     sub _detect_syscall( $class, $name, $arch ) {
         my $lib = '/boot/system/lib/libroot.so';
         return undef unless -e $lib;

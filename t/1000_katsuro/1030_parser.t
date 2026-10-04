@@ -528,9 +528,8 @@ subtest 'Source positions on expressions (in call)' => sub {
 my i64 $r = foo(1 + 2 * 3);
 BROCKEN
 
-    # Call position comes from '(' token (opening paren of arg list)
-    # 'm'=1, 'y'=2, ' '=3, 'i'=4, '6'=5, '4'=6, ' '=7, '$'=8, 'r'=9, ' '=10, '='=11, ' '=12,
-    # 'f'=13, 'o'=14, 'o'=15, '('=16
+    # Call position comes from '(' token (opening paren of arg list) 'm'=1, 'y'=2, ' '=3, 'i'=4, '6'=5, '4'=6, ' '=7,
+    # '$'=8, 'r'=9, ' '=10, '='=11, ' '=12, 'f'=13, 'o'=14, 'o'=15, '('=16
     my $call = $prog->statements->[0]->init;
     is( $call->line, 1,  'Call line' );
     is( $call->col,  16, 'Call col (opening paren)' );

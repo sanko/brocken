@@ -12,16 +12,13 @@ use Brocken::Jenny::Lowerer::RISCV64;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# A 128-bit value occupies a consecutive register pair.  The pair a result
-# comes back in was hard-coded in each lowerer (rdx on x86-64, x1 on ARM64, a1
-# on RISC-V); the parameter pair came from an index into `param_registers`.  The
-# ABI now answers both, so the lowerers no longer name a second register behind
-# its back.
+# A 128-bit value occupies a consecutive register pair.  The pair a result comes back in was hard-coded in each lowerer
+# (rdx on x86-64, x1 on ARM64, a1 on RISC-V); the parameter pair came from an index into `param_registers`.  The ABI now
+# answers both, so the lowerers no longer name a second register behind its back.
 #
 # The check lowers an i128-returning program on every backend from any host and
-# reads the pair off the moves: the callee writes the result pair and the caller
-# reads the same pair.  The comment tags the two halves, so the register is
-# taken from the operand rather than assumed.
+# reads the pair off the moves: the callee writes the result pair and the caller reads the same pair.  The comment tags
+# the two halves, so the register is taken from the operand rather than assumed.
 my %lowerer_for = (
     'x86_64-pc-linux-gnu'       => 'Brocken::Jenny::Lowerer::X86_64',
     'x86_64-pc-windows-msvc'    => 'Brocken::Jenny::Lowerer::X86_64',

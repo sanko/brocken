@@ -18,8 +18,7 @@ sub test_prog {
     ok $result->{status} eq 'pass', $name or diag "FAIL: $result->{reason}\nGot: $result->{got}\nSource:\n$source";
 }
 
-# This program was extracted from a fuzzer-generated test case
-# that passes on x86_64 but fails on RISC-V.
+# This program was extracted from a fuzzer-generated test case that passes on x86_64 but fails on RISC-V.
 # We progressively add more statements to isolate the failing step.
 #
 # Program:

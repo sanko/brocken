@@ -320,16 +320,16 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
     }
 
     # Build the _brocken_gate_dispatch trampoline.
-    # Called by gate stubs: _brocken_gate_dispatch(ICB, gate_id, a0..a5) -> i64
-    # Loads function pointer from gate_table[gate_id] at ICB+112 and calls through it.
+    # Called by gate stubs: _brocken_gate_dispatch(ICB, gate_id, a0..a5) -> i64 Loads function pointer from
+    # gate_table[gate_id] at ICB+112 and calls through it.
     method _build_gate_dispatch_mf() {
         my $i64 = Brocken::Lindsay::IR::Type::i64();
         my $ptr = Brocken::Lindsay::IR::Type::ptr();
         my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => '_brocken_gate_dispatch' );
         my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
 
-        # Parameters: x0=ICB, x1=gate_id, x2=a0, x3=a1, x4=a2, x5=a3, stack: a4, a5
-        # Save ICB to stack before clobbering x0 for gate table load
+        # Parameters: x0=ICB, x1=gate_id, x2=a0, x3=a1, x4=a2, x5=a3, stack: a4, a5 Save ICB to stack before clobbering
+        # x0 for gate table load
         my $icb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%icb', type => $ptr );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -429,8 +429,8 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $x1, $gate_id ], comment => 'x1 = gate_id (second arg)' ) );
 
         # Arguments a0-a3 are already in x2-x5 (unchanged).
-        # Arguments a4, a5 are on the caller's stack, also unchanged.
-        # call_indirect fn_ptr -- calls fn(ICB, gate_id, a0, a1, a2, a3, a4, a5)
+        # Arguments a4, a5 are on the caller's stack, also unchanged. call_indirect fn_ptr -- calls fn(ICB, gate_id, a0,
+        # a1, a2, a3, a4, a5)
         my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%ret', type => $i64 );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -542,9 +542,8 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         }
         my $callee_size = scalar(@to_save) * 8;
 
-        # The outgoing argument area sits at the bottom of the frame, below the
-        # spill slots, because the callee reads those arguments from the entry
-        # stack pointer and `bl` does not move it.
+        # The outgoing argument area sits at the bottom of the frame, below the spill slots, because the callee reads
+        # those arguments from the entry stack pointer and `bl` does not move it.
         my $call_arg_frame = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
         my $unified_frame  = ( $callee_size + $spill_frame + $call_arg_frame + 15 ) & ~15;
         my $extra_frame    = $unified_frame - $callee_size;
@@ -556,12 +555,10 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         my $total_frame = $unified_frame + $aligned_alloca;
         $alloca_frame = $unified_frame;
 
-        # An incoming argument is measured from the stack pointer as it was on
-        # entry; the prologue has since moved it down by the whole frame, so the
-        # bias is added back.  A spill slot is nominally placed where the
-        # allocator asked, which is inside the spill area, so it is lifted above
-        # the outgoing area that now sits below it.  An outgoing argument is
-        # already where it belongs.
+        # An incoming argument is measured from the stack pointer as it was on entry; the prologue has since moved it
+        # down by the whole frame, so the bias is added back.  A spill slot is nominally placed where the allocator
+        # asked, which is inside the spill area, so it is lifted above the outgoing area that now sits below it.  An
+        # outgoing argument is already where it belongs.
         my $final_disp = sub ($addr) {
             my $disp = $addr->{disp} // 0;
             return $disp unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
@@ -581,14 +578,11 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             qr/^($pat)$/;
         };
 
-        # The base of a memory operand is a virtual register for an ordinary
-        # spill slot, because the lowerer materializes the address with an
-        # `add` before using it.  A raw one names the physical stack register
-        # instead, and the available-register set deliberately does not contain
-        # it, so it has to be recognized here: looked up in the allocation
-        # table as if it were a virtual register, sp resolved to whatever
-        # register the allocator had handed out under that name, and the
-        # argument load went to the wrong place.
+        # The base of a memory operand is a virtual register for an ordinary spill slot, because the lowerer
+        # materializes the address with an `add` before using it.  A raw one names the physical stack register instead,
+        # and the available-register set deliberately does not contain it, so it has to be recognized here: looked up in
+        # the allocation table as if it were a virtual register, sp resolved to whatever register the allocator had
+        # handed out under that name, and the argument load went to the wrong place.
         my $base_kind = sub ($name) {
             return 'phys_reg' if !ref $name && $name eq $platform->stack_reg;
             return ref $name || $name !~ $phys_re ? 'virt_reg' : 'phys_reg';
@@ -1325,13 +1319,10 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                         $bytes .= pack( 'V', ADD_SP | ( $save_size << 10 ) );
                     }
                     else {
-                        # No push.  The 64 bytes this used to subtract are
-                        # x86-64's shadow space; AAPCS64 has none, and `bl`
-                        # leaves the return address in x30, so sp is already
-                        # pointing at the first outgoing argument.  Subtracting
-                        # anything put the arguments 64 bytes above where the
-                        # callee reads them from, which is only visible once
-                        # there is a ninth argument to read.
+                        # No push.  The 64 bytes this used to subtract are x86-64's shadow space; AAPCS64 has none, and
+                        # `bl` leaves the return address in x30, so sp is already pointing at the first outgoing
+                        # argument.  Subtracting anything put the arguments 64 bytes above where the callee reads them
+                        # from, which is only visible once there is a ninth argument to read.
                         push @func_fixups, { offset => $current_offset->(), type => 'call_bl', target => $func_name };
                         $bytes .= pack( 'V', BL );
                     }
@@ -1398,12 +1389,9 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
 
                     # A raw displacement is positioned by the calling
-                    # convention rather than by the allocator: an incoming
-                    # argument sits above the frame and an outgoing one at the
-                    # bottom.  Neither is a spill slot, and counting it here
-                    # would both size the spill area wrong and overlap the
-                    # outgoing argument area.  _compute_call_arg_frame sizes
-                    # the latter.
+                    # convention rather than by the allocator: an incoming argument sits above the frame and an outgoing
+                    # one at the bottom.  Neither is a spill slot, and counting it here would both size the spill area
+                    # wrong and overlap the outgoing argument area.  _compute_call_arg_frame sizes the latter.
                     next if $addr->{raw};
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
                     $found    = 1;
@@ -1413,12 +1401,10 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
     }
 
-    # Size of the outgoing argument area at the bottom of the frame, holding
-    # the arguments the register set could not carry.  Callers write those at
-    # fixed stack pointer offsets, so the area has to be reserved before the
-    # call rather than pushed at the call site: that keeps the register
-    # allocator's stack-relative spill slots valid across the call and leaves sp
-    # 16-byte aligned at a public interface.
+    # Size of the outgoing argument area at the bottom of the frame, holding the arguments the register set could not
+    # carry.  Callers write those at fixed stack pointer offsets, so the area has to be reserved before the
+    # call rather than pushed at the call site: that keeps the register allocator's stack-relative spill slots valid
+    # across the call and leaves sp 16-byte aligned at a public interface.
     method _compute_call_arg_frame( $mf, $stack_reg ) {
         my $max_disp = -1;
         for my $mbb ( $mf->blocks->@* ) {
@@ -1427,10 +1413,9 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                     next unless $op->kind eq 'mem';
                     my $addr = $op->value;
 
-                    # Only the caller's outgoing arguments occupy this area; an
-                    # entry-relative load reads an incoming argument, which
-                    # belongs to whoever called here and is measured from the
-                    # entry stack pointer anyway.
+                    # Only the caller's outgoing arguments occupy this area; an entry-relative load reads an incoming
+                    # argument, which belongs to whoever called here and is measured from the entry stack pointer
+                    # anyway.
                     next unless $addr->{raw} && $addr->{raw} ne 'entry';
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );

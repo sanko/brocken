@@ -63,11 +63,9 @@ class Brocken::Jenny::Linker v0.0.1 {
     }
 
     # Prepares the memory and file layout for the binary.
-    # This must handle different alignment requirements:
-    # - x86_64 ELF: 4KB (0x1000)
-    # - ARM64 ELF: 4KB (0x1000) on Linux, 64KB (0x10000) on others for Android.
-    # - Mach-O (Apple Silicon): 16KB (0x4000).
-    # - PE (Windows): 512B (0x200) for files, 4KB (0x1000) for memory.
+    # This must handle different alignment requirements: - x86_64 ELF: 4KB (0x1000) - ARM64 ELF: 4KB (0x1000) on Linux,
+    # 64KB (0x10000) on others for Android. - Mach-O (Apple Silicon): 16KB (0x4000). - PE (Windows): 512B (0x200) for
+    # files, 4KB (0x1000) for memory.
     method pre_layout( $text_size, $data_size, $platform, $debug = 0 ) {
         my $page_align
             = $platform->is_macos ? ( $platform->is_arm64 ? 0x4000 : 0x1000 ) :
