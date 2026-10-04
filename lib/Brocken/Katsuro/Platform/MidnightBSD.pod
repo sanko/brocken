@@ -10,9 +10,9 @@ Concrete platform class for MidnightBSD. Inherits from B<BSD>.
 
 =head1 METHODS
 
-=head2 is_midnightbsd
+=head2 C<is_midnightbsd( )>
 
-Returns true (1).
+Returns a true value.
 
 =head1 LICENSE
 

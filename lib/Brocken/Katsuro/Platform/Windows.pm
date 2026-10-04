@@ -1,9 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform;
-
-class Brocken::Katsuro::Platform::Windows : isa(Brocken::Katsuro::Platform) {
+class Brocken::Katsuro::Platform::Windows v0.0.1 : isa(Brocken::Katsuro::Platform) {
     method is_windows() {1}
     method is_posix()   {0}
     method bin_ext()    {'.exe'}
@@ -20,5 +18,4 @@ class Brocken::Katsuro::Platform::Windows : isa(Brocken::Katsuro::Platform) {
         return $name . $self->lib_ext if !defined $version;
         return $name . '-' . $version . $self->lib_ext;
     }
-}
-1;
+} 1;

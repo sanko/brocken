@@ -1,9 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform;
-
-class Brocken::Katsuro::Platform::Linux : isa(Brocken::Katsuro::Platform) {
+class Brocken::Katsuro::Platform::Linux v0.0.1 : isa(Brocken::Katsuro::Platform) {
     method is_linux() {1}
     method format()   {'elf'}
 
@@ -67,5 +65,4 @@ class Brocken::Katsuro::Platform::Linux : isa(Brocken::Katsuro::Platform) {
         };
         $syscalls;
     }
-}
-1;
+} 1;

@@ -1,11 +1,8 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[portable];
-no warnings qw[experimental::class];
-use Brocken::Jenny::Linker;
-use Brocken::Katsuro::Platform;
-
-class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
+no warnings qw[portable experimental::class];
+class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
+    use Brocken::Katsuro::Platform;
     use Brocken::Jenny::Codegen::ARM64::Inst;
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
 
@@ -843,5 +840,4 @@ class Brocken::Jenny::Linker::PE : isa(Brocken::Jenny::Linker) {
         print $fh pack( 'v', 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
         close $fh;
     }
-}
-1;
+} 1;

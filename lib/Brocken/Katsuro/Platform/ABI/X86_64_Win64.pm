@@ -1,9 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform::ABI::X86_64;
-
-class Brocken::Katsuro::Platform::ABI::X86_64_Win64 : isa(Brocken::Katsuro::Platform::ABI::X86_64) {
+class Brocken::Katsuro::Platform::ABI::X86_64_Win64 v0.0.1 : isa(Brocken::Katsuro::Platform::ABI::X86_64) {
 
     # Windows x64 Calling Convention
     # SCRATCH: rax, rcx, rdx, r8, r9, r10, r11
@@ -23,7 +21,7 @@ class Brocken::Katsuro::Platform::ABI::X86_64_Win64 : isa(Brocken::Katsuro::Plat
         my %data = (
             available => [qw[xmm0 xmm1 xmm2 xmm3 xmm4 xmm5 xmm6 xmm7 xmm8 xmm9 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15]],
             caller    => [qw[xmm0 xmm1 xmm2 xmm3 xmm4 xmm5]],
-            callee    => [qw[xmm6 xmm7 xmm8 xmm9 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15]],
+            callee    => [qw[xmm6 xmm7 xmm8 xmm9 xmm10 xmm11 xmm12 xmm13 xmm14 xmm15]]
         );
         return $data{$category} // [];
     }
@@ -35,6 +33,5 @@ class Brocken::Katsuro::Platform::ABI::X86_64_Win64 : isa(Brocken::Katsuro::Plat
     # Win64 numbers argument positions 1-4 across both register files: the
     # first argument goes to rcx or xmm0, the second to rdx or xmm1, and so on;
     # the fifth and later arguments go on the stack whatever their class.
-    method positional_arguments() { 1 }
-}
-1;
+    method positional_arguments() {1}
+} 1;

@@ -1,8 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-
-class Brocken::Katsuro::Lowerer {
+class Brocken::Katsuro::Lowerer v0.0.1 {
     use Brocken::Lindsay::IR;
     use Brocken::Lindsay::IR::Builder;
     use Brocken::ICB;
@@ -106,7 +105,7 @@ class Brocken::Katsuro::Lowerer {
         return 8;
     }
 
-    # === Return type inference ===
+    # Return type inference
     method _infer_return_type($ast) {
         my $body = $ast->body;
         my %var_types;
@@ -186,7 +185,7 @@ class Brocken::Katsuro::Lowerer {
         return 'Any';
     }
 
-    # === Main entry point ===
+    # Main entry point
     method lower_program($ast) {
         my @all_stmts = $ast->statements->@*;
         my @decls;
@@ -276,7 +275,7 @@ class Brocken::Katsuro::Lowerer {
         $current_class = undef;
     }
 
-    # === Register built-in FFI functions ===
+    # Register built-in FFI functions
     method _puts_name() {
         return $self->platform && $self->platform->is_windows ? '_puts' : 'puts';
     }
@@ -349,7 +348,7 @@ class Brocken::Katsuro::Lowerer {
         }
     }
 
-    # === Pass 1: Register declarations ===
+    # Pass 1: Register declarations
     method register_class($ast) {
         my @fields;
         my $offset = 0;
@@ -432,7 +431,7 @@ class Brocken::Katsuro::Lowerer {
         $functions->{$name} = $fn;
     }
 
-    # === Pass 2: Lower function bodies ===
+    # Pass 2: Lower function bodies
     method lower_function($ast) {
         $fuel_exit_block = undef;
         return if $ast->body->statements->@* == 0;
@@ -579,7 +578,7 @@ class Brocken::Katsuro::Lowerer {
         }
     }
 
-    # === Block lowering ===
+    # Block lowering
     method lower_block_body($block_ast) {
         for my $stmt ( $block_ast->statements->@* ) {
             $self->lower_statement($stmt);
@@ -610,7 +609,7 @@ class Brocken::Katsuro::Lowerer {
         }
     }
 
-    # === Statement lowering ===
+    # Statement lowering
     method lower_statement($stmt) {
         return unless defined $stmt;
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') )       { return $self->lower_var_decl($stmt); }
@@ -902,7 +901,7 @@ class Brocken::Katsuro::Lowerer {
         $current_block = $exit;
     }
 
-    # === Exception handling: setjmp/longjmp intrinsics ===
+    # Exception handling: setjmp/longjmp intrinsics
     method _ensure_sjlj_intrinsics() {
         return if $functions->{'setjmp'};
         my $setjmp_fn = Brocken::Lindsay::IR::Function->new(
@@ -924,7 +923,7 @@ class Brocken::Katsuro::Lowerer {
         $functions->{'longjmp'} = $longjmp_fn;
     }
 
-    # === try/catch/finally lowering ===
+    # try/catch/finally lowering
     # CFG structure:
     #   try_setup -> setjmp call, branch on return value
     #   try_body  -> user code, normal exit pops handler -> finally/merge
@@ -1059,7 +1058,7 @@ class Brocken::Katsuro::Lowerer {
         $current_block = $merge_block;
     }
 
-    # === throw lowering ===
+    # throw lowering
     # Evaluate expr, store in ICB.thrown_value.
     # If handler exists: longjmp to it.
     # If no handler: set err_code = ERR_THROW, continue.
@@ -1150,7 +1149,7 @@ class Brocken::Katsuro::Lowerer {
         }
     }
 
-    # === Expression lowering ===
+    # Expression lowering
     method lower_expression($expr) {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Const') ) {
             return $self->lower_const($expr);
@@ -1855,7 +1854,7 @@ class Brocken::Katsuro::Lowerer {
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }
 
-    # === Condition conversion ===
+    # Condition conversion
     method as_condition( $val, $line = 0, $col = 0 ) {
         return $val if $val->type->bits == 1;
 
@@ -1867,7 +1866,7 @@ class Brocken::Katsuro::Lowerer {
         return $builder->build_icmp( 'ne', $val, $zero, undef, $line, $col );
     }
 
-    # === Type conversion helper ===
+    # Type conversion helper
     method maybe_convert_type( $val, $target_type, $line = 0, $col = 0 ) {
         return $val if $val->type->kind eq $target_type->kind && $val->type->bits == $target_type->bits;
 
@@ -2021,7 +2020,7 @@ class Brocken::Katsuro::Lowerer {
         $val;
     }
 
-    # === Class field helpers ===
+    # Class field helpers
     method resolve_class_name($ast) {
         my $obj = $ast->obj;
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
@@ -2253,11 +2252,11 @@ class Brocken::Katsuro::Lowerer {
     }
 
     method lower_class_const($ast) {
-        Carp::croak( "__CLASS__ used outside of a class at " . $self->_loc($ast) ) unless $current_class;
+        Carp::croak( '__CLASS__ used outside of a class at ' . $self->_loc($ast) ) unless $current_class;
         return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => $current_class, );
     }
 
-    # === Method body lowering with field GEP pre-population ===
+    # Method body lowering with field GEP pre-population
     method lower_method( $class_name, $method_ast ) {
         my $full_name = $class_name . '::' . $method_ast->name;
         $current_func = $functions->{$full_name};
@@ -2376,7 +2375,7 @@ class Brocken::Katsuro::Lowerer {
         }
     }
 
-    # === Auto-generated accessor and constructor lowering ===
+    # Auto-generated accessor and constructor lowering
     method generate_reader( $class_name, $field_ast ) {
         my $full_name = $class_name . '::' . $field_ast->name;
         $current_func = $functions->{$full_name};

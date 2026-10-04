@@ -4,8 +4,7 @@ no warnings qw[experimental::class portable];
 use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
 use Symbol 'gensym';
-
-class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
+class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
     use Brocken::Jenny::Codegen::ARM64::Inst;
     use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
     field $has_ffi : reader = false;
@@ -694,5 +693,4 @@ class Brocken::Jenny::Linker::MachO : isa(Brocken::Jenny::Linker) {
         }
         return $output_file;
     }
-}
-1;
+} 1;

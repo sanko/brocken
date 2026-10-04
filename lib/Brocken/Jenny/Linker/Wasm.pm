@@ -1,12 +1,10 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Jenny::Linker;
-use Brocken::Katsuro::Platform;
-use Brocken::ICB ();
-
-class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
-    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
+class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
+    use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
+    use Brocken::Katsuro::Platform;
+    use Brocken::ICB ();
 
     # The address the bump allocator starts handing out from. 1024 rather
     # than 0, because 0 doubles as the out-of-memory answer: `bump_alloc`
@@ -316,5 +314,4 @@ class Brocken::Jenny::Linker::Wasm : isa(Brocken::Jenny::Linker) {
         }
         return $out;
     }
-}
-1;
+} 1;

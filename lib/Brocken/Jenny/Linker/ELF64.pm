@@ -1,12 +1,9 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Jenny::Linker;
-use Brocken::Katsuro::Platform;
-
-class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
-    use Brocken::Jenny::Codegen::ARM64::Inst;
-    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
+class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
+    use Brocken::Katsuro::Platform;
+    use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
     field $_extern_got_offsets : reader = {};
 
     # Structurally compliant segment layout grouping all read-only sections
@@ -421,7 +418,6 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                 }
             }
             elsif ( $platform->is_arm64 ) {
-                use Brocken::Jenny::Codegen::ARM64::Inst;
                 if ( grep { $_ eq 'setjmp' } keys %extern_seen ) {
 
                     # setjmp(buf): save x19-x30 + SP, return 0
@@ -429,24 +425,24 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
                         my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
                         $text .= pack( 'V', str_64( $reg, 0, $i * 8 ) );
                     }
-                    $text .= pack( 'V', add_imm( 1, 31, 0 ) );    # mov x1, sp
-                    $text .= pack( 'V', str_64( 1, 0, 96 ) );     # str x1, [x0, #96]
-                    $text .= pack( 'V', movz_64( 0, 0 ) );        # mov x0, #0
-                    $text .= pack( 'V', ret() );                  # ret
+                    $text .= pack( 'V', add_imm( 1, 31, 0 ) );        # mov x1, sp
+                    $text .= pack( 'V', str_64( 1, 0, 96 ) );         # str x1, [x0, #96]
+                    $text .= pack( 'V', movz_64( 0, 0 ) );            # mov x0, #0
+                    $text .= pack( 'V', ret() );                      # ret
                     $sjlj_stubs{setjmp} = $stub_base;
                     $stub_base = length($text);
                 }
                 if ( grep { $_ eq 'longjmp' } keys %extern_seen ) {
 
                     # longjmp(buf, val): restore x19-x30 + SP, return via saved LR
-                    $text .= pack( 'V', ldr_64( 2, 0, 96 ) );     # ldr x2, [x0, #96]  (saved SP)
-                    $text .= pack( 'V', add_imm( 31, 2, 0 ) );    # mov sp, x2
+                    $text .= pack( 'V', ldr_64( 2, 0, 96 ) );         # ldr x2, [x0, #96]  (saved SP)
+                    $text .= pack( 'V', add_imm( 31, 2, 0 ) );        # mov sp, x2
                     for my $i ( reverse( 0 .. 11 ) ) {
                         my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
                         $text .= pack( 'V', ldr_64( $reg, 0, $i * 8 ) );
                     }
-                    $text .= pack( 'V', mov_64( 0, 1 ) );         # mov x0, x1  (return val)
-                    $text .= pack( 'V', ret() );                  # ret (jumps to saved LR)
+                    $text .= pack( 'V', mov_64( 0, 1 ) );             # mov x0, x1  (return val)
+                    $text .= pack( 'V', ret() );                      # ret (jumps to saved LR)
                     $sjlj_stubs{longjmp} = $stub_base;
                 }
             }
@@ -1425,5 +1421,4 @@ class Brocken::Jenny::Linker::ELF64 : isa(Brocken::Jenny::Linker) {
         chmod 0755, $output_file;
         return $output_file;
     }
-}
-1;
+} 1;

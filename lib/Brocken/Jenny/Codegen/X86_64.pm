@@ -1,16 +1,16 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use List::Util ();
-use Brocken::Katsuro::Platform;
-use Brocken::Jenny::Lowerer::X86_64;
-use Brocken::Jenny::RegAlloc;
-use Brocken::Jenny::MIR;
-use Brocken::ICB;
-
-class Brocken::Jenny::Codegen::X86_64 {
-    field $platform : param;
+#
+class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
+    use List::Util ();
+    use Brocken::Katsuro::Platform;
+    use Brocken::Jenny::Lowerer::X86_64;
+    use Brocken::Jenny::RegAlloc;
+    use Brocken::Jenny::MIR;
+    use Brocken::ICB;
     use Brocken::Jenny::Codegen::X86_64::Encodings qw[:all];
+    field $platform : param;
 
     # Lower Lindsay IR to MIR, allocate registers, then encode to x86_64 machine code
     method emit_function($ir_func) {
@@ -1671,7 +1671,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                 my $vreg = '%' . $p->name . '.addr';
                 my $slot = $alloca_map->{$vreg};
                 push @params,
-                    { name => ( $p->name =~ s/^%//r ), type => 'Int', slot => defined $slot ? $slot : 0, line => 0, col => 0, artificial => 0, };
+                    { name => ( $p->name =~ s/^%//r ), type => 'Int', slot => defined $slot ? $slot : 0, line => 0, col => 0, artificial => 0 };
             }
 
             # Collect locals from IR alloca instructions with debug metadata
@@ -1687,7 +1687,7 @@ class Brocken::Jenny::Codegen::X86_64 {
                         slot       => defined $slot ? $slot : 0,
                         line       => $inst->line // 0,
                         col        => $inst->col  // 0,
-                        artificial => 0,
+                        artificial => 0
                         };
                 }
             }
@@ -1720,9 +1720,10 @@ class Brocken::Jenny::Codegen::X86_64 {
             class_info   => $class_info,
             arch         => 'x64',
             platform     => $platform,
-            debug        => $debug_level,
+            debug        => $debug_level
         );
         return $dwarf->build_all;
     }
-}
+};
+#
 1;

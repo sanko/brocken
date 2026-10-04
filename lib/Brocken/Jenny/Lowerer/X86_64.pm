@@ -1,12 +1,11 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[portable];
-no warnings qw[experimental::class];
-use Brocken::Jenny::MIR;
-use Brocken::ICB;
-use List::Util qw[min max];
-
-class Brocken::Jenny::Lowerer::X86_64 {
+no warnings qw[portable experimental::class];
+#
+class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
+    use Brocken::Jenny::MIR;
+    use Brocken::ICB;
+    use List::Util qw[min max];
     field $platform : param;
     method _abi() { $platform->abi }
 
@@ -4940,7 +4939,6 @@ class Brocken::Jenny::Lowerer::X86_64 {
         }
         return undef;
     }
-}
-
-# Lowerer: Lindsay IR -> Machine IR (ARM64 / AArch64)
-1;
+    }
+    #
+    1;

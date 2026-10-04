@@ -1,14 +1,14 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use List::Util ();
-use Brocken::Katsuro::Platform;
-use Brocken::Jenny::Lowerer::ARM64;
-use Brocken::Jenny::RegAlloc;
-use Brocken::Jenny::MIR;
-use Brocken::ICB;
-
-class Brocken::Jenny::Codegen::ARM64 {
+#
+class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
+    use List::Util ();
+    use Brocken::Katsuro::Platform;
+    use Brocken::Jenny::Lowerer::ARM64;
+    use Brocken::Jenny::RegAlloc;
+    use Brocken::Jenny::MIR;
+    use Brocken::ICB;
     use Brocken::Jenny::Codegen::ARM64::Encodings qw[:all];
     use Brocken::Jenny::Codegen::ARM64::Inst      qw[:all];
     field $platform : param;
@@ -1480,7 +1480,7 @@ class Brocken::Jenny::Codegen::ARM64 {
                         slot       => defined $slot ? $slot : 0,
                         line       => $inst->line // 0,
                         col        => $inst->col  // 0,
-                        artificial => 0,
+                        artificial => 0
                         };
                 }
             }
@@ -1511,9 +1511,10 @@ class Brocken::Jenny::Codegen::ARM64 {
             class_info   => $class_info,
             arch         => 'arm64',
             platform     => $platform,
-            debug        => $debug_level,
+            debug        => $debug_level
         );
         return $dwarf->build_all;
     }
-}
+};
+#
 1;

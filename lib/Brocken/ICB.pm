@@ -1,4 +1,4 @@
-package Brocken::ICB {
+package Brocken::ICB v0.0.1 {
     use v5.42;
 
     BEGIN {
