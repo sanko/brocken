@@ -196,6 +196,23 @@ SKIP: {
         # 4-byte store would have truncated to zero.
         answers( 'my $x = 4294967296; return $x >> 32;', 1, 'a payload above 32 bits survives' );
     };
+
+    # Returning a boxed value transfers ownership to the caller, so the box has to
+    # outlive the callee's own locals. The exit path increfs the return value
+    # before running the cleanup, but the incref was gated on a type kind of `any`
+    # while the IR spells it `dynamic`, so it never ran: the exit decref dropped
+    # the box to the free list and the caller read a slot that had been overwritten
+    # with the list link. This was a frontend lifetime fault, not a Wasm one -- the
+    # same programs returned 0 on native -- and it is why every returned list
+    # element looked like a freed pointer even after the frame region was separated
+    # from the arena.
+    subtest 'a box returned from a function survives the callee' => sub {
+        answers( 'sub mk() -> Any { my $u = 7; return $u; } my $a = mk(); return $a + 1;', 8, 'return a local, use it in the caller' );
+        answers( 'sub mk() -> Any { my $u = 7; my $v = 9; return $u + $v; } my $a = mk(); return $a - 6;', 10, 'the returned box holds a computed value' );
+        answers( 'sub id(Any $v) -> Any { return $v; } my $x = 5; return id($x);', 5, 'a box passed through an Any parameter' );
+        answers( 'sub mk() -> Any { my $u = 3; return $u; } my $a = mk(); my $b = mk(); return $a + $b;', 6, 'two Any returns do not free each other' );
+        answers( 'sub mk() -> ptr { my $u = 7; return ($u, 2); } my ($a, $b) = mk(); return $a + $b;', 9, 'an untyped list element survives its maker' );
+    };
     subtest 'the generated modules validate' => sub {
         validates( 'my $x = 42; return $x;',                'one untyped variable validates' );
         validates( 'my $a = 3; my $b = 4; return $a + $b;', 'two untyped variables validate' );
