@@ -4,7 +4,7 @@ package Brocken::Jenny::Codegen::ARM64::Inst v0.0.1 {
     use Exporter 'import';
     our %EXPORT_TAGS = (
         all => [
-            qw(
+            qw[
                 X0 X1 X2 X3 X4 X5 X6 X7 X8 X9
                 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19
                 X20 X21 X22 X23 X24 X25 X26 X27 X28 X29 X30
@@ -17,7 +17,7 @@ package Brocken::Jenny::Codegen::ARM64::Inst v0.0.1 {
                 brk svc uxtb
                 add_imm sub_imm
                 cmp_imm
-            )
+            ]
         ]
     );
     our @EXPORT_OK = @{ $EXPORT_TAGS{all} };

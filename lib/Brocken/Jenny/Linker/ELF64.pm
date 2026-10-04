@@ -1,6 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
+#
 class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
     use Brocken::Katsuro::Platform;
     use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
@@ -58,13 +59,14 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
 
     method _build_entry_stub( $platform, $func_offsets, $text_rva, $got_exit, $got_init_tls = undef, $got_rtld_call_init = undef ) {
         if ( $platform->is_arm64 ) {
+            require Brocken::Jenny::Codegen::ARM64::Inst;
             my $sub     = 0xD1000000 | ( 1 << 22 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31;
-            my $add     = add_imm( 0, 31, 0 );
-            my $bl_main = bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
-            my $adrp    = adrp( 8, $got_exit, $text_rva + 12 );
-            my $ldr     = ldr_64( 8, 8, $got_exit & 0xFFF );
-            my $blr     = blr(8);
-            my $brk     = brk(0);
+            my $add     = Brocken::Jenny::Codegen::ARM64::Inst::add_imm( 0, 31, 0 );
+            my $bl_main = Brocken::Jenny::Codegen::ARM64::Inst::bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
+            my $adrp    = Brocken::Jenny::Codegen::ARM64::Inst::adrp( 8, $got_exit, $text_rva + 12 );
+            my $ldr     = Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 8, 8, $got_exit & 0xFFF );
+            my $blr     = Brocken::Jenny::Codegen::ARM64::Inst::blr(8);
+            my $brk     = Brocken::Jenny::Codegen::ARM64::Inst::brk(0);
             return pack 'V7', $sub, $add, $bl_main, $adrp, $ldr, $blr, $brk;
         }
         if ( $platform->is_riscv64 ) {
@@ -418,31 +420,32 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 }
             }
             elsif ( $platform->is_arm64 ) {
+                require Brocken::Jenny::Codegen::ARM64::Inst;
                 if ( grep { $_ eq 'setjmp' } keys %extern_seen ) {
 
                     # setjmp(buf): save x19-x30 + SP, return 0
                     for my $i ( 0 .. 11 ) {
                         my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
-                        $text .= pack( 'V', str_64( $reg, 0, $i * 8 ) );
+                        $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::str_64( $reg, 0, $i * 8 ) );
                     }
-                    $text .= pack( 'V', add_imm( 1, 31, 0 ) );        # mov x1, sp
-                    $text .= pack( 'V', str_64( 1, 0, 96 ) );         # str x1, [x0, #96]
-                    $text .= pack( 'V', movz_64( 0, 0 ) );            # mov x0, #0
-                    $text .= pack( 'V', ret() );                      # ret
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::add_imm( 1, 31, 0 ) );    # mov x1, sp
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::str_64( 1, 0, 96 ) );     # str x1, [x0, #96]
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::movz_64( 0, 0 ) );        # mov x0, #0
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ret() );                  # ret
                     $sjlj_stubs{setjmp} = $stub_base;
                     $stub_base = length($text);
                 }
                 if ( grep { $_ eq 'longjmp' } keys %extern_seen ) {
 
                     # longjmp(buf, val): restore x19-x30 + SP, return via saved LR
-                    $text .= pack( 'V', ldr_64( 2, 0, 96 ) );         # ldr x2, [x0, #96]  (saved SP)
-                    $text .= pack( 'V', add_imm( 31, 2, 0 ) );        # mov sp, x2
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 2, 0, 96 ) );     # ldr x2, [x0, #96]  (saved SP)
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::add_imm( 31, 2, 0 ) );    # mov sp, x2
                     for my $i ( reverse( 0 .. 11 ) ) {
                         my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
-                        $text .= pack( 'V', ldr_64( $reg, 0, $i * 8 ) );
+                        $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( $reg, 0, $i * 8 ) );
                     }
-                    $text .= pack( 'V', mov_64( 0, 1 ) );             # mov x0, x1  (return val)
-                    $text .= pack( 'V', ret() );                      # ret (jumps to saved LR)
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::mov_64( 0, 1 ) );         # mov x0, x1  (return val)
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ret() );                  # ret (jumps to saved LR)
                     $sjlj_stubs{longjmp} = $stub_base;
                 }
             }
@@ -517,8 +520,9 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 $stub_bytes = pack( 'CC l<', 0xFF, 0x25, $disp32 );
             }
             elsif ( $platform->is_arm64 ) {
-                $stub_bytes = pack( 'V', adrp( 16, $got_rva, $text_rva + $stub_ofs ) );
-                $stub_bytes .= pack( 'V', ldr_64( 16, 16, $got_rva & 0xFFF ) );
+                require Brocken::Jenny::Codegen::ARM64::Inst;
+                $stub_bytes = pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::adrp( 16, $got_rva, $text_rva + $stub_ofs ) );
+                $stub_bytes .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 16, 16, $got_rva & 0xFFF ) );
                 $stub_bytes .= pack( 'V', 0xD61F0000 | ( 16 << 5 ) );
             }
             elsif ( $platform->is_riscv64 ) {
