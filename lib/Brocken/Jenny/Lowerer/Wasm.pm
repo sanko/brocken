@@ -3,6 +3,7 @@ use feature qw[class];
 no warnings qw[portable];
 no warnings qw[experimental::class];
 use Brocken::Jenny::MIR;
+use Brocken::ICB ();
 use List::Util qw[min max];
 
 class Brocken::Jenny::Lowerer::Wasm {
@@ -46,15 +47,24 @@ class Brocken::Jenny::Lowerer::Wasm {
                 # to decide whether to keep recursing. That is why fib(8)
                 # returned 21 and fib(9) returned 0: eight frames of 24 bytes
                 # each just reached the end of the header, and the ninth
-                # overwrote the fuel the next call was about to read. 144 + 16
-                # is the arena base the runtime itself starts its heap cursor at
-                # (Brocken::Runtime::_init).
+                # overwrote the fuel the next call was about to read.
+                #
+                # The frame region cannot share the arena. An Immix block runs
+                # from base+144 for HEAP_SIZE bytes, and `bump_alloc` hands out
+                # boxed values and lists from it. Seeding the frames at the same
+                # base then made the first `bump_alloc` return the address the
+                # frame was already using, so a box overwrote `%__heap_base.addr`
+                # with its own header (tag << 24). A later `decref` read that
+                # header back as the heap base and faulted at tag+48 -- the
+                # address in the trap tracked the *box tag*, 0x2000031 for an
+                # i64 and 0x7000030 for a list, which is how the aliasing was
+                # identified. Frames now sit above the whole arena.
                 $mbb->add_instruction( $self->_wasm_push_vreg( '%__heap_base', 'heap_ptr: seed from base', Brocken::Lindsay::IR::Type::ptr() ) );
                 $mbb->add_instruction(
                     Brocken::Jenny::MIR::MachineInstruction->new(
                         opcode   => 'i64_const',
-                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 160 ) ],
-                        comment  => 'heap_ptr: skip ICB and block header'
+                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 144 + Brocken::ICB::HEAP_SIZE ) ],
+                        comment  => 'heap_ptr: start above ICB and arena'
                     )
                 );
                 $mbb->add_instruction(
@@ -2361,31 +2371,66 @@ class Brocken::Jenny::Lowerer::Wasm {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Box') ) {
-                    my $val = $inst->operands->[0];
-                    my $tag = $self->_type_tag( $val->type );
+                    my $val       = $inst->operands->[0];
+                    my $heap_base = $inst->operands->[1];
+                    my $tag       = $self->_type_tag( $val->type );
 
-                    # save heap_ptr as result
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'local_set',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
-                            comment  => 'box: save to ' . $inst->name
-                        )
-                    );
+                    if ($heap_base) {
+                        # Allocate from the Immix arena, not this frame's
+                        # `%heap_ptr` region. A frame's bump region is reclaimed
+                        # when it returns, so a box handed back to the caller was
+                        # freed before the caller could read it -- a returned
+                        # list trapped at its first element. `bump_alloc` takes
+                        # the heap base and a size and returns the block, the
+                        # same call the native backends and the list and hash
+                        # builders already make.
+                        $mbb->add_instruction( $self->_wasm_push( $heap_base, 'box: arg 0 heap_base' ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16 ) ],
+                                comment  => 'box: arg 1 size'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'call_func',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'Brocken::Runtime::bump_alloc' ) ],
+                                comment  => 'box: call bump_alloc'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'local_set',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                                comment  => 'box: save to ' . $inst->name
+                            )
+                        );
+                    }
+                    else {
+                        # save heap_ptr as result
+                        $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'local_set',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name ) ],
+                                comment  => 'box: save to ' . $inst->name
+                            )
+                        );
 
-                    # heap_ptr += 16
-                    $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i64_const',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16 ) ],
-                            comment  => 'box: bump 16'
-                        )
-                    );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'box: add' ) );
-                    $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'box: save heap', Brocken::Lindsay::IR::Type::ptr() ) );
+                        # heap_ptr += 16
+                        $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'box: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 16 ) ],
+                                comment  => 'box: bump 16'
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'box: add' ) );
+                        $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'box: save heap', Brocken::Lindsay::IR::Type::ptr() ) );
+                    }
 
                     # store header (tag << 24) at [%dyn + 0]
                     my $header_val = $tag << 24;

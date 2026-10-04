@@ -482,7 +482,16 @@ class Brocken::Katsuro::Lowerer {
             $builder->build_store( $fuel_const, $fuel_addr );
 
             # Initialize memory_limit at [hb+MEMORY_LIMIT]
-            my $mem_limit_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $mem_limit );
+            #
+            # A Wasm module declares its linear memory once, so the Immix arena
+            # has to stop at the frame region instead of growing into it. Native
+            # heaps grow with the mmap and keep the unlimited (0) default, but a
+            # Wasm link caps the arena at the heap size it reserved just below
+            # the frames.
+            my $effective_mem_limit = $mem_limit;
+            $effective_mem_limit = Brocken::ICB::HEAP_SIZE
+                if !$effective_mem_limit && $platform && $platform->can('is_wasm') && $platform->is_wasm;
+            my $mem_limit_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $effective_mem_limit );
             my $hb_mem          = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
             my $mem_off = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::MEMORY_LIMIT );
             my $mem_limit_addr = $builder->build_add( $hb_mem, $mem_off );
@@ -742,8 +751,12 @@ class Brocken::Katsuro::Lowerer {
                 # Incref the return value so it survives the decref of all RC locals below.
                 # If $val refers to the same object as one of the locals, this bump keeps RC >= 1
                 # across the cleanup, preventing a premature free + dangling pointer.
-                # Only applies when $val is an Any type (heap-allocated with RC).
-                if ( $val->type && $val->type->kind eq 'any' ) {
+                # Only applies when $val is a dynamic type (heap-allocated with RC). The kind
+                # is `dynamic`, not `any`: an earlier rename left this test comparing against
+                # `any`, so the incref never fired and `sub f() -> Any { my $u = 7; return $u; }`
+                # freed the box in the exit decref and handed the caller a pointer onto the
+                # free list, whose payload slot had been overwritten with the list link.
+                if ( $val->type && $val->type->kind eq 'dynamic' ) {
                     $builder->build_incref( $val, $line, $col );
                 }
                 my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;

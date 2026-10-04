@@ -65,26 +65,30 @@ subtest 'Wasm module runs as a WASI command' => sub {
     unlink $module if -e $module;
 };
 
-# The memory has to cover three things: the base itself, the 24-byte runtime
-# header written there, and the whole heap the entry preamble promises
-# Brocken::Runtime::_init. That last part is what this used to miss -- the module
-# reserved one 64KB page while telling the runtime it had a megabyte, so a native
-# target got away with it (its mmap grows on demand) and a Wasm module handed
-# the allocator a range past the end of linear memory. One boxed variable fit in
-# the page that was really there; a second trapped.
-subtest 'Wasm memory covers the base, its header and the heap' => sub {
-    my $heap = Brocken::ICB::HEAP_SIZE;
-    my $want = sub {
-        my ($base) = @_;
-        return int( ( $base + 24 + $heap + 65535 ) / 65536 );
+# The memory has to cover four things: the base itself, the runtime state written
+# there (the ICB, 144 bytes, plus the Immix block that starts right after it), the
+# whole heap the entry preamble promises Brocken::Runtime::_init, and the frame
+# region that sits above the arena. That last part is what this used to miss --
+# the module reserved one 64KB page while telling the runtime it had a megabyte,
+# so a native target got away with it (its mmap grows on demand) and a Wasm module
+# handed the allocator a range past the end of linear memory. One boxed variable
+# fit in the page that was really there; a second trapped.
+subtest 'Wasm memory covers the base, its state, the heap and the frames' => sub {
+    my $heap    = Brocken::ICB::HEAP_SIZE;
+    my $reserve = Brocken::Jenny::Linker::Wasm::FRAME_RESERVE;
+    my $want    = sub {
+        my ( $base, $size ) = @_;
+        $size //= $heap;
+        return int( ( $base + 144 + $size + $reserve + 65535 ) / 65536 );
     };
-    is( Brocken::Jenny::Linker::Wasm->new->_initial_pages,                       $want->(1024),  'the default base reserves the whole heap' );
-    is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536 )->_initial_pages, $want->(65536), 'a base past 64KB adds a page on top' );
+    is( Brocken::Jenny::Linker::Wasm->new->_initial_pages, $want->(1024), 'the default base reserves the whole heap and the frame region' );
+    is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536 )->_initial_pages,
+        $want->(65536), 'a base past 64KB adds a page on top' );
 
-    # A heap smaller than the base still has to be reserved, and the header at
-    # the base must not fall off the end either.
+    # A heap smaller than the base still has to be reserved, the runtime state at
+    # the base must not fall off the end, and the frame region has to fit too.
     is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536, heap_size => 16 )->_initial_pages,
-        2, 'a small heap still covers a base past the first page' );
+        $want->( 65536, 16 ), 'a small heap still covers a base past the first page and the frames' );
     my $pages  = Brocken::Jenny::Linker::Wasm->new( heap_base => 70000 )->_initial_pages;
     my $module = temp_path('wasm_pages') . '.wasm';
     link_module( $module, Brocken::Jenny::Linker::Wasm->new( heap_base => 70000 ) );

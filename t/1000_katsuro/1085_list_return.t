@@ -96,15 +96,13 @@ subtest 'list elements keep their own kind' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
 SKIP: {
-        skip 'Not native', 3 unless $host->is_native;
+        skip 'Not native', 4 unless $host->is_native;
 
-        # A list built from an untyped value is not asserted here: `my $u = 7;
-        # return ($u, 2);` puts the box in the slot without taking a reference to
-        # it, so the box is released when `mk` returns and the slot reads back as
-        # whatever is left in that memory -- 58 on the code before this file's
-        # change and 0 after it. Nothing else in this file reads an untyped value
-        # back out of a list, and the ownership question behind it is a separate
-        # fault from a slot not recording what an element was. Both are in TODO.md.
+        # An untyped element is boxed on the way into the slot and the box has to
+        # survive the return of the function that built the list. It is increfed
+        # when it is stored, so the exit decref of the local `$u` no longer leaves
+        # the slot pointing at a freed box (it used to read back as whatever was
+        # left in that memory -- 58 before the list-slot ownership fix, 0 after it).
         my @cases = (
             [ <<'BROCKEN', 4, 'a list of floats' ],
 sub make_list() -> ptr {
@@ -125,6 +123,14 @@ sub make_list() -> ptr {
     return (1.5, 2.5);
 }
 my (f64 $a, f64 $b) = make_list();
+return $a + $b;
+BROCKEN
+            [ <<'BROCKEN', 9, 'an untyped element survives the return of its maker' ],
+sub make_list() -> ptr {
+    my $u = 7;
+    return ($u, 2);
+}
+my ($a, $b) = make_list();
 return $a + $b;
 BROCKEN
         );
