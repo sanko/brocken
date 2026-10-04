@@ -1,14 +1,14 @@
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
-use lib 'lib', '../../lib', '../lib';
+use blib;
 use Brocken;
 use Brocken::Lindsay::IR;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'Parser accepts eq/ne/lt/gt/le/ge/cmp as binary operators' => sub {
     for my $op (qw(eq ne lt gt le ge cmp)) {
-        my $ast = Brocken->new->parse_only(<<BROCKEN);
+        my $ast = Brocken->new->parse(<<BROCKEN);
 my String \$a = "x";
 my String \$b = "y";
 my \$r = \$a $op \$b;
@@ -24,7 +24,7 @@ BROCKEN
     }
 };
 subtest 'Parser accepts length() as function call' => sub {
-    my $ast = Brocken->new->parse_only(<<'BROCKEN');
+    my $ast = Brocken->new->parse(<<'BROCKEN');
 my String $s = "hello";
 my $len = length($s);
 return 0;

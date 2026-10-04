@@ -218,9 +218,9 @@ Parses and lowers C<$source> for this instance's platform, merging the runtime i
 The optional C<$filename> defaults to C<(eval)> and is the name reported in diagnostics. Returns a
 L<Brocken::Lindsay::IR::Module> with class info and read-only data attached, ready to hand to C<codegen>.
 
-=head2 C<parse_only( $source, $filename )>
+=head2 C<parse( $source, $filename )>
 
-    my $ast = $brocken->parse_only( $source, $filename );
+    my $ast = $brocken->parse( $source, $filename );
 
 The parse half of C<compile> on its own, returning the raw L<Brocken::Katsuro::AST::Program> without lowering. Useful
 for introspection and for testing the front end against the back end. The runtime is not merged in.

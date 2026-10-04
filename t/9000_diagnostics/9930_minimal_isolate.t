@@ -1,5 +1,5 @@
 use v5.42;
-use lib 'lib', '../lib';
+use blib;
 use Test2::V0;
 use Test2::Tools::Brocken qw[run_exec temp_path];
 use Brocken;
@@ -17,7 +17,7 @@ my %os2triple = (
     dragonfly => 'x86_64-pc-dragonflybsd-elf',
     netbsd    => 'x86_64-pc-netbsd-elf',
     openbsd   => 'x86_64-pc-openbsd-elf',
-    darwin    => 'x86_64-apple-macosx',
+    darwin    => 'x86_64-apple-macosx'
 );
 my $triple   = $os2triple{$^O} or plan skip_all => "Unknown OS: $^O";
 my $platform = Brocken::Katsuro::Platform::parse($triple);

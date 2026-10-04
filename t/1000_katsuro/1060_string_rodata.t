@@ -1,7 +1,7 @@
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
-use lib 'lib', '../../lib', '../lib';
+use blib;
 use Brocken;
 use Brocken::Lindsay::IR;
 no warnings qw[experimental::class experimental::builtin portable];
@@ -74,7 +74,7 @@ BROCKEN
     ok( $found, 'found folded concatenated string in rodata' );
 };
 subtest 'Parser accepts . as binary operator' => sub {
-    my $ast = Brocken->new->parse_only(<<'BROCKEN');
+    my $ast = Brocken->new->parse(<<'BROCKEN');
 my String $x = "a" . "b";
 return 0;
 BROCKEN

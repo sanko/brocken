@@ -1,7 +1,6 @@
+use v5.42;
+
 package Brocken::Jenny v0.0.1 {
-    use v5.42;
-    use feature qw[class];
-    no warnings qw[experimental::class];
     use Brocken::Jenny::Codegen::X86_64;
     use Brocken::Jenny::Codegen::ARM64;
     use Brocken::Jenny::Codegen::RISCV64;
@@ -20,4 +19,5 @@ package Brocken::Jenny v0.0.1 {
     use Brocken::Jenny::Linker::ELF64;
     use Brocken::Jenny::Linker::Wasm;
 };
+#
 1;

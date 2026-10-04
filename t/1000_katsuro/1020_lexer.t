@@ -1,7 +1,7 @@
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
-use lib 'lib', '../../lib', '../lib';
+use blib;
 use Test2::Tools::Brocken qw[run_exec];
 use Brocken::Katsuro::Lexer;
 subtest 'Katsuro Lexer: Tokenizer and gradual typing' => sub {

@@ -1,7 +1,3 @@
-# lib/Brocken/ICB.pm — Isolate Control Block layout constants.
-# Field definitions and offsets computed by Brocken::Layout at compile time.
-# This is the single source of truth for ICB offsets used by Perl code.
-# The Brocken runtime (core.brocken) has its own accessor functions.
 package Brocken::ICB {
     use v5.42;
 

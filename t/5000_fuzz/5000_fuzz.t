@@ -1,6 +1,6 @@
 use v5.42;
 use Test2::V0 '!subtest';
-use lib 'lib', '../../lib', '../lib';
+use blib;
 use Brocken::Fuzz;
 no warnings qw[experimental::class];
 my $fuzz       = Brocken::Fuzz->new( seed => 20260713 );

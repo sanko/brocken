@@ -1,5 +1,5 @@
 use v5.42;
-use lib 'lib', '../../lib', '../lib';
+use blib;
 use Test::More;
 use Brocken;
 subtest 'set_default_policy sets class defaults' => sub {
