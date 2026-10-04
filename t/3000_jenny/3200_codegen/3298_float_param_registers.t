@@ -1,6 +1,6 @@
 use v5.42;
 use Test2::V0 '!subtest';
-use lib 'lib', '../../../lib', '../../lib', '../lib';
+use blib;
 use Brocken;
 use Brocken::Katsuro;
 use Brocken::Lindsay;

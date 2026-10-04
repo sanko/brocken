@@ -1,6 +1,6 @@
 use v5.42;
 use Test2::V0;
-use lib 'lib', '../../lib', '../../../lib';
+use blib;
 use Brocken::Katsuro;
 use Brocken::Lindsay::IR;
 use Brocken::Lindsay::IR::Builder;

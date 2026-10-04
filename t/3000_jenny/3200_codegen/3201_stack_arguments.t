@@ -1,6 +1,6 @@
 use v5.42;
 use Test2::V0 '!subtest';
-use lib 'lib', '../../../lib', '../../lib', '../lib';
+use blib;
 use Test2::Tools::Brocken qw[run_exec cross_available temp_path];
 use Brocken;
 use Brocken::Katsuro;

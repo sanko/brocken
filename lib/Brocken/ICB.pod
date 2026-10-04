@@ -1,3 +1,5 @@
+=pod
+
 =encoding utf-8
 
 =head1 NAME
@@ -17,10 +19,10 @@ An isolate's control block is the 144-byte structure at the base of its heap, ho
 keep running: where the allocator is, how much fuel is left, what went wrong, and where exceptions are going. This
 module is the layout of that structure, as constants.
 
-It exists because two things have to agree on those offsets. The runtime, written in Brocken in
-F<src/runtime/core.brocken>, reaches its own fields with accessor functions, and the linker and the debug machinery in
-Perl need the same offsets as plain integers. Rather than let the two drift, this module computes the layout once
-through L<Brocken::Layout> from a single field list and generates a constant for every field.
+It exists because two things have to agree on those offsets. The runtime, written in Brocken, reaches its own fields
+with accessor functions, and the linker and the debug machinery in Perl need the same offsets as plain integers. Rather
+than let the two drift, this module computes the layout once through L<Brocken::Layout> from a single field list and
+generates a constant for every field.
 
 The field list in F<lib/Brocken/ICB.pm> is therefore the single source of truth for ICB offsets in Perl. Reorder it and
 every constant below changes with it, which is the point.

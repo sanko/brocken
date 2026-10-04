@@ -1,7 +1,7 @@
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
-use lib 'lib', '../../lib', '../lib';
+use blib;
 use Brocken;
 use Brocken::Lindsay;
 use Brocken::Jenny::Codegen::ARM64;
@@ -37,10 +37,6 @@ SKIP: {
         is( $sig,  0,         "$name — no crash (signal=0)" );
         is( $exit, $expected, "$name — exit code $expected" );
     }
-
-    # ------------------------------------------------------------------
-    # 1. Baseline integer returns (both widths)
-    # ------------------------------------------------------------------
     subtest 'Baseline integer return' => sub {
         {
             my $func = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
@@ -57,10 +53,6 @@ SKIP: {
             run_check( 'i64 return 31', 31, $func );
         }
     };
-
-    # ------------------------------------------------------------------
-    # 2. sitofp + fptosi: integer constant -> float -> integer
-    # ------------------------------------------------------------------
     subtest 'sitofp + fptosi (f32 vs f64)' => sub {
 
         # f32 path: i32 -> f32 -> i32
@@ -87,10 +79,6 @@ SKIP: {
             run_check( 'i64 sitofp f64 + fptosi 31', 31, $func );
         }
     };
-
-    # ------------------------------------------------------------------
-    # 3. Direct float constant fptosi (no alloca, no sitofp)
-    # ------------------------------------------------------------------
     subtest 'float constant fptosi (f32 vs f64)' => sub {
         {
             my $func = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
@@ -111,10 +99,6 @@ SKIP: {
             run_check( 'f64 const fptosi 31.0 -> 31', 31, $func );
         }
     };
-
-    # ------------------------------------------------------------------
-    # 4. fadd via alloca store/load (tests fload + fstr + fadd + fcvtzs)
-    # ------------------------------------------------------------------
     subtest 'fadd via alloca (f32 vs f64)' => sub {
         {
             my $func = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
@@ -147,10 +131,6 @@ SKIP: {
             run_check( 'f64 alloca 10.5 + 20.5 -> 31', 31, $func );
         }
     };
-
-    # ------------------------------------------------------------------
-    # 5. fadd register-to-register (tests fmov_gp2f + fadd + fcvtzs)
-    # ------------------------------------------------------------------
     subtest 'fadd register (f32 vs f64)' => sub {
         {
             my $func = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );

@@ -1,6 +1,6 @@
 use v5.42;
 use Test2::V0 '!subtest';
-use lib 'lib', '../../lib', 'blib/lib', '../blib/lib';
+use blib;
 use Brocken;
 use Brocken::Katsuro::Platform;
 #

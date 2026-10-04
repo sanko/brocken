@@ -210,10 +210,10 @@ Parses and lowers `$source` for this instance's platform, merging the runtime in
 The optional `$filename` defaults to `(eval)` and is the name reported in diagnostics. Returns a
 [Brocken::Lindsay::IR::Module](https://metacpan.org/pod/Brocken%3A%3ALindsay%3A%3AIR%3A%3AModule) with class info and read-only data attached, ready to hand to `codegen`.
 
-## `parse_only( $source, $filename )`
+## `parse( $source, $filename )`
 
 ```perl
-my $ast = $brocken->parse_only( $source, $filename );
+my $ast = $brocken->parse( $source, $filename );
 ```
 
 The parse half of `compile` on its own, returning the raw [Brocken::Katsuro::AST::Program](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3AAST%3A%3AProgram) without lowering. Useful

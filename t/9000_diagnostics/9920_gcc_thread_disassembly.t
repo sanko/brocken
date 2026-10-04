@@ -1,7 +1,7 @@
 use v5.40;
 use Test2::V0;
 use File::Temp qw(tempfile);
-use lib 'lib', '../lib', 'blib/lib', '../blib/lib';
+use blib;
 my $os = $^O;
 note("Host OS: $os");
 skip_all 'No need for these diagnostics right now';

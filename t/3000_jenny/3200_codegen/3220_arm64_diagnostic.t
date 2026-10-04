@@ -1,7 +1,7 @@
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
-use lib 'lib', '../../lib', '../../../lib';
+use blib;
 use Brocken;
 use Config;
 use Fcntl    qw(O_RDONLY O_WRONLY O_CREAT O_TRUNC);
@@ -48,7 +48,7 @@ SKIP: {
             [ 'gcc',                        [] ],
             [ 'x86_64-w64-mingw32-gcc',     [] ],
             [ 'clang',                      [ '-target', 'aarch64-windows-msvc' ] ],
-            [ 'clang',                      [] ],
+            [ 'clang',                      [] ]
         );
         my $cc;
     CAND: for my $cand (@cc_candidates) {

@@ -2,7 +2,7 @@ use v5.42;
 use Math::BigInt;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
-use lib 'lib', '../../../lib', '../../lib', '../lib';
+use blib;
 use Brocken;
 use Brocken::Lindsay;
 no warnings qw[experimental::class experimental::builtin portable];
@@ -58,7 +58,7 @@ SKIP: {
         [ sle => -1,  0, 1, '-1 sle 0 (true)' ],
         [ sle =>  0, -1, 0, '0 sle -1 (false)' ],
         [ sge => -1,  0, 0, '-1 sge 0 (false)' ],
-        [ sge =>  0, -1, 1, '0 sge -1 (true)' ],
+        [ sge =>  0, -1, 1, '0 sge -1 (true)' ]
     ) {
         my ( $pred, $a, $b, $expected, $desc ) = @$tc;
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
