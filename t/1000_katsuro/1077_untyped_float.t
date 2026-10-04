@@ -46,9 +46,12 @@ use feature qw[class];
 # representation `gc_scan_list` and the `Any` incref on the reading side
 # already assumed. See 1085_list_return.t.
 #
-# A float has no bits to shift and no bit pattern to mask, so `<< >> & | ^ && ||`
-# and `%` keep an integer target when they meet an untyped operand, and a float
-# remainder is not something the Wasm backend has at all.
+# A float has no bits to shift and no bit pattern to mask, so `<< >> & | ^`
+# and `%` keep an integer target when they meet an untyped operand: Perl
+# truncates a float before an integer-only operator applies, so `my $x = 12.7;
+# $x | 10` is `12 | 10`. `&&` and `||` are a truth test rather than an integer
+# operator, so an untyped operand meeting one is read as `f64` and compared
+# against zero instead. Both are asserted in 1087_float_integer_only_ops.t.
 #
 # Assigning a box to another box and self-assigning are excluded here too. Both
 # trap on Wasm for integers as well as floats, so they belong to the aliasing

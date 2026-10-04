@@ -1135,16 +1135,15 @@ class Brocken::Jenny::Codegen::X86_64 {
                         $value = $value->numify if ref($value) && $value->isa('Math::BigInt');
                         if ( $bits >= 64 && ( $value > 0x7FFFFFFF || $value < -0x80000000 ) ) {
                             my $base_disp = $mem->value->{disp} // 0;
-                            my @halves = ( [ $base_disp, $value & 0xFFFFFFFF ], [ $base_disp + 4, ( $value >> 32 ) & 0xFFFFFFFF ] );
+                            my @halves    = ( [ $base_disp, $value & 0xFFFFFFFF ], [ $base_disp + 4, ( $value >> 32 ) & 0xFFFFFFFF ] );
                             for my $half (@halves) {
-                                my $half_mem
-                                    = Brocken::Jenny::MIR::MachineOperand->new(
+                                my $half_mem = Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
                                     value => { %{ $mem->value }, disp => $half->[0] },
                                     type  => Brocken::Lindsay::IR::Type::i32()
-                                    );
+                                );
                                 my ( $hmodrm, $hextra, $hrex_x, $hrex_b ) = $mem_modrm->( $half_mem, 0 );
-                                $bytes .= pack( 'C', 0x40 | $hrex_x | $hrex_b );    # no REX.W: a 32-bit store
+                                $bytes .= pack( 'C', 0x40 | $hrex_x | $hrex_b );            # no REX.W: a 32-bit store
                                 $bytes .= pack( 'C', MOV_IMM_RM ) . pack( 'C', $hmodrm );
                                 $bytes .= join '', $hextra->@*;
                                 $bytes .= pack( 'V', $half->[1] );

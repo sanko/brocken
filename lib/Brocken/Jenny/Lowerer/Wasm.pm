@@ -4,7 +4,7 @@ no warnings qw[portable];
 no warnings qw[experimental::class];
 use Brocken::Jenny::MIR;
 use Brocken::ICB ();
-use List::Util qw[min max];
+use List::Util   qw[min max];
 
 class Brocken::Jenny::Lowerer::Wasm {
 
@@ -1869,11 +1869,15 @@ class Brocken::Jenny::Lowerer::Wasm {
                         #
                         # Wasm has no float remainder and no float bitwise or
                         # shift instruction, and the integer ones cannot be
-                        # applied to a float operand as-is. The native backend
-                        # treats these as operations on the bit pattern, which
-                        # is a defined thing there and has no Wasm counterpart,
-                        # so they are refused by name instead of being mapped to
-                        # an opcode like "f32_rem_u" that could never encode.
+                        # applied to a float operand as-is.
+                        #
+                        # A float never arrives here from the frontend: `lower_binop`
+                        # truncates one toward zero before an integer-only
+                        # operator applies, so this target is handed an integer
+                        # operation. The guard stays for IR that reaches the
+                        # backend by another route, and to refuse by name rather
+                        # than map onto an opcode like "f32_rem_u", which could
+                        # never encode.
                         if ( $p =~ /^f/ && $opcode =~ /\A(?:rem|urem|and|or|xor|shl|lshr|ashr)\z/ ) {
                             die "Wasm has no $opcode for $p; float bitwise, shift and remainder " . "are not implemented on this target\n";
                         }
@@ -2374,8 +2378,8 @@ class Brocken::Jenny::Lowerer::Wasm {
                     my $val       = $inst->operands->[0];
                     my $heap_base = $inst->operands->[1];
                     my $tag       = $self->_type_tag( $val->type );
-
                     if ($heap_base) {
+
                         # Allocate from the Immix arena, not this frame's
                         # `%heap_ptr` region. A frame's bump region is reclaimed
                         # when it returns, so a box handed back to the caller was
@@ -2966,7 +2970,6 @@ class Brocken::Jenny::Lowerer::Wasm {
                 $op = $ir_val->type->bits >= 64 ? 'f64_const' : 'f32_const';
             }
             else {
-
                 # A pointer or a boxed value is a 64-bit operand in Wasm just as
                 # an i64 is, so a constant standing in for one -- the zero a
                 # fuel-exit stub returns from a function declared `-> ptr` or
