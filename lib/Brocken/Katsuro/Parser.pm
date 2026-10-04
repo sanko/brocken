@@ -1,10 +1,10 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::AST;
-use Carp ();
-
-class Brocken::Katsuro::Parser {
+#
+class Brocken::Katsuro::Parser v0.0.1 {
+    use Brocken::Katsuro::AST;
+    use Carp ();
     field $tokens   : param;
     field $filename : param = '';
     field $pos      : param = 0;
@@ -26,9 +26,9 @@ class Brocken::Katsuro::Parser {
         PREC_PRODUCT => 45,
         PREC_UNARY   => 55,
         PREC_CALL    => 60,
-        PREC_DEREF   => 65,
+        PREC_DEREF   => 65
     };
-    my %TYPE_KEYWORDS = map { $_ => 1 } qw(Int String Any Bool ptr int bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64);
+    my %TYPE_KEYWORDS = map { $_ => 1 } qw[Int String Any Bool ptr int bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64];
     my %FEATURE_TYPES = ( i128 => 'brocken_native_types', u128 => 'brocken_native_types' );
     method peek()    { $tokens->[$pos] }
     method prev()    { $tokens->[ $pos - 1 ] }
@@ -399,7 +399,7 @@ class Brocken::Katsuro::Parser {
         );
     }
 
-    # === Class declarations ===
+    # Class declarations
     method parse_class_decl() {
         my $class_token = $self->advance();
         my $name_token  = $self->consume( 'IDENT', undef, "Expected class name after 'class'" );
@@ -807,5 +807,6 @@ class Brocken::Katsuro::Parser {
         }
         return 0;
     }
-}
+};
+#
 1;

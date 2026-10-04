@@ -1,9 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform::ABI;
-
-class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::ABI) {
+class Brocken::Katsuro::Platform::ABI::X86_64 v0.0.1 : isa(Brocken::Katsuro::Platform::ABI) {
 
     # System V AMD64 Calling Convention
     # SCRATCH: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11
@@ -60,5 +58,4 @@ class Brocken::Katsuro::Platform::ABI::X86_64 : isa(Brocken::Katsuro::Platform::
         );
         return $map{$name};
     }
-}
-1;
+} 1;

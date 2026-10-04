@@ -3,7 +3,7 @@ use feature qw[class];
 no warnings qw[experimental::class];
 
 # Types
-class Brocken::Lindsay::IR::Type {
+class Brocken::Lindsay::IR::Type v0.0.1 {
     field $kind           : reader : param;            # 'int', 'float', 'ptr', 'void', 'dynamic', 'struct'
     field $bits           : reader : param = 0;        # 8, 16, 32, 64, ... (struct: total bits)
     field $signed         : reader : param = 1;        # 1=signed, 0=unsigned (only for 'int' kind)
@@ -71,28 +71,28 @@ class Brocken::Lindsay::IR::Type {
         return "f$bits"                      if $kind eq 'float';
         return $kind;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Value {
+class Brocken::Lindsay::IR::Value v0.0.1{
     field $type : reader : param;
     field $name : reader : param = undef;
 
     # Every value needs a way to print itself in IR dumps
     method as_string() { $name // '%<anon>' }
-}
+};
 
-class Brocken::Lindsay::IR::Constant : isa(Brocken::Lindsay::IR::Value) {
+class Brocken::Lindsay::IR::Constant v0.0.1: isa(Brocken::Lindsay::IR::Value) {
     field $value : reader : param;
     method as_string() {$value}
-}
+};
 
-class Brocken::Lindsay::IR::RodataRef : isa(Brocken::Lindsay::IR::Value) {
+class Brocken::Lindsay::IR::RodataRef v0.0.1: isa(Brocken::Lindsay::IR::Value) {
     field $label : reader : param;
     field $bytes : reader : param;
     method as_string() {$label}
-}
+};
 
-class Brocken::Lindsay::IR::Instruction : isa(Brocken::Lindsay::IR::Value) {
+class Brocken::Lindsay::IR::Instruction v0.0.1: isa(Brocken::Lindsay::IR::Value) {
     field $opcode   : reader : param;
     field $operands : reader : param = [];
     field $parent   : reader : param = undef;    # The Basic Block
@@ -109,26 +109,26 @@ class Brocken::Lindsay::IR::Instruction : isa(Brocken::Lindsay::IR::Value) {
         my $ops = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $operands->@*;
         return "  $res$opcode $ops";
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::ICmp : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::ICmp v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $predicate : reader : param;    # 'eq', 'ne', 'sgt' (signed greater than), 'slt', etc.
 
     method render() {
         my ( $lhs, $rhs ) = $self->operands->@*;
         return sprintf '  %s = icmp %s %s %s, %s', ( $self->name // '%<anon>' ), $predicate, $lhs->type->as_string, $lhs->as_string, $rhs->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Br : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Br v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $dest_block : reader : param;
 
     method render() {
         return '  br label %' . $dest_block->name;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::CondBr : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::CondBr v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $true_block  : reader : param;
     field $false_block : reader : param;
 
@@ -136,18 +136,18 @@ class Brocken::Lindsay::IR::Instruction::CondBr : isa(Brocken::Lindsay::IR::Inst
         my $cond = $self->operands->[0];
         return sprintf '  br %s %s, label %%%s, label %%%s', $cond->type->as_string, $cond->as_string, $true_block->name, $false_block->name;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Ret : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Ret v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         return '  ret void' if $self->type->kind eq 'void';
         my $val = $self->operands->[0];
         return '  ret ' . $val->type->as_string . ' ' . $val->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Call : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Call v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $callee : reader : param;    # Brocken::Lindsay::IR::Function
 
     method render() {
@@ -155,34 +155,34 @@ class Brocken::Lindsay::IR::Instruction::Call : isa(Brocken::Lindsay::IR::Instru
         my $res  = $self->type->kind eq 'void' ? '' : ( $self->name // '%<anon>' ) . ' = ';
         return sprintf '  %scall %s @%s(%s)', $res, $self->type->as_string, $callee->name, $args;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Syscall : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Syscall v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
         my $res  = $self->name // '%<anon>';
         return sprintf '  %s = syscall(%s)', $res, $args;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Box : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Box v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $val = $self->operands->[0];
         return sprintf '  %s = box %s %s to dynamic', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Unbox : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Unbox v0.0.1 : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $val = $self->operands->[0];
         return sprintf '  %s = unbox %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $self->type->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Zext : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Zext v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $target_type : reader : param;
 
     method render() {
@@ -191,42 +191,42 @@ class Brocken::Lindsay::IR::Instruction::Zext : isa(Brocken::Lindsay::IR::Instru
     }
 }
 
-class Brocken::Lindsay::IR::Instruction::Sext : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Sext v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $target_type : reader : param;
 
     method render() {
         my $val = $self->operands->[0];
         return sprintf '  %s = sext %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $target_type->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::SIToFP : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::SIToFP v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $target_type : reader : param;
 
     method render() {
         my $val = $self->operands->[0];
         return sprintf '  %s = sitofp %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $target_type->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::FPToSI : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::FPToSI v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $target_type : reader : param;
 
     method render() {
         my $val = $self->operands->[0];
         return sprintf '  %s = fptosi %s %s to %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string, $target_type->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Incref : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Incref v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $val = $self->operands->[0];
         return sprintf '  incref %s %s', $val->type->as_string, $val->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Decref : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Decref v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $val  = $self->operands->[0];
@@ -235,123 +235,123 @@ class Brocken::Lindsay::IR::Instruction::Decref : isa(Brocken::Lindsay::IR::Inst
         $s .= sprintf ' [heap_base=%s]', $heap->as_string if $heap;
         return $s;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::FiberCreate : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::FiberCreate v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $callee : reader : param;    # Brocken::Lindsay::IR::Function
 
     method render() {
         my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
         return sprintf '  %s = fiber_create @%s(%s)', ( $self->name // '%<anon>' ), $callee->name, $args;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::IsolateCreate : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::IsolateCreate v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $callee : reader : param;    # Brocken::Lindsay::IR::Function
 
     method render() {
         my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
         return sprintf '  %s = isolate_create @%s(%s)', ( $self->name // '%<anon>' ), $callee->name, $args;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::IsolateJoin : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::IsolateJoin v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $isolate = $self->operands->[0];
         return sprintf '  isolate_join %s %s', $isolate->type->as_string, $isolate->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::FiberTransfer : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::FiberTransfer v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my ( $fiber, $val ) = $self->operands->@*;
         return sprintf '  %s = fiber_transfer %s %s, %s %s', ( $self->name // '%<anon>' ), $fiber->type->as_string, $fiber->as_string,
             $val->type->as_string, $val->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::FiberYield : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::FiberYield v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $val = $self->operands->[0];
         return sprintf '  %s = fiber_yield %s %s', ( $self->name // '%<anon>' ), $val->type->as_string, $val->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::FiberId : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::FiberId v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         return sprintf '  %s = fiber_id', ( $self->name // '%<anon>' );
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::FiberPin : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::FiberPin v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my ( $fiber, $tid ) = $self->operands->@*;
         return sprintf '  fiber_pin %s %s, %s %s', $fiber->type->as_string, $fiber->as_string, $tid->type->as_string, $tid->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::ChanCreate : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::ChanCreate v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $capacity = $self->operands->[0];
         return sprintf '  %s = chan_create %s %s', ( $self->name // '%<anon>' ), $capacity->type->as_string, $capacity->as_string;
     }
 }
-
-class Brocken::Lindsay::IR::Instruction::ChanSend : isa(Brocken::Lindsay::IR::Instruction) {
+;
+class Brocken::Lindsay::IR::Instruction::ChanSend v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my ( $chan, $val ) = $self->operands->@*;
         return sprintf '  chan_send %s %s, %s %s', $chan->type->as_string, $chan->as_string, $val->type->as_string, $val->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::ChanRecv : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::ChanRecv v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $chan = $self->operands->[0];
         return sprintf '  %s = chan_recv %s %s', ( $self->name // '%<anon>' ), $chan->type->as_string, $chan->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::ChanClose : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::ChanClose v0.0.1 : isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $chan = $self->operands->[0];
         return sprintf '  chan_close %s %s', $chan->type->as_string, $chan->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::ChanTrySend : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::ChanTrySend v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my ( $chan, $val ) = $self->operands->@*;
         return sprintf '  %s = chan_try_send %s %s, %s %s', ( $self->name // '%<anon>' ), $chan->type->as_string, $chan->as_string,
             $val->type->as_string, $val->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::ChanTryRecv : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::ChanTryRecv v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $chan = $self->operands->[0];
         return sprintf '  %s = chan_try_recv %s %s', ( $self->name // '%<anon>' ), $chan->type->as_string, $chan->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::FrameAddr : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::FrameAddr v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         return sprintf '  %s = frame_addr %s', ( $self->name // '%<anon>' ), $self->type->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Phi : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Phi v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $incoming : reader : param = [];    # Array of [Value, Block]
 
     method render() {
@@ -362,18 +362,18 @@ class Brocken::Lindsay::IR::Instruction::Phi : isa(Brocken::Lindsay::IR::Instruc
     method add_incoming( $val, $block ) {
         push $incoming->@*, [ $val, $block ];
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Select : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Select v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my ( $cond, $true_val, $false_val ) = $self->operands->@*;
         return sprintf '  %s = select %s %s, %s %s, %s %s', ( $self->name // '%<anon>' ), $cond->type->as_string, $cond->as_string,
             $true_val->type->as_string, $true_val->as_string, $false_val->type->as_string, $false_val->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::GetElementPtr : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::GetElementPtr v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $base_type : reader : param;
     field $struct_field_idx : reader : param = undef;
 
@@ -389,9 +389,9 @@ class Brocken::Lindsay::IR::Instruction::GetElementPtr : isa(Brocken::Lindsay::I
         return sprintf '  %s = getelementptr %s, %s %s, %s', ( $self->name // '%<anon>' ), $base_type->as_string, $ptr->type->as_string,
             $ptr->as_string, $idx_str;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Alloca : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Alloca v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $allocated_type  : reader : param;
     field $count           : reader : param = undef;
     field $debug_name      : reader : param = undef;
@@ -405,25 +405,25 @@ class Brocken::Lindsay::IR::Instruction::Alloca : isa(Brocken::Lindsay::IR::Inst
         }
         return $str;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Load : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Load v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my $ptr = $self->operands->[0];
         return sprintf '  %s = load %s, %s %s', ( $self->name // '%<anon>' ), $self->type->as_string, $ptr->type->as_string, $ptr->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Instruction::Store : isa(Brocken::Lindsay::IR::Instruction) {
+class Brocken::Lindsay::IR::Instruction::Store v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {
         my ( $val, $ptr ) = $self->operands->@*;
         return sprintf '  store %s %s, %s %s', $val->type->as_string, $val->as_string, $ptr->type->as_string, $ptr->as_string;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Block {
+class Brocken::Lindsay::IR::Block v0.0.1 {
     field $name         : reader : param;
     field $parent       : reader : param = undef;    # The function
     field $instructions : reader = [];
@@ -472,9 +472,9 @@ class Brocken::Lindsay::IR::Block {
         $out .= $_->render . "\n" for $instructions->@*;
         return $out;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Function {
+class Brocken::Lindsay::IR::Function v0.0.1{
     field $name        : reader : param;
     field $return_type : reader : param;
     field $params      : reader : param = [];    # Array of Brocken::Lindsay::IR::Value
@@ -505,9 +505,9 @@ class Brocken::Lindsay::IR::Function {
         $out .= qq[}\n];
         return $out;
     }
-}
+};
 
-class Brocken::Lindsay::IR::Module {
+class Brocken::Lindsay::IR::Module v0.0.1 {
     field $name : reader : param = 'main';
     field $functions : reader = [];
     field $_class_info = {};
@@ -527,5 +527,6 @@ class Brocken::Lindsay::IR::Module {
         $out .= $_->as_string . "\n" for $functions->@*;
         return $out;
     }
-}
+};
+#
 1;

@@ -1,21 +1,18 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-
-class Brocken::Jenny::MIR::MachineOperand {
+class Brocken::Jenny::MIR::MachineOperand v0.0.1 {
     field $kind  : param : reader;
     field $value : param : reader;
     field $type  : param : reader = undef;
-}
-
-class Brocken::Jenny::MIR::MachineInstruction {
+};
+class Brocken::Jenny::MIR::MachineInstruction v0.0.1 {
     field $opcode      : param : reader;
     field $operands    : param : reader = [];
     field $comment     : param : reader = '';
     field $ir_inst_idx : param : reader : writer = -1;
-}
-
-class Brocken::Jenny::MIR::MachineBasicBlock {
+};
+class Brocken::Jenny::MIR::MachineBasicBlock v0.0.1 {
     field $name         : param : reader;
     field $instructions : param : reader = [];
     field $successors   : reader = [];
@@ -44,9 +41,8 @@ class Brocken::Jenny::MIR::MachineBasicBlock {
         my $last = $self->instructions->[-1];
         return $last->opcode =~ /^(jmp|beq|bne|br|ret|ctx_restore|ctx_swap)$/ ? $last : undef;
     }
-}
-
-class Brocken::Jenny::MIR::MachineFunction {
+};
+class Brocken::Jenny::MIR::MachineFunction v0.0.1 {
     field $name       : param : reader;
     field $blocks     : param : reader = [];
     field $frame_size : param : reader = 0;
@@ -95,5 +91,6 @@ class Brocken::Jenny::MIR::MachineFunction {
             @$pred = ();
         }
     }
-}
+};
+#
 1;

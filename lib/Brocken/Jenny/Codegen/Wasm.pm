@@ -1,13 +1,12 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[portable];
-no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform;
-use Brocken::Jenny::Lowerer::Wasm;
-use Brocken::Jenny::RegAlloc;
-use Brocken::Jenny::MIR;
-
-class Brocken::Jenny::Codegen::Wasm {
+no warnings qw[portable experimental::class];
+#
+class Brocken::Jenny::Codegen::Wasm v0.0.1 {
+    use Brocken::Katsuro::Platform;
+    use Brocken::Jenny::Lowerer::Wasm;
+    use Brocken::Jenny::RegAlloc;
+    use Brocken::Jenny::MIR;
     use Brocken::Jenny::Codegen::Wasm::Encodings qw[:all];
     field $platform : param;
 
@@ -608,9 +607,10 @@ class Brocken::Jenny::Codegen::Wasm {
             class_info   => $class_info,
             arch         => 'wasm64',
             platform     => $platform,
-            debug        => $debug_level,
+            debug        => $debug_level
         );
         return $dwarf->build_all;
     }
-}
+};
+#
 1;

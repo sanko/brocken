@@ -1,6 +1,6 @@
-package Brocken::Jenny::Codegen::Wasm::Encodings {
-    ;
-    use v5.42;
+use v5.42;
+
+package Brocken::Jenny::Codegen::Wasm::Encodings v0.0.1 {
     use Exporter 'import';
     our %EXPORT_TAGS = (
         all => [

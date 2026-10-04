@@ -1,9 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use Brocken::Katsuro::Platform::ABI;
-
-class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform::ABI) {
+class Brocken::Katsuro::Platform::ABI::AArch64 v0.0.1 : isa(Brocken::Katsuro::Platform::ABI) {
 
     # ARM64 Procedure Call Standard (AAPCS64)
     # SCRATCH: x0-x15
@@ -71,5 +69,4 @@ class Brocken::Katsuro::Platform::ABI::AArch64 : isa(Brocken::Katsuro::Platform:
         return $1 if $name =~ /^v(\d+)$/;
         return undef;
     }
-}
-1;
+} 1;

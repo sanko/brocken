@@ -1,10 +1,9 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class experimental::builtin];
-use Brocken::Katsuro::Platform::ABI;
-
-class Brocken::Katsuro::Platform {
-    use Config qw(%Config);
+class Brocken::Katsuro::Platform v0.0.1 {
+    use Config qw[%Config];
+    use Brocken::Katsuro::Platform::ABI;
 
     #~ https://wiki.osdev.org/Target_Triplet
     #~ https://github.com/ziglang/zig/issues/20690
@@ -14,11 +13,11 @@ class Brocken::Katsuro::Platform {
     #~ -<os>[.<ver>]
     #~ [-<api>[.<ver>]
     #~ [-<abi>[+~opts]]]
-    my %known_vendor = map { $_ => 1 } qw(
+    my %known_vendor = map { $_ => 1 } qw[
         pc apple unknown w64 ibm hp sun amd
         nintendo sony mti nvidia fortanix risc0
         esp lynx unikraft kmc wrs portbld
-    );
+    ];
 
     # Hide stderr appropriately for the host OS shell.
     # This is critical for feature detection where commands might fail.
@@ -276,7 +275,7 @@ class Brocken::Katsuro::Platform {
             elf   => 'Brocken::Jenny::Linker::ELF64',
             macho => 'Brocken::Jenny::Linker::MachO',
             pe    => 'Brocken::Jenny::Linker::PE',
-            wasm  => 'Brocken::Jenny::Linker::Wasm',
+            wasm  => 'Brocken::Jenny::Linker::Wasm'
         );
         return $by_format{ $self->format };
     }
@@ -334,7 +333,7 @@ class Brocken::Katsuro::Platform {
                 mmap      => 477,
                 nanosleep => 240,
                 brk       => 45
-            },
+            }
         };
     }
     method syscall($name) { $self->syscalls->{ $self->arch }{$name} }
@@ -368,5 +367,4 @@ class Brocken::Katsuro::Platform {
     method return_register()                       { $self->abi->return_register }
     method fp_return_register()                    { $self->abi->fp_return_register }
     method fiber_reg()                             { $self->abi->fiber_reg }
-}
-1;
+} 1;

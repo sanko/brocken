@@ -1,5 +1,6 @@
-package Brocken::Jenny::Codegen::ARM64::Encodings {
-    use v5.42;
+use v5.42;
+
+package Brocken::Jenny::Codegen::ARM64::Encodings v0.0.1 {
     use Exporter 'import';
     our %EXPORT_TAGS = (
         all => [

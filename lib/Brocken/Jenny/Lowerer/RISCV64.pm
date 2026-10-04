@@ -1,11 +1,9 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[portable];
-no warnings qw[experimental::class];
-use Brocken::Jenny::MIR;
-use Brocken::ICB;
-
-class Brocken::Jenny::Lowerer::RISCV64 {
+no warnings qw[portable experimental::class];
+class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
+    use Brocken::Jenny::MIR;
+    use Brocken::ICB;
     field $platform : param;
     method _abi() { $platform->abi }
 
@@ -4359,7 +4357,6 @@ class Brocken::Jenny::Lowerer::RISCV64 {
         }
         return undef;
     }
-}
-
-# Lowerer: Lindsay IR -> Machine IR (Wasm)
+};
+#
 1;

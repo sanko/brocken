@@ -1,16 +1,13 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
-use List::Util ();
-use Carp       ();
-
-class Brocken::Jenny::RegAlloc::LiveInterval {
+class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
     field $name  : param : reader;
     field $start : param : reader;
     field $end   : param : reader;
-}
-
-class Brocken::Jenny::RegAlloc::LinearScan {
+} class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
+    use List::Util ();
+    use Carp ();
 
     method allocate( $mf, $platform, $is_float = 0 ) {
         $mf->compute_cfg unless $mf->entry_block->successors->@*;
@@ -1031,5 +1028,6 @@ class Brocken::Jenny::RegAlloc::LinearScan {
         my $frame = $num_callee * 8 + $spill_frame + $caller_save_size;
         return ( $frame + 15 ) & ~15;
     }
-}
+};
+#
 1;
