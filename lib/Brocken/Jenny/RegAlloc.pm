@@ -13,14 +13,12 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         $mf->compute_cfg unless $mf->entry_block->successors->@*;
         my @intervals = $self->_compute_live_intervals( $mf, $platform, $is_float );
 
-        # The address scratch is reserved on a second pass, and only when the
-        # first one actually produced a collision.  Reserving it up front is not
-        # an option: almost every function has some addressable memory operand,
-        # so the reserve would shrink the allocatable pool of nearly every
-        # function by one register and change assignments that were correct
-        # before.  Deciding after allocation is safe because the first pass has
-        # already chosen its registers, so the second pass cannot be invalidated
-        # by the decision it makes.
+        # The address scratch is reserved on a second pass, and only when the first one actually produced a collision.
+        # Reserving it up front is not
+        # an option: almost every function has some addressable memory operand, so the reserve would shrink the
+        # allocatable pool of nearly every function by one register and change assignments that were correct before.
+        # Deciding after allocation is safe because the first pass has already chosen its registers, so the second pass
+        # cannot be invalidated by the decision it makes.
         my $res = $self->_linear_scan( $mf, \@intervals, $platform, $is_float, 0 );
         if ( !defined $res->{spill_addr_temp} && $self->_has_addr_hazard( $mf, $res->{spill_slots} ) ) {
             $res = $self->_linear_scan( $mf, \@intervals, $platform, $is_float, 1 );
@@ -30,12 +28,10 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
 
     # Does any instruction need a reloaded address and a reloaded value at once?
     #
-    # This mirrors the decision insert_spill_code makes per instruction: a
-    # memory operand whose base is spilled has to be reloaded into a register,
-    # and if the same instruction also has a spilled register operand that goes
-    # into the value scratch, the two have to be different registers.  A load
-    # with only a spilled destination does not collide, because the destination
-    # write consumes the address rather than needing it alongside the value.
+    # This mirrors the decision insert_spill_code makes per instruction: a memory operand whose base is spilled has to
+    # be reloaded into a register, and if the same instruction also has a spilled register operand that goes into the
+    # value scratch, the two have to be different registers.  A load with only a spilled destination does not collide,
+    # because the destination write consumes the address rather than needing it alongside the value.
     method _has_addr_hazard( $mf, $spill_slots ) {
         return 0 unless $spill_slots && keys %$spill_slots;
         for my $bb ( $mf->blocks->@* ) {
@@ -76,16 +72,14 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
             next unless $op->kind eq 'mem';
             my $base = $op->value->{base} // '';
 
-            # The physical stack register is named directly by a raw memory
-            # operand (an incoming or outgoing argument at a fixed stack
-            # pointer offset).  It has no interval: nothing ever defines it, so
-            # treating it as a virtual register would hand it an unrelated
-            # register and, under pressure, a spill slot whose reload would
-            # retarget the operand.
+            # The physical stack register is named directly by a raw memory operand (an incoming or outgoing argument at
+            # a fixed stack pointer offset).  It has no interval: nothing ever defines it, so treating it as a virtual
+            # register would hand it an unrelated register and, under pressure, a spill slot whose reload would retarget
+            # the operand.
             next if $base eq $platform->stack_reg;
 
-            # Track virtual register names, but skip known physical register names
-            # (like r12, which the lowerer uses directly in fiber memory operands).
+            # Track virtual register names, but skip known physical register names (like r12, which the lowerer uses
+            # directly in fiber memory operands).
             push @names, $base if $base ne '' && $base !~ $phys_re;
             my $index = $op->value->{index} // '';
             push @names, $index if $index ne '';
@@ -116,12 +110,10 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
             my %defd = ();
             my %used = ();
 
-            # Detect intra-block loops: find the first label that is the
-            # target of a branch within the same block.  Such blocks contain
-            # a preamble (pre-label) and a loop body (post-label).
-            # Loop-carried vregs (defined in preamble, used in loop body)
-            # must appear in USE[b] so their live intervals span the full
-            # block rather than ending at their last mention.
+            # Detect intra-block loops: find the first label that is the target of a branch within the same block.  Such
+            # blocks contain a preamble (pre-label) and a loop body (post-label).
+            # Loop-carried vregs (defined in preamble, used in loop body) must appear in USE[b] so their live intervals
+            # span the full block rather than ending at their last mention.
             my $split_idx = -1;
             {
                 my %labels_in_block;
@@ -318,10 +310,9 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         @caller_regs = grep { $_ ne $fiber_reg } @caller_regs if $fiber_reg;
         @callee_regs = grep { $_ ne $fiber_reg } @callee_regs if $fiber_reg;
 
-        # Exclude physical registers that are used as destinations by any
-        # instruction in this function. This prevents argument-setup MOVs
-        # (e.g. `mov rcx, virt`) from clobbering virt_reg values that the
-        # allocator may have assigned to the same physical register.
+        # Exclude physical registers that are used as destinations by any instruction in this function. This prevents
+        # argument-setup MOVs (e.g. `mov rcx, virt`) from clobbering virt_reg values that the allocator may have
+        # assigned to the same physical register.
         my %defined_phys;
         my $has_ctx_swap = 0;
         if ( $mf && $mf->blocks->@* ) {
@@ -341,22 +332,18 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
             }
         }
 
-        # Exclude r10/r11 when the function contains ctx_swap. The ctx_swap
-        # encoding body uses these as internal temporaries (resume_pc and
-        # saved_rsp), making them invisible to the per-function phys_reg
-        # destination scan above. Any virtual register allocated to r10 or
-        # r11 would have its value silently corrupted within ctx_swap.
+        # Exclude r10/r11 when the function contains ctx_swap. The ctx_swap encoding body uses these as internal
+        # temporaries (resume_pc and saved_rsp), making them invisible to the per-function phys_reg destination scan
+        # above. Any virtual register allocated to r10 or r11 would have its value silently corrupted within ctx_swap.
         if ( $has_ctx_swap && !$is_float ) {
             $defined_phys{r10} = 1;
             $defined_phys{r11} = 1;
         }
 
-        # Exclude rax/rdx when the function contains udiv, sdiv, umulh,
-        # div128_64, or rem128_64. Their codegen emits inline assembly that
-        # clobbers rax and rdx (e.g. MOV RAX,dst; XOR RDX,RDX; DIV src;
-        # MOV dst,RAX) without exposing those registers in the MIR operand
-        # list. Any virtual register assigned to rax or rdx would be silently
-        # corrupted at the inline asm boundary.
+        # Exclude rax/rdx when the function contains udiv, sdiv, umulh, div128_64, or rem128_64. Their codegen emits
+        # inline assembly that clobbers rax and rdx (e.g. MOV RAX,dst; XOR RDX,RDX; DIV src; MOV dst,RAX) without
+        # exposing those registers in the MIR operand list. Any virtual register assigned to rax or rdx would be
+        # silently corrupted at the inline asm boundary.
         if ( !$is_float && $mf && $mf->blocks->@* ) {
             for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
@@ -369,10 +356,9 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         }
 
         # Exclude rax when the function contains fmov_gp2f.
-        # The AMD Zen 4 erratum workaround in X86_64 codegen (fmov_gp2f with
-        # source in R8-R15) moves the GP source through RAX via inline
-        # assembly bytes not visible in the MIR operand list. Any virtual
-        # register assigned to rax would be silently corrupted.
+        # The AMD Zen 4 erratum workaround in X86_64 codegen (fmov_gp2f with source in R8-R15) moves the GP source
+        # through RAX via inline assembly bytes not visible in the MIR operand list. Any virtual register assigned to
+        # rax would be silently corrupted.
         if ( !$is_float && $mf && $mf->blocks->@* ) {
             for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
@@ -384,11 +370,9 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         }
 
         # Exclude rcx when the function contains shl, lshr, or ashr.
-        # Variable-count shift codegen (D3 /ext rm) emits MOV src -> ecx
-        # then SHL/ SHR /SAR dst, %cl. The MOV to ecx silently clobbers
-        # whatever was in rcx, but the MIR operands (dst, src) do not
-        # expose this fixed-register usage. Any virtual register assigned
-        # to rcx would be silently corrupted.
+        # Variable-count shift codegen (D3 /ext rm) emits MOV src -> ecx then SHL/ SHR /SAR dst, %cl. The MOV to ecx
+        # silently clobbers whatever was in rcx, but the MIR operands (dst, src) do not expose this fixed-register
+        # usage. Any virtual register assigned to rcx would be silently corrupted.
         if ( !$is_float && $mf && $mf->blocks->@* ) {
             for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
@@ -403,30 +387,24 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
 
         # A second scratch, for the address of a spilled memory operand.
         #
-        # One scratch is not always enough: an instruction can need a reloaded
-        # address *and* a reloaded value at the same time, which is what a store
-        # through a spilled address is (the address is one spilled value and the
-        # stored value is another).  Reloading both into one scratch made the
-        # second overwrite the first, so the instruction addressed memory
-        # through whatever the value happened to be -- usually a small integer,
-        # which is an unmapped address.
+        # One scratch is not always enough: an instruction can need a reloaded address *and* a reloaded value at the
+        # same time, which is what a store through a spilled address is (the address is one spilled value and the stored
+        # value is another).  Reloading both into one scratch made the second overwrite the first, so the instruction
+        # addressed memory through whatever the value happened to be -- usually a small integer, which is an unmapped
+        # address.
         #
         # Taking the register out of the pool is what makes this expensive, and
-        # it is expensive: which virtual registers a function can hold depends on
-        # how many registers are left, so one register fewer re-shuffles the
-        # assignment of a function that was already correct.  Every register
-        # below is therefore drawn first from the registers this function cannot
-        # use anyway, which costs the assignment nothing, and only falls back to
-        # the pool when there is no such register left.  The register is
-        # reserved at all only when the function can need it; see
-        # _has_addr_hazard for why that is decided after the first pass.
+        # it is expensive: which virtual registers a function can hold depends on how many registers are left, so one
+        # register fewer re-shuffles the assignment of a function that was already correct.  Every register below is
+        # therefore drawn first from the registers this function cannot use anyway, which costs the assignment nothing,
+        # and only falls back to the pool when there is no such register left.  The register is reserved at all only
+        # when the function can need it; see _has_addr_hazard for why that is decided after the first pass.
         my $spill_temp = pop @caller_regs;
 
         # A register that is in neither pool and that the scan above did not pin
-        # is free to clobber: nothing in the function holds a value in it.  The
-        # return register is the usual one, since it is excluded from both pools
-        # by construction, and the reloads using it are always immediately
-        # followed by the instruction that consumes them.
+        # is free to clobber: nothing in the function holds a value in it.  The return register is the usual one, since
+        # it is excluded from both pools by construction, and the reloads using it are always immediately followed by
+        # the instruction that consumes them.
         my @spare;
         if ($need_addr_scratch) {
             my %pool = map { $_ => 1 } ( @caller_regs, @callee_regs, $spill_temp );
@@ -444,9 +422,8 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         if ( !defined $spill_addr_temp && $need_addr_scratch ) {
 
             # Nothing is free, so the register has to come out of the pool.  The
-            # callee set first: it is in no argument file, so a caller-register
-            # shortage cannot turn into a different stack argument layout.  The
-            # price is an extra prologue save.
+            # callee set first: it is in no argument file, so a caller-register shortage cannot turn into a different
+            # stack argument layout.  The price is an extra prologue save.
             $spill_addr_temp = pop @callee_regs;
             $addr_is_callee  = 1;
         }
@@ -505,9 +482,8 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
 
         # Falls back to the value scratch when no address scratch was reserved.
-        # That is safe for the same reason the memory base falls back below: the
-        # reservation happens exactly when an address and a value would be live
-        # together, so sharing is only reached when nothing else is live in it.
+        # That is safe for the same reason the memory base falls back below: the reservation happens exactly when an
+        # address and a value would be live together, so sharing is only reached when nothing else is live in it.
         my $addr_reg = defined $spill_addr_temp ? $spill_addr_temp : $spill_temp;
         my $addr_op  = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $addr_reg, type => undef ) };
         my $mem_op
@@ -520,9 +496,8 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
             );
         };
 
-        # The address of a spilled memory operand is reloaded into the address
-        # scratch, not the value scratch, so an instruction that also reloads a
-        # value keeps both live at once.
+        # The address of a spilled memory operand is reloaded into the address scratch, not the value scratch, so an
+        # instruction that also reloads a value keeps both live at once.
         my $load_addr_inst = sub ($o) {
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => $load_op,
@@ -690,33 +665,27 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
 
     # Schedule the parameter-capture shuffle at function entry.
     #
-    # The lowerer emits one `<move> <dst>, <param_reg>` per incoming argument
-    # at the very top of the entry block, so the captures read the caller's
-    # argument registers simultaneously -- they behave like a parallel move,
-    # not a sequence.  Once the allocator picks destinations, a destination
-    # may land on a register that a *later* capture still has to read.
+    # The lowerer emits one `<move> <dst>, <param_reg>` per incoming argument at the very top of the entry block, so the
+    # captures read the caller's argument registers simultaneously -- they behave like a parallel move, not a sequence.
+    # Once the allocator picks destinations, a destination may land on a register that a *later* capture still has to
+    # read.
     #
-    # Parking every such source in the one spill temp is not enough: each new
-    # park overwrites the previous one, so only the last value survives.  A
-    # temp that is not reserved from allocation (the second argument the old
-    # call sites passed) can itself be a capture destination, which is how a
-    # parked value was clobbered and a parameter read back as its neighbour.
-    # So schedule the captures as a real parallel move: emit any capture whose
-    # destination is not a pending source, and break a cycle by parking a
-    # single source in the temp of that capture's own register class, which
-    # frees the temp again as soon as its one consumer runs.
+    # Parking every such source in the one spill temp is not enough: each new park overwrites the previous one, so only
+    # the last value survives.  A temp that is not reserved from allocation (the second argument the old call sites
+    # passed) can itself be a capture destination, which is how a parked value was clobbered and a parameter read back
+    # as its neighbour.
+    # So schedule the captures as a real parallel move: emit any capture whose destination is not a pending source, and
+    # break a cycle by parking a single source in the temp of that capture's own register class, which frees the temp
+    # again as soon as its one consumer runs.
     method fix_entry_shuffle( $mf, $assignment, $temp_reg, $fp_temp_reg = undef ) {
         my $entry = $mf->entry_block;
         return unless $entry;
 
-        # Captures are the leading run of register moves reading a physical
-        # register.  Later moves that read a physical register (a return value
-        # landing in a register, say) are not part of this parallel move and
-        # must be left where they are.  A floating-point capture is an `fmov`
-        # and a RISC-V integer capture a `mv`, not a `mov`, so a scan that
-        # recognised only `mov` stopped at the first one and left the rest
-        # unscheduled -- a capture that wrote a register could land before one
-        # that read it, and an argument arrived as a copy of its neighbour.
+        # Captures are the leading run of register moves reading a physical register.  Later moves that read a physical
+        # register (a return value landing in a register, say) are not part of this parallel move and must be left where
+        # they are.  A floating-point capture is an `fmov` and a RISC-V integer capture a `mv`, not a `mov`, so a scan
+        # that recognised only `mov` stopped at the first one and left the rest unscheduled -- a capture that wrote a
+        # register could land before one that read it, and an argument arrived as a copy of its neighbour.
         my $is_capture = sub {
             my ($inst) = @_;
             return 0 unless $inst;
@@ -728,18 +697,15 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         my ( @prefix, @tokens );
         my @insts = $entry->instructions->@*;
 
-        # A load reads memory and writes a virtual register, so it neither
-        # reads nor clobbers a register the captures shuffle.  One can sit
-        # among them -- a parameter that arrived on the stack is read there --
-        # and the captures on either side of it belong to the same parallel
-        # move.  Treating the load as the end of the run instead stranded the
-        # captures after it: they kept their original order, so a
-        # floating-point capture ran after another had already written the
-        # register it read and an argument arrived as its neighbour.
+        # A load reads memory and writes a virtual register, so it neither reads nor clobbers a register the captures
+        # shuffle.  One can sit among them -- a parameter that arrived on the stack is read there -- and the captures on
+        # either side of it belong to the same parallel move.  Treating the load as the end of the run instead stranded
+        # the
+        # captures after it: they kept their original order, so a floating-point capture ran after another had already
+        # written the register it read and an argument arrived as its neighbour.
         #
-        # A load with no capture after it ends the run rather than widening it
-        # over the rest of the block, which by now carries the spill reloads
-        # that the captures are interleaved among.
+        # A load with no capture after it ends the run rather than widening it over the rest of the block, which by now
+        # carries the spill reloads that the captures are interleaved among.
         for ( my $k = 0; $k < @insts; $k++ ) {
             my $inst = $insts[$k];
             if ( $is_capture->($inst) ) {
@@ -754,9 +720,8 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         }
         return unless @prefix > 1;
 
-        # A cycle is broken through the spill temp of its own class: a `mov`
-        # cycle needs a general register and an `fmov` cycle a floating-point
-        # one, and neither can stand in for the other.
+        # A cycle is broken through the spill temp of its own class: a `mov` cycle needs a general register and an
+        # `fmov` cycle a floating-point one, and neither can stand in for the other.
         my @plan;
         for my $class ( [ 0, $temp_reg, 'mov' ], [ 1, $fp_temp_reg, 'fmov' ] ) {
             my ( $is_fp, $temp, $opcode ) = @$class;
@@ -766,8 +731,8 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
                 my $dst = $cap->{inst}->operands->[0];
                 my $reg = $dst->kind eq 'phys_reg' ? $dst->value : $assignment->{ $dst->value };
 
-                # A spilled or unresolved destination writes no register, so it
-                # cannot clobber a source.  A `mov r, r` preserves its source.
+                # A spilled or unresolved destination writes no register, so it cannot clobber a source.  A `mov r, r`
+                # preserves its source.
                 # Neither takes part in scheduling; both are still emitted.
                 if ( !defined $reg || $reg =~ /^spill\(/ || $reg eq $cap->{src} ) {
                     push @parked, $cap;
@@ -776,29 +741,25 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
                 push @work, { cap => $cap, dst => $reg, src => $cap->{src} };
             }
 
-            # One capture on its own cannot clobber a source, and none cannot
-            # either, so there is nothing to order.  They are still emitted:
-            # the block is rebuilt from the plan, and dropping them here would
-            # take them out of the instruction stream.
+            # One capture on its own cannot clobber a source, and none cannot either, so there is nothing to order.
+            # They are still emitted: the block is rebuilt from the plan, and dropping them here would take them out of
+            # the instruction stream.
             if ( @work <= 1 ) {
                 push @plan, @work, map { { cap => $_, src => $_->{src} } } @parked;
                 next;
             }
 
-            # Without a scratch of this class there is nothing to park a cycle
-            # in, so the group keeps its original order rather than being
-            # scheduled around a temp that does not exist.  The same goes for a
-            # group the scheduler could not finish.  Either way its captures
-            # are still emitted: the block is rebuilt from the plan, and
-            # leaving them out would drop them.
+            # Without a scratch of this class there is nothing to park a cycle in, so the group keeps its original order
+            # rather than being scheduled around a temp that does not exist.  The same goes for a group the scheduler
+            # could not finish.  Either way its captures
+            # are still emitted: the block is rebuilt from the plan, and leaving them out would drop them.
             unless ( defined $temp ) {
                 push @plan, @work, map { { cap => $_, src => $_->{src} } } @parked;
                 next;
             }
 
-            # The spill temp is excluded from allocation, so no capture writes
-            # it.  If that ever stops holding, decline rather than emit a
-            # shuffle we cannot schedule.
+            # The spill temp is excluded from allocation, so no capture writes it.  If that ever stops holding, decline
+            # rather than emit a shuffle we cannot schedule.
             my %touched = map { $_ => 1 } map { ( $_->{dst}, $_->{src} ) } @work;
             if ( $touched{$temp} ) {
                 push @plan, @work, map { { cap => $_, src => $_->{src} } } @parked;
@@ -818,9 +779,8 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
                 }
                 unless ( defined $chosen ) {
 
-                    # Every remaining destination is still needed as a source,
-                    # so the rest is a cycle.  Park one source in the temp and
-                    # reschedule; its consumer runs before the temp is reused.
+                    # Every remaining destination is still needed as a source, so the rest is a cycle.  Park one source
+                    # in the temp and reschedule; its consumer runs before the temp is reused.
                     last if --$budget < 0;
                     my $head = $work[0];
                     push @steps, { cap => undef, opcode => $opcode, dst => $temp, src => $head->{src} };
@@ -840,8 +800,8 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         }
         return unless @plan;
 
-        # Group the plan so that a cycle parked in the temp travels with the
-        # capture that consumes it, and keep the register each capture reads.
+        # Group the plan so that a cycle parked in the temp travels with the capture that consumes it, and keep the
+        # register each capture reads.
         my @groups;
         my @pending;
         for my $step (@plan) {
@@ -861,10 +821,10 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
                 );
         }
 
-        # Each capture is re-emitted in the scheduled order but keeps the slot
-        # it already occupied, and a load read among the captures stays where
-        # it was: a stack parameter is addressed against the stack pointer the
-        # prologue left, so the load cannot be moved to suit the shuffle.
+        # Each capture is re-emitted in the scheduled order but keeps the slot it already occupied, and a load read
+        # among the captures stays where
+        # it was: a stack parameter is addressed against the stack pointer the prologue left, so the load cannot be
+        # moved to suit the shuffle.
         my @new;
         for my $token (@tokens) {
             if ( !$token->{is_cap} ) { push @new, $token->{inst}; next }
@@ -881,25 +841,21 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
 
     # Schedule the argument copies before a call as a parallel move.
     #
-    # The lowerer emits one move per register argument just before each call,
-    # in reverse order, on the theory that setting the first argument last
-    # keeps a later move from clobbering it.  That holds only for a chain whose
-    # sources are never themselves written: with two floating-point arguments
-    # allocated to xmm1 and xmm2, reversing emits the copy into xmm1 first and
-    # destroys the source of the copy into xmm0, so the earlier argument reads
-    # back as its neighbour.  The reverse order is not a parallel move; this is.
+    # The lowerer emits one move per register argument just before each call, in reverse order, on the theory that
+    # setting the first argument last keeps a later move from clobbering it.  That holds only for a chain whose
+    # sources are never themselves written: with two floating-point arguments allocated to xmm1 and xmm2, reversing
+    # emits the copy into xmm1 first and destroys the source of the copy into xmm0, so the earlier argument reads back
+    # as its neighbour.  The reverse order is not a parallel move; this is.
     #
-    # An argument register is both the destination of one copy and, once the
-    # allocator has run, the place a source can live, so the copies are
-    # unordered and have to be scheduled: emit any copy whose destination no
-    # remaining copy still reads, and break a cycle by parking one source in
-    # the spill temp of its own class.  A run that already has no collision is
-    # left exactly as the lowerer wrote it, so nothing that worked moves.
+    # An argument register is both the destination of one copy and, once the allocator has run, the place a source can
+    # live, so the copies are
+    # unordered and have to be scheduled: emit any copy whose destination no remaining copy still reads, and break a
+    # cycle by parking one source in the spill temp of its own class.  A run that already has no collision is left
+    # exactly as the lowerer wrote it, so nothing that worked moves.
     #
-    # Only plain register copies take part.  A stack store, an immediate, a
-    # spilled source (whose reload is not part of the run) or anything else
-    # makes the group one this scheduler cannot see through, and it is left
-    # alone rather than reordered on incomplete information.
+    # Only plain register copies take part.  A stack store, an immediate, a spilled source (whose reload is not part of
+    # the run) or anything else makes the group one this scheduler cannot see through, and it is left alone rather than
+    # reordered on incomplete information.
     method fix_call_shuffle( $mf, $assignment, $int_temp, $fp_temp ) {
         my $reg_of = sub ($op) {
             return undef unless $op;

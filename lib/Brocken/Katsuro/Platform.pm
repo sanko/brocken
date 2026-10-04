@@ -254,13 +254,11 @@ class Brocken::Katsuro::Platform v0.0.1 {
     method is_wasm()         {0}
     method is_posix()        {1}
 
-    # The back end that targets this platform. Both are class names rather than
-    # objects, so the caller decides how to construct them, and this module stays
-    # free of a load-time dependency on the back end.
+    # The back end that targets this platform. Both are class names rather than objects, so the caller decides how to
+    # construct them, and this module stays free of a load-time dependency on the back end.
     #
-    # Code generation follows the architecture, so a subclass that only changes
-    # the operating system inherits the right generator. The linker follows the
-    # binary format, which the subclasses already declare.
+    # Code generation follows the architecture, so a subclass that only changes the operating system inherits the right
+    # generator. The linker follows the binary format, which the subclasses already declare.
     #
     method codegen_class() {
         return 'Brocken::Jenny::Codegen::Wasm'    if $self->is_wasm;
@@ -291,8 +289,8 @@ class Brocken::Katsuro::Platform v0.0.1 {
     method is_x64()     { $self->arch eq 'x86_64' }
     #
     # Returns a mapping of common syscall names to their architecture-specific numbers.
-    # Defaults to BSD-style syscall numbering which is shared by FreeBSD, NetBSD, OpenBSD,
-    # DragonFly, and Mach (to some extent).
+    # Defaults to BSD-style syscall numbering which is shared by FreeBSD, NetBSD, OpenBSD, DragonFly, and Mach (to some
+    # extent).
     method syscalls() {
         return {
             x86_64 => {

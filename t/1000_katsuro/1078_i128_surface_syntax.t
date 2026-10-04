@@ -6,21 +6,18 @@ use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# `my i128 $x = 3;` fails to parse, but only because the 128-bit names are
-# behind the `brocken_native_types` feature gate.  The parser declines to treat
-# `i128` as a type without it, so `my` is left looking for a type and the error
+# `my i128 $x = 3;` fails to parse, but only because the 128-bit names are behind the `brocken_native_types` feature
+# gate.  The parser declines to treat `i128` as a type without it, so `my` is left looking for a type and the error
 # blames the variable name instead:
 #
 #     my i128 $x = 3;                          # Expected variable name after 'my'
 #     use feature 'brocken_native_types';
 #     my i128 $x = 3;                          # fine
 #
-# The gate is deliberate and documented in `Brocken::Katsuro::Parser`.  The
-# claim that an i128 cannot be declared in source, and therefore has no
-# end-to-end test, no longer holds: the declaration parses, the lowerer splits
-# it across two registers, and the value computes.  This checks both halves --
-# the rejection without the gate, and a declare/widen/narrow round trip that
-# executes on the host.
+# The gate is deliberate and documented in `Brocken::Katsuro::Parser`.  The claim that an i128 cannot be declared in
+# source, and therefore has no end-to-end test, no longer holds: the declaration parses, the lowerer splits it across
+# two registers, and the value computes.  This checks both halves -- the rejection without the gate, and a
+# declare/widen/narrow round trip that executes on the host.
 subtest 'the 128-bit names are feature-gated' => sub {
     for my $ty (qw[i128 u128]) {
         my $err = eval { Brocken->new->parse("my $ty \$x = 1;"); 1 } ? undef : $@;

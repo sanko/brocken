@@ -844,9 +844,8 @@ sub Brocken::Runtime::box_tag( ptr $dyn )->i64 {
     return Brocken::shr( Brocken::band( $header, 4278190080 ), 24 );
 }
 
-# Read a boxed payload as an integer, truncating a float toward zero. A payload
-# narrower than i64 needs no extra care, because a narrow read of a wide
-# little-endian payload is exactly a truncation.
+# Read a boxed payload as an integer, truncating a float toward zero. A payload narrower than i64 needs no extra care,
+# because a narrow read of a wide little-endian payload is exactly a truncation.
 sub Brocken::Runtime::unbox_i64( ptr $dyn )->i64 {
     my ptr $payload = Brocken::ptr_add( $dyn, 8 );
     my i64 $tag     = Brocken::Runtime::box_tag($dyn);

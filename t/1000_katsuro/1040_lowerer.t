@@ -705,21 +705,18 @@ BROCKEN
     ok( $f, 'found entry function' );
     my $text = $f->as_string();
 
-    # The two subtests above are the equal-width case. When the widths differ the
-    # promotion runs first and picks sext from the *source* signedness, so the
-    # narrower signed operand used to be sign-extended straight into an unsigned
-    # type. The backends size an extension from its source operand and sign-extend
-    # all the way out to 32 bits, so the sign survived into an unsigned comparison
-    # and 0xFFFFFFC3 was compared against 65509. Reaching the target width as a
-    # signed value and then zero-extending it is the value the unsigned type holds.
+    # The two subtests above are the equal-width case. When the widths differ the promotion runs first and picks sext
+    # from the *source* signedness, so the narrower signed operand used to be sign-extended straight into an unsigned
+    # type. The backends size an extension from its source operand and sign-extend all the way out to 32 bits, so the
+    # sign survived into an unsigned comparison and 0xFFFFFFC3 was compared against 65509. Reaching the target width as
+    # a signed value and then zero-extending it is the value the unsigned type holds.
     like( $text, qr/sext\s+i8\s+\S+\s+to\s+i16/,  'narrower signed operand reaches the target width as a signed value' );
     like( $text, qr/zext\s+i16\s+\S+\s+to\s+u16/, 'then lands in the unsigned type with the bits above it cleared' );
     like( $text, qr/icmp\s+uge\s+u16/,            'comparison is unsigned at u16' );
 };
 
-# The assertions above cannot tell whether the register ends up holding
-# 0x0000FFC3 or 0xFFFFFFC3, so every case is also executed. The narrower signed
-# operand is reinterpreted at the wider unsigned width before the compare.
+# The assertions above cannot tell whether the register ends up holding 0x0000FFC3 or 0xFFFFFFC3, so every case is also
+# executed. The narrower signed operand is reinterpreted at the wider unsigned width before the compare.
 subtest 'Mixed-width signed/unsigned comparisons agree with the widened values' => sub {
     my $host = Brocken->new;
 

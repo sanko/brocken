@@ -6,56 +6,48 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
     use Brocken::Katsuro::Platform;
     use Brocken::ICB ();
 
-    # The address the bump allocator starts handing out from. 1024 rather
-    # than 0, because 0 doubles as the out-of-memory answer: `bump_alloc`
-    # returns it on exhaustion and `check_alloc` traps on it, so a heap that
-    # began at 0 could never tell "the first block" from "no block".
+    # The address the bump allocator starts handing out from. 1024 rather than 0, because 0 doubles as the out-of-memory
+    # answer: `bump_alloc` returns it on exhaustion and `check_alloc` traps on it, so a heap that began at 0 could never
+    # tell "the first block" from "no block".
     field $heap_base : param = 1024;
 
-    # The heap the entry preamble tells the runtime it owns. A native link
-    # backs that with an mmap that grows on demand, but a Wasm module declares
-    # its memory once, in the initial memory section, and the allocator happily
-    # hands out addresses across the whole heap it was promised. Reserving a
-    # single page while promising 1MB meant the arena bookkeeping ran off the
-    # end of linear memory: one boxed variable fit in what was actually there,
-    # and a second trapped on an address past the memory.
+    # The heap the entry preamble tells the runtime it owns. A native link backs that with an mmap that grows on demand,
+    # but a Wasm module declares its memory once, in the initial memory section, and the allocator happily hands out
+    # addresses across the whole heap it was promised. Reserving a single page while promising 1MB meant the arena
+    # bookkeeping ran off the
+    # end of linear memory: one boxed variable fit in what was actually there, and a second trapped on an address past
+    # the memory.
     field $heap_size : param = Brocken::ICB::HEAP_SIZE;
 
-    # The Wasm frame region sits above the arena rather than inside it. The
-    # runtime's Immix arena runs from `heap_base + 144` for `heap_size` bytes,
-    # and the Wasm lowering keeps its per-call frame bump in the space that
-    # follows. Reserving it here means an allocation cannot walk into a live
-    # frame; the lowering seeds `%heap_ptr` at exactly `heap_base + 144 +
-    # heap_size`.
+    # The Wasm frame region sits above the arena rather than inside it. The runtime's Immix arena runs from `heap_base +
+    # 144` for `heap_size` bytes, and the Wasm lowering keeps its per-call frame bump in the space that follows.
+    # Reserving it here means an allocation cannot walk into a live frame; the lowering seeds `%heap_ptr` at exactly
+    # `heap_base + 144 + heap_size`.
     use constant FRAME_RESERVE => 0x10000;
 
-    # Four things have to fit: the base itself, the 144-byte ICB of runtime state
-    # written there (cursor, limit, cap, free-list head, and the counters that
-    # sit beside them), the whole arena, and the frame reserve above it. The
-    # fixed single page this used to emit covered the default base of 1024 by
-    # coincidence; a base above 64KB would have put the runtime state itself out
-    # of bounds, and the frames had nowhere reserved for them at all.
+    # Four things have to fit: the base itself, the 144-byte ICB of runtime state written there (cursor, limit, cap,
+    # free-list head, and the counters that sit beside them), the whole arena, and the frame reserve above it. The fixed
+    # single page this used to emit covered the default base of 1024 by coincidence; a base above 64KB would have put
+    # the runtime state itself out of bounds, and the frames had nowhere reserved for them at all.
     method _initial_pages () {
         my $pages = int( ( $heap_base + 144 + $heap_size + FRAME_RESERVE + 65535 ) / 65536 );
         return $pages < 1 ? 1 : $pages;
     }
 
     # Shared by both emission paths below, so the page count cannot drift
-    # between them: the runtime reads this section to decide how much heap it
-    # has, and the two paths used to build their own.
+    # between them: the runtime reads this section to decide how much heap it has, and the two paths used to build their
+    # own.
     method _memory_section () {
         my $content = pack( 'C', 1 ) . pack( 'C', 0 ) . $self->_uleb( $self->_initial_pages );
         return pack( 'C', 5 ) . $self->_uleb( length $content ) . $content;
     }
 
-    # Global Section (ID 6): one mutable i64, the linear-memory frame bump
-    # pointer. It has to be a global rather than a local because a Wasm local
-    # belongs to one function. The bump pointer is shared by every function --
-    # the caller carves its frame, then the callee carries on from where the
-    # caller left off -- so a per-function copy let a callee hand out the same
-    # addresses its caller was still using, and the caller's saved parameter
-    # slots were overwritten mid-call. That is what made a runtime helper that
-    # called another runtime helper read a clobbered pointer and fault.
+    # Global Section (ID 6): one mutable i64, the linear-memory frame bump pointer. It has to be a global rather than a
+    # local because a Wasm local belongs to one function. The bump pointer is shared by every function -- the caller
+    # carves its frame, then the callee carries on from where the caller left off -- so a per-function copy let a callee
+    # hand out the same addresses its caller was still using, and the caller's saved parameter slots were overwritten
+    # mid-call. That is what made a runtime helper that called another runtime helper read a clobbered pointer and
+    # fault.
     #
     # The initialiser is a constant; the entry sets it from the real heap base
     # before the first allocation.
@@ -67,25 +59,20 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
         return pack( 'C', 6 ) . $self->_uleb( length $content ) . $content;
     }
 
-    # A `_start` export, so `wasmtime run module.wasm` runs the module as a
-    # WASI command instead of needing `--invoke _BROCKEN_ENTRY` and a heap base
-    # on the command line. The native linkers each have such a stub; this one
-    # did not.
+    # A `_start` export, so `wasmtime run module.wasm` runs the module as a WASI command instead of needing `--invoke
+    # _BROCKEN_ENTRY` and a heap base on the command line. The native linkers each have such a stub; this one did not.
     #
-    # A WASI `_start` is `() -> ()`, so it cannot supply a heap base the way
-    # `_BROCKEN_ENTRY` takes one as a parameter, and passes the link-time one
-    # itself. The entry's return value is dropped: propagating it would mean
-    # importing wasi_snapshot_preview1.proc_exit, and this module emits no
-    # import section, which would also break every caller that instantiates it
-    # directly. So a program returning 42 and one returning 1 both exit 0. The
-    # `drop` is emitted only when the entry actually leaves a value behind,
-    # since dropping from an empty stack is itself a validation error.
+    # A WASI `_start` is `() -> ()`, so it cannot supply a heap base the way `_BROCKEN_ENTRY` takes one as a parameter,
+    # and passes the link-time one itself. The entry's return value is dropped: propagating it would mean importing
+    # wasi_snapshot_preview1.proc_exit, and this module emits no import section, which would also break every caller
+    # that instantiates it directly. So a program returning 42 and one returning 1 both exit 0. The `drop` is emitted
+    # only when the entry actually leaves a value behind, since dropping from an empty stack is itself a validation
+    # error.
     #
-    # The base is pushed in the entry's own parameter type, which is i64
-    # because a Wasm pointer is 64 bits. `i32.const` would make the call a type
-    # error. `i32.const`/`i64.const` take a *signed* LEB128, hence _sleb rather
-    # than the _uleb used for indices and section sizes; for a base of 1024 the
-    # two encodings happen to agree, which is how the unsigned form could pass.
+    # The base is pushed in the entry's own parameter type, which is i64 because a Wasm pointer is 64 bits. `i32.const`
+    # would make the call a type error. `i32.const`/`i64.const` take a *signed* LEB128, hence _sleb rather than the
+    # _uleb used for indices and section sizes; for a base of 1024 the two encodings happen to agree, which is how the
+    # unsigned form could pass.
     method _start_body( $entry_index, $entry = undef ) {
         my $body   = pack( 'C', 0x00 );                                            # no locals
         my $vt     = $entry ? $entry->{param_valtypes}[0] : undef;
@@ -120,10 +107,9 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                     };
             }
 
-            # The WASI command stub, appended once the indices exist so it can
-            # name the entry. It carries no fixups: its call target is already
-            # known. Only the multi-function path has the metadata _start_body
-            # needs, so the single-function path below does not get one.
+            # The WASI command stub, appended once the indices exist so it can name the entry. It carries no fixups: its
+            # call target is already known. Only the multi-function path has the metadata _start_body needs, so the
+            # single-function path below does not get one.
             if ( defined( my $entry_index = $func_offsets{_BROCKEN_ENTRY} ) ) {
                 push @func_data,
                     {
@@ -135,10 +121,9 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                     };
             }
 
-            # Resolve cross-function call fixups. Each 5-byte placeholder is
-            # replaced by a shorter LEB128, so rebuild each function in a single
-            # ordered pass rather than splicing in place and invalidating the
-            # offsets of the fixups that follow.
+            # Resolve cross-function call fixups. Each 5-byte placeholder is replaced by a shorter LEB128, so rebuild
+            # each function in a single ordered pass rather than splicing in place and invalidating the offsets of the
+            # fixups that follow.
             for my $fd (@func_data) {
                 my @fixups = sort { $a->{offset} <=> $b->{offset} } $fd->{fixups}->@*;
                 next unless @fixups;
@@ -171,7 +156,8 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                 }
             }
 
-            # WASM section IDs: 1=Type, 2=Import, 3=Function, 4=Table, 5=Memory, 6=Global, 7=Export, 8=Start, 9=Element, 10=Code, 11=Data
+            # WASM section IDs: 1=Type, 2=Import, 3=Function, 4=Table, 5=Memory, 6=Global, 7=Export, 8=Start, 9=Element,
+            # 10=Code, 11=Data
             # Value types: 0x7F=i32, 0x7E=i64, 0x7D=f32, 0x7C=f64
             # Functype opcode: 0x60
             # Type Section (ID 1)
@@ -286,8 +272,8 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
         close $fh;
     }
 
-    # Unsigned LEB128 encoding: emit 7-bit chunks with continuation bit 0x80,
-    # MSB last. Used for WASM section sizes, function indices, and memory limits.
+    # Unsigned LEB128 encoding: emit 7-bit chunks with continuation bit 0x80, MSB last. Used for WASM section sizes,
+    # function indices, and memory limits.
     method _uleb ($v) {
         my $out = '';
         do {
@@ -299,9 +285,8 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
         return $out;
     }
 
-    # Signed LEB128: the same 7-bit groups, but the last one carries the sign, so
-    # a value whose top group has bit 0x40 set needs an extra group the unsigned
-    # form would not spend. `i32.const`/`i64.const` take this encoding.
+    # Signed LEB128: the same 7-bit groups, but the last one carries the sign, so a value whose top group has bit 0x40
+    # set needs an extra group the unsigned form would not spend. `i32.const`/`i64.const` take this encoding.
     method _sleb ($v) {
         my $out = '';
         while (1) {

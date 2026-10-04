@@ -5,9 +5,8 @@ use blib;
 use Brocken;
 use Brocken::Katsuro::Platform;
 #
-# The constructor picks its back end from the platform rather than from a table
-# of its own, so this checks that every target resolves to the code generator
-# for its architecture and the linker for its binary format.
+# The constructor picks its back end from the platform rather than from a table of its own, so this checks that every
+# target resolves to the code generator for its architecture and the linker for its binary format.
 #
 subtest 'constructor builds the back end the platform names' => sub {
     my @targets = (

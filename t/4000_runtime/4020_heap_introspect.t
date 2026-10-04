@@ -480,8 +480,8 @@ Brocken::store_i64(Brocken::ptr_add($hb, 24), $fake_end);
 Brocken::store_i64(Brocken::ptr_add($hb, 32), $fake_end);
 # Re-zero live_count for this test
 Brocken::store_i64(Brocken::ptr_add($block0, 32752), 0);
-# Now allocate one Any — this will trigger block-full path in bump_alloc
-# find_free_line finds no free lines → allocates new block from legacy heap
+# Now allocate one Any — this will trigger block-full path in bump_alloc find_free_line finds no free lines → allocates
+# new block from legacy heap
 my $x = 42;
 my ptr $after_cb = Brocken::load_i64(Brocken::ptr_add($hb, 80));
 # current_block should have changed

@@ -215,9 +215,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
         }
 
-        # Pass 2: Generate class runtimes first so auto-generated methods
-        # (constructor, reader, writer) register in $functions before
-        # any function body tries to call them.
+        # Pass 2: Generate class runtimes first so auto-generated methods (constructor, reader, writer) register in
+        # $functions before any function body tries to call them.
         for my $stmt (@decls) {
             if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') ) {
                 $self->generate_class_runtime($stmt);
@@ -482,11 +481,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
             # Initialize memory_limit at [hb+MEMORY_LIMIT]
             #
-            # A Wasm module declares its linear memory once, so the Immix arena
-            # has to stop at the frame region instead of growing into it. Native
-            # heaps grow with the mmap and keep the unlimited (0) default, but a
-            # Wasm link caps the arena at the heap size it reserved just below
-            # the frames.
+            # A Wasm module declares its linear memory once, so the Immix arena has to stop at the frame region instead
+            # of growing into it. Native heaps grow with the mmap and keep the unlimited (0) default, but a Wasm link
+            # caps the arena at the heap size it reserved just below the frames.
             my $effective_mem_limit = $mem_limit;
             $effective_mem_limit = Brocken::ICB::HEAP_SIZE if !$effective_mem_limit && $platform && $platform->can('is_wasm') && $platform->is_wasm;
             my $mem_limit_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $effective_mem_limit );
@@ -586,9 +583,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     # Lower a block with block-scoped RC cleanup.
-    # Variables declared as `Any` inside the block are decref'd at block exit,
-    # not at function exit.  Early return, last, or next from inside the block
-    # bypasses this cleanup; those paths rely on the function-scoped decref loop.
+    # Variables declared as `Any` inside the block are decref'd at block exit, not at function exit.  Early return,
+    # last, or next from inside the block bypasses this cleanup; those paths rely on the function-scoped decref loop.
     method lower_block($block_ast) {
         my @saved_keys = sort keys %$needs_rc;
         $self->lower_block_body($block_ast);
@@ -747,13 +743,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             if (@rc_names) {
 
                 # Incref the return value so it survives the decref of all RC locals below.
-                # If $val refers to the same object as one of the locals, this bump keeps RC >= 1
-                # across the cleanup, preventing a premature free + dangling pointer.
-                # Only applies when $val is a dynamic type (heap-allocated with RC). The kind
-                # is `dynamic`, not `any`: an earlier rename left this test comparing against
-                # `any`, so the incref never fired and `sub f() -> Any { my $u = 7; return $u; }`
-                # freed the box in the exit decref and handed the caller a pointer onto the
-                # free list, whose payload slot had been overwritten with the list link.
+                # If $val refers to the same object as one of the locals, this bump keeps RC >= 1 across the cleanup,
+                # preventing a premature free + dangling pointer.
+                # Only applies when $val is a dynamic type (heap-allocated with RC). The kind is `dynamic`, not `any`:
+                # an earlier rename left this test comparing against `any`, so the incref never fired and `sub f() ->
+                # Any { my $u = 7; return $u; }` freed the box in the exit decref and handed the caller a pointer onto
+                # the free list, whose payload slot had been overwritten with the list link.
                 if ( $val->type && $val->type->kind eq 'dynamic' ) {
                     $builder->build_incref( $val, $line, $col );
                 }
@@ -1274,10 +1269,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $offset    = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $i * 8 );
             my $elem_addr = $builder->build_add( $list_ptr, $offset, undef, $line, $col );
 
-            # The slot already holds a box pointer (see `lower_list_expr`), so it
-            # is read as a dynamic and not boxed again. Reading it as an i64 and
-            # converting to `Any` put a second box around the first, so every
-            # unbox downstream read a pointer where it expected a payload.
+            # The slot already holds a box pointer (see `lower_list_expr`), so it is read as a dynamic and not boxed
+            # again. Reading it as an i64 and converting to `Any` put a second box around the first, so every unbox
+            # downstream read a pointer where it expected a payload.
             my $elem_dyn = $builder->build_load( $dynamic_type, $elem_addr, undef, $line, $col );
             my $elem_val = $t->{type} eq 'Any' ? $elem_dyn : $self->maybe_convert_type( $elem_dyn, $ir_type, $line, $col );
             if ( $t->{type} eq 'Any' ) {
@@ -1318,35 +1312,29 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $op  = $ast->op;
         my ( $line, $col ) = ( $ast->line, $ast->col );
 
-        # A float has no bits to shift and no bit pattern to mask, so these
-        # operators have no float form. `%` is an integer modulus here for the
-        # same reason it is one in Perl.
+        # A float has no bits to shift and no bit pattern to mask, so these operators have no float form. `%` is an
+        # integer modulus here for the same reason it is one in Perl.
         #
-        # `&&` and `||` are deliberately not in this list. They are a truth test
-        # rather than an integer operator, and a float is true when it is not
-        # zero; both are handled by comparison below. Truncating instead would
-        # make `my f64 $a = 0.5; my f64 $b = 1.0; $a && $b` false, because 0.5
-        # truncates to 0.
+        # `&&` and `||` are deliberately not in this list. They are a truth test rather than an integer operator, and a
+        # float is true when it is not zero; both are handled by comparison below. Truncating instead would make `my f64
+        # $a = 0.5; my f64 $b = 1.0; $a && $b` false, because 0.5 truncates to 0.
         my $bool_op      = $op eq '&&' || $op eq '||';
         my $integer_only = !$bool_op && ( $op eq '<<' || $op eq '>>' || $op eq '&' || $op eq '|' || $op eq '^' || $op eq '%' );
 
-        # An untyped variable is a box, and a box's payload may be a float, so an
-        # untyped operand is read at whatever width the other operand is rather
-        # than always as an i64.
+        # An untyped variable is a box, and a box's payload may be a float, so an untyped operand is read at whatever
+        # width the other operand is rather than always as an i64.
         #
         # Converting both sides to i64 first meant `$x == 1.5` was built as a
-        # comparison of two integers: the float-ness of the literal was gone
-        # before the comparison existed, so no backend could recover it.
+        # comparison of two integers: the float-ness of the literal was gone before the comparison existed, so no
+        # backend could recover it.
         #
-        # When the other operand is itself an integer there is still nothing to
-        # go on, because the box might hold a float either way, so arithmetic on
-        # an untyped operand is done in f64. That is Perl's scalar rule, under
-        # which `1.5 + 1` is 2.5. The alternative -- unboxing to i64 and reading a
-        # float payload as its bit pattern -- made `1.5 + 2.5` wrong, and wrong in
-        # a way that looked right for a good while: IEEE-754 orders positive floats
-        # the same way their bit patterns order as integers, so `$x + $y`, `$x < $y`
-        # and `$x == $y` all came out right by accident and only `$x > $y` showed
-        # the fault.
+        # When the other operand is itself an integer there is still nothing to go on, because the box might hold a
+        # float either way, so arithmetic on an untyped operand is done in f64. That is Perl's scalar rule, under which
+        # `1.5 + 1` is 2.5. The alternative -- unboxing to i64 and reading a float payload as its bit pattern -- made
+        # `1.5 + 2.5` wrong, and wrong in
+        # a way that looked right for a good while: IEEE-754 orders positive floats the same way their bit patterns
+        # order as integers, so `$x + $y`, `$x < $y` and `$x == $y` all came out right by accident and only `$x > $y`
+        # showed the fault.
         if ( $lhs->type->kind eq 'dynamic' || $rhs->type->kind eq 'dynamic' ) {
             my $target
                 = $integer_only             ? Brocken::Lindsay::IR::Type::i64() :
@@ -1358,10 +1346,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $rhs = $self->maybe_convert_type( $rhs, $target );
         }
 
-        # A typed float meeting one of the integer-only operators is
-        # truncated toward zero first, which is what Perl does: `12.7 & 10.3` is
-        # `12 & 10`, `-3.9 & 7.0` is `-3 & 7` rather than `-4 & 7`, and
-        # `1.0 << 2.9` shifts by 2.
+        # A typed float meeting one of the integer-only operators is truncated toward zero first, which is what Perl
+        # does: `12.7 & 10.3` is `12 & 10`, `-3.9 & 7.0` is `-3 & 7` rather than `-4 & 7`, and `1.0 << 2.9` shifts by 2.
         #
         # The conversion belongs here rather than further down because the mixed
         # int/float unification promotes the integer side back up to float, which
@@ -1373,14 +1359,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $rhs = $self->maybe_convert_type( $rhs, $i64_type ) if $rhs->type->kind eq 'float';
         }
 
-        # `&&` and `||` take a float the other way round: true when it is not
-        # zero, so the operand becomes a `!= 0.0` comparison. Truncation would
-        # be wrong in both directions, since 0.5 and -0.5 both truncate to 0.
+        # `&&` and `||` take a float the other way round: true when it is not zero, so the operand becomes a `!= 0.0`
+        # comparison. Truncation would be wrong in both directions, since 0.5 and -0.5 both truncate to 0.
         #
         # Reading an untyped operand as f64 above is what lets one comparison
-        # serve either kind of box: `unbox_f64` widens an integer payload, so
-        # `my $x = 5; $x && $y` is `5.0 != 0.0` and true and `my $x = 0; $x && $y`
-        # is `0.0 != 0.0` and false, without the tag being read twice.
+        # serve either kind of box: `unbox_f64` widens an integer payload, so `my $x = 5; $x && $y` is `5.0 != 0.0` and
+        # true and `my $x = 0; $x && $y` is `0.0 != 0.0` and false, without the tag being read twice.
         if ($bool_op) {
             my $truthy = sub {
                 my ($side) = @_;
@@ -1391,17 +1375,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $rhs = $truthy->($rhs) if $rhs->type->kind eq 'float';
         }
 
-        # Unify types for mixed int/float operations: both sides end up the same
-        # type kind (both float or both int) so the MIR lowerer can emit the
-        # correct opcode (fadd vs add, fcmp vs icmp, etc.).
+        # Unify types for mixed int/float operations: both sides end up the same type kind (both float or both int) so
+        # the MIR lowerer can emit the correct opcode (fadd vs add, fcmp vs icmp, etc.).
         #
         # The integer side is promoted up to the float, not the other way round.
-        # Converting the float to the integer type truncated it, so
-        # `my i64 $a = 1; my f64 $b = 1.5; $a == $b` compared 1 against 1 and
-        # answered true, `$a < $b` compared 1 against 1 and answered false, and
-        # `my i64 $a = 2; $a * $b` computed 2 * 1. Every one of those was wrong
-        # in fully typed code, on every backend, and no backend could recover
-        # the fraction once the lowering had thrown it away.
+        # Converting the float to the integer type truncated it, so `my i64 $a = 1; my f64 $b = 1.5; $a == $b` compared
+        # 1 against 1 and answered true, `$a < $b` compared 1 against 1 and answered false, and `my i64 $a = 2; $a * $b`
+        # computed 2 * 1. Every one of those was wrong in fully typed code, on every backend, and no backend could
+        # recover the fraction once the lowering had thrown it away.
         if ( $lhs->type->kind ne $rhs->type->kind && $lhs->type->kind ne 'dynamic' && $rhs->type->kind ne 'dynamic' ) {
             if ( $lhs->type->kind eq 'int' && $rhs->type->kind eq 'float' ) {
                 $lhs = $self->maybe_convert_type( $lhs, $rhs->type );
@@ -1419,16 +1400,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $builder->build_lshr( $lhs, $rhs, undef, $line, $col );
         }
 
-        # Promote narrower operand to match wider type width so the MIR
-        # lowerer sees consistent operand widths (critical for i128/halving).
+        # Promote narrower operand to match wider type width so the MIR lowerer sees consistent operand widths (critical
+        # for i128/halving).
         if ( $lhs->type->kind eq $rhs->type->kind && $lhs->type->bits != $rhs->type->bits && $lhs->type->kind ne 'dynamic' ) {
             if ( $lhs->type->kind eq 'float' ) {
 
-                # A decimal literal is lexed as f64, so `if ($f32 == 1.5)` hands
-                # us an f64 against an f32.  There is no fptrunc/fpext in the IR,
-                # so the only sound unification is to re-tag the literal to the
-                # width of the other operand; widening the loaded value instead
-                # would reinterpret a four-byte pattern as eight.
+                # A decimal literal is lexed as f64, so `if ($f32 == 1.5)` hands us an f64 against an f32.  There is no
+                # fptrunc/fpext in the IR, so the only sound unification is to re-tag the literal to the width of the
+                # other operand; widening the loaded value instead would reinterpret a four-byte pattern as eight.
                 if ( $rhs->isa('Brocken::Lindsay::IR::Constant') ) {
                     $rhs = $self->maybe_convert_type( $rhs, $lhs->type );
                 }
@@ -1465,13 +1444,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $builder->build_and( $lhs, $rhs, undef, $line, $col ) if $op eq '&&';
         return $builder->build_or( $lhs, $rhs, undef, $line, $col )  if $op eq '||';
 
-        # Mixed-signedness comparison: types < 64 bits with different signedness
-        # produce wrong results because the codegen loads signed operands with
-        # movsx (sign-extend) and unsigned with movzx (zero-extend) into 32-bit
-        # registers.  When the CMP uses unsigned predicates, the sign-extended
-        # value looks like a huge positive number.  Fix: widen both operands to
-        # a common 32-bit type with appropriate extension so the bit patterns
-        # match the simulation semantics.
+        # Mixed-signedness comparison: types < 64 bits with different signedness produce wrong results because the
+        # codegen loads signed operands with movsx (sign-extend) and unsigned with movzx (zero-extend) into 32-bit
+        # registers.  When the CMP uses unsigned predicates, the sign-extended value looks like a huge positive number.
+        # Fix: widen both operands to a common 32-bit type with appropriate extension so the bit patterns match the
+        # simulation semantics.
         if ( $lhs->type->kind eq 'int' &&
             $rhs->type->kind eq 'int'            &&
             $lhs->type->bits == $rhs->type->bits &&
@@ -1492,10 +1469,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $builder->build_icmp( 'ne', $lhs, $rhs, undef, $line, $col ) if $op eq '!=';
 
         # Ordering has no signed/unsigned split for a float, and the backends
-        # spell the float predicates plainly: the x86-64 lowerer has them as
-        # lt/le/gt/ge -> b/be/a/ae and ARM64 as cset_lt/... . Emitting the
-        # integer s/u forms here keyed off is_signed picked a name no float
-        # table has, so every ordered float comparison came out false.
+        # spell the float predicates plainly: the x86-64 lowerer has them as lt/le/gt/ge -> b/be/a/ae and ARM64 as
+        # cset_lt/... . Emitting the integer s/u forms here keyed off is_signed picked a name no float table has, so
+        # every ordered float comparison came out false.
         if ( $lhs->type->kind eq 'float' ) {
             return $builder->build_icmp( 'lt', $lhs, $rhs, undef, $line, $col ) if $op eq '<';
             return $builder->build_icmp( 'gt', $lhs, $rhs, undef, $line, $col ) if $op eq '>';
@@ -1618,13 +1594,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $operand = $self->maybe_convert_type( $operand, Brocken::Lindsay::IR::Type::i8() );
         }
 
-        # Fold negation of a float literal, so `-1.5` is a negative constant
-        # rather than an fneg of a positive one. Beyond saving a runtime op,
-        # it is load-bearing for f32: the result of an unfolded neg is not a
-        # Constant, so there is nothing to re-tag and `my f32 $a = -1.0;`
-        # died trying to widen it. Left to floats deliberately -- folding
-        # `-5` for an i64 as well is a separate question, since an unsigned
-        # neg is defined as wrapping.
+        # Fold negation of a float literal, so `-1.5` is a negative constant rather than an fneg of a positive one.
+        # Beyond saving a runtime op,
+        # it is load-bearing for f32: the result of an unfolded neg is not a Constant, so there is nothing to re-tag and
+        # `my f32 $a = -1.0;` died trying to widen it. Left to floats deliberately -- folding `-5` for an i64 as well is
+        # a separate question, since an unsigned neg is defined as wrapping.
         if ( $op eq '-' && $operand->isa('Brocken::Lindsay::IR::Constant') && $operand->type->kind eq 'float' ) {
             return Brocken::Lindsay::IR::Constant->new( type => $operand->type, value => -( $operand->value ) );
         }
@@ -1640,13 +1614,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return unless $symbols->{'__heap_base'};
         return unless defined $fuel_exit_block;
 
-        # Emit fuel decrement + overflow check in a dedicated block, then
-        # branch to fuel_exit_block or a fresh ok_block.  Keeping the memory
-        # ops in a separate block from any subsequent call_func avoids the
-        # register-allocator pressure that previously corrupted PE binaries
-        # (Bug 9 - the load/add/load/sub/store/cmp sequence placed inline
-        # right before a call_func confused the allocator when a physical
-        # register overlapped a call argument and the ICB base).
+        # Emit fuel decrement + overflow check in a dedicated block, then branch to fuel_exit_block or a fresh ok_block.
+        # Keeping the memory ops in a separate block from any subsequent call_func avoids the register-allocator
+        # pressure that previously corrupted PE binaries (Bug 9 - the load/add/load/sub/store/cmp sequence placed inline
+        # right before a call_func confused the allocator when a physical register overlapped a call argument and the
+        # ICB base).
         my $hb_fuel    = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
         my $fuel_off   = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::FUEL );
         my $fuel_addr  = $builder->build_add( $hb_fuel, $fuel_off, undef, $line, $col );
@@ -1793,9 +1765,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return undef;
         }
 
-        # A boxed float has to be read as a float. load_i64 on an f64 payload
-        # hands back the bit pattern instead of the value, which is what an
-        # unbox in an integer context used to see.
+        # A boxed float has to be read as a float. load_i64 on an f64 payload hands back the bit pattern instead of the
+        # value, which is what an unbox in an integer context used to see.
         return $builder->build_load( Brocken::Lindsay::IR::Type::f64(), $args[0], undef, $line, $col ) if $name eq 'load_f64';
         if ( $name eq 'store_f64' ) {
             $builder->build_store( $args[1], $args[0], $line, $col );
@@ -1885,19 +1856,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # Reinterpret: dynamic -> ptr is a no-op; Any vars ARE pointers to fat scalars
             return $val if $target_type->kind eq 'ptr';
 
-            # A direct unbox is a blind payload load: it reads the eight bytes at
-            # offset 8 at whatever width the context asked for, without looking
-            # at the tag. So a float payload read into an i64 came back as its
-            # bit pattern, and an integer payload read into an f64 came back as
-            # a denormal built out of a small integer. The runtime helpers read
-            # the tag first and convert, which is what makes the value mean what
-            # the box actually holds: unbox_f64 widens an integer payload,
-            # unbox_i64 truncates a float payload toward zero.
+            # A direct unbox is a blind payload load: it reads the eight bytes at offset 8 at whatever width the context
+            # asked for, without looking at the tag. So a float payload read into an i64 came back as its bit pattern,
+            # and an integer payload read into an f64 came back as a denormal built out of a small integer. The runtime
+            # helpers read the tag first and convert, which is what makes the value mean what
+            # the box actually holds: unbox_f64 widens an integer payload, unbox_i64 truncates a float payload toward
+            # zero.
             #
-            # f32 and i128 keep the direct load. There is no fptrunc/fpext in the
-            # IR to narrow what unbox_f64 returns, and unbox_i64 would only ever
-            # hand back the low eight bytes of an i128 payload. Both were already
-            # excluded as unsupported; this does not make them worse.
+            # f32 and i128 keep the direct load. There is no fptrunc/fpext in the IR to narrow what unbox_f64 returns,
+            # and unbox_i64 would only ever hand back the low eight bytes of an i128 payload. Both were already excluded
+            # as unsupported; this does not make them worse.
             my $kind = $target_type->kind;
             my $bits = $target_type->bits;
             if ( $kind eq 'float' && $bits == 64 ) {
@@ -1923,19 +1891,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     return $builder->build_zext( $val, $target_type, undef, $line, $col );
                 }
 
-                # Sign-extending into an *unsigned* type is not expressible: the
-                # backends size an extension from its source operand and sign-extend
-                # all the way out to 32 or 64 bits, with no way to stop at the
-                # destination width, so the bits above it survive into whatever
-                # consumes them. The promotion picks sext from the *source*
-                # signedness, so that is exactly what happened to
-                # `my i8 $a = -61; my u16 $b = 65509; $a >= $b`: the narrower
-                # signed operand landed in an unsigned comparison still carrying
-                # its sign, comparing 0xFFFFFFC3 against 65509 and answering 1.
-                # Sign-extend to a signed type of the target width first, then
-                # zero-extend that width, which is the value the unsigned type
-                # actually holds. A 64-bit destination is already as wide as the
-                # register the extension lands in, so its sign is the whole value.
+                # Sign-extending into an *unsigned* type is not expressible: the backends size an extension from its
+                # source operand and sign-extend all the way out to 32 or 64 bits, with no way to stop at the
+                # destination width, so the bits above it survive into whatever consumes them. The promotion picks sext
+                # from the *source* signedness, so that is exactly what happened to `my i8 $a = -61; my u16 $b = 65509;
+                # $a >= $b`: the narrower signed operand landed in an unsigned comparison still carrying its sign,
+                # comparing 0xFFFFFFC3 against 65509 and answering 1.
+                # Sign-extend to a signed type of the target width first, then zero-extend that width, which is the
+                # value the unsigned type actually holds. A 64-bit destination is already as wide as the register the
+                # extension lands in, so its sign is the whole value.
                 if ( $target_type->is_signed || $target_type->bits >= 64 ) {
                     return $builder->build_sext( $val, $target_type, undef, $line, $col );
                 }
@@ -1975,18 +1939,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $builder->build_sitofp( $val, $target_type, undef, $line, $col );
         }
 
-        # Float -> integer (fptosi). The conversion is masked to the target width for
-        # the same reason the int->int case above is: an fptosi typed at a narrow
-        # destination still lowers to a full-width convert (a 32-bit
-        # cvttsd2si, an fcvtzs to w, a trunc_sat), so without the mask the
-        # leftover bits survive into a slot that is only a byte wide, and a bool
-        # target kept the whole value instead of one bit.
+        # Float -> integer (fptosi). The conversion is masked to the target width for the same reason the int->int case
+        # above is: an fptosi typed at a narrow destination still lowers to a full-width convert (a 32-bit cvttsd2si, an
+        # fcvtzs to w, a trunc_sat), so without the mask the leftover bits survive into a slot that is only a byte wide,
+        # and a bool target kept the whole value instead of one bit.
         #
-        # Only a destination narrower than 32 bits needs it. A 32- or 64-bit one
-        # is already the width the conversion produces, so masking would be a
-        # no-op there -- and the 32-bit mask is not representable, since
-        # 0xFFFFFFFF is -1 as a signed i32 and emitting it as an i32 constant is
-        # rejected as too large.
+        # Only a destination narrower than 32 bits needs it. A 32- or 64-bit one is already the width the conversion
+        # produces, so masking would be a no-op there -- and the 32-bit mask is not representable, since 0xFFFFFFFF is
+        # -1 as a signed i32 and emitting it as an i32 constant is rejected as too large.
         if ( $val->type->kind eq 'float' && $target_type->kind eq 'int' ) {
             my $bits = $target_type->bits;
             my $mask = $bits < 32 ? ( 1 << $bits ) - 1 : undef;
@@ -2000,12 +1960,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $builder->build_and( $converted, $mask_val, undef, $line, $col );
         }
 
-        # Float width, which is what a decimal literal runs into: it arrives as
-        # f64, and `my f32 $t = 1.5;` would otherwise store eight bytes into a
-        # four-byte slot. A *literal* is again not a number that needs
-        # converting -- the constant holds a plain Perl number and each backend
-        # packs it at the width its type asks for -- so re-tagging is the whole
-        # conversion, and it is also where the rounding to f32 happens.
+        # Float width, which is what a decimal literal runs into: it arrives as f64, and `my f32 $t = 1.5;` would
+        # otherwise store eight bytes into a four-byte slot. A *literal* is again not a number that needs converting --
+        # the constant holds a plain Perl number and each backend packs it at the width its type asks for -- so
+        # re-tagging is the whole conversion, and it is also where the rounding to f32 happens.
         if ( $val->type->kind eq 'float' && $target_type->kind eq 'float' ) {
             return $val if $val->type->bits == $target_type->bits;
             if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
@@ -2166,25 +2124,21 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $ptr_type     = Brocken::Lindsay::IR::Type::ptr();
         my $dynamic_type = Brocken::Lindsay::IR::Type::dynamic();
 
-        # A list slot is one untagged eight-byte cell, and the reader
-        # (`lower_list_var_decl`) has no way to know what it was written as. So a
-        # slot cannot hold a float: the bits of 1.5 read back as an integer are
-        # 4607182418800017408, not 1.5. Every element is boxed on the way in, which
-        # puts the tag next to the payload and lets the reader convert the box
+        # A list slot is one untagged eight-byte cell, and the reader (`lower_list_var_decl`) has no way to know what it
+        # was written as. So a
+        # slot cannot hold a float: the bits of 1.5 read back as an integer are 4607182418800017408, not 1.5. Every
+        # element is boxed on the way in, which puts the tag next to the payload and lets the reader convert the box
         # into whatever the target declared.
         #
-        # This is also the representation the rest of the runtime already assumes.
-        # `gc_scan_list` reads each slot and treats it as a pointer when it looks
-        # like one, and the reader already increfs an `Any` target on the
+        # This is also the representation the rest of the runtime already assumes. `gc_scan_list` reads each slot and
+        # treats it as a pointer when it looks like one, and the reader already increfs an `Any` target on the
         # assumption that the slot holds a box.
         #
-        # An element that is already untyped is stored as it stands rather than
-        # boxed again, so `my ($a, $b) = ($x, $x)` puts the one box each slot can
-        # hold rather than a box around a pointer to a box. That stops the second
-        # box, not the second problem: the slot does not take a reference of its
-        # own, so a box built in the function that builds the list is released
-        # when that function returns. That is separate from the slot
-        # representation and is listed under Known Bugs in TODO.md.
+        # An element that is already untyped is stored as it stands rather than boxed again, so `my ($a, $b) = ($x, $x)`
+        # puts the one box each slot can hold rather than a box around a pointer to a box. That stops the second box,
+        # not the second problem: the slot does not take a reference of its own, so a box built in the function that
+        # builds the list is released when that function returns. That is separate from the slot representation and is
+        # listed under Known Bugs in TODO.md.
         my @elements;
         for my $elem ( $ast->elements->@* ) {
             my $val = $self->lower_expression($elem);

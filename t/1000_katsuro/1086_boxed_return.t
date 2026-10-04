@@ -6,13 +6,11 @@ use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# Returning a dynamic (boxed) value hands ownership to the caller, so the box has
-# to survive the decref of the function's own locals. The exit path increfs the
-# return value before running that cleanup, but the incref was gated on a type
-# kind of `any` while the IR spells it `dynamic`, so it never ran: the exit decref
-# dropped the box's refcount to zero and pushed it onto the free list, and the
-# caller received a pointer whose payload slot had already been overwritten with
-# the free-list link. Every case below returned 0 before the fix.
+# Returning a dynamic (boxed) value hands ownership to the caller, so the box has to survive the decref of the
+# function's own locals. The exit path increfs the return value before running that cleanup, but the incref was gated on
+# a type kind of `any` while the IR spells it `dynamic`, so it never ran: the exit decref dropped the box's refcount to
+# zero and pushed it onto the free list, and the caller received a pointer whose payload slot had already been
+# overwritten with the free-list link. Every case below returned 0 before the fix.
 sub run_case {
     my ( $src, $want, $name ) = @_;
     my $brocken = Brocken->new();

@@ -10,18 +10,15 @@ use Brocken::Jenny::Lowerer::X86_64;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
-# Win64 numbers argument positions 1-4 across both register files: the first
-# argument is rcx or xmm0, the second rdx or xmm1, and so on, and the fifth
-# argument and later go on the stack whatever their class.  SysV instead gives
-# each class its own counter.  The two files were read with one counter each, so
-# a mixed argument list landed in the wrong registers -- a float after an
-# integer went to the second xmm rather than the position's xmm.
+# Win64 numbers argument positions 1-4 across both register files: the first argument is rcx or xmm0, the second rdx or
+# xmm1, and so on, and the fifth argument and later go on the stack whatever their class.  SysV instead gives each class
+# its own counter.  The two files were read with one counter each, so a mixed argument list landed in the wrong
+# registers -- a float after an integer went to the second xmm rather than the position's xmm.
 #
 # The check lowers on any host and reads the physical registers off the moves.
-# The callee of `g` has two hidden leading parameters, so the float `$y` is
-# position 4 and belongs in xmm3; the old model put it in xmm0.  The literal
-# argument is materialised straight into its argument register, so the
-# destination of `fmov_gp2f` is that register.
+# The callee of `g` has two hidden leading parameters, so the float `$y` is position 4 and belongs in xmm3; the old
+# model put it in xmm0.  The literal argument is materialised straight into its argument register, so the destination of
+# `fmov_gp2f` is that register.
 my $win64 = Brocken::Katsuro::Platform::parse('x86_64-pc-windows-msvc');
 my $sysv  = Brocken::Katsuro::Platform::parse('x86_64-pc-linux-gnu');
 is(

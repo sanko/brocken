@@ -3,9 +3,8 @@ package Test2::Tools::Brocken v0.0.1 {
     use Exporter 'import';
     use Test2::API qw[context];
 
-    # The assertion functions are used in their function form rather than through
-    # a context object, so they land in whatever context the calling test already
-    # has -- a subtest, say -- instead of opening a nested one of their own.
+    # The assertion functions are used in their function form rather than through a context object, so they land in
+    # whatever context the calling test already has -- a subtest, say -- instead of opening a nested one of their own.
     use Test2::Tools::Basic   qw[fail diag skip];
     use Test2::Tools::Compare qw[is];
     use Carp                  qw[croak];
@@ -22,13 +21,11 @@ package Test2::Tools::Brocken v0.0.1 {
         return $dir . '/' . $basename;
     }
 
-    # Looks a binary up on PATH and returns where it was found, or nothing. The
-    # test suite carries no absolute path of its own, so a missing tool leaves the
-    # caller free to skip rather than fail.
+    # Looks a binary up on PATH and returns where it was found, or nothing. The test suite carries no absolute path of
+    # its own, so a missing tool leaves the caller free to skip rather than fail.
     #
-    # The suffixes in PATHEXT are what `where` searches and this does not, so
-    # they are tried explicitly. Without that, `wasmtime` is not found on a
-    # Windows host at all, because the file on disk is `wasmtime.exe`.
+    # The suffixes in PATHEXT are what `where` searches and this does not, so they are tried explicitly. Without that,
+    # `wasmtime` is not found on a Windows host at all, because the file on disk is `wasmtime.exe`.
     sub _find_binary ($exe) {
         my @suffixes = ( '', ( $^O eq 'MSWin32' ? split /;/, ( $ENV{PATHEXT} // '.COM;.EXE;.BAT;.CMD' ) : () ) );
         for my $dir ( File::Spec->path ) {
@@ -42,10 +39,9 @@ package Test2::Tools::Brocken v0.0.1 {
     sub wasmtime_binary () { state $found //= _find_binary('wasmtime') }
     sub node_binary ()     { state $found //= _find_binary('node') }
 
-    # Which runner can execute a Wasm module here. wasmtime is preferred; node can
-    # instantiate a module without it, which is enough to read the entry's return
-    # value. Nothing at all means the Wasm target cannot be exercised, and the
-    # caller is expected to skip.
+    # Which runner can execute a Wasm module here. wasmtime is preferred; node can instantiate a module without it,
+    # which is enough to read the entry's return value. Nothing at all means the Wasm target cannot be exercised, and
+    # the caller is expected to skip.
     sub wasm_runner () {
         return 'wasmtime' if wasmtime_binary();
         return 'node'     if node_binary();
@@ -57,9 +53,8 @@ package Test2::Tools::Brocken v0.0.1 {
         return Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
     }
 
-    # Whether a linked `.wasm` is accepted by a validator, as a system() status:
-    # zero when the module is valid. Nothing at all when no runner is present, so
-    # the caller can skip rather than report a module as broken.
+    # Whether a linked `.wasm` is accepted by a validator, as a system() status: zero when the module is valid. Nothing
+    # at all when no runner is present, so the caller can skip rather than report a module as broken.
     sub wasm_validates ($file) {
         my $runner = wasm_runner() or return undef;
         if ( $runner eq 'wasmtime' ) {
@@ -69,30 +64,27 @@ package Test2::Tools::Brocken v0.0.1 {
         return system( node_binary(), '-e', "const fs=require('fs');process.exit(WebAssembly.validate(fs.readFileSync('$file'))?0:1);" );
     }
 
-    # A qemu binary and the sysroot it needs are named for the host that has
-    # them, which on a Windows host is normally WSL.  Both are named through
-    # the environment so the test suite carries no absolute path of its own:
-    # without them there is nothing to run a foreign ELF with, and the caller
-    # is expected to skip rather than fail.
+    # A qemu binary and the sysroot it needs are named for the host that has them, which on a Windows host is normally
+    # WSL.  Both are named through
+    # the environment so the test suite carries no absolute path of its own: without them there is nothing to run a
+    # foreign ELF with, and the caller is expected to skip rather than fail.
     my %QEMU = ( aarch64 => 'qemu-aarch64', riscv64 => 'qemu-riscv64', x86_64 => 'qemu-x86_64' );
 
     sub _wsl_path ($path) {
         return undef unless defined $path && length $path;
         $path =~ s{\\}{/}g;
 
-        # A path that already crosses into the distribution, whether written
-        # as a share (`//wsl$/Ubuntu/...`) or as the path inside it, is passed
-        # through.  A Windows path is a drive letter, and the drive is mounted
-        # under /mnt by default.
+        # A path that already crosses into the distribution, whether written as a share (`//wsl$/Ubuntu/...`) or as the
+        # path inside it, is passed through.  A Windows path is a drive letter, and the drive is mounted under /mnt by
+        # default.
         return $1                          if $path =~ m{^(//wsl\$/[^/]+(?:/.*)?)$};
         return '/' . $1                    if $path =~ m{^/(wsl\$/[^/]+/.*)$};
         return '/mnt/' . lc($1) . '/' . $2 if $path =~ m{^([A-Za-z]):/(.*)$};
         return $path;
     }
 
-    # A path that already names a place inside the distribution is what qemu
-    # wants, but it is not something this host can stat, so the check goes
-    # through the share and the two forms are kept apart.
+    # A path that already names a place inside the distribution is what qemu wants, but it is not something this host
+    # can stat, so the check goes through the share and the two forms are kept apart.
     sub _sysroot ($platform) {
         my $sysroot = $ENV{ 'BROCKEN_SYSROOT_' . uc $platform->arch } // $ENV{BROCKEN_SYSROOT};
         return undef unless $sysroot && length $sysroot;
@@ -134,10 +126,9 @@ package Test2::Tools::Brocken v0.0.1 {
         return _find_binary($exe) ? 1 : 0;
     }
 
-    # Every target a snippet can be run on here: the host always, a cross target
-    # only when its emulator and sysroot are present, and Wasm only when a runner
-    # for it is. A target that cannot be executed is left out rather than
-    # reported as a failure, since its absence says nothing about the compiler.
+    # Every target a snippet can be run on here: the host always, a cross target only when its emulator and sysroot are
+    # present, and Wasm only when a runner for it is. A target that cannot be executed is left out rather than reported
+    # as a failure, since its absence says nothing about the compiler.
     sub executable_targets () {
         require Brocken::Katsuro::Platform;
         my @targets = ( [ 'host', undef ] );
@@ -149,9 +140,8 @@ package Test2::Tools::Brocken v0.0.1 {
         return @targets;
     }
 
-    # Runs a linked `.wasm` and returns the value `_BROCKEN_ENTRY` returned,
-    # followed by whatever the runner printed. The entry returns an i64 that the
-    # test compares as a number, so it is the last line rather than the whole
+    # Runs a linked `.wasm` and returns the value `_BROCKEN_ENTRY` returned, followed by whatever the runner printed.
+    # The entry returns an i64 that the test compares as a number, so it is the last line rather than the whole
     # output: a runner writes its own warnings alongside the value.
     sub wasm_entry_value ( $file, %args ) {
         my $runner = $args{runner} // wasm_runner();
@@ -174,12 +164,10 @@ package Test2::Tools::Brocken v0.0.1 {
         return ( @lines ? $lines[-1] : '', $output );
     }
 
-    # Compiles a snippet and asserts the value it returns, on every target that
-    # can be run here. `targets` defaults to `executable_targets`, and each entry
-    # is a `[ tag, platform ]` pair, with an undefined platform meaning the host.
-    # A Wasm platform is linked to a `.wasm` and run through whichever runner is
-    # available; anything else is run as a native executable and compared on its
-    # exit status. `basename` names the file each target is written to.
+    # Compiles a snippet and asserts the value it returns, on every target that can be run here. `targets` defaults to
+    # `executable_targets`, and each entry is a `[ tag, platform ]` pair, with an undefined platform meaning the host.
+    # A Wasm platform is linked to a `.wasm` and run through whichever runner is available; anything else is run as a
+    # native executable and compared on its exit status. `basename` names the file each target is written to.
     sub answers ( $src, $want, $name, %args ) {
         require Brocken;
         require Brocken::Jenny::Linker::Wasm;
@@ -201,8 +189,8 @@ package Test2::Tools::Brocken v0.0.1 {
                 next;
             }
 
-            # The linker's platform is the one the instance was built with, not
-            # this loop's `$platform`, which is undef for the host target:
+            # The linker's platform is the one the instance was built with, not this loop's `$platform`, which is undef
+            # for the host target:
             # MachO reads `->arch` and `->os` off it to pick the slice.
             my $file = temp_path($basename) . $brocken->ext;
             $brocken->linker->write_executable( $file, $funcs, $brocken->platform );
@@ -212,11 +200,9 @@ package Test2::Tools::Brocken v0.0.1 {
         return;
     }
 
-    # Compiles a snippet for the Wasm target, links it, and asserts that the
-    # module validates. This is the check that catches an operand width or a
-    # stack type the validator objects to, which is a different failure from
-    # returning a wrong number: the module never runs at all. `answers` covers
-    # the running side.
+    # Compiles a snippet for the Wasm target, links it, and asserts that the module validates. This is the check that
+    # catches an operand width or a stack type the validator objects to, which is a different failure from
+    # returning a wrong number: the module never runs at all. `answers` covers the running side.
     sub validates ( $src, $name, %args ) {
         require Brocken;
         require Brocken::Jenny::Linker::Wasm;
@@ -236,10 +222,9 @@ package Test2::Tools::Brocken v0.0.1 {
         return;
     }
 
-    # The physical registers named by operand `$which` of every `$opcode`
-    # instruction in a machine function, in the order they appear. A test that
-    # cares which register an argument landed in reads it through here rather
-    # than walking the block and instruction lists itself.
+    # The physical registers named by operand `$which` of every `$opcode` instruction in a machine function, in the
+    # order they appear. A test that cares which register an argument landed in reads it through here rather than
+    # walking the block and instruction lists itself.
     sub phys_operands ( $mf, $opcode, $which ) {
         my @names;
         for my $mbb ( $mf->blocks->@* ) {
@@ -265,24 +250,21 @@ package Test2::Tools::Brocken v0.0.1 {
         my $argv     = $args{args} // [];
         my $ctx      = context();
 
-        # A foreign target needs an emulator, and this one is not always
-        # present.  Returning nothing leaves the caller free to skip; running
-        # the file directly would only report a bad-executable error that
-        # says nothing about the compiler.
+        # A foreign target needs an emulator, and this one is not always present.  Returning nothing leaves the caller
+        # free to skip; running the file directly would only report a bad-executable error that says nothing about the
+        # compiler.
         my $cross = cross_command( $file, $platform, $argv );
         return undef unless $cross;
         my $cmd  = $cross;
         my @exec = @$cmd;
         my $actual;
 
-        # The assertion is reported here, not at the end, so that a caller that
-        # returns early still gets one.  Holding the context open to the end
-        # meant a subtest died inside it and the whole subtest was reported as
-        # failing with no assertion of its own.
-        # A child killed by a signal reports `$? & 127`, and `$? >> 8` is then 0:
-        # the harness used to call that a clean `exit 0`, which let real crashes
-        # (an isolate segfaulting with SIGSEGV reported as 139) pass any test
-        # expecting 0. Signal death is now always a failure in its own right.
+        # The assertion is reported here, not at the end, so that a caller that returns early still gets one.  Holding
+        # the context open to the end meant a subtest died inside it and the whole subtest was reported as failing with
+        # no assertion of its own.
+        # A child killed by a signal reports `$? & 127`, and `$? >> 8` is then 0: the harness used to call that a clean
+        # `exit 0`, which let real crashes (an isolate segfaulting with SIGSEGV reported as 139) pass any test expecting
+        # 0. Signal death is now always a failure in its own right.
         my $signal;
         if ($do_gdb) {
             my $gdb_out;

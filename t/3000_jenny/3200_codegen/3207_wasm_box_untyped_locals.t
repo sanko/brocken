@@ -11,9 +11,8 @@ use feature qw[class];
 
 # Untyped `my` variables on the Wasm target.
 #
-# `my $x = 42;` is the most ordinary statement in the language, and Wasm could
-# not emit it. An untyped variable is a boxed dynamic value, so all of these
-# faults were in the `box`/`unbox` path and all of them had to clear before the
+# `my $x = 42;` is the most ordinary statement in the language, and Wasm could not emit it. An untyped variable is a
+# boxed dynamic value, so all of these faults were in the `box`/`unbox` path and all of them had to clear before the
 # module would even validate:
 #
 # 1. `Codegen/Wasm.pm` declared each local from the MIR function's `%ir_types`
@@ -36,13 +35,11 @@ use feature qw[class];
 #    below as well as the integer ones.
 #
 # With those fixed, a second fault appeared that no amount of lowering could
-# have masked: the linker reserved one 64KB page of linear memory while the
-# entry preamble tells `_init` it has 1MB. One boxed variable fit in the page
-# that was really there; a second allocated past the end of linear memory and
-# trapped, at an address that tracked the box's type tag because the allocator
-# had been handed a range it should never have believed in. A native target gets
-# away with the same mismatch because its mmap grows on demand.
-# `Brocken::ICB::HEAP_SIZE` is now the single source of truth for that 1MB.
+# have masked: the linker reserved one 64KB page of linear memory while the entry preamble tells `_init` it has 1MB. One
+# boxed variable fit in the page that was really there; a second allocated past the end of linear memory and trapped, at
+# an address that tracked the box's type tag because the allocator had been handed a range it should never have believed
+# in. A native target gets away with the same mismatch because its mmap grows on demand. `Brocken::ICB::HEAP_SIZE` is
+# now the single source of truth for that 1MB.
 my $host     = Brocken::Katsuro::Platform::parse();
 my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $brocken  = Brocken->new( platform => $platform );
@@ -53,8 +50,8 @@ my $node = $host->is_windows ? `where node 2>NUL` : `which node 2>/dev/null`;
 chomp $node if $node;
 my $runner = $wasmtime && -x $wasmtime ? 'wasmtime' : ( $node && -x $node ? 'node' : undef );
 
-# The declared memory has to cover the heap the entry preamble promises _init,
-# or the allocator will eventually hand out an address past the end of it.
+# The declared memory has to cover the heap the entry preamble promises _init, or the allocator will eventually hand out
+# an address past the end of it.
 sub memory_covers_heap ($name) {
     my $file = temp_path('wasm_box') . '.wasm';
     Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $brocken->compile('return 42;')->functions ),
@@ -62,9 +59,8 @@ sub memory_covers_heap ($name) {
     my $bytes = do { open my $fh, '<:raw', $file or die $!; local $/; <$fh> };
     unlink $file if -e $file;
 
-    # Walk to the memory section (id 5) and read the initial page count out of
-    # its limits vector. A single page is the fault this guards: the entry
-    # preamble tells `_init` it has Brocken::ICB::HEAP_SIZE.
+    # Walk to the memory section (id 5) and read the initial page count out of its limits vector. A single page is the
+    # fault this guards: the entry preamble tells `_init` it has Brocken::ICB::HEAP_SIZE.
     my $pages;
     my $pos = 8;
     while ( $pos < length $bytes ) {
@@ -123,11 +119,10 @@ SKIP: {
         answers( 'my i64 $a = 3; my $b = 1; return $a + $b;', 4,  'typed then untyped' );
     };
 
-    # Assigning one box to another used to trap: the store increfs the box it is
-    # about to replace and decrefs the old payload, and with the source and the
-    # destination the same box, or with a chain of moves, the two orderings
-    # disagreed about a block that was still live and the free list handed it
-    # out again. These are the shapes TODO.md recorded as still trapping.
+    # Assigning one box to another used to trap: the store increfs the box it is about to replace and decrefs the old
+    # payload, and with the source and the destination the same box, or with a chain of moves, the two orderings
+    # disagreed about a block that was still live and the free list handed it out again. These are the shapes TODO.md
+    # recorded as still trapping.
     subtest 'assignment between untyped variables' => sub {
         answers( 'my $a = 3; my $b = 4; $b = $b; return $a;',                               3, 'self-assignment leaves the other value' );
         answers( 'my $a = 1; $a = $a; $a = $a; return $a;',                                 1, 'repeated self-assignment' );
@@ -146,15 +141,12 @@ SKIP: {
         answers( 'my $x = 4294967296; return $x >> 32;', 1, 'a payload above 32 bits survives' );
     };
 
-    # Returning a boxed value transfers ownership to the caller, so the box has to
-    # outlive the callee's own locals. The exit path increfs the return value
-    # before running the cleanup, but the incref was gated on a type kind of `any`
-    # while the IR spells it `dynamic`, so it never ran: the exit decref dropped
-    # the box to the free list and the caller read a slot that had been overwritten
-    # with the list link. This was a frontend lifetime fault, not a Wasm one -- the
-    # same programs returned 0 on native -- and it is why every returned list
-    # element looked like a freed pointer even after the frame region was separated
-    # from the arena.
+    # Returning a boxed value transfers ownership to the caller, so the box has to outlive the callee's own locals. The
+    # exit path increfs the return value before running the cleanup, but the incref was gated on a type kind of `any`
+    # while the IR spells it `dynamic`, so it never ran: the exit decref dropped the box to the free list and the caller
+    # read a slot that had been overwritten with the list link. This was a frontend lifetime fault, not a Wasm one --
+    # the same programs returned 0 on native -- and it is why every returned list element looked like a freed pointer
+    # even after the frame region was separated from the arena.
     subtest 'a box returned from a function survives the callee' => sub {
         answers( 'sub mk() -> Any { my $u = 7; return $u; } my $a = mk(); return $a + 1;', 8, 'return a local, use it in the caller' );
         answers( 'sub mk() -> Any { my $u = 7; my $v = 9; return $u + $v; } my $a = mk(); return $a - 6;',
@@ -175,10 +167,9 @@ SKIP: {
     };
 }
 
-# Deliberately NOT asserted here: `my $x = 1.5;`. An untyped variable holding a
-# float is broken on every backend, not just this one -- the frontend boxes the
-# f64 and then unboxes it to i64, so the float-ness is gone before any backend
+# Deliberately NOT asserted here: `my $x = 1.5;`. An untyped variable holding a float is broken on every backend, not
+# just this one -- the frontend boxes the f64 and then unboxes it to i64, so the float-ness is gone before any backend
 # sees it, and x86-64 truncates to an integer where Wasm returns the raw bits.
-# That is a frontend gap, recorded in TODO.md; asserting either behaviour here
-# would only pin down which way it is currently wrong.
+# That is a frontend gap, recorded in TODO.md; asserting either behaviour here would only pin down which way it is
+# currently wrong.
 done_testing;

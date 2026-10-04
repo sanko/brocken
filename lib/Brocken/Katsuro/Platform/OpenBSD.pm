@@ -8,8 +8,7 @@ class Brocken::Katsuro::Platform::OpenBSD v0.0.1 : isa(Brocken::Katsuro::Platfor
     method interpreter()     {'/usr/libexec/ld.so'}
 
     # OpenBSD uses its own syscall numbering lineage (derived from 4.4BSD with local changes).
-    # Key difference from FreeBSD: mmap=197 (not 477). Other common syscalls share numbers
-    # across all BSDs on x86_64.
+    # Key difference from FreeBSD: mmap=197 (not 477). Other common syscalls share numbers across all BSDs on x86_64.
     method syscalls() {
         return {
             x86_64 => {

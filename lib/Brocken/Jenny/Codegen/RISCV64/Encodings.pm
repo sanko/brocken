@@ -47,15 +47,15 @@ package Brocken::Jenny::Codegen::RISCV64::Encodings v0.0.1 {
         FMV_D_X => 0xF2000000,    # FMV.D.X: float <- int reg (funct7=1111001)
 
         # Conversions
-        # FCVT.<fmt>.<int>: funct7=1101000 (fmt=00 S), rs2 selects the integer
-        # width (00000 W, 00010 L); the format bit (bit 25) is set for D.
+        # FCVT.<fmt>.<int>: funct7=1101000 (fmt=00 S), rs2 selects the integer width (00000 W, 00010 L); the format bit
+        # (bit 25) is set for D.
         FCVT_S_W => 0xD0001000,    # FCVT.S.W: int32 -> float32
         FCVT_S_L => 0xD0201000,    # FCVT.S.L: int64 -> float32
         FCVT_D_W => 0xD2001000,    # FCVT.D.W: int32 -> float64
         FCVT_D_L => 0xD2201000,    # FCVT.D.L: int64 -> float64
 
-        # FCVT.<int>.<fmt>: funct7=1100000 (fmt=00 S), rs2 selects the integer
-        # width (00000 W, 00010 L); the format bit (bit 25) is set for D.
+        # FCVT.<int>.<fmt>: funct7=1100000 (fmt=00 S), rs2 selects the integer width (00000 W, 00010 L); the format bit
+        # (bit 25) is set for D.
         FCVT_W_S => 0xC0001000,    # FCVT.W.S: float32 -> int32
         FCVT_W_D => 0xC2001000,    # FCVT.W.D: float64 -> int32
         FCVT_L_S => 0xC0201000,    # FCVT.L.S: float32 -> int64

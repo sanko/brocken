@@ -108,16 +108,12 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         my $dst         = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $param_name, type => $param->type );
                         if ($is_on_stack) {
 
-                            # An argument the register set could not carry is
-                            # read from a displacement off the stack pointer as
-                            # it was on entry.  The prologue moves that pointer
-                            # down by the whole frame, so the displacement is
-                            # marked raw and the encoder biases it; nothing else
-                            # knows the frame size here.  The stack index counts
-                            # only the arguments that overflowed, which is what
-                            # the caller numbers by, and the two register files
-                            # are sized independently, so an integer overflow is
-                            # not charged to the floating-point one.
+                            # An argument the register set could not carry is read from a displacement off the stack
+                            # pointer as it was on entry.  The prologue moves that pointer down by the whole frame, so
+                            # the displacement is marked raw and the encoder biases it; nothing else knows the frame
+                            # size here.  The stack index counts only the arguments that overflowed, which is what the
+                            # caller numbers by, and the two register files are sized independently, so an integer
+                            # overflow is not charged to the floating-point one.
                             my $off  = $stk_idx++;
                             my $slot = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'mem',
@@ -2929,9 +2925,8 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                     my $payload_mem
                         = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $inst->name, disp => 8 }, type => $val->type );
 
-                    # A float payload goes out through the FP store. `store_imm`
-                    # cannot express one, so a float constant reached the box as
-                    # its integer value and the float was lost here.
+                    # A float payload goes out through the FP store. `store_imm` cannot express one, so a float constant
+                    # reached the box as its integer value and the float was lost here.
                     my $is_float    = $val->type && $val->type->kind eq 'float';
                     my $store_op    = $is_float ? 'fstore' : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store';
                     my $payload_src = $is_float ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val);
@@ -3577,12 +3572,9 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                     my @gp_regs = $abi->param_registers->@*;
                     my @fp_regs = $abi->fp_param_registers->@*;
 
-                    # An argument that no longer fits in its register file is
-                    # stored at a raw displacement off the stack pointer.  The
-                    # area is reserved in the frame rather than pushed at the
-                    # call, so sp stays 16-byte aligned across the call and the
-                    # allocator's spill slots keep the displacements they were
-                    # given.
+                    # An argument that no longer fits in its register file is stored at a raw displacement off the stack
+                    # pointer.  The area is reserved in the frame rather than pushed at the call, so sp stays 16-byte
+                    # aligned across the call and the allocator's spill slots keep the displacements they were given.
                     my $slot = sub ( $disp, $type ) {
                         return Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'mem',
@@ -3592,10 +3584,8 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                     };
 
                     # Where each argument goes is decided before anything is
-                    # emitted: the stack index counts only the arguments that
-                    # overflowed, and the two register files are sized
-                    # independently, so an integer overflow is not charged to
-                    # the floating-point one.
+                    # emitted: the stack index counts only the arguments that overflowed, and the two register files are
+                    # sized independently, so an integer overflow is not charged to the floating-point one.
                     my @where;
                     my ( $gp_idx, $fp_idx, $stk_idx ) = ( 0, 0, 0 );
                     for my $i ( 0 .. $#args ) {
@@ -3604,9 +3594,8 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         my $is_i128  = !$is_float && $arg_type && $arg_type->kind eq 'int' && $arg_type->bits == 128;
                         if ($is_i128) {
 
-                            # A 128-bit value takes a consecutive register pair,
-                            # so it goes to the stack whole when only one is left
-                            # rather than straddling the two.
+                            # A 128-bit value takes a consecutive register pair, so it goes to the stack whole when only
+                            # one is left rather than straddling the two.
                             my ( $lo_reg_name, $hi_reg_name ) = $self->_abi->param_pair_registers($gp_idx);
                             if ( defined $hi_reg_name ) {
                                 $where[$i] = [ 'reg', $lo_reg_name, $hi_reg_name ];
@@ -3625,13 +3614,11 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         }
                     }
 
-                    # Forward order, unlike x86-64, which emits in reverse so
-                    # arg0 lands last.  A float literal is placed straight in
-                    # the register its argument goes to (see
-                    # _place_float_constant), so the order no longer decides
-                    # which registers are still free when one is materialized:
-                    # a scratch the allocator picked itself could land on the
-                    # register an earlier argument had just been given.
+                    # Forward order, unlike x86-64, which emits in reverse so arg0 lands last.  A float literal is
+                    # placed straight in the register its argument goes to (see _place_float_constant), so the order no
+                    # longer decides
+                    # which registers are still free when one is materialized: a scratch the allocator picked itself
+                    # could land on the register an earlier argument had just been given.
                     for my $i ( 0 .. $#args ) {
                         my $arg_type = $args[$i]->type;
                         my $is_float = $arg_type  && $arg_type->kind eq 'float';
@@ -3659,13 +3646,10 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                             }
                             elsif ( $is_float && $args[$i]->isa('Brocken::Lindsay::IR::Constant') ) {
 
-                                # A stack slot holds the same bits an FP register
-                                # would, so the pattern goes straight out of the
-                                # general register it is built in and no FP
-                                # scratch is needed.  Every target this backend
-                                # emits for is little-endian, which is what puts
-                                # the pattern in the slot the way a float load
-                                # reads it back.
+                                # A stack slot holds the same bits an FP register would, so the pattern goes straight
+                                # out of the general register it is built in and no FP scratch is needed.  Every target
+                                # this backend emits for is little-endian, which is what puts the pattern in the slot
+                                # the way a float load reads it back.
                                 $self->_place_float_bits( $mbb, $args[$i], $slot->( $off, undef ) );
                             }
                             else {
@@ -3731,14 +3715,10 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                             }
                             elsif ( $is_float && $args[$i]->isa('Brocken::Lindsay::IR::Constant') ) {
 
-                                # A literal is placed in the register the
-                                # argument goes to rather than in a
-                                # floating-point scratch a `fmov` then copies
-                                # across.  The scratch was a virtual register,
-                                # so the allocator chose it from the same pool
-                                # as everything else and it could land on the
-                                # register an earlier argument had already been
-                                # given.
+                                # A literal is placed in the register the argument goes to rather than in a
+                                # floating-point scratch a `fmov` then copies across.  The scratch was a virtual
+                                # register, so the allocator chose it from the same pool as everything else and it could
+                                # land on the register an earlier argument had already been given.
                                 $self->_place_float_constant( $mbb, $args[$i], $reg );
                             }
                             else {
@@ -4866,11 +4846,10 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
         return $self->_lower_opnd($ir_val);
     }
 
-    # A float constant's bit pattern, built in a general register and moved
-    # straight into $dest.  This is _materialize without the floating-point
-    # scratch: $dest is a register the caller already knows it wants, so there
-    # is nothing left for the allocator to pick.  The GPR scratch is still a
-    # virtual register, but its lifetime is the two instructions here.
+    # A float constant's bit pattern, built in a general register and moved straight into $dest.  This is _materialize
+    # without the floating-point
+    # scratch: $dest is a register the caller already knows it wants, so there is nothing left for the allocator to
+    # pick.  The GPR scratch is still a virtual register, but its lifetime is the two instructions here.
     method _place_float_constant( $mbb, $ir_val, $dest ) {
         my $bits        = $ir_val->type->bits;
         my $value       = $ir_val->value;
@@ -4885,21 +4864,18 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
             )
         );
 
-        # The destination is a physical register, which carries no type of its
-        # own, and `fmov_gp2f` takes the width of the move from there.  Left
-        # untyped an f32 came out as the double-register form; unlike RISC-V
-        # there is no NaN-boxing, so the low half still read correctly, but the
-        # width now comes from the literal like every other move.
+        # The destination is a physical register, which carries no type of its own, and `fmov_gp2f` takes the width of
+        # the move from there.  Left untyped an f32 came out as the double-register form; unlike RISC-V there is no
+        # NaN-boxing, so the low half still read correctly, but the width now comes from the literal like every other
+        # move.
         my $dest_typed = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $dest->value, type => $ir_val->type );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'fmov_gp2f', operands => [ $dest_typed, $gp ], comment => 'fmc: gp->fp' ) );
     }
 
-    # The same bit pattern, stored straight to a stack slot, for the argument
-    # the register set cannot carry.  A memory slot holds the same bits an FP
-    # register would, so this needs no floating-point register at all.  The
-    # scratch is typed to the float's own width so the store comes out 4 bytes
-    # for an f32 and 8 for an f64.
+    # The same bit pattern, stored straight to a stack slot, for the argument the register set cannot carry.  A memory
+    # slot holds the same bits an FP register would, so this needs no floating-point register at all.  The scratch is
+    # typed to the float's own width so the store comes out 4 bytes for an f32 and 8 for an f64.
     method _place_float_bits( $mbb, $ir_val, $mem ) {
         my $bits        = $ir_val->type->bits;
         my $value       = $ir_val->value;

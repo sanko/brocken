@@ -27,9 +27,8 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         my %skip;
         @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
 
-        # i128 return uses rax:rdx -- rdx must also be excluded from caller-save
-        # or the post-call restore overwrites the hi return value before the
-        # Lowerer reads it.  Detect call_func whose next instr reads from rdx.
+        # i128 return uses rax:rdx -- rdx must also be excluded from caller-save or the post-call restore overwrites the
+        # hi return value before the Lowerer reads it.  Detect call_func whose next instr reads from rdx.
         for my $bb ( $mf->blocks->@* ) {
             for my $i ( 0 .. $#{ $bb->instructions } ) {
                 my $inst = $bb->instructions->[$i];
@@ -85,9 +84,8 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             push @func_idx, $i;
         }
 
-        # If fiber ops exist and there's a main function, emit an init wrapper
-        # that allocates the main FCB, initializes r12, and calls the original
-        # main (emitted as _real_main).
+        # If fiber ops exist and there's a main function, emit an init wrapper that allocates the main FCB, initializes
+        # r12, and calls the original main (emitted as _real_main).
         my $emit_init = $has_fiber && $entry_index >= 0;
         my @result;
         for my $i ( 0 .. $#mfs ) {
@@ -258,11 +256,10 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     }
 
     # Build the isolate trampoline MIR function.
-    # Called by pthread_create (Unix, rdi=arg) or CreateThread (Windows, rcx=arg)
-    # on a new OS thread. Receives a void* arg pointing to { FCB* fcb, ICB* icb, i64 args[6] }.
-    # Sets r12 = FCB, stores ICB in FCB.os_thread, loads up to 6 args into the
-    # platform calling-convention registers, then calls FCB.resume_pc via
-    # call_indirect. The callee's return value (rax) is passed through.
+    # Called by pthread_create (Unix, rdi=arg) or CreateThread (Windows, rcx=arg) on a new OS thread. Receives a void*
+    # arg pointing to { FCB* fcb, ICB* icb, i64 args[6] }.
+    # Sets r12 = FCB, stores ICB in FCB.os_thread, loads up to 6 args into the platform calling-convention registers,
+    # then calls FCB.resume_pc via call_indirect. The callee's return value (rax) is passed through.
     method _build_isolate_trampoline_mf() {
         my $i64     = Brocken::Lindsay::IR::Type::i64();
         my $ptr     = Brocken::Lindsay::IR::Type::ptr();
@@ -367,16 +364,16 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     }
 
     # Build the _brocken_gate_dispatch trampoline.
-    # Called by gate stubs: _brocken_gate_dispatch(ICB, gate_id, a0..a5) -> i64
-    # Loads function pointer from gate_table[gate_id] at ICB+112 and calls through it.
+    # Called by gate stubs: _brocken_gate_dispatch(ICB, gate_id, a0..a5) -> i64 Loads function pointer from
+    # gate_table[gate_id] at ICB+112 and calls through it.
     method _build_gate_dispatch_mf() {
         my $i64 = Brocken::Lindsay::IR::Type::i64();
         my $ptr = Brocken::Lindsay::IR::Type::ptr();
         my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => '_brocken_gate_dispatch' );
         my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
 
-        # Parameters: rdi=ICB, rsi=gate_id, rdx=a0, rcx=a1, r8=a2, r9=a3, stack: a4, a5
-        # Save ICB to stack before clobbering rdi for gate table load
+        # Parameters: rdi=ICB, rsi=gate_id, rdx=a0, rcx=a1, r8=a2, r9=a3, stack: a4, a5 Save ICB to stack before
+        # clobbering rdi for gate table load
         my $icb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%icb', type => $ptr );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -477,8 +474,8 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         );
 
         # Arguments a0-a3 are already in rdx, rcx, r8, r9 (unchanged).
-        # Arguments a4, a5 are on the caller's stack, also unchanged.
-        # call_indirect fn_ptr -- calls fn(ICB, gate_id, a0, a1, a2, a3, a4, a5)
+        # Arguments a4, a5 are on the caller's stack, also unchanged. call_indirect fn_ptr -- calls fn(ICB, gate_id, a0,
+        # a1, a2, a3, a4, a5)
         my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%ret', type => $i64 );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -522,8 +519,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     }
 
     # Build the fiber init wrapper MIR function that sets up the main fiber's FCB.
-    # Calls _real_main normally; the standard epilogue (mov rsp,rbp; pop rbp; ret)
-    # correctly unwinds the frame.
+    # Calls _real_main normally; the standard epilogue (mov rsp,rbp; pop rbp; ret) correctly unwinds the frame.
     method _build_fiber_init_mf() {
         my $i64 = Brocken::Lindsay::IR::Type::i64();
         my $ptr = Brocken::Lindsay::IR::Type::ptr();
@@ -631,20 +627,18 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         }
         my $shadow_space = ( $platform->is_windows && !$is_leaf ) ? 32 : 0;
 
-        # The outgoing argument area sits at the bottom of the frame, below the
-        # alloca and spill areas, because a callee reads the arguments the
-        # register set could not carry at fixed offsets off the caller's stack
-        # pointer and `call` does not move it.  It is reserved in the prologue
-        # rather than pushed at the call site so that rsp-relative spill slots
-        # stay valid across the call and rsp is 16-byte aligned at every call.
+        # The outgoing argument area sits at the bottom of the frame, below the alloca and spill areas, because a callee
+        # reads the arguments the register set could not carry at fixed offsets off the caller's stack pointer and
+        # `call` does not move it.  It is reserved in the prologue rather than pushed at the call site so that
+        # rsp-relative spill slots stay valid across the call and rsp is 16-byte aligned at every call.
         my $call_arg_frame = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
         $call_arg_frame = $shadow_space if $call_arg_frame < $shadow_space;
 
-        # Ensure the spill area (which includes caller-saved register slots) does not
-        # overlap with the callee-saved register save area at the top of the frame.
-        # On Win64, rsp-relative displacements are shifted by (total_alloca + call_arg_frame)
-        # during encoding (see mem_modrm).  Without this extra padding the caller-save
-        # slots can land at the same rsp-relative offset as the callee saves.
+        # Ensure the spill area (which includes caller-saved register slots) does not overlap with the callee-saved
+        # register save area at the top of the frame.
+        # On Win64, rsp-relative displacements are shifted by (total_alloca + call_arg_frame) during encoding (see
+        # mem_modrm).  Without this extra padding the caller-save slots can land at the same rsp-relative offset as the
+        # callee saves.
         $spill_frame += $call_arg_frame;
         my $total_frame = ( $callee_size + $spill_frame + $call_arg_frame + $total_alloca + 15 ) & ~15;
         my $needs_frame = $total_frame > 0 || $used_callee->@* > 0 || $total_alloca > 0;
@@ -705,25 +699,20 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                 qr/^($pat)$/;
             };
 
-            # The base of an ordinary memory operand is a virtual register for a
-            # spill slot, because the allocator assigned a register to it.  A raw
-            # one names the physical stack register instead, and the
+            # The base of an ordinary memory operand is a virtual register for a spill slot, because the allocator
+            # assigned a register to it.  A raw one names the physical stack register instead, and the
             # available-register set deliberately does not contain it, so it has
-            # to be recognized here: looked up in the allocation table as if it
-            # were a virtual register, rsp resolved to whatever register the
-            # allocator had handed out under that name and the access went to the
-            # wrong place.
+            # to be recognized here: looked up in the allocation table as if it were a virtual register, rsp resolved to
+            # whatever register the allocator had handed out under that name and the access went to the wrong place.
             my $base_kind
                 = !ref $addr->{base} && $addr->{base} eq $platform->stack_reg ? 'phys_reg' : ( $addr->{base} =~ $phys_re ? 'phys_reg' : 'virt_reg' );
             my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind, value => $addr->{base} ) );
             my $bid    = $reg_id->($base_r);
             my $disp   = $addr->{disp} // 0;
 
-            # A raw displacement is positioned by the calling convention: an
-            # outgoing argument already sits where the callee will look for it,
-            # so the outgoing area is not added again.  Every other rsp-relative
-            # operand is a spill slot placed where the allocator asked, which is
-            # inside the spill area above the outgoing arguments.
+            # A raw displacement is positioned by the calling convention: an outgoing argument already sits where the
+            # callee will look for it, so the outgoing area is not added again.  Every other rsp-relative operand is a
+            # spill slot placed where the allocator asked, which is inside the spill area above the outgoing arguments.
             $disp += $total_alloca + $call_arg_frame if $base_r eq 'rsp' && !$addr->{raw};
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
@@ -1120,17 +1109,14 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                         $bytes .= pack( 'v', $imm->value & 0xFFFF );
                     }
                     else {
-                        # `mov r/m64, imm32` sign-extends its 32-bit immediate,
-                        # so a 64-bit value outside signed 32-bit range cannot be
-                        # put in memory with it: 4294967296 was stored as 0 and
-                        # 4294967295 as -1. There is no `mov r/m64, imm64` to fall
-                        # back on, so the value goes out as its two 32-bit halves,
-                        # each of which is exact. A 32-bit store does not
-                        # sign-extend, and the destination needs no register of
-                        # its own, so this costs one extra instruction and
-                        # nothing else. Only a freshly written slot wants this:
-                        # the halves are not written atomically, which does not
-                        # matter for a value no other thread can see yet.
+                        # `mov r/m64, imm32` sign-extends its 32-bit immediate, so a 64-bit value outside signed 32-bit
+                        # range cannot be
+                        # put in memory with it: 4294967296 was stored as 0 and 4294967295 as -1. There is no `mov
+                        # r/m64, imm64` to fall back on, so the value goes out as its two 32-bit halves, each of which
+                        # is exact. A 32-bit store does not sign-extend, and the destination needs no register of its
+                        # own, so this costs one extra instruction and nothing else. Only a freshly written slot wants
+                        # this: the halves are not written atomically, which does not matter for a value no other thread
+                        # can see yet.
                         my $value = $imm->value;
                         $value = $value->numify if ref($value) && $value->isa('Math::BigInt');
                         if ( $bits >= 64 && ( $value > 0x7FFFFFFF || $value < -0x80000000 ) ) {
@@ -1261,10 +1247,8 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
 
                     # The opcode name says `sd`, but as with fload/fstore/fmov
                     # this handles both float widths and the prefix picks which:
-                    # F2 is the double form (cvtsi2sd), F3 the single one
-                    # (cvtsi2ss). The float width lives on the destination; the
-                    # `bits` above is the *integer* source width, which only
-                    # decides REX.W.
+                    # F2 is the double form (cvtsi2sd), F3 the single one (cvtsi2ss). The float width lives on the
+                    # destination; the `bits` above is the *integer* source width, which only decides REX.W.
                     my $fbits = $dst->type && $dst->type->kind eq 'float' ? $dst->type->bits : 64;
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     $rex |= 0x48 if $bits >= 64;
@@ -1280,12 +1264,10 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     my $sid   = $reg_id->($src_r);
                     my $bits  = $dst->type ? $dst->type->bits : 64;
 
-                    # As above: F2 is cvttsd2si (double source), F3 is
-                    # cvttss2si (single source). The float width is on the
-                    # source; `bits` is the integer destination width and only
-                    # decides REX.W. Reading a single-precision value as a
-                    # double here is what left `my i64 $j = $f32;` wrong even
-                    # once the f32 slot itself was stored and loaded correctly.
+                    # As above: F2 is cvttsd2si (double source), F3 is cvttss2si (single source). The float width is on
+                    # the source; `bits` is the integer destination width and only decides REX.W. Reading a
+                    # single-precision value as a double here is what left `my i64 $j = $f32;` wrong even once the f32
+                    # slot itself was stored and loaded correctly.
                     my $fbits = $src->type && $src->type->kind eq 'float' ? $src->type->bits : 64;
                     my $rex   = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
                     $rex |= 0x48 if $bits >= 64;
@@ -1356,13 +1338,11 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
 
-                    # Use operand type width: 64-bit for i64, 32-bit for narrower
-                    # types.  Narrow signed values are loaded with movsx (sign-
-                    # extending to 64 bits), but 32-bit cmp on the lower 32 bits
-                    # is still correct because the sign bit is preserved at bit 31.
-                    # Using 64-bit cmp for i32 would be wrong because 32-bit mov
-                    # zero-extends, making negative values appear as large 64-bit
-                    # positive numbers.
+                    # Use operand type width: 64-bit for i64, 32-bit for narrower types.  Narrow signed values are
+                    # loaded with movsx (sign- extending to 64 bits), but 32-bit cmp on the lower 32 bits is still
+                    # correct because the sign bit is preserved at bit 31.
+                    # Using 64-bit cmp for i32 would be wrong because 32-bit mov zero-extends, making negative values
+                    # appear as large 64-bit positive numbers.
                     my $bits  = $dst->type  ? $dst->type->bits : 32;
                     my $rex_w = $bits >= 64 ? REX_W            : 0;
                     if ( $src->kind eq 'imm' ) {
@@ -1600,11 +1580,9 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
 
                     # A raw displacement is positioned by the calling
-                    # convention rather than by the allocator: an incoming
-                    # argument sits above the frame and an outgoing one below
-                    # it.  Neither is a spill slot, and counting it here would
-                    # both size the spill area wrong and overlap the outgoing
-                    # argument area.  _compute_call_arg_frame sizes the latter.
+                    # convention rather than by the allocator: an incoming argument sits above the frame and an outgoing
+                    # one below it.  Neither is a spill slot, and counting it here would both size the spill area wrong
+                    # and overlap the outgoing argument area.  _compute_call_arg_frame sizes the latter.
                     next if $addr->{raw};
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );
                     $found    = 1;
@@ -1614,12 +1592,10 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         return $found ? ( ( $max_disp + 8 + 15 ) & ~15 ) : 0;
     }
 
-    # Size of the outgoing argument area at the bottom of the frame, holding the
-    # arguments the register set could not carry.  A callee reads those at fixed
-    # offsets off the caller's stack pointer, so the area has to be reserved
-    # before the call rather than pushed at the call site: that keeps the
-    # register allocator's stack-relative spill slots valid across the call and
-    # leaves rsp 16-byte aligned at every public interface.
+    # Size of the outgoing argument area at the bottom of the frame, holding the arguments the register set could not
+    # carry.  A callee reads those at fixed offsets off the caller's stack pointer, so the area has to be reserved
+    # before the call rather than pushed at the call site: that keeps the register allocator's stack-relative spill
+    # slots valid across the call and leaves rsp 16-byte aligned at every public interface.
     method _compute_call_arg_frame( $mf, $stack_reg ) {
         my $max_disp = -1;
         for my $mbb ( $mf->blocks->@* ) {
@@ -1628,10 +1604,9 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     next unless $op->kind eq 'mem';
                     my $addr = $op->value;
 
-                    # Only the caller's outgoing arguments occupy this area; an
-                    # entry-relative load reads an incoming argument, which
-                    # belongs to whoever called here and is measured from the
-                    # entry stack pointer anyway.
+                    # Only the caller's outgoing arguments occupy this area; an entry-relative load reads an incoming
+                    # argument, which belongs to whoever called here and is measured from the entry stack pointer
+                    # anyway.
                     next unless $addr->{raw} && $addr->{raw} ne 'entry';
                     next unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $stack_reg;
                     $max_disp = List::Util::max( $max_disp, $addr->{disp} // 0 );

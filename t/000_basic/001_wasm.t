@@ -5,8 +5,8 @@ use Brocken;
 use Brocken::Katsuro::Platform;
 #
 # The wasm target lowers, emits, and links without dying, and the module it
-# produces is valid bytecode: the dispatch loop and the branch lowering behind
-# it are exercised here through wasmtime, which validates the whole module.
+# produces is valid bytecode: the dispatch loop and the branch lowering behind it are exercised here through wasmtime,
+# which validates the whole module.
 #
 my $brocken = Brocken->new( platform => Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi') );
 ok $brocken, 'constructor builds a wasm compiler' or diag $@;

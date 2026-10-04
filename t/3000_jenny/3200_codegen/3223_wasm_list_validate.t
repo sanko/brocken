@@ -11,22 +11,18 @@ use feature qw[class];
 
 # A list built inside a subroutine failed to validate on Wasm.
 #
-# The list itself was never the fault. Every function whose IR return type is a
-# pointer or a boxed value gets a fuel-exit block, and that block returns a zero
-# constant of the function's return type. `_wasm_push` chose the constant width
-# from `int` alone, so a `ptr` or `dynamic` zero was pushed as an i32 while the
-# function signature -- and the `ret` -- wanted an i64. The validator reported
-# `type mismatch: expected i64, found i32`, and because a list is normally
-# returned from a helper declared `-> ptr`, every list of that shape hit it.
-# The constant width now comes from `_scalar_bits`, which already counts a
-# pointer and a boxed value as 64 bits.
+# The list itself was never the fault. Every function whose IR return type is a pointer or a boxed value gets a
+# fuel-exit block, and that block returns a zero constant of the function's return type. `_wasm_push` chose the constant
+# width from `int` alone, so a `ptr` or `dynamic` zero was pushed as an i32 while the function signature -- and the
+# `ret` -- wanted an i64. The validator reported `type mismatch: expected i64, found i32`, and because a list is
+# normally returned from a helper declared `-> ptr`, every list of that shape hit it.
+# The constant width now comes from `_scalar_bits`, which already counts a pointer and a boxed value as 64 bits.
 #
 # What this does NOT settle is the lifetime of a box handed out of a frame:
-# Wasm reclaims a function's bump region on return, so a box built inside the
-# helper is freed before the caller reads the list slot that points at it, and
-# the program traps when it runs. That is the `box` -> `bump_alloc` item in
-# TODO.md, separate from whether the module is well formed. These cases assert
-# validation only, which is what was broken here.
+# Wasm reclaims a function's bump region on return, so a box built inside the helper is freed before the caller reads
+# the list slot that points at it, and the program traps when it runs. That is the `box` -> `bump_alloc` item in
+# TODO.md, separate from whether the module is well formed. These cases assert validation only, which is what was broken
+# here.
 my $host     = Brocken::Katsuro::Platform::parse();
 my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $brocken  = Brocken->new( platform => $platform );

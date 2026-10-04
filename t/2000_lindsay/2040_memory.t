@@ -94,8 +94,8 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i64, params => [] );
     $b->position_at_end( $main->append_block('entry') );
 
-    # Simulate our 32KB Immix block by allocating a smaller block on the local stack
-    # (Since we haven't implemented thread-local globals in IR yet)
+    # Simulate our 32KB Immix block by allocating a smaller block on the local stack (Since we haven't implemented
+    # thread-local globals in IR yet)
     my $fake_heap = $b->build_alloca( Brocken::Lindsay::IR::Type::i128(), 'fake_heap' );
 
     # Allocate a pointer to track our cursor, initialized to the start of the fake heap
@@ -127,8 +127,8 @@ SKIP: {
         my $output_file = $brocken->tmpdir . '/memory_model_test' . $brocken->ext;
         $linker->write_executable( $output_file, $funcs, $host );
 
-        # If this succeeds and returns 1, our allocator, RC system,
-        # and cross-function call/spilling logic are mathematically flawless!
+        # If this succeeds and returns 1, our allocator, RC system, and cross-function call/spilling logic are
+        # mathematically flawless!
         run_exec( $output_file, expected_exit => 1, platform => $host, name => 'Bump alloc and RC correctly returns 1 on ' . $host->friendly );
     }
 };

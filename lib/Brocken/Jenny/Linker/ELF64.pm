@@ -7,8 +7,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
     use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
     field $_extern_got_offsets : reader = {};
 
-    # Structurally compliant segment layout grouping all read-only sections
-    # in the RX segment, and keeping only writable sections in the RW segment.
+    # Structurally compliant segment layout grouping all read-only sections in the RX segment, and keeping only writable
+    # sections in the RW segment.
     method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
 
         # Flags: 1=alloc, 2=write, 4=execute
@@ -39,8 +39,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         $layout->add_section( '.eh_frame',     4096, 0 );
         $layout->add_section( '.eh_frame_hdr', 4096, 0 );
         #
-        # Dynamic debug section sizing: compute actual size from debug_data, with a
-        # 256-byte margin to accommodate minor payload growth (alignment padding, etc.).
+        # Dynamic debug section sizing: compute actual size from debug_data, with a 256-byte margin to accommodate minor
+        # payload growth (alignment padding, etc.).
         my $dd = $self->debug_data;
         if ( $dbg >= 1 ) { $layout->add_section( '.debug_line', ( length( $dd->{'.debug_line'} // '' ) + 256 ) || 16384, 0 ); }
         if ( $dbg >= 2 ) {
@@ -180,11 +180,9 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
     #
     # This used to be backticks with a `2>/dev/null` redirect.
     #
-    # The compiler is resolved before the pipe is opened: a bare name that is
-    # not on PATH makes open's child fail to exec and print
-    # `Can't exec "...": No such file or directory` to the inherited STDERR,
-    # which is noise in every link on a host that lacks one of the probe
-    # compilers (the RISC-V lane has no clang). A path is used as given so the
+    # The compiler is resolved before the pipe is opened: a bare name that is not on PATH makes open's child fail to
+    # exec and print `Can't exec "...": No such file or directory` to the inherited STDERR, which is noise in every link
+    # on a host that lacks one of the probe compilers (the RISC-V lane has no clang). A path is used as given so the
     # caller can still point at a stub or an out-of-tree toolchain.
     sub _cc_print_file_name ( $cc, $lib ) {
         my $exe = $cc;
@@ -327,15 +325,14 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform, $self->debug_level );
         }
         else {
-            # Update text size and recalculate layout so all subsequent RVA
-            # lookups (e.g. import_rva, got_rva) reflect the current code size.
+            # Update text size and recalculate layout so all subsequent RVA lookups (e.g. import_rva, got_rva) reflect
+            # the current code size.
             $self->layout->get('.text')->{size} = length($code_bytes) + $entry_stub_len;
 
-            # Update .rodata size to match current rodata content.  Without this,
-            # stale size=0 from a prior empty-rodata compilation causes .calculate()
-            # to place .interp (and other sections) at the same offset as .rodata.
-            # The section-output loop then writes .rodata payload first, then .interp
-            # overwrites it, making string constants read as the dynamic linker path.
+            # Update .rodata size to match current rodata content.  Without this, stale size=0 from a prior empty-rodata
+            # compilation causes .calculate() to place .interp (and other sections) at the same offset as .rodata.
+            # The section-output loop then writes .rodata payload first, then .interp overwrites it, making string
+            # constants read as the dynamic linker path.
             my $_rd = $self->layout->get('.rodata');
             if ($_rd) {
                 my $_rodata_size = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
@@ -780,13 +777,11 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $libpthread = $platform->libpthread_name;
         if ( defined $libpthread ) {
 
-            # Try compiler query to find the actual pthread library. The query
-            # goes through a pipe rather than backticks because the
-            # `2>/dev/null` redirect it used to carry is a POSIX-ism that
-            # cmd.exe rejects: on Windows the redirect failed, the compiler was
-            # never actually consulted, and every link printed three "The system
-            # cannot find the path specified." lines. Now a host with no compiler
-            # for the target just falls through to the platform default.
+            # Try compiler query to find the actual pthread library. The query goes through a pipe rather than backticks
+            # because the `2>/dev/null` redirect it used to carry is a POSIX-ism that cmd.exe rejects: on Windows the
+            # redirect failed, the compiler was never actually consulted, and every link printed three "The system
+            # cannot find the path specified." lines. Now a host with no compiler for the target just falls through to
+            # the platform default.
             my $fallback = $libpthread;
             for my $cc (qw(clang gcc cc)) {
                 my @libs_to_ask = 'libpthread.so';
@@ -805,8 +800,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 last if $libpthread ne $fallback;
             }
 
-            # The threading library must be loaded before libc.so so it can properly intercept
-            # weak internal symbols and initialize Thread Local Storage (TLS).
+            # The threading library must be loaded before libc.so so it can properly intercept weak internal symbols and
+            # initialize Thread Local Storage (TLS).
             push @libs, $libpthread;
         }
         push @libs, $libc;
@@ -852,9 +847,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         for my $name (@imports) {
             $sym_indices{$name} = $sym_idx++;
 
-            # STB_GLOBAL|STT_FUNC = 0x12; STB_WEAK|STT_FUNC = 0x22
-            # sched_setaffinity is absent on DragonFly BSD (it uses pthread_setaffinity_np);
-            # emit it as a weak symbol so RTLD doesn't abort if the symbol is missing.
+            # STB_GLOBAL|STT_FUNC = 0x12; STB_WEAK|STT_FUNC = 0x22 sched_setaffinity is absent on DragonFly BSD (it uses
+            # pthread_setaffinity_np); emit it as a weak symbol so RTLD doesn't abort if the symbol is missing.
             my $st_info = ( $name eq 'sched_setaffinity' && $platform->is_dragonflybsd ) ? 0x22 : 0x12;
             $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, $st_info, 0, 0, 0, 0 );
         }
@@ -981,8 +975,11 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
         $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
 
-# GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit, [7]=pthread_join, [8]=sched_setaffinity, [9]=pthread_mutex_lock, [10]=pthread_mutex_unlock, [11]=pthread_cond_wait, [12]=pthread_cond_signal, [13]=pthread_cond_broadcast, [14]=_init_tls, [15]=_rtld_call_init, [16+]=dynamic extern functions
-# Compute total GOT slots needed: 3 reserved + max slot index from all imports
+        # GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit,
+        # [7]=pthread_join, [8]=sched_setaffinity, [9]=pthread_mutex_lock, [10]=pthread_mutex_unlock,
+        # [11]=pthread_cond_wait, [12]=pthread_cond_signal, [13]=pthread_cond_broadcast, [14]=_init_tls,
+        # [15]=_rtld_call_init, [16+]=dynamic extern functions
+        # Compute total GOT slots needed: 3 reserved + max slot index from all imports
         my $max_got_offset = 0;
         for my $name (@imports) {
             my $off = $self->import_rva($name);
@@ -1021,8 +1018,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $gnu_hash     = '';
         if ( $platform->is_dragonflybsd ) {
 
-            # GNU hash table (DT_GNU_HASH / .gnu.hash) -- DragonFly ld-elf.so.2
-            # requires it for TLS initialization (SYSV .hash alone is insufficient).
+            # GNU hash table (DT_GNU_HASH / .gnu.hash) -- DragonFly ld-elf.so.2 requires it for TLS initialization (SYSV
+            # .hash alone is insufficient).
             my $dl_new_hash = sub {
                 my $name = shift;
                 my $h    = 5381;
@@ -1396,10 +1393,9 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
 
             # PT_TLS=7: Creates a minimal thread-local storage segment.
             # Required on FreeBSD to trigger rtld TLS initialization.
-            # On DragonFly this actually HARM: the kernel sets FS.base to an
-            # 8-byte zero-filled area from our PT_TLS, but libc's sigblockall
-            # expects a full TCB there. Without PT_TLS the kernel leaves FS.base
-            # alone and rtld manages it correctly (matching GCC's behavior).
+            # On DragonFly this actually HARM: the kernel sets FS.base to an 8-byte zero-filled area from our PT_TLS,
+            # but libc's sigblockall expects a full TCB there. Without PT_TLS the kernel leaves FS.base alone and rtld
+            # manages it correctly (matching GCC's behavior).
             my $data_sec  = $self->layout->get('.data');
             my $tls_vaddr = $data_sec ? $base + $data_sec->{rva} : $base;
             my $tls_off   = $data_sec ? $data_sec->{off}         : 0;
@@ -1410,9 +1406,10 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e551, 6, 0, 0, 0, 0, 0, 0x10 );
         my $entry_point = $self->type eq 'shared' ? 0 : $base + $self->layout->get('.text')->{rva};
 
-# ELF64 header (e_ident + e_type/e_machine/e_version + e_entry/e_phoff/e_shoff + e_flags + e_ehsize/e_phentsize/e_phnum/e_shentsize/e_shnum/e_shstrndx)
-# e_machine: EM_AARCH64=183, EM_RISCV=243, EM_X86_64=62
-# e_flags: RISC-V EF_RISCV_RVC=0x0004 (compressed insns), else 0
+        # ELF64 header (e_ident + e_type/e_machine/e_version + e_entry/e_phoff/e_shoff + e_flags +
+        # e_ehsize/e_phentsize/e_phnum/e_shentsize/e_shnum/e_shstrndx)
+        # e_machine: EM_AARCH64=183, EM_RISCV=243, EM_X86_64=62
+        # e_flags: RISC-V EF_RISCV_RVC=0x0004 (compressed insns), else 0
         my $ehdr = pack(
             'A4 C C C C C x7 S< S< L< Q< Q< Q< L< S< S< S< S< S< S<',
             "\x7fELF", 2, 1, 1, $osabi, 0, $elf_type, ( $platform->is_arm64 ? 183 : ( $platform->is_riscv64 ? 243 : 62 ) ),

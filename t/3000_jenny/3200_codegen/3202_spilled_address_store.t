@@ -11,38 +11,30 @@ use feature qw[class];
 
 # A store through an address that the allocator spilled.
 #
-# The allocator kept exactly one scratch register for spill reloads, so an
-# instruction that needed two spilled values at once had nowhere to put the
-# second one.  A store whose address is a spilled local and whose value is
-# another spilled local is exactly that shape: the address is one spilled value
-# and the stored value is another.  Both were reloaded into the same scratch, so
-# the reload of the value overwrote the address and the store wrote through
-# whatever the value happened to be -- a small integer, from a parameter, which
-# on x86-64 is an unmapped address.  The result was an access violation at run
-# time from code that encoded without a single diagnostic.
+# The allocator kept exactly one scratch register for spill reloads, so an instruction that needed two spilled values at
+# once had nowhere to put the second one.  A store whose address is a spilled local and whose value is
+# another spilled local is exactly that shape: the address is one spilled value and the stored value is another.  Both
+# were reloaded into the same scratch, so the reload of the value overwrote the address and the store wrote through
+# whatever the value happened to be -- a small integer, from a parameter, which on x86-64 is an unmapped address.  The
+# result was an access violation at run time from code that encoded without a single diagnostic.
 #
-# The count that trips it is not a constant of the language.  It is whatever
-# makes the allocator run out of registers while every address is still live,
-# and that is per backend, so each count below is chosen to force spilling.  The
-# structural check fails when a count did not spill, rather than passing
-# vacuously.
+# The count that trips it is not a constant of the language.  It is whatever makes the allocator run out of registers
+# while every address is still live, and that is per backend, so each count below is chosen to force spilling.  The
+# structural check fails when a count did not spill, rather than passing vacuously.
 #
-# Reserving the second register is itself a cost, and it is easy to pay it in the
-# wrong place.  Taking a register out of the pool for every function shrinks
-# that pool by one everywhere and changes assignments that were correct before,
-# which is a different set of bugs entirely.  So the allocator only reserves it
-# once a first pass has produced a real collision, and these tests hold it to
-# that: the structural check covers the backends, and the run confirms the
-# programs that were already correct still are.
+# Reserving the second register is itself a cost, and it is easy to pay it in the wrong place.  Taking a register out of
+# the pool for every function shrinks that pool by one everywhere and changes assignments that were correct before,
+# which is a different set of bugs entirely.  So the allocator only reserves it once a first pass has produced a real
+# collision, and these tests hold it to
+# that: the structural check covers the backends, and the run confirms the programs that were already correct still are.
 #
 # Two things are checked.  The run checks observable behaviour, which is the only
-# thing that catches a store landing on the wrong address: a wrong sum has to be
-# a wrong sum, not merely a program that happened not to fault.  The structural
-# check then covers every backend, including the ones that cannot be executed
-# here, and states the invariant directly -- when an instruction is handed a
-# reloaded address and a reloaded value, the two sit in different registers.
-# Enough arguments to overrun the register file on each backend, low enough
-# that the ones that spill to the stack still land in a sane frame.
+# thing that catches a store landing on the wrong address: a wrong sum has to be a wrong sum, not merely a program that
+# happened not to fault.  The structural check then covers every backend, including the ones that cannot be executed
+# here, and states the invariant directly -- when an instruction is handed a reloaded address and a reloaded value, the
+# two sit in different registers.
+# Enough arguments to overrun the register file on each backend, low enough that the ones that spill to the stack still
+# land in a sane frame.
 my %COUNT   = ( x86_64 => 16, aarch64 => 40, riscv64 => 32 );
 my @TARGETS = (
     [ 'x86_64-pc-windows-msvc',    'Brocken::Jenny::Lowerer::X86_64' ],
@@ -51,9 +43,8 @@ my @TARGETS = (
     [ 'riscv64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::RISCV64' ],
 );
 
-# Each argument is a distinct odd multiple of 7, so the sums for the counts
-# above stay distinct once the process exit code truncates them to a byte, and
-# losing or duplicating a single argument moves the result.
+# Each argument is a distinct odd multiple of 7, so the sums for the counts above stay distinct once the process exit
+# code truncates them to a byte, and losing or duplicating a single argument moves the result.
 sub sum_src($n) {
     my @args   = map { 7 * $_ } 1 .. $n;
     my $params = join ', ',  map {"i64 \$p$_"} 0 .. $n - 1;
@@ -68,9 +59,8 @@ BROCKEN
 }
 sub expected_sum($n) { return ( 7 * $n * ( $n + 1 ) / 2 ) & 0xFF }
 
-# Walk the run of spill reloads in front of each instruction.  When a run holds
-# both a reloaded address and a reloaded value, the instruction is about to use
-# two spilled values at once and they cannot share a register.
+# Walk the run of spill reloads in front of each instruction.  When a run holds both a reloaded address and a reloaded
+# value, the instruction is about to use two spilled values at once and they cannot share a register.
 sub reload_reg_conflict($mf) {
     my @bad;
     for my $bb ( $mf->blocks->@* ) {

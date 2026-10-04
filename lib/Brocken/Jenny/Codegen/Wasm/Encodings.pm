@@ -193,11 +193,10 @@ package Brocken::Jenny::Codegen::Wasm::Encodings v0.0.1 {
 
         # Conversions
         #
-        # The int/float conversions each name both widths, so there is one
-        # constant per combination rather than one per direction. Verified
-        # against `wat2wasm` rather than read off a table: `i64.trunc_f64_s` is
-        # 0xB0, with 0xAE being `i64.trunc_f32_s` and 0xA8 `i32.trunc_f32_s`,
-        # and `f64.convert_i64_s` is 0xB9, with 0xBB being `f64.promote_f32`.
+        # The int/float conversions each name both widths, so there is one constant per combination rather than one per
+        # direction. Verified against `wat2wasm` rather than read off a table: `i64.trunc_f64_s` is 0xB0, with 0xAE
+        # being `i64.trunc_f32_s` and 0xA8 `i32.trunc_f32_s`, and `f64.convert_i64_s` is 0xB9, with 0xBB being
+        # `f64.promote_f32`.
         I32_WRAP_I64      => 0xA7,    # i32.wrap_i64
         I64_EXTEND_I32_S  => 0xAC,    # i64.extend_i32_s
         I64_EXTEND_I32_U  => 0xAD,    # i64.extend_i32_u

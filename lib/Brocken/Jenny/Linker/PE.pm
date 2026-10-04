@@ -11,8 +11,8 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         # Ensure $platform is normalized into a platform object if a raw string is passed
         $platform = Brocken::Katsuro::Platform::parse($platform) unless ref $platform;
 
-        # Multi-function support: if $code_data is an arrayref of {name, bytes, fixups},
-        # concatenate all blobs, compute function offsets, and track external fixups.
+        # Multi-function support: if $code_data is an arrayref of {name, bytes, fixups}, concatenate all blobs, compute
+        # function offsets, and track external fixups.
         my @func_fixups;
         my %func_offsets;
         my $code_bytes;
@@ -297,8 +297,8 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $idata_bytes = '';
         my $idata_rva   = 0;
 
-        # Pre-compute idata RVA (text + preceding sections, page-aligned)
-        # Account for import stubs that will be appended to .text during fixup resolution
+        # Pre-compute idata RVA (text + preceding sections, page-aligned) Account for import stubs that will be appended
+        # to .text during fixup resolution
         my $import_stub_overhead = 0;
         if ( $platform->is_arm64 ) {
             $import_stub_overhead = scalar(@import_list) * 12;    # ADRP + LDR + BR (4 bytes each)
@@ -562,8 +562,8 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die "Cannot open $output_file for writing: $!";
         binmode $fh;
 
-        # DOS MZ Header (Exactly 64 bytes: a2=magic, v29=29 WORDS, V=e_lfanew)
-        # We explicitly use v29 and count-matched repetition to avoid pack argument shifts.
+        # DOS MZ Header (Exactly 64 bytes: a2=magic, v29=29 WORDS, V=e_lfanew) We explicitly use v29 and count-matched
+        # repetition to avoid pack argument shifts.
         my $dos_header = pack( 'a2 v29 V',
             'MZ',   0x0090, 0x0003, 0x0000,          0x0004, 0x0000,      0xffff, 0x0000, 0x0100, 0x0000,
             0x0000, 0x0000, 0x0040, 0x0000, (0) x 4, 0,      0, (0) x 10, 0x00000080 );
@@ -731,9 +731,10 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         # COFF characteristics: 0x0022 = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE
         my $file_header = pack( 'v2 V3 v2', $machine, $num_sections, $timestamp, $pointer_to_symbol_table, $num_coff_symbols, 240, 0x0022 );
 
-        # PE32+ Optional Header (Magic=0x020b): fields include entry, image base 0x140000000, section alignment 0x1000, file alignment 0x200,
-        # subsystem=3 (CONSOLE), DLL characteristics=0x8160 (NX compatible + TSA aware + DYNAMIC_BASE),
-        # stack reserve 0x400000 (4MB), stack commit 0x200000 (2MB covers 1MB entry-stub heap), heap reserve 0x100000, heap commit 0x1000
+        # PE32+ Optional Header (Magic=0x020b): fields include entry, image base 0x140000000, section alignment 0x1000,
+        # file alignment 0x200, subsystem=3 (CONSOLE), DLL characteristics=0x8160 (NX compatible + TSA aware +
+        # DYNAMIC_BASE), stack reserve 0x400000 (4MB), stack commit 0x200000 (2MB covers 1MB entry-stub heap), heap
+        # reserve 0x100000, heap commit 0x1000
         my $init_debug_size = 0;
         $init_debug_size += $_ for values %debug_raw_sizes;
         my $size_of_image = $sec_rva;

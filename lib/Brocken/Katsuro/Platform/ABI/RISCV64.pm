@@ -10,9 +10,9 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 v0.0.1 : isa(Brocken::Katsuro::Pl
     method registers( $category = 'available' ) {
         my %data = (
 
-            # Order matters: t0-t6 (non-param caller regs) come before a1-a7 (param caller regs)
-            # to avoid register allocator assigning vregs to param regs that get clobbered
-            # by argument-setup mov instructions in the Lowerer.
+            # Order matters: t0-t6 (non-param caller regs) come before a1-a7 (param caller regs) to avoid register
+            # allocator assigning vregs to param regs that get clobbered by argument-setup mov instructions in the
+            # Lowerer.
             available => [qw[a0 t0 t1 t2 t3 t4 t5 t6 a1 a2 a3 a4 a5 a6 a7 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11]],
             caller    => [qw[a0 t0 t1 t2 t3 t4 t5 t6 a1 a2 a3 a4 a5 a6 a7]],
             callee    => [qw[s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11]]
@@ -23,9 +23,8 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 v0.0.1 : isa(Brocken::Katsuro::Pl
     method stack_reg()       {'sp'}
     method param_registers() { [qw(a0 a1 a2 a3 a4 a5 a6 a7)] }
 
-    # The floating-point file starts at fa0 rather than f0: fa0-fa7 are f10-f17,
-    # while f0-f7 are the scratch registers ft0-ft7.  The two files are indexed
-    # independently, so an integer overflow is not charged to this one.
+    # The floating-point file starts at fa0 rather than f0: fa0-fa7 are f10-f17, while f0-f7 are the scratch registers
+    # ft0-ft7.  The two files are indexed independently, so an integer overflow is not charged to this one.
     method fp_param_registers() { [qw(f10 f11 f12 f13 f14 f15 f16 f17)] }
     method return_register()    {'a0'}
     method fp_return_register() {'f10'}
@@ -34,12 +33,11 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 v0.0.1 : isa(Brocken::Katsuro::Pl
     method return_pair_registers() { return (qw(a0 a1)) }
     method fiber_reg()             {'s11'}
 
-    # Arguments past the last of a0-a7 arrive on the stack.  RISC-V's `call`
-    # puts the return address in ra rather than pushing it, so nothing sits
-    # below the arguments: on entry sp points directly at the first stack
-    # argument and the offset does not skip a return address the way x86-64's
-    # does.  The call instruction does not move sp either, so the caller-side
-    # offset is the same.
+    # Arguments past the last of a0-a7 arrive on the stack.  RISC-V's `call` puts the return address in ra rather than
+    # pushing it, so nothing sits
+    # below the arguments: on entry sp points directly at the first stack argument and the offset does not skip a return
+    # address the way x86-64's does.  The call instruction does not move sp either, so the caller-side offset is the
+    # same.
     method stack_param_offset($index)        { 8 * $index }
     method caller_stack_param_offset($index) { 8 * $index }
 

@@ -15,9 +15,8 @@ my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
 chomp $wasmtime_path if $wasmtime_path;
 
-# A `_start` whose body traps instead of calling the entry. Reached only when
-# `wasmtime run` finds and runs `_start`, so a failing exit here is the proof
-# that the stub really is what runs the module.
+# A `_start` whose body traps instead of calling the entry. Reached only when `wasmtime run` finds and runs `_start`, so
+# a failing exit here is the proof that the stub really is what runs the module.
 class TrapStart : isa(Brocken::Jenny::Linker::Wasm) {
 
     method _start_body( $entry_index, $entry = undef ) {
@@ -65,14 +64,12 @@ subtest 'Wasm module runs as a WASI command' => sub {
     unlink $module if -e $module;
 };
 
-# The memory has to cover four things: the base itself, the runtime state written
-# there (the ICB, 144 bytes, plus the Immix block that starts right after it), the
-# whole heap the entry preamble promises Brocken::Runtime::_init, and the frame
-# region that sits above the arena. That last part is what this used to miss --
-# the module reserved one 64KB page while telling the runtime it had a megabyte,
-# so a native target got away with it (its mmap grows on demand) and a Wasm module
-# handed the allocator a range past the end of linear memory. One boxed variable
-# fit in the page that was really there; a second trapped.
+# The memory has to cover four things: the base itself, the runtime state written there (the ICB, 144 bytes, plus the
+# Immix block that starts right after it), the
+# whole heap the entry preamble promises Brocken::Runtime::_init, and the frame region that sits above the arena. That
+# last part is what this used to miss -- the module reserved one 64KB page while telling the runtime it had a megabyte,
+# so a native target got away with it (its mmap grows on demand) and a Wasm module handed the allocator a range past the
+# end of linear memory. One boxed variable fit in the page that was really there; a second trapped.
 subtest 'Wasm memory covers the base, its state, the heap and the frames' => sub {
     my $heap    = Brocken::ICB::HEAP_SIZE;
     my $reserve = Brocken::Jenny::Linker::Wasm::FRAME_RESERVE;
@@ -84,8 +81,8 @@ subtest 'Wasm memory covers the base, its state, the heap and the frames' => sub
     is( Brocken::Jenny::Linker::Wasm->new->_initial_pages, $want->(1024), 'the default base reserves the whole heap and the frame region' );
     is( Brocken::Jenny::Linker::Wasm->new( heap_base => 65536 )->_initial_pages, $want->(65536), 'a base past 64KB adds a page on top' );
 
-    # A heap smaller than the base still has to be reserved, the runtime state at
-    # the base must not fall off the end, and the frame region has to fit too.
+    # A heap smaller than the base still has to be reserved, the runtime state at the base must not fall off the end,
+    # and the frame region has to fit too.
     is(
         Brocken::Jenny::Linker::Wasm->new( heap_base => 65536, heap_size => 16 )->_initial_pages,
         $want->( 65536, 16 ),
@@ -96,8 +93,8 @@ subtest 'Wasm memory covers the base, its state, the heap and the frames' => sub
     link_module( $module, Brocken::Jenny::Linker::Wasm->new( heap_base => 70000 ) );
     my $bytes = do { open my $fh, '<', $module or die $!; binmode $fh; local $/; <$fh> };
 
-    # id 5, a three-byte body, one memory, no maximum. The last byte is the
-    # initial page count, and it has to be the count _initial_pages promised.
+    # id 5, a three-byte body, one memory, no maximum. The last byte is the initial page count, and it has to be the
+    # count _initial_pages promised.
     my $page_byte = chr $pages;
     like $bytes, qr/\x05\x03\x01\x00\Q$page_byte\E/, 'the emitted memory section declares the whole heap';
     unlink $module if -e $module;

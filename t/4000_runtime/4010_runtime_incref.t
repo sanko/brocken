@@ -90,8 +90,8 @@ subtest 'Return boxed Any survives decref cleanup' => sub {
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
 
-        # Regression: lower_return used to decref ALL RC locals before build_ret,
-        # which freed the returned object (RC 1 -> 0) and returned a dangling pointer.
+        # Regression: lower_return used to decref ALL RC locals before build_ret, which freed the returned object (RC 1
+        # -> 0) and returned a dangling pointer.
         # The fix adds build_incref($val) before the decref loop.
         my $module = Brocken->new->compile(<<'BROCKEN');
 sub wrap(i64 $n) -> i64 {

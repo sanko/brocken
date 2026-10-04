@@ -13,9 +13,8 @@ SKIP: {
     skip 'Isolate chain test only on native hosts', 1 unless $host->is_native;
 
     # Every isolate here dies with SIGSEGV on OmniOS/illumos r151050 (gcc13).
-    # The generated trampoline and its pthread/TLS setup are not yet correct for
-    # that platform; the same binaries run fine on Linux, the BSDs, macOS and
-    # Windows. See the illumos lane in .github/workflows/ci.yml.
+    # The generated trampoline and its pthread/TLS setup are not yet correct for that platform; the same binaries run
+    # fine on Linux, the BSDs, macOS and Windows. See the illumos lane in .github/workflows/ci.yml.
     skip 'Isolate spawn segfaults on illumos', 1 if $host->is_solaris;
     my $i32 = Brocken::Lindsay::IR::Type::i32();
     my $i64 = Brocken::Lindsay::IR::Type::i64();

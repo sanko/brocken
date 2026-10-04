@@ -64,8 +64,8 @@ SKIP: {
     };
     subtest 'a narrow signed value read back from memory keeps its sign' => sub {
 
-        # The load is what these all pass through, so the sign has to survive
-        # the round trip through the slot rather than sitting in a register.
+        # The load is what these all pass through, so the sign has to survive the round trip through the slot rather
+        # than sitting in a register.
         for my $ty (qw[i8 i16]) {
             wasm_ans( "my $ty \$a = 0; my $ty \$b = 3; my $ty \$c = \$a - \$b; my $ty \$d = \$c / \$b; return \$d + 64;", 63, "$ty -3 / 3 is -1" );
             wasm_ans( "my $ty \$a = 0; my $ty \$b = 4; my $ty \$c = \$a - \$b; my $ty \$d = \$c >> 2; return (\$d + 64) & 255;",

@@ -110,9 +110,8 @@ my $a = 10;
 my $b = 20;
 my $c = 30;
 my i64 $used = Brocken::load_i64(Brocken::ptr_add($hb, 96));
-# Each Any allocation goes through bump_alloc and increments memory_used
-# The bump_alloc memory_used increments happen per bump_alloc call,
-# but the free16 hot-path does NOT increment memory_used.
+# Each Any allocation goes through bump_alloc and increments memory_used The bump_alloc memory_used increments happen
+# per bump_alloc call, but the free16 hot-path does NOT increment memory_used.
 # After 3 fresh allocations (no free16 recycling), memory_used should be >= 48
 if ($used < 48) { return 1; }
 return 0;

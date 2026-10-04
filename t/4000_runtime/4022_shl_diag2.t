@@ -47,11 +47,9 @@ if (Brocken::ptr_cmp_eq($r62, 0)) { $fail = 62; }
 my i64 $r63 = Brocken::shl(1, 63);
 if (Brocken::ptr_cmp_eq($r63, 0)) { $fail = 63; }
 
-# --- Phase 2: cross-check consistency ---
-# shl(1, N) == shl(1, N-1) << 1 for all N we tested
-# We already have the values, check: r31 must be non-zero and r63 must be non-zero
-# If both r31 and r63 are non-zero, test that r31 shifted left by 32 gives r63.
-# r31 << 32 = shl(r31, 32)
+# --- Phase 2: cross-check consistency --- shl(1, N) == shl(1, N-1) << 1 for all N we tested We already have the values,
+# check: r31 must be non-zero and r63 must be non-zero If both r31 and r63 are non-zero, test that r31 shifted left by
+# 32 gives r63. r31 << 32 = shl(r31, 32)
 my i64 $r31_shl32 = Brocken::shl($r31, 32);
 if (!Brocken::ptr_cmp_eq($r31_shl32, $r63)) { $fail = 70; }
 
