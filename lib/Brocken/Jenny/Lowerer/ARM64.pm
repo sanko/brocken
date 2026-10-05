@@ -970,12 +970,18 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                 );
                             }
                             elsif ( $opcode eq 'div' || $opcode eq 'rem' || $opcode eq 'udiv' || $opcode eq 'urem' ) {
+
+                                # Both the fast path and the shift-subtract loop below are unsigned -- udiv, cset_cs and
+                                # cset_ne do not look at a sign bit -- so the abs prologue and the sign epilogue are the
+                                # only signedness here. A u128 operand took both of them and came back with a negative
+                                # answer for every dividend above 2^127.
+                                my $is_signed = $opcode eq 'div' || $opcode eq 'rem';
                                 my ( $lo_lhs, $hi_lhs ) = $self->_split_i128($lhs);
                                 my ( $lo_rhs, $hi_rhs ) = $self->_split_i128($rhs);
                                 my $fast_path;
                                 if ( $lo_rhs->kind eq 'imm' && $hi_rhs->kind eq 'imm' ) {
                                     $fast_path = $hi_rhs->value == 0;
-                                    if ( !$fast_path && $hi_rhs->value < 0 ) {
+                                    if ( $is_signed && !$fast_path && $hi_rhs->value < 0 ) {
                                         $fast_path = $lo_rhs->value != 0;
                                     }
                                 }
@@ -1110,86 +1116,89 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $hi, $tmp ] ) );
                                 };
-                                my $sign_d = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_sgnd',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $sign_d, $hi_lhs ],
-                                        comment  => 'i128 sign d mv'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'lshr',
-                                        operands => [ $sign_d, $sixty3 ],
-                                        comment  => 'i128 sign d lshr'
-                                    )
-                                );
-                                my $mask_d = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_mskd',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $mask_d, $imm->(0) ],
-                                        comment  => 'i128 mask d=0'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sub',
-                                        operands => [ $mask_d, $sign_d ],
-                                        comment  => 'i128 mask d=-sign'
-                                    )
-                                );
-                                $apply_mask128->( $inst->name . '_ad', $lo_lhs, $hi_lhs, $mask_d );
-                                my $sign_v = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_signv',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $sign_v, $hi_rhs ],
-                                        comment  => 'i128 sign v mv'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'lshr',
-                                        operands => [ $sign_v, $sixty3 ],
-                                        comment  => 'i128 sign v lshr'
-                                    )
-                                );
-                                my $mask_v = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_mskv',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $mask_v, $imm->(0) ],
-                                        comment  => 'i128 mask v=0'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sub',
-                                        operands => [ $mask_v, $sign_v ],
-                                        comment  => 'i128 mask v=-sign'
-                                    )
-                                );
-                                $apply_mask128->( $inst->name . '_av', $lo_rhs, $hi_rhs, $mask_v );
+                                my ( $sign_d, $mask_d, $sign_v, $mask_v );
+                                if ($is_signed) {
+                                    $sign_d = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_sgnd',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $sign_d, $hi_lhs ],
+                                            comment  => 'i128 sign d mv'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'lshr',
+                                            operands => [ $sign_d, $sixty3 ],
+                                            comment  => 'i128 sign d lshr'
+                                        )
+                                    );
+                                    $mask_d = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_mskd',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $mask_d, $imm->(0) ],
+                                            comment  => 'i128 mask d=0'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sub',
+                                            operands => [ $mask_d, $sign_d ],
+                                            comment  => 'i128 mask d=-sign'
+                                        )
+                                    );
+                                    $apply_mask128->( $inst->name . '_ad', $lo_lhs, $hi_lhs, $mask_d );
+                                    $sign_v = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_signv',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $sign_v, $hi_rhs ],
+                                            comment  => 'i128 sign v mv'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'lshr',
+                                            operands => [ $sign_v, $sixty3 ],
+                                            comment  => 'i128 sign v lshr'
+                                        )
+                                    );
+                                    $mask_v = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_mskv',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $mask_v, $imm->(0) ],
+                                            comment  => 'i128 mask v=0'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sub',
+                                            operands => [ $mask_v, $sign_v ],
+                                            comment  => 'i128 mask v=-sign'
+                                        )
+                                    );
+                                    $apply_mask128->( $inst->name . '_av', $lo_rhs, $hi_rhs, $mask_v );
+                                }
 
-                                # ---- end signed handling ----
+                                # end signed handling
                                 if ($fast_path) {
 
                                     # q_hi = hi_lhs / lo_rhs  (64-bit native udiv)
@@ -1846,62 +1855,66 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                         }
                                     }
                                 }
-                                my $sign_q_tmp = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_sqt',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                my $mask_q = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_mskq',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $sign_q_tmp, $sign_d ] ) );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'xor',
-                                        operands => [ $sign_q_tmp, $sign_v ],
-                                        comment  => 'i128 q sign = d ^ v'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $mask_q, $imm->(0) ],
-                                        comment  => 'i128 mask q=0'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sub',
-                                        operands => [ $mask_q, $sign_q_tmp ],
-                                        comment  => 'i128 mask q=-sign'
-                                    )
-                                );
-                                $apply_mask128->( $inst->name . '_aq', $q_lo, $q_hi, $mask_q );
-                                my $mask_r = Brocken::Jenny::MIR::MachineOperand->new(
-                                    kind  => 'virt_reg',
-                                    value => $inst->name . '_mskr',
-                                    type  => Brocken::Lindsay::IR::Type::i64()
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mv',
-                                        operands => [ $mask_r, $imm->(0) ],
-                                        comment  => 'i128 mask r=0'
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'sub',
-                                        operands => [ $mask_r, $sign_d ],
-                                        comment  => 'i128 mask r=-sign'
-                                    )
-                                );
-                                $apply_mask128->( $inst->name . '_ar', $r_lo, $r_hi, $mask_r );
-                                my $out_lo = $opcode eq 'div' ? $q_lo : $r_lo;
-                                my $out_hi = $opcode eq 'div' ? $q_hi : $r_hi;
+                                my ( $sign_q_tmp, $mask_q, $mask_r );
+                                if ($is_signed) {
+                                    $sign_q_tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_sqt',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mask_q = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_mskq',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $sign_q_tmp, $sign_d ] ) );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'xor',
+                                            operands => [ $sign_q_tmp, $sign_v ],
+                                            comment  => 'i128 q sign = d ^ v'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $mask_q, $imm->(0) ],
+                                            comment  => 'i128 mask q=0'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sub',
+                                            operands => [ $mask_q, $sign_q_tmp ],
+                                            comment  => 'i128 mask q=-sign'
+                                        )
+                                    );
+                                    $apply_mask128->( $inst->name . '_aq', $q_lo, $q_hi, $mask_q );
+                                    $mask_r = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_mskr',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $mask_r, $imm->(0) ],
+                                            comment  => 'i128 mask r=0'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'sub',
+                                            operands => [ $mask_r, $sign_d ],
+                                            comment  => 'i128 mask r=-sign'
+                                        )
+                                    );
+                                    $apply_mask128->( $inst->name . '_ar', $r_lo, $r_hi, $mask_r );
+                                }
+                                my $is_div = $opcode eq 'div' || $opcode eq 'udiv';
+                                my $out_lo = $is_div ? $q_lo : $r_lo;
+                                my $out_hi = $is_div ? $q_hi : $r_hi;
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mv',

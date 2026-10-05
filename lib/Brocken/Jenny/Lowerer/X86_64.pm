@@ -992,6 +992,12 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             );
                         }
                         elsif ( $opcode eq 'div' || $opcode eq 'udiv' || $opcode eq 'rem' || $opcode eq 'urem' ) {
+
+                            # `div128_64` is an unsigned x86 DIV and the shift-subtract loop below compares with
+                            # unsigned seta/setb, so the abs prologue and the sign epilogue are the only signedness here.
+                            # A u128 divisor took both of them and came back with a negative answer for every dividend
+                            # above 2^127.
+                            my $is_signed = $opcode eq 'div' || $opcode eq 'rem';
                             my ( $lo_lhs, $hi_lhs ) = $self->_split_i128($lhs);
                             my ( $lo_rhs, $hi_rhs ) = $self->_split_i128($rhs);
                             my $fast_path;
@@ -1000,7 +1006,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
 
                                 # Signed negative divisor (hi<0): after abs, hi=0 iff |divisor| < 2^64.
                                 # -2^64 is the only negative with |value| >= 2^64 for which hi=-1 and lo=0.
-                                if ( !$fast_path && $hi_rhs->value < 0 ) {
+                                if ( $is_signed && !$fast_path && $hi_rhs->value < 0 ) {
                                     $fast_path = $lo_rhs->value != 0;
                                 }
                             }
@@ -1120,7 +1126,9 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             };
 
                             # dividend sign + abs
-                            my $sign_d = Brocken::Jenny::MIR::MachineOperand->new(
+                            my ( $sign_d, $mask_d, $sign_v, $mask_v );
+                            if ($is_signed) {
+                            $sign_d = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'virt_reg',
                                 value => $inst->name . '_sgnd',
                                 type  => Brocken::Lindsay::IR::Type::i64()
@@ -1139,7 +1147,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                     comment  => 'i128 sign d shr'
                                 )
                             );
-                            my $mask_d = Brocken::Jenny::MIR::MachineOperand->new(
+                            $mask_d = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'virt_reg',
                                 value => $inst->name . '_mskd',
                                 type  => Brocken::Lindsay::IR::Type::i64()
@@ -1161,7 +1169,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             $apply_mask128->( $inst->name . '_ad', $lo_lhs, $hi_lhs, $mask_d );
 
                             # divisor sign + abs
-                            my $sign_v = Brocken::Jenny::MIR::MachineOperand->new(
+                            $sign_v = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'virt_reg',
                                 value => $inst->name . '_signv',
                                 type  => Brocken::Lindsay::IR::Type::i64()
@@ -1180,7 +1188,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                     comment  => 'i128 sign v shr'
                                 )
                             );
-                            my $mask_v = Brocken::Jenny::MIR::MachineOperand->new(
+                            $mask_v = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'virt_reg',
                                 value => $inst->name . '_mskv',
                                 type  => Brocken::Lindsay::IR::Type::i64()
@@ -1200,6 +1208,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                 )
                             );
                             $apply_mask128->( $inst->name . '_av', $lo_rhs, $hi_rhs, $mask_v );
+                            }
 
                             # ---- end signed handling ----
                             if ($fast_path) {
@@ -1241,6 +1250,18 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                         opcode   => 'mov',
                                         operands => [ $r_lo, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ) ],
                                         comment  => 'i128 div fast r_lo = (r:lo)%lo'
+                                    )
+                                );
+
+                                # r_hi still holds `hi % divisor`, the intermediate carried into the second division.
+                                # A divisor below 2^64 leaves a remainder that fits in r_lo alone, so a dividend above
+                                # 2^64 returned a 128-bit remainder whose high half was that leftover -- 42 % 10 was
+                                # unaffected only because its high half is 0 to begin with.
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $r_hi, $imm128->(0) ],
+                                        comment  => 'i128 div fast r_hi=0'
                                     )
                                 );
                             }
@@ -1671,12 +1692,14 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             }
 
                             # ---- signed i128 div/rem: apply sign to quotient and remainder ----
-                            my $sign_q_tmp = Brocken::Jenny::MIR::MachineOperand->new(
+                            my ( $sign_q_tmp, $mask_q, $mask_r );
+                            if ($is_signed) {
+                            $sign_q_tmp = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'virt_reg',
                                 value => $inst->name . '_sqt',
                                 type  => Brocken::Lindsay::IR::Type::i64()
                             );
-                            my $mask_q = Brocken::Jenny::MIR::MachineOperand->new(
+                            $mask_q = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'virt_reg',
                                 value => $inst->name . '_mskq',
                                 type  => Brocken::Lindsay::IR::Type::i64()
@@ -1705,7 +1728,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                 )
                             );
                             $apply_mask128->( $inst->name . '_aq', $q_lo, $q_hi, $mask_q );
-                            my $mask_r = Brocken::Jenny::MIR::MachineOperand->new(
+                            $mask_r = Brocken::Jenny::MIR::MachineOperand->new(
                                 kind  => 'virt_reg',
                                 value => $inst->name . '_mskr',
                                 type  => Brocken::Lindsay::IR::Type::i64()
@@ -1725,6 +1748,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                 )
                             );
                             $apply_mask128->( $inst->name . '_ar', $r_lo, $r_hi, $mask_r );
+                            }
 
                             # ---- end signed handling ----
                             my $is_div = $opcode eq 'div' || $opcode eq 'udiv';
