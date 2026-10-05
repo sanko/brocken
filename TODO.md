@@ -60,16 +60,16 @@ Neither is a stage of the compiler, so neither is a namespace.
 ## Active Sprint: Memory Management Runtime (R0–R1)
 
 ### R0: Fix Fat Scalar Box Layout
-- [ ] Change `box` in all 4 MIR lowerers: store header word (packed refcount+flags+tag+pad) at `[ptr+0]`, payload at `[ptr+8]` instead of payload at `[ptr+0]` and tag at `[ptr+8]`
-- [ ] Change `unbox` to load payload from `[ptr+8]` instead of `[ptr+0]`
-- [ ] Update `_type_tag` and related metadata
-- [ ] Tests in `t/4000_runtime/`
+- [x] Change `box` in all 4 MIR lowerers: store header word (packed refcount+flags+tag+pad) at `[ptr+0]`, payload at `[ptr+8]` instead of payload at `[ptr+0]` and tag at `[ptr+8]` — all four lowerers already do this; each packs the header as `_type_tag << 24` over a zeroed word and stores the payload at `[ptr+8]`, and `box` no longer uses `alloca` (see R2).
+- [x] Change `unbox` to load payload from `[ptr+8]` instead of `[ptr+0]` — the runtime's `unbox_i64`/`unbox_f64` read `[ptr+8]`, and the direct `unbox` instruction loads from `[ptr+8]` on all 4 lowerers.
+- [x] Update `_type_tag` and related metadata — all 4 lowerers return the same tag for each type kind, and the runtime dispatches on it; the numbering actually in use is now the one in the layout table below.
+- [x] Tests in `t/4000_runtime/` — the box layout itself is covered by `t/2000_lindsay/2050_boxing.t` and the returned-box subtest in `t/3000_jenny/3200_codegen/3306_wasm_box_untyped_locals.t`; `t/4000_runtime/` covers the runtime side that reads the header.
 
 ### R1: Immediate Reference Counting
-- [ ] Implement `Brocken::Runtime::incref`/`decref` in `core.brocken` (load u16 at `[ptr+0]`, inc/dec, store; decref to 0 → free)
-- [ ] Wire RC injection in frontend Lowerer (`Katsuro/Lowerer.pm`) - `build_incref` on assignment, `build_decref` on scope exit
+- [x] Implement `Brocken::Runtime::incref`/`decref` in `core.brocken` (load u16 at `[ptr+0]`, inc/dec, store; decref to 0 → free) — both are in `core.brocken`; `decref` returns the block to `free_blocks` when its `live_count` reaches 0, and pushes the object to the suspect buffer when the count is still positive (see R3).
+- [x] Wire RC injection in frontend Lowerer (`Katsuro/Lowerer.pm`) - `build_incref` on assignment, `build_decref` on scope exit — assignment, scope exit, and `lower_return` all inject, including the incref of a returned value.
 - [x] Change `box` from `alloca` to heap allocation via `bump_alloc` — all three native backends and Wasm call `Brocken::Runtime::bump_alloc` when the frontend supplies a `heap_base` operand; the `%heap_ptr` frame bump is kept only for hand-built IR with no `heap_base`.
-- [ ] Tests in `t/4000_runtime/`
+- [x] Tests in `t/4000_runtime/` — `4010_runtime_incref.t` for the RC operations and `4000_any_var.t` for the frontend's injection.
 
 ## Earlier Completed Sprints
 
@@ -167,10 +167,7 @@ Neither is a stage of the compiler, so neither is a namespace.
 - [x] **Signed i128 div/rem**  all targets use abs(inputs) + apply sign to output.
 - [x] **i128 `min`/`max`**  implemented on all 4 targets (X86_64, ARM64, RISCV64, Wasm).
 - [x] **Large-value i128 icmp tests**  added native (246 tests) and Wasm (328 tests) execution tests with Math::BigInt constants > 2^64.
-- [ ] **Unsigned 128-bit div/rem**  only the signed form is implemented; all targets use abs(inputs)
-      + sign on the output, so a `u128` division or remainder runs the signed path and gives the
-      wrong answer for operands with bit 127 set. The fuzzer omits `u128` generation until this
-      exists.
+- [x] **Unsigned 128-bit div/rem**  `u128` division and remainder now take an unsigned path on all 4 targets: the abs prologue and the sign epilogue are gated on the signed opcodes, and the result select covers `udiv`. The shift-subtract loop needed no change on any target — it shifts and compares without looking at a sign bit — and x86_64's `div128_64` was already the unsigned `DIV`, though its fast remainder path left the intermediate `hi % divisor` in the high half and had to clear it. RISCV64, Wasm, and ARM64 were selecting the remainder for `udiv` because their result select tested only `div`; that was the answer-changing bug. `t/3000_jenny/3200_codegen/3268_i128_unsigned_divrem_native.t` (42 assertions over 14 constant pairs) and `3269_i128_unsigned_divrem_lowering.t` (88 assertions over all 4 lowerers, including the signed path) cover it.
 - [ ] **Endianness**  no handling for big-endian targets.
 
 ### OS-level Threads (Isolates)
@@ -301,17 +298,17 @@ The 16-byte dynamic value (`Any` type) layout, enforced by `box` lowering:
 Offset  Size  Field
 0       2     Reference Count (u16, max 65535; overflow pins object)
 2       1     GC Flags (Bit 0: Cycle Suspect, Bit 1: Buffered, Bit 2: Leaf)
-3       1     Type Tag (0=Int, 1=String, 2=Array, 3=Class, 4=Ptr, 5=Dynamic, 6=i128)
+3       1     Type Tag (1=Int<=32, 2=i64, 3=Float, 4=Ptr, 5=Dynamic, 6=i128, 7=List, 8=Hash, 0=Other)
 4       4     Padding / Aux (e.g., String cached char length)
 8       8     Payload (Raw u64/i64/f64/ptr)
 ```
 
-Total: 16 bytes. The current `box` lowering stores payload at offset 0 and tag at offset 8 - this must be changed to match the spec layout above before RC can work.
+Total: 16 bytes. This is the layout the `box` lowering already produces in all 4 MIR lowerers: the header is packed as one u64 (`tag << 24` over a zeroed word, so the refcount, flags, and padding start at zero) and stored at `[ptr+0]`, with the payload at `[ptr+8]`. `unbox` and the runtime's `unbox_i64`/`unbox_f64` read the payload from `[ptr+8]`.
 
 ### Phase Plan
 
 #### R0: Fix Fat Scalar Layout (prerequisite for all RC work)
-- [ ] Change `box` lowering in all 4 MIR lowerers:
+- [x] Change `box` lowering in all 4 MIR lowerers: — the packed-header approach is what all 4 use; `alloca 16` became a heap allocation (see R1), and each lowerer packs `((padding << 32) | (tag << 24) | (flags << 16) | refcount)` as one u64 over a zeroed word and stores the payload at `[ptr+8]`.
   - `alloca 16` stays the same
   - Instead of `store payload at [ptr+0]` and `store tag at [ptr+8]`:
     - `store_imm 0 at [ptr+0]` (zero-initialize refcount + flags + tag + padding as u64)
@@ -321,48 +318,39 @@ Total: 16 bytes. The current `box` lowering stores payload at offset 0 and tag a
     - Pack the header: `((padding << 32) | (tag << 24) | (flags << 16) | refcount)` as one u64
     - `store_imm header at [ptr+0]` (zero header = all zeros initially)
     - `store payload at [ptr+8]`
-- [ ] Change `unbox` lowering to load from `[ptr+8]` instead of `[ptr+0]`
-- [ ] All 4 backends: X86_64, ARM64, RISCV64, Wasm
+- [x] Change `unbox` lowering to load from `[ptr+8]` instead of `[ptr+0]` — done on all 4 lowerers and in the runtime's `unbox_i64`/`unbox_f64`.
+- [x] All 4 backends: X86_64, ARM64, RISCV64, Wasm
 
 #### R1: Immediate Reference Counting (IR → Runtime)
 - [x] `incref`/`decref` IR instructions defined in Lindsay IR
 - [x] `build_incref`/`build_decref` in Builder API
 - [x] All 4 MIR lowerers already handle `Incref`/`Decref` → emit `call_func @Brocken::Runtime::incref`/`decref`
-- [ ] **NEW:** Implement `Brocken::Runtime::incref(ptr)` and `Brocken::Runtime::decref(ptr)` in `core.brocken`:
+- [x] **NEW:** Implement `Brocken::Runtime::incref(ptr)` and `Brocken::Runtime::decref(ptr)` in `core.brocken`: — both exist; `incref` saturates at 65535, and `decref` returns the object to `free16_head`, decrementing the owning block's `live_count` and recycling the block when it reaches 0.
   - `incref`: load u16 from `[ptr+0]`, if < 65535, increment by 1, store back
   - `decref`: load u16 from `[ptr+0]`, decrement by 1, store back; if result == 0, add to free list (or call DESTROY + free)
-- [ ] **NEW:** Wire RC injection in frontend Lowerer (`Katsuro/Lowerer.pm`):
+- [x] **NEW:** Wire RC injection in frontend Lowerer (`Katsuro/Lowerer.pm`): — all three sites inject: assignment, scope exit, and `lower_return`.
   - On variable assignment (`lower_assign`): emit `build_incref` on the new value
   - On scope exit (block end): emit `build_decref` for each local variable
   - On function return: emit `build_decref` for the return value's old binding
 - [x] **NEW:** Change `box` lowering to use heap allocation (via `Brocken::Runtime::bump_alloc`) instead of `alloca` so RC-managed objects live on the heap — all four backends, with the frame region reserved above the arena on Wasm
 
 #### R2: Immix Allocator
-- [ ] Implement Immix allocator in `core.brocken`:
-  - `BLOCK_SIZE = 32768` (32KB), `LINE_SIZE = 256` bytes, `LINES_PER_BLOCK = 128`
-  - Line header in each block: 128-bit bitmap tracking which lines are available
-  - `alloc_block(size)` → allocate or reuse a 32KB block from the ICB free list
-  - `alloc_line(block)` → find next free line, mark as used, return line address
-  - `alloc(size)` → bump-allocate within current line; if insufficient space, allocate a new line (or block if all lines full)
-  - Block recycling: when all lines in a block are freed (via RC), return block to ICB free list
-- [ ] Update ICB layout to track Immix state:
+- [x] Implement Immix allocator in `core.brocken`: — `bump_alloc` is the allocator: it takes from `free16_head` first, then bumps inside the current line, calls `find_free_line`/`mark_line` for a new line, and `recycle_block` returns a block to `free_blocks` at `live_count` 0. The block layout is documented at the top of `core.brocken`.
+- [x] Update ICB layout to track Immix state: — the accessors are in `core.brocken` and the field list is in `lib/Brocken/ICB.pm`, which is the source the accessors' offsets are checked against.
   - `immix_cursor` at ICB offset 24 (current bump pointer within current line)
   - `immix_limit` at ICB offset 32 (end of current block)
   - `free_blocks` at ICB offset 40 (linked list of free blocks)
-  - `suspect_buffer_head/tail` at ICB offsets 48/56 (for trial deletion)
-- [ ] Update entry stub and `_init` to initialize ICB fields
-- [ ] Replace `Brocken::Runtime::bump_alloc` with Immix `alloc`
-- [ ] Wire `box` → Immix allocator (instead of `alloca`)
+  - `free16_head` at ICB offset 48, `suspect_buffer_head` at ICB offset 56 (the suspect buffer is a singly-linked list with no tail)
+- [x] Update entry stub and `_init` to initialize ICB fields — `_init` sets the cursor, limit, both free heads, and the current block.
+- [x] Replace `Brocken::Runtime::bump_alloc` with Immix `alloc` — done inside `bump_alloc` rather than under a new name: the name is the frontend's, and the body is now the line-aware Immix allocation described above.
+- [x] Wire `box` → Immix allocator (instead of `alloca`) — the frontend supplies `heap_base`, and all 4 lowerers call `Brocken::Runtime::bump_alloc`.
 
 #### R3: Bacon/Rajan Trial Deletion (Cycle Detection)
-- [ ] Suspect buffer operations:
-  - On `decref` where RC > 0 after decrement: push pointer to suspect buffer
-  - `suspect_buffer_push(ptr)`: store ptr at ICB suspect_buffer_head, advance
-  - `suspect_buffer_drain()`: called periodically, processes all suspects
-- [ ] Mark phase: for each suspect, increment an internal "gc_mark" counter
-- [ ] Scan phase: trace references from each suspect, decrement marks
-- [ ] Collect phase: objects with mark == 0 are confirmed cyclic garbage - free them
-- [ ] All implemented in `core.brocken`
+- [x] Suspect buffer operations: — `decref` pushes when the count is still positive after the decrement (guarded by the Cycle Suspect and Buffered flag bits), and `push_suspect_buffer`/`pop_suspect_buffer`/`suspect_count` maintain the singly-linked list.
+- [x] Mark phase: for each suspect, increment an internal "gc_mark" counter — the trial-deletion mark is the GC flag byte's color bits rather than a separate counter: phase 1 of `gc_drain` tentatively scans each suspect and sets Gray.
+- [x] Scan phase: trace references from each suspect, decrement marks — `gc_scan_obj` plus `gc_scan_list`/`gc_scan_hash` follow the references out of each candidate.
+- [x] Collect phase: objects with mark == 0 are confirmed cyclic garbage - free them — phases 2 and 3 of `gc_drain` restore refs for the reachable (Black) ones and free the rest back to `free16`.
+- [x] All implemented in `core.brocken` — `gc_drain` drives all three phases; covered by `t/4000_runtime/4040_gc_r3.t`.
 
 #### R4: Perceus RC Elision & Reuse (Lindsay Optimizer Pass)
 - [ ] **Borrow inference**: analyze function parameters to determine ownership (borrowed vs owned)
