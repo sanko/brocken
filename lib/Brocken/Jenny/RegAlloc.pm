@@ -93,8 +93,7 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
 
     # Whether an instruction's first operand is a destination (written) rather than a source (read).
     method _defines_operand0($inst) {
-        return 0 if $inst->opcode eq 'store'     || $inst->opcode eq 'store_imm'
-                 || $inst->opcode eq 'bne'       || $inst->opcode eq 'beq';
+        return 0 if $inst->opcode eq 'store' || $inst->opcode eq 'store_imm' || $inst->opcode eq 'bne' || $inst->opcode eq 'beq';
         return 1;
     }
 
@@ -110,7 +109,7 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         my %defd;
         my %used;
         for my $inst ( $insts->@* ) {
-            my @ops = $self->_register_operands($inst);
+            my @ops    = $self->_register_operands($inst);
             my $writes = @ops && $self->_defines_operand0($inst);
             my $dst;
             for my $i ( 0 .. $#ops ) {
@@ -178,7 +177,7 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
             if ( $split_idx > 0 ) {
                 my @pre_insts  = $bb->instructions->@[ 0 .. $split_idx - 1 ];
                 my @post_insts = $bb->instructions->@[ $split_idx .. $#{ $bb->instructions } ];
-                my ( $pre_defd, $pre_used ) = $self->_scan_insts( \@pre_insts,  $is_float, $platform );
+                my ( $pre_defd, $pre_used )   = $self->_scan_insts( \@pre_insts, $is_float, $platform );
                 my ( $post_defd, $post_used ) = $self->_scan_insts( \@post_insts, $is_float, $platform );
 
                 # use = pre_use U (pre_def ^ post_use)
@@ -435,13 +434,19 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
             }
             else {
                 my ($spill) = sort { $b->end <=> $a->end } @active;
-                my $freed_reg = $assignment{ $spill->name };
-                $spill_slots{ $spill->name } = $next_spill++ * 8;
-                $assignment{ $spill->name }  = 'spill(' . $spill_slots{ $spill->name } . ')';
-                @active                      = grep { $_->name ne $spill->name } @active;
-                $assignment{ $int->name }    = $freed_reg;
-                $used_callee{$freed_reg}     = 1 if grep { $_ eq $freed_reg } @callee_regs;
-                push @active, $int;
+                if ( $spill->end > $int->end ) {
+                    my $freed_reg = $assignment{ $spill->name };
+                    $spill_slots{ $spill->name } = $next_spill++ * 8;
+                    $assignment{ $spill->name }  = 'spill(' . $spill_slots{ $spill->name } . ')';
+                    @active                      = grep { $_->name ne $spill->name } @active;
+                    $assignment{ $int->name }    = $freed_reg;
+                    $used_callee{$freed_reg}     = 1 if grep { $_ eq $freed_reg } @callee_regs;
+                    push @active, $int;
+                }
+                else {
+                    $spill_slots{ $int->name } = $next_spill++ * 8;
+                    $assignment{ $int->name }  = 'spill(' . $spill_slots{ $int->name } . ')';
+                }
             }
         }
         return {
