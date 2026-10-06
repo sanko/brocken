@@ -1275,8 +1275,9 @@ class Brocken::Fuzz v0.0.1 {
             [ 64,  0 ],      # u64
             [ 64,  'f' ],    # f64
             [ 128, 1 ],      # i128
+            [ 128, 0 ],      # u128
         );
-        my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2, 2, 1 );
+        my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2, 2, 1, 1 );
         my $total   = 0;
         $total += $_ for @weights;
         my $r = $self->_rand_int( $total - 1 );
@@ -1314,12 +1315,12 @@ class Brocken::Fuzz v0.0.1 {
         return $self->_clamp_i128( $val, $signed )                       if $bits >= 128;
         return ref($val) && $val->isa('Math::BigInt') ? $val : int($val) if $bits >= 64 && $signed;
         if ( $bits >= 64 && !$signed ) {
-            use integer;
-            my $r = $val & ~0;
-            if ( ref($r) && $r->isa('Math::BigInt') && $r < 0 ) {
-                $r += Math::BigInt->new(2)**64;
-            }
-            return $r;
+            require Math::BigInt;
+            my $m  = Math::BigInt->new(1) << 64;
+            my $v2 = ref($val) && $val->isa('Math::BigInt') ? $val->copy : Math::BigInt->new($val);
+            if ( $v2 < 0 ) { $v2 = $v2 + $m }
+            $v2 = $v2 % $m;
+            return $v2;
         }
         use integer;
         my $mask    = ( 1 << $bits ) - 1;
@@ -1352,16 +1353,30 @@ class Brocken::Fuzz v0.0.1 {
         return $self->_rand_f64_val()                                           if $signed eq 'f';
         return $self->_clamp_to_type( $self->_rand_i128_val(), $bits, $signed ) if $bits >= 128;
         if ( $bits >= 64 && !$signed ) {
-            return int( rand( 2**31 - 1 ) ) + int( rand( 2**31 - 1 ) );
+            return $self->_clamp_to_type( $self->_rand_u64_val(), $bits, $signed );
         }
         return $self->_clamp_to_type( $self->_rand_i64_val(), $bits, $signed );
     }
 
-    # Generate a random i128 value (small range for initial testing).
-    # Returns a Math::BigInt object.
+    # Generate $n random bytes by drawing one rand() call per byte.  Byte-at-a-time keeps every value a function
+    # of the seeded rand() stream, so a (seed, case_num) tuple still replays deterministically.
+    method _rand_bytes( $n ) {
+        my $acc = 0;
+        $acc = ( $acc << 8 ) | int( rand(256) ) for 1 .. $n;
+        return $acc;
+    }
+
+    # Generate a random u64 spanning the full 0..2**64-1 range as a Math::BigInt.
+    method _rand_u64_val() {
+        require Math::BigInt;
+        return Math::BigInt->new( $self->_rand_bytes(8) );
+    }
+
+    # Generate a random i128 spanning the full unsigned 128-bit range as a Math::BigInt.
+    # _clamp_i128 reinterprets the top bit as a sign for i128 destinations.
     method _rand_i128_val() {
         require Math::BigInt;
-        return Math::BigInt->new( int( rand(200) ) - 100 );
+        return Math::BigInt->new( $self->_rand_bytes(16) );
     }
 
     # Generate a random f64-compatible value (non-negative integer stored as Perl float; avoids negative-literal parse

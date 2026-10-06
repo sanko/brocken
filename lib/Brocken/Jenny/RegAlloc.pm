@@ -91,6 +91,42 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         return $inst->operands->@*;
     }
 
+    # Whether an instruction's first operand is a destination (written) rather than a source (read).
+    method _defines_operand0($inst) {
+        return 0 if $inst->opcode eq 'store'     || $inst->opcode eq 'store_imm'
+                 || $inst->opcode eq 'bne'       || $inst->opcode eq 'beq';
+        return 1;
+    }
+
+    # Walk one straight-line instruction list and collect the virtual registers it defines and uses.
+    #
+    # The reads of an instruction are recorded before its write, so a read-modify-write such as `mv X, X` marks X as
+    # both.  Recording the write first would drop the read, and that misclassifies every loop-carried virtual register
+    # that the loop body happens to touch first through a self-move: it would not reach the block's USE set, so its live
+    # interval would stop at the self-move instead of running to the end of the block, and a later temporary would be
+    # free to take the same physical register.  That silently destroyed a value across the loop back edge -- the q-bit
+    # scratch was handed the register holding the running remainder high word of an i128 division.
+    method _scan_insts( $insts, $is_float, $platform ) {
+        my %defd;
+        my %used;
+        for my $inst ( $insts->@* ) {
+            my @ops = $self->_register_operands($inst);
+            my $writes = @ops && $self->_defines_operand0($inst);
+            my $dst;
+            for my $i ( 0 .. $#ops ) {
+                my $name = $self->_vreg_name( $ops[$i], $is_float );
+                next unless defined $name;
+                if ( $i == 0 && $writes ) { $dst = $name; next }
+                $used{$name} = 1;
+            }
+            unless ($is_float) {
+                $used{$_} = 1 for $self->_vreg_names_from_mem_operands( $inst, $platform );
+            }
+            $defd{$dst} = 1 if defined $dst;
+        }
+        return ( \%defd, \%used );
+    }
+
     method _compute_live_intervals( $mf, $platform, $is_float ) {
         my @blocks = $mf->blocks->@*;
         my @bi_range;    # block_idx => [first_inst_idx, last_inst_idx]
@@ -142,90 +178,28 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
             if ( $split_idx > 0 ) {
                 my @pre_insts  = $bb->instructions->@[ 0 .. $split_idx - 1 ];
                 my @post_insts = $bb->instructions->@[ $split_idx .. $#{ $bb->instructions } ];
-                my %pre_defd;
-                my %pre_used;
-                for my $inst (@pre_insts) {
-                    my @ops = $self->_register_operands($inst);
-                    for my $op (@ops) {
-                        my $name = $self->_vreg_name( $op, $is_float );
-                        next unless defined $name;
-                        if ( $op == $ops[0] &&
-                            $inst->opcode ne 'store'     &&
-                            $inst->opcode ne 'store_imm' &&
-                            $inst->opcode ne 'bne'       &&
-                            $inst->opcode ne 'beq' ) {
-                            $pre_defd{$name} = 1 unless exists $pre_used{$name};
-                        }
-                        else {
-                            $pre_used{$name} = 1 unless exists $pre_defd{$name};
-                        }
-                    }
-                    for my $base ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
-                        next if $is_float;
-                        $pre_used{$base} = 1 unless exists $pre_defd{$base};
-                    }
-                }
-                my %post_defd;
-                my %post_used;
-                for my $inst (@post_insts) {
-                    my @ops = $self->_register_operands($inst);
-                    for my $op (@ops) {
-                        my $name = $self->_vreg_name( $op, $is_float );
-                        next unless defined $name;
-                        if ( $op == $ops[0] &&
-                            $inst->opcode ne 'store'     &&
-                            $inst->opcode ne 'store_imm' &&
-                            $inst->opcode ne 'bne'       &&
-                            $inst->opcode ne 'beq' ) {
-                            $post_defd{$name} = 1 unless exists $post_used{$name};
-                        }
-                        else {
-                            $post_used{$name} = 1 unless exists $post_defd{$name};
-                        }
-                    }
-                    for my $base ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
-                        next if $is_float;
-                        $post_used{$base} = 1 unless exists $post_defd{$base};
-                    }
-                }
+                my ( $pre_defd, $pre_used ) = $self->_scan_insts( \@pre_insts,  $is_float, $platform );
+                my ( $post_defd, $post_used ) = $self->_scan_insts( \@post_insts, $is_float, $platform );
 
                 # use = pre_use U (pre_def ^ post_use)
                 # def = pre_def U post_def
-                for my $v ( keys %pre_used ) {
+                for my $v ( keys %$pre_used ) {
                     $used{$v} = 1;
                 }
-                for my $v ( keys %pre_defd ) {
-                    $used{$v} = 1 if $post_used{$v};
+                for my $v ( keys %$pre_defd ) {
+                    $used{$v} = 1 if $post_used->{$v};
                 }
-                for my $v ( keys %pre_defd ) {
+                for my $v ( keys %$pre_defd ) {
                     $defd{$v} = 1;
                 }
-                for my $v ( keys %post_defd ) {
+                for my $v ( keys %$post_defd ) {
                     $defd{$v} = 1;
                 }
             }
             else {
-                for my $inst ( $bb->instructions->@* ) {
-                    my @ops = $self->_register_operands($inst);
-                    for my $op (@ops) {
-                        my $name = $self->_vreg_name( $op, $is_float );
-                        next unless defined $name;
-                        if ( $op == $ops[0] &&
-                            $inst->opcode ne 'store'     &&
-                            $inst->opcode ne 'store_imm' &&
-                            $inst->opcode ne 'bne'       &&
-                            $inst->opcode ne 'beq' ) {
-                            $defd{$name} = 1 unless exists $used{$name};
-                        }
-                        else {
-                            $used{$name} = 1 unless exists $defd{$name};
-                        }
-                    }
-                    for my $base ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
-                        next if $is_float;
-                        $used{$base} = 1 unless exists $defd{$base};
-                    }
-                }
+                my ( $d, $u ) = $self->_scan_insts( [ $bb->instructions->@* ], $is_float, $platform );
+                %defd = %$d;
+                %used = %$u;
             }
             $def{$bi} = \%defd;
             $use{$bi} = \%used;
@@ -296,6 +270,12 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         my @intervals;
         for my $name ( sort { $first{$a} <=> $first{$b} || $a cmp $b } keys %first ) {
             push @intervals, Brocken::Jenny::RegAlloc::LiveInterval->new( name => $name, start => $first{$name}, end => $last{$name} );
+        }
+        if ( $ENV{BROCKEN_DUMP_INTERVALS} ) {
+            for my $bi ( 0 .. $#blocks ) {
+                printf STDERR "BLOCK %d: use=[%s] def=[%s]\n", $bi, join( ',', sort keys %{ $use{$bi} } ), join( ',', sort keys %{ $def{$bi} } );
+            }
+            printf STDERR "INTERVAL %-40s [%3d,%3d]\n", $_->name, $_->start, $_->end for @intervals;
         }
         return @intervals;
     }

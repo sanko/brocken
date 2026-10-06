@@ -15,7 +15,6 @@ changes what every target is handed.
 
 - Dynamic (boxed) types at top level — [Upcoming](#upcoming)
 - Hash support — [Upcoming](#upcoming)
-- RC injection into the frontend lowerer (`build_incref` on assignment, `build_decref` on scope exit) — [R1](#r1-immediate-reference-counting-ir--runtime)
 
 ### `Brocken::Lindsay` — the IR
 
@@ -33,8 +32,6 @@ instruction or an IR pass, not a change to any one target.
 MIR, the per-target lowerers, register allocation, codegen, and the linkers. Work here
 is per architecture or per object format.
 
-- Fat scalar `box`/`unbox` layout at `[ptr+0]` and `[ptr+8]` — [R0](#r0-fix-fat-scalar-layout-prerequisite-for-all-rc-work)
-- Unsigned 128-bit div/rem — [128-bit Numerics](#128-bit-numerics-i128)
 - Big-endian targets, which no lowering handles — [128-bit Numerics](#128-bit-numerics-i128)
 - Mixed integer/floating arguments wrong on x86-64 Linux ELF — [Known Bugs](#known-bugs)
 - Wasm: a call result is lost when the same expression calls again — [Known Bugs](#known-bugs)
@@ -52,7 +49,6 @@ is per architecture or per object format.
 
 Neither is a stage of the compiler, so neither is a namespace.
 
-- `incref`/`decref`, the Immix allocator, trial deletion — [Phase 4](#phase-4-self-hosted-memory-management-corebrocken)
 - Fiber stack scanning, UTF-8 strings, self-hosted PerlIO — [R5](#r5-future-runtime-work)
 - Fuzzer expansion, phases F0–F9 — [Fuzzer Expansion Plan](#fuzzer-expansion-plan)
 - How these bugs are found and what the tests have to execute — [Test-process lessons](#test-process-lessons)
