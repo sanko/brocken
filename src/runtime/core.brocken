@@ -251,6 +251,9 @@ sub Brocken::Runtime::bump_alloc( ptr $heap_base, i64 $size )->ptr {
             if ( Brocken::ptr_cmp_gt( $after_alloc, $block_end ) == 0 ) {
                 Brocken::Runtime::set_immix_cursor( $heap_base, $after_alloc );
                 my ptr $new_limit = Brocken::ptr_add( $line_start, 256 );
+                if ( Brocken::ptr_cmp_gt( $new_limit, $block_end ) ) {
+                    $new_limit = $block_end;
+                }
                 Brocken::Runtime::set_immix_limit( $heap_base, $new_limit );
                 Brocken::Runtime::mark_line( $block_base, $found );
                 my i64 $next_nf = Brocken::i64_add( $found, 1 );
