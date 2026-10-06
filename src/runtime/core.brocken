@@ -775,19 +775,20 @@ sub Brocken::Runtime::gc_drain( ptr $hb ) {
 sub Brocken::Runtime::i64_to_str( ptr $hb, i64 $val )->ptr {
     my ptr $buf    = Brocken::Runtime::bump_alloc( $hb, 32 );
     my ptr $cursor = $buf;
+    my u64 $uval   = $val;
     if ( $val < 0 ) {
         Brocken::store_i8( $cursor, 45 );
         $cursor = Brocken::ptr_add( $cursor, 1 );
-        $val    = 0 - $val;
+        $uval   = 0 - $val;
     }
     my ptr $digits_start = $cursor;
     while (1) {
-        my i64 $digit = $val % 10;
+        my i64 $digit = $uval % 10;
         my i64 $ch    = Brocken::i64_add( $digit, 48 );
         Brocken::store_i8( $cursor, $ch );
         $cursor = Brocken::ptr_add( $cursor, 1 );
-        $val    = $val / 10;
-        if ( $val == 0 ) { last; }
+        $uval   = $uval / 10;
+        if ( $uval == 0 ) { last; }}
     }
     my ptr $end = Brocken::ptr_add( $cursor, -1 );
     while ( Brocken::ptr_cmp_lt( $digits_start, $end ) != 0 ) {
