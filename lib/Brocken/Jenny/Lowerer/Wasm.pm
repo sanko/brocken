@@ -2913,7 +2913,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                             if ( $ret_bits == 64 && $val_bits && $val_bits <= 32 ) {
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'i64_extend_i32_u',
+                                        opcode   => ( $val->type && !$val->type->is_signed ) ? 'i64_extend_i32_u' : 'i64_extend_i32_s',
                                         operands => [],
                                         comment  => 'retval widen'
                                     )
