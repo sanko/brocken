@@ -961,36 +961,16 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     my $mov_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $mov_rex, 0x89, $mov_modrm );
                 }
-                elsif ( $opcode eq 'div128_64' || $opcode eq 'rem128_64' ) {
-                    my ( $dst, $src_lo, $src_hi, $src_div ) = $inst->operands->@*;
-                    my $dst_r  = $resolve->($dst);
-                    my $lo_r   = $resolve->($src_lo);
-                    my $hi_r   = $resolve->($src_hi);
+                elsif ( $opcode eq 'div128_64' ) {
+                    my ( $src_div ) = $inst->operands->@*;
                     my $div_r  = $resolve->($src_div);
-                    my $did    = $reg_id->($dst_r);
-                    my $lo_id  = $reg_id->($lo_r);
-                    my $hi_id  = $reg_id->($hi_r);
                     my $div_id = $reg_id->($div_r);
                     my $rex_w  = REX_W;
-
-                    # MOV RAX, src_lo  (0x8B: MOV r64, r/m64; reg=dest=RAX, r/m=src_lo)
-                    my $rax_rex   = 0x40 | $rex_w | ( $lo_id >= 8 ? 1 : 0 );
-                    my $rax_modrm = 0xC0 | ( 0 << 3 ) | ( $lo_id & 7 );
-                    $bytes .= pack( 'CCC', $rax_rex, 0x8B, $rax_modrm );
-
-                    # MOV RDX, src_hi
-                    my $rdx_rex   = 0x40 | $rex_w | ( $hi_id >= 8 ? 1 : 0 );
-                    my $rdx_modrm = 0xC0 | ( 2 << 3 ) | ( $hi_id & 7 );
-                    $bytes .= pack( 'CCC', $rdx_rex, 0x8B, $rdx_modrm );
 
                     # DIV src_div  (RDX:RAX / src_div -> RAX = quotient, RDX = remainder)
                     my $div_rex   = 0x40 | $rex_w | ( $div_id >= 8 ? 1 : 0 );
                     my $div_modrm = 0xC0 | ( 6 << 3 ) | ( $div_id & 7 );
                     $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
-                    my $store_reg   = $opcode eq 'div128_64' ? 0 : 2;
-                    my $store_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
-                    my $store_modrm = 0xC0 | ( $store_reg << 3 ) | ( $did & 7 );
-                    $bytes .= pack( 'CCC', $store_rex, 0x89, $store_modrm );
                 }
                 elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
                     my $dst_r  = $resolve->($dst);
