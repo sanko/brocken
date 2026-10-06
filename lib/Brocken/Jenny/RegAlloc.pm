@@ -5,7 +5,8 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
     field $name  : param : reader;
     field $start : param : reader;
     field $end   : param : reader;
-} class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
+};
+class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
     use List::Util ();
     use Carp ();
 
@@ -93,7 +94,7 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
 
     # Whether an instruction's first operand is a destination (written) rather than a source (read).
     method _defines_operand0($inst) {
-        return 0 if $inst->opcode eq 'store' || $inst->opcode eq 'store_imm' || $inst->opcode eq 'bne' || $inst->opcode eq 'beq';
+        return 0 if $inst->opcode =~ /^(?:store|store_imm|bne|beq|cmp|fcmp|ctx_swap)$/;
         return 1;
     }
 
@@ -108,6 +109,7 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
     method _scan_insts( $insts, $is_float, $platform ) {
         my %defd;
         my %used;
+        my %rmw = map { $_ => 1 } qw(add sub mul udiv sdiv div rem urem and or xor shl lshr ashr adc sbb fadd fsub fmul fdiv fmin fmax fxor fand);
         for my $inst ( $insts->@* ) {
             my @ops    = $self->_register_operands($inst);
             my $writes = @ops && $self->_defines_operand0($inst);
@@ -115,7 +117,11 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
             for my $i ( 0 .. $#ops ) {
                 my $name = $self->_vreg_name( $ops[$i], $is_float );
                 next unless defined $name;
-                if ( $i == 0 && $writes ) { $dst = $name; next }
+                if ( $i == 0 && $writes ) {
+                    $dst = $name;
+                    $used{$name} = 1 if $rmw{$inst->opcode};
+                    next;
+                }
                 $used{$name} = 1;
             }
             unless ($is_float) {
@@ -462,7 +468,7 @@ class Brocken::Jenny::RegAlloc::LiveInterval v0.0.1 {
         return unless $spill_slots && keys %$spill_slots;
         my $load_op     = $is_float ? 'fload'  : 'load';
         my $store_op    = $is_float ? 'fstore' : 'store';
-        my %reads_dst   = map { $_ => 1 } qw(add sub adc sbb and or xor cmp shl shr sar neg inc dec not bne beq);
+        my %reads_dst   = map { $_ => 1 } qw(add sub mul sdiv udiv div rem urem adc sbb and or xor cmp shl shr sar neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
 

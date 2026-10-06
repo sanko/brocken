@@ -1226,62 +1226,16 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                 );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' ), $hi_lhs ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ), $zero_v ],
+                                        opcode   => 'div128_64',
+                                        operands => [ $q_hi, $hi_lhs, $zero_v, $lo_rhs ],
+                                        comment  => 'i128 div fast q_hi = hi/lo'
                                     )
                                 );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'div128_64',
-                                        operands => [ $lo_rhs ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ $q_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' ) ]
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ) ]
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' ), $lo_lhs ]
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ), $r_hi ]
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'div128_64',
-                                        operands => [ $lo_rhs ],
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ $q_lo, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' ) ]
-                                    )
-                                );
-                                $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new(
-                                        opcode   => 'mov',
-                                        operands => [ $r_lo, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ) ]
+                                        operands => [ $q_lo, $lo_lhs, $r_hi, $lo_rhs ],
+                                        comment  => 'i128 div fast q_lo = (r:lo)/lo'
                                     )
                                 );
 
