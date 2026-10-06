@@ -1843,6 +1843,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
         # Box: native -> dynamic
         if ( $target_type->kind eq 'dynamic' && $val->type->kind ne 'dynamic' ) {
+            if ( $val->type->kind eq 'int' && $val->type->bits < 32 ) {
+                my $wt = $val->type->is_signed ? Brocken::Lindsay::IR::Type::i32() : Brocken::Lindsay::IR::Type::u32();
+                $val = $val->type->is_signed ? $builder->build_sext( $val, $wt, undef, $line, $col ) :
+                    $builder->build_zext( $val, $wt, undef, $line, $col );
+            }
             my $hb
                 = $symbols->{'__heap_base'} ?
                 $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col ) :
