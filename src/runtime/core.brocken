@@ -268,6 +268,7 @@ sub Brocken::Runtime::bump_alloc( ptr $heap_base, i64 $size )->ptr {
         if ( Brocken::ptr_cmp_eq( $fb, 0 ) == 0 ) {
             my ptr $fb_next = Brocken::load_i64($fb);
             Brocken::Runtime::set_free_blocks( $heap_base, $fb_next );
+            Brocken::Runtime::clear_block_bitmap($fb);
             my ptr $fb_line0 = Brocken::ptr_add( $fb, 16 );
             Brocken::Runtime::set_immix_cursor( $heap_base, $fb_line0 );
             Brocken::Runtime::set_immix_limit( $heap_base, Brocken::ptr_add( $fb, 256 ) );
