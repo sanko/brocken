@@ -799,7 +799,9 @@ sub Brocken::Runtime::i64_to_str( ptr $hb, i64 $val )->ptr {
 }
 
 # Convert an unsigned u64 to a NUL-terminated decimal string.
-sub Brocken::Runtime::u64_to_str( ptr $hb, i64 $val )->ptr {
+# The parameter is u64 so that `%` and `/` below lower to unsigned division. With an i64 parameter they stayed signed,
+# so any value at or above 2^63 produced negative remainders and $digit + 48 wrote bytes outside '0'..'9'.
+sub Brocken::Runtime::u64_to_str( ptr $hb, u64 $val )->ptr {
     my ptr $buf          = Brocken::Runtime::bump_alloc( $hb, 32 );
     my ptr $cursor       = $buf;
     my ptr $digits_start = $cursor;

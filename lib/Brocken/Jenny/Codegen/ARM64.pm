@@ -519,7 +519,7 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         return $mf;
     }
 
-    method _encode( $mf, $assignment, $used_callee, $alloca_map = undef, $source_map = undef ) {
+    method _encode( $mf, $assignment, $used_callee, $alloca_map = undef, $source_map = undef, $reserved = [] ) {
         my $bytes        = '';
         my $alloca_frame = 0;
         my $total_alloca = 0;
@@ -587,11 +587,56 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             return 'phys_reg' if !ref $name && $name eq $platform->stack_reg;
             return ref $name || $name !~ $phys_re ? 'virt_reg' : 'phys_reg';
         };
+
         my $current_opcode = '';
         my $resolve        = sub ($op) {
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
             return $op->value                                if $op->kind eq 'phys_reg';
             die "Unexpected operand kind: " . $op->kind . " (value=" . ( $op->value // 'undef' ) . ") in opcode=$current_opcode";
+        };
+
+        # A register the allocator took out of the pool for its own spill reloads.  Those reloads use them as the
+        # destination of a spilled result, so a scratch picked for an immediate or a memory source must not be one of
+        # them: it would overwrite the value the instruction is about to read.
+        my %reserved = map { $_ => 1 } grep { defined } @$reserved;
+
+        # A register holding no virtual register anywhere in this function, and not one of the reserved spill
+        # registers, is free for the duration of a single instruction.
+        my $pick_scratch = sub () {
+            my %used;
+            @used{ values %$assignment } = ();
+            $used{$_} = 1 for keys %reserved;
+            for my $r ( $platform->registers('caller')->@* ) {
+                return $r unless $used{$r};
+            }
+            return undef;
+        };
+
+        # A spilled virtual register reaches the back end as a memory operand, and when both the source and the
+        # destination of an arithmetic, logical or comparison instruction are spilled the source is left as a memory
+        # operand rather than reloaded, because these are the opcodes the spiller will hand memory to.  None of their
+        # encodings has a memory form here, so the value is pulled into a scratch register first and the register form
+        # is emitted.
+        my $load_mem_scratch = sub ($mem, $what) {
+            my $addr = $mem->value;
+            my $base_r
+                = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+            my $bid  = $reg_id->($base_r);
+            my $tmp_r = $pick_scratch->();
+            die "no temp register for the memory source of $what" unless $tmp_r;
+            my $tid = $reg_id->($tmp_r);
+            if ( defined $addr->{index} ) {
+                my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
+                my $iid     = $reg_id->($index_r);
+                $bytes .= pack( 'V', LDR_64_REG | ( $iid << 16 ) | ( $bid << 5 ) | $tid );
+            }
+            else {
+                my $disp = $final_disp->($addr);
+
+                # Spill slots and frame sizes are multiples of 8, which is the scale LDR_64 wants.
+                $bytes .= pack( 'V', LDR_64 | ( ( $disp >> 3 ) << 10 ) | ( $bid << 5 ) | $tid );
+            }
+            return $tid;
         };
         if ( $total_frame > 0 ) {
 
@@ -832,11 +877,8 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                     elsif ( $src->kind eq 'imm' ) {
 
                         # Non-add/sub opcode with imm: load into temp register
-                        my %used;
-                        @used{ values %$assignment } = ();
-                        my $tmp_r;
-                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
-                        die 'no temp register for imm operand' unless $tmp_r;
+                            my $tmp_r = $pick_scratch->();
+                            die 'no temp register for imm operand' unless $tmp_r;
                         my $sid = $reg_id->($tmp_r);
                         my $v   = $src->value;
 
@@ -858,9 +900,8 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                         $bytes .= pack( 'V', $op | ( $sid << 16 ) | ( $did << 5 ) | $did );
                     }
                     else {
-                        my $src_r = $resolve->($src);
-                        my $sid   = $reg_id->($src_r);
-                        my $op    = $reg_op{$opcode};
+                        my $sid = $src->kind eq 'mem' ? $load_mem_scratch->( $src, $opcode ) : $reg_id->( $resolve->($src) );
+                        my $op  = $reg_op{$opcode};
                         $bytes .= pack( 'V', $op | ( $sid << 16 ) | ( $did << 5 ) | $did );
                     }
                 }
@@ -1061,8 +1102,7 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                         }
                     }
                     else {
-                        my $src_r = $resolve->($src);
-                        my $sid   = $reg_id->($src_r);
+                        my $sid = $src->kind eq 'mem' ? $load_mem_scratch->( $src, $opcode ) : $reg_id->( $resolve->($src) );
                         $bytes .= pack( 'V', $sf | CMP_REG | ( $sid << 16 ) | ( $did << 5 ) );
                     }
                 }
