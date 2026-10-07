@@ -946,4 +946,19 @@ subtest 'stale rodata does not persist between fuzz cases' => sub {
     is( $result->{status}, 'pass', 'no-string program still runs' );
     is( [ sort keys %{ $fuzz->linker->rodata } ], [], 'rodata is reset for a case without strings' );
 };
+
+# Bug: _gen_binop_assign always used a variable as the RHS, so immediate-operand lowering was never fuzzed.
+subtest 'binop-assign generator can emit an immediate RHS' => sub {
+    my $fuzz  = Brocken::Fuzz->new( seed => 7 );
+    my %vars  = ( a => 3, b => 5, c => 7 );
+    my %types = map { $_ => { bits => 64, signed => 1 } } qw[a b c];
+    my @names = qw[a b c];
+    srand(7);
+    my $found = 0;
+    for ( 1 .. 200 ) {
+        my $res = $fuzz->_gen_binop_assign( \%vars, \%types, \@names );
+        $found++ if defined $res->{code} && $res->{code} =~ /\$\w+\s*=\s*\$\w+\s*(?:<<|>>|[-+*\/%&|^])\s*\(?-?\d/;
+    }
+    ok $found > 0, "immediate RHS seen in $found/200 generated assignments";
+};
 done_testing;
