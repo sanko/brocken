@@ -712,11 +712,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         $val = $self->maybe_convert_type( $val, $stored_type );
         if ( $ast->op eq '//=' ) {
-            my $existing = $builder->build_load( $stored_type, $addr, undef, $line, $col );
-            my $zero     = Brocken::Lindsay::IR::Constant->new( type => $stored_type, value => 0 );
-            my $is_undef = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
-            my $new_val  = $builder->build_select( $is_undef, $val, $existing, undef, $line, $col );
-            $builder->build_store( $new_val, $addr, $line, $col );
+            if ( $stored_type->kind eq 'ptr' || $stored_type->kind eq 'dynamic' ) {
+                my $existing = $builder->build_load( $stored_type, $addr, undef, $line, $col );
+                my $zero     = Brocken::Lindsay::IR::Constant->new( type => $stored_type, value => 0 );
+                my $is_undef = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+                my $new_val  = $builder->build_select( $is_undef, $val, $existing, undef, $line, $col );
+                $builder->build_store( $new_val, $addr, $line, $col );
+            }
+            else {
+                $builder->build_store( $val, $addr, $line, $col );
+            }
         }
         else {
             my $is_rc = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
