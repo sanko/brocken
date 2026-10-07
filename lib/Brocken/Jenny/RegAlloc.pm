@@ -651,9 +651,19 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 my $inst = $bb->instructions->[$i];
                 my $next = $bb->instructions->[ $i + 1 ];
                 if ( $inst->opcode =~ /^(?:load|fload)$/ && $inst->comment =~ /^caller-restore / && $next && $next->opcode =~ /^(?:mov|fmov)$/ ) {
-                    my ($load_dst) = $inst->operands->@*;
+                    my ( $load_dst ) = $inst->operands->@*;
                     my ( $mov_dst, $mov_src ) = $next->operands->@*;
-                    if ( $load_dst->kind eq 'phys_reg' && $mov_dst->kind eq 'phys_reg' && $load_dst->value eq $mov_dst->value ) {
+
+                    # The reload is redundant only when the following copy writes a *different* register into the same
+                    # destination.  A self-move keeps whatever the reload restored is not what it does: `mov R, R`
+                    # leaves the clobbered value in place, so dropping the caller-restore reload loses the restored
+                    # value entirely.
+                    if (   $load_dst->kind eq 'phys_reg'
+                        && $mov_dst->kind eq 'phys_reg'
+                        && $mov_src->kind eq 'phys_reg'
+                        && $load_dst->value eq $mov_dst->value
+                        && $load_dst->value ne $mov_src->value )
+                    {
                         next;
                     }
                 }
