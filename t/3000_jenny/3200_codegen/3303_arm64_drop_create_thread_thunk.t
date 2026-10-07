@@ -1,0 +1,35 @@
+use v5.42;
+use Blib;
+use Brocken;
+use Test2::V0;
+use Brocken::Lindsay;
+use Brocken::Katsuro::Platform;
+use Brocken::Jenny::Codegen::ARM64;
+no warnings qw[experimental::class experimental::builtin portable];
+use feature qw[class];
+
+subtest 'the Windows isolate path calls CreateThread directly, not via a thunk' => sub {
+    my $platform = Brocken::Katsuro::Platform::parse('aarch64-pc-windows-msvc');
+    my $i32      = Brocken::Lindsay::IR::Type::i32();
+
+    my $worker = Brocken::Lindsay::IR::Function->new( name => 'worker_fn', return_type => $i32 );
+    my $wb     = Brocken::Lindsay::IR::Builder->new();
+    $wb->position_at_end( $worker->append_block('entry') );
+    $wb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 42 ) );
+
+    my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i32 );
+    my $mb   = Brocken::Lindsay::IR::Builder->new();
+    $mb->position_at_end( $main->append_block('entry') );
+    my $iso = $mb->build_isolate_create( $worker, [], '%iso' );
+    $mb->build_isolate_join($iso);
+    $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
+
+    my $codegen = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
+    my $funcs   = $codegen->emit_functions( [ $main, $worker ] );
+    my %by_name = map { $_->{name} => $_ } $funcs->@*;
+    ok( !exists $by_name{_create_thread}, 'no _create_thread thunk is emitted' );
+    ok( exists $by_name{main},            'main is emitted' );
+    ok( exists $by_name{worker_fn},       'the worker is emitted' );
+    ok( exists $by_name{_isolate_trampoline}, 'the isolate trampoline is emitted' );
+};
+done_testing;

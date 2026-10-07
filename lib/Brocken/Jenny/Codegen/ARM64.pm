@@ -125,9 +125,6 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             my $gate_mf = $self->_build_gate_dispatch_mf;
             push @result, $self->_emit_single_mf($gate_mf);
         }
-        if ( $has_isolate && $platform->is_windows ) {
-            push @result, $self->_build_create_thread_fn;
-        }
         return \@result;
     }
 
@@ -197,25 +194,6 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             }
         }
         return 0;
-    }
-
-    method _build_create_thread_fn() {
-        my $bytes = pack( 'V', stp_pre( 29, 30, 31, -32 ) );
-        $bytes .= pack( 'V', add_imm( 29, 31, 0 ) );
-        $bytes .= pack( 'V', str_64( 19, 31, 16 ) );         # save x19
-        $bytes .= pack( 'V', mov_64( 19, 0 ) );
-        $bytes .= pack( 'V', movz_64( 0, 0 ) );              # x0 = NULL
-        $bytes .= pack( 'V', movz_64( 1, 0 ) );              # x1 = 0
-        $bytes .= pack( 'V', movz_64( 4, 0 ) );              # x4 = 0
-        $bytes .= pack( 'V', movz_64( 5, 0 ) );              # x5 = 0
-        my $call_off = length($bytes);
-        $bytes .= pack( 'V', bl(0) );                        # call CreateThread
-        $bytes .= pack( 'V', str_64( 0, 19, 0 ) );           # *handle = rax
-        $bytes .= pack( 'V', ldr_64( 19, 31, 16 ) );         # restore x19
-        $bytes .= pack( 'V', ldp_post( 29, 30, 31, 32 ) );
-        $bytes .= pack( 'V', ret() );
-        my @fixups = ( { offset => $call_off, type => 'call_bl', target => 'CreateThread' } );
-        return { name => '_create_thread', bytes => $bytes, fixups => \@fixups };
     }
 
     method _build_isolate_trampoline_mf() {
