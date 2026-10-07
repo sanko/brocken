@@ -824,7 +824,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 print $fh ( "\x00" x ( $debug_raw_sizes{$name} - length($data) ) );
             }
         }
-        if ( $pointer_to_symbol_table > 0 ) {
+        if ( $pointer_to_symbol_table > 0 || $has_strtab ) {
             print $fh $coff_symtab;
             print $fh $strtab_payload;
         }
