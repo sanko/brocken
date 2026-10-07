@@ -1529,7 +1529,8 @@ class Brocken::Fuzz v0.0.1 {
         my $file;
         eval {
             $file = $self->tmpdir . '/fuzz_output' . $self->ext;
-            $self->linker->set_rodata($rodata) if $rodata && keys %$rodata;
+            # Always reset: a case with no string literals must not reuse the previous case's table.
+            $self->linker->set_rodata( $rodata // {} );
             $self->linker->write_executable( $file, $funcs, $self->host );
         };
         $self->_release_funcs($funcs);

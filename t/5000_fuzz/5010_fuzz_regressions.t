@@ -935,4 +935,15 @@ if ($v1) {
 return $v1;
 PROG
 };
+
+# Bug: set_rodata was skipped when a case had no string literals, so the previous case's table leaked into the
+# linker.  Seed stale rodata by hand and run a program that has none.
+subtest 'stale rodata does not persist between fuzz cases' => sub {
+    my $fuzz = Brocken::Fuzz->new( seed => 1 );
+    skip 'Not native', 1 unless $fuzz->host->is_native;
+    $fuzz->linker->set_rodata( { __stale => "leftover\0" } );
+    my $result = $fuzz->test_program( { source => 'return 5;', expected => 5 } );
+    is( $result->{status}, 'pass', 'no-string program still runs' );
+    is( [ sort keys %{ $fuzz->linker->rodata } ], [], 'rodata is reset for a case without strings' );
+};
 done_testing;
