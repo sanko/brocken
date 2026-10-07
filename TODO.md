@@ -61,8 +61,8 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 
 ### P0 — code generation and the allocator
 - [x] **1.1 x86-64 `div128_64` fast path is malformed**  the codegen took operand 0 as the divisor, never loaded `RAX`/`RDX`, and never stored the quotient, and the lowerer's fast path dropped the two remainder captures, so a spilled divisor and `r_hi` reloaded into the same scratch. Codegen is back to `[dst, src_lo, src_hi, src_div]` with a memory operand allowed in every slot, the lowerer captures `r_hi`/`r_lo` into `rdx` between the two `DIV`s, and the spiller no longer maps every reloaded operand onto one scratch. Covered by `t/3000_jenny/3200_codegen/3268_i128_unsigned_divrem_native.t`.
-- [ ] **1.2 Wasm scalar integer `min`/`max` name opcodes that do not exist**  `i32_min`/`i64_min` are not WebAssembly; the lowerer must emit a compare plus `select`. `Jenny::Lowerer::Wasm`. Test: `3300_wasm_integer_minmax.t`.
-- [ ] **1.3 `fix_call_shuffle` wipes the `lea_rodata` label**  the re-emit writes `reads->[0]` into operand 1 for every step, and a `lea_rodata` item has no read, so its label operand becomes an undef `phys_reg`. `Jenny::RegAlloc`. Test: `3301_call_shuffle_rodata.t`.
+- [x] **1.2 Wasm scalar integer `min`/`max` name opcodes that do not exist**  integer `min`/`max` now lower to a signed compare plus `select` (float still uses the real `f32`/`f64` opcodes). Covered by `t/3000_jenny/3200_codegen/3300_wasm_integer_minmax.t`.
+- [x] **1.3 `fix_call_shuffle` wipes the `lea_rodata` label**  the re-emit guarded the operand-1 rewrite behind the opcode and a non-empty read list, so a `lea_rodata` item keeps its label. Covered by `t/3000_jenny/3200_codegen/3301_call_shuffle_rodata.t`.
 
 ### P0 — architecture and ABI
 - [ ] **2.1 RISC-V codegen dies on a spilled memory source**  the spiller rewrites a spilled source to a `mem` operand for the arithmetic ops, which ARM64 loads into a scratch but `Codegen::RISCV64` hands to `$resolve`, which dies. Add the same memory-source load. Test: `3302_riscv_spill_mem_source.t`.
