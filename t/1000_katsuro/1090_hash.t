@@ -46,6 +46,18 @@ subtest 'comma paren without => is list' => sub {
     my $expr = $ret->expr;
     isa_ok( $expr, ['Brocken::Katsuro::AST::Expr::List'] );
 };
+subtest 'mixed positional and named call arguments keep the positional prefix' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse('sub foo() -> i64 { return bar(1, x => 2); }');
+    my $ret  = $prog->statements->[0]->body->statements->[0];
+    my $call = $ret->expr;
+    isa_ok( $call, ['Brocken::Katsuro::AST::Expr::Call'] );
+    is( scalar( $call->args->@* ), 2, 'two arguments: positional then hash' );
+    isa_ok( $call->args->[0], ['Brocken::Katsuro::AST::Expr::Const'] );
+    is( $call->args->[0]->value, 1, 'positional value preserved' );
+    isa_ok( $call->args->[1], ['Brocken::Katsuro::AST::Expr::Hash'] );
+    is( $call->args->[1]->pairs->@*, 1, 'one named pair' );
+};
 subtest 'hash literal produces ptr type' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -97,6 +109,48 @@ BROCKEN
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
         is( $? >> 8, 11, 'Point->new(x=>5, y=>6) with :param -> x+y=11' );
+        unlink $file;
+    }
+};
+subtest 'positional constructor arguments for :param fields' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 1 unless $host->is_native;
+        my $module = Brocken->new->compile(<<'BROCKEN');
+class Point {
+    field i64 $x :param;
+    field i64 $y :param;
+}
+my ptr $p = Point->new(4, 9);
+return $p->x + $p->y;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/pos_param_ctor' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 13, 'Point->new(4, 9) with :param -> 4+9=13' );
+        unlink $file;
+    }
+};
+subtest 'mixed positional and named constructor arguments' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 1 unless $host->is_native;
+        my $module = Brocken->new->compile(<<'BROCKEN');
+class Point {
+    field i64 $x :param;
+    field i64 $y :param;
+}
+my ptr $p = Point->new(4, y => 9);
+return $p->x + $p->y;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/mixed_param_ctor' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 13, 'Point->new(4, y=>9) -> 4+9=13' );
         unlink $file;
     }
 };

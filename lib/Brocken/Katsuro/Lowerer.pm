@@ -369,6 +369,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 idx        => $#fields + 1,
                 default    => $f->default,
                 default_op => $f->default_op,
+                param      => ( grep { $_ eq 'param' } $f->attrs->@* ) ? 1 : 0,
                 };
             $offset += $self->type_size($ir_type);
         }
@@ -2041,17 +2042,30 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->_emit_fuel_check( $line, $col );
             my $self_ptr = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
 
-            # Only named constructors supported: new(x => 100, y => 150)
-            my $args = $ast->args;
-            Carp::croak("Positional constructors are not supported. Use named syntax: class->new(field => value)")
-                unless $args->@* == 1 && $args->[0]->isa('Brocken::Katsuro::AST::Expr::Hash');
-            my $hash = $args->[0];
+            # Constructors take positional values for :param fields in declaration order, followed by an optional
+            # Hash of named field overrides: new(1, 2, y => 3).
+            my @positional = $ast->args->@*;
+            my $hash;
+            if ( @positional && $positional[-1]->isa('Brocken::Katsuro::AST::Expr::Hash') ) {
+                $hash = pop @positional;
+            }
             my %field_idx;
             for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
                 $field_idx{ $cd->{fields}[$i]{name} } = $i;
             }
+            my @param_fields = grep { $_->{param} } $cd->{fields}->@*;
+            Carp::croak( "Too many positional constructor arguments for class '$class_name' at " . $self->_loc($ast) )
+                if @positional > @param_fields;
             my %seen;
-            for my $pair ( $hash->pairs->@* ) {
+            for my $i ( 0 .. $#positional ) {
+                my $fd  = $param_fields[$i];
+                my $val = $self->lower_expression( $positional[$i] );
+                $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
+                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $field_idx{ $fd->{name} }, '%' . $fd->{name} . '.init', $line, $col );
+                $builder->build_store( $val, $field_ptr, $line, $col );
+                $seen{ $fd->{name} } = 1;
+            }
+            for my $pair ( $hash ? $hash->pairs->@* : () ) {
                 my $key_expr = $pair->{key};
                 next unless $key_expr->isa('Brocken::Katsuro::AST::Expr::Const') && $key_expr->type eq 'String';
                 my $field_name = $key_expr->value;
