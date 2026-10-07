@@ -1864,48 +1864,76 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                             my $bits = $self->_scalar_bits( $inst->type ) || 32;
                             $p = $bits >= 64 ? 'i64' : 'i32';
                         }
-                        $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS' ) );
-                        $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
-                        $self->_wasm_fit( $mbb, $lhs, $p );
-                        $self->_wasm_fit( $mbb, $rhs, $p );
+                        if ( ( $opcode eq 'min' || $opcode eq 'max' ) && $p =~ /^i/ ) {
 
-                        # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
-                        #
-                        # `div` and `rem` are the signed operations and have to pick the signed opcode. They used to map
-                        # to the unsigned one, which agreed with the signed answer for every positive operand and
-                        # disagreed for every negative
-                        # one: `i64 -20 / 3` came out as a quotient of two's complement bits. Only the signedness of the
-                        # operands separates the two, so a positive-operand test cannot see the difference.
-                        #
-                        # Wasm has no float remainder and no float bitwise or shift instruction, and the integer ones
-                        # cannot be applied to a float operand as-is.
-                        #
-                        # A float never arrives here from the frontend: `lower_binop` truncates one toward zero before
-                        # an integer-only operator applies, so this target is handed an integer operation. The guard
-                        # stays for IR that reaches the backend by another route, and to refuse by name rather than map
-                        # onto an opcode like "f32_rem_u", which could never encode.
-                        if ( $p =~ /^f/ && $opcode =~ /\A(?:rem|urem|and|or|xor|shl|lshr|ashr)\z/ ) {
-                            die "Wasm has no $opcode for $p; float bitwise, shift and remainder " . "are not implemented on this target\n";
+                            # WebAssembly has no integer min/max opcode -- only the float ones exist -- so select the
+                            # operand with a signed comparison plus `select`: stack lhs, rhs, (lhs<rhs) for min.
+                            my $lt = $p eq 'i64' ? Brocken::Lindsay::IR::Type::i64() : Brocken::Lindsay::IR::Type::i32();
+                            my $ta = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_ma', type => $lt );
+                            my $tb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_mb', type => $lt );
+                            $mbb->add_instruction( $self->_wasm_push( $lhs, 'minmax lhs' ) );
+                            $self->_wasm_fit( $mbb, $lhs, $p );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$ta], comment => 'minmax save lhs' ) );
+                            $mbb->add_instruction( $self->_wasm_push( $rhs, 'minmax rhs' ) );
+                            $self->_wasm_fit( $mbb, $rhs, $p );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$tb], comment => 'minmax save rhs' ) );
+                            for ( 1 .. 2 ) {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$ta], comment => 'minmax lhs' ) );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tb], comment => 'minmax rhs' ) );
+                            }
+                            my $cmp = $opcode eq 'min' ? "${p}_lt_s" : "${p}_gt_s";
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => $cmp, operands => [], comment => "$opcode cmp" ) );
+                            $mbb->add_instruction( $self->_wasm_select( $inst->type, $opcode ) );
                         }
-                        my %map = (
-                            add  => "${p}_add",
-                            sub  => "${p}_sub",
-                            mul  => "${p}_mul",
-                            div  => $p =~ /^f/ ? "${p}_div" : "${p}_div_s",
-                            rem  => "${p}_rem_s",
-                            udiv => "${p}_div_u",
-                            urem => "${p}_rem_u",
-                            and  => "${p}_and",
-                            or   => "${p}_or",
-                            xor  => "${p}_xor",
-                            shl  => "${p}_shl",
-                            lshr => "${p}_shr_u",
-                            ashr => "${p}_shr_s",
-                            min  => "${p}_min",
-                            max  => "${p}_max",
-                        );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => $map{$opcode}, operands => [], comment => $opcode ) );
+                        else {
+                            $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS' ) );
+                            $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
+                            $self->_wasm_fit( $mbb, $lhs, $p );
+                            $self->_wasm_fit( $mbb, $rhs, $p );
+
+                            # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
+                            #
+                            # `div` and `rem` are the signed operations and have to pick the signed opcode. They used to
+                            # map to the unsigned one, which agreed with the signed answer for every positive operand and
+                            # disagreed for every negative
+                            # one: `i64 -20 / 3` came out as a quotient of two's complement bits. Only the signedness of
+                            # the operands separates the two, so a positive-operand test cannot see the difference.
+                            #
+                            # Wasm has no float remainder and no float bitwise or shift instruction, and the integer ones
+                            # cannot be applied to a float operand as-is.
+                            #
+                            # A float never arrives here from the frontend: `lower_binop` truncates one toward zero before
+                            # an integer-only operator applies, so this target is handed an integer operation. The guard
+                            # stays for IR that reaches the backend by another route, and to refuse by name rather than map
+                            # onto an opcode like "f32_rem_u", which could never encode.
+                            if ( $p =~ /^f/ && $opcode =~ /\A(?:rem|urem|and|or|xor|shl|lshr|ashr)\z/ ) {
+                                die "Wasm has no $opcode for $p; float bitwise, shift and remainder " . "are not implemented on this target\n";
+                            }
+                            my %map = (
+                                add  => "${p}_add",
+                                sub  => "${p}_sub",
+                                mul  => "${p}_mul",
+                                div  => $p =~ /^f/ ? "${p}_div" : "${p}_div_s",
+                                rem  => "${p}_rem_s",
+                                udiv => "${p}_div_u",
+                                urem => "${p}_rem_u",
+                                and  => "${p}_and",
+                                or   => "${p}_or",
+                                xor  => "${p}_xor",
+                                shl  => "${p}_shl",
+                                lshr => "${p}_shr_u",
+                                ashr => "${p}_shr_s",
+                                min  => "${p}_min",
+                                max  => "${p}_max",
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => $map{$opcode}, operands => [], comment => $opcode ) );
+                        }
 
                         # Store result from stack to a local
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
