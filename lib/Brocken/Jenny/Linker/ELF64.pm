@@ -505,6 +505,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
 
         # Generate import stubs for undefined external functions
+        my @import_patches;
         for my $ff (@func_fixups) {
             next if exists $func_offsets{ $ff->{target} };
             my $got_rva;
@@ -533,6 +534,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             }
             next unless length($stub_bytes);
             $text .= $stub_bytes;
+            push @import_patches, { ofs => $stub_ofs };
             $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size;
         }
         $self->layout->get('.text')->{size} = length($text);
@@ -1072,6 +1074,42 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         $gnu_hash_rva = $platform->is_dragonflybsd ? $self->layout->get('.gnu.hash')->{rva} : 0;
         my $rela_rva       = $self->layout->get('.rela.dyn')->{rva};
         my $got_rva_actual = $self->layout->get('.got')->{rva};
+
+        # The entrance stub at the head of .text and the import stubs at its tail were baked with the layout that
+        # existed before the inline setjmp/longjmp stubs and the import stubs themselves grew .text and moved .got.
+        # Rebuild them now, once the layout above is final, so every baked GOT displacement points at a real slot.
+        if ( $self->type eq 'exe' ) {
+            my $got_exit = $self->import_rva('exit');
+            my ( $got_init_tls, $got_rtld_call_init );
+            if ( $platform->is_dragonflybsd ) {
+                $got_init_tls       = $self->import_rva('_init_tls');
+                $got_rtld_call_init = $self->import_rva('_rtld_call_init');
+            }
+            my $stub = $self->_build_entry_stub( $platform, \%func_offsets, $self->layout->get('.text')->{rva}, $got_exit, $got_init_tls, $got_rtld_call_init );
+            substr( $text, 0, length($stub), $stub );
+        }
+        for my $pad (@import_patches) {
+            my $text_rva_final = $self->layout->get('.text')->{rva};
+            if ( $platform->is_x64 ) {
+                my $disp32 = $got_rva_actual - ( $text_rva_final + $pad->{ofs} + 6 );
+                substr( $text, $pad->{ofs} + 2, 4, pack( 'l<', $disp32 ) );
+            }
+            elsif ( $platform->is_arm64 ) {
+                require Brocken::Jenny::Codegen::ARM64::Inst;
+                substr( $text, $pad->{ofs}, 4, pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::adrp( 16, $got_rva_actual, $text_rva_final + $pad->{ofs} ) ) );
+                substr( $text, $pad->{ofs} + 4, 4, pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 16, 16, $got_rva_actual & 0xFFF ) ) );
+            }
+            elsif ( $platform->is_riscv64 ) {
+                my $stub_rva = $text_rva_final + $pad->{ofs};
+                my $diff     = $got_rva_actual - $stub_rva;
+                my $hi20     = ( $diff + 0x800 ) >> 12;
+                my $lo12     = $diff & 0xFFF;
+                my $auipc    = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;
+                my $ld       = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
+                substr( $text, $pad->{ofs}, 4, pack( 'V', $auipc ) );
+                substr( $text, $pad->{ofs} + 4, 4, pack( 'V', $ld ) );
+            }
+        }
         my $dynamic        = '';
 
         # Dynamic section entries (d_tag, d_val/d_ptr):
