@@ -81,9 +81,9 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [x] **4.4 Wasm single-function path leaves call fixups unpatched**  the hashref branch never scanned `fixups`, so `call` placeholders stayed `\x80\x80\x80\x80\x00`. It now applies the same sorted single-pass patch as the array path, replacing each placeholder with the function index 0. Covered by `t/3000_jenny/3100_linker/3175_wasm_single_function_fixups.t`.
 
 ### P1 — memory management
-- [ ] **5.1 class instances have no 8-byte object header**  `register_class` starts fields at offset 0 and `new` allocates `total_size`, so `decref` reads field 0 as the refcount. Start fields at 8, allocate `8 + total_size`, and initialize the header.
-- [ ] **5.2 `//=` treats integer `0` as undefined**  only a null pointer is undefined on a native scalar. Branch on the type: keep the null test for `ptr`/`dynamic`, otherwise store unconditionally.
-- [ ] **5.3 assigning to an array variable dies**  declarations key `'@'.name` but `lower_assign` looks up `name`. Include the sigil.
+- [x] **5.1 class instances have no 8-byte object header**  `register_class` starts fields at offset 0 and `new` allocates `total_size`, so `decref` reads field 0 as the refcount. Start fields at 8, allocate `8 + total_size`, and initialize the header. Covered by `t/1000_katsuro/1097_class_object_header.t`.
+- [x] **5.2 `//=` treats integer `0` as undefined**  only a null pointer is undefined on a native scalar. Branch on the type: keep the null test for `ptr`/`dynamic`, otherwise store unconditionally. Covered by `t/1000_katsuro/1098_defined_or_assign.t`.
+- [x] **5.3 assigning to an array variable dies**  declarations key `'@'.name` but `lower_assign` looks up `name`. Include the sigil. Covered by `t/1000_katsuro/1099_array_assign.t`.
 - [ ] **5.4 Wasm string concatenation calls libc `malloc`**  the linker has no imports and dies on the undefined symbol. Route `.` through the managed allocator (or WASI imports).
 - [ ] **5.5 a non-constant array size crashes the allocator**  `alloca` lowering calls `$inst->count->value` when `count` is an instruction. Fold only a constant; otherwise adjust the stack dynamically.
 
