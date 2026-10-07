@@ -38,7 +38,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             $callee_seen{ $platform->fiber_reg } = 1;
         }
         my @used_callee = sort keys %callee_seen;
-        my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee );
+        my ($bytes) = $self->_encode( $mf, \%assignment, \@used_callee, undef, undef, [ $int_res->{spill_temp}, $int_res->{spill_addr_temp} ] );
         $mf->release;
         return $bytes;
     }
@@ -98,7 +98,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my @used_callee = sort keys %callee_seen;
             my %alloca_map;
             my %source_map;
-            my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
+            my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map, [ $int_res->{spill_temp}, $int_res->{spill_addr_temp} ] );
             $mf->release;
             push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
         }
@@ -141,7 +141,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             $callee_seen{ $platform->fiber_reg } = 1;
         }
         my @used_callee = sort keys %callee_seen;
-        my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, undef, undef, [ $int_res->{spill_temp}, $int_res->{spill_addr_temp} ] );
         $mf->release;
         return { name => $mf->name, bytes => $bytes, fixups => $func_fixups };
     }
@@ -451,7 +451,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         return $mf;
     }
 
-    method _encode( $mf, $assignment, $used_callee, $alloca_map = undef, $source_map = undef ) {
+    method _encode( $mf, $assignment, $used_callee, $alloca_map = undef, $source_map = undef, $reserved = [] ) {
         my $bytes        = '';
         my $alloca_frame = 0;
         my $total_alloca = 0;
@@ -554,6 +554,49 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         my $base_kind = sub ($name) {
             return 'phys_reg' if !ref $name && $name eq $platform->stack_reg;
             return 'virt_reg';
+        };
+
+        # A spill reload lands in the register the allocator reserved for it, so a scratch chosen for a memory source
+        # must not be one of those: it would overwrite the reloaded value the instruction is about to use.
+        my %reserved   = map { $_ => 1 } grep { defined } @$reserved;
+        my $pick_scratch = sub () {
+            my %used;
+            @used{ values %$assignment } = ();
+            $used{$_} = 1 for keys %reserved;
+            for my $r ( $platform->registers('caller')->@* ) {
+                return $r unless $used{$r};
+            }
+            return undef;
+        };
+
+        # A spilled virtual register reaches this back end as a memory operand, and when both the source and the
+        # destination of an arithmetic or logical instruction are spilled the source is left as a memory operand
+        # rather than reloaded, because these are the opcodes the spiller will hand memory to.  No RISC-V encoding
+        # here takes a memory source, so the value is pulled into a scratch register first and the register form is
+        # emitted.
+        my $load_mem_scratch = sub ($mem, $what) {
+            my $addr = $mem->value;
+            my $base_r
+                = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+            my $bid  = $reg_id->($base_r);
+            my $tmp_r = $pick_scratch->();
+            die "no temp register for the memory source of $what" unless $tmp_r;
+            my $tid    = $reg_id->($tmp_r);
+            my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits   : 64;
+            my $signed = $mem->type && $mem->type->kind eq 'int'     ? $mem->type->signed : 1;
+            my $funct3 = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
+            if ( defined $addr->{index} ) {
+                my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
+                my $iid     = $reg_id->($index_r);
+                $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
+                my $disp = $final_disp->($addr);
+                $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $tid << 7 ) | LOAD );
+            }
+            else {
+                my $disp = $final_disp->($addr);
+                $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $tid << 7 ) | LOAD );
+            }
+            return $tid;
         };
         if ( $total_frame > 0 ) {
             my $tf = $total_frame;
@@ -823,8 +866,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                             $src_r = $tmp_r;
                         }
                         else {
-                            $src_r = $resolve->($src);
-                            $sid   = $reg_id->($src_r);
+                            $sid = $src->kind eq 'mem' ? $load_mem_scratch->( $src, $opcode ) : $reg_id->( $resolve->($src) );
                         }
                         my $r_op = OP;
                         $r_op = 0x3B if ( ( $opcode eq 'div' || $opcode eq 'mul' ) && $dst->type && $dst->type->bits < 64 );
