@@ -87,4 +87,16 @@ subtest 'STRING token decodes backslash escapes' => sub {
     my ($str2) = grep { $_->{type} eq 'STRING' } @{ $lexer2->lex() };
     is( $str2->{value}, "single\ttab", 'single-quoted escapes decoded too' );
 };
+subtest 'FLOAT token for exponent and leading-dot notation' => sub {
+    my $lexer  = Brocken::Katsuro::Lexer->new( source => '1e-5 2.5E10 .5 3.0e2' );
+    my $tokens = $lexer->lex();
+    my @floats = grep { $_->{type} eq 'FLOAT' } @$tokens;
+    my @nums   = grep { $_->{type} eq 'NUM' } @$tokens;
+    is( scalar @floats, 4, 'all four literals are FLOAT' );
+    is( $floats[0]->{value}, 1e-5,   '1e-5' );
+    is( $floats[1]->{value}, 2.5e10, '2.5E10' );
+    is( $floats[2]->{value}, 0.5,    '.5' );
+    is( $floats[3]->{value}, 300,    '3.0e2' );
+    is( scalar @nums, 0, 'no NUM tokens' );
+};
 done_testing;
