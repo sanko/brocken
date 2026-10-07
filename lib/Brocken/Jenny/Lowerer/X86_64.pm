@@ -1233,9 +1233,23 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                 );
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ) ],
+                                        comment  => 'i128 div fast r_hi = hi%lo'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'div128_64',
                                         operands => [ $q_lo, $lo_lhs, $r_hi, $lo_rhs ],
                                         comment  => 'i128 div fast q_lo = (r:lo)/lo'
+                                    )
+                                );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mov',
+                                        operands => [ $r_lo, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ) ],
+                                        comment  => 'i128 div fast r_lo = (r:lo)%lo'
                                     )
                                 );
 

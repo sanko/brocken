@@ -528,42 +528,41 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     push @new, $inst;
                     next;
                 }
-                my $d_off = $sp{0};
-                my $s_off = $sp{1};
-                my $d_sp  = defined $d_off;
-                my $s_sp  = defined $s_off;
-                my $dd    = $d_sp && $s_sp && $d_off != $s_off;
-                if ($d_sp) {
-                    $ops[0] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[0]->type );
+                # Which operand positions the encoder can take straight from memory.  A spilled operand there costs
+                # no scratch at all, which matters when an instruction reads several sources at once: the reload
+                # scratch is a single register, so two reloaded sources would otherwise overwrite each other before
+                # the instruction ran.  `div128_64`/`rem128_64` read three sources and write one, so every position
+                # (including the destination) may be memory.
+                my %mem_ok;
+                if ( $opcode eq 'div128_64' || $opcode eq 'rem128_64' ) {
+                    $mem_ok{$_} = 1 for 0 .. 3;
                 }
-                if ( $s_sp && $dd && $can_mem_src{$opcode} ) {
-                    $ops[1] = Brocken::Jenny::MIR::MachineOperand->new(
-                        kind  => 'mem',
-                        value => { base => $stack_reg, disp => $s_off },
-                        type  => $ops[1]->type,
-                    );
+                elsif ( $can_mem_src{$opcode} || $opcode eq 'mul' || $opcode eq 'udiv' || $opcode eq 'sdiv' ) {
+                    $mem_ok{1} = 1;
                 }
-                elsif ($s_sp) {
-                    $ops[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[1]->type );
-                }
+
+                # A spilled operand that is not taken from memory is reloaded into the single value
+                # scratch, so the reload below matches this assignment.
                 my @load_offsets;
-                if ($dd) {
-                    if ( $can_mem_src{$opcode} ) {
-                        push @load_offsets, $d_off if $reads_dst{$opcode};
+                my $store_off;
+                for my $i ( 0 .. $#ops ) {
+                    next unless defined $sp{$i};
+                    if ( $mem_ok{$i} ) {
+                        $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new(
+                            kind  => 'mem',
+                            value => { base => $stack_reg, disp => $sp{$i} },
+                            type  => $ops[$i]->type,
+                        );
+                        next;
+                    }
+                    $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[$i]->type );
+                    if ( $i == 0 ) {
+                        push @load_offsets, $sp{0} if $reads_dst{$opcode};
+                        $store_off = $sp{0};
                     }
                     else {
-                        push @load_offsets, $s_off;
-                        push @load_offsets, $d_off if $reads_dst{$opcode};
+                        push @load_offsets, $sp{$i};
                     }
-                }
-                else {
-                    push @load_offsets, $s_off if $s_sp;
-                    push @load_offsets, $d_off if $d_sp && $reads_dst{$opcode};
-                }
-                for my $i ( 2 .. $#ops ) {
-                    next unless defined $sp{$i};
-                    push @load_offsets, $sp{$i};
-                    $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[$i]->type );
                 }
 
                 # Address first: it lands in its own scratch and stays valid
@@ -571,9 +570,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 push @new, $load_addr_inst->($smem_off) if defined $smem_off;
                 push @new, $load_inst->($_) for @load_offsets;
                 push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
-                if ($d_sp) {
-                    push @new, $store_inst->($d_off);
-                }
+                push @new, $store_inst->($store_off) if defined $store_off;
             }
             $bb->instructions->@* = @new;
         }
