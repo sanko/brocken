@@ -385,6 +385,17 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         # and only falls back to the pool when there is no such register left.  The register is reserved at all only
         # when the function can need it; see _has_addr_hazard for why that is decided after the first pass.
         my $spill_temp = pop @caller_regs;
+        my $spill_temp_is_callee = 0;
+        if ( !defined $spill_temp ) {
+
+            # Register exhaustion: every caller register is live, so the reload
+            # temporary has to come out of the callee set. The prologue then saves
+            # it like any other callee register, insert_spill_code clobbers the saved
+            # value, and the epilogue restores it.
+            $spill_temp           = pop @callee_regs;
+            $spill_temp_is_callee = 1;
+        }
+        Carp::croak('no register available for the spill temp') if !defined $spill_temp;
 
         # A register that is in neither pool and that the scan above did not pin
         # is free to clobber: nothing in the function holds a value in it.  The return register is the usual one, since
@@ -421,6 +432,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         my %assignment;
         my %used_callee;
         $used_callee{$spill_addr_temp} = 1 if $addr_is_callee;
+        $used_callee{$spill_temp}      = 1 if $spill_temp_is_callee;
         my %spill_slots;
         my @active;
         my $next_spill = 0;
