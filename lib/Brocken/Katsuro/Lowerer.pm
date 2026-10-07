@@ -684,7 +684,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $addr;
         my $stored_type;
         if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') ) {
-            $addr = $symbols->{ $target->name };
+            my $key = $target->sigil eq '@' ? '@' . $target->name : $target->name;
+            $addr = $symbols->{$key};
             Carp::croak( "Undefined variable '" . $target->name . "' at " . $self->_loc($target) ) unless $addr;
             if ( $addr->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $current_class ) {
                 my $cd      = $classes->{$current_class};
