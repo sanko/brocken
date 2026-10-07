@@ -77,7 +77,7 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 ### P1 — linkers
 - [x] **4.1 ELF64 entrance stub keeps a stale `$got_exit`**  the stub is built before the import/setjmp stubs grow `.text` and shift `.got`; nothing rebases the baked-in displacement. The entrance stub is rebuilt and the import-stub displacements recomputed once the final layout is in. Covered by `t/3000_jenny/3100_linker/3160_elf_got_rebase.t`.
 - [x] **4.2 DragonFly ELF entry stub calls with a misaligned stack**  the two init calls ran at `rsp%16==8` between the `push rdi`/`pop rdi`; the entry stub now dips the stack 8 bytes before the push and raises it again after the pop, so every call executes 16-aligned. Covered by `t/3000_jenny/3100_linker/3165_dragonfly_entry_alignment.t`.
-- [ ] **4.3 PE omits the COFF string table below debug level 5**  long section names are written as `/N` offsets even when `debug_level < 5`, but the string table is emitted only at `>= 5`. Write it whenever long names are used.
+- [x] **4.3 PE omits the COFF string table below debug level 5**  long section names were written as `/N` offsets while the string table was emitted only at `debug_level >= 5` (gated on the COFF symbol table). The writer now appends the string table whenever any long name is used. Covered by `t/3000_jenny/3100_linker/3170_pe_string_table.t`.
 - [ ] **4.4 Wasm single-function path leaves call fixups unpatched**  the hashref branch never scans `fixups`, so `call` placeholders stay `\x80\x80\x80\x80\x00`. Route it through the same patching as the array path.
 
 ### P1 — memory management
