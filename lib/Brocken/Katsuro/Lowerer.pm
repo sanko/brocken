@@ -350,7 +350,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # Pass 1: Register declarations
     method register_class($ast) {
         my @fields;
-        my $offset = 0;
+        my $offset = 8;
         my @field_types;
         my @field_names;
         my @field_offsets;
@@ -2041,6 +2041,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $total_size );
             $self->_emit_fuel_check( $line, $col );
             my $self_ptr = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
+            my $header_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => ( 1 | ( 4 << 24 ) ) );
+            $builder->build_store( $header_const, $self_ptr, $line, $col );
 
             # Constructors take positional values for :param fields in declaration order, followed by an optional
             # Hash of named field overrides: new(1, 2, y => 3).
