@@ -878,6 +878,14 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                         my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $did & 7 );
                         $bytes .= pack( 'CCCV', $rex, IMUL_IMM, $modrm, $src->value );
                     }
+                    elsif ( $src->kind eq 'mem' ) {
+
+                        # imul dst, [mem]  => REX.W 0F AF /r
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, $did & 7 );
+                        my $rex = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | $rex_x | $rex_b;
+                        $bytes .= pack( 'CCC', $rex, 0x0F, 0xAF ) . pack( 'C', $modrm );
+                        $bytes .= join '', $extra->@*;
+                    }
                     else {
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
@@ -912,9 +920,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                 }
                 elsif ( $opcode eq 'udiv' ) {
                     my $dst_r = $resolve->($dst);
-                    my $src_r = $resolve->($src);
                     my $did   = $reg_id->($dst_r);
-                    my $sid   = $reg_id->($src_r);
                     my $rex_w = ( $dst->type && $dst->type->bits >= 64 ) ? REX_W : 0;
 
                     # MOV RAX/EAX, dst
@@ -927,9 +933,18 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     $bytes .= pack( 'CCC', $xor_rex, 0x31, 0xD2 );
 
                     # DIV src  (EDX:EAX or RDX:RAX / src -> quotient; /6 = DIV)
-                    my $div_rex   = 0x40 | $rex_w | ( $sid >= 8 ? 1 : 0 );
-                    my $div_modrm = 0xC0 | ( 6 << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
+                    if ( $src->kind eq 'mem' ) {
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, 6 );
+                        my $rex = 0x40 | $rex_w | $rex_x | $rex_b;
+                        $bytes .= pack( 'CCC', $rex, 0xF7, $modrm ) . join '', $extra->@*;
+                    }
+                    else {
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $div_rex   = 0x40 | $rex_w | ( $sid >= 8 ? 1 : 0 );
+                        my $div_modrm = 0xC0 | ( 6 << 3 ) | ( $sid & 7 );
+                        $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
+                    }
 
                     # MOV dst, RAX/EAX  (dst = quotient)
                     my $mov_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
@@ -938,9 +953,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                 }
                 elsif ( $opcode eq 'sdiv' ) {
                     my $dst_r = $resolve->($dst);
-                    my $src_r = $resolve->($src);
                     my $did   = $reg_id->($dst_r);
-                    my $sid   = $reg_id->($src_r);
                     my $rex_w = ( $dst->type && $dst->type->bits >= 64 ) ? REX_W : 0;
 
                     # MOV RAX/EAX, dst
@@ -952,25 +965,78 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     $bytes .= $rex_w ? pack( 'CC', 0x48, 0x99 ) : pack( 'C', 0x99 );
 
                     # IDIV src  (EDX:EAX or RDX:RAX / src -> quotient, remainder; /7 = IDIV)
-                    my $div_rex   = 0x40 | $rex_w | ( $sid >= 8 ? 1 : 0 );
-                    my $div_modrm = 0xC0 | ( 7 << 3 ) | ( $sid & 7 );
-                    $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
+                    if ( $src->kind eq 'mem' ) {
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src, 7 );
+                        my $rex = 0x40 | $rex_w | $rex_x | $rex_b;
+                        $bytes .= pack( 'CCC', $rex, 0xF7, $modrm ) . join '', $extra->@*;
+                    }
+                    else {
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $div_rex   = 0x40 | $rex_w | ( $sid >= 8 ? 1 : 0 );
+                        my $div_modrm = 0xC0 | ( 7 << 3 ) | ( $sid & 7 );
+                        $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
+                    }
 
                     # MOV dst, RAX/EAX  (dst = quotient)
                     my $mov_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
                     my $mov_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $mov_rex, 0x89, $mov_modrm );
                 }
-                elsif ( $opcode eq 'div128_64' ) {
-                    my ( $src_div ) = $inst->operands->@*;
-                    my $div_r  = $resolve->($src_div);
-                    my $div_id = $reg_id->($div_r);
+                elsif ( $opcode eq 'div128_64' || $opcode eq 'rem128_64' ) {
+                    my ( $dst, $src_lo, $src_hi, $src_div ) = $inst->operands->@*;
                     my $rex_w  = REX_W;
 
-                    # DIV src_div  (RDX:RAX / src_div -> RAX = quotient, RDX = remainder)
-                    my $div_rex   = 0x40 | $rex_w | ( $div_id >= 8 ? 1 : 0 );
-                    my $div_modrm = 0xC0 | ( 6 << 3 ) | ( $div_id & 7 );
-                    $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
+                    # Every operand may be a register or a memory spill slot.  A memory source keeps the value out of
+                    # the one reload scratch, which is what lets the spiller satisfy all three sources at once.
+                    my $mov_to = sub ( $reg_idx, $op ) {
+                        if ( $op->kind eq 'mem' ) {
+                            my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $op, $reg_idx );
+                            my $rex = 0x40 | $rex_w | ( $reg_idx >= 8 ? 4 : 0 ) | $rex_x | $rex_b;
+                            return pack( 'CCC', $rex, 0x8B, $modrm ) . join '', $extra->@*;
+                        }
+                        my $r    = $resolve->($op);
+                        my $rid  = $reg_id->($r);
+                        my $rex  = 0x40 | $rex_w | ( $reg_idx >= 8 ? 4 : 0 ) | ( $rid >= 8 ? 1 : 0 );
+                        my $modrm = 0xC0 | ( ( $reg_idx & 7 ) << 3 ) | ( $rid & 7 );
+                        return pack( 'CCC', $rex, 0x8B, $modrm );
+                    };
+
+                    # MOV RAX, src_lo  (0x8B: MOV r64, r/m64; reg=dest=RAX, r/m=src_lo)
+                    $bytes .= $mov_to->( 0, $src_lo );
+
+                    # MOV RDX, src_hi
+                    $bytes .= $mov_to->( 2, $src_hi );
+
+                    # DIV src_div  (RDX:RAX / src_div -> RAX = quotient, RDX = remainder; /6 = DIV)
+                    if ( $src_div->kind eq 'mem' ) {
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $src_div, 6 );
+                        my $rex = 0x40 | $rex_w | $rex_x | $rex_b;
+                        $bytes .= pack( 'CCC', $rex, 0xF7, $modrm ) . join '', $extra->@*;
+                    }
+                    else {
+                        my $div_r  = $resolve->($src_div);
+                        my $div_id = $reg_id->($div_r);
+                        my $div_rex   = 0x40 | $rex_w | ( $div_id >= 8 ? 1 : 0 );
+                        my $div_modrm = 0xC0 | ( 6 << 3 ) | ( $div_id & 7 );
+                        $bytes .= pack( 'CCC', $div_rex, 0xF7, $div_modrm );
+                    }
+
+                    my $store_reg = $opcode eq 'div128_64' ? 0 : 2;
+
+                    # MOV dst, RAX/RDX  (0x89: MOV r/m64, r64; reg=src, r/m=dest)
+                    if ( $dst->kind eq 'mem' ) {
+                        my ( $modrm, $extra, $rex_x, $rex_b ) = $mem_modrm->( $dst, $store_reg );
+                        my $rex = 0x40 | $rex_w | ( $store_reg >= 8 ? 4 : 0 ) | $rex_x | $rex_b;
+                        $bytes .= pack( 'CCC', $rex, 0x89, $modrm ) . join '', $extra->@*;
+                    }
+                    else {
+                        my $dst_r     = $resolve->($dst);
+                        my $did       = $reg_id->($dst_r);
+                        my $store_rex = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                        my $store_modrm = 0xC0 | ( $store_reg << 3 ) | ( $did & 7 );
+                        $bytes .= pack( 'CCC', $store_rex, 0x89, $store_modrm );
+                    }
                 }
                 elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
                     my $dst_r  = $resolve->($dst);
