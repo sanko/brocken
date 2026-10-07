@@ -175,17 +175,14 @@ a syntax error: the parser expects a C<(>.
 =head2 Call arguments
 
 Arguments in parentheses are parsed by C<parse_call_args_after_paren> into a list of C<{ key, value }> pairs, where
-C<key> is C<undef> for a positional argument. If any argument used the fat comma C<< => >>, the whole list is returned
-as a single-element list holding a C<Brocken::Katsuro::AST::Expr::Hash>; otherwise it is returned as a flat list of the
-value expressions.
+C<key> is C<undef> for a positional argument. If any argument used the fat comma C<< => >>, the positional arguments
+are kept in order and followed by a single C<Brocken::Katsuro::AST::Expr::Hash> holding the named pairs. So
+C<< f( 1, x => 2 ) >> parses as C<(1, Hash(x => 2))>> and the positional argument is not lost.
 
 A bare name on the left of a fat comma becomes a C<String> constant, so C<< f( x => 1 ) >> passes the string C<x>, not
 a variable named C<x>. That is deliberate: named arguments in this language are for constructors and other hash-like
 callees, where a bare name is almost always a key and not a variable. It does mean there is no way to pass a variable
 as a named key.
-
-Mixing named and positional arguments is not rejected here, so C<< f( 1, x => 2 ) >> parses and leaves the question of
-what the callee does with a positional first argument to the lowerer.
 
 =head1 FEATURE GATES
 

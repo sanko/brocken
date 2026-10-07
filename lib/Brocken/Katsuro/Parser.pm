@@ -572,9 +572,14 @@ class Brocken::Katsuro::Parser v0.0.1 {
             }
             $self->consume(')');
             if ($has_fat_comma) {
-                my @pairs;
-                for my $e (@elements) { push @pairs, { key => $e->{key}, value => $e->{value} }; }
-                return Brocken::Katsuro::AST::Expr::Hash->new( $self->_pos_token($token), pairs => \@pairs );
+                my ( @positional, @pairs );
+                for my $e (@elements) {
+                    if ( defined $e->{key} ) { push @pairs, { key => $e->{key}, value => $e->{value} }; }
+                    else                     { push @positional, $e->{value}; }
+                }
+                my $hash = Brocken::Katsuro::AST::Expr::Hash->new( $self->_pos_token($token), pairs => \@pairs );
+                return $hash unless @positional;
+                return Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($token), elements => [ @positional, $hash ] );
             }
             if ( scalar @elements == 0 ) {
                 return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 0, type => 'Int' );
@@ -774,9 +779,14 @@ class Brocken::Katsuro::Parser v0.0.1 {
         }
         $self->consume(')');
         if ($has_fat_comma) {
-            my @pairs;
-            for my $e (@elements) { push @pairs, { key => $e->{key}, value => $e->{value} }; }
-            return [ Brocken::Katsuro::AST::Expr::Hash->new( pairs => \@pairs ) ];
+            my ( @positional, @pairs );
+            for my $e (@elements) {
+                if ( defined $e->{key} ) { push @pairs, { key => $e->{key}, value => $e->{value} }; }
+                else                     { push @positional, $e->{value}; }
+            }
+            my @result = @positional;
+            push @result, Brocken::Katsuro::AST::Expr::Hash->new( pairs => \@pairs ) if @pairs;
+            return \@result;
         }
         return [ map { $_->{value} } @elements ];
     }
