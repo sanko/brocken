@@ -65,7 +65,7 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [x] **1.3 `fix_call_shuffle` wipes the `lea_rodata` label**  the re-emit guarded the operand-1 rewrite behind the opcode and a non-empty read list, so a `lea_rodata` item keeps its label. Covered by `t/3000_jenny/3200_codegen/3301_call_shuffle_rodata.t`.
 
 ### P0 — architecture and ABI
-- [ ] **2.1 RISC-V codegen dies on a spilled memory source**  the spiller rewrites a spilled source to a `mem` operand for the arithmetic ops, which ARM64 loads into a scratch but `Codegen::RISCV64` hands to `$resolve`, which dies. Add the same memory-source load. Test: `3302_riscv_spill_mem_source.t`.
+- [x] **2.1 RISC-V codegen dies on a spilled memory source**  the spiller rewrites a spilled source to a `mem` operand for the arithmetic ops, which ARM64 loads into a scratch but `Codegen::RISCV64` handed to `$resolve`, which died. The encoder now pulls the value into a scratch (tracking the reserved spill registers so it cannot clobber a spilled destination) before the register form. Covered by `t/3000_jenny/3200_codegen/3302_riscv_mem_source.t`.
 - [ ] **2.2 ARM64 `_build_create_thread_fn` is dead and incomplete**  it leaves `x2`/`x3` uninitialized and nothing calls `_create_thread`; the Windows isolate path calls `CreateThread` directly. Drop the thunk and its emission.
 - [ ] **2.3 `_brocken_gate_dispatch` does not forward stack arguments**  the trampoline builds its own frame, so an `a4`/`a5` the callee reads comes from the trampoline's frame, not the caller's. Copy the incoming stack arguments into the outgoing slots before `call_indirect`. Test: `3304_gate_dispatch_stack_args.t`.
 
