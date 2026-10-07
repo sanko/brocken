@@ -958,8 +958,15 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                         next;
                     }
                     my $inst = $step->{inst};
-                    $inst->operands->[1]
-                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{reads}->[0], type => $step->{type} );
+                    if ( $inst->opcode eq 'lea_rodata' || !$step->{reads}->@* ) {
+
+                        # A lea_rodata load has no register source; rewriting operand 1 would turn its label into an
+                        # undef phys_reg.
+                    }
+                    else {
+                        $inst->operands->[1]
+                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $step->{reads}->[0], type => $step->{type} );
+                    }
                     push @new, $inst;
                 }
                 splice @insts, $first, scalar(@run), @new;
