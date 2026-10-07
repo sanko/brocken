@@ -391,6 +391,34 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'add', operands => [ $sp, $sixteen ], comment => 'deallocate stack slot' ) );
 
+        # Forward the stack arguments a4, a5 into the outgoing slots.  The prologue has moved sp down by total_frame,
+        # so the callee would otherwise read them from deeper inside this trampoline's own frame.  The incoming values
+        # are read off the entry stack pointer and re-stored into the outgoing area, which _compute_call_arg_frame
+        # reserves ahead of the call.
+        my $a4 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%a4', type => $i64 );
+        my $a5 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%a5', type => $i64 );
+        for my $i ( 0, 1 ) {
+            my $arg = $i == 0 ? $a4 : $a5;
+            my $in  = Brocken::Jenny::MIR::MachineOperand->new(
+                kind  => 'mem',
+                value => { base => $platform->stack_reg, disp => $platform->abi->stack_param_offset( 6 + $i ), raw => 'entry' },
+                type  => $i64
+            );
+            my $out = Brocken::Jenny::MIR::MachineOperand->new(
+                kind  => 'mem',
+                value => { base => $platform->stack_reg, disp => $platform->abi->caller_stack_param_offset( 6 + $i ), raw => 'stack' },
+                type  => $i64
+            );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'load', operands => [ $arg, $in ],
+                    comment => 'read incoming a' . ( 4 + $i ) . ' from the caller frame' )
+            );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'store', operands => [ $out, $arg ],
+                    comment => 'forward a' . ( 4 + $i ) . ' into the outgoing area' )
+            );
+        }
+
         # Re-set x0 = ICB for the called function (AAPCS64: x0 = first arg)
         my $x0 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
         $mbb->add_instruction(
@@ -406,9 +434,8 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $x1, $gate_id ], comment => 'x1 = gate_id (second arg)' ) );
 
-        # Arguments a0-a3 are already in x2-x5 (unchanged).
-        # Arguments a4, a5 are on the caller's stack, also unchanged. call_indirect fn_ptr -- calls fn(ICB, gate_id, a0,
-        # a1, a2, a3, a4, a5)
+        # Arguments a0-a3 are already in x2-x5 (unchanged); a4, a5 have been copied into the outgoing area above.
+        # call_indirect fn_ptr -- calls fn(ICB, gate_id, a0, a1, a2, a3, a4, a5)
         my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%ret', type => $i64 );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(

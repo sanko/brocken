@@ -355,14 +355,41 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             )
         );
 
+        # Forward the stack arguments a4, a5 into the outgoing slots.  The prologue has moved sp down by total_frame,
+        # so the callee would otherwise read them from deeper inside this trampoline's own frame.  The incoming values
+        # are read off the entry stack pointer and re-stored into the outgoing area, which _compute_call_arg_frame
+        # reserves ahead of the call.
+        my $a4 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%a4', type => $i64 );
+        my $a5 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%a5', type => $i64 );
+        for my $i ( 0, 1 ) {
+            my $arg = $i == 0 ? $a4 : $a5;
+            my $in  = Brocken::Jenny::MIR::MachineOperand->new(
+                kind  => 'mem',
+                value => { base => $platform->stack_reg, disp => $platform->abi->stack_param_offset( 6 + $i ), raw => 'entry' },
+                type  => $i64
+            );
+            my $out = Brocken::Jenny::MIR::MachineOperand->new(
+                kind  => 'mem',
+                value => { base => $platform->stack_reg, disp => $platform->abi->caller_stack_param_offset( 6 + $i ), raw => 'stack' },
+                type  => $i64
+            );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'load', operands => [ $arg, $in ],
+                    comment => 'read incoming a' . ( 4 + $i ) . ' from the caller frame' )
+            );
+            $mbb->add_instruction(
+                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'store', operands => [ $out, $arg ],
+                    comment => 'forward a' . ( 4 + $i ) . ' into the outgoing area' )
+            );
+        }
+
         # a1 = gate_id for called function (second arg)
         my $a1 = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'a1' );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $a1, $gate_id ], comment => 'a1 = gate_id (second arg)' ) );
 
-        # Arguments a2-a5 are already in their registers (unchanged).
-        # Arguments a4, a5 are on the caller's stack, also unchanged. call_indirect fn_ptr -- calls fn(ICB, gate_id, a0,
-        # a1, a2, a3, a4, a5)
+        # Arguments a2-a5 still hold a0-a3 (unchanged); a4, a5 have been copied into the outgoing area above.
+        # call_indirect fn_ptr -- calls fn(ICB, gate_id, a0, a1, a2, a3, a4, a5)
         my $result = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%ret', type => $i64 );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
