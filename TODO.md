@@ -88,9 +88,9 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [ ] **5.5 a non-constant array size crashes the allocator**  `alloca` lowering calls `$inst->count->value` when `count` is an instruction. Fold only a constant; otherwise adjust the stack dynamically.
 
 ### P2 — front end
-- [ ] **6.1 string literals are not unescaped**  `\n`, `\t`, `\\`, `\"` stay literal. Decode them in the lexer. Test: extend `t/1000_katsuro/1020_lexer.t`.
-- [ ] **6.2 a fat comma collapses the whole argument list into one hash**  mixed positional and named arguments lose their positions. Keep the positional prefix and append the hash. Test: extend `t/1000_katsuro/1030_parser.t`.
-- [ ] **6.3 scientific notation and a leading-dot float are not lexed**  `1e-5`, `2.5E10`, `.5`. Broaden the float rule. Test: extend `t/1000_katsuro/1020_lexer.t`.
+- [x] **6.1 string literals are not unescaped**  the lexer now decodes `\n`, `\t`, `\r`, `\0`, `\\`, `\"` and `\'` and leaves unknown escapes untouched. Covered by `t/1000_katsuro/1020_lexer.t`.
+- [x] **6.2 a fat comma collapses the whole argument list into one hash**  the parser now keeps the positional prefix and appends the hash, and the constructor lowering binds positionals to `:param` fields in declaration order before applying named overrides. Covered by `t/1000_katsuro/1090_hash.t`.
+- [x] **6.3 scientific notation and a leading-dot float are not lexed**  the float rule now accepts `1e-5`, `2.5E10`, `.5` and `3.0e2`. Covered by `t/1000_katsuro/1020_lexer.t`.
 
 ### P2 — fuzzer
 - [ ] **7.1 stale `.rodata` persists between fuzz cases**  `set_rodata` is skipped when an iteration has no strings, so the previous table is reused. Always reset. `Brocken::Fuzz`.
