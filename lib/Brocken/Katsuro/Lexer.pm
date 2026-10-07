@@ -75,9 +75,12 @@ class Brocken::Katsuro::Lexer v0.0.1 {
 
             # 4. Match Strings (Double or Single Quoted)
             if ( $remaining =~ /^"((?:[^"\\]|\\.)*)"/s || $remaining =~ /^'((?:[^'\\]|\\.)*)'/s ) {
-                my $val = $1;
+                my $raw = $1;
+                my $val = $raw;
+                my %esc = ( 'n' => "\n", 't' => "\t", 'r' => "\r", '0' => "\0", '\\' => "\\", '"' => '"', "'" => "'" );
+                $val =~ s{\\(.)}{ $esc{$1} // "\\$1" }ges;
                 push @tokens, $self->_token( 'STRING', $val );
-                $self->_advance_pos( length($val) + 2 );    # account for quotes
+                $self->_advance_pos( length($raw) + 2 );    # account for quotes
                 next;
             }
 
