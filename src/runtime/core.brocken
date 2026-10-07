@@ -880,3 +880,49 @@ sub Brocken::Runtime::unbox_f64( ptr $dyn )->f64 {
     my f64 $f = $n;
     return $f;
 }
+
+# NUL-terminated string concatenation, allocated from the managed heap. This replaces the frontend's old strlen +
+# malloc + strcpy + strcat call sequence: a Wasm module emits no import section, so those libc names were undefined
+# symbols the linker died on. The strings never need refcounting: the buffer belongs to the caller and the payload it
+# holds has no references of its own.
+sub Brocken::Runtime::str_concat( ptr $hb, ptr $lhs, ptr $rhs )->ptr {
+    my i64 $llen  = 0;
+    my ptr $p     = $lhs;
+    while (1) {
+        my i8 $c = Brocken::load_i8($p);
+        if ( $c == 0 ) { last; }
+        $llen = Brocken::i64_add( $llen, 1 );
+        $p    = Brocken::ptr_add( $p, 1 );
+    }
+    my i64 $rlen = 0;
+    $p = $rhs;
+    while (1) {
+        my i8 $c = Brocken::load_i8($p);
+        if ( $c == 0 ) { last; }
+        $rlen = Brocken::i64_add( $rlen, 1 );
+        $p    = Brocken::ptr_add( $p, 1 );
+    }
+    my i64 $total = Brocken::i64_add( Brocken::i64_add( $llen, $rlen ), 1 );
+    my ptr $buf   = Brocken::Runtime::bump_alloc( $hb, $total );
+    my ptr $dst   = $buf;
+    $p       = $lhs;
+    my i64 $i = 0;
+    while ( $i < $llen ) {
+        my i8 $byte = Brocken::load_i8($p);
+        Brocken::store_i8( $dst, $byte );
+        $p   = Brocken::ptr_add( $p, 1 );
+        $dst = Brocken::ptr_add( $dst, 1 );
+        $i   = Brocken::i64_add( $i, 1 );
+    }
+    $p = $rhs;
+    $i = 0;
+    while ( $i < $rlen ) {
+        my i8 $byte = Brocken::load_i8($p);
+        Brocken::store_i8( $dst, $byte );
+        $p   = Brocken::ptr_add( $p, 1 );
+        $dst = Brocken::ptr_add( $dst, 1 );
+        $i   = Brocken::i64_add( $i, 1 );
+    }
+    Brocken::store_i8( $dst, 0 );
+    return $buf;
+}
