@@ -78,4 +78,13 @@ subtest 'FLOAT/NUM disambiguation: integer after float' => sub {
     is( scalar @nums,        1,    'one NUM token' );
     is( $nums[0]->{value},   99,   'NUM value is 99' );
 };
+subtest 'STRING token decodes backslash escapes' => sub {
+    my $lexer  = Brocken::Katsuro::Lexer->new( source => q{"line\nnext\tend\\slash\"quote"} );
+    my $tokens = $lexer->lex();
+    my ($str) = grep { $_->{type} eq 'STRING' } @$tokens;
+    is( $str->{value}, "line\nnext\tend\\slash\"quote", 'escapes are decoded, not left literal' );
+    my $lexer2  = Brocken::Katsuro::Lexer->new( source => q{'single\ttab'} );
+    my ($str2) = grep { $_->{type} eq 'STRING' } @{ $lexer2->lex() };
+    is( $str2->{value}, "single\ttab", 'single-quoted escapes decoded too' );
+};
 done_testing;
