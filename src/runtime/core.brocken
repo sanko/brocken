@@ -1,4 +1,4 @@
-# core.brocken: Brocken v0.1 Runtime Primitives
+# core.brocken: Brocken v0.1.x Runtime Primitives
 # Automatically compiled alongside user code.
 #
 # ICB (Isolate Control Block) layout: see lib/Brocken/ICB.pm for offsets.
