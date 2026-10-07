@@ -53,6 +53,49 @@ Neither is a stage of the compiler, so neither is a namespace.
 - Fuzzer expansion, phases F0–F9 — [Fuzzer Expansion Plan](#fuzzer-expansion-plan)
 - How these bugs are found and what the tests have to execute — [Test-process lessons](#test-process-lessons)
 
+## Active Sprint: Compiler Audit Fixes (2026-10)
+
+A pass over the back end, front end, linkers and fuzzer turned up the faults below.
+Each entry records the fix, where it lands, and the regression test that holds it.
+One commit per fix. The audit's own numbering is kept so a finding can be traced back.
+
+### P0 — code generation and the allocator
+- [x] **1.1 x86-64 `div128_64` fast path is malformed**  the codegen took operand 0 as the divisor, never loaded `RAX`/`RDX`, and never stored the quotient, and the lowerer's fast path dropped the two remainder captures, so a spilled divisor and `r_hi` reloaded into the same scratch. Codegen is back to `[dst, src_lo, src_hi, src_div]` with a memory operand allowed in every slot, the lowerer captures `r_hi`/`r_lo` into `rdx` between the two `DIV`s, and the spiller no longer maps every reloaded operand onto one scratch. Covered by `t/3000_jenny/3200_codegen/3268_i128_unsigned_divrem_native.t`.
+- [ ] **1.2 Wasm scalar integer `min`/`max` name opcodes that do not exist**  `i32_min`/`i64_min` are not WebAssembly; the lowerer must emit a compare plus `select`. `Jenny::Lowerer::Wasm`. Test: `3300_wasm_integer_minmax.t`.
+- [ ] **1.3 `fix_call_shuffle` wipes the `lea_rodata` label**  the re-emit writes `reads->[0]` into operand 1 for every step, and a `lea_rodata` item has no read, so its label operand becomes an undef `phys_reg`. `Jenny::RegAlloc`. Test: `3301_call_shuffle_rodata.t`.
+
+### P0 — architecture and ABI
+- [ ] **2.1 RISC-V codegen dies on a spilled memory source**  the spiller rewrites a spilled source to a `mem` operand for the arithmetic ops, which ARM64 loads into a scratch but `Codegen::RISCV64` hands to `$resolve`, which dies. Add the same memory-source load. Test: `3302_riscv_spill_mem_source.t`.
+- [ ] **2.2 ARM64 `_build_create_thread_fn` is dead and incomplete**  it leaves `x2`/`x3` uninitialized and nothing calls `_create_thread`; the Windows isolate path calls `CreateThread` directly. Drop the thunk and its emission.
+- [ ] **2.3 `_brocken_gate_dispatch` does not forward stack arguments**  the trampoline builds its own frame, so an `a4`/`a5` the callee reads comes from the trampoline's frame, not the caller's. Copy the incoming stack arguments into the outgoing slots before `call_indirect`. Test: `3304_gate_dispatch_stack_args.t`.
+
+### P0 — register allocation
+- [ ] **3.1 spill temp selection can return undef**  `$spill_temp = pop @caller_regs` with an exhausted pool yields undef and emits operand values of undef. Fall back to the callee set (recorded in `used_callee`), and croak if nothing is left. `Jenny::RegAlloc`. Test: `3305_spill_temp_exhaustion.t`.
+- [ ] **3.2 the call-shuffle floating-point scratch can be an argument register**  `fix_call_shuffle` is handed `$fp_res->{spill_temp}` (`v7` on ARM64, an `fa`/`xmm` argument register), and aborts the shuffle when it is touched. Pass `$platform->abi->fp_entry_shuffle_temp` on the native backends. Test: `3306_arm64_call_shuffle_fp_temp.t`.
+- [ ] **3.3 a self-move hides a needed caller-restore**  `remove_redundant_caller_restores` drops the reload when the next instruction is `mov R, R`, which preserves `R`. Require `mov_src` to differ. Test: `3307_caller_restore_self_move.t`.
+
+### P1 — linkers
+- [ ] **4.1 ELF64 entrance stub keeps a stale `$got_exit`**  the stub is built before the import/setjmp stubs grow `.text` and shift `.got`; nothing rebases the baked-in displacement. Re-patch after the final layout.
+- [ ] **4.2 DragonFly ELF entry stub calls with a misaligned stack**  after `push rdi` the two init calls run at `rsp%16==8`. Realign around the `push`/`pop`.
+- [ ] **4.3 PE omits the COFF string table below debug level 5**  long section names are written as `/N` offsets even when `debug_level < 5`, but the string table is emitted only at `>= 5`. Write it whenever long names are used.
+- [ ] **4.4 Wasm single-function path leaves call fixups unpatched**  the hashref branch never scans `fixups`, so `call` placeholders stay `\x80\x80\x80\x80\x00`. Route it through the same patching as the array path.
+
+### P1 — memory management
+- [ ] **5.1 class instances have no 8-byte object header**  `register_class` starts fields at offset 0 and `new` allocates `total_size`, so `decref` reads field 0 as the refcount. Start fields at 8, allocate `8 + total_size`, and initialize the header.
+- [ ] **5.2 `//=` treats integer `0` as undefined**  only a null pointer is undefined on a native scalar. Branch on the type: keep the null test for `ptr`/`dynamic`, otherwise store unconditionally.
+- [ ] **5.3 assigning to an array variable dies**  declarations key `'@'.name` but `lower_assign` looks up `name`. Include the sigil.
+- [ ] **5.4 Wasm string concatenation calls libc `malloc`**  the linker has no imports and dies on the undefined symbol. Route `.` through the managed allocator (or WASI imports).
+- [ ] **5.5 a non-constant array size crashes the allocator**  `alloca` lowering calls `$inst->count->value` when `count` is an instruction. Fold only a constant; otherwise adjust the stack dynamically.
+
+### P2 — front end
+- [ ] **6.1 string literals are not unescaped**  `\n`, `\t`, `\\`, `\"` stay literal. Decode them in the lexer. Test: extend `t/1000_katsuro/1020_lexer.t`.
+- [ ] **6.2 a fat comma collapses the whole argument list into one hash**  mixed positional and named arguments lose their positions. Keep the positional prefix and append the hash. Test: extend `t/1000_katsuro/1030_parser.t`.
+- [ ] **6.3 scientific notation and a leading-dot float are not lexed**  `1e-5`, `2.5E10`, `.5`. Broaden the float rule. Test: extend `t/1000_katsuro/1020_lexer.t`.
+
+### P2 — fuzzer
+- [ ] **7.1 stale `.rodata` persists between fuzz cases**  `set_rodata` is skipped when an iteration has no strings, so the previous table is reused. Always reset. `Brocken::Fuzz`.
+- [ ] **7.2 the fuzzer never emits an immediate RHS**  so immediate-guarded lowering paths are unreachable. Emit a constant operand some of the time. `Brocken::Fuzz`.
+
 ## Active Sprint: Memory Management Runtime (R0–R1)
 
 ### R0: Fix Fat Scalar Box Layout
