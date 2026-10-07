@@ -96,12 +96,17 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         # DragonFly: call _init_tls and _rtld_call_init before main for TLS setup
         my $pre_main = '';
         if ( defined $got_init_tls ) {
-            $pre_main .= pack( 'C', 0x57 );                                           # push rdi (save heap_base)
+
+            # SysV requires rsp%16 == 0 at a call site (callees expect rsp%16 == 8 at entry). `push rdi` alone leaves
+            # rsp%16 == 8, so dip the stack 8 bytes before the push and raise it again after the pop.
+            $pre_main .= pack( 'C4', 0x48, 0x83, 0xEC, 0x08 );    # sub rsp, 8
+            $pre_main .= pack( 'C', 0x57 );                       # push rdi (save heap_base)
             my $rir1 = $text_rva + length($stub) + length($pre_main) + 6;
-            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_init_tls - $rir1 );          # call [rip + init_tls]
+            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_init_tls - $rir1 );           # call [rip + init_tls]
             my $rir2 = $text_rva + length($stub) + length($pre_main) + 6;
-            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_rtld_call_init - $rir2 );    # call [rip + rtld_call_init]
-            $pre_main .= pack( 'C', 0x5F );                                           # pop rdi (restore heap_base)
+            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_rtld_call_init - $rir2 );     # call [rip + rtld_call_init]
+            $pre_main .= pack( 'C', 0x5F );                       # pop rdi (restore heap_base)
+            $pre_main .= pack( 'C4', 0x48, 0x83, 0xC4, 0x08 );    # add rsp, 8
         }
         $stub .= $pre_main;
 
