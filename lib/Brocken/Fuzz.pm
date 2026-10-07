@@ -426,10 +426,25 @@ class Brocken::Fuzz v0.0.1 {
         return { code => undef } if @int_names < 2;
         my $dst      = $var_names->[ $self->_rand_int( $#{$var_names} ) ];
         my $lhs      = $int_names[ $self->_rand_int($#int_names) ];
-        my $rhs      = $int_names[ $self->_rand_int($#int_names) ];
-        my $lv       = $vars->{$lhs};
-        my $rv       = $vars->{$rhs};
         my $lhs_bits = $var_types->{$lhs}{bits} // 64;
+
+        # One draw picks the RHS.  The top of the range (index == @int_names) selects an integer literal instead of a
+        # variable, so the immediate-operand lowering paths are exercised too.
+        my $sel = rand( @int_names + 1 );
+        my $ri  = int($sel);
+        my ( $rhs, $rhs_expr, $rv, $rt );
+        if ( $ri == @int_names ) {
+            my $imm   = int( ( $sel - $ri ) * 200 ) - 100;
+            $rhs_expr = $imm < 0 ? "($imm)" : "$imm";
+            $rv       = $imm;
+            $rt       = { bits => 64, signed => 1 };
+        }
+        else {
+            $rhs      = $int_names[$ri];
+            $rv       = $vars->{$rhs};
+            $rhs_expr = "\$$rhs";
+            $rt       = $var_types->{$rhs};
+        }
         my $op;
 
         for my $try ( 0 .. 9 ) {
@@ -442,8 +457,8 @@ class Brocken::Fuzz v0.0.1 {
             $op = '+' if $rv == 0 && ( $op eq '/' || $op eq '%' );
             $op = '+' if ( $op eq '<<' || $op eq '>>' ) && ( $rv < 0 || $rv >= $lhs_bits );
         }
-        return { code => "\$$dst = \$$lhs $op \$$rhs;" } unless defined $lv && defined $rv;
-        my $result = $self->_eval_i64_typed( $op, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
+        return { code => "\$$dst = \$$lhs $op $rhs_expr;" } unless defined $vars->{$lhs} && defined $rv;
+        my $result = $self->_eval_i64_typed( $op, $vars->{$lhs}, $rv, $var_types->{$lhs}, $rt );
         if ( defined $result ) {
             my $t = $var_types->{$dst};
             $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
@@ -453,7 +468,7 @@ class Brocken::Fuzz v0.0.1 {
             my $t = $var_types->{$dst};
             $vars->{$dst} = $self->_clamp_to_type( 0, $t->{bits}, $t->{signed} );
         }
-        return { code => "\$$dst = \$$lhs $op \$$rhs;" };
+        return { code => "\$$dst = \$$lhs $op $rhs_expr;" };
     }
 
     method _gen_unop_assign( $vars, $var_types, $var_names ) {
