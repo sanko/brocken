@@ -1546,41 +1546,17 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my ( $label, $bytes ) = $self->_intern_rodata($combined);
                 return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
             }
-            my $strlen_fn = Brocken::Lindsay::IR::Function->new(
-                name        => $self->_crt_name('strlen'),
-                return_type => Brocken::Lindsay::IR::Type::i64(),
-                params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
-            );
-            my $len_l      = $builder->build_call( $strlen_fn, [$lhs], undef, $line, $col );
-            my $len_r      = $builder->build_call( $strlen_fn, [$rhs], undef, $line, $col );
-            my $total      = $builder->build_add( $len_l, $len_r, undef, $line, $col );
-            my $one        = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
-            my $alloc_size = $builder->build_add( $total, $one, undef, $line, $col );
-            my $malloc_fn  = Brocken::Lindsay::IR::Function->new(
-                name        => $self->_crt_name('malloc'),
-                return_type => Brocken::Lindsay::IR::Type::ptr(),
-                params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64() ) ],
-            );
-            my $buf       = $builder->build_call( $malloc_fn, [$alloc_size], undef, $line, $col );
-            my $strcpy_fn = Brocken::Lindsay::IR::Function->new(
-                name        => $self->_crt_name('strcpy'),
-                return_type => Brocken::Lindsay::IR::Type::ptr(),
-                params      => [
-                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                ],
-            );
-            $builder->build_call( $strcpy_fn, [ $buf, $lhs ], undef, $line, $col );
-            my $strcat_fn = Brocken::Lindsay::IR::Function->new(
-                name        => $self->_crt_name('strcat'),
-                return_type => Brocken::Lindsay::IR::Type::ptr(),
-                params      => [
-                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                ],
-            );
-            $builder->build_call( $strcat_fn, [ $buf, $rhs ], undef, $line, $col );
-            return $buf;
+
+            # Route dynamic concat through the managed allocator: Brocken::Runtime::str_concat copies both byte strings
+            # and NUL-terminates them. The old strlen + malloc + strcpy + strcat sequence depended on libc, which a Wasm
+            # module has no way to import, so the linker died on the undefined 'malloc' symbol.
+            my $hb        = $symbols->{'__heap_base'} ?
+                $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col ) :
+                undef;
+            Carp::croak( "String concat requires __heap_base at " . $self->_loc($ast) ) unless $hb;
+            my $concat_fn = $functions->{'Brocken::Runtime::str_concat'};
+            Carp::croak( "Runtime function str_concat not found at " . $self->_loc($ast) ) unless $concat_fn;
+            return $builder->build_call( $concat_fn, [ $hb, $lhs, $rhs ], undef, $line, $col );
         }
         Carp::croak( "Unknown binary operator '$op' at " . $self->_loc($ast) );
     }
