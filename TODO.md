@@ -93,8 +93,8 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [x] **6.3 scientific notation and a leading-dot float are not lexed**  the float rule now accepts `1e-5`, `2.5E10`, `.5` and `3.0e2`. Covered by `t/1000_katsuro/1020_lexer.t`.
 
 ### P2 — fuzzer
-- [ ] **7.1 stale `.rodata` persists between fuzz cases**  `set_rodata` is skipped when an iteration has no strings, so the previous table is reused. Always reset. `Brocken::Fuzz`.
-- [ ] **7.2 the fuzzer never emits an immediate RHS**  so immediate-guarded lowering paths are unreachable. Emit a constant operand some of the time. `Brocken::Fuzz`.
+- [x] **7.1 stale `.rodata` persists between fuzz cases**  `test_program` now always calls `set_rodata( $rodata // {} )`, so a case with no strings cannot reuse the previous table. Covered by `t/5000_fuzz/5010_fuzz_regressions.t`.
+- [x] **7.2 the fuzzer never emits an immediate RHS**  `_gen_binop_assign` now draws one value that can select an integer literal instead of a variable, keeping the random stream length unchanged. Covered by `t/5000_fuzz/5010_fuzz_regressions.t`.
 
 ## Active Sprint: Memory Management Runtime (R0–R1)
 
