@@ -235,6 +235,27 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $ret_valtype = $codegen_output->{return_valtype} // 0x7F;
         my $type_sec;
 
+        # Resolve call fixups the same way the multi-function path does. A single-function module only has index 0 to
+        # talk to, so the LEB128 placeholder is replaced with that index instead of shoring up the bogus 5-byte one.
+        my @resolve;
+        for my $fx ( sort { $a->{offset} <=> $b->{offset} } ( $codegen_output->{fixups} // [] )->@* ) {
+            next unless $fx->{type} eq 'call_idx';
+            push @resolve, $fx;
+        }
+        if (@resolve) {
+            my $out = '';
+            my $pos = 0;
+            my $at;
+            for my $fixup (@resolve) {
+                $at = $fixup->{offset};
+                die "Wasm write_executable: call fixup out of range in $name" if $at < $pos || $at + 5 > length($body);
+                $out .= substr( $body, $pos, $at - $pos );
+                $out .= $self->_uleb(0);
+                $pos = $at + 5;
+            }
+            $body = $out . substr( $body, $pos );
+        }
+
         if ( ref $ret_valtype eq 'ARRAY' ) {
             $type_sec = pack( 'C', 0x60 ) . "\x00" . pack( 'C', scalar $ret_valtype->@* ) . pack( 'C*', $ret_valtype->@* );
         }
