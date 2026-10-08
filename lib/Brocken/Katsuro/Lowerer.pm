@@ -1253,6 +1253,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_array_decl($ast) {
         my $ir_type  = $self->type_from_name( $ast->elem_type );
         my $size_val = $self->lower_expression( $ast->size_expr );
+        if ( defined $size_val ) {
+
+            # The alloca carries the element count as an i64.  A constant folds to a constant i64 so the backends can
+            # still size the frame statically; a runtime value must be an i64 too, or an untyped (`my $n = 4`) size
+            # would feed the count as a *box pointer* and the dynamic alloca would carve garbage (audit 5.5).
+            $size_val = $self->maybe_convert_type( $size_val, Brocken::Lindsay::IR::Type::i64(), $ast->line, $ast->col );
+        }
         my $key      = '@' . $ast->name;
         my $alloca   = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
         $symbols->{$key} = $alloca;

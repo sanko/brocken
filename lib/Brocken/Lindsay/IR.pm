@@ -397,7 +397,7 @@ class Brocken::Lindsay::IR::Instruction::Alloca v0.0.1: isa(Brocken::Lindsay::IR
 
     method render() {
         my $str = sprintf '  %s = alloca %s', ( $self->name // '%<anon>' ), $allocated_type->as_string;
-        $str .= sprintf ', i64 %s', $count->value if $count;
+        $str .= ', i64 ' . $count->as_string if $count;
         if ($debug_name) {
             $str .= ', !dbg name="' . $debug_name . '"' . ( defined $debug_type_name ? ' type="' . $debug_type_name . '"' : '' );
         }
