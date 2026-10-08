@@ -943,8 +943,8 @@ subtest 'stale rodata does not persist between fuzz cases' => sub {
     skip 'Not native', 1 unless $fuzz->host->is_native;
     $fuzz->linker->set_rodata( { __stale => "leftover\0" } );
     my $result = $fuzz->test_program( { source => 'return 5;', expected => 5 } );
-    is( $result->{status}, 'pass', 'no-string program still runs' );
-    is( [ sort keys %{ $fuzz->linker->rodata } ], [], 'rodata is reset for a case without strings' );
+    is( $result->{status},                        'pass', 'no-string program still runs' );
+    is( [ sort keys %{ $fuzz->linker->rodata } ], [],     'rodata is reset for a case without strings' );
 };
 
 # Bug: _gen_binop_assign always used a variable as the RHS, so immediate-operand lowering was never fuzzed.

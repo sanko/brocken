@@ -14,7 +14,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
     # expected it in a register).
     method build_binop( $opcode, $lhs, $rhs, $name = undef, $line = 0, $col = 0, $result_type = undef ) {
         my $inst = Brocken::Lindsay::IR::Instruction->new(
-            name     => $name // $self->_next_id(),
+            name     => $name        // $self->_next_id(),
             type     => $result_type // $lhs->type,
             opcode   => $opcode,
             operands => [ $lhs, $rhs ],
@@ -32,13 +32,14 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
     method build_shl( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'shl',  $lhs, $rhs, $name, $line, $col ) }
     method build_lshr( $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) { $self->build_binop( 'lshr', $lhs, $rhs, $name, $line, $col ) }
     method build_ashr( $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) { $self->build_binop( 'ashr', $lhs, $rhs, $name, $line, $col ) }
+
     method build_and( $lhs, $rhs, $name = undef, $line = 0, $col = 0, $result_type = undef ) {
-        $self->build_binop( 'and', $lhs, $rhs, $name, $line, $col, $result_type )
+        $self->build_binop( 'and', $lhs, $rhs, $name, $line, $col, $result_type );
     }
-    method build_or( $lhs, $rhs, $name   = undef, $line = 0, $col = 0 ) { $self->build_binop( 'or',   $lhs, $rhs, $name, $line, $col ) }
-    method build_xor( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'xor',  $lhs, $rhs, $name, $line, $col ) }
-    method build_min( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'min',  $lhs, $rhs, $name, $line, $col ) }
-    method build_max( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'max',  $lhs, $rhs, $name, $line, $col ) }
+    method build_or( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'or',  $lhs, $rhs, $name, $line, $col ) }
+    method build_xor( $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) { $self->build_binop( 'xor', $lhs, $rhs, $name, $line, $col ) }
+    method build_min( $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) { $self->build_binop( 'min', $lhs, $rhs, $name, $line, $col ) }
+    method build_max( $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) { $self->build_binop( 'max', $lhs, $rhs, $name, $line, $col ) }
 
     method build_unop( $opcode, $operand, $name = undef, $line = 0, $col = 0 ) {
         my $inst = Brocken::Lindsay::IR::Instruction->new(

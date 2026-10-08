@@ -21,7 +21,6 @@ sub wasm_section {
     }
     return undef;
 }
-
 subtest 'a single-function module resolves its call placeholders' => sub {
     my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-unknown');
 
@@ -33,22 +32,17 @@ subtest 'a single-function module resolves its call placeholders' => sub {
         return_valtype => 0x7F,
         fixups         => [ { type => 'call_idx', target => '_BROCKEN_ENTRY', offset => 1 } ],
     };
-
-    my $brocken      = Brocken->new();
-    my $output_file  = $brocken->tmpdir . '/single_call.wasm';
-    my $linker       = Brocken::Jenny::Linker::Wasm->new();
+    my $brocken     = Brocken->new();
+    my $output_file = $brocken->tmpdir . '/single_call.wasm';
+    my $linker      = Brocken::Jenny::Linker::Wasm->new();
     $linker->write_executable( $output_file, $codegen_output, $platform );
-
     open my $fh, '<:raw', $output_file or die "open $output_file: $!";
     my $bin = do { local $/; <$fh> };
     close $fh;
-
-    is index($bin, "\x10\x80\x80\x80\x80\x00"), -1, 'no 5-byte call placeholder survives in the module';
-
+    is index( $bin, "\x10\x80\x80\x80\x80\x00" ), -1, 'no 5-byte call placeholder survives in the module';
     my $code = wasm_section( $bin, 10 );
-    ok defined($code), 'code section present';
+    ok defined($code),                  'code section present';
     ok index( $code, "\x10\x00" ) >= 0, 'the single function calls index 0 (patched LEB128)' if defined $code;
     unlink $output_file;
 };
-
 done_testing;

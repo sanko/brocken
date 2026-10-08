@@ -14,11 +14,9 @@ subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
     my $i64 = Brocken::Lindsay::IR::Type::i64();
     my $ptr = Brocken::Lindsay::IR::Type::ptr();
 
-    # -------------------------------------------------------------------
-    # 1. Build bar()
+    #  Build bar()
     # It reads its own Frame Pointer, walks up to foo()'s frame,
     # and extracts the Return IP (which points directly to the next instruction in main)
-    # -------------------------------------------------------------------
     my $bar = Brocken::Lindsay::IR::Function->new( name => 'bar', return_type => $i64, params => [] );
     $b->position_at_end( $bar->append_block('entry') );
     my $bar_fp = $b->build_frame_addr('bar_fp');
@@ -34,21 +32,19 @@ subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
     my $is_valid = $b->build_icmp( 'ne', $main_ip, Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ) );
     $b->build_ret($is_valid);
 
-    # -------------------------------------------------------------------
-    # 2. Build foo()
-    # -------------------------------------------------------------------
+    # Build foo()
     my $foo = Brocken::Lindsay::IR::Function->new( name => 'foo', return_type => $i64, params => [] );
     $b->position_at_end( $foo->append_block('entry') );
     my $res = $b->build_call( $bar, [] );
     $b->build_ret($res);
 
-    # 3. Build entry function
+    # Build entry function
     my $entry = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i64, params => [] );
     $b->position_at_end( $entry->append_block('entry') );
     my $res2 = $b->build_call( $foo, [] );
     $b->build_ret($res2);
 
-    # 4. Compile and Execute
+    # Compile and Execute
     my $funcs       = $brocken->codegen->emit_functions( [ $bar, $foo, $entry ] );
     my $output_file = $brocken->tmpdir . '/backtrace_test' . $brocken->ext;
     $brocken->linker->set_func_ranges(
@@ -62,4 +58,5 @@ subtest 'Zero-Cost Native Backtrace (Frame Pointers)' => sub {
         name          => 'Walked Frame Pointers and grabbed Return IP correctly on ' . $host->friendly
     );
 };
+#
 done_testing;

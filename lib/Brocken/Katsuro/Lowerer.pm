@@ -1270,8 +1270,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # would feed the count as a *box pointer* and the dynamic alloca would carve garbage (audit 5.5).
             $size_val = $self->maybe_convert_type( $size_val, Brocken::Lindsay::IR::Type::i64(), $ast->line, $ast->col );
         }
-        my $key      = '@' . $ast->name;
-        my $alloca   = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
+        my $key    = '@' . $ast->name;
+        my $alloca = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
         $symbols->{$key} = $alloca;
     }
 
@@ -1567,7 +1567,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # Route dynamic concat through the managed allocator: Brocken::Runtime::str_concat copies both byte strings
             # and NUL-terminates them. The old strlen + malloc + strcpy + strcat sequence depended on libc, which a Wasm
             # module has no way to import, so the linker died on the undefined 'malloc' symbol.
-            my $hb        = $symbols->{'__heap_base'} ?
+            my $hb
+                = $symbols->{'__heap_base'} ?
                 $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col ) :
                 undef;
             Carp::croak( "String concat requires __heap_base at " . $self->_loc($ast) ) unless $hb;
@@ -2045,7 +2046,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
             my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $total_size );
             $self->_emit_fuel_check( $line, $col );
-            my $self_ptr = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
+            my $self_ptr     = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
             my $header_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => ( 1 | ( 4 << 24 ) ) );
             $builder->build_store( $header_const, $self_ptr, $line, $col );
 
@@ -2061,14 +2062,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $field_idx{ $cd->{fields}[$i]{name} } = $i;
             }
             my @param_fields = grep { $_->{param} } $cd->{fields}->@*;
-            Carp::croak( "Too many positional constructor arguments for class '$class_name' at " . $self->_loc($ast) )
-                if @positional > @param_fields;
+            Carp::croak( "Too many positional constructor arguments for class '$class_name' at " . $self->_loc($ast) ) if @positional > @param_fields;
             my %seen;
             for my $i ( 0 .. $#positional ) {
                 my $fd  = $param_fields[$i];
                 my $val = $self->lower_expression( $positional[$i] );
                 $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
-                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $field_idx{ $fd->{name} }, '%' . $fd->{name} . '.init', $line, $col );
+                my $field_ptr
+                    = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $field_idx{ $fd->{name} }, '%' . $fd->{name} . '.init', $line,
+                    $col );
                 $builder->build_store( $val, $field_ptr, $line, $col );
                 $seen{ $fd->{name} } = 1;
             }

@@ -45,8 +45,8 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         for my $bb ( $mf->blocks->@* ) {
             for my $inst ( $bb->instructions->@* ) {
-                my $opcode  = $inst->opcode;
-                my @ops     = $inst->operands->@*;
+                my $opcode     = $inst->opcode;
+                my @ops        = $inst->operands->@*;
                 my $needs_addr = 0;
                 my $needs_idx  = 0;
                 my $needs_val  = 0;
@@ -145,7 +145,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 next unless defined $name;
                 if ( $i == 0 && $writes ) {
                     $dst = $name;
-                    $used{$name} = 1 if $rmw{$inst->opcode};
+                    $used{$name} = 1 if $rmw{ $inst->opcode };
                     next;
                 }
                 $used{$name} = 1;
@@ -439,7 +439,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         # therefore drawn first from the registers this function cannot use anyway, which costs the assignment nothing,
         # and only falls back to the pool when there is no such register left.  The register is reserved at all only
         # when the function can need it; see _has_addr_hazard for why that is decided after the first pass.
-        my $spill_temp = pop @caller_regs;
+        my $spill_temp           = pop @caller_regs;
         my $spill_temp_is_callee = 0;
         if ( !defined $spill_temp ) {
 
@@ -533,9 +533,10 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
 
     method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0, $spill_addr_temp = undef ) {
         return unless $spill_slots && keys %$spill_slots;
-        my $load_op     = $is_float ? 'fload'  : 'load';
-        my $store_op    = $is_float ? 'fstore' : 'store';
-        my %reads_dst   = map { $_ => 1 } qw(add sub mul sdiv udiv div rem urem adc sbb and or xor cmp shl shr sar neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand);
+        my $load_op   = $is_float ? 'fload'  : 'load';
+        my $store_op  = $is_float ? 'fstore' : 'store';
+        my %reads_dst = map { $_ => 1 }
+            qw(add sub mul sdiv udiv div rem urem adc sbb and or xor cmp shl shr sar neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
 
@@ -592,9 +593,9 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     # scratch, and any value operand owns the value scratch, so the index takes whichever is left.
                     my $index = $op->value->{index} // '';
                     if ( $index ne '' && defined( my $off = $spill_slots->{$index} ) ) {
-                        $ind_off = $off;
-                        $ind_scratch = defined $smem_off ? $spill_temp
-                            : ( keys(%sp) ? ( defined $spill_addr_temp ? $spill_addr_temp : $spill_temp ) : $spill_temp );
+                        $ind_off     = $off;
+                        $ind_scratch = defined $smem_off ? $spill_temp :
+                            ( keys(%sp) ? ( defined $spill_addr_temp ? $spill_addr_temp : $spill_temp ) : $spill_temp );
                         $op->value->{index} = $ind_scratch;
                     }
                 }
@@ -602,6 +603,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     push @new, $inst;
                     next;
                 }
+
                 # Which operand positions the encoder can take straight from memory.  A spilled operand there costs
                 # no scratch at all, which matters when an instruction reads several sources at once: the reload
                 # scratch is a single register, so two reloaded sources would otherwise overwrite each other before
@@ -649,21 +651,26 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 # while the value scratch is reused below.
                 push @new, $load_addr_inst->($smem_off) if defined $smem_off;
                 if ( defined $ind_off ) {
-                    push @new, Brocken::Jenny::MIR::MachineInstruction->new(
+                    push @new,
+                        Brocken::Jenny::MIR::MachineInstruction->new(
                         opcode   => $load_op,
-                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $ind_scratch, type => undef ), $mem_op->($ind_off) ],
-                        comment  => 'spill-reload-index'
-                    );
+                        operands => [
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $ind_scratch, type => undef ),
+                            $mem_op->($ind_off)
+                        ],
+                        comment => 'spill-reload-index'
+                        );
                 }
-                for my $lr ( @load_offsets ) {
-                    push @new, Brocken::Jenny::MIR::MachineInstruction->new(
+                for my $lr (@load_offsets) {
+                    push @new,
+                        Brocken::Jenny::MIR::MachineInstruction->new(
                         opcode   => $load_op,
                         operands => [
                             Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lr->[1], type => undef ),
                             $mem_op->( $lr->[0] ),
                         ],
                         comment => 'spill-reload',
-                    );
+                        );
                 }
                 push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
                 push @new, $store_inst->($store_off) if defined $store_off;
@@ -735,19 +742,18 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 my $inst = $bb->instructions->[$i];
                 my $next = $bb->instructions->[ $i + 1 ];
                 if ( $inst->opcode =~ /^(?:load|fload)$/ && $inst->comment =~ /^caller-restore / && $next && $next->opcode =~ /^(?:mov|fmov)$/ ) {
-                    my ( $load_dst ) = $inst->operands->@*;
+                    my ($load_dst) = $inst->operands->@*;
                     my ( $mov_dst, $mov_src ) = $next->operands->@*;
 
                     # The reload is redundant only when the following copy writes a *different* register into the same
                     # destination.  A self-move keeps whatever the reload restored is not what it does: `mov R, R`
                     # leaves the clobbered value in place, so dropping the caller-restore reload loses the restored
                     # value entirely.
-                    if (   $load_dst->kind eq 'phys_reg'
-                        && $mov_dst->kind eq 'phys_reg'
-                        && $mov_src->kind eq 'phys_reg'
-                        && $load_dst->value eq $mov_dst->value
-                        && $load_dst->value ne $mov_src->value )
-                    {
+                    if ( $load_dst->kind eq 'phys_reg' &&
+                        $mov_dst->kind eq 'phys_reg'        &&
+                        $mov_src->kind eq 'phys_reg'        &&
+                        $load_dst->value eq $mov_dst->value &&
+                        $load_dst->value ne $mov_src->value ) {
                         next;
                     }
                 }

@@ -98,7 +98,9 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my @used_callee = sort keys %callee_seen;
             my %alloca_map;
             my %source_map;
-            my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map, [ $int_res->{spill_temp}, $int_res->{spill_addr_temp} ] );
+            my ( $bytes, $func_fixups )
+                = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map,
+                [ $int_res->{spill_temp}, $int_res->{spill_addr_temp} ] );
             $mf->release;
             push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
         }
@@ -141,7 +143,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             $callee_seen{ $platform->fiber_reg } = 1;
         }
         my @used_callee = sort keys %callee_seen;
-        my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, undef, undef, [ $int_res->{spill_temp}, $int_res->{spill_addr_temp} ] );
+        my ( $bytes, $func_fixups )
+            = $self->_encode( $mf, \%assignment, \@used_callee, undef, undef, [ $int_res->{spill_temp}, $int_res->{spill_addr_temp} ] );
         $mf->release;
         return { name => $mf->name, bytes => $bytes, fixups => $func_fixups };
     }
@@ -374,12 +377,18 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 type  => $i64
             );
             $mbb->add_instruction(
-                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'load', operands => [ $arg, $in ],
-                    comment => 'read incoming a' . ( 4 + $i ) . ' from the caller frame' )
+                Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'load',
+                    operands => [ $arg, $in ],
+                    comment  => 'read incoming a' . ( 4 + $i ) . ' from the caller frame'
+                )
             );
             $mbb->add_instruction(
-                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'store', operands => [ $out, $arg ],
-                    comment => 'forward a' . ( 4 + $i ) . ' into the outgoing area' )
+                Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode   => 'store',
+                    operands => [ $out, $arg ],
+                    comment  => 'forward a' . ( 4 + $i ) . ' into the outgoing area'
+                )
             );
         }
 
@@ -479,15 +488,15 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
     }
 
     method _encode( $mf, $assignment, $used_callee, $alloca_map = undef, $source_map = undef, $reserved = [] ) {
-        my $bytes        = '';
-        my $alloca_frame = 0;
-        my $total_alloca = 0;
-        my $is_leaf      = 1;
+        my $bytes          = '';
+        my $alloca_frame   = 0;
+        my $total_alloca   = 0;
+        my $is_leaf        = 1;
         my $has_dyn_alloca = 0;
-        my $spill_frame  = $self->_compute_spill_frame( $mf, $platform->stack_reg );
+        my $spill_frame    = $self->_compute_spill_frame( $mf, $platform->stack_reg );
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
-                $is_leaf = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
+                $is_leaf        = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
                 $has_dyn_alloca = 1 if $inst->opcode eq 'alloca_dyn';
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
@@ -509,7 +518,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # The outgoing argument area sits at the bottom of the frame, below the spill slots, because the callee reads
         # those arguments from the entry stack pointer and neither `jal ra` nor `jalr ra` moves it.
         my $call_arg_frame = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
-        my $push_active  = 0;
+        my $push_active    = 0;
         my $call_arg_push;
         if ($has_dyn_alloca) {
 
@@ -558,13 +567,14 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             return $disp unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
             if ($has_dyn_alloca) {
                 return $disp + $total_frame - $dyn_fp_off if ( $addr->{raw} // '' ) eq 'entry';
-                return $disp                                if $addr->{raw};
+                return $disp                              if $addr->{raw};
                 return $disp - $dyn_fp_off;
             }
             return $disp + $total_frame if ( $addr->{raw} // '' ) eq 'entry';
             return $disp                if $addr->{raw};
             return $disp + $call_arg_frame;
         };
+
         # In a dynamic frame, which base register a memory operand is addressed through: s0 for every fixed-frame slot,
         # the live stack pointer for the outgoing arguments a callee reads off its entry sp.  Returns undef when the
         # operand is not stack-relative at all (a plain vreg base).
@@ -574,6 +584,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             return undef if ( $addr->{raw} // '' ) eq 'stack';
             return 's0';
         };
+
         # A fixed-frame slot measured from s0 (final_disp) can fall outside the signed 12-bit displacement an
         # ld/sd/fld/fsd immediate can encode: in a dynamic frame the spill slots and allocas sit below the frame
         # pointer, so their displacements come out negative, and a large frame pushes them past -2048.  Materialize
@@ -589,7 +600,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $lo = $disp & 0xFFF;
             $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 24 << 7 ) | LUI );
             $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 24 << 15 ) | ( 0 << 12 ) | ( 24 << 7 ) | OP_IMM ) if $lo;
-            $bytes .= pack( 'V', ( 0 << 25 ) | ( 24 << 20 ) | ( 8 << 15 ) | ( 0 << 12 ) | ( 24 << 7 ) | OP );    # add s8, s0, s8
+            $bytes .= pack( 'V', ( 0 << 25 ) | ( 24 << 20 ) | ( 8 << 15 ) | ( 0 << 12 ) | ( 24 << 7 ) | OP );              # add s8, s0, s8
             return ( 24, 0 );
         };
         my $reg_id = sub ($r) {
@@ -652,7 +663,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
 
         # A spill reload lands in the register the allocator reserved for it, so a scratch chosen for a memory source
         # must not be one of those: it would overwrite the reloaded value the instruction is about to use.
-        my %reserved   = map { $_ => 1 } grep { defined } @$reserved;
+        my %reserved     = map { $_ => 1 } grep {defined} @$reserved;
         my $pick_scratch = sub () {
             my %used;
             @used{ values %$assignment } = ();
@@ -668,11 +679,10 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # rather than reloaded, because these are the opcodes the spiller will hand memory to.  No RISC-V encoding
         # here takes a memory source, so the value is pulled into a scratch register first and the register form is
         # emitted.
-        my $load_mem_scratch = sub ($mem, $what) {
-            my $addr = $mem->value;
-            my $base_r
-                = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
-            my $bid  = $reg_id->($base_r);
+        my $load_mem_scratch = sub ( $mem, $what ) {
+            my $addr   = $mem->value;
+            my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+            my $bid    = $reg_id->($base_r);
             my $anchor = $anchor_base->($addr);
             $bid = 8 if defined $anchor;
             my $tmp_r = $pick_scratch->();
@@ -681,8 +691,9 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits   : 64;
             my $signed = $mem->type && $mem->type->kind eq 'int'     ? $mem->type->signed : 1;
             my $funct3 = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
-            my $disp = $final_disp->($addr);
+            my $disp   = $final_disp->($addr);
             ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
+
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                 my $iid     = $reg_id->($index_r);
@@ -746,7 +757,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 my $lo = $neg & 0xFFF;
                 $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
                 $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
-                $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );    # sub sp, sp, t5
+                $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );           # sub sp, sp, t5
             }
         };
         my $sp_push = sub () {
@@ -1092,18 +1103,17 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         $pow2 /= 2;
                         $log2++;
                     }
-                    die "alloca_dyn: non-power-of-two element size $elem not encodable on RISCV64"
-                        if $pow2 != 1 || $elem <= 0;
+                    die "alloca_dyn: non-power-of-two element size $elem not encodable on RISCV64" if $pow2 != 1 || $elem <= 0;
                     if ($log2) {
                         $bytes .= pack( 'V', ( $log2 << 20 ) | ( $cid << 15 ) | ( 1 << 12 ) | ( 15 << 7 ) | OP );    # slli a5, count, #log2
                     }
                     else {
                         $bytes .= pack( 'V', ( 0 << 20 ) | ( $cid << 15 ) | ( 0 << 12 ) | ( 15 << 7 ) | OP_IMM );    # addi a5, count, 0
                     }
-                    $bytes .= pack( 'V', ( 15 << 20 ) | ( 15 << 15 ) | ( 0 << 12 ) | ( 15 << 7 ) | OP_IMM );    # addi a5, #15
-                    $bytes .= pack( 'V', ( ( -16 ) & 0xFFF ) << 20 | ( 15 << 15 ) | ( 7 << 12 ) | ( 15 << 7 ) | OP_IMM );    # andi a5, a5, -16
+                    $bytes .= pack( 'V', ( 15 << 20 ) | ( 15 << 15 ) | ( 0 << 12 ) | ( 15 << 7 ) | OP_IMM );               # addi a5, #15
+                    $bytes .= pack( 'V', ( (-16) & 0xFFF ) << 20 | ( 15 << 15 ) | ( 7 << 12 ) | ( 15 << 7 ) | OP_IMM );    # andi a5, a5, -16
                     $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 15 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );    # sub sp, sp, a5
-                    $bytes .= pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );    # mv dst, sp
+                    $bytes .= pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );               # mv dst, sp
                 }
                 elsif ( $opcode eq 'load' ) {
                     my $dst_r = $resolve->($dst);
@@ -1117,9 +1127,9 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
                     my $signed = $src->type && $src->type->kind eq 'int'     ? $src->type->signed : 1;
                     my $funct3 = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
-
-                    my $disp = $final_disp->($addr);
+                    my $disp   = $final_disp->($addr);
                     ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
+
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -1149,6 +1159,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
                     my $disp   = $final_disp->($addr);
                     ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
+
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -1240,6 +1251,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $funct3 = ( $dst->type && $dst->type->bits <= 32 ) ? 2 : 3;
                     my $disp   = $final_disp->($addr);
                     ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
+
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -1268,6 +1280,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $funct3 = ( $src->type && $src->type->bits <= 32 ) ? 2 : 3;
                     my $disp   = $final_disp->($addr);
                     ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
+
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -1508,7 +1521,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                             my $lo = $dyn & 0xFFF;
                             $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
                             $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
-                            $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 8 << 15 ) | ( 0 << 12 ) | ( 15 << 7 ) | OP );    # sub a5, s0, t5
+                            $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 8 << 15 ) | ( 0 << 12 ) | ( 15 << 7 ) | OP );       # sub a5, s0, t5
                         }
                         for my $i ( reverse 0 .. $#to_save ) {
                             my $reg     = $to_save[$i];
@@ -1519,14 +1532,15 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         }
                         my $tf = $total_frame;
                         if ( $tf <= 2047 ) {
-                            $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 15 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );    # addi sp, a5, total_frame
+                            $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 15 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM )
+                                ;    # addi sp, a5, total_frame
                         }
                         else {
                             my $hi = ( $tf + 0x800 ) >> 12;
                             my $lo = $tf & 0xFFF;
                             $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
                             $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
-                            $bytes .= pack( 'V', ( 0x00 << 25 ) | ( 5 << 20 ) | ( 15 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );    # add sp, a5, t5
+                            $bytes .= pack( 'V', ( 0x00 << 25 ) | ( 5 << 20 ) | ( 15 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );       # add sp, a5, t5
                         }
                     }
                     else {

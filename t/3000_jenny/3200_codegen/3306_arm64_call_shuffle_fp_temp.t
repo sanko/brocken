@@ -65,25 +65,20 @@ sub has_save_inst {
     }
     return 0;
 }
-
 subtest 'a spill temp that is an argument register blocks the shuffle' => sub {
-    my $mf_v7  = mk_mf();
-    my $alloc  = Brocken::Jenny::RegAlloc::LinearScan->new();
+    my $mf_v7 = mk_mf();
+    my $alloc = Brocken::Jenny::RegAlloc::LinearScan->new();
     $alloc->fix_call_shuffle( $mf_v7, {}, undef, 'v7' );
     ok !has_save_inst($mf_v7), 'an fp spill temp of v7 is touched by the run and the shuffle is skipped';
-
     my $mf_v31 = mk_mf();
     $alloc->fix_call_shuffle( $mf_v31, {}, undef, 'v31' );
     ok has_save_inst($mf_v31), 'the ABI fp entry shuffle temp schedules the same run';
 };
-
 subtest 'the ARM64 backend passes the ABI fp entry shuffle temp to the call shuffle' => sub {
     my $platform = Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu');
     my $codegen  = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
     my $blob     = $codegen->_emit_single_mf( mk_mf() );
     my $bytes    = $blob->{bytes};
-    like $bytes, qr/\Q@{[ pack( 'V', 0x1E6040DF ) ]}\E/s,
-        'the parked copy fmov v31, v6 (0x1E6040DF) survives codegen';
+    like $bytes, qr/\Q@{[ pack( 'V', 0x1E6040DF ) ]}\E/s, 'the parked copy fmov v31, v6 (0x1E6040DF) survives codegen';
 };
-
 done_testing;

@@ -434,7 +434,7 @@ class Brocken::Fuzz v0.0.1 {
         my $ri  = int($sel);
         my ( $rhs, $rhs_expr, $rv, $rt );
         if ( $ri == @int_names ) {
-            my $imm   = int( ( $sel - $ri ) * 200 ) - 100;
+            my $imm = int( ( $sel - $ri ) * 200 ) - 100;
             $rhs_expr = $imm < 0 ? "($imm)" : "$imm";
             $rv       = $imm;
             $rt       = { bits => 64, signed => 1 };
@@ -446,7 +446,6 @@ class Brocken::Fuzz v0.0.1 {
             $rt       = $var_types->{$rhs};
         }
         my $op;
-
         for my $try ( 0 .. 9 ) {
             $op = $self->_rand_binop();
             last
@@ -1375,7 +1374,7 @@ class Brocken::Fuzz v0.0.1 {
 
     # Generate $n random bytes by drawing one rand() call per byte.  Byte-at-a-time keeps every value a function
     # of the seeded rand() stream, so a (seed, case_num) tuple still replays deterministically.
-    method _rand_bytes( $n ) {
+    method _rand_bytes($n) {
         my $acc = 0;
         $acc = ( $acc << 8 ) | int( rand(256) ) for 1 .. $n;
         return $acc;
@@ -1544,6 +1543,7 @@ class Brocken::Fuzz v0.0.1 {
         my $file;
         eval {
             $file = $self->tmpdir . '/fuzz_output' . $self->ext;
+
             # Always reset: a case with no string literals must not reuse the previous case's table.
             $self->linker->set_rodata( $rodata // {} );
             $self->linker->write_executable( $file, $funcs, $self->host );

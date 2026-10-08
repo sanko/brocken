@@ -99,14 +99,14 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
 
             # SysV requires rsp%16 == 0 at a call site (callees expect rsp%16 == 8 at entry). `push rdi` alone leaves
             # rsp%16 == 8, so dip the stack 8 bytes before the push and raise it again after the pop.
-            $pre_main .= pack( 'C4', 0x48, 0x83, 0xEC, 0x08 );    # sub rsp, 8
-            $pre_main .= pack( 'C', 0x57 );                       # push rdi (save heap_base)
+            $pre_main .= pack( 'C4', 0x48, 0x83, 0xEC, 0x08 );                        # sub rsp, 8
+            $pre_main .= pack( 'C', 0x57 );                                           # push rdi (save heap_base)
             my $rir1 = $text_rva + length($stub) + length($pre_main) + 6;
-            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_init_tls - $rir1 );           # call [rip + init_tls]
+            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_init_tls - $rir1 );          # call [rip + init_tls]
             my $rir2 = $text_rva + length($stub) + length($pre_main) + 6;
-            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_rtld_call_init - $rir2 );     # call [rip + rtld_call_init]
-            $pre_main .= pack( 'C', 0x5F );                       # pop rdi (restore heap_base)
-            $pre_main .= pack( 'C4', 0x48, 0x83, 0xC4, 0x08 );    # add rsp, 8
+            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_rtld_call_init - $rir2 );    # call [rip + rtld_call_init]
+            $pre_main .= pack( 'C',     0x5F );                                       # pop rdi (restore heap_base)
+            $pre_main .= pack( 'C4',    0x48, 0x83, 0xC4, 0x08 );                     # add rsp, 8
         }
         $stub .= $pre_main;
 
@@ -1091,7 +1091,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 $got_init_tls       = $self->import_rva('_init_tls');
                 $got_rtld_call_init = $self->import_rva('_rtld_call_init');
             }
-            my $stub = $self->_build_entry_stub( $platform, \%func_offsets, $self->layout->get('.text')->{rva}, $got_exit, $got_init_tls, $got_rtld_call_init );
+            my $stub = $self->_build_entry_stub( $platform, \%func_offsets, $self->layout->get('.text')->{rva},
+                $got_exit, $got_init_tls, $got_rtld_call_init );
             substr( $text, 0, length($stub), $stub );
         }
         for my $pad (@import_patches) {
@@ -1102,7 +1103,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             }
             elsif ( $platform->is_arm64 ) {
                 require Brocken::Jenny::Codegen::ARM64::Inst;
-                substr( $text, $pad->{ofs}, 4, pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::adrp( 16, $got_rva_actual, $text_rva_final + $pad->{ofs} ) ) );
+                substr( $text, $pad->{ofs}, 4,
+                    pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::adrp( 16, $got_rva_actual, $text_rva_final + $pad->{ofs} ) ) );
                 substr( $text, $pad->{ofs} + 4, 4, pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 16, 16, $got_rva_actual & 0xFFF ) ) );
             }
             elsif ( $platform->is_riscv64 ) {
@@ -1112,11 +1114,11 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 my $lo12     = $diff & 0xFFF;
                 my $auipc    = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;
                 my $ld       = ( ( $lo12 & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 3 << 12 ) | ( 5 << 7 ) | 0x03;
-                substr( $text, $pad->{ofs}, 4, pack( 'V', $auipc ) );
+                substr( $text, $pad->{ofs},     4, pack( 'V', $auipc ) );
                 substr( $text, $pad->{ofs} + 4, 4, pack( 'V', $ld ) );
             }
         }
-        my $dynamic        = '';
+        my $dynamic = '';
 
         # Dynamic section entries (d_tag, d_val/d_ptr):
         #   DT_NEEDED=1, DT_PLTGOT=3, DT_HASH=4, DT_STRTAB=5, DT_SYMTAB=6,

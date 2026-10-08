@@ -40,9 +40,7 @@ SKIP: {
         is( $exit, $expected, "$name — exit code $expected" );
     }
 
-    # ------------------------------------------------------------------
-    # 1. Baseline: return integer constant (no float at all)
-    # ------------------------------------------------------------------
+    # Baseline: return integer constant (no float at all)
     subtest 'Baseline integer return' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i64() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
@@ -51,9 +49,7 @@ SKIP: {
         run_check( 'return 31', 31, $func );
     };
 
-    # ------------------------------------------------------------------
-    # 2. f64 constant via alloca load + fptosi (tests fload + fcvtzs)
-    # ------------------------------------------------------------------
+    # f64 constant via alloca load + fptosi (tests fload + fcvtzs)
     subtest 'f64 alloca load + fptosi' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i64() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
@@ -66,9 +62,7 @@ SKIP: {
         run_check( 'store/load 31.0 + fptosi -> 31', 31, $func );
     };
 
-    # ------------------------------------------------------------------
-    # 3. f64 constant direct fptosi (no alloca) — tests fmov_gp2f + fcvtzs
-    # ------------------------------------------------------------------
+    # f64 constant direct fptosi (no alloca) — tests fmov_gp2f + fcvtzs
     subtest 'f64 constant direct fptosi' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i64() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
@@ -81,9 +75,7 @@ SKIP: {
         run_check( 'fptosi of const 31.0 -> 31', 31, $func );
     };
 
-    # ------------------------------------------------------------------
-    # 4. f64 constant -> fadd -> fptosi (full pipeline, what 1070 fails on)
-    # ------------------------------------------------------------------
+    # f64 constant -> fadd -> fptosi (full pipeline, what 1070 fails on)
     subtest 'f64 fadd + fptosi' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i64() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
@@ -102,9 +94,7 @@ SKIP: {
         run_check( 'f64 10.5 + 20.5 -> 31', 31, $func );
     };
 
-    # ------------------------------------------------------------------
-    # 5. f64 fadd of values from register (no memory) — tests fmov_gp2f + fadd + fcvtzs
-    # ------------------------------------------------------------------
+    # f64 fadd of values from register (no memory) — tests fmov_gp2f + fadd + fcvtzs
     subtest 'f64 register add (no alloca)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i64() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
@@ -117,9 +107,7 @@ SKIP: {
         run_check( 'f64 reg add 10.5 + 20.5 -> 31', 31, $func );
     };
 
-    # ------------------------------------------------------------------
-    # 6. f64 sitofp (integer->float) + fptosi — tests scvtf + fcvtzs
-    # ------------------------------------------------------------------
+    # f64 sitofp (integer->float) + fptosi — tests scvtf + fcvtzs
     subtest 'f64 sitofp + fptosi' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i64() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
@@ -131,9 +119,7 @@ SKIP: {
         run_check( 'sitofp 31 + fptosi -> 31', 31, $func );
     };
 
-    # ------------------------------------------------------------------
-    # 7. f64 fadd with integer constant LHS (tests sink of int->float->add)
-    # ------------------------------------------------------------------
+    # f64 fadd with integer constant LHS (tests sink of int->float->add)
     subtest 'f64 add int const + float const' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i64() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
@@ -147,4 +133,5 @@ SKIP: {
         run_check( 'sitofp 10 + 20.5 -> 30', 30, $func );
     };
 }
+#
 done_testing;

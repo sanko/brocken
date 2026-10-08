@@ -38,7 +38,7 @@ subtest 'call shuffle keeps the lea_rodata label operand' => sub {
         Brocken::Jenny::MIR::MachineInstruction->new(
             opcode   => 'lea_rodata',
             operands => [
-                Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rdx' ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg',     value => 'rdx' ),
                 Brocken::Jenny::MIR::MachineOperand->new( kind => 'rodata_label', value => '__str_0' ),
             ],
             comment => 'arg 2 (string) to rdx'
@@ -51,15 +51,14 @@ subtest 'call shuffle keeps the lea_rodata label operand' => sub {
             comment  => 'call @foo'
         )
     );
-
     my %assignment = ( '%a' => 'rdi', '%b' => 'rsi' );
     Brocken::Jenny::RegAlloc::LinearScan->new()->fix_call_shuffle( $mf, \%assignment, 'rax', 'xmm0' );
-
     my @insts = $bb->instructions->@*;
     my (@rodata) = grep { $_->opcode eq 'lea_rodata' } @insts;
-    is( scalar @rodata, 1, 'one lea_rodata survives the shuffle' );
+    is( scalar @rodata,                   1,              'one lea_rodata survives the shuffle' );
     is( $rodata[0]->operands->[1]->kind,  'rodata_label', 'label operand kind preserved' );
     is( $rodata[0]->operands->[1]->value, '__str_0',      'label operand value preserved' );
+
     for my $i (@insts) {
         for my $op ( $i->operands->@* ) {
             ok( !( ref($op) && $op->kind eq 'phys_reg' && !defined $op->value ), 'no undef phys_reg operand emitted' );

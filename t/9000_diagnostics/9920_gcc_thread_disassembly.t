@@ -1,9 +1,10 @@
 use v5.40;
 use Test2::V0;
-use File::Temp qw(tempfile);
+use File::Temp qw[tempfile];
 use blib;
+#
 my $os = $^O;
-note("Host OS: $os");
+note 'Host OS: ' .$os;
 skip_all 'No need for these diagnostics right now';
 SKIP: {
     skip 'gcc thread disassembly test requires a Unix-like OS with gcc', 1 if $os eq 'MSWin32' || $os eq 'cygwin';
@@ -12,12 +13,12 @@ SKIP: {
     skip "gcc not found (tried '$cc')", 1 if $cc_ok != 0;
 
     # Show GCC target triple
-    diag("gcc -dumpmachine");
-    system("$cc -dumpmachine 2>&1");
+    diag 'gcc -dumpmachine';
+    system "$cc -dumpmachine 2>&1";
 
     # Show preprocessor defines relevant to OS/threads
-    diag("gcc -dM -E (OS+thread defines)");
-    system("$cc -lpthread -dM -E -x c /dev/null 2>&1 | grep -iE 'freebsd|dragonfly|linux|gnu|thread|tls|_REENTRANT|_PTHREADS' || true");
+    diag 'gcc -dM -E (OS+thread defines)';
+    system "$cc -lpthread -dM -E -x c /dev/null 2>&1 | grep -iE 'freebsd|dragonfly|linux|gnu|thread|tls|_REENTRANT|_PTHREADS' || true";
     my ( $sfh, $c_path ) = tempfile( 'gcc_diag_XXXX', SUFFIX => '.c', TMPDIR => 1, UNLINK => 0 );
     my $bin_path = $c_path;
     $bin_path =~ s/\.c$//;
@@ -52,93 +53,87 @@ int main() {
 CCODE
     print $sfh $c_code;
     close $sfh;
-    ok( -f $c_path, "C source written: $c_path" );
+    ok  -f $c_path, 'C source written: ' . $c_path;
 
     #
-    note("Step 1: gcc -S (assembly output)");
+    note 'Step 1: gcc -S (assembly output)';
     my $asm_out = `$cc -lpthread -S -o $s_path $c_path 2>&1`;
     my $rc1     = $? >> 8;
     if ( $rc1 == 0 ) {
-        ok( 1, 'gcc -S succeeded' );
+        pass 'gcc -S succeeded';
         open my $afh, '<', $s_path or diag("Cannot read $s_path: $!");
         if ($afh) {
             local $/;
             my $asm = <$afh>;
             close $afh;
-            note("Assembly output:\n$asm");
+            note 'Assembly output:'; note $asm;
         }
     }
     else {
-        diag("gcc -S failed (exit $rc1): $asm_out");
-        ok( 0, 'gcc -S succeeded' );
+        diag "gcc -S failed (exit $rc1): $asm_out";
+        fail 'gcc -S succeeded';
     }
 
     #
-    note("Step 2: gcc -o (full binary)");
+    note 'Step 2: gcc -o (full binary)';
     my $compile = `$cc -lpthread -o $bin_path $c_path 2>&1`;
     my $rc2     = $? >> 8;
     if ( $rc2 == 0 ) {
-        ok( 1, "gcc compilation succeeded: $bin_path" );
+        pass 'gcc compilation succeeded: ' .$bin_path;
     }
     else {
-        diag("gcc compilation failed (exit $rc2): $compile");
-        ok( 0, 'gcc compilation succeeded' );
+        diag "gcc compilation failed (exit $rc2): $compile";
+        fail 'gcc compilation succeeded';
     }
 
     #
-    note("Step 3: Run binary");
+    note 'Step 3: Run binary';
     my $run = `$bin_path 2>&1`;
     my $rc3 = $? >> 8;
-    diag("Binary output: $run");
-    diag("Exit code: $rc3");
-    if ( $rc3 == 0 ) {
-        ok( 1, 'Binary execution succeeded' );
-    }
-    else {
-        diag('Binary execution FAILED');
-        ok( 0, 'Binary execution succeeded' );
-    }
+    diag 'Binary output: '. $run;
+    diag 'Exit code: ' .$rc3;
+    is $rc3, 0,'Binary execution succeeded' ;
 
     #
-    note("Step 4: ELF Information");
+    note 'Step 4: ELF Information';
     my $elf_ok = 0;
     if ( system('readelf --version >/dev/null 2>&1') == 0 ) {
         $elf_ok = 1;
-        diag("readelf -h (ELF header)");
+        diag 'readelf -h (ELF header)';
         system("readelf -h $bin_path 2>&1");
-        diag("readelf -l (program headers)");
+        diag 'readelf -l (program headers)';
         system("readelf -l $bin_path 2>&1");
-        diag("readelf -d (dynamic section)");
+        diag 'readelf -d (dynamic section)';
         system("readelf -d $bin_path 2>&1");
-        diag("readelf -S (section headers)");
+        diag 'readelf -S (section headers)';
         system("readelf -S $bin_path 2>&1");
-        diag("readelf -n (notes)");
+        diag 'readelf -n (notes)';
         system("readelf -n $bin_path 2>&1");
-        diag("readelf -r (relocations)");
+        diag 'readelf -r (relocations)';
         system("readelf -r $bin_path 2>&1");
-        diag("readelf -s (symbol table)");
+        diag 'readelf -s (symbol table)';
         system("readelf -s $bin_path 2>&1");
     }
     elsif ( system('objdump --version >/dev/null 2>&1') == 0 ) {
         $elf_ok = 1;
-        diag("objdump -p (private/dynamic)");
+        diag 'objdump -p (private/dynamic)';
         system("objdump -p $bin_path 2>&1");
-        diag("objdump -h (section headers)");
+        diag 'objdump -h (section headers)';
         system("objdump -h $bin_path 2>&1");
-        diag("objdump -d (disassembly)");
+        diag( 'bjdump -d (disassembly)';
         system("objdump -d $bin_path 2>&1");
-        diag("objdump -R (relocations)");
+        diag 'objdump -R (relocations)';
         system("objdump -R $bin_path 2>&1");
-        diag("objdump -t (symbol table)");
+        diag 'objdump -t (symbol table)';
         system("objdump -t $bin_path 2>&1");
     }
     else {
-        diag('No readelf or objdump available');
+        diag 'No readelf or objdump available';
     }
-    ok( $elf_ok, 'ELF dump completed' );
+    ok $elf_ok, 'ELF dump completed' ;
 
     # Step 5: Hex dump of raw binary
-    note("Step 5: Hex dump");
+    note 'Step 5: Hex dump';
     open my $bfh, '<:raw', $bin_path or do {
         diag("Cannot open $bin_path for reading: $!");
         skip 'Cannot read binary', 1;
@@ -151,7 +146,7 @@ CCODE
     close $bfh;
     my $len      = length($bin);
     my $dump_max = $len > 8192 ? 8192 : $len;
-    diag("Binary size: $len bytes, dumping first $dump_max bytes");
+    diag "Binary size: $len bytes, dumping first $dump_max bytes";
     for ( my $i = 0; $i < $dump_max; $i += 16 ) {
         my $chunk = substr( $bin, $i, 16 );
         my $hex;
@@ -165,7 +160,7 @@ CCODE
             else                           { $hex .= ' '; }     # normal separator
             $ascii .= ( $byte >= 32 && $byte < 127 ) ? chr($byte) : '.';
         }
-        diag( sprintf "%08x  %-48s  |%s|", $i, $hex, $ascii );
+        diag sprintf '%08x  %-48s  |%s|', $i, $hex, $ascii ;
     }
     pass 'Hex dump completed' ;
 

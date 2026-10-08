@@ -27,8 +27,9 @@ BROCKEN
     ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/Brocken::Runtime::bump_alloc\(ptr\s+\S+,\s+i64\s+24/, 'new allocates header + both fields (8 + 16 = 24)' );
-    like( $text, qr/store\s+i64\s+67108865/, 'new initializes the object header (refcount 1, tag 4 = ptr)' );
-    my ($gep) = grep { $_->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $_->base_type->kind eq 'struct' }
+    like( $text, qr/store\s+i64\s+67108865/,                              'new initializes the object header (refcount 1, tag 4 = ptr)' );
+    my ($gep)
+        = grep { $_->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $_->base_type->kind eq 'struct' }
         map { $_->instructions->@* } $f->blocks->@*;
     ok( $gep, 'found struct GEP for field access' );
     is( $gep->base_type->field_offset(0), 8,  'first field lives at offset 8, after the header' );
