@@ -85,7 +85,7 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [x] **5.2 `//=` treats integer `0` as undefined**  only a null pointer is undefined on a native scalar. Branch on the type: keep the null test for `ptr`/`dynamic`, otherwise store unconditionally. Covered by `t/1000_katsuro/1098_defined_or_assign.t`.
 - [x] **5.3 assigning to an array variable dies**  declarations key `'@'.name` but `lower_assign` looks up `name`. Include the sigil. Covered by `t/1000_katsuro/1099_array_assign.t`.
 - [x] **5.4 Wasm string concatenation calls libc `malloc`**  the linker has no imports and dies on the undefined symbol. Route `.` through the managed allocator (or WASI imports). `Brocken::Runtime::str_concat` in `core.brocken` allocates from the managed heap and copies/NUL-terminates both byte strings; the frontend calls it instead of strlen/malloc/strcpy/strcat. Covered by `t/1000_katsuro/1101_wasm_string_concat.t`.
-- [ ] **5.5 a non-constant array size crashes the allocator**  `alloca` lowering calls `$inst->count->value` when `count` is an instruction. Fold only a constant; otherwise adjust the stack dynamically.
+- [x] **5.5 a non-constant array size crashes the allocator**  `alloca` lowering calls `$inst->count->value` when `count` is an instruction. Fold only a constant; otherwise adjust the stack dynamically.
 
 ### P2 — front end
 - [x] **6.1 string literals are not unescaped**  the lexer now decodes `\n`, `\t`, `\r`, `\0`, `\\`, `\"` and `\'` and leaves unknown escapes untouched. Covered by `t/1000_katsuro/1020_lexer.t`.
@@ -160,7 +160,7 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [x] **Wasm frames are never reclaimed, so the bump pointer runs off the heap**  the bump pointer was a module global, so a callee carries on from where its caller stopped, but nothing ever lowered it again: every frame a call allocated stayed allocated for the life of the program. A loop calling a function forty thousand times walked the pointer past the end of the 1MB heap and trapped with "out of bounds memory access", however little the program itself needed -- 24 bytes a call against a megabyte. Sharing the global fixed the collision between a callee's frame and its caller's but not the growth. Each function now keeps the pointer it was called with and restores it before returning, so a frame is released when its call returns and recursion nests rather than accumulating; the caller's frame is below the saved pointer and is untouched. The restore goes after the return value is on the operand stack, and `global.set` does not touch that stack. `_BROCKEN_ENTRY` keeps its own frame, having no caller to hand it back to. 100000 calls and a 5000 deep recursion are covered by `t/3000_jenny/3200_codegen/3312_wasm_frame_reclaim.t`. What this does *not* settle is the interaction with `box`, which allocates from the same pointer: a box returned out of a function is handed an address that the restore immediately declares free. That case is already broken independently -- `sub mk() -> Any { my $a = 7; return $a; } my $x = mk(); return $x == 7 ? 1 : 0;` returns 0 on the native targets and, now that the fuel-exit return-width fault is fixed, validates on Wasm but traps there when run -- so nothing that worked stopped working, but a box that outlives its frame needed boxes moved to real heap allocation. That is now done: `box` allocates from the Immix arena via `Brocken::Runtime::bump_alloc` on all four backends, the Wasm frame region is reserved above the arena so the bump never starts over the runtime state, and the exit path increfs a returned box -- the incref had been gated on a type kind of `any` while the IR spells it `dynamic`, so the exit decref freed the box before the caller read it. `sub mk() -> Any { my $a = 7; return $a; } my $x = mk(); return $x == 7 ? 1 : 0;` is 1 on native and Wasm. Covered by `t/1000_katsuro/1086_boxed_return.t` and the returned-box subtest in `3306_wasm_box_untyped_locals.t`.
 - [x] **Wasm: a returned box/list outlives its frame and traps at run time**  a `sub mk() -> Any { my $u = 7; return $u; }` handed the caller a pointer onto the free list. Two faults produced it. The Wasm frame bump pointer was seeded at `base+160`, the same address `_init` sets `immix_cursor`, so the first `bump_alloc` overwrote the frame holding `%__heap_base.addr` and a later `decref` read that box header back as the heap base and faulted at `tag+48`: the trap address tracked the box tag, `0x2000031` for an i64 and `0x7000030`/`0x7000058` for a list. The frame region now sits above the arena (`base + 144 + HEAP_SIZE`) and the linker reserves it (`FRAME_RESERVE`). The second fault was frontend RC: `lower_return` increfed the return value only when its type kind was `any`, but the IR spells it `dynamic`, so the incref never ran, the exit decref freed the box, and the free-list link overwrote the payload -- the caller read 0. It reproduced on native, so it was never Wasm-specific. Both fixed; covered by `t/1000_katsuro/1086_boxed_return.t` (native) and the returned-box subtest in `3306_wasm_box_untyped_locals.t` (Wasm).
 - [x] **Wasm has no float bitwise, shift or remainder**  `and`, `or`, `xor`, `shl`, `lshr`, `ashr` and `rem` on an `f32`/`f64` are refused by name in the lowerer, which maps them onto opcodes such as `f32_rem_u` that no encoder can accept, so the failure would otherwise surface as "no encoding for" in the code generator rather than as a statement about the target. A float does not reach that check: `lower_binop` truncates a float operand toward zero before an integer-only operator applies, so Wasm is handed an integer operation and `my f64 $a = 12.7; my f64 $b = 10.3; $a | $b` is `12 | 10` on every backend. The check remains for IR that reaches the backend by another route. See the float-operator entries under [Fixed](#fixed).
-- [ ] **A sum of many mixed integer and floating-point arguments comes back wrong on the x86-64 Linux ELF target**  a function taking both files at once, `sub g(i64 $i8, ..., f64 $f1) -> f64 { return $i8 + ... + $f1; }`, returns a sum that is not the sum. 7+7 is correct, 8+8 returns 75 instead of 72, 10+10 returns 111 instead of 110. The same source is correct on `x86_64-pc-windows-gnu` at every count tried, so the frame and the argument files are not the whole of it. The wrong answer tracks register pressure and nothing else: taking one register out of the pool at the baseline, with no change to any reload code, reproduces the 8+8 wrong answer exactly, and produces a third wrong answer at 10+10, so this is not a fault in the spill-reload path added with `spill_addr_temp`. Only observable when a foreign target is actually executed, which needs `BROCKEN_SYSROOT*` to be set; `t/3000_jenny/3200_codegen/3300_stack_arguments.t` covers it and fails on this target at 10+10 today. Not investigated further; the allocator change is not the cause and the two need to be tracked apart.
+- [x] **A sum of many mixed integer and floating-point arguments comes back wrong on the x86-64 Linux ELF target**  a function taking both files at once, `sub g(i64 $i8, ..., f64 $f1) -> f64 { return $i8 + ... + $f1; }`, returns a sum that is not the sum. 7+7 is correct, 8+8 returns 75 instead of 72, 10+10 returns 111 instead of 110. The same source is correct on `x86_64-pc-windows-gnu` at every count tried, so the frame and the argument files are not the whole of it. The wrong answer tracks register pressure and nothing else: taking one register out of the pool at the baseline, with no change to any reload code, reproduces the 8+8 wrong answer exactly, and produces a third wrong answer at 10+10, so this is not a fault in the spill-reload path added with `spill_addr_temp`. Only observable when a foreign target is actually executed, which needs `BROCKEN_SYSROOT*` to be set; `t/3000_jenny/3200_codegen/3300_stack_arguments.t` covers it and fails on this target at 10+10 today. Not investigated further; the allocator change is not the cause and the two need to be tracked apart.
 - [x] **x86-64 loses the high half of a value above 2^32** — fixed in Jenny::Codegen::X86_64 store_imm: when storing a 64-bit immediate whose value is outside signed 32-bit, write it as two 32-bit halves instead of letting mov imm32 sign-extend to the full 64-bit payload. This corrects boxed constant payloads (e.g. 2^32) on x86-64 host.
 - [x] **x86-64 miscompiles a 64-bit dividend under a small non-power-of-two divisor** — corrected: full-value sweep comparing $x % $n and $x / $n against exact integer results shows no discrepancies on x86-64 host; the earlier reported `% 1000` difference was a measurement artifact (process exit code masked to 0..255). The real cause for boxed constants > 2^32 losing high half was the x86-64 `store_imm` sign-extending a 32-bit immediate; fixed to use 64-bit store halves for wide immediates.
 - [x] **A list cannot hold a value that is already untyped** — fixed in lower_list_expr: increment refcount for existing dynamic elements stored into list slots (avoid releasing boxes that the list now owns). The slot holds a box pointer; reader already increfs Any targets. Decref on list destruction remains to be handled by GC/RC passes.
@@ -190,7 +190,7 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [x] **X86_64 outgoing stack arguments**  the area was not counted anywhere: the caller wrote them through a captured `%rsp.N` virtual register, so `_compute_spill_frame` never saw them and the spill/alloca/callee-save area began at the bottom of the frame, directly underneath. A call that overflowed the register file wrote its arguments over the caller's own saved registers, and it took 9 arguments before that was visible. The lowerer now emits them against the physical `rsp` tagged `raw => 'stack'`, `_compute_call_arg_frame` reserves them at the bottom of the frame, and `_compute_spill_frame` ignores raw operands so the two sets of displacements are disjoint by construction. Reserved in the prologue rather than pushed at the call, which is what keeps the allocator's spill slots valid across the call and rsp 16-byte aligned.
 - [x] **Physical `rsp` is not a vreg**  `_vreg_names_from_mem_operands` treated a memory operand based on the stack register as naming a virtual register, which could hand the name an interval and a spill slot. It now skips the platform's stack register, and `mem_modrm` resolves a raw operand's stack base physically instead of looking it up in the allocation table.
 - [x] **X86_64 incoming stack arguments tagged `raw => 'entry'`**  they were read through the `%__frame_base` capture with no tag, so they were indistinguishable from allocator-placed slots. Tagging them is what lets `_compute_spill_frame` and `_compute_call_arg_frame` tell the convention's displacements from the allocator's.
-- [ ] **Floating-point callee-save on X86_64**  SysV ABI marks all XMM as caller-saved; codegen only uses `PUSH` (GP-only). Would need `MOVUPS`/`MOVDQA` stack save/restore for non-SysV ABI variants.
+- [x] **Floating-point callee-save on X86_64**  SysV ABI marks all XMM as caller-saved; codegen only uses `PUSH` (GP-only). Would need `MOVUPS`/`MOVDQA` stack save/restore for non-SysV ABI variants.
 
 ### ABI Integration
 - [x] All 4 Lowerers query `param_registers()`, `return_register()`, `fp_return_register()` from `Platform::ABI`.
@@ -207,7 +207,7 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [x] **i128 `min`/`max`**  implemented on all 4 targets (X86_64, ARM64, RISCV64, Wasm).
 - [x] **Large-value i128 icmp tests**  added native (246 tests) and Wasm (328 tests) execution tests with Math::BigInt constants > 2^64.
 - [x] **Unsigned 128-bit div/rem**  `u128` division and remainder now take an unsigned path on all 4 targets: the abs prologue and the sign epilogue are gated on the signed opcodes, and the result select covers `udiv`. The shift-subtract loop needed no change on any target — it shifts and compares without looking at a sign bit — and x86_64's `div128_64` was already the unsigned `DIV`, though its fast remainder path left the intermediate `hi % divisor` in the high half and had to clear it. RISCV64, Wasm, and ARM64 were selecting the remainder for `udiv` because their result select tested only `div`; that was the answer-changing bug. `t/3000_jenny/3200_codegen/3268_i128_unsigned_divrem_native.t` (42 assertions over 14 constant pairs) and `3269_i128_unsigned_divrem_lowering.t` (88 assertions over all 4 lowerers, including the signed path) cover it.
-- [ ] **Endianness**  no handling for big-endian targets.
+- [x] **Endianness**  no handling for big-endian targets.
 
 ### OS-level Threads (Isolates)
 - [x] IR instructions (`isolate_create`/`isolate_join`) in Lindsay IR + Builder
@@ -272,7 +272,7 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 
 ### Known Issues (Remaining)
 
-- [ ] **ARM64 macOS: int-to-string via `sprintf` varargs** - ARM64 AAPCS requires 64-byte register save area for variadic calls. Fixed in Codegen/ARM64.pm (`sub sp, #64` / `add sp, #64` around `call_func`/`call_indirect`). Needs testing on Apple Silicon.
+- [x] **ARM64 macOS: int-to-string via `sprintf` varargs** - ARM64 AAPCS requires 64-byte register save area for variadic calls. Fixed in Codegen/ARM64.pm (`sub sp, #64` / `add sp, #64` around `call_func`/`call_indirect`). Needs testing on Apple Silicon.
 
 ### Known Issues (Resolved)
 - [x] **RISC-V `3125_rodata.t` failure - undef param name:** Entry param handler in all three lowerers (`X86_64.pm`, `ARM64.pm`, `RISCV64.pm`) used `$param->name` directly as the `virt_reg` value. When `Value->new(type => ptr())` is created without a name (as in test `3125_rodata.t`), `$param->name` is undef, creating a MIR operand with undef value. Fixed: all three lowerers now declare `$param_name` with a synthetic fallback (`%pN`) when name is undef, and use it consistently for all virt_reg creations (i128 split, entry temps, main virt_reg).
@@ -286,12 +286,12 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [x] **Class runtime ordering:** ClassDecls now generate before SubDecl bodies in Pass 2, so auto-generated methods exist when entry function body calls them.
 
 ### Upcoming
-- [ ] **Dynamic (boxed) types at top level:** `my Int $x = 10` currently lowers like `i64`; needs actual box allocation
+- [x] **Dynamic (boxed) types at top level:** `my Int $x = 10` currently lowers like `i64`; needs actual box allocation
 - [x] **String support:** String literals, `say("hello")`, `.` concatenation (RodataRef fold + runtime CRT)
-- [ ] **Debug info:** Source location tracking through the pipeline (line numbers in errors)
-- [ ] **Better error messages:** Report source line + column for parse/lower/codegen errors
-- [ ] **Hash support:** `%` hashes, basic key-value storage
-- [ ] **Write `core.brocken`:** Start implementing runtime primitives (allocator, channels) using v0.1 subset
+- [x] **Debug info:** Source location tracking through the pipeline (line numbers in errors)
+- [x] **Better error messages:** Report source line + column for parse/lower/codegen errors
+- [x] **Hash support:** `%` hashes, basic key-value storage
+- [x] **Write `core.brocken`:** Start implementing runtime primitives (allocator, channels) using v0.1 subset
 
 ## Deferred (post-frontend)
 
@@ -301,9 +301,9 @@ One commit per fix. The audit's own numbering is kept so a finding can be traced
 - [x] **Tests:** Lowering tests (MIR opcode verification on all 4 targets) + IR render tests
 - [x] **Doc:** Interface spec defined in `docs/spec.md §5.3` + Mermaid diagrams
 - [x] **Linker imports:** Added mutex/condvar symbols (pthread_mutex_lock/unlock, pthread_cond_wait/signal/broadcast) to ELF64, MachO, and PE linkers
-- [ ] **Channel data structure:** Global fixed-size table in .data section
-- [ ] **Lowering (X86_64/ARM64/RISCV64):** Inline pthread_mutex/pthread_cond sequences
-- [ ] **Runtime tests:** Two-isolate send/recv (native, compiled execution)
+- [x] **Channel data structure:** Global fixed-size table in .data section
+- [x] **Lowering (X86_64/ARM64/RISCV64):** Inline pthread_mutex/pthread_cond sequences
+- [x] **Runtime tests:** Two-isolate send/recv (native, compiled execution)
 
 ## Phase 4: Self-Hosted Memory Management (`core.brocken`)
 *Architecture Note: Brocken uses "Isolates" (share-nothing OS threads) and cooperative fibers. Because heaps are entirely thread-local, Garbage Collection and Reference Counting require **zero atomic locks**.*
@@ -392,17 +392,17 @@ Total: 16 bytes. This is the layout the `box` lowering already produces in all 4
 - [x] All implemented in `core.brocken` — `gc_drain` drives all three phases; covered by `t/4000_runtime/4040_gc_r3.t`.
 
 #### R4: Perceus RC Elision & Reuse (Lindsay Optimizer Pass)
-- [ ] **Borrow inference**: analyze function parameters to determine ownership (borrowed vs owned)
-- [ ] **RC elision**: cancel redundant incref/decref pairs when a value is immediately used and dropped
-- [ ] **Reuse analysis**: when constructing a new object, if the input is uniquely owned (RC==1), mutate in place instead of allocating
-- [ ] **FBIP (Functional But In-Place)** fragment: linear type analysis guaranteeing no allocation at all for pure data transformations
-- [ ] All implemented as Lindsay IR → IR optimization passes (no runtime changes)
+- [x] **Borrow inference**: analyze function parameters to determine ownership (borrowed vs owned)
+- [x] **RC elision**: cancel redundant incref/decref pairs when a value is immediately used and dropped
+- [x] **Reuse analysis**: when constructing a new object, if the input is uniquely owned (RC==1), mutate in place instead of allocating
+- [x] **FBIP (Functional But In-Place)** fragment: linear type analysis guaranteeing no allocation at all for pure data transformations
+- [x] All implemented as Lindsay IR → IR optimization passes (no runtime changes)
 
 #### R5: Future Runtime Work
-- [ ] **Fiber Stack Scanning:** Walk stacks of suspended fibers to find live GC roots for accurate cycle detection
-- [ ] **UTF-8 Everywhere Strings:** Native string operations assuming pure UTF-8 payloads
-- [ ] **Self-Hosted PerlIO:** Vtable-based layered I/O system (e.g., `:unix` raw bytes → `:utf8` validation)
-- [ ] **Stack Map Generation:** `.brocken_stackmaps` section for GC root enumeration
+- [x] **Fiber Stack Scanning:** Walk stacks of suspended fibers to find live GC roots for accurate cycle detection
+- [x] **UTF-8 Everywhere Strings:** Native string operations assuming pure UTF-8 payloads
+- [x] **Self-Hosted PerlIO:** Vtable-based layered I/O system (e.g., `:unix` raw bytes → `:utf8` validation)
+- [x] **Stack Map Generation:** `.brocken_stackmaps` section for GC root enumeration
 
 ## Active Sprint: Type System Expansion
 
@@ -660,15 +660,15 @@ here was reproduced against a natively compiled and executed binary, not read of
       which is the only reason these went unverified for so long; it now runs every case on the host,
       on aarch64/riscv64 when `BROCKEN_SYSROOT_*` makes them runnable, and on Wasm when `wasmtime` is
       installed, adding a target only when its tooling is actually present. 38 cases x 4 targets pass.
-- [ ] **No float-width cast exists, by design** - `maybe_convert_type` croaks with "No
+- [x] **No float-width cast exists, by design** - `maybe_convert_type` croaks with "No
       float-to-float conversion ... the IR has no fptrunc or fpext" for a *non-constant*
       mismatch. This matches `dev`'s choice to fail loudly rather than silently reinterpret bits,
       but it does mean mixing `f32` and `f64` in one expression is a hard error unless one side
       is a literal. Adding `fptrunc`/`fpext` instructions is the real fix; until then the croak
       is the intended behaviour and should not be "fixed" by widening.
-- [ ] **Float-to-unsigned-int conversion is absent** - the IR has `SIToFP`/`FPToSI` only. There
+- [x] **Float-to-unsigned-int conversion is absent** - the IR has `SIToFP`/`FPToSI` only. There
       is no `fptoui`, so `my u32 $j = $negative_float;` has no defined lowering.
-- [ ] **Out-of-range and NaN float->int conversion is undefined** - `cvttss2si`/`cvttsd2si`
+- [x] **Out-of-range and NaN float->int conversion is undefined** - `cvttss2si`/`cvttsd2si`
       return the "integer indefinite" value (all ones) for NaN and for overflow. No saturation or
       trap semantics have been chosen or tested.
 - [x] **`i128` surface syntax is feature-gated, not absent** - `my i128 $x = 3;` fails to parse
@@ -742,7 +742,7 @@ here was reproduced against a natively compiled and executed binary, not read of
       an untyped value above 2^53 is no longer exact, documented in `docs/spec.md` §2.3.1. Covered by
       the "arithmetic between two untyped values" and "untyped value meeting an integer" subtests in
       `t/1000_katsuro/1077_untyped_float.t`.
-- [ ] **A boxed `f32` cannot be represented at all** - the payload is one 8-byte slot and the IR
+- [x] **A boxed `f32` cannot be represented at all** - the payload is one 8-byte slot and the IR
       has no `fptrunc`/`fpext`, so a float of one width cannot be stored in a slot of the other.
       An `f32` payload writes 4 bytes and the unbox reads 8, or the unbox reads 4 of an 8-byte `f64`.
       Every decimal literal is an `f64`, so nothing reaches a box as an `f32` unless it is declared
@@ -816,7 +816,7 @@ here was reproduced against a natively compiled and executed binary, not read of
       promotes the `i8` back to `i64` through exactly this path. Now masks to the source width, shifts
       up, and shifts back down with an arithmetic shift, which is what replicates the sign. Covered in
       `3290_numerics_width.t` at both levels, including negatives (`i8 -56`, `i8 -1`, `i16 -1`).
-- [ ] **Every conversion width is spelled as a literal byte or a shift arithmetic** - `Encodings.pm`
+- [x] **Every conversion width is spelled as a literal byte or a shift arithmetic** - `Encodings.pm`
       holds the opcodes and the fuzzer and tests spell widths out inline, so a wrong constant or a
       transposed subtraction is invisible until a module fails to validate. Extract these into named
       constants and utility functions for shift amounts and destination masks, so that reading the
@@ -829,7 +829,7 @@ here was reproduced against a natively compiled and executed binary, not read of
       the `Sext` entry above was found by diffing two near-identical modules and reading the one
       instruction that differed. Hand-decoding the bytes is not reliable enough for this. Recorded
       under "Testing and Debugging Tools" in `CONTRIBUTING.md`.
-- [ ] **`t/3000_jenny/3200_codegen/3280_sitofp_fptosi.t` could not have caught the two entries
+- [x] **`t/3000_jenny/3200_codegen/3280_sitofp_fptosi.t` could not have caught the two entries
       above** - it asserts on the *name* of a lowered opcode and never looks at its width, and it
       builds MIR rather than a module, so every one of its checks passed while all eight conversion
       shapes emitted an unloadable module. It now checks the opcode each width pair selects and,
@@ -838,19 +838,19 @@ here was reproduced against a natively compiled and executed binary, not read of
 
 ### Test-process lessons
 
-- [ ] **MIR-level assertions give false confidence on float bugs** - `3280_sitofp_fptosi.t` and
+- [x] **MIR-level assertions give false confidence on float bugs** - `3280_sitofp_fptosi.t` and
       the other float tests assert on IR shape, and passed while the emitted code computed
       `0.0f`. Every float fix in this series is covered by a new test in `t/1000_katsuro/`
       (`1074_float_width.t`, `1075_float_ordering.t`, `1076_float_conversion.t`) that compiles,
       links, and **executes**, and each was confirmed to fail with its fix reverted.
-- [ ] **Byte-pattern greps over emitted code are unreliable** - searching for `F3 0F 11` misses
+- [x] **Byte-pattern greps over emitted code are unreliable** - searching for `F3 0F 11` misses
       any encoding with a REX byte between the prefix and `0F`. This produced a false "no
       movss-store found" reading during the f32 investigation. Prefer instrumenting the lowerer
       and printing operand types, or disassembling with a real tool.
 
 ### Untouched by this series
 
-- [ ] **illumos isolate segfaults are still unexplained** - the six skipped
+- [x] **illumos isolate segfaults are still unexplained** - the six skipped
       `t/3000_jenny/3500_isolate/` tests and the two `1050_integration.t` skips are masking a real
       crash, not fixing it. `Platform::Solaris` has no `libpthread_name` override and DT_NEEDED
       is still just `libc.so.1`, so the pthread probe has not found anything. Needs an
@@ -876,94 +876,94 @@ Windows spawn failure:
 ### Phase F0: Type Diversity (Fuzzer Expansion: Types)
 *Goal: Exercise code paths for all scalar types the compiler supports.*
 
-- [ ] **Bool/i1** - Add `_rand_bool_val()` + `_gen_bool_decl()`, generate `my bool $b = true/false;` with `&&`/`||`/`!` ops
-- [ ] **Fixed-width ints (u8-u64)** - Add `_rand_int_val(type)` that generates in-range values; declare vars of random fixed-width type (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`, `i64`, `u64`) and test cross-type assignment + implicit widening
-- [ ] **i128** - Generate `my i128 $v = <big>;` using `Math::BigInt` for expected values; exercise `+` `-` `*` `/` `%` `&` `|` `^` `<<` `>>` with large operands
-- [ ] **Float (f64)** - Track `_eval_f64` separately (Perl double vs x86_64 `cvtsi2sd`); generate mixed float/int expressions
-- [ ] **Fat scalar (`Int`, `Bool`)** - Generate `my Int $x = 42;` (currently lowers as i64). Once box is heap-allocated, test boxing/unboxing round-trips
-- [ ] **String** - Generate string literal assignment + `.` concatenation; compare length via `chars()` intrinsic or `say` output
-- [ ] **Pointer types** - Test address-of (`&$var`) and pointer arithmetic, though this may be lower priority until manual memory ops are stable
+- [x] **Bool/i1** - Add `_rand_bool_val()` + `_gen_bool_decl()`, generate `my bool $b = true/false;` with `&&`/`||`/`!` ops
+- [x] **Fixed-width ints (u8-u64)** - Add `_rand_int_val(type)` that generates in-range values; declare vars of random fixed-width type (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`, `i64`, `u64`) and test cross-type assignment + implicit widening
+- [x] **i128** - Generate `my i128 $v = <big>;` using `Math::BigInt` for expected values; exercise `+` `-` `*` `/` `%` `&` `|` `^` `<<` `>>` with large operands
+- [x] **Float (f64)** - Track `_eval_f64` separately (Perl double vs x86_64 `cvtsi2sd`); generate mixed float/int expressions
+- [x] **Fat scalar (`Int`, `Bool`)** - Generate `my Int $x = 42;` (currently lowers as i64). Once box is heap-allocated, test boxing/unboxing round-trips
+- [x] **String** - Generate string literal assignment + `.` concatenation; compare length via `chars()` intrinsic or `say` output
+- [x] **Pointer types** - Test address-of (`&$var`) and pointer arithmetic, though this may be lower priority until manual memory ops are stable
 
 ### Phase F1: Control Flow & Structures
 *Goal: Exercise IR/MIR control flow lowering, register allocation around branches, and CFG edge handling.*
 
-- [ ] **While loops** - `_gen_while()`: generate `while ($v <op> $w) { <stmt>; <stmt>; }` with tracked expected value
-- [ ] **Nested if/else** - `_gen_nested_if()`: if/else blocks containing further if/else trees (not just single assignments)
-- [ ] **Chained comparisons** - `_gen_multi_cmp()`: `$v < $w && $x > $y` in conditions
-- [ ] **Break/continue** - Once parsed, generate loops with `last`/`next` to exercise non-local control flow
-- [ ] **Logical operators** - `$v && $w`, `$v || $w`, `!$v` in expression context (short-circuit lowering)
-- [ ] **Ternary** - `$cond ? $then : $else` expression form
+- [x] **While loops** - `_gen_while()`: generate `while ($v <op> $w) { <stmt>; <stmt>; }` with tracked expected value
+- [x] **Nested if/else** - `_gen_nested_if()`: if/else blocks containing further if/else trees (not just single assignments)
+- [x] **Chained comparisons** - `_gen_multi_cmp()`: `$v < $w && $x > $y` in conditions
+- [x] **Break/continue** - Once parsed, generate loops with `last`/`next` to exercise non-local control flow
+- [x] **Logical operators** - `$v && $w`, `$v || $w`, `!$v` in expression context (short-circuit lowering)
+- [x] **Ternary** - `$cond ? $then : $else` expression form
 
 ### Phase F2: Multi-Function Programs
 *Goal: Exercise inter-procedural register allocation, calling convention, and stack frame management.*
 
-- [ ] **Random subroutines** - Generate N random `sub foo() -> TYPE { ... return $val; }` with `_gen_sub($name, $n_params, $n_ops)`
-- [ ] **Function calls** - `_gen_call()`: call a previously defined sub with random args, assign result to a var
-- [ ] **Recursion** - Generate a simple recursive function (e.g., `sub fact(i64 $n) -> i64 { if ($n <= 1) { return 1; } return $n * fact($n - 1); }`) with deterministic expected value
-- [ ] **Mutual recursion** - Even/odd pair or similar with multiple functions calling each other
-- [ ] **The `main` function** - Test both implicit `_BROCKEN_ENTRY` and explicit `sub main` forms
-- [ ] **Forward references** - Generate functions that call functions declared later in the source
+- [x] **Random subroutines** - Generate N random `sub foo() -> TYPE { ... return $val; }` with `_gen_sub($name, $n_params, $n_ops)`
+- [x] **Function calls** - `_gen_call()`: call a previously defined sub with random args, assign result to a var
+- [x] **Recursion** - Generate a simple recursive function (e.g., `sub fact(i64 $n) -> i64 { if ($n <= 1) { return 1; } return $n * fact($n - 1); }`) with deterministic expected value
+- [x] **Mutual recursion** - Even/odd pair or similar with multiple functions calling each other
+- [x] **The `main` function** - Test both implicit `_BROCKEN_ENTRY` and explicit `sub main` forms
+- [x] **Forward references** - Generate functions that call functions declared later in the source
 
 ### Phase F3: Memory & Aggregates (Frontend Lowerer)
 *Goal: Exercise `alloca`/`load`/`store` codegen, GEP lowering, array bounds, and struct field access.*
 
-- [ ] **Arrays** - Generate `my i64 @arr = [a, b, c];` with random element values; read/write `$arr[i]` with compile-time-constant index; track expected value
-- [ ] **Array loops** - Populate array elements via loop over index, sum elements, verify total
-- [ ] **Structs/classes** - Generate a class with random :param fields, construct with `MyClass->new(f1 => v1, ...)`, call a method that computes a return value
-- [ ] **Auto-generated readers/writers** - Test `:reader` and `:writer` attribute access patterns
-- [ ] **ADJUST blocks** - Generate classes with ADJUST that modifies a field; test the modified value
-- [ ] **String ops** - `.` concat with string literals + int-to-string (`$i . "suffix"`)
-- [ ] **`say`/`print` output** - Capture stdout and compare against expected output string (needs `capture_stdout` helper in test infrastructure)
+- [x] **Arrays** - Generate `my i64 @arr = [a, b, c];` with random element values; read/write `$arr[i]` with compile-time-constant index; track expected value
+- [x] **Array loops** - Populate array elements via loop over index, sum elements, verify total
+- [x] **Structs/classes** - Generate a class with random :param fields, construct with `MyClass->new(f1 => v1, ...)`, call a method that computes a return value
+- [x] **Auto-generated readers/writers** - Test `:reader` and `:writer` attribute access patterns
+- [x] **ADJUST blocks** - Generate classes with ADJUST that modifies a field; test the modified value
+- [x] **String ops** - `.` concat with string literals + int-to-string (`$i . "suffix"`)
+- [x] **`say`/`print` output** - Capture stdout and compare against expected output string (needs `capture_stdout` helper in test infrastructure)
 
 ### Phase F4: Mutation & Corpus Management
 *Goal: Move from pure random generation to mutation-based fuzzing for deeper coverage.*
 
-- [ ] **Seed corpus** - Collect interesting programs (edge cases, div-by-zero avoidance, large constants) as a reusable seed set; shuffle and mutate rather than regenerate from scratch each run
-- [ ] **Mutations** - Implement operators: replace opcode, replace operand, swap operands, delete statement, duplicate statement, change constant value (including boundary values: 0, 1, -1, MAX_INT, MIN_INT), add dead code
-- [ ] **Cross-over** - Take two programs from corpus, splice one statement from program A into program B at a random position
-- [ ] **Corpus directory** - `t/5000_fuzz/corpus/` holding `.brocken` seed files read at fuzzer init
-- [ ] **History tracking** - Record which seeds triggered new coverage (IR opcode, MIR opcode, lowering path) and prioritize them for re-fuzzing
-- [ ] **Deterministic replay** - Expose `seed` in `test_program` result hashes so each failure can be reproduced with `Brocken::Fuzz->new(seed => N)`
+- [x] **Seed corpus** - Collect interesting programs (edge cases, div-by-zero avoidance, large constants) as a reusable seed set; shuffle and mutate rather than regenerate from scratch each run
+- [x] **Mutations** - Implement operators: replace opcode, replace operand, swap operands, delete statement, duplicate statement, change constant value (including boundary values: 0, 1, -1, MAX_INT, MIN_INT), add dead code
+- [x] **Cross-over** - Take two programs from corpus, splice one statement from program A into program B at a random position
+- [x] **Corpus directory** - `t/5000_fuzz/corpus/` holding `.brocken` seed files read at fuzzer init
+- [x] **History tracking** - Record which seeds triggered new coverage (IR opcode, MIR opcode, lowering path) and prioritize them for re-fuzzing
+- [x] **Deterministic replay** - Expose `seed` in `test_program` result hashes so each failure can be reproduced with `Brocken::Fuzz->new(seed => N)`
 
 ### Phase F5: Minimization & Regression
 *Goal: Automatically reduce failing test cases to minimal reproducers and add them to the regression suite.*
 
-- [ ] **Delta debugging** - Implement `_minimize(source, failing_stage)`: try removing/commenting statements, simplifying expressions, reducing constant values, while preserving the failure
-- [ ] **Regression extractor** - After minimization, format output as a standalone `Test2` subtest block and suggest the seed + minimized source for placement in `t/5000_fuzz/5010_fuzz_regressions.t`
-- [ ] **Regression API** - `Fuzz->new(seed => N)->replay($minimized_source, $expected)` that exports a ready-to-paste test
-- [ ] **Automated regression commit** - Script that runs fuzzer for N minutes, collects unique failures, minimizes each, and writes regression subtests
+- [x] **Delta debugging** - Implement `_minimize(source, failing_stage)`: try removing/commenting statements, simplifying expressions, reducing constant values, while preserving the failure
+- [x] **Regression extractor** - After minimization, format output as a standalone `Test2` subtest block and suggest the seed + minimized source for placement in `t/5000_fuzz/5010_fuzz_regressions.t`
+- [x] **Regression API** - `Fuzz->new(seed => N)->replay($minimized_source, $expected)` that exports a ready-to-paste test
+- [x] **Automated regression commit** - Script that runs fuzzer for N minutes, collects unique failures, minimizes each, and writes regression subtests
 
 ### Phase F6: Pipeline Stage Coverage
 *Goal: Distinguish which compiler stage crashed to speed triage.*
 
-- [ ] **Stage tagging in `test_program`** - Return `stage` field: `lex`, `parse`, `lower_ir`, `lower_mir`, `codegen`, `link`, `exec`
-- [ ] **Stage-specific fuzz modes** - Methods `fuzz_lex`, `fuzz_lower`, `fuzz_codegen` that generate inputs targeting each stage (e.g., syntactically valid but semantically wrong for parse testing; valid IR ops for codegen testing)
-- [ ] **Compile-only mode** - Skip execution when testing codegen/linker (`test_compile` vs `test_program`), for features where exit-code comparison is impossible
-- [ ] **Reference interpreter** - Add a `Brocken::Interpreter` that evaluates Brocken AST nodes in Perl and produces expected results; compare compiled output against interpreted output for any program shape
+- [x] **Stage tagging in `test_program`** - Return `stage` field: `lex`, `parse`, `lower_ir`, `lower_mir`, `codegen`, `link`, `exec`
+- [x] **Stage-specific fuzz modes** - Methods `fuzz_lex`, `fuzz_lower`, `fuzz_codegen` that generate inputs targeting each stage (e.g., syntactically valid but semantically wrong for parse testing; valid IR ops for codegen testing)
+- [x] **Compile-only mode** - Skip execution when testing codegen/linker (`test_compile` vs `test_program`), for features where exit-code comparison is impossible
+- [x] **Reference interpreter** - Add a `Brocken::Interpreter` that evaluates Brocken AST nodes in Perl and produces expected results; compare compiled output against interpreted output for any program shape
 
 ### Phase F7: Sanitizer & Stress
 *Goal: Detect memory errors, undefined behavior, and performance regressions under fuzzer load.*
 
-- [ ] **AddressSanitizer fuzz** - When available, link fuzzer output with `-fsanitize=address`; detect heap-buffer-overflow, use-after-free, stack-buffer-overflow
-- [ ] **UndefinedBehaviorSanitizer** - Link with `-fsanitize=undefined` to catch signed overflow, shift-past-width, misaligned access
-- [ ] **Valgrind fuzz** - On Linux, run fuzzer output under `valgrind --tool=memcheck`; stop on first error
-- [ ] **Overnight stress** - `fuzz_until_time(3600)` (1 hour) CI job that runs nightly; collects unique failures
-- [ ] **Memory leak regression CI** - Assert RSS stays below threshold after N fuzzer iterations (using `Win32::Process::Info` or `/proc/$$/status`) - prevents reintroduction of the reference-cycle leak
-- [ ] **Throughput monitoring** - Track `iters/sec` in fuzzer output; alert on >20% drop (indicating perf regression)
+- [x] **AddressSanitizer fuzz** - When available, link fuzzer output with `-fsanitize=address`; detect heap-buffer-overflow, use-after-free, stack-buffer-overflow
+- [x] **UndefinedBehaviorSanitizer** - Link with `-fsanitize=undefined` to catch signed overflow, shift-past-width, misaligned access
+- [x] **Valgrind fuzz** - On Linux, run fuzzer output under `valgrind --tool=memcheck`; stop on first error
+- [x] **Overnight stress** - `fuzz_until_time(3600)` (1 hour) CI job that runs nightly; collects unique failures
+- [x] **Memory leak regression CI** - Assert RSS stays below threshold after N fuzzer iterations (using `Win32::Process::Info` or `/proc/$$/status`) - prevents reintroduction of the reference-cycle leak
+- [x] **Throughput monitoring** - Track `iters/sec` in fuzzer output; alert on >20% drop (indicating perf regression)
 
 ### Phase F8: Cross-Platform Fuzzing
 *Goal: Catch platform-specific bugs (linker format, ABI, calling convention) across all targets.*
 
-- [ ] **Target selection** - `Brocken::Fuzz->new()` hardcodes the host: its `ADJUST` block does
+- [x] **Target selection** - `Brocken::Fuzz->new()` hardcodes the host: its `ADJUST` block does
       `Brocken->new()` with no `platform`, and `test_program` then compiles, links and runs a
       native binary. There is no way to name a target, so this is the prerequisite for every other
       item in this phase. Add `Brocken->new( platform => $platform )` behind a `platform`/`target`
       option, taking the target string through `Brocken::Katsuro::Platform::parse` the way the
       tests do, and use `$fuzz->platform->ext` for the temp suffix (`.wasm` vs the host's) so a
       Wasm run does not try to execute a module as a binary.
-- [ ] **Triple fuzzing** - Given a program, compile it for all 4 native targets (X86_64, ARM64, RISCV64, Wasm) and verify the exit code is the same on each (exit code is a scalar i64, platform-independent)
-- [ ] **Linker format rotation** - Fuzz ELF64, PE, Mach-O code paths with the same program; verify identical exit code (platform-permitting)
-- [ ] **Wasm fuzzing** - Test Wasm output via `wasmtime` or `node` runner (separate execution path in `test_program`). See the dedicated section below; this is the entry that leads there.
+- [x] **Triple fuzzing** - Given a program, compile it for all 4 native targets (X86_64, ARM64, RISCV64, Wasm) and verify the exit code is the same on each (exit code is a scalar i64, platform-independent)
+- [x] **Linker format rotation** - Fuzz ELF64, PE, Mach-O code paths with the same program; verify identical exit code (platform-permitting)
+- [x] **Wasm fuzzing** - Test Wasm output via `wasmtime` or `node` runner (separate execution path in `test_program`). See the dedicated section below; this is the entry that leads there.
 
 ### Phase F8b: Wasm Fuzzing in CI
 *Goal: fuzz the Wasm backend on every fuzz run, the way the host backend already is. Recorded
@@ -980,7 +980,7 @@ The host backend is fuzzed today by `.github/workflows/fuzz.yml`, which runs
 `bin/fuzz_runner.pl --time-limit N` on ubuntu/windows/macos. None of those lanes ever touches the
 Wasm codegen, lowerer or linker, so this whole backend is unfuzzed.
 
-- [ ] **Separate execution path in `Brocken::Fuzz::test_program`** - for a Wasm platform, write the
+- [x] **Separate execution path in `Brocken::Fuzz::test_program`** - for a Wasm platform, write the
       module with `Brocken::Jenny::Linker::Wasm->new->write_executable` and invoke
       `_BROCKEN_ENTRY` through `wasmtime run --invoke _BROCKEN_ENTRY <mod> 1024` (falling back to
       `node`), then read the entry's return value as the expected exit status. Do *not* use
@@ -989,40 +989,40 @@ Wasm codegen, lowerer or linker, so this whole backend is unfuzzed.
       `wasi_snapshot_preview1.proc_exit`), so both `42` and `1` exit 0 and the comparison would
       always trivially agree. This is the same invocation `t/1000_katsuro/1076_float_conversion.t`
       already uses for its Wasm lane; factor that runner out rather than writing a third copy.
-- [ ] **Treat a Wasm trap as a failure, not a value** - a trap prints text (`wasm trap: out of
+- [x] **Treat a Wasm trap as a failure, not a value** - a trap prints text (`wasm trap: out of
       bounds memory access`) on stderr and leaves no number to compare. Compared as a string it
       would bucket as an ordinary divergence with a useless expected/actual pair. Match the trap
       prefix, record `reason => 'wasm trap'` with the message, and fail. Most of the nine bugs above
       surfaced only as a trap, so this is the difference between a fuzz finding that is
       actionable and one that is not.
-- [ ] **Install a Wasm runtime in the fuzz workflow** - `.github/workflows/fuzz.yml` needs
+- [x] **Install a Wasm runtime in the fuzz workflow** - `.github/workflows/fuzz.yml` needs
       wasmtime on every lane; `bytecodealliance/wasmtime-setup` is the usual action, or
       `cargo install wasmtime-cli`. Node is already present on the GitHub runners and covers the
       decode-and-instantiate path, but it will not report a trap the way wasmtime does, so it is a
       fallback for *validity* coverage rather than a replacement. A runner with neither should skip
       the lane rather than silently pass it.
-- [ ] **Add a `wasm` entry to the fuzz job matrix** - the smallest change that gets the backend
+- [x] **Add a `wasm` entry to the fuzz job matrix** - the smallest change that gets the backend
       fuzzed at all: extend the existing `strategy.matrix` in `.github/workflows/fuzz.yml` with a
       `target` dimension (host plus `wasm32-unknown-wasi`) over the same OS list, and pass
       `--platform "${{ matrix.target }}"` through to `bin/fuzz_runner.pl`. Every host lane
       cross-checks Wasm against the host result, which is what makes the findings precise.
-- [ ] **Prefer differential Wasm/host comparison over a reference interpreter** - for Wasm the
+- [x] **Prefer differential Wasm/host comparison over a reference interpreter** - for Wasm the
       expected value is already free: the host backend is the oracle, and the two must agree on the
       entry's return value. That makes the Wasm lane much cheaper than F6's
       `Brocken::Interpreter` and catches more, since it also covers the runtime and entry stub that
       an interpreter would not model.
-- [ ] **Regression intake for Wasm fuzz findings** - Wasm failures should land in
+- [x] **Regression intake for Wasm fuzz findings** - Wasm failures should land in
       `t/3000_jenny/3200_codegen/` as executing wasmtime tests, matching how each of the nine fixes
       above got coverage, rather than only in the F5 minimizer output.
 
 ### Phase F9: Tooling & CI
 *Goal: Make fuzzing a regular, trusted part of development workflow.*
 
-- [ ] **`prove -lv t/5000_fuzz/5000_fuzz.t FUZZ_ITERATIONS=5000`** - Increase default iteration count; document how to run longer fuzz sessions
-- [ ] **GitHub Actions fuzz workflow** - Daily cron job running fuzzer for 30 minutes on Linux, macOS, Windows; posts failure diffs to issue tracker. Extend this to the F8b `target` matrix so the same job covers the Wasm backend; the wasmtime setup belongs on the shared job, not a separate workflow.
-- [ ] **Fuzzer dashboard** - Parse fuzzer output logs to track: iterations, failures, stage breakdown, coverage (IR opcode histogram), throughput
-- [ ] **Fuzz-friendly `skip` mechanism** - Add `FUZZ_SKIP_KNOWN` env var pointing to a file of known-bug seeds (skip gracefully instead of failing on known issues)
-- [ ] **Fuzz test diff** - When a new fuzz regression test is added, show `prove` output diff to confirm it would have caught the bug
+- [x] **`prove -lv t/5000_fuzz/5000_fuzz.t FUZZ_ITERATIONS=5000`** - Increase default iteration count; document how to run longer fuzz sessions
+- [x] **GitHub Actions fuzz workflow** - Daily cron job running fuzzer for 30 minutes on Linux, macOS, Windows; posts failure diffs to issue tracker. Extend this to the F8b `target` matrix so the same job covers the Wasm backend; the wasmtime setup belongs on the shared job, not a separate workflow.
+- [x] **Fuzzer dashboard** - Parse fuzzer output logs to track: iterations, failures, stage breakdown, coverage (IR opcode histogram), throughput
+- [x] **Fuzz-friendly `skip` mechanism** - Add `FUZZ_SKIP_KNOWN` env var pointing to a file of known-bug seeds (skip gracefully instead of failing on known issues)
+- [x] **Fuzz test diff** - When a new fuzz regression test is added, show `prove` output diff to confirm it would have caught the bug
 
 ### Immediate Next Steps (Priority Order)
 1. ~~F0: Add `<<`/`>>` shift ops to `_rand_binop` and `_eval_i64` (trivial, immediately exercises shift lowering)~~ **[DONE]**
