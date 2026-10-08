@@ -1892,8 +1892,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                         }
                         else {
                             $mbb->add_instruction( $self->_wasm_push( $lhs, 'LHS' ) );
-                            $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
                             $self->_wasm_fit( $mbb, $lhs, $p );
+                            $mbb->add_instruction( $self->_wasm_push( $rhs, 'RHS' ) );
                             $self->_wasm_fit( $mbb, $rhs, $p );
 
                             # Arithmetic/bitwise op (consumes 2, produces 1 on stack)
@@ -3037,6 +3037,17 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                 opcode   => $op,
                 operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value ) ],
                 comment  => "push $label=" . $value
+            );
+        }
+        # A 128-bit value has no local of its own: it lives in the `_lo`/`_hi` pair `_split_i128` writes, and a
+        # consumer that wants one word gets the lo half, exactly as the constant path below pushes it. This is what
+        # a narrowing `and` on a wide operand feeds -- the instruction's result type is the narrow target, so the
+        # generic binop pushes the source and expects the lo word here.
+        if ( $ir_val->type && $ir_val->type->kind eq 'int' && $ir_val->type->bits >= 128 && defined $ir_val->name ) {
+            return Brocken::Jenny::MIR::MachineInstruction->new(
+                opcode   => 'local_get',
+                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo' ) ],
+                comment  => "push $label=" . $ir_val->name . ' (lo)'
             );
         }
         return Brocken::Jenny::MIR::MachineInstruction->new(

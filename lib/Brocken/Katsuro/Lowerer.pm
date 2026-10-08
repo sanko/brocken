@@ -1007,6 +1007,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $builder->position_at_end($landing_block);
         $current_block = $landing_block;
 
+        # setjmp/longjmp only restores callee-saved registers on the exceptional
+        # return; any heap-base copy held in a caller-saved register before the
+        # jump is garbage here.  Reload from the alloca slot (frame memory is
+        # stable across longjmp because rsp returns to its body value).
+        $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb_alloca, undef, $line, $col );
+        $eh_stack_addr
+            = $builder->build_add( $hb,
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::EXCEPTION_HANDLER_STACK ),
+            undef, $line, $col, );
+
         # Load thrown value
         my $thrown_addr
             = $builder->build_add( $hb,
@@ -1922,7 +1932,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $cv & $mask );
                 }
                 my $mask_val = Brocken::Lindsay::IR::Constant->new( type => $val->type, value => $mask );
-                return $builder->build_and( $val, $mask_val, undef, $line, $col );
+
+                # The instruction, not the mask, carries the target type: a narrowed value whose result stayed typed
+                # at the source width is classified by that width everywhere downstream -- at a call the ABI saw a
+                # u128 argument masked to 64 bits, put it on the stack, and the callee read an uninitialized
+                # register instead. The mask keeps the source type so it lowers against the source operands; the
+                # backends size the operation from the result.
+                return $builder->build_and( $val, $mask_val, undef, $line, $col, $target_type );
             }
         }
 

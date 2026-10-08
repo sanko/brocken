@@ -2,7 +2,7 @@
 
 **Author:** Sanko Robinson
 
-**Version:** 0.1
+**Version:** v0.0.1
 
 **Status:** Active Development
 
