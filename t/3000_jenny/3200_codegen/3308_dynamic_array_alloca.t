@@ -53,6 +53,18 @@ sub has_alloca_dyn($triple, $lower_class, $src) {
     return 0;
 }
 
+sub find_array_alloca($src) {
+    my $module = Brocken->new->compile($src);
+    my ($func) = grep { $_->name eq '_BROCKEN_ENTRY' } $module->functions->@*;
+    for my $bb ( $func->blocks->@* ) {
+        for my $inst ( $bb->instructions->@* ) {
+            next unless $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca');
+            return $inst if $inst->count;
+        }
+    }
+    return undef;
+}
+
 subtest 'alloca_dyn is used for dynamic array sizes' => sub {
     for my $target (@TARGETS) {
         my ( $triple, $class ) = @$target;
@@ -97,6 +109,45 @@ subtest 'large dynamic arrays cross out-of-range displacements (masked to 8 bits
     $brocken->linker->write_executable( $out, $funcs, $host );
     ok -e $out, 'executable created';
     run_exec( $out, expected_exit => 161, platform => $host, name => 'dyn large on host' );
+};
+
+subtest 'an untyped size is unboxed before the alloca' => sub {
+    my $src = <<'BROCKEN';
+my $n = 6;
+my [i64; $n] @arr;
+@arr[0] = 5;
+return @arr[0];
+BROCKEN
+    my $alloca = find_array_alloca($src);
+    ok( $alloca, 'the array alloca is present' );
+    ok( $alloca && $alloca->count && $alloca->count->type && $alloca->count->type->kind eq 'int' && $alloca->count->type->bits == 64,
+        'the count is an i64, not the box pointer of the untyped size' );
+
+    # The boxed (`my $n`) size used to reach the dynamic alloca as a raw box pointer, and the allocator carved that
+    # many bytes off the stack.  It has to run and answer 5.
+    my $brocken = Brocken->new;
+    my $host    = $brocken->platform;
+    my $module  = Brocken->new->compile($src);
+    my $funcs   = $brocken->codegen->emit_functions( $module->functions );
+    my $out     = $brocken->tmpdir . '/dyn_untyped' . $brocken->ext;
+    $brocken->linker->write_executable( $out, $funcs, $host );
+    run_exec( $out, expected_exit => 5, platform => $host, name => 'untyped array size on host' );
+};
+
+subtest 'IR render survives a dynamic count' => sub {
+    my $src = <<'BROCKEN';
+my i64 $n = 6;
+my [i64; $n] @arr;
+@arr[0] = 5;
+return @arr[0];
+BROCKEN
+    my $alloca = find_array_alloca($src);
+    ok( $alloca, 'the array alloca is present' );
+    ok( $alloca && $alloca->count && !$alloca->count->isa('Brocken::Lindsay::IR::Constant'),
+        'the count is an instruction' );
+    my $text = eval { $alloca->render };
+    is( $@, '', 'render does not call ->value on an instruction count' );
+    like( $text // '', qr/alloca i64, i64 %/, 'render spells the count as its SSA name' );
 };
 
 subtest 'foreign targets handle dynamic arrays' => sub {
