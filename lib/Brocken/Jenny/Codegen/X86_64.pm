@@ -722,11 +722,16 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     my $pages = int( $total_frame / 4096 );
                     my $rem   = $total_frame % 4096;
                     if ( $pages > 0 ) {
-                        $bytes .= pack( 'CV', 0xB9, $pages );                # mov ecx, pages
+
+                        # The counter must not be an argument register: the lowered body saves
+                        # rcx/rdx/r8/r9 (params) only after this prologue, so clobbering them
+                        # here would destroy param 0 (heap base) before it is read.  eax is
+                        # excluded from allocation and carries no argument.
+                        $bytes .= pack( 'CV', 0xB8, $pages );                # mov eax, pages
                         my $loop_start = length $bytes;
                         $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, 4096 );    # sub rsp, 4096
                         $bytes .= pack( 'CCC',  0x85, 0x04, 0x24 );          # test [rsp], eax  (probe)
-                        $bytes .= pack( 'CCC',  0x83, 0xE9, 0x01 );          # sub ecx, 1
+                        $bytes .= pack( 'CCC',  0x83, 0xE8, 0x01 );          # sub eax, 1
                         my $disp = $loop_start - length($bytes) - 2;
                         $bytes .= pack( 'Cc', 0x75, $disp );                 # jne loop
                     }

@@ -33,18 +33,33 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
     # registers whenever an instruction reads two spilled things at the same time:
     #   * a spilled memory base and a spilled register operand (the value scratch would otherwise hold both),
     #   * a spilled memory index and either a spilled base (the SIB byte reads both registers at once) or a spilled
-    #     register operand (the index reload would be overwritten before the instruction ran).
+    #     register operand (the index reload would be overwritten before the instruction ran),
+    #   * two spilled register operands that both have to be reloaded into registers -- a store/move with both sides
+    #     spilled, or a register-register RMW like a rotate shift whose count cannot stay in memory.  Each such operand
+    #     costs its own scratch, so both count towards the total.
     # A load with only a spilled destination does not collide: the destination write consumes the address, and the
     # store-after reuses a scratch only after the instruction has finished reading it.
     method _has_addr_hazard( $mf, $spill_slots ) {
         return 0 unless $spill_slots && keys %$spill_slots;
         my %store_after = map { $_ => 1 } qw(load fload lea);
+        my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         for my $bb ( $mf->blocks->@* ) {
             for my $inst ( $bb->instructions->@* ) {
-                my @ops        = $inst->operands->@*;
+                my $opcode  = $inst->opcode;
+                my @ops     = $inst->operands->@*;
                 my $needs_addr = 0;
                 my $needs_idx  = 0;
                 my $needs_val  = 0;
+
+                # Positions the encoder can take straight from memory cost no scratch at all.  The table must match
+                # insert_spill_code below, otherwise a source that stays a memory operand would count as a reload.
+                my %mem_ok;
+                if ( $opcode eq 'div128_64' || $opcode eq 'rem128_64' ) {
+                    $mem_ok{$_} = 1 for 0 .. 3;
+                }
+                elsif ( $can_mem_src{$opcode} || $opcode eq 'mul' || $opcode eq 'udiv' || $opcode eq 'sdiv' ) {
+                    $mem_ok{1} = 1;
+                }
                 for my $i ( 0 .. $#ops ) {
                     my $op = $ops[$i];
                     if ( $op->kind eq 'mem' ) {
@@ -54,8 +69,9 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                         $needs_idx = 1 if $index ne '' && defined $spill_slots->{$index};
                     }
                     elsif ( $op->kind eq 'virt_reg' && defined $spill_slots->{ $op->value } ) {
-                        next if $i == 0 && $store_after{$inst->opcode};
-                        $needs_val = 1;
+                        next if $i == 0 && $store_after{$opcode};
+                        next if $mem_ok{$i};
+                        $needs_val++;
                     }
                 }
                 return 1 if $needs_addr + $needs_idx + $needs_val >= 2;
@@ -530,13 +546,6 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         my $addr_op  = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $addr_reg, type => undef ) };
         my $mem_op
             = sub ($o) { Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $o }, type => undef ) };
-        my $load_inst = sub ($o) {
-            Brocken::Jenny::MIR::MachineInstruction->new(
-                opcode   => $load_op,
-                operands => [ $temp_op->(), $mem_op->($o) ],
-                comment  => 'spill-reload'
-            );
-        };
 
         # The address of a spilled memory operand is reloaded into the address scratch, not the value scratch, so an
         # instruction that also reloads a value keeps both live at once.
@@ -607,9 +616,14 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 }
 
                 # A spilled operand that is not taken from memory is reloaded into the single value
-                # scratch, so the reload below matches this assignment.
+                # scratch, so the reload below matches this assignment.  When two spilled operands
+                # both have to live in registers at once (a move with both sides spilled, or a rotate
+                # shift whose count cannot stay in memory), the second one takes the address scratch
+                # instead: _has_addr_hazard has reserved it precisely for these instructions, and no
+                # such instruction carries a memory address that would also need to own it.
                 my @load_offsets;
                 my $store_off;
+                my $n_reload = 0;
                 for my $i ( 0 .. $#ops ) {
                     next unless defined $sp{$i};
                     if ( $mem_ok{$i} ) {
@@ -620,13 +634,14 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                         );
                         next;
                     }
-                    $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => $ops[$i]->type );
+                    my $scr = $n_reload++ ? $addr_reg : $spill_temp;
+                    $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $scr, type => $ops[$i]->type );
                     if ( $i == 0 ) {
-                        push @load_offsets, $sp{0} if $reads_dst{$opcode};
+                        push @load_offsets, [ $sp{0}, $scr ] if $reads_dst{$opcode};
                         $store_off = $sp{0};
                     }
                     else {
-                        push @load_offsets, $sp{$i};
+                        push @load_offsets, [ $sp{$i}, $scr ];
                     }
                 }
 
@@ -640,7 +655,16 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                         comment  => 'spill-reload-index'
                     );
                 }
-                push @new, $load_inst->($_) for @load_offsets;
+                for my $lr ( @load_offsets ) {
+                    push @new, Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode   => $load_op,
+                        operands => [
+                            Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lr->[1], type => undef ),
+                            $mem_op->( $lr->[0] ),
+                        ],
+                        comment => 'spill-reload',
+                    );
+                }
                 push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
                 push @new, $store_inst->($store_off) if defined $store_off;
             }

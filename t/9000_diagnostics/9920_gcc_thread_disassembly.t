@@ -12,11 +12,11 @@ SKIP: {
     skip "gcc not found (tried '$cc')", 1 if $cc_ok != 0;
 
     # Show GCC target triple
-    diag("=== gcc -dumpmachine ===");
+    diag("gcc -dumpmachine");
     system("$cc -dumpmachine 2>&1");
 
     # Show preprocessor defines relevant to OS/threads
-    diag("=== gcc -dM -E (OS+thread defines) ===");
+    diag("gcc -dM -E (OS+thread defines)");
     system("$cc -lpthread -dM -E -x c /dev/null 2>&1 | grep -iE 'freebsd|dragonfly|linux|gnu|thread|tls|_REENTRANT|_PTHREADS' || true");
     my ( $sfh, $c_path ) = tempfile( 'gcc_diag_XXXX', SUFFIX => '.c', TMPDIR => 1, UNLINK => 0 );
     my $bin_path = $c_path;
@@ -54,8 +54,8 @@ CCODE
     close $sfh;
     ok( -f $c_path, "C source written: $c_path" );
 
-    # ---- Step 1: Assembly dump via gcc -S ----
-    note("=== Step 1: gcc -S (assembly output) ===");
+    #
+    note("Step 1: gcc -S (assembly output)");
     my $asm_out = `$cc -lpthread -S -o $s_path $c_path 2>&1`;
     my $rc1     = $? >> 8;
     if ( $rc1 == 0 ) {
@@ -73,8 +73,8 @@ CCODE
         ok( 0, 'gcc -S succeeded' );
     }
 
-    # ---- Step 2: Compile full binary ----
-    note("=== Step 2: gcc -o (full binary) ===");
+    #
+    note("Step 2: gcc -o (full binary)");
     my $compile = `$cc -lpthread -o $bin_path $c_path 2>&1`;
     my $rc2     = $? >> 8;
     if ( $rc2 == 0 ) {
@@ -85,8 +85,8 @@ CCODE
         ok( 0, 'gcc compilation succeeded' );
     }
 
-    # ---- Step 3: Run the binary ----
-    note("=== Step 3: Run binary ===");
+    #
+    note("Step 3: Run binary");
     my $run = `$bin_path 2>&1`;
     my $rc3 = $? >> 8;
     diag("Binary output: $run");
@@ -99,37 +99,37 @@ CCODE
         ok( 0, 'Binary execution succeeded' );
     }
 
-    # ---- Step 4: ELF dump (program headers, dynamic section, section headers) ----
-    note("=== Step 4: ELF Information ===");
+    #
+    note("Step 4: ELF Information");
     my $elf_ok = 0;
     if ( system('readelf --version >/dev/null 2>&1') == 0 ) {
         $elf_ok = 1;
-        diag("=== readelf -h (ELF header) ===");
+        diag("readelf -h (ELF header)");
         system("readelf -h $bin_path 2>&1");
-        diag("=== readelf -l (program headers) ===");
+        diag("readelf -l (program headers)");
         system("readelf -l $bin_path 2>&1");
-        diag("=== readelf -d (dynamic section) ===");
+        diag("readelf -d (dynamic section)");
         system("readelf -d $bin_path 2>&1");
-        diag("=== readelf -S (section headers) ===");
+        diag("readelf -S (section headers)");
         system("readelf -S $bin_path 2>&1");
-        diag("=== readelf -n (notes) ===");
+        diag("readelf -n (notes)");
         system("readelf -n $bin_path 2>&1");
-        diag("=== readelf -r (relocations) ===");
+        diag("readelf -r (relocations)");
         system("readelf -r $bin_path 2>&1");
-        diag("=== readelf -s (symbol table) ===");
+        diag("readelf -s (symbol table)");
         system("readelf -s $bin_path 2>&1");
     }
     elsif ( system('objdump --version >/dev/null 2>&1') == 0 ) {
         $elf_ok = 1;
-        diag("=== objdump -p (private/dynamic) ===");
+        diag("objdump -p (private/dynamic)");
         system("objdump -p $bin_path 2>&1");
-        diag("=== objdump -h (section headers) ===");
+        diag("objdump -h (section headers)");
         system("objdump -h $bin_path 2>&1");
-        diag("=== objdump -d (disassembly) ===");
+        diag("objdump -d (disassembly)");
         system("objdump -d $bin_path 2>&1");
-        diag("=== objdump -R (relocations) ===");
+        diag("objdump -R (relocations)");
         system("objdump -R $bin_path 2>&1");
-        diag("=== objdump -t (symbol table) ===");
+        diag("objdump -t (symbol table)");
         system("objdump -t $bin_path 2>&1");
     }
     else {
@@ -137,8 +137,8 @@ CCODE
     }
     ok( $elf_ok, 'ELF dump completed' );
 
-    # ---- Step 5: Hex dump of raw binary ----
-    note("=== Step 5: Hex dump ===");
+    # Step 5: Hex dump of raw binary
+    note("Step 5: Hex dump");
     open my $bfh, '<:raw', $bin_path or do {
         diag("Cannot open $bin_path for reading: $!");
         skip 'Cannot read binary', 1;
@@ -167,13 +167,14 @@ CCODE
         }
         diag( sprintf "%08x  %-48s  |%s|", $i, $hex, $ascii );
     }
-    ok( 1, 'Hex dump completed' );
+    pass 'Hex dump completed' ;
 
-    # ---- Cleanup ----
-    note("=== Cleanup ===");
+    #
+    note 'Cleanup';
     for my $f ( $c_path, $s_path, $bin_path ) {
         unlink $f if defined $f && -f $f;
     }
-    note('Temporary files removed');
+    note 'Temporary files removed';
 }
+#
 done_testing;

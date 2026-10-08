@@ -416,6 +416,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                     $text .= pack( 'C4', 0x4C, 0x8B, 0x7F, 0x30 );    # mov r15, [rdi+0x30]
                     $text .= pack( 'C4', 0x48, 0x8B, 0x47, 0x38 );    # mov rax, [rdi+0x38] (saved rsp)
                     $text .= pack( 'C3', 0x48, 0x89, 0xC4 );          # mov rsp, rax
+                    $text .= pack( 'C4', 0x48, 0x83, 0xC4, 0x08 );    # add rsp, 8 (skip consumed ret-addr slot, restore body rsp)
                     $text .= pack( 'C3', 0x48, 0x89, 0xF0 );          # mov rax, rsi        (return val)
                     $text .= pack( 'C3', 0x41, 0xFF, 0xE0 );          # jmp r8
                     $sjlj_stubs{longjmp} = $stub_base;

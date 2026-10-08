@@ -210,6 +210,8 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 # 4C 8B 79 38       mov r15, [rcx+0x38]
                 # 48 8B 41 40       mov rax, [rcx+0x40]   (saved rsp)
                 # 48 89 C4          mov rsp, rax
+                # 48 83 C4 08       add rsp, 8            (skip the consumed return-addr slot,
+                #                                          restoring the caller's body rsp)
                 # 48 89 D0          mov rax, rdx           (return val)
                 # 41 FF E0          jmp r8
                 $text .= pack( 'C4', 0x4C, 0x8B, 0x41, 0x48 );
@@ -223,6 +225,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 $text .= pack( 'C4', 0x4C, 0x8B, 0x79, 0x38 );
                 $text .= pack( 'C4', 0x48, 0x8B, 0x41, 0x40 );
                 $text .= pack( 'C3', 0x48, 0x89, 0xC4 );
+                $text .= pack( 'C4', 0x48, 0x83, 0xC4, 0x08 );
                 $text .= pack( 'C3', 0x48, 0x89, 0xD0 );
                 $text .= pack( 'C3', 0x41, 0xFF, 0xE0 );
                 $sjlj_stubs{longjmp} = $stub_base;

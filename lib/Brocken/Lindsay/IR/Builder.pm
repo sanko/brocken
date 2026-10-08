@@ -8,10 +8,14 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
     method position_at_end($block) { $insert_block = $block }
     method _next_id()              { '%' . $id_counter++ }
 
-    method build_binop( $opcode, $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) {
+    # `$result_type` overrides the result width, which a narrowing `and` needs: the mask keeps the operand's own type
+    # but the instruction must carry the type it narrows *to*, or the ABI classifies the result by the source width
+    # (a u128 masked down to 64 bits still read as an i128 at the call site, so it went to the stack while the callee
+    # expected it in a register).
+    method build_binop( $opcode, $lhs, $rhs, $name = undef, $line = 0, $col = 0, $result_type = undef ) {
         my $inst = Brocken::Lindsay::IR::Instruction->new(
             name     => $name // $self->_next_id(),
-            type     => $lhs->type,
+            type     => $result_type // $lhs->type,
             opcode   => $opcode,
             operands => [ $lhs, $rhs ],
             parent   => $insert_block,
@@ -28,7 +32,9 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
     method build_shl( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'shl',  $lhs, $rhs, $name, $line, $col ) }
     method build_lshr( $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) { $self->build_binop( 'lshr', $lhs, $rhs, $name, $line, $col ) }
     method build_ashr( $lhs, $rhs, $name = undef, $line = 0, $col = 0 ) { $self->build_binop( 'ashr', $lhs, $rhs, $name, $line, $col ) }
-    method build_and( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'and',  $lhs, $rhs, $name, $line, $col ) }
+    method build_and( $lhs, $rhs, $name = undef, $line = 0, $col = 0, $result_type = undef ) {
+        $self->build_binop( 'and', $lhs, $rhs, $name, $line, $col, $result_type )
+    }
     method build_or( $lhs, $rhs, $name   = undef, $line = 0, $col = 0 ) { $self->build_binop( 'or',   $lhs, $rhs, $name, $line, $col ) }
     method build_xor( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'xor',  $lhs, $rhs, $name, $line, $col ) }
     method build_min( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'min',  $lhs, $rhs, $name, $line, $col ) }
