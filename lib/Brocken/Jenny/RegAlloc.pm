@@ -27,28 +27,38 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         return $res;
     }
 
-    # Does any instruction need a reloaded address and a reloaded value at once?
+    # Does any instruction need two reload registers at once?
     #
-    # This mirrors the decision insert_spill_code makes per instruction: a memory operand whose base is spilled has to
-    # be reloaded into a register, and if the same instruction also has a spilled register operand that goes into the
-    # value scratch, the two have to be different registers.  A load with only a spilled destination does not collide,
-    # because the destination write consumes the address rather than needing it alongside the value.
+    # insert_spill_code has one value scratch and, when a hazard exists, one address scratch.  It needs two distinct
+    # registers whenever an instruction reads two spilled things at the same time:
+    #   * a spilled memory base and a spilled register operand (the value scratch would otherwise hold both),
+    #   * a spilled memory index and either a spilled base (the SIB byte reads both registers at once) or a spilled
+    #     register operand (the index reload would be overwritten before the instruction ran).
+    # A load with only a spilled destination does not collide: the destination write consumes the address, and the
+    # store-after reuses a scratch only after the instruction has finished reading it.
     method _has_addr_hazard( $mf, $spill_slots ) {
         return 0 unless $spill_slots && keys %$spill_slots;
+        my %store_after = map { $_ => 1 } qw(load fload lea);
         for my $bb ( $mf->blocks->@* ) {
             for my $inst ( $bb->instructions->@* ) {
-                my $addr_spilled = 0;
-                my $val_spilled  = 0;
-                for my $op ( $inst->operands->@* ) {
+                my @ops        = $inst->operands->@*;
+                my $needs_addr = 0;
+                my $needs_idx  = 0;
+                my $needs_val  = 0;
+                for my $i ( 0 .. $#ops ) {
+                    my $op = $ops[$i];
                     if ( $op->kind eq 'mem' ) {
                         my $base = $op->value->{base} // '';
-                        $addr_spilled = 1 if defined $spill_slots->{$base};
+                        $needs_addr = 1 if defined $spill_slots->{$base};
+                        my $index = $op->value->{index} // '';
+                        $needs_idx = 1 if $index ne '' && defined $spill_slots->{$index};
                     }
-                    elsif ( $op->kind eq 'virt_reg' ) {
-                        $val_spilled = 1 if defined $spill_slots->{ $op->value };
+                    elsif ( $op->kind eq 'virt_reg' && defined $spill_slots->{ $op->value } ) {
+                        next if $i == 0 && $store_after{$inst->opcode};
+                        $needs_val = 1;
                     }
                 }
-                return 1 if $addr_spilled && $val_spilled;
+                return 1 if $needs_addr + $needs_idx + $needs_val >= 2;
             }
         }
         return 0;
@@ -367,6 +377,35 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 }
             }
         }
+
+        # Exclude the registers a dynamic alloca depends on.  The code generator's alloca_dyn sequence (scale the count
+        # by the element size, align it, subtract it from the live stack pointer, hand the caller the new bottom)
+        # clobbers a scratch register its operands do not name, and it keeps the frame pointer as the fixed base for
+        # every static frame reference -- nothing else may be handed rbp, or it would point somewhere else by the time a
+        # spill slot or an outgoing argument is addressed through it.  Both registers are invisible to the operand scan
+        # above, exactly like the rax/rdx/rcx clobbers.
+        if ( !$is_float && $mf && $mf->blocks->@* ) {
+            my $has_dyn = 0;
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    $has_dyn = 1 if $inst->opcode eq 'alloca_dyn';
+                }
+            }
+            if ($has_dyn) {
+                if ( $platform->is_x64 ) {
+                    $defined_phys{rax} = 1;
+                    $defined_phys{rbp} = 1;
+                }
+                elsif ( $platform->is_arm64 ) {
+                    $defined_phys{x16} = 1;
+                    $defined_phys{x29} = 1;
+                }
+                elsif ( $platform->is_riscv64 ) {
+                    $defined_phys{a5} = 1;
+                    $defined_phys{s8} = 1;
+                }
+            }
+        }
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         @callee_regs = grep { !$defined_phys{$_} } @callee_regs;
 
@@ -528,6 +567,8 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     $sp{$i} = $off;
                 }
                 my $smem_off;
+                my $ind_off;
+                my $ind_scratch;
                 for my $op (@ops) {
                     next unless $op->kind eq 'mem';
                     my $base = $op->value->{base} // '';
@@ -535,8 +576,20 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                         $smem_off = $off;
                         $op->value->{base} = $addr_reg;
                     }
+
+                    # A spilled index also has to move into a register: the SIB byte addresses with it, so it cannot stay
+                    # in memory the way a spilled base slot can be reached through its own address.  Give it a register
+                    # that nothing else this instruction holds at the same instant occupies -- the base owns the address
+                    # scratch, and any value operand owns the value scratch, so the index takes whichever is left.
+                    my $index = $op->value->{index} // '';
+                    if ( $index ne '' && defined( my $off = $spill_slots->{$index} ) ) {
+                        $ind_off = $off;
+                        $ind_scratch = defined $smem_off ? $spill_temp
+                            : ( keys(%sp) ? ( defined $spill_addr_temp ? $spill_addr_temp : $spill_temp ) : $spill_temp );
+                        $op->value->{index} = $ind_scratch;
+                    }
                 }
-                if ( !keys %sp && !defined $smem_off ) {
+                if ( !keys %sp && !defined $smem_off && !defined $ind_off ) {
                     push @new, $inst;
                     next;
                 }
@@ -580,6 +633,13 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 # Address first: it lands in its own scratch and stays valid
                 # while the value scratch is reused below.
                 push @new, $load_addr_inst->($smem_off) if defined $smem_off;
+                if ( defined $ind_off ) {
+                    push @new, Brocken::Jenny::MIR::MachineInstruction->new(
+                        opcode   => $load_op,
+                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $ind_scratch, type => undef ), $mem_op->($ind_off) ],
+                        comment  => 'spill-reload-index'
+                    );
+                }
                 push @new, $load_inst->($_) for @load_offsets;
                 push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
                 push @new, $store_inst->($store_off) if defined $store_off;

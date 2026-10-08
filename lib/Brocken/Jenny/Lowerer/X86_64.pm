@@ -3126,16 +3126,34 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
                     my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 );
-                    $size ||= 1;    # i1 rounds up from 0 to 1 byte
-                    $size *= $inst->count->value if $inst->count;
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'alloca',
-                            operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
-                            comment  => "alloca $size bytes"
-                        )
-                    );
+
+                    # A non-constant count is a runtime value: fold no immediate, and let the code generator carve the
+                    # space out of the live stack.  The count's value lives in a virtual register produced by whatever
+                    # instruction computed it (the Load of a local, for `my [i64; $n]`).
+                    if ( $inst->count && !$inst->count->isa('Brocken::Lindsay::IR::Constant') ) {
+                        my $elem     = int( ( $inst->allocated_type->bits + 7 ) / 8 );
+                        $elem ||= 1;    # i1 rounds up from 0 to 1 byte
+                        my $count_op = $self->_lower_opnd( $inst->count );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'alloca_dyn',
+                                operands => [ $dst, $count_op, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $elem ) ],
+                                comment  => "alloca_dyn $elem-byte elements"
+                            )
+                        );
+                    }
+                    else {
+                        my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 );
+                        $size ||= 1;    # i1 rounds up from 0 to 1 byte
+                        $size *= $inst->count->value if $inst->count;
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'alloca',
+                                operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                                comment  => "alloca $size bytes"
+                            )
+                        );
+                    }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                     my $ptr     = $inst->operands->[0];

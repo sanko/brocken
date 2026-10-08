@@ -2210,8 +2210,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
-                    my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 ) || 1;
-                    $size *= ( $inst->count ? $inst->count->value : 1 );
+                    my $elem = int( ( $inst->allocated_type->bits + 7 ) / 8 ) || 1;
 
                     # save current heap_ptr as result
                     $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
@@ -2225,13 +2224,47 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
 
                     # heap_ptr += size
                     $mbb->add_instruction( $self->_wasm_push_vreg( '%heap_ptr', 'alloca: push heap', Brocken::Lindsay::IR::Type::ptr() ) );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'i64_const',
-                            operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
-                            comment  => "alloca: size $size"
-                        )
-                    );
+
+                    # A non-constant count is a runtime value: push it, widen it to the 64-bit size arithmetic, and
+                    # multiply by the element byte size at runtime.
+                    if ( $inst->count && !$inst->count->isa('Brocken::Lindsay::IR::Constant') ) {
+                        my $count_type = $inst->count->type;
+                        $mbb->add_instruction( $self->_wasm_push_vreg( $inst->count->name, 'alloca: count', $count_type ) );
+                        if ( !$count_type || $count_type->bits < 64 ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'i64_extend_i32_u',
+                                    operands => [],
+                                    comment  => 'alloca: extend count'
+                                )
+                            );
+                        }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $elem ) ],
+                                comment  => "alloca: elem $elem bytes"
+                            )
+                        );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_mul',
+                                operands => [],
+                                comment  => 'alloca: count*elem'
+                            )
+                        );
+                    }
+                    else {
+                        my $size = $elem;
+                        $size *= ( $inst->count ? $inst->count->value : 1 );
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'i64_const',
+                                operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                                comment  => "alloca: size $size"
+                            )
+                        );
+                    }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_add', operands => [], comment => 'alloca: add' ) );
                     $mbb->add_instruction( $self->_wasm_set_vreg( '%heap_ptr', 'alloca: save heap', Brocken::Lindsay::IR::Type::ptr() ) );

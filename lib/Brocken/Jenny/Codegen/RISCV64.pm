@@ -483,10 +483,12 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         my $alloca_frame = 0;
         my $total_alloca = 0;
         my $is_leaf      = 1;
+        my $has_dyn_alloca = 0;
         my $spill_frame  = $self->_compute_spill_frame( $mf, $platform->stack_reg );
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
+                $has_dyn_alloca = 1 if $inst->opcode eq 'alloca_dyn';
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
@@ -496,6 +498,9 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         }
         my @to_save = $used_callee->@*;
         push @to_save, 's0';    # Always save frame pointer for backtrace support
+        if ($has_dyn_alloca) {
+            push @to_save, 's8';    # the anchor materialization scratch, below: callee-saved, so the prologue must keep it
+        }
         if ( !$is_leaf ) {
             push @to_save, 'ra';
         }
@@ -504,6 +509,21 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # The outgoing argument area sits at the bottom of the frame, below the spill slots, because the callee reads
         # those arguments from the entry stack pointer and neither `jal ra` nor `jalr ra` moves it.
         my $call_arg_frame = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
+        my $push_active  = 0;
+        my $call_arg_push;
+        if ($has_dyn_alloca) {
+
+            # A dynamic alloca moves the live stack pointer below the fixed part of the frame, so the outgoing-argument
+            # area can no longer be reserved at the bottom in the prologue: it would come to rest above the dynamic
+            # region, where a callee reads nothing, and outgoing writes would land in the middle of the array.  The
+            # arguments are pushed at each call site instead (`addi sp, sp, -call_arg_push` around the raw 'stack'
+            # stores and `jal`), which keeps sp 16-byte aligned at the call and keeps the raw displacements the
+            # lowerer assigned them untouched.  The fixed part of the frame is therefore just the callee saves, spill
+            # slots and static allocas, and every one of those is addressed off the frame pointer s0 (final_disp) so
+            # the dips around the pushed arguments never move a slot.
+            $call_arg_frame = 0;
+            $call_arg_push  = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
+        }
         my $unified_frame  = ( $callee_size + $spill_frame + $call_arg_frame + 15 ) & ~15;
         my $extra_frame    = $unified_frame - $callee_size;
         my $aligned_alloca = ( $total_alloca + 15 ) & ~15;
@@ -518,12 +538,59 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # down by the whole frame, so the bias is added back.  A spill slot is nominally placed where the allocator
         # asked, which is inside the spill area, so it is lifted above the outgoing area that now sits below it.  An
         # outgoing argument is already where it belongs.
+        #
+        # In a dynamic frame the live stack pointer dips below the fixed part (each alloca_dyn subtracts from it, and
+        # each call site subtracts the outgoing area again), so any slot that sits in the fixed frame -- a spill slot,
+        # a static alloca, an incoming argument -- has to be measured from the frame pointer s0, which the prologue set
+        # at prologue-sp + dyn_fp_off and nothing afterwards moves.  Only the outgoing arguments keep using the live
+        # stack pointer: they are written where the callee will read them off its entry sp and reclaimed right after
+        # the call.
+        my $dyn_fp_off;
+        if ($has_dyn_alloca) {
+            my $fp_idx = 0;
+            for my $i ( 0 .. $#to_save ) {
+                $fp_idx = $i if $to_save[$i] eq 's0';
+            }
+            $dyn_fp_off = $extra_frame + $fp_idx * 8;
+        }
         my $final_disp = sub ($addr) {
             my $disp = $addr->{disp} // 0;
             return $disp unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
+            if ($has_dyn_alloca) {
+                return $disp + $total_frame - $dyn_fp_off if ( $addr->{raw} // '' ) eq 'entry';
+                return $disp                                if $addr->{raw};
+                return $disp - $dyn_fp_off;
+            }
             return $disp + $total_frame if ( $addr->{raw} // '' ) eq 'entry';
             return $disp                if $addr->{raw};
             return $disp + $call_arg_frame;
+        };
+        # In a dynamic frame, which base register a memory operand is addressed through: s0 for every fixed-frame slot,
+        # the live stack pointer for the outgoing arguments a callee reads off its entry sp.  Returns undef when the
+        # operand is not stack-relative at all (a plain vreg base).
+        my $anchor_base = sub ($addr) {
+            return undef unless $has_dyn_alloca;
+            return undef unless defined $addr->{base} && !ref $addr->{base} && $addr->{base} eq $platform->stack_reg;
+            return undef if ( $addr->{raw} // '' ) eq 'stack';
+            return 's0';
+        };
+        # A fixed-frame slot measured from s0 (final_disp) can fall outside the signed 12-bit displacement an
+        # ld/sd/fld/fsd immediate can encode: in a dynamic frame the spill slots and allocas sit below the frame
+        # pointer, so their displacements come out negative, and a large frame pushes them past -2048.  Materialize
+        # `s0 + disp` into the s8 scratch -- excluded from allocation for exactly this purpose in a dynamic frame
+        # (RegAlloc), absent from every temp-pick loop because it is a callee register, and not an argument register --
+        # then address through s8 with a zero displacement.  Returns the (base, disp) pair the instruction should
+        # encode; unchanged when nothing is out of range or the operand is not anchored, which keeps a non-dynamic
+        # function byte-identical.
+        my $anchor_disp = sub ( $anchor, $bid, $disp ) {
+            return ( $bid, $disp ) unless defined $anchor;
+            return ( $bid, $disp ) if $disp >= -2048 && $disp <= 2047;
+            my $hi = ( $disp + 0x800 ) >> 12;
+            my $lo = $disp & 0xFFF;
+            $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 24 << 7 ) | LUI );
+            $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 24 << 15 ) | ( 0 << 12 ) | ( 24 << 7 ) | OP_IMM ) if $lo;
+            $bytes .= pack( 'V', ( 0 << 25 ) | ( 24 << 20 ) | ( 8 << 15 ) | ( 0 << 12 ) | ( 24 << 7 ) | OP );    # add s8, s0, s8
+            return ( 24, 0 );
         };
         my $reg_id = sub ($r) {
             return 0 unless defined $r;
@@ -606,21 +673,23 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $base_r
                 = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
             my $bid  = $reg_id->($base_r);
+            my $anchor = $anchor_base->($addr);
+            $bid = 8 if defined $anchor;
             my $tmp_r = $pick_scratch->();
             die "no temp register for the memory source of $what" unless $tmp_r;
             my $tid    = $reg_id->($tmp_r);
             my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits   : 64;
             my $signed = $mem->type && $mem->type->kind eq 'int'     ? $mem->type->signed : 1;
             my $funct3 = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
+            my $disp = $final_disp->($addr);
+            ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                 my $iid     = $reg_id->($index_r);
                 $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                my $disp = $final_disp->($addr);
                 $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $tid << 7 ) | LOAD );
             }
             else {
-                my $disp = $final_disp->($addr);
                 $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $tid << 7 ) | LOAD );
             }
             return $tid;
@@ -656,6 +725,40 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $fp_off = $extra_frame + $fp_idx * 8;
             $bytes .= pack( 'V', ( ( $fp_off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 8 << 7 ) | OP_IMM );
         }
+        if ( $has_dyn_alloca && $total_frame == 0 ) {
+
+            # No fixed frame at all, but the dynamic region still needs the s0 anchor: nothing is spilled, so point
+            # the frame pointer at the entry stack pointer and every fixed-frame reference is then a no-op offset.
+            $bytes .= pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 8 << 7 ) | OP_IMM );    # addi s0, sp, 0
+        }
+
+        # Move the live stack pointer by the outgoing-argument area around a call, or before the first store into it.
+        # A negative adjustment comes first (below the dynamic region) and is undone right after the call, which keeps
+        # sp 16-byte aligned throughout and leaves the raw displacements the lowerer assigned the arguments alone.
+        my $sp_delta = sub ($amount) {
+            my $neg = -$amount;
+            if ( $neg >= -2048 && $neg <= 2047 ) {
+                my $imm = $neg & 0xFFF;
+                $bytes .= pack( 'V', ( $imm << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );    # addi sp, sp, -amount
+            }
+            else {
+                my $hi = ( $neg + 0x800 ) >> 12;
+                my $lo = $neg & 0xFFF;
+                $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
+                $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
+                $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );    # sub sp, sp, t5
+            }
+        };
+        my $sp_push = sub () {
+            return unless $has_dyn_alloca && !$push_active && $call_arg_push > 0;
+            $sp_delta->($call_arg_push);
+            $push_active = 1;
+        };
+        my $sp_pop = sub () {
+            return unless $has_dyn_alloca && $push_active;
+            $sp_delta->( -$call_arg_push );
+            $push_active = 0;
+        };
         my %labels;
         my @fixups;
         my @func_fixups;
@@ -668,6 +771,29 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 my $opcode = $inst->opcode;
                 my @ops    = $inst->operands->@*;
                 my ( $dst, $src ) = @ops;
+
+                # A store to an outgoing-argument slot is the first of the group that sits at the bottom of the live
+                # stack at the call; in a dynamic frame the bottom is below the dynamic region, so move it down before
+                # the group writes anything.
+                if ( $has_dyn_alloca && !$push_active && $call_arg_push > 0 ) {
+                    for my $op ( $inst->operands->@* ) {
+                        if ( $op->kind eq 'mem' && ( $op->value->{raw} // '' ) eq 'stack' ) {
+                            if ( $call_arg_push <= 2047 ) {
+                                my $neg = ( -$call_arg_push ) & 0xFFF;
+                                $bytes .= pack( 'V', ( $neg << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                            }
+                            else {
+                                my $hi = ( $call_arg_push + 0x800 ) >> 12;
+                                my $lo = $call_arg_push & 0xFFF;
+                                $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
+                                $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
+                                $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );
+                            }
+                            $push_active = 1;
+                            last;
+                        }
+                    }
+                }
                 if ( $opcode eq 'label' ) {
                     $labels{ $dst->value } = $current_offset->();
                 }
@@ -926,20 +1052,58 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $did   = $reg_id->($dst_r);
                     my $off   = $alloca_frame;
                     $alloca_map->{ $dst->value } = $off if $alloca_map;
-                    if ( $off <= 2047 ) {
-                        $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+
+                    # In a dynamic frame the static alloca sits in the fixed frame above the s0 anchor, so measure it
+                    # off s0 (entry sp + dyn_fp_off) rather than the live sp, which has since moved down by the
+                    # dynamic region at runtime.
+                    my $base_id = $has_dyn_alloca ? 8 : 2;
+                    $off = $off - $dyn_fp_off if $has_dyn_alloca;
+                    if ( $off >= -2048 && $off <= 2047 ) {
+                        my $imm = $off & 0xFFF;
+                        $bytes .= pack( 'V', ( $imm << 20 ) | ( $base_id << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                     else {
                         my $hi = ( $off + 0x800 ) >> 12;
                         my $lo = $off & 0xFFF;
                         $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( $did << 7 ) | LUI );
                         $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM ) if $lo;
-                        $bytes .= pack( 'V', ( 0x00 << 25 ) | ( $did << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP );
+                        $bytes .= pack( 'V', ( 0x00 << 25 ) | ( $did << 20 ) | ( $base_id << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP );
                     }
 
                     # alloca_frame tracks where the next alloca starts (grows forward from stack top)
                     $alloca_frame += $src->value;
                     $alloca_frame = ( $alloca_frame + 15 ) & ~15;
+                }
+                elsif ( $opcode eq 'alloca_dyn' ) {
+                    my ( $dst, $count_op, $elem_op ) = $inst->operands->@*;
+                    my $dst_r   = $resolve->($dst);
+                    my $did     = $reg_id->($dst_r);
+                    my $count_r = $resolve->($count_op);
+                    my $cid     = $reg_id->($count_r);
+                    my $elem    = $elem_op->value;
+
+                    # Carve `count * elem`, 16-byte aligned, out of the live stack in the a5 scratch (excluded from
+                    # allocation for this function).  The dynamic region therefore always sits below the fixed frame
+                    # and below the outgoing-argument pushes, so it survives both later static allocas and calls.
+                    my $log2 = 0;
+                    my $pow2 = $elem;
+                    while ( $pow2 > 1 ) {
+                        last if $pow2 % 2;
+                        $pow2 /= 2;
+                        $log2++;
+                    }
+                    die "alloca_dyn: non-power-of-two element size $elem not encodable on RISCV64"
+                        if $pow2 != 1 || $elem <= 0;
+                    if ($log2) {
+                        $bytes .= pack( 'V', ( $log2 << 20 ) | ( $cid << 15 ) | ( 1 << 12 ) | ( 15 << 7 ) | OP );    # slli a5, count, #log2
+                    }
+                    else {
+                        $bytes .= pack( 'V', ( 0 << 20 ) | ( $cid << 15 ) | ( 0 << 12 ) | ( 15 << 7 ) | OP_IMM );    # addi a5, count, 0
+                    }
+                    $bytes .= pack( 'V', ( 15 << 20 ) | ( 15 << 15 ) | ( 0 << 12 ) | ( 15 << 7 ) | OP_IMM );    # addi a5, #15
+                    $bytes .= pack( 'V', ( ( -16 ) & 0xFFF ) << 20 | ( 15 << 15 ) | ( 7 << 12 ) | ( 15 << 7 ) | OP_IMM );    # andi a5, a5, -16
+                    $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 15 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );    # sub sp, sp, a5
+                    $bytes .= pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );    # mv dst, sp
                 }
                 elsif ( $opcode eq 'load' ) {
                     my $dst_r = $resolve->($dst);
@@ -948,10 +1112,14 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $base_r
                         = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
+                    my $anchor = $anchor_base->($addr);
+                    $bid = 8 if defined $anchor;
                     my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
                     my $signed = $src->type && $src->type->kind eq 'int'     ? $src->type->signed : 1;
                     my $funct3 = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
 
+                    my $disp = $final_disp->($addr);
+                    ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -962,11 +1130,9 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         die 'no temp register for indexed load' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp = $final_disp->($addr);
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | LOAD );
                     }
                     else {
-                        my $disp = $final_disp->($addr);
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | LOAD );
                     }
                 }
@@ -977,8 +1143,12 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $base_r
                         = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
+                    my $anchor = $anchor_base->($addr);
+                    $bid = 8 if defined $anchor;
                     my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
                     my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
+                    my $disp   = $final_disp->($addr);
+                    ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -989,13 +1159,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         die 'no temp register for indexed store' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp   = $final_disp->($addr);
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
                     }
                     else {
-                        my $disp   = $final_disp->($addr);
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
@@ -1007,6 +1175,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $base_r
                         = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
+                    my $anchor = $anchor_base->($addr);
+                    $bid = 8 if defined $anchor;
                     my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits : 64;
                     my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
 
@@ -1038,6 +1208,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                             $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
                         }
                     }
+                    my $disp = $final_disp->($addr);
+                    ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
                     my $store_bid = $bid;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
@@ -1052,7 +1224,6 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid2 << 7 ) | OP );
                         $store_bid = $tid2;
                     }
-                    my $disp   = $addr->{disp} // 0;
                     my $imm_lo = $disp & 0x1F;
                     my $imm_hi = ( $disp >> 5 ) & 0x7F;
                     $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $store_bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
@@ -1064,7 +1235,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $base_r
                         = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
+                    my $anchor = $anchor_base->($addr);
+                    $bid = 8 if defined $anchor;
                     my $funct3 = ( $dst->type && $dst->type->bits <= 32 ) ? 2 : 3;
+                    my $disp   = $final_disp->($addr);
+                    ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -1075,11 +1250,9 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         die 'no temp register for indexed fload' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp = $final_disp->($addr);
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | FLOAD );
                     }
                     else {
-                        my $disp = $final_disp->($addr);
                         $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | FLOAD );
                     }
                 }
@@ -1090,7 +1263,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $base_r
                         = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
+                    my $anchor = $anchor_base->($addr);
+                    $bid = 8 if defined $anchor;
                     my $funct3 = ( $src->type && $src->type->bits <= 32 ) ? 2 : 3;
+                    my $disp   = $final_disp->($addr);
+                    ( $bid, $disp ) = $anchor_disp->( $anchor, $bid, $disp );
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -1101,13 +1278,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         die 'no temp register for indexed fstore' unless $tmp_r;
                         my $tid = $reg_id->($tmp_r);
                         $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $disp   = $final_disp->($addr);
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
                     }
                     else {
-                        my $disp   = $final_disp->($addr);
                         my $imm_lo = $disp & 0x1F;
                         my $imm_hi = ( $disp >> 5 ) & 0x7F;
                         $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
@@ -1302,35 +1477,80 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 }
                 elsif ( $opcode eq 'call_func' ) {
                     my $func_name = $dst->value;
+                    $sp_push->();
                     push @func_fixups, { offset => $current_offset->(), type => 'call_jal', target => $func_name };
                     $bytes .= pack( 'V', JAL | ( 1 << 7 ) | 0x6F );
+                    $sp_pop->();
                 }
                 elsif ( $opcode eq 'call_indirect' ) {
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
+                    $sp_push->();
                     $bytes .= pack( 'V', 0x67 | ( 1 << 7 ) | ( $sid << 15 ) );
+                    $sp_pop->();
                 }
                 elsif ( $opcode eq 'ret' ) {
-                    if ( $callee_size > 0 ) {
+                    if ($has_dyn_alloca) {
+
+                        # The live sp sits at the bottom of the dynamic region, wherever the runtime count put it, so
+                        # the callee saves can no longer be found at a fixed sp displacement.  Recover the frame base
+                        # (the stack pointer just after the prologue subtracted the fixed frame) in the excluded a5
+                        # scratch as s0 - dyn_fp_off, reload the saves from there, and jump sp from there to the entry
+                        # stack pointer (frame base + total_frame, a static distance) -- all before s0, still holding
+                        # this frame's anchor, is overwritten by its own restore.
+                        my $dyn = $dyn_fp_off;
+                        if ( $dyn <= 2047 ) {
+                            my $neg = ( -$dyn ) & 0xFFF;
+                            $bytes .= pack( 'V', ( $neg << 20 ) | ( 8 << 15 ) | ( 0 << 12 ) | ( 15 << 7 ) | OP_IMM );    # addi a5, s0, -dyn
+                        }
+                        else {
+                            my $hi = ( $dyn + 0x800 ) >> 12;
+                            my $lo = $dyn & 0xFFF;
+                            $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
+                            $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
+                            $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 8 << 15 ) | ( 0 << 12 ) | ( 15 << 7 ) | OP );    # sub a5, s0, t5
+                        }
                         for my $i ( reverse 0 .. $#to_save ) {
                             my $reg     = $to_save[$i];
                             my $rid     = $reg_id->($reg);
                             my $off     = $extra_frame + $i * 8;
                             my $load_op = $reg =~ /^f/ ? FLOAD : LOAD;
-                            $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | $load_op );
+                            $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 15 << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | $load_op );
                         }
-                    }
-                    if ( $total_frame > 0 ) {
                         my $tf = $total_frame;
                         if ( $tf <= 2047 ) {
-                            $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                            $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 15 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );    # addi sp, a5, total_frame
                         }
                         else {
                             my $hi = ( $tf + 0x800 ) >> 12;
                             my $lo = $tf & 0xFFF;
                             $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
                             $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
-                            $bytes .= pack( 'V', ( 0x00 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );
+                            $bytes .= pack( 'V', ( 0x00 << 25 ) | ( 5 << 20 ) | ( 15 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );    # add sp, a5, t5
+                        }
+                    }
+                    else {
+                        if ( $callee_size > 0 ) {
+                            for my $i ( reverse 0 .. $#to_save ) {
+                                my $reg     = $to_save[$i];
+                                my $rid     = $reg_id->($reg);
+                                my $off     = $extra_frame + $i * 8;
+                                my $load_op = $reg =~ /^f/ ? FLOAD : LOAD;
+                                $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | $load_op );
+                            }
+                        }
+                        if ( $total_frame > 0 ) {
+                            my $tf = $total_frame;
+                            if ( $tf <= 2047 ) {
+                                $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                            }
+                            else {
+                                my $hi = ( $tf + 0x800 ) >> 12;
+                                my $lo = $tf & 0xFFF;
+                                $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
+                                $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
+                                $bytes .= pack( 'V', ( 0x00 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );
+                            }
                         }
                     }
                     $bytes .= pack( 'V', JALR );
