@@ -1874,16 +1874,29 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                             $mbb->add_instruction( $self->_wasm_push( $lhs, 'minmax lhs' ) );
                             $self->_wasm_fit( $mbb, $lhs, $p );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$ta], comment => 'minmax save lhs' ) );
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'local_set',
+                                    operands => [$ta],
+                                    comment  => 'minmax save lhs'
+                                )
+                            );
                             $mbb->add_instruction( $self->_wasm_push( $rhs, 'minmax rhs' ) );
                             $self->_wasm_fit( $mbb, $rhs, $p );
                             $mbb->add_instruction(
-                                Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_set', operands => [$tb], comment => 'minmax save rhs' ) );
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'local_set',
+                                    operands => [$tb],
+                                    comment  => 'minmax save rhs'
+                                )
+                            );
+
                             for ( 1 .. 2 ) {
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$ta], comment => 'minmax lhs' ) );
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$ta], comment => 'minmax lhs' )
+                                );
                                 $mbb->add_instruction(
-                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tb], comment => 'minmax rhs' ) );
+                                    Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'local_get', operands => [$tb], comment => 'minmax rhs' )
+                                );
                             }
                             my $cmp = $opcode eq 'min' ? "${p}_lt_s" : "${p}_gt_s";
                             $mbb->add_instruction(
@@ -2247,12 +2260,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                             )
                         );
                         $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'i64_mul',
-                                operands => [],
-                                comment  => 'alloca: count*elem'
-                            )
-                        );
+                            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'i64_mul', operands => [], comment => 'alloca: count*elem' ) );
                     }
                     else {
                         my $size = $elem;
@@ -3039,6 +3047,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                 comment  => "push $label=" . $value
             );
         }
+
         # A 128-bit value has no local of its own: it lives in the `_lo`/`_hi` pair `_split_i128` writes, and a
         # consumer that wants one word gets the lo half, exactly as the constant path below pushes it. This is what
         # a narrowing `and` on a wide operand feeds -- the instruction's result type is the narrow target, so the

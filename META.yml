@@ -107,6 +107,9 @@ provides:
   Brocken::Jenny::Pass::Fiber:
     file: lib/Brocken/Jenny/Pass/Fiber.pm
     version: v0.0.1
+  Brocken::Jenny::RegAlloc::LinearScan:
+    file: lib/Brocken/Jenny/RegAlloc.pm
+    version: v0.0.1
   Brocken::Jenny::RegAlloc::LiveInterval:
     file: lib/Brocken/Jenny/RegAlloc.pm
     version: v0.0.1

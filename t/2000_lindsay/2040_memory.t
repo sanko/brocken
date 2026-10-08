@@ -43,9 +43,7 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     my $ptr     = Brocken::Lindsay::IR::Type::ptr();
     my $void    = Brocken::Lindsay::IR::Type::void();
 
-    # -------------------------------------------------------------------
-    # 1. Build Brocken::Runtime::incref
-    # -------------------------------------------------------------------
+    # Build Brocken::Runtime::incref
     my $p_inc_obj = Brocken::Lindsay::IR::Value->new( type => $ptr, name => 'obj' );
     my $incref_fn = Brocken::Lindsay::IR::Function->new( name => 'Brocken::Runtime::incref', return_type => $void, params => [$p_inc_obj] );
     $b->position_at_end( $incref_fn->append_block('entry') );
@@ -56,9 +54,7 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     $b->build_store( $rc_inc, $p_inc_obj );
     $b->build_ret();
 
-    # -------------------------------------------------------------------
-    # 2. Build Brocken::Runtime::decref
-    # -------------------------------------------------------------------
+    # Build Brocken::Runtime::decref
     my $p_dec_obj = Brocken::Lindsay::IR::Value->new( type => $ptr, name => 'obj' );
     my $decref_fn = Brocken::Lindsay::IR::Function->new( name => 'Brocken::Runtime::decref', return_type => $void, params => [$p_dec_obj] );
     $b->position_at_end( $decref_fn->append_block('entry') );
@@ -69,9 +65,7 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     $b->build_store( $rc_dec, $p_dec_obj );
     $b->build_ret();
 
-    # -------------------------------------------------------------------
-    # 3. Build Brocken::Runtime::bump_alloc
-    # -------------------------------------------------------------------
+    # Build Brocken::Runtime::bump_alloc
     my $p_cursor_ptr = Brocken::Lindsay::IR::Value->new( type => $ptr, name => 'cursor_ptr' );
     my $p_size       = Brocken::Lindsay::IR::Value->new( type => $i64, name => 'size' );
     my $alloc_fn     = Brocken::Lindsay::IR::Function->new( name => 'bump_alloc', return_type => $ptr, params => [ $p_cursor_ptr, $p_size ] );
@@ -88,9 +82,7 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     $b->build_store( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), $cursor_val );
     $b->build_ret($cursor_val);
 
-    # -------------------------------------------------------------------
-    # 4. Build main() - The Integration Test
-    # -------------------------------------------------------------------
+    # Build main() - The Integration Test
     my $main = Brocken::Lindsay::IR::Function->new( name => '_BROCKEN_ENTRY', return_type => $i64, params => [] );
     $b->position_at_end( $main->append_block('entry') );
 
@@ -114,9 +106,7 @@ subtest 'Memory Model: RC and Bump Allocation' => sub {
     my $final_rc = $b->build_load( $i64, $fat_scalar, 'final_rc' );
     $b->build_ret($final_rc);
 
-    # -------------------------------------------------------------------
-    # 5. Compile and Execute
-    # -------------------------------------------------------------------
+    # Compile and Execute
     my @functions = ( $main, $incref_fn, $decref_fn, $alloc_fn );
 SKIP: {
         skip 'Native memory model test only runs on native hosts', 1 unless $host->is_native;
@@ -132,4 +122,5 @@ SKIP: {
         run_exec( $output_file, expected_exit => 1, platform => $host, name => 'Bump alloc and RC correctly returns 1 on ' . $host->friendly );
     }
 };
+#
 done_testing;

@@ -6,7 +6,6 @@ use Brocken;
 use Brocken::Lindsay;
 use Math::BigInt;
 use Time::HiRes qw[time];
-
 #
 my $brocken   = Brocken->new();
 my $platform  = $brocken->platform;

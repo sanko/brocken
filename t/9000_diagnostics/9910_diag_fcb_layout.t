@@ -362,7 +362,7 @@ SKIP: {
             $brocken->linker->write_executable( $output_file, $funcs, $platform );
 
             if ( $variant == 1 ) {
-                diag( "--- generated function sizes ---" );
+                diag( "generated function sizes" );
                 for my $f ( $funcs->@* ) {
                     diag( sprintf "  %-30s %4d bytes", $f->{name}, length( $f->{bytes} // '' ) );
                 }
@@ -375,7 +375,7 @@ SKIP: {
                     close $fh;
                     my $dis = qx[objdump -D -b binary -m i386:x86-64 -M x86-64 $binfile 2>/dev/null];
                     diag( "" );
-                    diag( "--- $f->{name} (".length($bytes)." bytes) ---" );
+                    diag( "$f->{name} (".length($bytes)." bytes)" );
                     diag( sprintf "  hex: %s", unpack( 'H*', $bytes ) ) if length($bytes) <= 64;
                     for ( split /\n/, $dis ) {
                         next if /^$/ || /file format/ || /^Disassembly/;
@@ -386,14 +386,14 @@ SKIP: {
                 }
 
                 diag( "" );
-                diag( "--- linked binary .text hex dump ---" );
+                diag( "linked binary .text hex dump" );
                 my $txth = qx[objdump -s -j .text $output_file 2>/dev/null];
                 if ( $? == 0 && $txth !~ /^\s*$/ ) {
                     for ( split /\n/, $txth ) { s/\t+/ /g; diag("  $_"); }
                 }
 
                 diag( "" );
-                diag( "--- linked binary disassembly (full) ---" );
+                diag( "linked binary disassembly (full)" );
                 my $fulld = qx[objdump -d -M x86-64 $output_file 2>/dev/null];
                 if ( $? == 0 && $fulld !~ /^\s*$/ ) {
                     for ( split /\n/, $fulld ) {
@@ -404,7 +404,7 @@ SKIP: {
                 }
 
                 diag( "" );
-                diag( "--- linked binary dynamic relocations ---" );
+                diag( "linked binary dynamic relocations" );
                 my $dynrel = qx[objdump -R $output_file 2>/dev/null];
                 if ( $? == 0 && $dynrel !~ /^\s*$/ ) {
                     for ( split /\n/, $dynrel ) { s/\t+/ /g; diag("  $_"); }
@@ -414,7 +414,7 @@ SKIP: {
                 }
 
                 diag( "" );
-                diag( "--- dynamic section (DT_NEEDED etc) ---" );
+                diag( "dynamic section (DT_NEEDED etc)" );
                 my $dynsec = qx[readelf -d $output_file 2>/dev/null];
                 if ( $? == 0 && $dynsec !~ /^\s*$/ ) {
                     for ( split /\n/, $dynsec ) { s/\t+/ /g; diag("  $_"); }
@@ -424,7 +424,7 @@ SKIP: {
                 }
 
                 diag( "" );
-                diag( "--- program headers (readelf -l) ---" );
+                diag( "program headers (readelf -l)" );
                 my $phdr = qx[readelf -l $output_file 2>/dev/null];
                 if ( $? == 0 && $phdr !~ /^\s*$/ ) {
                     for ( split /\n/, $phdr ) { s/\t+/ /g; diag("  $_"); }
@@ -434,7 +434,7 @@ SKIP: {
                 }
 
                 diag( "" );
-                diag( "--- GOT section hex dump ---" );
+                diag( "GOT section hex dump" );
                 my $gotdump = qx[objdump -s -j .got $output_file 2>/dev/null];
                 if ( $? == 0 && $gotdump !~ /^\s*$/ ) {
                     for ( split /\n/, $gotdump ) { s/\t+/ /g; diag("  $_"); }
@@ -444,7 +444,7 @@ SKIP: {
                 }
 
                 diag( "" );
-                diag( "--- dynamic symbol table ---" );
+                diag( "dynamic symbol table" );
                 my $dsym = qx[objdump -T $output_file 2>/dev/null];
                 if ( $? == 0 && $dsym !~ /^\s*$/ ) {
                     for ( split /\n/, $dsym ) { s/\t+/ /g; diag("  $_"); }
@@ -458,13 +458,13 @@ SKIP: {
 
             my $tag = $with_join ? 'create+join' : 'create-only';
             diag( "" );
-            diag( "--- running linked binary ($tag) ---" );
+            diag( "running linked binary ($tag)" );
             my $run_out = qx[timeout 10 $output_file 2>&1];
             my $run_exit = $? >> 8;
             my $run_sig  = $? & 127;
             if ( $run_sig ) {
                 diag( "  KILLED by signal $run_sig" );
-                diag( "--- GDB backtrace ($tag) ---" );
+                diag( "GDB backtrace ($tag)" );
                 my $gdb_out = qx[gdb -batch -ex run -ex bt -ex 'info registers' $output_file 2>&1];
                 for ( split /\n/, $gdb_out ) {
                     s/\t+/ /g; s/^\s+//;
@@ -501,7 +501,7 @@ int main(void) {
 C_END
         close $cfh;
         if ( system( 'gcc', '-o', $c_out, $c_src, '-lpthread' ) == 0 ) {
-            diag( "--- GCC program headers ---" );
+            diag( "GCC program headers" );
             my $gph = qx[readelf -l $c_out 2>/dev/null];
             if ( $? == 0 && $gph !~ /^\s*$/ ) {
                 for ( split /\n/, $gph ) { s/\t+/ /g; diag("  $_"); }
@@ -509,12 +509,12 @@ C_END
             else {
                 diag("  (readelf -l unavailable)");
             }
-            diag( "--- GCC dynamic section (DT_NEEDED etc) ---" );
+            diag( "GCC dynamic section (DT_NEEDED etc)" );
             my $dyn = qx[readelf -d $c_out 2>/dev/null];
             if ( $? == 0 && $dyn !~ /^\s*$/ ) {
                 for ( split /\n/, $dyn ) { s/\t+/ /g; diag("  $_"); }
             }
-            diag( "--- GCC dynamic symbol table ---" );
+            diag( "GCC dynamic symbol table" );
             my $sym = qx[objdump -T $c_out 2>/dev/null];
             if ( $? == 0 && $sym !~ /^\s*$/ ) {
                 for ( split /\n/, $sym ) { s/\t+/ /g; diag("  $_"); }
@@ -550,7 +550,7 @@ SKIP: {
         my $output_file = $brocken->tmpdir . '/trivial_diag' . $brocken->ext;
         $brocken->linker->write_executable( $output_file, $funcs, $platform );
 
-        diag( "--- running trivial binary (ret 42) ---" );
+        diag( "running trivial binary (ret 42)" );
         my $out = qx[timeout 10 $output_file 2>&1];
         my $exit = $? >> 8;
         my $sig  = $? & 127;
@@ -583,7 +583,7 @@ int main(void) {
     printf("=== pthread_create resolution diagnostic ===\n");
 
     /* 1. Direct call via PLT (what gcc produces) */
-    printf("--- direct pthread_create ---\n");
+    printf("direct pthread_create\n");
     pthread_t t1;
     int r1 = pthread_create(&t1, NULL, worker, NULL);
     printf("direct: rc=%d\n", r1);
@@ -594,7 +594,7 @@ int main(void) {
     }
 
     /* 2. Call through dlsym(RTLD_DEFAULT, "pthread_create") */
-    printf("--- dlsym pthread_create ---\n");
+    printf("dlsym pthread_create\n");
     void *sym = dlsym(RTLD_DEFAULT, "pthread_create");
     printf("dlsym(RTLD_DEFAULT) = %p\n", sym);
     if (sym) {
@@ -614,7 +614,7 @@ int main(void) {
     }
 
     /* 3. Call through dlsym on explicit libpthread handle */
-    printf("--- dlopen/dlsym pthread_create ---\n");
+    printf("dlopen/dlsym pthread_create\n");
     void *lib = dlopen("libpthread.so.0", RTLD_LAZY | RTLD_LOCAL);
     printf("dlopen(libpthread) = %p\n", lib);
     if (lib) {
@@ -750,9 +750,9 @@ static void run_test(const char *label) {
 
 int main(void) {
     printf("=== Isolate trampoline PIE vs non-PIE ===\n");
-    printf("\n--- PIE test ---\n");
+    printf("\nPIE test\n");
     run_test("PIE");
-    printf("\n--- non-PIE test ---\n");
+    printf("\nnon-PIE test\n");
     run_test("non-PIE");
     return 0;
 }
@@ -767,7 +767,7 @@ C_END
         my $pie_type = '';
         if ($rc_pie == 0) {
             $pie_type = qx[readelf -h $out_pie 2>/dev/null];
-            diag("--- PIE binary ELF header ---");
+            diag("PIE binary ELF header");
             diag($_) for split /\n/, $pie_type;
             my $output = qx[$out_pie 2>&1];
             $result_pie = $? >> 8;
@@ -785,7 +785,7 @@ C_END
         my $nopie_type = '';
         if ($rc_nopie == 0) {
             $nopie_type = qx[readelf -h $out_nopie 2>/dev/null];
-            diag("--- non-PIE binary ELF header ---");
+            diag("non-PIE binary ELF header");
             diag($_) for split /\n/, $nopie_type;
             my $output = qx[$out_nopie 2>&1];
             $result_nopie = $? >> 8;
@@ -857,7 +857,7 @@ SKIP: {
         my $output_file = $brocken->tmpdir . '/raw_pthread' . $brocken->ext;
         $brocken->linker->write_executable( $output_file, $funcs, $platform );
 
-        diag( "--- running raw-bytes pthread binary ---" );
+        diag( "running raw-bytes pthread binary" );
         my $out = qx[timeout 10 $output_file 2>&1];
         my $exit = $? >> 8;
         my $sig  = $? & 127;
@@ -865,27 +865,27 @@ SKIP: {
         for ( split /\n/, $out ) { s/\t+/ /g; diag("  $_"); }
 
         diag( "" );
-        diag( "--- raw-bytes binary program headers ---" );
+        diag( "raw-bytes binary program headers" );
         my $ph = qx[readelf -l $output_file 2>/dev/null];
         if ( $? == 0 && $ph !~ /^\s*$/ ) {
             for ( split /\n/, $ph ) { s/\t+/ /g; diag("  $_"); }
         }
-        diag( "--- raw-bytes binary GOT dump ---" );
+        diag( "raw-bytes binary GOT dump" );
         my $gd = qx[objdump -s -j .got $output_file 2>/dev/null];
         if ( $? == 0 && $gd !~ /^\s*$/ ) {
             for ( split /\n/, $gd ) { s/\t+/ /g; diag("  $_"); }
         }
-        diag( "--- raw-bytes binary dynamic relocations ---" );
+        diag( "raw-bytes binary dynamic relocations" );
         my $dr = qx[objdump -R $output_file 2>/dev/null];
         if ( $? == 0 && $dr !~ /^\s*$/ ) {
             for ( split /\n/, $dr ) { s/\t+/ /g; diag("  $_"); }
         }
-        diag( "--- raw-bytes binary dynamic section ---" );
+        diag( "raw-bytes binary dynamic section" );
         my $ds = qx[readelf -d $output_file 2>/dev/null];
         if ( $? == 0 && $ds !~ /^\s*$/ ) {
             for ( split /\n/, $ds ) { s/\t+/ /g; diag("  $_"); }
         }
-        diag( "--- raw-bytes binary disassembly ---" );
+        diag( "raw-bytes binary disassembly" );
         my $da = qx[objdump -d -M x86-64 $output_file 2>/dev/null];
         if ( $? == 0 && $da !~ /^\s*$/ ) {
             for ( split /\n/, $da ) {

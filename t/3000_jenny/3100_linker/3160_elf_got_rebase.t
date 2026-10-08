@@ -17,21 +17,17 @@ subtest 'the entrance stub exit displacement tracks the final .got rva' => sub {
     # boundary, which relocates .got and would leave a stale displacement in the entrance stub.
     my $call_at = 4043;
     my $blob    = ( "\x90" x $call_at ) . pack( 'C5', 0xE8, 0, 0, 0, 0 );
-    my @funcs = ( { name => '_BROCKEN_ENTRY', bytes => $blob, fixups => [ { type => 'call_rel32', target => 'setjmp', offset => $call_at } ] } );
-
-    my $brocken     = Brocken->new();
+    my @funcs   = ( { name => '_BROCKEN_ENTRY', bytes => $blob, fixups => [ { type => 'call_rel32', target => 'setjmp', offset => $call_at } ] } );
+    my $brocken = Brocken->new();
     my $output_file = $brocken->tmpdir . '/got_rebase_test';
     my $linker      = Brocken::Jenny::Linker::ELF64->new();
     $linker->write_executable( $output_file, \@funcs, $platform );
-
     open my $fh, '<:raw', $output_file or die "open $output_file: $!";
     my $bin = do { local $/; <$fh> };
     close $fh;
-
     my $text_sec = $linker->layout->get('.text');
     my $got_sec  = $linker->layout->get('.got');
     is( substr( $bin, $text_sec->{off}, 4 ), "\x48\x83\xE4\xF0", '.text starts with the entrance stub' );
-
     my $stub_len = $linker->entry_stub_len($platform);
 
     # The exit call is `FF 15 <rel32>` immediately before the trailing ud2 of the stub, so the rip at the end of the
@@ -40,8 +36,6 @@ subtest 'the entrance stub exit displacement tracks the final .got rva' => sub {
     my $disp     = unpack( 'l<', substr( $bin, $text_sec->{off} + $stub_len - 6, 4 ) );
     my $exit_got = $linker->import_rva('exit');
     is $disp, $exit_got - $exit_rip, 'the exit call still reaches the final exit GOT slot after .text grew';
-
     unlink $output_file;
 };
-
 done_testing;

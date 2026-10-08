@@ -255,7 +255,6 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
             }
             $body = $out . substr( $body, $pos );
         }
-
         if ( ref $ret_valtype eq 'ARRAY' ) {
             $type_sec = pack( 'C', 0x60 ) . "\x00" . pack( 'C', scalar $ret_valtype->@* ) . pack( 'C*', $ret_valtype->@* );
         }

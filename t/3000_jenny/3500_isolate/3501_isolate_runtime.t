@@ -49,7 +49,7 @@ SKIP: {
                 diag('=== DragonFly libc diagnostics ===');
                 for my $lib ( grep -e,
                     glob('/lib/libc.so.* /usr/lib/libc.so.* /lib/libpthread.so.* /usr/lib/libpthread.so.* /usr/lib/libthread_xu.so.*') ) {
-                    diag("--- $lib (readelf -l) ---");
+                    diag("$lib (readelf -l)");
                     my $lout = `readelf -l $lib 2>&1`;
                     for ( split /\n/, $lout ) {
                         if (/PT_TLS|LOAD|Type|Offset|VirtAddr|FileSiz|MemSiz|Flags|Align/) {
@@ -60,7 +60,7 @@ SKIP: {
                 }
 
                 # Find sigblockall symbol across all libs using nm (dynamic syms)
-                diag('--- sigblockall analysis ---');
+                diag('sigblockall analysis');
                 my ( $sig_addr, $sig_lib );
                 for my $lib ( grep -e, glob('/lib/libc.so.* /usr/lib/libc.so.*') ) {
                     for my $cmd (
@@ -83,7 +83,7 @@ SKIP: {
                 if ($sig_addr) {
                     my $start = sprintf '%x', $sig_addr - 0x10;
                     my $stop  = sprintf '%x', $sig_addr + 0x40;
-                    diag("  --- $sig_lib disassembly around sigblockall (0x$start-0x$stop) ---");
+                    diag("  $sig_lib disassembly around sigblockall (0x$start-0x$stop)");
                     my $dis = `objdump -d --start-address=0x$start --stop-address=0x$stop $sig_lib 2>&1`;
                     for ( split /\n/, $dis ) { s/\t/ /g; diag("  $_"); }
 
@@ -102,7 +102,7 @@ SKIP: {
 
                     # Compute the runtime address for the GOT entry used by sigblockall+9
                     if ( $sig_lib =~ m|/libc\.so| ) {
-                        diag('  --- sigblockall+9 GOT entry analysis ---');
+                        diag('  sigblockall+9 GOT entry analysis');
 
                         # Find LOAD segments to compute file offset of GOT entry
                         my $load_info = `readelf -l $sig_lib 2>&1`;
@@ -119,7 +119,7 @@ SKIP: {
                             my $got_va          = 0x338770;
                             my $inside          = ( $got_va >= $rw_va && $got_va < $rw_va + $rw_file_sz );
                             my $file_off        = $rw_file_off + ( $got_va - $rw_va );
-                            diag("  --- file-level GOT entry ($got_va) ---");
+                            diag("  file-level GOT entry ($got_va)");
                             diag("    RW LOAD: VA=0x$rw_va, file_off=0x$rw_file_off, file_sz=0x$rw_file_sz, end=0x$rw_file_off_end");
                             diag( "    GOT VA 0x$got_va " . ( $inside ? "INSIDE RW LOAD" : "OUTSIDE RW LOAD" ) );
                             diag( "    GOT file offset: 0x" . sprintf( '%x', $file_off ) );
@@ -127,7 +127,7 @@ SKIP: {
                             chomp $od_out;
                             diag("    raw file bytes (od): $od_out");
                         }
-                        diag("  --- runtime GOT analysis (file-level) ---");
+                        diag("  runtime GOT analysis (file-level)");
 
                         # nm -D with object size/st_type for __lpmap_blockallsigs
                         my $sym = `nm -D $sig_lib 2>/dev/null | grep '__lpmap_blockallsigs'`;
@@ -143,12 +143,12 @@ SKIP: {
                         diag("    libc ELF type: $elf_type");
 
                         # Dump /proc/self/map via GDB (run then crash to get state)
-                        diag("  --- /proc/self/map (from GDB batch) ---");
+                        diag("  /proc/self/map (from GDB batch)");
                         my $map_out = `gdb -batch -ex run -ex 'info proc mappings' -ex quit $output_file 2>&1 | grep -E '0x[0-9a-f]+-' | head -40`;
                         for ( split /\n/, $map_out ) { s/\t/ /g; diag("  $_"); }
 
                         # Read runtime GOT value using GDB
-                        diag("  --- runtime GOT entry value (from GDB) ---");
+                        diag("  runtime GOT entry value (from GDB)");
                         my $gdb_got
                             = `gdb -batch -ex run -ex 'print/x (sigblockall + 9 + 7 + 0x2f9ba8)' -ex 'x/gx (sigblockall + 9 + 7 + 0x2f9ba8)' -ex 'info reg fs_base' -ex quit $output_file 2>&1`;
                         for ( split /\n/, $gdb_got ) { s/\t/ /g; diag("  $_"); }
@@ -156,7 +156,7 @@ SKIP: {
                 }
                 else {
                     diag('  sigblockall NOT found via nm/objdump/readelf in any libc');
-                    diag('  --- fallback: dumping all libc symbols matching "blockallsigs" ---');
+                    diag('  fallback: dumping all libc symbols matching "blockallsigs"');
                     for my $lib ( grep -e, glob('/lib/libc.so.* /usr/lib/libc.so.*') ) {
                         my $out = `nm -D $lib 2>/dev/null | grep -i blockallsigs`;
                         next unless $out;
@@ -189,27 +189,27 @@ CCODE
 
                 if ( $gcc_rc == 0 ) {
                     diag('=== GCC binary compiled OK ===');
-                    diag('--- readelf -l comparison ---');
+                    diag('readelf -l comparison');
                     my $our_phdr = `readelf -l $output_file 2>&1`;
                     my $gcc_phdr = `readelf -l $gcc_bin 2>&1`;
                     diag("BROCKEN binary program headers:\n$our_phdr");
                     diag("GCC binary program headers:\n$gcc_phdr");
-                    diag('--- readelf -d comparison ---');
+                    diag('readelf -d comparison');
                     my $our_dyn = `readelf -d $output_file 2>&1`;
                     my $gcc_dyn = `readelf -d $gcc_bin 2>&1`;
                     diag("BROCKEN dynamic section:\n$our_dyn");
                     diag("GCC dynamic section:\n$gcc_dyn");
-                    diag('--- readelf -S comparison ---');
+                    diag('readelf -S comparison');
                     my $our_sec = `readelf -S $output_file 2>&1`;
                     my $gcc_sec = `readelf -S $gcc_bin 2>&1`;
                     diag("BROCKEN section headers:\n$our_sec");
                     diag("GCC section headers:\n$gcc_sec");
-                    diag('--- readelf -s comparison ---');
+                    diag('readelf -s comparison');
                     my $our_sym = `readelf -s $output_file 2>&1`;
                     my $gcc_sym = `readelf -s $gcc_bin 2>&1`;
                     diag("BROCKEN symbol table:\n$our_sym");
                     diag("GCC symbol table:\n$gcc_sym");
-                    diag('--- .interp content comparison ---');
+                    diag('.interp content comparison');
                     my $our_interp = `strings -n 1 $output_file | grep '^/' | head -1`;
                     my $gcc_interp = `strings -n 1 $gcc_bin | grep '^/' | head -1`;
                     $our_interp //= '';
@@ -218,7 +218,7 @@ CCODE
                     chomp $gcc_interp;
                     diag("  BROCKEN interp: '$our_interp'");
                     diag("  GCC interp:     '$gcc_interp'");
-                    diag('--- objdump -p (GCC full private header) ---');
+                    diag('objdump -p (GCC full private header)');
                     my $gcc_objdump = `objdump -p $gcc_bin 2>&1`;
                     diag($gcc_objdump);
                 }

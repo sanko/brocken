@@ -9,12 +9,11 @@ no warnings qw[experimental::class experimental::builtin];
 use feature qw[class];
 
 # Regression for dynamic frame adjustment.
-
 my @TARGETS = (
-    [ 'x86_64-pc-windows-msvc',   'Brocken::Jenny::Lowerer::X86_64' ],
-    [ 'x86_64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::X86_64' ],
-    [ 'aarch64-unknown-linux-gnu','Brocken::Jenny::Lowerer::ARM64'  ],
-    [ 'riscv64-unknown-linux-gnu','Brocken::Jenny::Lowerer::RISCV64'],
+    [ 'x86_64-pc-windows-msvc',    'Brocken::Jenny::Lowerer::X86_64' ],
+    [ 'x86_64-unknown-linux-gnu',  'Brocken::Jenny::Lowerer::X86_64' ],
+    [ 'aarch64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::ARM64' ],
+    [ 'riscv64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::RISCV64' ],
 );
 
 sub src_dyn_small($n) {
@@ -38,7 +37,7 @@ return @arr[0] + @arr[999];
 BROCKEN
 }
 
-sub has_alloca_dyn($triple, $lower_class, $src) {
+sub has_alloca_dyn( $triple, $lower_class, $src ) {
     my $platform = Brocken::Katsuro::Platform::parse($triple);
     my $module   = Brocken->new->compile($src);
     my ($func)   = grep { $_->name eq '_BROCKEN_ENTRY' } $module->functions->@*;
@@ -64,14 +63,12 @@ sub find_array_alloca($src) {
     }
     return undef;
 }
-
 subtest 'alloca_dyn is used for dynamic array sizes' => sub {
     for my $target (@TARGETS) {
         my ( $triple, $class ) = @$target;
         ok( has_alloca_dyn( $triple, $class, src_dyn_small(3) ), "$triple uses alloca_dyn for dynamic count" );
     }
 };
-
 subtest 'alloca_dyn is not used when array size is constant' => sub {
     my $src_const = <<'BROCKEN';
 my i64 $x;
@@ -86,7 +83,6 @@ BROCKEN
         ok( !has_alloca_dyn( $triple, $class, $src_const ), "$triple does not use alloca_dyn for constant size" );
     }
 };
-
 subtest 'small dynamic arrays return correct value (masked to 8 bits)' => sub {
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
@@ -98,7 +94,6 @@ subtest 'small dynamic arrays return correct value (masked to 8 bits)' => sub {
     ok -e $out, 'executable created';
     run_exec( $out, expected_exit => 7, platform => $host, name => 'dyn small on host' );
 };
-
 subtest 'large dynamic arrays cross out-of-range displacements (masked to 8 bits)' => sub {
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
@@ -110,7 +105,6 @@ subtest 'large dynamic arrays cross out-of-range displacements (masked to 8 bits
     ok -e $out, 'executable created';
     run_exec( $out, expected_exit => 161, platform => $host, name => 'dyn large on host' );
 };
-
 subtest 'an untyped size is unboxed before the alloca' => sub {
     my $src = <<'BROCKEN';
 my $n = 6;
@@ -133,7 +127,6 @@ BROCKEN
     $brocken->linker->write_executable( $out, $funcs, $host );
     run_exec( $out, expected_exit => 5, platform => $host, name => 'untyped array size on host' );
 };
-
 subtest 'IR render survives a dynamic count' => sub {
     my $src = <<'BROCKEN';
 my i64 $n = 6;
@@ -142,14 +135,12 @@ my [i64; $n] @arr;
 return @arr[0];
 BROCKEN
     my $alloca = find_array_alloca($src);
-    ok( $alloca, 'the array alloca is present' );
-    ok( $alloca && $alloca->count && !$alloca->count->isa('Brocken::Lindsay::IR::Constant'),
-        'the count is an instruction' );
+    ok( $alloca,                                                                             'the array alloca is present' );
+    ok( $alloca && $alloca->count && !$alloca->count->isa('Brocken::Lindsay::IR::Constant'), 'the count is an instruction' );
     my $text = eval { $alloca->render };
     is( $@, '', 'render does not call ->value on an instruction count' );
     like( $text // '', qr/alloca i64, i64 %/, 'render spells the count as its SSA name' );
 };
-
 subtest 'foreign targets handle dynamic arrays' => sub {
     for my $target (@TARGETS) {
         my ($triple) = @$target;
@@ -171,5 +162,4 @@ subtest 'foreign targets handle dynamic arrays' => sub {
         }
     }
 };
-
 done_testing;

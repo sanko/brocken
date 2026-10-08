@@ -2294,7 +2294,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
-                    my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
 
                     # A non-constant count is a runtime value: fold no immediate, and let the code generator carve the
                     # space out of the live stack.

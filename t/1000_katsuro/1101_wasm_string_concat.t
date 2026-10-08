@@ -28,28 +28,27 @@ BROCKEN
         }
     }
     is( $callees{'Brocken::Runtime::str_concat'} // 0, 1, 'concat routed through the managed allocator' );
-    for my $libc ( qw(strlen malloc strcpy strcat) ) {
-        is( ( $callees{$libc} // 0 ) + ( $callees{'_' . $libc} // 0 ), 0, "no $libc call in the module" );
+    for my $libc (qw(strlen malloc strcpy strcat)) {
+        is( ( $callees{$libc} // 0 ) + ( $callees{ '_' . $libc } // 0 ), 0, "no $libc call in the module" );
     }
 };
-
 subtest 'Wasm module with dynamic concat links and validates' => sub {
     my $platform = wasm_platform();
     my $brocken  = Brocken->new( platform => $platform );
 
     # Two integer operands make both routes dynamic: i64_to_str for each side, then str_concat. On the old lowering the
     # module linked with calls to strlen/malloc/strcpy/strcat, and the Wasm linker died: "undefined function 'strlen'".
-    my $module   = $brocken->compile(<<'BROCKEN');
+    my $module = $brocken->compile(<<'BROCKEN');
 my String $s = 5 . 10;
 return 0;
 BROCKEN
-    my $funcs = $brocken->codegen->emit_functions( $module->functions );
-    my $file  = temp_path('wasm_str_concat') . '.wasm';
+    my $funcs  = $brocken->codegen->emit_functions( $module->functions );
+    my $file   = temp_path('wasm_str_concat') . '.wasm';
     my $linked = eval {
         $brocken->linker->write_executable( $file, $funcs, $platform );
         1;
     };
-    ok( $linked, 'linker accepts the concat module' ) or diag($@);
+    ok( $linked,  'linker accepts the concat module' ) or diag($@);
     ok( -e $file, 'wasm file produced' ) if $linked;
 SRUN: {
         skip 'no Wasm runner is available', 1 unless wasm_runner();
@@ -59,7 +58,6 @@ SRUN: {
     }
     unlink $file if -e $file;
 };
-
 subtest 'str_concat output is correct natively' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
@@ -81,5 +79,4 @@ BROCKEN
     like `$file`, qr[^42 hello\nhello 42\nx\ny\n510$], 'managed allocator concatenates and NUL-terminates';
     unlink $file;
 };
-
 done_testing;

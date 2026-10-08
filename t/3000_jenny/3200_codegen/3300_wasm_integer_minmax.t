@@ -29,6 +29,7 @@ sub run_module {
     my $file    = temp_path('minmax') . '.wasm';
     $linker->write_executable( $file, $res, $platform );
     my $output;
+
     if ( $wasmtime_path && -x $wasmtime_path ) {
         $output = qx["$wasmtime_path" run --invoke main $file 2>$null];
         chomp $output if $output;
@@ -36,39 +37,36 @@ sub run_module {
     unlink $file if -e $file;
     return $output;
 }
-
 subtest 'wasm i32 integer min/max' => sub {
     my $out = run_module(
         Brocken::Lindsay::IR::Type::i32(),
         sub {
-            my ($b)  = @_;
-            my $t    = Brocken::Lindsay::IR::Type::i32();
-            my $c30  = Brocken::Lindsay::IR::Constant->new( type => $t, value => 30 );
-            my $c7   = Brocken::Lindsay::IR::Constant->new( type => $t, value => 7 );
-            my $mn   = $b->build_min( $c30, $c7, '%mn' );
-            my $mx   = $b->build_max( $c30, $c7, '%mx' );
+            my ($b) = @_;
+            my $t   = Brocken::Lindsay::IR::Type::i32();
+            my $c30 = Brocken::Lindsay::IR::Constant->new( type => $t, value => 30 );
+            my $c7  = Brocken::Lindsay::IR::Constant->new( type => $t, value => 7 );
+            my $mn  = $b->build_min( $c30, $c7, '%mn' );
+            my $mx  = $b->build_max( $c30, $c7, '%mx' );
             $b->build_ret( $b->build_sub( $mx, $mn, '%r' ) );
         }
     );
     skip 'wasmtime is not installed', 1 unless defined $out;
     is( $out, 23, 'max(30,7) - min(30,7) = 23' );
 };
-
 subtest 'wasm i64 integer min/max' => sub {
     my $out = run_module(
         Brocken::Lindsay::IR::Type::i64(),
         sub {
-            my ($b)    = @_;
-            my $t      = Brocken::Lindsay::IR::Type::i64();
-            my $big    = Brocken::Lindsay::IR::Constant->new( type => $t, value => 5_000_000_000 );
-            my $small  = Brocken::Lindsay::IR::Constant->new( type => $t, value => 3 );
-            my $mn     = $b->build_min( $big, $small, '%mn' );
-            my $mx     = $b->build_max( $big, $small, '%mx' );
+            my ($b)   = @_;
+            my $t     = Brocken::Lindsay::IR::Type::i64();
+            my $big   = Brocken::Lindsay::IR::Constant->new( type => $t, value => 5_000_000_000 );
+            my $small = Brocken::Lindsay::IR::Constant->new( type => $t, value => 3 );
+            my $mn    = $b->build_min( $big, $small, '%mn' );
+            my $mx    = $b->build_max( $big, $small, '%mx' );
             $b->build_ret( $b->build_sub( $mx, $mn, '%r' ) );
         }
     );
     skip 'wasmtime is not installed', 1 unless defined $out;
     is( $out, 4_999_999_997, 'max(5e9,3) - min(5e9,3)' );
 };
-
 done_testing;

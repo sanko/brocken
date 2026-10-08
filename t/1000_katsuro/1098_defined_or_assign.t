@@ -14,7 +14,7 @@ subtest '//= stores the RHS on a native scalar' => sub {
 
 # The null test is kept where "undefined" really is a null pointer.
 subtest '//= keeps the null test for ptr' => sub {
-    answers( 'my ptr $p = 0; $p //= 100; if ($p) { return 1; } return 0;', 1, 'a null pointer is replaced' );
+    answers( 'my ptr $p = 0; $p //= 100; if ($p) { return 1; } return 0;',      1, 'a null pointer is replaced' );
     answers( 'my ptr $p = 7; $p //= 100; if ($p == 7) { return 1; } return 0;', 1, 'a live pointer is kept' );
 };
 done_testing;
