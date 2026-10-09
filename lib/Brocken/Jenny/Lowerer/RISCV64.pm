@@ -4123,6 +4123,16 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $dst, $fp_reg ], comment => "frame_addr" ) );
                 }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::StackSave') ) {
+                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'stack_save', operands => [$dst], comment => "stack_save" ) );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::StackRestore') ) {
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode => 'stack_restore', operands => [ $self->_lower_opnd( $inst->operands->[0] ) ], comment => "stack_restore" ) );
+                }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanCreate') ) {
                     my $i64 = Brocken::Lindsay::IR::Type::i64();
                     my $ptr = Brocken::Lindsay::IR::Type::ptr();

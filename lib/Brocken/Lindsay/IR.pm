@@ -405,6 +405,23 @@ class Brocken::Lindsay::IR::Instruction::Alloca v0.0.1: isa(Brocken::Lindsay::IR
     }
 };
 
+class Brocken::Lindsay::IR::Instruction::StackSave v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
+
+    # Captures the current stack pointer (the bottom of the dynamic region) as an opaque ptr value.  StackRestore
+    # below hands that value back to the stack pointer, popping every dynamic alloca carved since the save.
+    method render() {
+        return sprintf '  %s = stack_save %s', ( $self->name // '%<anon>' ), $self->type->as_string;
+    }
+};
+
+class Brocken::Lindsay::IR::Instruction::StackRestore v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
+
+    method render() {
+        my $saved = $self->operands->[0];
+        return sprintf '  stack_restore %s %s', $saved->type->as_string, $saved->as_string;
+    }
+};
+
 class Brocken::Lindsay::IR::Instruction::Load v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
 
     method render() {

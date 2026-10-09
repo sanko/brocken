@@ -26,7 +26,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $_rodata_label_counter = 0;
     field $_loop_header_blocks   = [];    # stack of header block labels
     field $_loop_check_blocks    = [];    # stack of iteration-check block labels (counter guard)
-    field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
+field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
+    field $_loop_body_scopes            = [];    # stack of dynamic-stack scopes opened for each in-progress loop body
+    field $_dyn_scope_stack             = [];    # stack of { save => stack_save instr | undef } for each in-progress block scope
     field $fuel_exit_block;               # set in lower_function, used by call-site fuel checks
 
     method unique_block_name($prefix) {
@@ -578,9 +580,27 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     # Block lowering
     method lower_block_body($block_ast) {
+        push $_dyn_scope_stack->@*, { save => undef };
+        $self->lower_block_statements($block_ast);
+        my $sc = pop $_dyn_scope_stack->@*;
+        $self->_restore_dyn_scope($sc);
+    }
+
+    # Lower a block's statements without opening a dynamic-stack scope.  The caller owns the scope (e.g. a loop
+    # body, which needs its scope recognizable for last/next cleanup).
+    method lower_block_statements($block_ast) {
         for my $stmt ( $block_ast->statements->@* ) {
             $self->lower_statement($stmt);
         }
+    }
+
+    # Restore the stack pointer to the bottom of the dynamic region carved inside a scope, reusing the scope's save.
+    # Skipped when the block already ended in a terminator: return/last/next restores there themselves, and return
+    # additionally unwinds via the epilogue.
+    method _restore_dyn_scope($sc) {
+        return unless $sc->{save};
+        return if $current_block->terminator;
+        $builder->build_stackrestore( $sc->{save} );
     }
 
     # Lower a block with block-scoped RC cleanup.
@@ -892,7 +912,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         $builder->position_at_end($body);
         $current_block = $body;
-        $self->lower_block_body( $ast->body );
+        my $loop_scope = { save => undef };
+        push $_dyn_scope_stack->@*, $loop_scope;
+        push $_loop_body_scopes->@*, $loop_scope;
+        $self->lower_block_statements( $ast->body );
+        pop $_loop_body_scopes->@*;
+        my $body_sc = pop $_dyn_scope_stack->@*;
+        $self->_restore_dyn_scope($body_sc);
         unless ( $current_block->terminator ) {
             $builder->build_br( $header, $line, $col );
         }
@@ -1149,15 +1175,36 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $builder->build_br( $header, $line, $col );
     }
 
-    # Decref RC-tracked variables before leaving the current block via break/continue.
+    # Decref RC-tracked variables and restore the loop body's dynamic stack region before leaving it via break/
+    # continue, so a dynamic alloca inside a loop never grows the stack across iterations.
     method _emit_loop_cleanup() {
         my @rc_names = sort keys %$needs_rc;
-        return unless @rc_names;
-        my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
-        for my $name (@rc_names) {
-            my $addr   = $symbols->{$name} or next;
-            my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-            $builder->build_decref( $loaded, 0, 0, $decref_hb );
+        if (@rc_names) {
+            my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+            for my $name (@rc_names) {
+                my $addr   = $symbols->{$name} or next;
+                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+                $builder->build_decref( $loaded, 0, 0, $decref_hb );
+            }
+        }
+        my $loop_scope = $_loop_body_scopes->[-1] or return;
+        return if $current_block->terminator;
+        my $top = scalar @$_dyn_scope_stack;
+        my $k;
+        for ( $k = $top - 1; $k >= 0; $k-- ) {
+            last if $_dyn_scope_stack->[$k] == $loop_scope;
+        }
+        return if $k < 0;
+
+        # The outermost save inside the loop body is the first one created at the innermost (earliest) scope.  Its
+        # value predates every later alloca, so restoring it pops the whole dynamic region the loop carved, while
+        # leaving saves from scopes strictly outside the loop (still-live arrays) untouched.
+        for my $i ( $k .. $top - 1 ) {
+            my $sc = $_dyn_scope_stack->[$i];
+            if ( $sc->{save} ) {
+                $builder->build_stackrestore( $sc->{save} );
+                last;
+            }
         }
     }
 
@@ -1271,6 +1318,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $size_val = $self->maybe_convert_type( $size_val, Brocken::Lindsay::IR::Type::i64(), $ast->line, $ast->col );
         }
         my $key    = '@' . $ast->name;
+        if ( $size_val && !$size_val->isa('Brocken::Lindsay::IR::Constant') ) {
+            my $sc = @$_dyn_scope_stack ? $_dyn_scope_stack->[-1] : undef;
+            if ($sc) { $sc->{save} //= $builder->build_stacksave(); }
+        }
         my $alloca = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
         $symbols->{$key} = $alloca;
     }

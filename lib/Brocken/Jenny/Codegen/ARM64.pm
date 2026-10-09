@@ -1147,6 +1147,18 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                     $bytes .= pack( 'V', SUB_X | ( 16 << 16 ) | ( 31 << 5 ) | 31 );    # sub sp, sp, x16
                     $bytes .= pack( 'V', MOV_SP | $did );                              # mov dst, sp
                 }
+                elsif ( $opcode eq 'stack_save' ) {
+                    my $dst   = $inst->operands->[0];
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    $bytes .= pack( 'V', MOV_SP | $did );                              # mov dst, sp
+                }
+                elsif ( $opcode eq 'stack_restore' ) {
+                    my $src   = $inst->operands->[0];
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    $bytes .= pack( 'V', ADD_X | ( $sid << 16 ) | ( 31 << 5 ) | 31 );  # mov sp, src (add sp, src, xzr)
+                }
                 elsif ( $opcode eq 'load' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
