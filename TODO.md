@@ -14,7 +14,7 @@ These bugs cause silent miscompilations in the code generators and register allo
 - [x] **Shift Reload Omission:** `RegAlloc.pm`'s `%reads_dst` table uses `shr`/`sar` instead of the actual MIR opcodes `lshr`/`ashr`. Spilled shift destinations are currently overwritten without being reloaded.
 - [x] **`umulh` Liveness Gap:** `umulh` is missing from both `%reads_dst` and `%rmw` in `RegAlloc.pm`, causing omitted reloads and latent liveness issues.
 - [x] **x86-64 Mixed Arg Sum:** A sum of many mixed integer and floating-point arguments returns the wrong value on x86-64 Linux ELF targets due to register pressure spilling bugs.
-- [x] **F17 - Unbounded Stack Growth:** `alloca_dyn` inside a loop grows `rsp` every iteration until the function epilogue. Fixed by scoping dynamic arrays in per-scope `stack_save`/`stack_restore`, restored on `last`/`next` and at scope end. Tests: `3309_dynamic_alloca_loop.t`.
+- [x] **F17 - Unbounded Stack Growth:** `alloca_dyn` inside a loop grows `rsp` every iteration until the function epilogue. Fixed by heap-promoting dynamic-sized arrays (and static arrays exceeding 4 KiB) through `alloc_array`, freeing and reusing the slab at each loop back edge so growth is bounded. The dynamic-stack machinery (`alloca_dyn`/`stack_save`/`stack_restore`) and its MIR consumers were removed entirely. Tests: `3308_dynamic_array_alloca.t`, `3309_dynamic_alloca_loop.t`.
 
 ---
 
