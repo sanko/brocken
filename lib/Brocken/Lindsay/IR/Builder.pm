@@ -127,6 +127,30 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
         return $insert_block->append_inst($inst);
     }
 
+    method build_stacksave( $name = undef, $line = 0, $col = 0 ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::StackSave->new(
+            name   => $name // $self->_next_id(),
+            type   => Brocken::Lindsay::IR::Type::ptr(),
+            opcode => 'stack_save',
+            parent => $insert_block,
+            line   => $line,
+            col    => $col,
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_stackrestore( $saved, $line = 0, $col = 0 ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::StackRestore->new(
+            type     => Brocken::Lindsay::IR::Type::void(),
+            opcode   => 'stack_restore',
+            operands => [$saved],
+            parent   => $insert_block,
+            line     => $line,
+            col      => $col,
+        );
+        return $insert_block->append_inst($inst);
+    }
+
     method build_phi( $type, $name = undef, $line = 0, $col = 0 ) {
         my $inst = Brocken::Lindsay::IR::Instruction::Phi->new(
             name   => $name // $self->_next_id(),

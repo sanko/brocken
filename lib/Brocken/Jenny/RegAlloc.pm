@@ -137,7 +137,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
 
     # Whether an instruction's first operand is a destination (written) rather than a source (read).
     method _defines_operand0($inst) {
-        return 0 if $inst->opcode =~ /^(?:store|store_imm|bne|beq|cmp|fcmp|ctx_swap)$/;
+        return 0 if $inst->opcode =~ /^(?:store|store_imm|bne|beq|cmp|fcmp|ctx_swap|stack_restore)$/;
         return 1;
     }
 
@@ -553,7 +553,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         my $load_op   = $is_float ? 'fload'  : 'load';
         my $store_op  = $is_float ? 'fstore' : 'store';
         my %reads_dst = map { $_ => 1 }
-            qw(add sub mul umulh sdiv udiv div rem urem adc sbb and or xor cmp shl lshr ashr neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand);
+            qw(add sub mul umulh sdiv udiv div rem urem adc sbb and or xor cmp shl lshr ashr neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand stack_restore);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
 

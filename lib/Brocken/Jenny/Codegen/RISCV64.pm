@@ -857,6 +857,22 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                     }
                 }
+                elsif ( $opcode eq 'stack_save' ) {
+                    my $dst   = $inst->operands->[0];
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+
+                    # mv rd, sp (addi rd, x2, 0)
+                    $bytes .= pack( 'V', ( 0 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                }
+                elsif ( $opcode eq 'stack_restore' ) {
+                    my $src   = $inst->operands->[0];
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+
+                    # mv sp, rs (addi x2, rs, 0)
+                    $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                }
                 elsif ( $opcode eq 'movzx' ) {
                     my $src_bits = $src->type ? $src->type->bits : 64;
                     my $dst_r    = $resolve->($dst);

@@ -1220,6 +1220,22 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     my $modrm = ( 3 << 6 ) | ( ( $did & 7 ) << 3 ) | 4;    # mov dst, rsp (mod=11: rm=4 is rsp itself, no SIB)
                     $bytes .= pack( 'C', 0x48 | $mul ) . pack( 'CC', 0x8B, $modrm );
                 }
+                elsif ( $opcode eq 'stack_save' ) {
+                    my $dst   = $inst->operands->[0];
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $rex   = 0x48 | ( $did >= 8 ? 4 : 0 );
+                    my $mrm   = 0xC0 | ( ( $did & 7 ) << 3 ) | 4;          # mov dst, rsp (rm=4 is rsp)
+                    $bytes .= pack( 'CCC', $rex, 0x8B, $mrm );
+                }
+                elsif ( $opcode eq 'stack_restore' ) {
+                    my $src   = $inst->operands->[0];
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $rex   = 0x48 | ( $sid >= 8 ? 4 : 0 );
+                    my $mrm   = 0xC0 | ( ( $sid & 7 ) << 3 ) | 4;          # mov rsp, src (rm=4 is rsp)
+                    $bytes .= pack( 'CCC', $rex, 0x89, $mrm );
+                }
                 elsif ( $opcode eq 'alloca' ) {
                     my $asan_off = ( $alloca_top + 15 ) & ~15;
                     $alloca_map->{ $dst->value } = $asan_off if $alloca_map;
