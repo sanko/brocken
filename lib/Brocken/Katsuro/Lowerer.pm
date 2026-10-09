@@ -30,7 +30,7 @@ field $array_elem_types      = {};    # '@name' -> element IR type (for heap-arr
     field $_loop_check_blocks    = [];    # stack of iteration-check block labels (counter guard)
 field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
     field $_loop_body_scopes            = [];    # stack of dynamic-stack scopes opened for each in-progress loop body
-    field $_dyn_scope_stack             = [];    # stack of { save => stack_save instr | undef } for each in-progress block scope
+    field $_dyn_scope_stack             = [];    # stack of scope records for each in-progress block/loop (RC ownership)
     field $fuel_exit_block;               # set in lower_function, used by call-site fuel checks
 
     method unique_block_name($prefix) {
@@ -583,10 +583,9 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
 
     # Block lowering
     method lower_block_body($block_ast) {
-        push $_dyn_scope_stack->@*, { save => undef };
+        push $_dyn_scope_stack->@*, {};
         $self->lower_block_statements($block_ast);
-        my $sc = pop $_dyn_scope_stack->@*;
-        $self->_restore_dyn_scope($sc);
+        pop $_dyn_scope_stack->@*;
     }
 
     # Lower a block's statements without opening a dynamic-stack scope.  The caller owns the scope (e.g. a loop
@@ -595,15 +594,6 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         for my $stmt ( $block_ast->statements->@* ) {
             $self->lower_statement($stmt);
         }
-    }
-
-    # Restore the stack pointer to the bottom of the dynamic region carved inside a scope, reusing the scope's save.
-    # Skipped when the block already ended in a terminator: return/last/next restores there themselves, and return
-    # additionally unwinds via the epilogue.
-    method _restore_dyn_scope($sc) {
-        return unless $sc->{save};
-        return if $current_block->terminator;
-        $builder->build_stackrestore( $sc->{save} );
     }
 
     # Register an RC-tracked variable, recording the innermost dynamic (block/loop) scope that declares it.  The
@@ -929,17 +919,15 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         }
         $builder->position_at_end($body);
         $current_block = $body;
-        my $loop_scope = { save => undef, rc_pre => { %$needs_rc } };
+        my $loop_scope = { rc_pre => { %$needs_rc } };
         push $_dyn_scope_stack->@*, $loop_scope;
         push $_loop_body_scopes->@*, $loop_scope;
         $self->lower_block_statements( $ast->body );
         pop $_loop_body_scopes->@*;
-        my $body_sc = pop $_dyn_scope_stack->@*;
-        $self->_restore_dyn_scope($body_sc);
+        pop $_dyn_scope_stack->@*;
 
         # Free RC-tracked values the body created this iteration (arrays and Any) so a loop that re-declares a heap
-        # array each pass reuses the freed slab instead of growing the arena -- the heap analogue of the loop
-        # stack_save/stack_restore removed with F17.
+        # array each pass reuses the freed slab instead of growing the arena.
         $self->_emit_loop_back_edge_rc_cleanup($loop_scope) unless $current_block->terminator;
         unless ( $current_block->terminator ) {
             $builder->build_br( $header, $line, $col );
@@ -1216,9 +1204,8 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         }
     }
 
-    # Decref RC-tracked variables and restore the loop body's dynamic stack region before leaving it via break/
-    # continue.  Only variables the loop body itself introduced are decref'd (objects from outer scopes stay alive for
-    # the code that follows the loop), and the dynamic alloca the body carved disappears with its stack save.
+    # Decref RC-tracked variables before leaving a loop body via break/continue.  Only variables the loop body itself
+    # introduced are decref'd (objects from outer scopes stay alive for the code that follows the loop).
     method _emit_loop_cleanup() {
         my $loop_scope = $_loop_body_scopes->[-1];
         if ($loop_scope) {
@@ -1237,25 +1224,6 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
                     my $owner = $rc_owner->{$name};
                     $self->_forget_rc($name) unless defined $owner && $owner == $loop_scope;
                 }
-            }
-        }
-        $loop_scope = $_loop_body_scopes->[-1] or return;
-        return if $current_block->terminator;
-        my $top = scalar @$_dyn_scope_stack;
-        my $k;
-        for ( $k = $top - 1; $k >= 0; $k-- ) {
-            last if $_dyn_scope_stack->[$k] == $loop_scope;
-        }
-        return if $k < 0;
-
-        # The outermost save inside the loop body is the first one created at the innermost (earliest) scope.  Its
-        # value predates every later alloca, so restoring it pops the whole dynamic region the loop carved, while
-        # leaving saves from scopes strictly outside the loop (still-live arrays) untouched.
-        for my $i ( $k .. $top - 1 ) {
-            my $sc = $_dyn_scope_stack->[$i];
-            if ( $sc->{save} ) {
-                $builder->build_stackrestore( $sc->{save} );
-                last;
             }
         }
     }
@@ -1377,7 +1345,7 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         # allocated on the Immix heap via Brocken::Runtime::alloc_array instead of the stack.  The declaration becomes a
         # pointer slot holding the tag-9 array header, RC-tracked like any fat scalar: alloc_array grants refcount 1, so
         # the scope-exit delta (block, loop iteration, function end) frees it back to the segregated free_big list,
-        # which next iteration's alloc_array reuses -- the heap analogue of the loop stack_save/stack_restore.
+        # which next iteration's alloc_array reuses.
         my $static_bytes = defined $size_val && $size_val->isa('Brocken::Lindsay::IR::Constant') ? $size_val->value * $elem_bytes : undef;
         my $promote      = !defined $static_bytes || $static_bytes > 4096;
         if ($promote) {
@@ -1395,10 +1363,7 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
             $self->_note_rc($key);
             return;
         }
-        if ( $size_val && !$size_val->isa('Brocken::Lindsay::IR::Constant') ) {
-            my $sc = @$_dyn_scope_stack ? $_dyn_scope_stack->[-1] : undef;
-            if ($sc) { $sc->{save} //= $builder->build_stacksave(); }
-        }
+        # A small constant-sized array stays on the stack; every other declaration was heap-promoted above.
         my $alloca = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
         $symbols->{$key} = $alloca;
     }
