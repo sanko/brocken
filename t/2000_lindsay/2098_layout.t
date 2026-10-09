@@ -1,7 +1,8 @@
 use v5.42;
 use Test2::V0;
 use FindBin;
-use blib use Brocken::Layout;
+use blib;
+use Brocken::Layout;
 
 # align()
 subtest 'align basic' => sub {
