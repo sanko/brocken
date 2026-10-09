@@ -2721,32 +2721,16 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                     );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
-                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-
-                    # A non-constant count is a runtime value: fold no immediate, and let the code generator carve the
-                    # space out of the live stack.
-                    if ( $inst->count && !$inst->count->isa('Brocken::Lindsay::IR::Constant') ) {
-                        my $elem     = int( ( $inst->allocated_type->bits + 7 ) / 8 ) || 1;
-                        my $count_op = $self->_lower_opnd( $inst->count );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'alloca_dyn',
-                                operands => [ $dst, $count_op, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $elem ) ],
-                                comment  => "alloca_dyn $elem-byte elements"
-                            )
-                        );
-                    }
-                    else {
-                        my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 ) || 1;
-                        $size *= ( $inst->count ? $inst->count->value : 1 );
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'alloca',
-                                operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
-                                comment  => "alloca $size bytes"
-                            )
-                        );
-                    }
+                    my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 ) || 1;
+                    $size *= ( $inst->count ? $inst->count->value : 1 );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'alloca',
+                            operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $size ) ],
+                            comment  => "alloca $size bytes"
+                        )
+                    );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Load') ) {
                     my $ptr     = $inst->operands->[0];
@@ -4769,16 +4753,6 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                     my $fp_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $self->_abi->frame_reg );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $dst, $fp_reg ], comment => "frame_addr" ) );
-                }
-                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::StackSave') ) {
-                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'stack_save', operands => [$dst], comment => "stack_save" ) );
-                }
-                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::StackRestore') ) {
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode => 'stack_restore', operands => [ $self->_lower_opnd( $inst->operands->[0] ) ], comment => "stack_restore" ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanCreate') ) {
                     my $i64 = Brocken::Lindsay::IR::Type::i64();
