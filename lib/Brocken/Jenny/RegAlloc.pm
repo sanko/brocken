@@ -137,7 +137,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
 
     # Whether an instruction's first operand is a destination (written) rather than a source (read).
     method _defines_operand0($inst) {
-        return 0 if $inst->opcode =~ /^(?:store|store_imm|bne|beq|cmp|fcmp|ctx_swap|stack_restore)$/;
+        return 0 if $inst->opcode =~ /^(?:store|store_imm|bne|beq|cmp|fcmp|ctx_swap)$/;
         return 1;
     }
 
@@ -411,34 +411,6 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
             }
         }
 
-        # Exclude the registers a dynamic alloca depends on.  The code generator's alloca_dyn sequence (scale the count
-        # by the element size, align it, subtract it from the live stack pointer, hand the caller the new bottom)
-        # clobbers a scratch register its operands do not name, and it keeps the frame pointer as the fixed base for
-        # every static frame reference -- nothing else may be handed rbp, or it would point somewhere else by the time a
-        # spill slot or an outgoing argument is addressed through it.  Both registers are invisible to the operand scan
-        # above, exactly like the rax/rdx/rcx clobbers.
-        if ( !$is_float && $mf && $mf->blocks->@* ) {
-            my $has_dyn = 0;
-            for my $mbb ( $mf->blocks->@* ) {
-                for my $inst ( $mbb->instructions->@* ) {
-                    $has_dyn = 1 if $inst->opcode eq 'alloca_dyn';
-                }
-            }
-            if ($has_dyn) {
-                if ( $platform->is_x64 ) {
-                    $defined_phys{rax} = 1;
-                    $defined_phys{rbp} = 1;
-                }
-                elsif ( $platform->is_arm64 ) {
-                    $defined_phys{x16} = 1;
-                    $defined_phys{x29} = 1;
-                }
-                elsif ( $platform->is_riscv64 ) {
-                    $defined_phys{a5} = 1;
-                    $defined_phys{s8} = 1;
-                }
-            }
-        }
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         @callee_regs = grep { !$defined_phys{$_} } @callee_regs;
 
@@ -553,7 +525,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         my $load_op   = $is_float ? 'fload'  : 'load';
         my $store_op  = $is_float ? 'fstore' : 'store';
         my %reads_dst = map { $_ => 1 }
-            qw(add sub mul umulh sdiv udiv div rem urem adc sbb and or xor cmp shl lshr ashr neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand stack_restore);
+            qw(add sub mul umulh sdiv udiv div rem urem adc sbb and or xor cmp shl lshr ashr neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
 

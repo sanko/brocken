@@ -664,12 +664,10 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         my $callee_size    = scalar(@$used_callee) * 8;
         my $is_leaf        = 1;
         my $total_alloca   = 0;
-        my $has_dyn_alloca = 0;
 
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
-                $is_leaf        = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
-                $has_dyn_alloca = 1 if $inst->opcode eq 'alloca_dyn';
+                $is_leaf = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
@@ -679,29 +677,12 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         }
         my $shadow_space = ( $platform->is_windows && !$is_leaf ) ? 32 : 0;
         my $max_call_arg = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
-        my $call_arg_frame;
-        my $call_arg_push;
-        if ($has_dyn_alloca) {
-
-            # A dynamic alloca moves the live stack pointer below the fixed part of the frame, so the outgoing-argument
-            # area can no longer be reserved at the bottom in the prologue: it would come to rest above the dynamic
-            # region, where a callee reads nothing.  The arguments are pushed at each call site instead (see the call
-            # handling below), which leaves rsp 16-byte aligned at the call and keeps the raw displacements the lowerer
-            # assigned them untouched.  The fixed part of the frame is therefore just the statically-known allocas and
-            # spill slots, and every one of those is addressed off the frame pointer (mem_modrm) so the rsp dips around
-            # the pushed arguments never move a slot.
-            $call_arg_frame = 0;
-            $call_arg_push  = $max_call_arg < $shadow_space ? $shadow_space : $max_call_arg;
-        }
-        else {
-            # The outgoing argument area sits at the bottom of the frame, below the alloca and spill areas, because a
-            # callee reads the arguments the register set could not carry at fixed offsets off the caller's stack
-            # pointer and `call` does not move it.  It is reserved in the prologue rather than pushed at the call site
-            # so that rsp-relative spill slots stay valid across the call and rsp is 16-byte aligned at every call.
-            $call_arg_frame = $shadow_space;
-            $call_arg_frame = $max_call_arg if $call_arg_frame < $max_call_arg;
-            $call_arg_push  = 0;
-        }
+        # The outgoing argument area sits at the bottom of the frame, below the alloca and spill areas, because a
+        # callee reads the arguments the register set could not carry at fixed offsets off the caller's stack
+        # pointer and `call` does not move it.  It is reserved in the prologue rather than pushed at the call site
+        # so that rsp-relative spill slots stay valid across the call and rsp is 16-byte aligned at every call.
+        my $call_arg_frame = $shadow_space;
+        $call_arg_frame = $max_call_arg if $call_arg_frame < $max_call_arg;
 
         # Ensure the spill area (which includes caller-saved register slots) does not overlap with the callee-saved
         # register save area at the top of the frame.
@@ -710,7 +691,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         # callee saves.
         $spill_frame += $call_arg_frame;
         my $total_frame = ( $callee_size + $spill_frame + $call_arg_frame + $total_alloca + 15 ) & ~15;
-        my $needs_frame = $total_frame > 0 || $used_callee->@* > 0 || $total_alloca > 0 || $has_dyn_alloca;
+        my $needs_frame = $total_frame > 0 || $used_callee->@* > 0 || $total_alloca > 0;
         if ( $is_leaf && !$needs_frame ) {
 
             # Leaf function with no frame: skip all prologue bytes
@@ -753,14 +734,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                 my $rid = $reg_id->($reg);
                 my $off = $total_frame - $call_arg_frame - ( $i * 8 ) - 8;
                 my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
-                if ($has_dyn_alloca) {
-                    my $disp  = $off - $total_frame;
-                    my $modrm = ( 1 << 6 ) | ( ( $rid & 7 ) << 3 ) | 5;
-                    $bytes .= pack( 'C', $rex ) . pack( 'CCc', 0x89, $modrm, $disp );
-                }
-                else {
-                    $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x89, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
-                }
+                $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x89, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
             }
         }
         my $resolve = sub ($op) {
@@ -795,18 +769,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             # callee will look for it, so the outgoing area is not added again.  Every other rsp-relative operand is a
             # spill slot placed where the allocator asked, which is inside the spill area above the outgoing arguments.
             if ( $base_r eq 'rsp' && !$addr->{raw} ) {
-                if ($has_dyn_alloca) {
-
-                    # In a dynamic frame the live stack pointer has moved below the fixed frame (each runtime alloca
-                    # subtracts from it), so an rsp-relative slot would drift with the dynamic region.  Address the
-                    # slot off the frame pointer instead: rbp always equals prologue-rsp + total_frame.
-                    $base_r = 'rbp';
-                    $bid    = 5;
-                    $disp   = $disp + $total_alloca + $call_arg_frame - $total_frame;
-                }
-                else {
-                    $disp += $total_alloca + $call_arg_frame;
-                }
+                $disp += $total_alloca + $call_arg_frame;
             }
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
@@ -847,15 +810,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             my $rex_b = ( $bid >= 8 ) ? 1 : 0;
             return ( $modrm, \@extra, 0, $rex_b );
         };
-        my $alloca_top  = $call_arg_frame;
-        my $push_active = 0;
-
-        # Move the bottom of the outgoing-argument area below the dynamic region without touching the flags: many
-        # callers have a comparison result sitting in the condition codes at the call.  LEA rsp, [rsp + disp32].
-        my $push_rsp = sub ($amt) {
-            $bytes .= pack( 'CCCCV', 0x48, 0x8D, 0xA4, 0x24, $amt & 0xFFFFFFFF );
-            return;
-        };
+        my $alloca_top = $call_arg_frame;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 if ( $source_map && $inst->ir_inst_idx >= 0 && !exists $source_map->{ $inst->ir_inst_idx } ) {
@@ -863,19 +818,6 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                 }
                 my $opcode = $inst->opcode;
                 my ( $dst, $src ) = $inst->operands->@*;
-
-                # A store to an outgoing-argument slot is the first of the group that sits at the bottom of the live
-                # stack at the call; in a dynamic frame the bottom is below the dynamic region, so move it down before
-                # the group writes anything.
-                if ( $has_dyn_alloca && !$push_active && $call_arg_push > 0 ) {
-                    for my $op ( $inst->operands->@* ) {
-                        if ( $op->kind eq 'mem' && ( $op->value->{raw} // '' ) eq 'stack' ) {
-                            $push_rsp->( -$call_arg_push );
-                            $push_active = 1;
-                            last;
-                        }
-                    }
-                }
                 if ( $opcode eq 'mov' ) {
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
@@ -1179,63 +1121,6 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                         $bytes .= pack( 'CCC', $rex, 0xD3, $smodrm );
                     }
                 }
-                elsif ( $opcode eq 'alloca_dyn' ) {
-                    my ( $dst, $count_op, $elem_op ) = $inst->operands->@*;
-                    my $dst_r   = $resolve->($dst);
-                    my $did     = $reg_id->($dst_r);
-                    my $count_r = $resolve->($count_op);
-                    my $cid     = $reg_id->($count_r);
-                    my $elem    = $elem_op->value;
-
-                    # Scale the element count by the element byte size in the rax scratch (excluded from allocation for
-                    # this function), align to 16, subtract the bytes from the live stack pointer, and hand the caller
-                    # the new bottom.  The dynamic region therefore always sits below the fixed frame and below the
-                    # outgoing-argument pushes, so it survives both later allocas and calls.
-                    my $rex_b = $cid >= 8 ? 1 : 0;
-                    $bytes .= pack( 'C',    0x48 | $rex_b ) . pack( 'CC', 0x8B, 0xC0 | ( $cid & 7 ) );    # mov rax, count
-                    $bytes .= pack( 'CCC',  0x48, 0x69, 0xC0 ) . pack( 'V', $elem );                      # imul rax, rax, elem
-                    $bytes .= pack( 'CCCC', 0x48, 0x83, 0xC0, 0x0F );                                     # add rax, 15
-                    $bytes .= pack( 'CCCC', 0x48, 0x83, 0xE0, 0xF0 );                                     # and rax, -16
-                    if ( $platform->is_windows ) {
-
-                        # Windows x64 faults if a single sub rsp lands past the guard page.  Count down page by
-                        # page, probing each page with test [rsp],eax, exactly like the prologue uses > 4KB frames.
-                        $bytes .= pack( 'CCV', 0x48, 0x3D, 4096 );             # cmp rax, 4096
-                        my $jbe_pos = length $bytes;
-                        $bytes .= pack( 'CC', 0x76, 0x00 );                    # jbe done (patched)
-                        my $loop_start = length $bytes;
-                        $bytes .= pack( 'CCCV', 0x48, 0x81, 0xEC, 0x1000 );    # sub rsp, 4096
-                        $bytes .= pack( 'CCC', 0x85, 0x04, 0x24 );             # test [rsp], eax
-                        $bytes .= pack( 'CCV', 0x48, 0x2D, 4096 );             # sub rax, 4096
-                        $bytes .= pack( 'CCV', 0x48, 0x3D, 4096 );             # cmp rax, 4096
-                        $bytes .= pack( 'CC', 0x73, 0x00 );                    # jae loop (patched)
-                        my $loop_disp = $loop_start - ( length $bytes ) - 2;
-                        substr( $bytes, -1, 1 ) = pack( 'c', $loop_disp );
-                        my $done_pos = length $bytes;
-                        my $jbe_disp = $done_pos - $jbe_pos - 2;
-                        substr( $bytes, $jbe_pos + 1, 1 ) = pack( 'c', $jbe_disp );
-                    }
-                    $bytes .= pack( 'CCC', 0x48, 0x29, 0xC4 );             # sub rsp, rax
-                    my $mul   = $did >= 8 ? 4 : 0;
-                    my $modrm = ( 3 << 6 ) | ( ( $did & 7 ) << 3 ) | 4;    # mov dst, rsp (mod=11: rm=4 is rsp itself, no SIB)
-                    $bytes .= pack( 'C', 0x48 | $mul ) . pack( 'CC', 0x8B, $modrm );
-                }
-                elsif ( $opcode eq 'stack_save' ) {
-                    my $dst   = $inst->operands->[0];
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $rex   = 0x48 | ( $did >= 8 ? 4 : 0 );
-                    my $mrm   = 0xC0 | ( ( $did & 7 ) << 3 ) | 4;          # mov dst, rsp (rm=4 is rsp)
-                    $bytes .= pack( 'CCC', $rex, 0x8B, $mrm );
-                }
-                elsif ( $opcode eq 'stack_restore' ) {
-                    my $src   = $inst->operands->[0];
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $rex   = 0x48 | ( $sid >= 8 ? 4 : 0 );
-                    my $mrm   = 0xC0 | ( ( $sid & 7 ) << 3 ) | 4;          # mov rsp, src (rm=4 is rsp)
-                    $bytes .= pack( 'CCC', $rex, 0x89, $mrm );
-                }
                 elsif ( $opcode eq 'alloca' ) {
                     my $asan_off = ( $alloca_top + 15 ) & ~15;
                     $alloca_map->{ $dst->value } = $asan_off if $alloca_map;
@@ -1246,27 +1131,12 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     $alloca_frame += $size;
                     my $aligned_top = ( $alloca_top + 15 ) & ~15;
                     my $rex         = 0x48 | ( $did >= 8 ? 4 : 0 );
-
-                    if ($has_dyn_alloca) {
-
-                        # The static alloca lives inside the fixed part of a dynamic frame: address it off the frame
-                        # pointer so it does not drift with the live stack pointer.  rbp = prologue-rsp + total_frame,
-                        # so the slot at prologue-rsp + aligned_top is rbp - (total_frame - aligned_top).
-                        my $disp  = $aligned_top - $total_frame;
-                        my $mod   = ( $disp == 0 || ( $disp >= -128 && $disp <= 127 ) ) ? 1 : 2;
-                        my $modrm = ( $mod << 6 ) | ( ( $did & 7 ) << 3 ) | 5;
-                        $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm );
-                        $bytes .= pack( 'c', $disp ) if $mod == 1;
-                        $bytes .= pack( 'V', $disp ) if $mod == 2;
-                    }
-                    else {
-                        my $mod   = ( $aligned_top == 0 ) ? 0 : ( $aligned_top >= -128 && $aligned_top <= 127 ) ? 1 : 2;
-                        my $modrm = ( $mod << 6 ) | ( ( $did & 7 ) << 3 ) | 4;
-                        my $sib   = 0x24;
-                        $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm ) . pack( 'C', $sib );
-                        $bytes .= pack( 'c', $aligned_top ) if $mod == 1;
-                        $bytes .= pack( 'V', $aligned_top ) if $mod == 2;
-                    }
+                    my $mod   = ( $aligned_top == 0 ) ? 0 : ( $aligned_top >= -128 && $aligned_top <= 127 ) ? 1 : 2;
+                    my $modrm = ( $mod << 6 ) | ( ( $did & 7 ) << 3 ) | 4;
+                    my $sib   = 0x24;
+                    $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm ) . pack( 'C', $sib );
+                    $bytes .= pack( 'c', $aligned_top ) if $mod == 1;
+                    $bytes .= pack( 'V', $aligned_top ) if $mod == 2;
                     $alloca_top = $aligned_top + $size;
                 }
                 elsif ( $opcode eq 'lea' ) {
@@ -1750,33 +1620,17 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm ) . "\x00\x00\x00\x00";
                 }
                 elsif ( $opcode eq 'call_func' ) {
-                    if ( $has_dyn_alloca && !$push_active && $call_arg_push > 0 ) {
-                        $push_rsp->( -$call_arg_push );
-                        $push_active = 1;
-                    }
                     my $func_name = $dst->value;
                     push @func_fixups, { offset => $current_offset->(), type => 'call_rel32', target => $func_name };
                     $bytes .= pack( 'C', 0xE8 ) . "\x00\x00\x00\x00";
-                    if ($push_active) {
-                        $push_rsp->($call_arg_push);
-                        $push_active = 0;
-                    }
                 }
                 elsif ( $opcode eq 'call_indirect' ) {
-                    if ( $has_dyn_alloca && !$push_active && $call_arg_push > 0 ) {
-                        $push_rsp->( -$call_arg_push );
-                        $push_active = 1;
-                    }
                     my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
                     my $rex   = $sid >= 8 ? 0x41 : 0x00;
                     my $modrm = 0xD0 | ( $sid & 7 );
                     if ($rex) { $bytes .= pack( 'C', $rex ) }
                     $bytes .= pack( 'CC', 0xFF, $modrm );
-                    if ($push_active) {
-                        $push_rsp->($call_arg_push);
-                        $push_active = 0;
-                    }
                 }
                 elsif ( $opcode eq 'jmp_func' ) {
                     my $func_name = $dst->value;
@@ -1793,14 +1647,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                             my $rid = $reg_id->($reg);
                             my $off = $total_frame - $call_arg_frame - ( $i * 8 ) - 8;
                             my $rex = 0x48 | ( $rid >= 8 ? 4 : 0 );
-                            if ($has_dyn_alloca) {
-                                my $disp  = $off - $total_frame;
-                                my $modrm = ( 1 << 6 ) | ( ( $rid & 7 ) << 3 ) | 5;
-                                $bytes .= pack( 'C', $rex ) . pack( 'CCc', 0x8B, $modrm, $disp );
-                            }
-                            else {
-                                $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x8B, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
-                            }
+                            $bytes .= pack( 'C', $rex ) . pack( 'CCCV', 0x8B, ( 2 << 6 ) | ( ( $rid & 7 ) << 3 ) | 4, 0x24, $off );
                         }
                         $bytes .= pack( 'CCC', 0x48, 0x89, 0xEC );    # mov rsp, rbp
                         $bytes .= pack( 'C',   POP_BASE + 5 );        # pop rbp
