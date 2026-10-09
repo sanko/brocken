@@ -78,6 +78,14 @@ sub Brocken::Runtime::set_free16_head( ptr $hb, ptr $val ) {
     Brocken::store_i64( Brocken::ptr_add( $hb, 48 ), $val );
 }
 
+sub Brocken::Runtime::get_free_big_head( ptr $hb )->ptr {
+    return Brocken::load_i64( Brocken::ptr_add( $hb, 144 ) );
+}
+
+sub Brocken::Runtime::set_free_big_head( ptr $hb, ptr $val ) {
+    Brocken::store_i64( Brocken::ptr_add( $hb, 144 ), $val );
+}
+
 sub Brocken::Runtime::get_suspect_buffer_head( ptr $hb )->ptr {
     return Brocken::load_i64( Brocken::ptr_add( $hb, 56 ) );
 }
@@ -169,9 +177,9 @@ sub Brocken::Runtime::set_thrown_value( ptr $hb, i64 $val ) {
 # Initialize ICB and Immix heap metadata.
 sub Brocken::Runtime::_init( ptr $heap_base, i64 $heap_size ) {
 
-    # Block starts after the ICB (144 bytes). Cannot read current_block from ICB yet, it hasn't been initialized.
+    # Block starts after the ICB (Brocken::ICB::SIZE bytes). Cannot read current_block from ICB yet, it hasn't been initialized.
     # Compute directly.
-    my ptr $block_base = Brocken::ptr_add( $heap_base,  144 );
+    my ptr $block_base = Brocken::ptr_add( $heap_base,  152 );
     my ptr $line0_data = Brocken::ptr_add( $block_base, 16 );
 
     # Zero the block metadata: bitmap at [block+0..15], live_count at [block+32752], next_free at [block+32760].
@@ -187,6 +195,7 @@ sub Brocken::Runtime::_init( ptr $heap_base, i64 $heap_size ) {
     Brocken::Runtime::set_immix_limit( $heap_base, Brocken::ptr_add( $block_base, 256 ) );
     Brocken::Runtime::set_free_blocks( $heap_base, 0 );
     Brocken::Runtime::set_free16_head( $heap_base, 0 );
+    Brocken::Runtime::set_free_big_head( $heap_base, 0 );
     Brocken::Runtime::set_suspect_buffer_head( $heap_base, 0 );
     Brocken::Runtime::set_fuel( $heap_base, 0 );
     Brocken::Runtime::set_err_code( $heap_base, 0 );
@@ -217,9 +226,11 @@ sub Brocken::Runtime::bump_alloc( ptr $heap_base, i64 $size )->ptr {
         }
     }
 
-    # Hot path: free16_head
+    # Hot path: free16_head. A free16 slot is exactly 16 usable bytes, so it only satisfies requests that fit in one;
+    # anything larger must not be handed a 16-byte slot or the tail of the object would overwrite the next free slot.
     my ptr $head = Brocken::Runtime::get_free16_head($heap_base);
-    if ( Brocken::ptr_cmp_eq( $head, 0 ) == 0 ) {
+    my i64 $fits16 = Brocken::ptr_cmp_ge( 16, $size );
+    if ( Brocken::ptr_cmp_eq( $head, 0 ) == 0 && Brocken::ptr_cmp_eq( $fits16, 0 ) == 0 ) {
         my ptr $next = Brocken::load_i64( Brocken::ptr_add( $head, 8 ) );
         Brocken::Runtime::set_free16_head( $heap_base, $next );
         return $head;
@@ -344,23 +355,35 @@ sub Brocken::Runtime::decref( ptr $obj, ptr $heap_base ) {
     Brocken::store_i64( $obj, Brocken::i64_add( Brocken::i64_sub( $header, $old_rc ), $new_rc ) );
     if ( Brocken::ptr_cmp_eq( $new_rc, 0 ) && Brocken::ptr_cmp_eq( $heap_base, 0 ) == 0 ) {
 
-        # Push to free16 list for immediate reuse
-        my ptr $head = Brocken::Runtime::get_free16_head($heap_base);
-        Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $head );
-        Brocken::Runtime::set_free16_head( $heap_base, $obj );
+        # Tag 9 arrays are recycled through the segregated free_big list: the bytes field at [obj+16] survives the
+        # free (only [obj+8] carries the next pointer), so alloc_array can size-match a future request to it. Block
+        # live_count recycling is skipped: array reuse is slab-granular, not block-granular.
+        my i64 $tag = Brocken::shr( $header, 24 );
+        if ( Brocken::ptr_cmp_eq( $tag, 9 ) ) {
+            my ptr $big_head = Brocken::Runtime::get_free_big_head($heap_base);
+            Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $big_head );
+            Brocken::Runtime::set_free_big_head( $heap_base, $obj );
+        }
+        else {
 
-        # Decrement live_count for the containing block.
-        my ptr $block_base = Brocken::Runtime::get_current_block($heap_base);
-        my ptr $lc_ptr     = Brocken::ptr_add( $block_base, 32752 );
-        my i64 $lc         = Brocken::load_i64($lc_ptr);
-        $lc = Brocken::i64_sub( $lc, 1 );
-        Brocken::store_i64( $lc_ptr, $lc );
-        if ( Brocken::ptr_cmp_eq( $lc, 0 ) ) {
+            # Push to free16 list for immediate reuse
+            my ptr $head = Brocken::Runtime::get_free16_head($heap_base);
+            Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $head );
+            Brocken::Runtime::set_free16_head( $heap_base, $obj );
 
-            # Block fully empty - recycle to free_blocks
-            my ptr $fb_head = Brocken::Runtime::get_free_blocks($heap_base);
-            Brocken::store_i64( $block_base, $fb_head );
-            Brocken::Runtime::set_free_blocks( $heap_base, $block_base );
+            # Decrement live_count for the containing block.
+            my ptr $block_base = Brocken::Runtime::get_current_block($heap_base);
+            my ptr $lc_ptr     = Brocken::ptr_add( $block_base, 32752 );
+            my i64 $lc         = Brocken::load_i64($lc_ptr);
+            $lc = Brocken::i64_sub( $lc, 1 );
+            Brocken::store_i64( $lc_ptr, $lc );
+            if ( Brocken::ptr_cmp_eq( $lc, 0 ) ) {
+
+                # Block fully empty - recycle to free_blocks
+                my ptr $fb_head = Brocken::Runtime::get_free_blocks($heap_base);
+                Brocken::store_i64( $block_base, $fb_head );
+                Brocken::Runtime::set_free_blocks( $heap_base, $block_base );
+            }
         }
     }
     elsif ( Brocken::ptr_cmp_gt( $new_rc, 0 ) && Brocken::ptr_cmp_eq( $heap_base, 0 ) == 0 ) {
@@ -927,11 +950,38 @@ sub Brocken::Runtime::str_concat( ptr $hb, ptr $lhs, ptr $rhs )->ptr {
     return $buf;
 }
 
-# Heap Array allocation (pass 1: i64 elements, tag 9, header [tag|rc] at +0, count at +8, elements at +16)
+# Heap Array allocation (tag 9, header [tag|rc] at +0, count at +8, bytes at +16, elements at +24).
+# Freed arrays are recycled through the segregated free_big_head list (sized >= request), so loops that re-allocate
+# an array each iteration reuse the same slab instead of growing the arena unboundedly.
 sub Brocken::Runtime::alloc_array( ptr $hb, i64 $count, i64 $elem_size )->ptr {
     my i64 $body = $count * $elem_size;
-    my i64 $size = $body + 16;                                   # header(8) + count(8)
-    my ptr $obj  = Brocken::Runtime::bump_alloc( $hb, $size );
+    my i64 $size = $body + 24;                                   # header(8) + count(8) + bytes(8)
+
+    # Recycle a freed array whose payload bytes are at least what this request needs. The bytes field survives the
+    # free (only [obj+8] carries the free-list next pointer), so a scan compares [obj+16] against the request.
+    my ptr $prev = 0;
+    my ptr $slab = Brocken::Runtime::get_free_big_head($hb);
+    while ( Brocken::ptr_cmp_eq( $slab, 0 ) == 0 ) {
+        my i64 $slab_bytes = Brocken::load_i64( Brocken::ptr_add( $slab, 16 ) );
+        if ( Brocken::ptr_cmp_ge( $slab_bytes, $body ) ) {
+            my ptr $next = Brocken::load_i64( Brocken::ptr_add( $slab, 8 ) );
+            if ( Brocken::ptr_cmp_eq( $prev, 0 ) ) {
+                Brocken::Runtime::set_free_big_head( $hb, $next );
+            }
+            else {
+                Brocken::store_i64( Brocken::ptr_add( $prev, 8 ), $next );
+            }
+            Brocken::store_i64( $slab, 0 );    # clear stale header before reuse
+            my i64 $header = Brocken::i64_add( 1, Brocken::shl( 9, 24 ) );
+            Brocken::store_i64( $slab,                        $header );
+            Brocken::store_i64( Brocken::ptr_add( $slab, 8 ), $count );
+            return $slab;
+        }
+        $prev = $slab;
+        $slab = Brocken::load_i64( Brocken::ptr_add( $slab, 8 ) );
+    }
+
+    my ptr $obj = Brocken::Runtime::bump_alloc( $hb, $size );
     if ( Brocken::ptr_cmp_eq( $obj, 0 ) ) {
         return 0;
     }
@@ -940,18 +990,19 @@ sub Brocken::Runtime::alloc_array( ptr $hb, i64 $count, i64 $elem_size )->ptr {
     my i64 $header = Brocken::i64_add( 1, Brocken::shl( 9, 24 ) );
     Brocken::store_i64( $obj,                        $header );
     Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $count );
+    Brocken::store_i64( Brocken::ptr_add( $obj, 16 ), $body );
     return $obj;
 }
 
-# Array element accessors for i64 elements
+# Array element accessors for i64 elements (elements start at +24, after header/count/bytes)
 sub Brocken::Runtime::array_get_i64( ptr $arr, i64 $idx )->i64 {
-    my ptr $base = Brocken::ptr_add( $arr,  16 );
+    my ptr $base = Brocken::ptr_add( $arr,  24 );
     my ptr $elem = Brocken::ptr_add( $base, $idx * 8 );
     return Brocken::load_i64($elem);
 }
 
 sub Brocken::Runtime::array_set_i64( ptr $arr, i64 $idx, i64 $val ) {
-    my ptr $base = Brocken::ptr_add( $arr,  16 );
+    my ptr $base = Brocken::ptr_add( $arr,  24 );
     my ptr $elem = Brocken::ptr_add( $base, $idx * 8 );
     Brocken::store_i64( $elem, $val );
     return;

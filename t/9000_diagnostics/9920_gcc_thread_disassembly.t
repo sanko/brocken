@@ -120,7 +120,7 @@ CCODE
         system("objdump -p $bin_path 2>&1");
         diag 'objdump -h (section headers)';
         system("objdump -h $bin_path 2>&1");
-        diag( 'bjdump -d (disassembly)';
+        diag 'bjdump -d (disassembly)';
         system("objdump -d $bin_path 2>&1");
         diag 'objdump -R (relocations)';
         system("objdump -R $bin_path 2>&1");

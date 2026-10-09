@@ -35,7 +35,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                 # Seed at the arena base, not at %__heap_base itself. The ICB that %__heap_base points at is 144 bytes
                 # of runtime state and the Immix block header starts right after it, so handing out frames from the base
                 # itself made the first few allocas land on
-                # top of it: the block metadata at base+144, and -- the visible one -- the fuel counter at base+64,
+                # top of it: the block metadata at base+ICB::SIZE, and -- the visible one -- the fuel counter at base+64,
                 # which every function reads to decide whether to keep recursing. That is why fib(8) returned 21 and
                 # fib(9) returned 0: eight frames of 24 bytes each just reached the end of the header, and the ninth
                 # overwrote the fuel the next call was about to read.
@@ -51,7 +51,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                 $mbb->add_instruction(
                     Brocken::Jenny::MIR::MachineInstruction->new(
                         opcode   => 'i64_const',
-                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 144 + Brocken::ICB::HEAP_SIZE ) ],
+                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => Brocken::ICB::SIZE() + Brocken::ICB::HEAP_SIZE() ) ],
                         comment  => 'heap_ptr: start above ICB and arena'
                     )
                 );

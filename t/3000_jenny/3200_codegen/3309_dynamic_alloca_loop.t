@@ -8,9 +8,10 @@ use Brocken::Katsuro::Platform;
 no warnings qw[experimental::class experimental::builtin];
 use feature qw[class];
 
-# F17: a dynamic alloca inside a while loop used to grow the stack on every iteration until the epilogue, because
-# alloca_dyn only ever moved rsp/sp down.  Each in-progress block scope now frames its dynamic arrays in a
-# stack_save/stack_restore pair, and last/next restore the loop body's outermost save, so the stack stays bounded.
+# F17: a dynamic array inside a while loop used to grow the stack on every iteration until the epilogue.  Dynamic-sized
+# arrays are now heap-promoted to Brocken::Runtime::alloc_array: each declaration allocates a tag-9 array on the Immix
+# heap, the loop's back-edge cleanup refcounts it back to the segregated free_big list, and the next iteration reuses
+# the same slab - so the stack has no dynamic frame at all and the heap stays bounded regardless of iteration count.
 my @TARGETS = (
     [ 'x86_64-pc-windows-msvc',    'Brocken::Jenny::Lowerer::X86_64' ],
     [ 'x86_64-unknown-linux-gnu',  'Brocken::Jenny::Lowerer::X86_64' ],
@@ -18,7 +19,6 @@ my @TARGETS = (
     [ 'riscv64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::RISCV64' ],
 );
 
-# A loop body with a runtime-sized array.  The per-iteration save/restore is what keeps the stack from growing.
 sub src_loop($N, $ITERS) {
     return <<"BROCKEN";
 my i64 \$n = $N;
@@ -48,31 +48,29 @@ sub lower_entry_ops( $triple, $lower_class, $src ) {
     return ( $block_ops[0] // [], \@block_ops );
 }
 
-sub block_has( $ops, $needle ) {
+sub count_op( $ops, $needle ) {
     return scalar grep { $_ eq $needle } @$ops;
 }
 
-subtest 'a dynamic array in a loop body is framed by stack_save/stack_restore' => sub {
+subtest 'a dynamic array in a loop body is heap-allocated, not dynamically stacked' => sub {
     for my $target (@TARGETS) {
         my ( $triple, $class ) = @$target;
         my ( $entry_ops, $blocks ) = lower_entry_ops( $triple, $class, src_loop( 64, 4 ) );
-        my ($body) = grep { block_has( $_, 'alloca_dyn' ) && block_has( $_, 'stack_restore' ) } @$blocks;
-        ok( $body, "$triple: the loop body block has alloca_dyn and stack_restore" );
-        next unless $body;
-        my $save_idx;
-        for my $i ( 0 .. $#$body ) {
-            if ( $body->[$i] eq 'stack_save' ) { $save_idx = $i; last }
+        my $alloca_dyn = 0;
+        my $stack_save = 0;
+        my $alloc      = 0;
+        for my $ops ( $entry_ops, @$blocks ) {
+            $alloca_dyn += count_op( $ops, 'alloca_dyn' );
+            $stack_save += count_op( $ops, 'stack_save' ) + count_op( $ops, 'stack_restore' );
+            $alloc      += count_op( $ops, 'call_func' );
         }
-        my @ops_after_save = @$body[ $save_idx + 1 .. $#$body ] if defined $save_idx;
-        ok( defined $save_idx, "$triple: stack_save precedes the per-iteration alloca_dyn" )
-            and ok( scalar( grep { $_ eq 'alloca_dyn' } @ops_after_save ) == 1, "$triple: the save is followed by the dynamic alloca" );
-        my $restore_idx = $#$body;
-        $restore_idx-- while $restore_idx >= 0 && $body->[$restore_idx] ne 'stack_restore';
-        ok( $restore_idx >= 0 && ( $restore_idx > $save_idx // -1 ), "$triple: stack_restore closes the loop body after the alloca" );
+        is( $alloca_dyn, 0, "$triple: no alloca_dyn anywhere in a promoted array loop" );
+        is( $stack_save, 0, "$triple: no stack_save/stack_restore anywhere in a promoted array loop" );
+        ok( $alloc > 0,  "$triple: the loop body still emits runtime calls (alloc_array) for the array" );
     }
 };
 
-subtest 'a function-scope dynamic array frames each loop scope and is still freed at exit' => sub {
+subtest 'a function-scope dynamic array alongside a loop-scope array stays heap-based' => sub {
     my $src = <<'BROCKEN';
 my i64 $n = 64;
 my [i64; $n] @big;
@@ -88,21 +86,21 @@ BROCKEN
     for my $target (@TARGETS) {
         my ( $triple, $class ) = @$target;
         my ( $entry_ops, $blocks ) = lower_entry_ops( $triple, $class, $src );
-        my ($body) = grep { block_has( $_, 'stack_save' ) && block_has( $_, 'alloca_dyn' ) } @$blocks;
-        ok( $body, "$triple: the function body captures a dynamic region" );
-        next unless $body;
-        my $first_save = 0;
-        $first_save++ while $first_save < @$body && $body->[$first_save] ne 'stack_save';
-        my $first_dyn = $first_save;
-        $first_dyn++ while $first_dyn < @$body && $body->[$first_dyn] ne 'alloca_dyn';
-        ok( $first_save < @$body && $first_save < $first_dyn, "$triple: entry captures the dynamic region before the first alloca" );
+        my $alloca_dyn = 0;
+        my $stack_save = 0;
+        for my $ops ( $entry_ops, @$blocks ) {
+            $alloca_dyn += count_op( $ops, 'alloca_dyn' );
+            $stack_save += count_op( $ops, 'stack_save' );
+        }
+        is( $alloca_dyn, 0, "$triple: function-scope and loop-scope arrays are both heap-promoted" );
+        is( $stack_save, 0, "$triple: no stack_save is emitted for either" );
     }
 };
 
-# The loop below concatenates the two behaviors the fix must keep correct at once on the host: a loop-scope array is
-# re-carved and freed every iteration, a next from inside an if-scope still returns to the header with a bounded
-# stack, and the loop actually terminates with the right answer.
-subtest 'bounded loop stack on the host' => sub {
+# The loop below concatenates the behaviors the heap replacement must keep correct on the host: a loop-scope array is
+# re-allocated and freed every iteration, a next from inside an if-scope still returns to the header with a bounded
+# heap, and the loop actually terminates with the right answer.
+subtest 'bounded loop heap on the host' => sub {
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
     my $src     = <<'BROCKEN';
@@ -129,7 +127,33 @@ BROCKEN
     ok -e $out, 'executable created';
 
     # evens: 100 x @scratch[0] = 300; odds: sum(1..199) + 1 each = 10000 + 100 = 10100.  total 10400, 10400 % 251 = 109.
-    run_exec( $out, expected_exit => 109, platform => $host, name => 'bounded loop-vla stack on host' );
+    run_exec( $out, expected_exit => 109, platform => $host, name => 'bounded loop-vla heap on host' );
+};
+
+subtest 'heap cursor stays bounded across a re-allocation loop on the host' => sub {
+    my $brocken = Brocken->new;
+    my $host    = $brocken->platform;
+    my $src     = <<'BROCKEN';
+my i64 $n = 50000;
+my i64 $i = 0;
+while ($i < 300) {
+    my [i64; $n] @buf;
+    @buf[1] = 7;
+    $i = $i + 1;
+}
+my ptr $hb = Brocken::heap_base();
+my ptr $hc = Brocken::Runtime::heap_cursor($hb);
+my i64 $used = Brocken::ptr_sub($hc, $hb);
+if (Brocken::ptr_cmp_gt($used, 2000000)) { return 2; }
+return 0;
+BROCKEN
+    my $module = Brocken->new->compile($src);
+    my $out    = $brocken->tmpdir . '/dyn_bounded' . $brocken->ext;
+    $brocken->linker->write_executable( $out, $brocken->codegen->emit_functions( $module->functions ), $host );
+    ok -e $out, 'executable created';
+
+    # 300 iterations of a 400KB array would want 120MB; free_big reuse must keep the cursor inside 2MB.
+    run_exec( $out, expected_exit => 0, platform => $host, name => 'heap cursor bounded after 300 re-allocations' );
 };
 
 subtest 'a function-scope array outlives the loop on the host' => sub {

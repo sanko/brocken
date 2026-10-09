@@ -1,7 +1,7 @@
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
-use Blib;
+use blib;
 use Brocken;
 use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Codegen::RISCV64;
@@ -23,7 +23,7 @@ my %rid = (
     t5 => 30,
     t6 => 31,
     sp => 2,
-    s0 => 8,
+    s0 => 8
 );
 sub word { return unpack( 'V', substr( $_[0], $_[1] * 4, 4 ) ) }
 subtest 'encode a spilled arithmetic source by pulling it into a scratch register' => sub {
@@ -62,4 +62,5 @@ subtest 'encode a spilled arithmetic source by pulling it into a scratch registe
         'and the mul reads the scratch'
     );
 };
+#
 done_testing;

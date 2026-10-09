@@ -8,7 +8,11 @@ use Brocken::Katsuro::Platform;
 no warnings qw[experimental::class experimental::builtin];
 use feature qw[class];
 
-# Regression for dynamic frame adjustment.
+# Heap promotion for dynamic array sizes: dynamic-sized arrays (and static arrays whose element count exceeds 4 KiB of
+# stack) are allocated on the Immix heap via Brocken::Runtime::alloc_array instead of the dynamic stack alloca. The
+# declaration becomes a pointer slot holding the tag-9 array header, so alloc_array no longer appears in MIR as
+# `alloca_dyn` and there is no dynamic frame adjustment. Loops that re-declare the array each iteration free it at the
+# back edge and reuse the same slab, bounding heap growth (see 3309).
 my @TARGETS = (
     [ 'x86_64-pc-windows-msvc',    'Brocken::Jenny::Lowerer::X86_64' ],
     [ 'x86_64-unknown-linux-gnu',  'Brocken::Jenny::Lowerer::X86_64' ],
@@ -37,9 +41,23 @@ return @arr[0] + @arr[999];
 BROCKEN
 }
 
-sub has_alloca_dyn( $triple, $lower_class, $src ) {
-    my $platform = Brocken::Katsuro::Platform::parse($triple);
-    my $module   = Brocken->new->compile($src);
+sub find_alloc_array_call($src) {
+    my $module = Brocken->new->compile($src);
+    my ($entry) = grep { $_->name eq '_BROCKEN_ENTRY' } $module->functions->@*;
+    my $alloc;
+    for my $bb ( $entry->blocks->@* ) {
+        for my $inst ( $bb->instructions->@* ) {
+            if ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') && $inst->callee && $inst->callee->name eq 'Brocken::Runtime::alloc_array' ) {
+                $alloc = $inst;
+            }
+        }
+    }
+    return ( $module, $alloc );
+}
+
+sub has_alloca_dyn( $lower_class, $src ) {
+    my $platform = Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu');
+    my ($module) = find_alloc_array_call($src);
     my ($func)   = grep { $_->name eq '_BROCKEN_ENTRY' } $module->functions->@*;
     my $mf       = $lower_class->new( platform => $platform )->lower($func);
     for my $bb ( $mf->blocks->@* ) {
@@ -52,24 +70,16 @@ sub has_alloca_dyn( $triple, $lower_class, $src ) {
     return 0;
 }
 
-sub find_array_alloca($src) {
-    my $module = Brocken->new->compile($src);
-    my ($func) = grep { $_->name eq '_BROCKEN_ENTRY' } $module->functions->@*;
-    for my $bb ( $func->blocks->@* ) {
-        for my $inst ( $bb->instructions->@* ) {
-            next unless $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca');
-            return $inst if $inst->count;
-        }
-    }
-    return undef;
-}
-subtest 'alloca_dyn is used for dynamic array sizes' => sub {
+subtest 'dynamic array sizes are heap-promoted, not dynamically stacked' => sub {
     for my $target (@TARGETS) {
         my ( $triple, $class ) = @$target;
-        ok( has_alloca_dyn( $triple, $class, src_dyn_small(3) ), "$triple uses alloca_dyn for dynamic count" );
+        my ( undef, $alloc ) = find_alloc_array_call( src_dyn_small(3) );
+        ok( $alloc,                                                               "$triple emits Brocken::Runtime::alloc_array for dynamic count" );
+        ok( !has_alloca_dyn( $class, src_dyn_small(3) ),                          "$triple no longer uses alloca_dyn for dynamic count" );
     }
 };
-subtest 'alloca_dyn is not used when array size is constant' => sub {
+
+subtest 'constant small arrays stay on the stack; large statics promote' => sub {
     my $src_const = <<'BROCKEN';
 my i64 $x;
 my [i64; 4] @arr;
@@ -78,11 +88,22 @@ my [i64; 4] @arr;
 $x = @arr[0] + @arr[3];
 return $x;
 BROCKEN
+    my $src_big = <<'BROCKEN';
+my [i64; 600] @arr;
+@arr[0] = 1;
+@arr[599] = 2;
+return @arr[0] + @arr[599];
+BROCKEN
     for my $target (@TARGETS) {
         my ( $triple, $class ) = @$target;
-        ok( !has_alloca_dyn( $triple, $class, $src_const ), "$triple does not use alloca_dyn for constant size" );
+        my ( undef, $small_alloc ) = find_alloc_array_call($src_const);
+        my ( undef, $big_alloc )   = find_alloc_array_call($src_big);
+        ok( !$small_alloc, "$triple constant small array stays a stack alloca" );
+        ok( !has_alloca_dyn( $class, $src_const ), "$triple constant small array uses no alloca_dyn" );
+        ok( $big_alloc,   "$triple static array over 4 KiB promotes to alloc_array" );
     }
 };
+
 subtest 'small dynamic arrays return correct value (masked to 8 bits)' => sub {
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
@@ -94,7 +115,8 @@ subtest 'small dynamic arrays return correct value (masked to 8 bits)' => sub {
     ok -e $out, 'executable created';
     run_exec( $out, expected_exit => 7, platform => $host, name => 'dyn small on host' );
 };
-subtest 'large dynamic arrays cross out-of-range displacements (masked to 8 bits)' => sub {
+
+subtest 'large dynamic arrays still land correct values through the heap (masked to 8 bits)' => sub {
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
     my $src     = src_dyn_large();
@@ -105,20 +127,25 @@ subtest 'large dynamic arrays cross out-of-range displacements (masked to 8 bits
     ok -e $out, 'executable created';
     run_exec( $out, expected_exit => 161, platform => $host, name => 'dyn large on host' );
 };
-subtest 'an untyped size is unboxed before the alloca' => sub {
+
+subtest 'an untyped size is unboxed to i64 before alloc_array' => sub {
     my $src = <<'BROCKEN';
 my $n = 6;
 my [i64; $n] @arr;
 @arr[0] = 5;
 return @arr[0];
 BROCKEN
-    my $alloca = find_array_alloca($src);
-    ok( $alloca, 'the array alloca is present' );
-    ok( $alloca && $alloca->count && $alloca->count->type && $alloca->count->type->kind eq 'int' && $alloca->count->type->bits == 64,
+    my ( undef, $alloc ) = find_alloc_array_call($src);
+    ok( $alloc, 'the alloc_array call is present' );
+    ok( $alloc
+            && $alloc->operands->@* >= 3
+            && $alloc->operands->[1]->type
+            && $alloc->operands->[1]->type->kind eq 'int'
+            && $alloc->operands->[1]->type->bits == 64,
         'the count is an i64, not the box pointer of the untyped size' );
 
     # The boxed (`my $n`) size used to reach the dynamic alloca as a raw box pointer, and the allocator carved that
-    # many bytes off the stack.  It has to run and answer 5.
+    # many bytes off the stack.  Now the size feeds alloc_array - it has to run and answer 5.
     my $brocken = Brocken->new;
     my $host    = $brocken->platform;
     my $module  = Brocken->new->compile($src);
@@ -127,6 +154,7 @@ BROCKEN
     $brocken->linker->write_executable( $out, $funcs, $host );
     run_exec( $out, expected_exit => 5, platform => $host, name => 'untyped array size on host' );
 };
+
 subtest 'IR render survives a dynamic count' => sub {
     my $src = <<'BROCKEN';
 my i64 $n = 6;
@@ -134,13 +162,13 @@ my [i64; $n] @arr;
 @arr[0] = 5;
 return @arr[0];
 BROCKEN
-    my $alloca = find_array_alloca($src);
-    ok( $alloca,                                                                             'the array alloca is present' );
-    ok( $alloca && $alloca->count && !$alloca->count->isa('Brocken::Lindsay::IR::Constant'), 'the count is an instruction' );
-    my $text = eval { $alloca->render };
-    is( $@, '', 'render does not call ->value on an instruction count' );
-    like( $text // '', qr/alloca i64, i64 %/, 'render spells the count as its SSA name' );
+    my ( $module, $alloc ) = find_alloc_array_call($src);
+    ok( $alloc, 'the alloc_array call is present' );
+    my $text = eval { $alloc->render };
+    is( $@, '',             'render does not call ->value on an instruction count' );
+    like( $text // '', qr/alloc_array/, 'render names the alloc_array callee' );
 };
+
 subtest 'foreign targets handle dynamic arrays' => sub {
     for my $target (@TARGETS) {
         my ($triple) = @$target;

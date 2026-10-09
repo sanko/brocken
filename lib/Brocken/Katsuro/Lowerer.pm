@@ -22,6 +22,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
     field $needs_rc              = {};    # var_name -> 1 (Any-typed variable needing refcounting)
+    field $rc_owner              = {};    # var_name -> owning $_dyn_scope_stack entry (declaring block/loop scope)
+field $array_elem_types      = {};    # '@name' -> element IR type (for heap-array GEP scaling)
     field $rodata : reader       = {};    # label -> bytes for string constants
     field $_rodata_label_counter = 0;
     field $_loop_header_blocks   = [];    # stack of header block labels
@@ -440,6 +442,7 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         $current_func = $functions->{ $ast->name };
         $symbols      = {};
         $needs_rc     = {};
+        $rc_owner     = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -603,6 +606,20 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         $builder->build_stackrestore( $sc->{save} );
     }
 
+    # Register an RC-tracked variable, recording the innermost dynamic (block/loop) scope that declares it.  The
+    # owning scope lets loop cleanup tell apart a variable the loop body itself owns (still live on the fall-through
+    # back edge) from one declared in a nested block that has already closed on that path.
+    method _note_rc($name) {
+        $needs_rc->{$name} = 1;
+        $rc_owner->{$name} = @$_dyn_scope_stack ? $_dyn_scope_stack->[-1] : undef;
+    }
+
+    # Drop an RC-tracked variable from scope tracking (after it has been decref'd, or when a path no longer needs it).
+    method _forget_rc($name) {
+        delete $needs_rc->{$name};
+        delete $rc_owner->{$name};
+    }
+
     # Lower a block with block-scoped RC cleanup.
     # Variables declared as `Any` inside the block are decref'd at block exit, not at function exit.  Early return,
     # last, or next from inside the block bypasses this cleanup; those paths rely on the function-scoped decref loop.
@@ -670,7 +687,7 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         my $alloca = $builder->build_alloca( $ir_type, '%' . $ast->name . '.addr', undef, $line, $col, $ast->name, $ast->type );
         $symbols->{ $ast->name } = $alloca;
         if ( $ast->type eq 'Any' ) {
-            $needs_rc->{ $ast->name } = 1;
+            $self->_note_rc( $ast->name );
         }
         if ( !defined $ast->init && $ast->type eq 'Any' ) {
             my $zero = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
@@ -912,19 +929,27 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         }
         $builder->position_at_end($body);
         $current_block = $body;
-        my $loop_scope = { save => undef };
+        my $loop_scope = { save => undef, rc_pre => { %$needs_rc } };
         push $_dyn_scope_stack->@*, $loop_scope;
         push $_loop_body_scopes->@*, $loop_scope;
         $self->lower_block_statements( $ast->body );
         pop $_loop_body_scopes->@*;
         my $body_sc = pop $_dyn_scope_stack->@*;
         $self->_restore_dyn_scope($body_sc);
+
+        # Free RC-tracked values the body created this iteration (arrays and Any) so a loop that re-declares a heap
+        # array each pass reuses the freed slab instead of growing the arena -- the heap analogue of the loop
+        # stack_save/stack_restore removed with F17.
+        $self->_emit_loop_back_edge_rc_cleanup($loop_scope) unless $current_block->terminator;
         unless ( $current_block->terminator ) {
             $builder->build_br( $header, $line, $col );
         }
         pop $_loop_header_blocks->@*;
         pop $_loop_check_blocks->@*;
         pop $_loop_exit_blocks->@*;
+        # The loop body's RC vars are scoped to the loop: every iteration path freed them (back edge, break, next).
+        # Drop any still tracked for this loop so a later block/function exit does not decref a dead slot again.
+        $self->_forget_rc($_) for grep { defined $rc_owner->{$_} && $rc_owner->{$_} == $loop_scope } keys %$needs_rc;
         $builder->position_at_end($exit);
         $current_block = $exit;
     }
@@ -1175,19 +1200,46 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         $builder->build_br( $header, $line, $col );
     }
 
-    # Decref RC-tracked variables and restore the loop body's dynamic stack region before leaving it via break/
-    # continue, so a dynamic alloca inside a loop never grows the stack across iterations.
-    method _emit_loop_cleanup() {
+    # Decref the RC-tracked values a loop body introduced this iteration and drop them from scope, mirroring
+    # lower_block's block-scoped cleanup for the back edge. Values from scopes strictly outside the loop are untouched.
+    method _emit_loop_back_edge_rc_cleanup($loop_scope) {
         my @rc_names = sort keys %$needs_rc;
-        if (@rc_names) {
-            my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
-            for my $name (@rc_names) {
-                my $addr   = $symbols->{$name} or next;
-                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-                $builder->build_decref( $loaded, 0, 0, $decref_hb );
+        @rc_names = grep { !$loop_scope->{rc_pre}{$_} } @rc_names;
+        return unless @rc_names;
+        return if $current_block->terminator;
+        my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+        for my $name (@rc_names) {
+            my $addr   = $symbols->{$name} or next;
+            my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+            $builder->build_decref( $loaded, 0, 0, $decref_hb );
+            $self->_forget_rc($name);
+        }
+    }
+
+    # Decref RC-tracked variables and restore the loop body's dynamic stack region before leaving it via break/
+    # continue.  Only variables the loop body itself introduced are decref'd (objects from outer scopes stay alive for
+    # the code that follows the loop), and the dynamic alloca the body carved disappears with its stack save.
+    method _emit_loop_cleanup() {
+        my $loop_scope = $_loop_body_scopes->[-1];
+        if ($loop_scope) {
+            my @rc_names = sort keys %$needs_rc;
+            @rc_names = grep { !$loop_scope->{rc_pre}{$_} } @rc_names;
+            if (@rc_names) {
+                my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+                for my $name (@rc_names) {
+                    my $addr   = $symbols->{$name} or next;
+                    my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+                    $builder->build_decref( $loaded, 0, 0, $decref_hb );
+
+                    # A variable the loop body itself owns stays live on the fall-through back edge, so leave it in
+                    # %$needs_rc for _emit_loop_back_edge_rc_cleanup.  One declared in a nested block has lexically
+                    # closed on that path, so drop it now to avoid a stale or duplicate decref of a dead slot.
+                    my $owner = $rc_owner->{$name};
+                    $self->_forget_rc($name) unless defined $owner && $owner == $loop_scope;
+                }
             }
         }
-        my $loop_scope = $_loop_body_scopes->[-1] or return;
+        $loop_scope = $_loop_body_scopes->[-1] or return;
         return if $current_block->terminator;
         my $top = scalar @$_dyn_scope_stack;
         my $k;
@@ -1317,7 +1369,32 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
             # would feed the count as a *box pointer* and the dynamic alloca would carve garbage (audit 5.5).
             $size_val = $self->maybe_convert_type( $size_val, Brocken::Lindsay::IR::Type::i64(), $ast->line, $ast->col );
         }
-        my $key    = '@' . $ast->name;
+        my $key        = '@' . $ast->name;
+        my $elem_bytes = $ir_type->byte_size;
+        $array_elem_types->{$key} = $ir_type;
+
+        # Heap promotion: dynamic-sized arrays (and static arrays whose element count would exceed 4 KiB of stack) are
+        # allocated on the Immix heap via Brocken::Runtime::alloc_array instead of the stack.  The declaration becomes a
+        # pointer slot holding the tag-9 array header, RC-tracked like any fat scalar: alloc_array grants refcount 1, so
+        # the scope-exit delta (block, loop iteration, function end) frees it back to the segregated free_big list,
+        # which next iteration's alloc_array reuses -- the heap analogue of the loop stack_save/stack_restore.
+        my $static_bytes = defined $size_val && $size_val->isa('Brocken::Lindsay::IR::Constant') ? $size_val->value * $elem_bytes : undef;
+        my $promote      = !defined $static_bytes || $static_bytes > 4096;
+        if ($promote) {
+            my $ptr_type  = Brocken::Lindsay::IR::Type::ptr();
+            my $slot      = $builder->build_alloca( $ptr_type, '%' . $key . '.heap', undef, $ast->line, $ast->col, $ast->name, $ast->elem_type );
+            my $hb_alloca = $symbols->{'__heap_base'} or Carp::croak( "Heap array declaration requires __heap_base at " . $self->_loc($ast) );
+            my $hb        = $builder->build_load( $ptr_type, $hb_alloca, undef, $ast->line, $ast->col );
+            my $alloc_fn  = $functions->{'Brocken::Runtime::alloc_array'} or Carp::croak( "Runtime function alloc_array not found at " . $self->_loc($ast) );
+            my $count_val = $size_val
+                // Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+            my $elem_size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $elem_bytes );
+            my $arr = $builder->build_call( $alloc_fn, [ $hb, $count_val, $elem_size_const ], undef, $ast->line, $ast->col );
+            $builder->build_store( $arr, $slot, $ast->line, $ast->col );
+            $symbols->{$key} = $slot;
+            $self->_note_rc($key);
+            return;
+        }
         if ( $size_val && !$size_val->isa('Brocken::Lindsay::IR::Constant') ) {
             my $sc = @$_dyn_scope_stack ? $_dyn_scope_stack->[-1] : undef;
             if ($sc) { $sc->{save} //= $builder->build_stacksave(); }
@@ -1339,7 +1416,7 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
             my $alloca  = $builder->build_alloca( $ir_type, '%' . $t->{name} . '.addr', undef, $line, $col, $t->{name}, $t->{type} );
             $symbols->{ $t->{name} } = $alloca;
             if ( $t->{type} eq 'Any' ) {
-                $needs_rc->{ $t->{name} } = 1;
+                $self->_note_rc( $t->{name} );
             }
             my $offset    = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $i * 8 );
             my $elem_addr = $builder->build_add( $list_ptr, $offset, undef, $line, $col );
@@ -1365,8 +1442,19 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
             my $key = '@' . $array_expr->name;
             my $sym = $symbols->{$key};
             Carp::croak( "Unknown array variable '\@" . $array_expr->name . "' at " . $self->_loc($array_expr) ) unless $sym;
-            $array_base = $sym;
-            $elem_type  = $sym->allocated_type;
+            my $slot_type = $sym->allocated_type;
+            if ( $needs_rc->{$key} ) {
+                $array_base = $builder->build_load( $slot_type, $sym, undef, $line, $col );
+
+                # Heap arrays carry a 24-byte header (tag/rc, count, bytes) before the elements; step past it so the
+                # element GEP below lands on element 0 rather than the header.  Stack arrays have no header.
+                my $header_off = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 24 );
+                $array_base = $builder->build_gep( Brocken::Lindsay::IR::Type::i8(), $array_base, [$header_off], undef, $line, $col );
+            }
+            else {
+                $array_base = $sym;
+            }
+            $elem_type = $array_elem_types->{$key} // $slot_type;
         }
         else {
             $array_base = $self->lower_expression($array_expr);
@@ -2296,6 +2384,7 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         return unless $current_func;
         $symbols  = {};
         $needs_rc = {};
+        $rc_owner = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -2360,6 +2449,7 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         return unless $current_func;
         $symbols  = {};
         $needs_rc = {};
+        $rc_owner = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
