@@ -17,7 +17,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
         $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0, $int_res->{spill_addr_temp} );
-        my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+        my $fp_res = $alloc->allocate( $mf, $platform, 1, $int_res->{spill_slots} );
         $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1, $fp_res->{spill_addr_temp} );
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
         my %skip;
@@ -74,7 +74,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
             my $int_res = $alloc->allocate( $mf, $platform, 0 );
             $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0, $int_res->{spill_addr_temp} );
-            my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+            my $fp_res = $alloc->allocate( $mf, $platform, 1, $int_res->{spill_slots} );
             $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1, $fp_res->{spill_addr_temp} );
             my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
             my %skip;
@@ -123,7 +123,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
         $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0, $int_res->{spill_addr_temp} );
-        my $fp_res = $alloc->allocate( $mf, $platform, 1 );
+        my $fp_res = $alloc->allocate( $mf, $platform, 1, $int_res->{spill_slots} );
         $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1, $fp_res->{spill_addr_temp} );
         my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
         my %skip;
