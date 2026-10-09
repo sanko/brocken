@@ -20,17 +20,17 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
     field $heap_size : param = Brocken::ICB::HEAP_SIZE;
 
     # The Wasm frame region sits above the arena rather than inside it. The runtime's Immix arena runs from `heap_base +
-    # 144` for `heap_size` bytes, and the Wasm lowering keeps its per-call frame bump in the space that follows.
+    # ICB::SIZE` for `heap_size` bytes, and the Wasm lowering keeps its per-call frame bump in the space that follows.
     # Reserving it here means an allocation cannot walk into a live frame; the lowering seeds `%heap_ptr` at exactly
-    # `heap_base + 144 + heap_size`.
+    # `heap_base + ICB::SIZE + heap_size`.
     use constant FRAME_RESERVE => 0x10000;
 
-    # Four things have to fit: the base itself, the 144-byte ICB of runtime state written there (cursor, limit, cap,
+    # Four things have to fit: the base itself, the ICB of runtime state written there (cursor, limit, cap,
     # free-list head, and the counters that sit beside them), the whole arena, and the frame reserve above it. The fixed
     # single page this used to emit covered the default base of 1024 by coincidence; a base above 64KB would have put
     # the runtime state itself out of bounds, and the frames had nowhere reserved for them at all.
     method _initial_pages () {
-        my $pages = int( ( $heap_base + 144 + $heap_size + FRAME_RESERVE + 65535 ) / 65536 );
+        my $pages = int( ( $heap_base + Brocken::ICB::SIZE() + $heap_size + FRAME_RESERVE + 65535 ) / 65536 );
         return $pages < 1 ? 1 : $pages;
     }
 
