@@ -10,9 +10,26 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
     use List::Util ();
     use Carp ();
 
-    method allocate( $mf, $platform, $is_float = 0 ) {
+    method allocate( $mf, $platform, $is_float = 0, $prior_spill_slots = undef ) {
         $mf->compute_cfg unless $mf->entry_block->successors->@*;
         my @intervals = $self->_compute_live_intervals( $mf, $platform, $is_float );
+
+        # Integer and floating-point values are allocated in separate passes over separate register files, but they
+        # share one stack frame.  Numbering each pass's spill slots from zero put the two sets on top of one another:
+        # an integer spill slot holding a pointer and a floating-point spill slot holding a double landed at the same
+        # displacement, and each store overwrote the other's value.  The two were only accidentally disjoint before
+        # because the integer spills happened to be short-lived; a function that keeps an address live across a
+        # floating-point computation (the mixed-argument sum) then dereferenced the double as if it were that address.
+        #
+        # The prior pass's map is passed in so the later one starts above it.  It is not a general allocator change:
+        # only the second of the two passes is told, and the first is unaffected.
+        my $slot_base = 0;
+        if ($prior_spill_slots) {
+            for my $off ( values $prior_spill_slots->%* ) {
+                my $slot = $off / 8 + 1;
+                $slot_base = $slot if $slot > $slot_base;
+            }
+        }
 
         # The address scratch is reserved on a second pass, and only when the first one actually produced a collision.
         # Reserving it up front is not
@@ -20,9 +37,9 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         # allocatable pool of nearly every function by one register and change assignments that were correct before.
         # Deciding after allocation is safe because the first pass has already chosen its registers, so the second pass
         # cannot be invalidated by the decision it makes.
-        my $res = $self->_linear_scan( $mf, \@intervals, $platform, $is_float, 0 );
+        my $res = $self->_linear_scan( $mf, \@intervals, $platform, $is_float, 0, $slot_base );
         if ( !defined $res->{spill_addr_temp} && $self->_has_addr_hazard( $mf, $res->{spill_slots} ) ) {
-            $res = $self->_linear_scan( $mf, \@intervals, $platform, $is_float, 1 );
+            $res = $self->_linear_scan( $mf, \@intervals, $platform, $is_float, 1, $slot_base );
         }
         return $res;
     }
@@ -135,7 +152,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
     method _scan_insts( $insts, $is_float, $platform ) {
         my %defd;
         my %used;
-        my %rmw = map { $_ => 1 } qw(add sub mul udiv sdiv div rem urem and or xor shl lshr ashr adc sbb fadd fsub fmul fdiv fmin fmax fxor fand);
+        my %rmw = map { $_ => 1 } qw(add sub mul umulh udiv sdiv div rem urem and or xor shl lshr ashr adc sbb fadd fsub fmul fdiv fmin fmax fxor fand);
         for my $inst ( $insts->@* ) {
             my @ops    = $self->_register_operands($inst);
             my $writes = @ops && $self->_defines_operand0($inst);
@@ -311,7 +328,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         return @intervals;
     }
 
-    method _linear_scan( $mf, $intervals, $platform, $is_float, $need_addr_scratch = 0 ) {
+    method _linear_scan( $mf, $intervals, $platform, $is_float, $need_addr_scratch = 0, $slot_base = 0 ) {
         my @caller_regs = $is_float ? $platform->fp_registers('caller')->@* : $platform->registers('caller')->@*;
         my @callee_regs = $is_float ? $platform->fp_registers('callee')->@* : $platform->registers('callee')->@*;
         my $skip_reg    = $is_float ? $platform->fp_return_register         : $platform->return_register;
@@ -490,7 +507,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         $used_callee{$spill_temp}      = 1 if $spill_temp_is_callee;
         my %spill_slots;
         my @active;
-        my $next_spill = 0;
+        my $next_spill = $slot_base;
 
         for my $int ( $intervals->@* ) {
             @active = grep { $_->end >= $int->start } @active;
@@ -536,7 +553,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         my $load_op   = $is_float ? 'fload'  : 'load';
         my $store_op  = $is_float ? 'fstore' : 'store';
         my %reads_dst = map { $_ => 1 }
-            qw(add sub mul sdiv udiv div rem urem adc sbb and or xor cmp shl shr sar neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand);
+            qw(add sub mul umulh sdiv udiv div rem urem adc sbb and or xor cmp shl lshr ashr neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
 
@@ -794,6 +811,35 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
             return 0 unless $src && $src->kind eq 'phys_reg';
             return $dst && ( $dst->kind eq 'phys_reg' || $dst->kind eq 'virt_reg' ) ? 1 : 0;
         };
+        # A store of the spill temp through a plain stack slot.  A register capture and a stack-parameter load both
+        # turn into one of these when their destination is spilled.
+        my $is_spill_store = sub ($inst, $temp, $is_fp) {
+            return 0 unless $inst && defined $temp;
+            my $op = $inst->opcode // '';
+            return 0 unless $is_fp ? $op eq 'fstore' : $op eq 'store';
+            my ( $mem, $stored ) = $inst->operands->@*;
+            return 0 unless $mem && $mem->kind eq 'mem'
+                && $stored && $stored->kind eq 'phys_reg' && $stored->value eq $temp;
+            my $base = $mem->value->{base};
+            return defined $base && !ref $base ? 1 : 0;
+        };
+
+        # A capture whose destination was spilled is no longer a single move: insert_spill_code turned it into a move
+        # through the spill temp followed by a store of that temp.  The pair still reads the incoming register and
+        # writes only memory, but the store is neither a capture nor a load, so a scan that does not look through it
+        # stops the run at the first spilled argument and leaves every capture behind it unscheduled -- exactly the
+        # neighbour-clobber this method exists to prevent.  Recognise the pair as one capture and keep its two
+        # instructions adjacent.
+        my $is_spill_capture = sub ($inst, $next, $is_fp) {
+            return 0 unless $inst && $next;
+            my $op = $inst->opcode // '';
+            return 0 unless $is_fp ? $op eq 'fmov' : ( $op eq 'mov' || $op eq 'mv' );
+            my ( $dst, $src ) = $inst->operands->@*;
+            my $temp = $is_fp ? $fp_temp_reg : $temp_reg;
+            return 0 unless defined $temp && $dst && $dst->kind eq 'phys_reg' && $dst->value eq $temp;
+            return 0 unless $src && $src->kind eq 'phys_reg';
+            return $is_spill_store->( $next, $temp, $is_fp );
+        };
         my ( @prefix, @tokens );
         my @insts = $entry->instructions->@*;
 
@@ -806,18 +852,51 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         #
         # A load with no capture after it ends the run rather than widening it over the rest of the block, which by now
         # carries the spill reloads that the captures are interleaved among.
-        for ( my $k = 0; $k < @insts; $k++ ) {
+        my $k = 0;
+        while ( $k < @insts ) {
             my $inst = $insts[$k];
+            my $is_fp = ( $inst->opcode eq 'fmov' );
+            if ( $is_spill_capture->( $inst, $insts[ $k + 1 ], $is_fp ) ) {
+                push @prefix,
+                    { inst => $inst, store => $insts[ $k + 1 ], src => $inst->operands->[1]->value, is_fp => $is_fp, split => 1 };
+                push @tokens, { is_cap => 1 };
+                $k += 2;
+                next;
+            }
             if ( $is_capture->($inst) ) {
                 my ( $dst, $src ) = $inst->operands->@*;
-                push @prefix, { inst   => $inst, src => $src->value, is_fp => ( $inst->opcode eq 'fmov' ? 1 : 0 ) };
+                push @prefix, { inst => $inst, src => $src->value, is_fp => $is_fp };
                 push @tokens, { is_cap => 1 };
+                $k += 1;
                 next;
             }
             last unless $inst->opcode eq 'load' || $inst->opcode eq 'fload';
-            last unless $is_capture->( $insts[ $k + 1 ] );
-            push @tokens, { is_cap => 0, inst => $inst };
+
+            # A stack parameter read here can itself be spilled, which insert_spill_code turns into a load through
+            # the temp followed by a store of it.  The pair neither reads nor writes a register the captures shuffle,
+            # so it belongs to the run just as a plain load does, and skipping over its store is what keeps the
+            # captures behind it -- the floating-point one that reads a register an earlier capture overwrites --
+            # inside the parallel move.
+            my $lfp   = ( $inst->opcode eq 'fload' );
+            my $ltemp = $lfp ? $fp_temp_reg : $temp_reg;
+            my $ldst  = $inst->operands->[0];
+            my @load  = ( $inst );
+            push @load, $insts[ $k + 1 ]
+                if $ldst && $ldst->kind eq 'phys_reg' && defined $ltemp
+                && $ldst->value eq $ltemp
+                && $is_spill_store->( $insts[ $k + 1 ], $ltemp, $lfp );
+
+            # Stop here when no capture follows, so a load near the end of the entry does not widen the run over the
+            # spill traffic below it.
+            my $after      = $insts[ $k + @load ];
+            my $after_fp   = $after ? ( $after->opcode eq 'fmov' ) : 0;
+            last unless $after
+                && ( $is_capture->($after)
+                    || $is_spill_capture->( $after, $insts[ $k + @load + 1 ], $after_fp ) );
+            push @tokens, { is_cap => 0, insts => \@load };
+            $k += @load;
         }
+        my $run_len = $k;
         return unless @prefix > 1;
 
         # A cycle is broken through the spill temp of its own class: a `mov` cycle needs a general register and an
@@ -828,10 +907,18 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
             my ( @work, @parked );
             for my $cap (@prefix) {
                 next unless $cap->{is_fp} == $is_fp;
+
+                # A split capture writes memory through the spill temp, so it clobbers no source.  It still reads its
+                # incoming register, though, so it has to take part in the schedule: give it a destination no capture
+                # can read, which keeps it ahead of any capture that overwrites the register it reads.
+                if ( $cap->{split} ) {
+                    push @work, { cap => $cap, dst => "\0mem" . scalar(@work), src => $cap->{src} };
+                    next;
+                }
                 my $dst = $cap->{inst}->operands->[0];
                 my $reg = $dst->kind eq 'phys_reg' ? $dst->value : $assignment->{ $dst->value };
 
-                # A spilled or unresolved destination writes no register, so it cannot clobber a source.  A `mov r, r`
+                # An unresolved destination writes no register, so it cannot clobber a source.  A `mov r, r`
                 # preserves its source.
                 # Neither takes part in scheduling; both are still emitted.
                 if ( !defined $reg || $reg =~ /^spill\(/ || $reg eq $cap->{src} ) {
@@ -906,7 +993,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         my @pending;
         for my $step (@plan) {
             if ( $step->{cap} ) {
-                push @groups, { lead => [@pending], inst => $step->{cap}{inst}, src => $step->{src} };
+                push @groups, { lead => [@pending], inst => $step->{cap}{inst}, store => $step->{cap}{store}, src => $step->{src} };
                 @pending = ();
                 next;
             }
@@ -927,7 +1014,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         # moved to suit the shuffle.
         my @new;
         for my $token (@tokens) {
-            if ( !$token->{is_cap} ) { push @new, $token->{inst}; next }
+            if ( !$token->{is_cap} ) { push @new, $token->{insts} ? @{ $token->{insts} } : $token->{inst}; next }
             my $group = shift @groups;
             last unless $group;
             push @new, @{ $group->{lead} };
@@ -935,8 +1022,9 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
             my $src = $cap->operands->[1];
             $cap->operands->[1] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $group->{src}, type => $src->type );
             push @new, $cap;
+            push @new, $group->{store} if $group->{store};
         }
-        splice $entry->instructions->@*, 0, scalar @tokens, @new;
+        splice $entry->instructions->@*, 0, $run_len, @new;
     }
 
     # Schedule the argument copies before a call as a parallel move.

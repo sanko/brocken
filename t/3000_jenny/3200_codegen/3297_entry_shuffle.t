@@ -3,8 +3,10 @@ use Test2::V0 '!subtest';
 use blib;
 use Brocken;
 use Brocken::Katsuro;
+use Brocken::Katsuro::Platform;
 use Brocken::Lindsay;
 use Brocken::Jenny;
+use Test2::Tools::Brocken qw[run_exec cross_available temp_path];
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -49,6 +51,71 @@ if ( f( @{[ join ', ', @args ]} ) == $total ) { return 42; }
 return 1;
 BROCKEN
         is( run($free), 42, "native: free function with $n argument(s), all in registers" );
+    }
+}
+
+# The same parallel move spans both register files, and that is where a capture
+# can hide behind traffic that looks like it does not belong to the move.  An
+# integer argument past the integer registers is read from the stack at the top
+# of the function, and a floating-point capture declared after it still has to be
+# part of the same move: its destination can be a register an earlier
+# floating-point capture read, so leaving it out lets the earlier one win.
+# The arguments interleave so a float capture follows an integer stack read, and
+# the counts run past each register file so both a stack read and a spill occur.
+#
+# SysV is where the shape appears -- six integer and eight floating-point
+# registers, and stack arguments read below the register captures -- so the
+# sweep is pinned to it and executed natively or under emulation, whichever the
+# host offers.
+SKIP: {
+    my $target = Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu');
+    my $gp     = scalar $target->abi->param_registers->@*;
+    my $fp     = scalar $target->abi->fp_param_registers->@*;
+    my $limit  = ( $gp > $fp ? $gp : $fp ) + 4;
+    skip 'x86_64 SysV not executable here', $limit unless cross_available($target);
+    my $cross = Brocken->new( platform => $target );
+    for my $n ( 1 .. $limit ) {
+        my ( @params, @args, @terms );
+        my $sum        = 0;
+        my ( $ni, $nf ) = ( $n, $n );
+        for my $k ( 0 .. 2 * $n - 1 ) {
+            if ( $k % 2 || $ni == 0 ) {
+                my $v = $nf--;
+                push @params, "f64 \$f$v";
+                push @args,   "$v.0";
+                push @terms,  "\$f$v";
+                $sum += $v;
+            }
+            else {
+                my $v = $ni--;
+                push @params, "i64 \$i$v";
+                push @args,   "$v";
+                push @terms,  "\$i$v";
+                $sum += $v;
+            }
+        }
+        my $params = join ', ', @params;
+        my $terms  = join ' + ', @terms;
+        my $call   = join ', ', @args;
+        my $src    = <<"BROCKEN";
+sub g( $params ) -> i64 {
+    my f64 \$s = $terms;
+    my i64 \$j = \$s;
+    return \$j;
+}
+if ( g( $call ) == $sum ) { return 42; }
+return 1;
+BROCKEN
+        my $module = $cross->compile($src);
+        my $funcs  = $cross->codegen->emit_functions( $module->functions );
+        my $out    = temp_path( 'shuffle_mixed' . $cross->ext );
+        $cross->linker->write_executable( $out, $funcs, $target );
+        run_exec(
+            $out,
+            expected_exit => 42,
+            platform      => $target,
+            name          => "x86_64 SysV: $n interleaved integer/float argument(s)",
+        );
     }
 }
 done_testing;
