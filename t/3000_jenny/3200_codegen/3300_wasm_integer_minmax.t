@@ -50,8 +50,10 @@ subtest 'wasm i32 integer min/max' => sub {
             $b->build_ret( $b->build_sub( $mx, $mn, '%r' ) );
         }
     );
-    skip 'wasmtime is not installed', 1 unless defined $out;
-    is( $out, 23, 'max(30,7) - min(30,7) = 23' );
+    SKIP: {
+        skip 'wasmtime is not installed', 1 unless defined $out;
+        is( $out, 23, 'max(30,7) - min(30,7) = 23' );
+    }
 };
 subtest 'wasm i64 integer min/max' => sub {
     my $out = run_module(
@@ -66,7 +68,9 @@ subtest 'wasm i64 integer min/max' => sub {
             $b->build_ret( $b->build_sub( $mx, $mn, '%r' ) );
         }
     );
-    skip 'wasmtime is not installed', 1 unless defined $out;
-    is( $out, 4_999_999_997, 'max(5e9,3) - min(5e9,3)' );
+    SKIP: {
+        skip 'wasmtime is not installed', 1 unless defined $out;
+        is( $out, 4_999_999_997, 'max(5e9,3) - min(5e9,3)' );
+    }
 };
 done_testing;
