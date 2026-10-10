@@ -5,6 +5,16 @@ no warnings qw[experimental::class];
 class Brocken::Jenny::Linker v0.0.1 {
     use Brocken::Jenny::Linker::Layout;
     use Brocken::Katsuro::Platform;
+
+    # Sizes (in bytes) of the initial thread's stack written into the executable image. Only a PE optional header can
+    # express them today (SizeOfStackReserve/SizeOfStackCommit); the other linkers accept the fields and ignore them,
+    # since an ELF or Mach-O image carries no thread-stack size of its own. The reserve has to stay comfortably above
+    # the 2 MiB runway the F17 stack guard seeds in _BROCKEN_ENTRY, which is why the default commit is sized to cover
+    # the 1 MiB entry-stub heap on top of the frames. Brocken->new overrides both per instance.
+    use constant DEFAULT_STACK_RESERVE => 0x400000;    # 4 MiB
+    use constant DEFAULT_STACK_COMMIT  => 0x200000;    # 2 MiB
+    field $stack_reserve : param : reader = DEFAULT_STACK_RESERVE;
+    field $stack_commit  : param : reader = DEFAULT_STACK_COMMIT;
     field $_layout        : reader(layout);
     field $type           : param : reader = 'exe';
     field $debug_data     : reader = {};

@@ -736,8 +736,8 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
 
         # PE32+ Optional Header (Magic=0x020b): fields include entry, image base 0x140000000, section alignment 0x1000,
         # file alignment 0x200, subsystem=3 (CONSOLE), DLL characteristics=0x8160 (NX compatible + TSA aware +
-        # DYNAMIC_BASE), stack reserve 0x400000 (4MB), stack commit 0x200000 (2MB covers 1MB entry-stub heap), heap
-        # reserve 0x100000, heap commit 0x1000
+        # DYNAMIC_BASE), the stack reserve/commit the linker was built with (4 MiB / 2 MiB by default; the commit
+        # covers the 1 MiB entry-stub heap), heap reserve 0x100000, heap commit 0x1000
         my $init_debug_size = 0;
         $init_debug_size += $_ for values %debug_raw_sizes;
         my $size_of_image = $sec_rva;
@@ -755,7 +755,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $dll_chars  = $self->debug_level >= 5 ? 0x8140 : 0x8160;          # Clear DYNAMIC_BASE at debug >= 5
         my $opt_header = pack( 'v C2 V3 V2 Q< V2 v4 v2 V V V V v2 Q<4 V2',
             0x020b,         14, 10, $size_of_code, $init_data_size, 0, 0x1000, 0x1000, 0x140000000, 4096, 512, $os_ver, 0, 0, 0, $os_ver, 0, 0,
-            $size_of_image, $size_of_headers, 0, 3, $dll_chars, 0x400000, 0x200000, 0x100000, 0x1000, 0, 16 );
+            $size_of_image, $size_of_headers, 0, 3, $dll_chars, $self->stack_reserve, $self->stack_commit, 0x100000, 0x1000, 0, 16 );
 
         # Data directories (128 bytes = 16 entries x 8 bytes each):
         #   [0]=export, [1]=import, [3]=pdata, [5]=reloc
