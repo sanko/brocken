@@ -925,51 +925,25 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         #   RISC-V:  R_RISCV_64           = 2
         #   x86_64:  R_X86_64_GLOB_DAT    = 6
         my $rel_type       = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );
-        my $rela_dyn       = '';
-        my $dlopen_slot    = $base + $self->import_rva('dlopen');
-        my $dlopen_sym_idx = $sym_indices{'dlopen'};
-        $rela_dyn .= pack( 'Q< Q< q<', $dlopen_slot, ( $dlopen_sym_idx << 32 ) | $rel_type, 0 );
-        my $dlsym_slot    = $base + $self->import_rva('dlsym');
-        my $dlsym_sym_idx = $sym_indices{'dlsym'};
-        $rela_dyn .= pack( 'Q< Q< q<', $dlsym_slot, ( $dlsym_sym_idx << 32 ) | $rel_type, 0 );
-        my $pthread_slot    = $base + $self->import_rva('pthread_create');
-        my $pthread_sym_idx = $sym_indices{'pthread_create'};
-        $rela_dyn .= pack( 'Q< Q< q<', $pthread_slot, ( $pthread_sym_idx << 32 ) | $rel_type, 0 );
-        my $exit_slot    = $base + $self->import_rva('exit');
-        my $exit_sym_idx = $sym_indices{ $platform->exit_name };
-        $rela_dyn .= pack( 'Q< Q< q<', $exit_slot, ( $exit_sym_idx << 32 ) | $rel_type, 0 );
-        my $join_slot    = $base + $self->import_rva('pthread_join');
-        my $join_sym_idx = $sym_indices{'pthread_join'};
-        $rela_dyn .= pack( 'Q< Q< q<', $join_slot, ( $join_sym_idx << 32 ) | $rel_type, 0 );
+        my @rela_entries;
+        push @rela_entries, [ 'dlopen',                 $sym_indices{'dlopen'} ];
+        push @rela_entries, [ 'dlsym',                  $sym_indices{'dlsym'} ];
+        push @rela_entries, [ 'pthread_create',         $sym_indices{'pthread_create'} ];
+        push @rela_entries, [ 'exit',                   $sym_indices{ $platform->exit_name } ];
+        push @rela_entries, [ 'pthread_join',           $sym_indices{'pthread_join'} ];
 
         if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
-            my $sched_slot    = $base + $self->import_rva('sched_setaffinity');
-            my $sched_sym_idx = $sym_indices{'sched_setaffinity'};
-            $rela_dyn .= pack( 'Q< Q< q<', $sched_slot, ( $sched_sym_idx << 32 ) | $rel_type, 0 );
+            push @rela_entries, [ 'sched_setaffinity', $sym_indices{'sched_setaffinity'} ];
         }
-        my $mutex_lock_slot    = $base + $self->import_rva('pthread_mutex_lock');
-        my $mutex_lock_sym_idx = $sym_indices{'pthread_mutex_lock'};
-        $rela_dyn .= pack( 'Q< Q< q<', $mutex_lock_slot, ( $mutex_lock_sym_idx << 32 ) | $rel_type, 0 );
-        my $mutex_unlock_slot    = $base + $self->import_rva('pthread_mutex_unlock');
-        my $mutex_unlock_sym_idx = $sym_indices{'pthread_mutex_unlock'};
-        $rela_dyn .= pack( 'Q< Q< q<', $mutex_unlock_slot, ( $mutex_unlock_sym_idx << 32 ) | $rel_type, 0 );
-        my $cond_wait_slot    = $base + $self->import_rva('pthread_cond_wait');
-        my $cond_wait_sym_idx = $sym_indices{'pthread_cond_wait'};
-        $rela_dyn .= pack( 'Q< Q< q<', $cond_wait_slot, ( $cond_wait_sym_idx << 32 ) | $rel_type, 0 );
-        my $cond_signal_slot    = $base + $self->import_rva('pthread_cond_signal');
-        my $cond_signal_sym_idx = $sym_indices{'pthread_cond_signal'};
-        $rela_dyn .= pack( 'Q< Q< q<', $cond_signal_slot, ( $cond_signal_sym_idx << 32 ) | $rel_type, 0 );
-        my $cond_broadcast_slot    = $base + $self->import_rva('pthread_cond_broadcast');
-        my $cond_broadcast_sym_idx = $sym_indices{'pthread_cond_broadcast'};
-        $rela_dyn .= pack( 'Q< Q< q<', $cond_broadcast_slot, ( $cond_broadcast_sym_idx << 32 ) | $rel_type, 0 );
+        push @rela_entries, [ 'pthread_mutex_lock',    $sym_indices{'pthread_mutex_lock'} ];
+        push @rela_entries, [ 'pthread_mutex_unlock',  $sym_indices{'pthread_mutex_unlock'} ];
+        push @rela_entries, [ 'pthread_cond_wait',     $sym_indices{'pthread_cond_wait'} ];
+        push @rela_entries, [ 'pthread_cond_signal',   $sym_indices{'pthread_cond_signal'} ];
+        push @rela_entries, [ 'pthread_cond_broadcast', $sym_indices{'pthread_cond_broadcast'} ];
 
         if ( $platform->is_dragonflybsd ) {
-            my $init_tls_slot    = $base + $self->import_rva('_init_tls');
-            my $init_tls_sym_idx = $sym_indices{'_init_tls'};
-            $rela_dyn .= pack( 'Q< Q< q<', $init_tls_slot, ( $init_tls_sym_idx << 32 ) | $rel_type, 0 );
-            my $rtld_call_slot    = $base + $self->import_rva('_rtld_call_init');
-            my $rtld_call_sym_idx = $sym_indices{'_rtld_call_init'};
-            $rela_dyn .= pack( 'Q< Q< q<', $rtld_call_slot, ( $rtld_call_sym_idx << 32 ) | $rel_type, 0 );
+            push @rela_entries, [ '_init_tls',       $sym_indices{'_init_tls'} ];
+            push @rela_entries, [ '_rtld_call_init', $sym_indices{'_rtld_call_init'} ];
         }
 
         # Relocation entries for dynamically discovered extern functions
@@ -978,10 +952,22 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 $sym_indices{$name} = $sym_idx++;
                 $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 0, 0, 0 );
             }
-            my $slot = $base + $self->import_rva($name);
-            $rela_dyn .= pack( 'Q< Q< q<', $slot, ( $sym_indices{$name} << 32 ) | $rel_type, 0 );
+            push @rela_entries, [ $name, $sym_indices{$name} ];
         }
-        $self->layout->get('.rela.dyn')->{size} = length($rela_dyn);
+
+        # The GOT slot addresses are not known until the layout is final (the entry stub and import stubs grow .text
+        # after this point), so record the entries now and materialise the table once the layout has settled.  The
+        # size is fixed by the entry count, which lets .rela.dyn hold its place while .got is still moving.
+        $self->layout->get('.rela.dyn')->{size} = @rela_entries * 24;
+        my $build_rela_dyn = sub {
+            my $out = '';
+            for my $entry (@rela_entries) {
+                my ( $name, $sym_idx ) = @$entry;
+                $out .= pack( 'Q< Q< q<', $base + $self->import_rva($name), ( $sym_idx << 32 ) | $rel_type, 0 );
+            }
+            return $out;
+        };
+        my $rela_dyn = $build_rela_dyn->();
 
         # GOT layout: [0]=reserved, [1]=DT_DEBUG, [2]=LINK_MAP, [3]=dlopen, [4]=dlsym, [5]=pthread_create, [6]=exit,
         # [7]=pthread_join, [8]=sched_setaffinity, [9]=pthread_mutex_lock, [10]=pthread_mutex_unlock,
@@ -1118,6 +1104,10 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 substr( $text, $pad->{ofs} + 4, 4, pack( 'V', $ld ) );
             }
         }
+
+        # .got is pinned now (the entry stub and import patches above were baked against the settled layout), so
+        # materialise the relocation table with the final slot addresses.
+        $rela_dyn = $build_rela_dyn->();
         my $dynamic = '';
 
         # Dynamic section entries (d_tag, d_val/d_ptr):

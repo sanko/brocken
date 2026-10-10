@@ -36,6 +36,14 @@ subtest 'the entrance stub exit displacement tracks the final .got rva' => sub {
     my $disp     = unpack( 'l<', substr( $bin, $text_sec->{off} + $stub_len - 6, 4 ) );
     my $exit_got = $linker->import_rva('exit');
     is $disp, $exit_got - $exit_rip, 'the exit call still reaches the final exit GOT slot after .text grew';
+
+    # The dynamic loader only populates the slot named by the .rela.dyn relocation, so that r_offset has to track the
+    # same final .got the entrance stub calls.  When it lagged one page behind, the exit slot stayed zero and the
+    # process jumped to address 0 as soon as a program ran off the end of main.  exit is the fourth fixed entry
+    # (dlopen, dlsym, pthread_create, exit).
+    my $rela_sec  = $linker->layout->get('.rela.dyn');
+    my $exit_roff = unpack( 'Q<', substr( $bin, $rela_sec->{off} + 3 * 24, 8 ) );
+    is $exit_roff, $linker->image_base + $exit_got, '.rela.dyn exit relocation names the final exit GOT slot';
     unlink $output_file;
 };
 done_testing;
