@@ -8,6 +8,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
     use Brocken::Jenny::RegAlloc;
     use Brocken::Jenny::MIR;
     use Brocken::ICB;
+    use Brocken::Jenny::StackGuard;
     use Brocken::Jenny::Codegen::RISCV64::Encodings qw[:all];
     field $platform : param;
 
@@ -423,7 +424,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'alloca',
-                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 136, type => $i64 ) ],
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 144, type => $i64 ) ],
                 comment  => 'main fiber FCB'
             )
         );
@@ -467,6 +468,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 comment => 'FCB.os_thread = &ICB'
             )
         );
+
+        # Seed the main fiber's stack limit (FCB[136] and ICB.stack_limit) from the current stack pointer so the first
+        # fiber switch can hand the ICB to a child without losing the main thread's runway. Also put the ICB in arg0,
+        # because _real_main takes it as its hidden first parameter.
+        Brocken::Jenny::StackGuard::seed_main_fiber_limit( $mbb, $platform, '%init.fcb', '%init.icb', 136 );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'mv',

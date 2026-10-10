@@ -3,12 +3,27 @@ use feature qw[class];
 no warnings qw[portable experimental::class];
 class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
     use Brocken::Jenny::MIR;
+    use Brocken::Jenny::StackGuard;
     use Brocken::ICB;
     field $platform : param;
     method _abi() { $platform->abi }
 
     method lower($ir_func) {
         my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        # Seeding ICB.stack_limit writes through %__heap_base, so it is only valid when the entry actually
+        # receives the hidden ICB argument. A pure-IR _BROCKEN_ENTRY has no parameters at all, and the vreg
+        # would be undefined; regalloc then hands it an arbitrary slot and the seed store lands on garbage.
+        # Such a program reads no stack limit anywhere (no guard is emitted without the ICB param), so there
+        # is nothing to seed.
+        if ( $ir_func->params->@* && $ir_func->params->[0]->name eq '%__heap_base' ) {
+            if ( $ir_func->name eq '_BROCKEN_ENTRY' ) {
+                $mf->set_stack_limit_init(1);
+            }
+            else {
+                $mf->set_stack_guard(1);
+            }
+        }
+        my @stk_tail;
         my $inst_idx = 0;
         for my $block ( $ir_func->blocks->@* ) {
             my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => $block->name );
@@ -141,6 +156,12 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         );
                     }
                 }
+            }
+            if ( $ir_func->blocks->[0] == $block && $mf->stack_limit_init ) {
+                Brocken::Jenny::StackGuard::seed_entry( $mbb, '%__heap_base', $platform );
+            }
+            elsif ( $ir_func->blocks->[0] == $block && $mf->stack_guard ) {
+                @stk_tail = Brocken::Jenny::StackGuard::guard_user_function( $mbb, '%__heap_base', $platform );
             }
             for my $inst ( $block->instructions->@* ) {
                 my $before_mir = scalar $mbb->instructions->@*;
@@ -3389,7 +3410,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
                     my $callee   = $inst->callee;
                     my $stack_sz = 64 * 1024;
-                    my $fcb_sz   = 136;                                        # +8 os_thread at offset 128
+                    my $fcb_sz   = 144;                                        # +8 os_thread at 128, +8 stack_limit at 136
                     my $stack    = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'virt_reg',
                         value => $inst->name . '.stk',
@@ -3547,7 +3568,28 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         )
                     );
 
-                    # Copy os_thread pointer from current fiber (s11) to new FCB[128]
+                    # Copy the thread ICB pointer from the current fiber ([s11+128]) to the new FCB[128]. FCB[128] is the per-thread
+                    # os_thread/ICB slot -- s11 itself is the FCB address, not the ICB, so storing s11 would leave the
+                    # child fiber's ctx_swap limit exchange reading a stale base.
+                    my $riscv_thread_icb = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'virt_reg',
+                        value => $inst->name . '.os',
+                        type  => Brocken::Lindsay::IR::Type::ptr()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'load',
+                            operands => [
+                                $riscv_thread_icb,
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => 's11', disp => 128 },
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
+                            ],
+                            comment => 'load thread ICB from current fiber'
+                        )
+                    );
                     my $fcb_os_thread = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
                         value => { base => $inst->name . '.fcb', disp => 128 },
@@ -3556,8 +3598,47 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'store',
-                            operands => [ $fcb_os_thread, $fiber_reg ],
-                            comment  => 'FCB.os_thread = current fiber os_thread'
+                            operands => [ $fcb_os_thread, $riscv_thread_icb ],
+                            comment  => 'FCB.os_thread = thread ICB'
+                        )
+                    );
+
+                    # Seed the fiber's own stack limit: 16 KiB above the bottom of the 64 KiB stack so the guard fires
+                    # before the creating frame's reserved scratch runs out.
+                    my $riscv_fiber_limit = Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'virt_reg',
+                        value => $inst->name . '.stklim',
+                        type  => Brocken::Lindsay::IR::Type::ptr()
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mv',
+                            operands => [ $riscv_fiber_limit, $stack ],
+                            comment  => 'fiber stack limit = stack base'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'add',
+                            operands => [
+                                $riscv_fiber_limit,
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz / 4, type => Brocken::Lindsay::IR::Type::i64() )
+                            ],
+                            comment => 'fiber stack limit += stack_sz/4 (16 KiB cushion)'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.fcb', disp => 136 },
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                ),
+                                $riscv_fiber_limit
+                            ],
+                            comment => 'FCB.stack_limit = stack + 16 KiB'
                         )
                     );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
@@ -3580,6 +3661,9 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                             comment  => 'transfer value'
                         )
                     );
+                    # Keep the shared ICB's stack_limit pointing at the fiber that is about to run.
+                    Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'xfer', 's11',
+                        $self->_lower_opnd($fiber), 128, 136 );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'ctx_swap',
@@ -3625,6 +3709,8 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                             comment => 'load parent FCB from current FCB'
                         )
                     );
+                    # Keep the shared ICB's stack_limit pointing at the parent we are about to resume.
+                    Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'yield', 's11', $parent_tmp, 128, 136 );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'ctx_swap',
@@ -3735,7 +3821,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateCreate') ) {
                     my $callee   = $inst->callee;
                     my $stack_sz = 64 * 1024;
-                    my $fcb_sz   = 136;
+                    my $fcb_sz   = 144;                                        # +8 os_thread at 128, +8 stack_limit at 136
                     my $icb_sz   = Brocken::ICB::SIZE;
                     my $i64      = Brocken::Lindsay::IR::Type::i64();
                     my $ptr      = Brocken::Lindsay::IR::Type::ptr();
@@ -3794,7 +3880,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         )
                     );
 
-                    for my $off ( 0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 96, 112 ) {
+                    for my $off ( 0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 96, 112, 136 ) {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'store_imm',
@@ -3886,6 +3972,40 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                                 $icb
                             ],
                             comment => 'FCB.os_thread = ICB'
+                        )
+                    );
+                    # The isolate's guards run on its own 64 KiB stack; seed the same cushion the fibers use so a
+                    # guarded isolate function compares sp against this stack, not the main thread's budget.
+                    my $riscv_isol_limit = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.stklim', type => $ptr );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'mv',
+                            operands => [ $riscv_isol_limit, $stack ],
+                            comment  => 'isolate stack limit = stack base'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'add',
+                            operands => [
+                                $riscv_isol_limit,
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz / 4, type => $i64 )
+                            ],
+                            comment => 'isolate stack limit += stack_sz/4 (16 KiB cushion)'
+                        )
+                    );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.icb', disp => Brocken::ICB::STACK_LIMIT },
+                                    type  => $i64
+                                ),
+                                $riscv_isol_limit
+                            ],
+                            comment => 'ICB.stack_limit = stack + 16 KiB'
                         )
                     );
                     my $max_args = 6;
@@ -4168,6 +4288,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
             }
             $mf->add_block($mbb);
         }
+        $mf->add_block($_) for @stk_tail;
         $mf->compute_cfg;
         return $mf;
     }
