@@ -13,19 +13,16 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
     method lower($ir_func) {
         my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
         # Seeding ICB.stack_limit writes through %__heap_base. A pure-IR _BROCKEN_ENTRY has no parameters at all;
-        # the real entry receives the hidden ICB as its first parameter. Be defensive across platforms about the
-        # exact param name.
-        my $hb_name = '%__heap_base';
-        if ( $ir_func->params->@* && defined $ir_func->params->[0]->name && $ir_func->params->[0]->name ne '' ) {
-            $hb_name = $ir_func->params->[0]->name;
-        }
-        if ( $ir_func->name eq '_BROCKEN_ENTRY' ) {
-            if ( $ir_func->params->@* ) {
+        # the real entry receives the hidden ICB as its first parameter. The guard builder also names that vreg
+        # literally, so a function only qualifies when its first parameter really is `%__heap_base`: the
+        # Brocken::Runtime::* helpers take an explicit `%hb` / `%heap_base` and must never be guarded, or the
+        # limit load dereferences whatever register regalloc handed an undefined vreg.
+        my $has_hidden_icb = $ir_func->params->@* && defined $ir_func->params->[0]->name && $ir_func->params->[0]->name eq '%__heap_base';
+        if ($has_hidden_icb) {
+            if ( $ir_func->name eq '_BROCKEN_ENTRY' ) {
                 $mf->set_stack_limit_init(1);
             }
-        }
-        elsif ( $hb_name eq '%__heap_base' || $hb_name =~ /heap_base/ ) {
-            if ( $ir_func->params->@* ) {
+            else {
                 $mf->set_stack_guard(1);
             }
         }
