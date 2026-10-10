@@ -540,7 +540,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             }
             next unless length($stub_bytes);
             $text .= $stub_bytes;
-            push @import_patches, { ofs => $stub_ofs };
+            push @import_patches, { ofs => $stub_ofs, name => $ff->{target} };
             $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size;
         }
         $self->layout->get('.text')->{size} = length($text);
@@ -1083,19 +1083,23 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
         for my $pad (@import_patches) {
             my $text_rva_final = $self->layout->get('.text')->{rva};
+
+            # Each stub must point at its own GOT slot, not the table base: the slot offsets are assigned per-import
+            # when the stubs are generated, and .got has since moved, so re-resolve through the same map.
+            my $got_slot = $self->import_rva( $pad->{name} );
             if ( $platform->is_x64 ) {
-                my $disp32 = $got_rva_actual - ( $text_rva_final + $pad->{ofs} + 6 );
+                my $disp32 = $got_slot - ( $text_rva_final + $pad->{ofs} + 6 );
                 substr( $text, $pad->{ofs} + 2, 4, pack( 'l<', $disp32 ) );
             }
             elsif ( $platform->is_arm64 ) {
                 require Brocken::Jenny::Codegen::ARM64::Inst;
                 substr( $text, $pad->{ofs}, 4,
-                    pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::adrp( 16, $got_rva_actual, $text_rva_final + $pad->{ofs} ) ) );
-                substr( $text, $pad->{ofs} + 4, 4, pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 16, 16, $got_rva_actual & 0xFFF ) ) );
+                    pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::adrp( 16, $got_slot, $text_rva_final + $pad->{ofs} ) ) );
+                substr( $text, $pad->{ofs} + 4, 4, pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 16, 16, $got_slot & 0xFFF ) ) );
             }
             elsif ( $platform->is_riscv64 ) {
                 my $stub_rva = $text_rva_final + $pad->{ofs};
-                my $diff     = $got_rva_actual - $stub_rva;
+                my $diff     = $got_slot - $stub_rva;
                 my $hi20     = ( $diff + 0x800 ) >> 12;
                 my $lo12     = $diff & 0xFFF;
                 my $auipc    = ( ( $hi20 & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | 0x17;

@@ -50,11 +50,13 @@ BROCKEN
     };
     ok( $linked,  'linker accepts the concat module' ) or diag($@);
     ok( -e $file, 'wasm file produced' ) if $linked;
-SRUN: {
-        skip 'no Wasm runner is available', 1 unless wasm_runner();
-        ok( $linked && -e $file, 'module written before validation' ) or last SRUN;
-        my $status = wasm_validates($file);
-        is( $status, 0, 'concat module validates' ) or diag('the module did not validate');
+    SRUN: {
+        SKIP: {
+            skip 'no Wasm runner is available', 1 unless wasm_runner();
+            ok( $linked && -e $file, 'module written before validation' ) or last SRUN;
+            my $status = wasm_validates($file);
+            is( $status, 0, 'concat module validates' ) or diag('the module did not validate');
+        }
     }
     unlink $file if -e $file;
 };
