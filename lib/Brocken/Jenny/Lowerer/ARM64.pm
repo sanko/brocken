@@ -10,16 +10,20 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
 
     method lower($ir_func) {
         my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
-        # Seeding ICB.stack_limit writes through %__heap_base, so it is only valid when the entry actually
-        # receives the hidden ICB argument. A pure-IR _BROCKEN_ENTRY has no parameters at all, and the vreg
-        # would be undefined; regalloc then hands it an arbitrary slot and the seed store lands on garbage.
-        # Such a program reads no stack limit anywhere (no guard is emitted without the ICB param), so there
-        # is nothing to seed.
-        if ( $ir_func->params->@* && $ir_func->params->[0]->name eq '%__heap_base' ) {
-            if ( $ir_func->name eq '_BROCKEN_ENTRY' ) {
+        # Seeding ICB.stack_limit writes through %__heap_base. A pure-IR _BROCKEN_ENTRY has no parameters at all;
+        # the real entry receives the hidden ICB as its first parameter. Be defensive across platforms about the
+        # exact param name.
+        my $hb_name = '%__heap_base';
+        if ( $ir_func->params->@* && defined $ir_func->params->[0]->name && $ir_func->params->[0]->name ne '' ) {
+            $hb_name = $ir_func->params->[0]->name;
+        }
+        if ( $ir_func->name eq '_BROCKEN_ENTRY' ) {
+            if ( $ir_func->params->@* ) {
                 $mf->set_stack_limit_init(1);
             }
-            else {
+        }
+        elsif ( $hb_name eq '%__heap_base' || $hb_name =~ /heap_base/ ) {
+            if ( $ir_func->params->@* ) {
                 $mf->set_stack_guard(1);
             }
         }
