@@ -237,6 +237,17 @@ my $fuel = $brocken->fuel;
 The limits in force for this instance. Each falls back to the matching package variable described above when the
 constructor was not given one.
 
+## `stack_reserve( ... )`, `stack_commit( ... )`
+
+```perl
+my $brocken = Brocken->new( stack_reserve => 8 * 1024 * 1024, stack_commit => 1024 * 1024 );
+```
+
+The initial thread's stack reservation and commit, in bytes, written into a PE executable's optional header
+(`SizeOfStackReserve` and `SizeOfStackCommit`). They default to 4 MiB and 2 MiB. Only the PE linker can express them
+today; the other linkers accept and ignore the values, since an ELF or Mach-O image carries no thread-stack size of
+its own. Keep the reserve above the 2 MiB runway the stack guard sets aside below the entry stack pointer.
+
 ## `platform( ... )`
 
 ```
