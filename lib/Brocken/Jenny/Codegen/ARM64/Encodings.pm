@@ -215,13 +215,13 @@ package Brocken::Jenny::Codegen::ARM64::Encodings v0.0.1 {
         CSINC => 0x9A9F07E0,           # CSINC Xd, XZR, XZR, ~cond: 100 11010100 11111 0 cond 1 11111 Xd
 
         # Immediate/Flag bits
-        SF             => 0x80000000,    # SF bit - OR'd into ADD/SUB when operating on 64-bit X regs
+        SF             => 0x80000000,                                                  # SF bit - OR'd into ADD/SUB when operating on 64-bit X regs
         FCB_RESUME_OFF => Brocken::Jenny::FCB::arch_layout('aarch64')->{resume_pc},    # from the FCB layout, never a second copy
 
         # Exception generation
-        BRK  => 0xD4200000,              # BRK #imm16: 11010100 001 imm16 00000 00000
-        SVC  => 0xD4000001,              # SVC #imm16: 11010100 000 imm16 00000 00001
-        UXTB => 0x53001C00               # UXTB Wd, Wn: 01 011010 110 000 000 000 Rn Rd
+        BRK  => 0xD4200000,                                                            # BRK #imm16: 11010100 001 imm16 00000 00000
+        SVC  => 0xD4000001,                                                            # SVC #imm16: 11010100 000 imm16 00000 00001
+        UXTB => 0x53001C00                                                             # UXTB Wd, Wn: 01 011010 110 000 000 000 Rn Rd
     };
 };
 1;

@@ -51,8 +51,9 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                 $mbb->add_instruction(
                     Brocken::Jenny::MIR::MachineInstruction->new(
                         opcode   => 'i64_const',
-                        operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => Brocken::ICB::SIZE() + Brocken::ICB::HEAP_SIZE() ) ],
-                        comment  => 'heap_ptr: start above ICB and arena'
+                        operands =>
+                            [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => Brocken::ICB::SIZE() + Brocken::ICB::HEAP_SIZE() ) ],
+                        comment => 'heap_ptr: start above ICB and arena'
                     )
                 );
                 $mbb->add_instruction(

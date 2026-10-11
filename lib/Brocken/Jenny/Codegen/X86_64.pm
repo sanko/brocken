@@ -300,8 +300,10 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{os_thread} }, type => $ptr ), $icb_ptr ],
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{os_thread} }, type => $ptr ),
+                    $icb_ptr
+                ],
                 comment => 'FCB.os_thread = ICB'
             )
         );
@@ -320,8 +322,10 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'load',
-                operands =>
-                    [ $func_addr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{resume_pc} }, type => $ptr ) ],
+                operands => [
+                    $func_addr,
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{resume_pc} }, type => $ptr )
+                ],
                 comment => 'func = FCB.resume_pc'
             )
         );
@@ -592,8 +596,10 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{self} }, type => $i64 ), $fcb ],
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{self} }, type => $i64 ),
+                    $fcb
+                ],
                 comment => 'FCB.self = FCB addr'
             )
         );
@@ -624,8 +630,14 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{os_thread} }, type => $i64 ), $icb ],
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'mem',
+                        value => { base => '%init.fcb', disp => $fcl->{os_thread} },
+                        type  => $i64
+                    ),
+                    $icb
+                ],
                 comment => 'FCB.os_thread = &ICB'
             )
         );
@@ -668,11 +680,11 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         my $alloca_frame = 0;
         my %reg_id_map   = ( rax => 0, rcx => 1, rdx => 2, rbx => 3, rsp => 4, rbp => 5, rsi => 6, rdi => 7 );
         for my $i ( 0 .. 15 ) { $reg_id_map{"xmm$i"} = $i }
-        my $reg_id         = sub ($r) { return 0 unless defined $r; return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
-        my $spill_frame    = $self->_compute_spill_frame( $mf, 'rsp' );
-        my $callee_size    = scalar(@$used_callee) * 8;
-        my $is_leaf        = 1;
-        my $total_alloca   = 0;
+        my $reg_id       = sub ($r) { return 0 unless defined $r; return $reg_id_map{$r} // ( $r =~ /^r(\d+)$/ ? $1 : 0 ) };
+        my $spill_frame  = $self->_compute_spill_frame( $mf, 'rsp' );
+        my $callee_size  = scalar(@$used_callee) * 8;
+        my $is_leaf      = 1;
+        my $total_alloca = 0;
 
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
@@ -686,6 +698,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         }
         my $shadow_space = ( $platform->is_windows && !$is_leaf ) ? 32 : 0;
         my $max_call_arg = $self->_compute_call_arg_frame( $mf, $platform->stack_reg );
+
         # The outgoing argument area sits at the bottom of the frame, below the alloca and spill areas, because a
         # callee reads the arguments the register set could not carry at fixed offsets off the caller's stack
         # pointer and `call` does not move it.  It is reserved in the prologue rather than pushed at the call site
@@ -1140,9 +1153,9 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     $alloca_frame += $size;
                     my $aligned_top = ( $alloca_top + 15 ) & ~15;
                     my $rex         = 0x48 | ( $did >= 8 ? 4 : 0 );
-                    my $mod   = ( $aligned_top == 0 ) ? 0 : ( $aligned_top >= -128 && $aligned_top <= 127 ) ? 1 : 2;
-                    my $modrm = ( $mod << 6 ) | ( ( $did & 7 ) << 3 ) | 4;
-                    my $sib   = 0x24;
+                    my $mod         = ( $aligned_top == 0 ) ? 0 : ( $aligned_top >= -128 && $aligned_top <= 127 ) ? 1 : 2;
+                    my $modrm       = ( $mod << 6 ) | ( ( $did & 7 ) << 3 ) | 4;
+                    my $sib         = 0x24;
                     $bytes .= pack( 'C', $rex ) . pack( 'CC', 0x8D, $modrm ) . pack( 'C', $sib );
                     $bytes .= pack( 'c', $aligned_top ) if $mod == 1;
                     $bytes .= pack( 'V', $aligned_top ) if $mod == 2;
@@ -1513,9 +1526,9 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     $bytes .= pack( 'CCC', $rex, 0x0F, $cc{$opcode} ) . pack( 'C', $modrm );
                 }
                 elsif ( $opcode eq 'ctx_swap' ) {
-                    my $ctx_r    = $resolve->($dst);       # fiber register (r12)
+                    my $ctx_r    = $resolve->($dst);        # fiber register (r12)
                     my $cid      = $reg_id->($ctx_r);
-                    my $target_r = $resolve->($src);       # target FCB pointer
+                    my $target_r = $resolve->($src);        # target FCB pointer
                     my $tid      = $reg_id->($target_r);
                     my $fcl      = fcb_layout($platform);
 

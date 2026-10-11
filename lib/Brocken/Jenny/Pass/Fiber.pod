@@ -68,8 +68,8 @@ is no way to spell a fiber switch in Brocken source, no allocator support for sa
 back end that can emit a context switch. The isolated-thread and fiber runtime is the work that comes before this pass
 does anything.
 
-C<has_yield> is kept because F<t/3000_jenny/3400_fiber/3401_fiber_lowering.t> tests it against C<needs_lowering>, which
-is enough of a contract to keep the interface from drifting while the implementation is still ahead of this.
+C<has_yield> is kept because F<t/30000_jenny/34000_fiber/34010_fiber_lowering.t> tests it against C<needs_lowering>,
+which is enough of a contract to keep the interface from drifting while the implementation is still ahead of this.
 
 =head1 LICENSE & LEGAL
 

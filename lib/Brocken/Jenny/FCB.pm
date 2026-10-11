@@ -28,48 +28,35 @@ our @EXPORT_OK = qw[arch_layout fcb_layout];
 # Registers `ctx_swap` spills, lowest offset first. Must match the save loop in each backend's
 # ctx_swap encoder, which reads this list rather than repeating it.
 my %SAVED = (
-    aarch64 => [ ( map { "x$_" } 19 .. 28 ), 'x29', 'x30', 'sp' ],
+    aarch64 => [ ( map {"x$_"} 19 .. 28 ), 'x29', 'x30', 'sp' ],
     riscv64 => [qw[s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 ra sp]],
     x86_64  => [qw[rbx rbp r12 r13 r14 r15]],
 );
 
 # The fiber register, whose slot in the region holds the FCB self-pointer.
-my %FIBER_REG = (
-    aarch64 => 'x28',
-    riscv64 => 's11',
-    x86_64  => 'r12',
-);
+my %FIBER_REG = ( aarch64 => 'x28', riscv64 => 's11', x86_64 => 'r12', );
 
 # Backends that hand a fiber transfer/yield value to the resumed fiber through its FCB. x86-64 keeps
 # the value in the return register (rax), which never collides with its first argument register, so it
 # reserves no slot.
 my %TRANSFER = ( aarch64 => 1, riscv64 => 1, x86_64 => 0 );
-
 my %CACHE;
 
 # Layout for an architecture name (e.g. 'aarch64'), with no platform in hand. Used by callers like the
 # instruction-encoding tables that need a single field at compile time.
 sub arch_layout ($arch) {
     return $CACHE{$arch} if $CACHE{$arch};
-
-    my $saved = $SAVED{$arch}       // die "no FCB layout for architecture '$arch'";
-    my $fiber = $FIBER_REG{$arch}   // die "no fiber register for architecture '$arch'";
-
+    my $saved   = $SAVED{$arch}     // die "no FCB layout for architecture '$arch'";
+    my $fiber   = $FIBER_REG{$arch} // die "no fiber register for architecture '$arch'";
     my $slot_of = sub ($reg) {
         for my $i ( 0 .. $#$saved ) {
             return $i if $saved->[$i] eq $reg;
         }
         return;
     };
-
     my $self_idx = $slot_of->($fiber);
     die "fiber register '$fiber' is not in the $arch FCB spill list" unless defined $self_idx;
-
-    my %off = (
-        saved => [ $saved->@* ],
-        self  => $self_idx * 8,
-        regs  => { map { $saved->[$_] => $_ * 8 } 0 .. $#$saved },
-    );
+    my %off    = ( saved => [ $saved->@* ], self => $self_idx * 8, regs => { map { $saved->[$_] => $_ * 8 } 0 .. $#$saved }, );
     my $cursor = 8 * scalar $saved->@*;
 
     # The stack pointer keeps its place in the region when the backend spills it there; otherwise it
@@ -82,7 +69,6 @@ sub arch_layout ($arch) {
         $off{saved_sp} = $cursor;
         $cursor += 8;
     }
-
     for my $field (qw[parent resume_pc os_thread stack_limit]) {
         $off{$field} = $cursor;
         $cursor += 8;
@@ -92,7 +78,6 @@ sub arch_layout ($arch) {
         $cursor += 8;
     }
     $off{size} = $cursor;
-
     return $CACHE{$arch} = \%off;
 }
 
@@ -100,5 +85,4 @@ sub arch_layout ($arch) {
 sub fcb_layout ($platform) {
     return arch_layout( $platform->arch );
 }
-
 1;

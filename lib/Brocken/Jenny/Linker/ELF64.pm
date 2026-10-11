@@ -924,23 +924,22 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         #   ARM64:   R_AARCH64_GLOB_DAT   = 1025
         #   RISC-V:  R_RISCV_64           = 2
         #   x86_64:  R_X86_64_GLOB_DAT    = 6
-        my $rel_type       = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );
+        my $rel_type = $platform->is_arm64 ? 1025 : ( $platform->is_riscv64 ? 2 : 6 );
         my @rela_entries;
-        push @rela_entries, [ 'dlopen',                 $sym_indices{'dlopen'} ];
-        push @rela_entries, [ 'dlsym',                  $sym_indices{'dlsym'} ];
-        push @rela_entries, [ 'pthread_create',         $sym_indices{'pthread_create'} ];
-        push @rela_entries, [ 'exit',                   $sym_indices{ $platform->exit_name } ];
-        push @rela_entries, [ 'pthread_join',           $sym_indices{'pthread_join'} ];
+        push @rela_entries, [ 'dlopen',         $sym_indices{'dlopen'} ];
+        push @rela_entries, [ 'dlsym',          $sym_indices{'dlsym'} ];
+        push @rela_entries, [ 'pthread_create', $sym_indices{'pthread_create'} ];
+        push @rela_entries, [ 'exit',           $sym_indices{ $platform->exit_name } ];
+        push @rela_entries, [ 'pthread_join',   $sym_indices{'pthread_join'} ];
 
         if ( $platform->is_linux || $platform->is_freebsd || $platform->is_dragonflybsd ) {
             push @rela_entries, [ 'sched_setaffinity', $sym_indices{'sched_setaffinity'} ];
         }
-        push @rela_entries, [ 'pthread_mutex_lock',    $sym_indices{'pthread_mutex_lock'} ];
-        push @rela_entries, [ 'pthread_mutex_unlock',  $sym_indices{'pthread_mutex_unlock'} ];
-        push @rela_entries, [ 'pthread_cond_wait',     $sym_indices{'pthread_cond_wait'} ];
-        push @rela_entries, [ 'pthread_cond_signal',   $sym_indices{'pthread_cond_signal'} ];
+        push @rela_entries, [ 'pthread_mutex_lock',     $sym_indices{'pthread_mutex_lock'} ];
+        push @rela_entries, [ 'pthread_mutex_unlock',   $sym_indices{'pthread_mutex_unlock'} ];
+        push @rela_entries, [ 'pthread_cond_wait',      $sym_indices{'pthread_cond_wait'} ];
+        push @rela_entries, [ 'pthread_cond_signal',    $sym_indices{'pthread_cond_signal'} ];
         push @rela_entries, [ 'pthread_cond_broadcast', $sym_indices{'pthread_cond_broadcast'} ];
-
         if ( $platform->is_dragonflybsd ) {
             push @rela_entries, [ '_init_tls',       $sym_indices{'_init_tls'} ];
             push @rela_entries, [ '_rtld_call_init', $sym_indices{'_rtld_call_init'} ];

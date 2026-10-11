@@ -25,9 +25,9 @@ jobs:
         perl Build.PL
         ./Build
         #~ Haiku ships neither strace nor truss; run the probe untraced.
-        perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
+        perl -Ilib t/30000_jenny/35000_isolate/35010_isolate_runtime.t || true
         prove -Ilib -lv $TEST_FILES
-      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
+      test_files: t/30000_jenny/35000_isolate/35010_isolate_runtime.t t/30000_jenny/35000_isolate/35080_mn_threading.t t/30000_jenny/34000_fiber/34020_fiber_runtime.t
   omnios:
     name: OmniOS
     uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
@@ -50,9 +50,9 @@ jobs:
         perl Build.PL
         ./Build
         #~ truss ships with OmniOS; strace does not exist there.
-        truss -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
+        truss -o trace.log perl -Ilib t/30000_jenny/35000_isolate/35010_isolate_runtime.t || true
         prove -Ilib -lv $TEST_FILES
-      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
+      test_files: t/30000_jenny/35000_isolate/35010_isolate_runtime.t t/30000_jenny/35000_isolate/35080_mn_threading.t t/30000_jenny/34000_fiber/34020_fiber_runtime.t
   openbsd:
     name: OpenBSD
     uses: sanko/workflow-testing/.github/workflows/run-vm.yml@main
@@ -76,9 +76,9 @@ jobs:
         perl Build.PL
         ./Build
         #~ OpenBSD has no strace; truss is the native system call tracer.
-        truss -o trace.log perl -Ilib t/3000_jenny/3500_isolate/3501_isolate_runtime.t || true
+        truss -o trace.log perl -Ilib t/30000_jenny/35000_isolate/35010_isolate_runtime.t || true
         prove -Ilib -lv $TEST_FILES
-      test_files: t/3000_jenny/3500_isolate/3501_isolate_runtime.t t/3000_jenny/3500_isolate/3508_mn_threading.t t/3000_jenny/3400_fiber/3402_fiber_runtime.t
+      test_files: t/30000_jenny/35000_isolate/35010_isolate_runtime.t t/30000_jenny/35000_isolate/35080_mn_threading.t t/30000_jenny/34000_fiber/34020_fiber_runtime.t
 name: Debug Threading Issues
 on:
   workflow_dispatch: ~

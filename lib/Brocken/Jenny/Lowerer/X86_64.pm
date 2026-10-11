@@ -12,8 +12,9 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
     method _abi() { $platform->abi }
 
     method lower($ir_func) {
-        my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
-        my $fcl      = fcb_layout($platform);
+        my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        my $fcl = fcb_layout($platform);
+
         # Seeding ICB.stack_limit writes through %__heap_base. A pure-IR _BROCKEN_ENTRY has no parameters at all;
         # the real entry receives the hidden ICB as its first parameter. The guard builder also names that vreg
         # literally, so a function only qualifies when its first parameter really is `%__heap_base`: the
@@ -3149,7 +3150,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => '' ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
-                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     my $size = int( ( $inst->allocated_type->bits + 7 ) / 8 );
                     $size ||= 1;    # i1 rounds up from 0 to 1 byte
                     $size *= $inst->count->value if $inst->count;
@@ -4091,8 +4092,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     );
 
                     # Keep the shared ICB's stack_limit pointing at the fiber that is about to run.
-                    Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'xfer', 'r12',
-                        $self->_lower_opnd($fiber) );
+                    Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'xfer', 'r12', $self->_lower_opnd($fiber) );
 
                     # Atomic context switch: save current FCB, restore target FCB, jump
                     $mbb->add_instruction(
@@ -4464,10 +4464,8 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'add',
-                            operands => [
-                                $isol_limit,
-                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz / 4, type => $i64 )
-                            ],
+                            operands =>
+                                [ $isol_limit, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz / 4, type => $i64 ) ],
                             comment => 'isolate stack limit += stack_sz/4 (16 KiB cushion)'
                         )
                     );

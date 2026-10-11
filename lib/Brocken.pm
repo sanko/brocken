@@ -58,12 +58,13 @@ class Brocken v0.0.1 {
     field $fuel         : reader : param = $Brocken::default_fuel;
     field $mem_limit    : reader : param = $Brocken::default_mem_limit;
     field $capabilities : reader : param = $Brocken::default_capabilities;
+
     # Sizes (in bytes) of the initial thread's stack, forwarded to linkers that can express them (a PE optional
     # header today). They default to the linker's own defaults, 4 MiB reserve / 2 MiB commit. The reserve must stay
     # above the 2 MiB runway the F17 stack guard seeds below the entry stack pointer; see Brocken::Jenny::Linker.
     field $stack_reserve : reader : param = Brocken::Jenny::Linker::DEFAULT_STACK_RESERVE();
     field $stack_commit  : reader : param = Brocken::Jenny::Linker::DEFAULT_STACK_COMMIT();
-    field $runtime      : reader : param = __CLASS__->DEFAULT_RUNTIME;
+    field $runtime       : reader : param = __CLASS__->DEFAULT_RUNTIME;
     #
     ADJUST {
         # The platform knows which back end targets it, and which extension the output needs, so there is no dispatch

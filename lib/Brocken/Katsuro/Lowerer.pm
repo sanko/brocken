@@ -23,14 +23,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
     field $needs_rc              = {};    # var_name -> 1 (Any-typed variable needing refcounting)
     field $rc_owner              = {};    # var_name -> owning $_dyn_scope_stack entry (declaring block/loop scope)
-field $array_elem_types      = {};    # '@name' -> element IR type (for heap-array GEP scaling)
+    field $array_elem_types      = {};    # '@name' -> element IR type (for heap-array GEP scaling)
     field $rodata : reader       = {};    # label -> bytes for string constants
     field $_rodata_label_counter = 0;
     field $_loop_header_blocks   = [];    # stack of header block labels
     field $_loop_check_blocks    = [];    # stack of iteration-check block labels (counter guard)
-field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
-    field $_loop_body_scopes            = [];    # stack of dynamic-stack scopes opened for each in-progress loop body
-    field $_dyn_scope_stack             = [];    # stack of scope records for each in-progress block/loop (RC ownership)
+    field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
+    field $_loop_body_scopes     = [];    # stack of dynamic-stack scopes opened for each in-progress loop body
+    field $_dyn_scope_stack      = [];    # stack of scope records for each in-progress block/loop (RC ownership)
     field $fuel_exit_block;               # set in lower_function, used by call-site fuel checks
 
     method unique_block_name($prefix) {
@@ -919,8 +919,8 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         }
         $builder->position_at_end($body);
         $current_block = $body;
-        my $loop_scope = { rc_pre => { %$needs_rc } };
-        push $_dyn_scope_stack->@*, $loop_scope;
+        my $loop_scope = { rc_pre => {%$needs_rc} };
+        push $_dyn_scope_stack->@*,  $loop_scope;
         push $_loop_body_scopes->@*, $loop_scope;
         $self->lower_block_statements( $ast->body );
         pop $_loop_body_scopes->@*;
@@ -935,6 +935,7 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
         pop $_loop_header_blocks->@*;
         pop $_loop_check_blocks->@*;
         pop $_loop_exit_blocks->@*;
+
         # The loop body's RC vars are scoped to the loop: every iteration path freed them (back edge, break, next).
         # Drop any still tracked for this loop so a later block/function exit does not decref a dead slot again.
         $self->_forget_rc($_) for grep { defined $rc_owner->{$_} && $rc_owner->{$_} == $loop_scope } keys %$needs_rc;
@@ -1212,7 +1213,8 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
             my @rc_names = sort keys %$needs_rc;
             @rc_names = grep { !$loop_scope->{rc_pre}{$_} } @rc_names;
             if (@rc_names) {
-                my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+                my $decref_hb
+                    = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
                 for my $name (@rc_names) {
                     my $addr   = $symbols->{$name} or next;
                     my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
@@ -1353,16 +1355,17 @@ field $_loop_exit_blocks     = [];    # stack of exit block labels for break (la
             my $slot      = $builder->build_alloca( $ptr_type, '%' . $key . '.heap', undef, $ast->line, $ast->col, $ast->name, $ast->elem_type );
             my $hb_alloca = $symbols->{'__heap_base'} or Carp::croak( "Heap array declaration requires __heap_base at " . $self->_loc($ast) );
             my $hb        = $builder->build_load( $ptr_type, $hb_alloca, undef, $ast->line, $ast->col );
-            my $alloc_fn  = $functions->{'Brocken::Runtime::alloc_array'} or Carp::croak( "Runtime function alloc_array not found at " . $self->_loc($ast) );
-            my $count_val = $size_val
-                // Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+            my $alloc_fn  = $functions->{'Brocken::Runtime::alloc_array'} or
+                Carp::croak( "Runtime function alloc_array not found at " . $self->_loc($ast) );
+            my $count_val       = $size_val // Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
             my $elem_size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $elem_bytes );
-            my $arr = $builder->build_call( $alloc_fn, [ $hb, $count_val, $elem_size_const ], undef, $ast->line, $ast->col );
+            my $arr             = $builder->build_call( $alloc_fn, [ $hb, $count_val, $elem_size_const ], undef, $ast->line, $ast->col );
             $builder->build_store( $arr, $slot, $ast->line, $ast->col );
             $symbols->{$key} = $slot;
             $self->_note_rc($key);
             return;
         }
+
         # A small constant-sized array stays on the stack; every other declaration was heap-promoted above.
         my $alloca = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
         $symbols->{$key} = $alloca;

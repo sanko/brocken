@@ -235,8 +235,10 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{os_thread} }, type => $ptr ), $icb_ptr ],
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{os_thread} }, type => $ptr ),
+                    $icb_ptr
+                ],
                 comment => 'FCB.os_thread = ICB'
             )
         );
@@ -255,8 +257,10 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'load',
-                operands =>
-                    [ $func_addr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{resume_pc} }, type => $ptr ) ],
+                operands => [
+                    $func_addr,
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{resume_pc} }, type => $ptr )
+                ],
                 comment => 'func = FCB.resume_pc'
             )
         );
@@ -477,8 +481,10 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{self} }, type => $i64 ), $fcb ],
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{self} }, type => $i64 ),
+                    $fcb
+                ],
                 comment => 'FCB.self = FCB addr'
             )
         );
@@ -509,8 +515,14 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{os_thread} }, type => $i64 ), $icb ],
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'mem',
+                        value => { base => '%init.fcb', disp => $fcl->{os_thread} },
+                        type  => $i64
+                    ),
+                    $icb
+                ],
                 comment => 'FCB.os_thread = &ICB'
             )
         );
@@ -1298,9 +1310,9 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                     $bytes .= pack( 'V', $base | ( $rid << 16 ) | ( $lid << 5 ) );
                 }
                 elsif ( $opcode eq 'ctx_swap' ) {
-                    my $ctx_r    = $resolve->($dst);           # fiber register (x28)
+                    my $ctx_r    = $resolve->($dst);        # fiber register (x28)
                     my $cid      = $reg_id->($ctx_r);
-                    my $target_r = $resolve->($src);           # target FCB pointer
+                    my $target_r = $resolve->($src);        # target FCB pointer
                     my $tid      = $reg_id->($target_r);
                     my $fcl      = fcb_layout($platform);
                     my @callee   = $fcl->{saved}->@*;

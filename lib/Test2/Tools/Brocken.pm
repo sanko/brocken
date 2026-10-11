@@ -152,7 +152,6 @@ package Test2::Tools::Brocken v0.0.1 {
             $output = qx["@{[ wasmtime_binary() ]}" run --invoke _BROCKEN_ENTRY "$file" $memory 2>&1];
         }
         else {
-
             # The entry returns an i64. `process.exit` can only carry a status inside Node's safe-integer range
             # (`>= -2^53 && <= 2^53`), so a wide return value threw `ERR_OUT_OF_RANGE` and the process died as exit
             # status 1 before the number was ever delivered. Write the value through fd 1 instead, which routes the
@@ -166,7 +165,8 @@ package Test2::Tools::Brocken v0.0.1 {
                 $output = "could not start node: $!\n";
                 return ( undef, $output );
             };
-            $output = do { local $/; <$node> } // '';
+            $output = do { local $/; <$node> }
+                // '';
             close $node;
         }
         my @lines = grep {/\S/} split /\n/, $output;

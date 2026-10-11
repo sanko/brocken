@@ -43,9 +43,9 @@ class Brocken::Jenny::MIR::MachineBasicBlock v0.0.1 {
     }
 };
 class Brocken::Jenny::MIR::MachineFunction v0.0.1 {
-    field $name       : param : reader;
-    field $blocks     : param : reader = [];
-    field $frame_size : param : reader = 0;
+    field $name             : param  : reader;
+    field $blocks           : param  : reader = [];
+    field $frame_size       : param  : reader = 0;
     field $stack_guard      : reader : writer = 0;    # emit a prologue stack-overflow trap
     field $stack_limit_init : reader : writer = 0;    # entry: seed ICB.stack_limit from the frame pointer
     method add_block($block) { push $self->blocks->@*, $block }

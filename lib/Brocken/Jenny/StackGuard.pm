@@ -35,9 +35,7 @@ use Brocken::Jenny::MIR;
 use Brocken::Lindsay::IR;
 use Brocken::ICB;
 use Brocken::Jenny::FCB qw[fcb_layout];
-
 use constant STACK_BUDGET => 2 * 1024 * 1024;    # main-thread margin below the entry stack pointer
-
 sub _i64 { return Brocken::Lindsay::IR::Type::i64() }
 sub _ptr { return Brocken::Lindsay::IR::Type::ptr() }
 sub _i1  { return Brocken::Lindsay::IR::Type::i1() }
@@ -45,12 +43,15 @@ sub _i1  { return Brocken::Lindsay::IR::Type::i1() }
 sub _mi ( $opcode, $operands, $comment ) {
     return Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => $operands, comment => $comment );
 }
-sub _phys ( $name ) {
+
+sub _phys ($name) {
     return Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $name );
 }
-sub _imm ( $value ) {
+
+sub _imm ($value) {
     return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value, type => Brocken::Lindsay::IR::Type::i64() );
 }
+
 sub _mem ( $base, $disp, $type ) {
 
     # Machine operands name a memory base by the virtual register's *name*, not by its operand object (see the
@@ -60,18 +61,20 @@ sub _mem ( $base, $disp, $type ) {
     my $name = ref $base ? $base->value : $base;
     return Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $name, disp => $disp }, type => $type );
 }
+
 sub _vreg ( $name, $type ) {
     return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $type );
 }
-sub _label ( $name ) {
+
+sub _label ($name) {
     return Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $name );
 }
 
 # dst = (a < b), unsigned, in the target's idiom.
 sub _set_ult ( $platform, $mbb, $dst, $a, $b, $comment ) {
     if ( $platform->is_arm64 ) {
-        $mbb->add_instruction( _mi( 'cmp',      [ $a, $b ], $comment ) );
-        $mbb->add_instruction( _mi( 'cset_cc',  [$dst],     $comment ) );
+        $mbb->add_instruction( _mi( 'cmp',     [ $a, $b ], $comment ) );
+        $mbb->add_instruction( _mi( 'cset_cc', [$dst],     $comment ) );
     }
     elsif ( $platform->is_riscv64 ) {
 
@@ -79,9 +82,9 @@ sub _set_ult ( $platform, $mbb, $dst, $a, $b, $comment ) {
         $mbb->add_instruction( _mi( 'sltu', [ $dst, $a, $b ], $comment ) );
     }
     else {
-        $mbb->add_instruction( _mi( 'cmp',  [ $a, $b ],       $comment ) );
+        $mbb->add_instruction( _mi( 'cmp',  [ $a,   $b ],      $comment ) );
         $mbb->add_instruction( _mi( 'mov',  [ $dst, _imm(0) ], $comment ) );
-        $mbb->add_instruction( _mi( 'setb', [$dst],           $comment ) );
+        $mbb->add_instruction( _mi( 'setb', [$dst], $comment ) );
     }
     return 1;
 }
@@ -89,19 +92,19 @@ sub _set_ult ( $platform, $mbb, $dst, $a, $b, $comment ) {
 # dst = (a == 0), in the target's idiom.
 sub _set_zeq ( $platform, $mbb, $dst, $a, $comment ) {
     if ( $platform->is_arm64 ) {
-        $mbb->add_instruction( _mi( 'cmp',      [ $a, _imm(0) ], $comment ) );
-        $mbb->add_instruction( _mi( 'cset_eq',  [$dst],          $comment ) );
+        $mbb->add_instruction( _mi( 'cmp',     [ $a, _imm(0) ], $comment ) );
+        $mbb->add_instruction( _mi( 'cset_eq', [$dst],          $comment ) );
     }
     elsif ( $platform->is_riscv64 ) {
 
         # sltiu is in-place (rs1 == rd): copy first, then dst = (dst <u 1).
-        $mbb->add_instruction( _mi( 'mv',    [ $dst, $a ],  $comment ) );
+        $mbb->add_instruction( _mi( 'mv',    [ $dst, $a ],      $comment ) );
         $mbb->add_instruction( _mi( 'sltiu', [ $dst, _imm(1) ], $comment ) );
     }
     else {
-        $mbb->add_instruction( _mi( 'cmp',  [ $a, _imm(0) ], $comment ) );
+        $mbb->add_instruction( _mi( 'cmp',  [ $a,   _imm(0) ], $comment ) );
         $mbb->add_instruction( _mi( 'mov',  [ $dst, _imm(0) ], $comment ) );
-        $mbb->add_instruction( _mi( 'sete', [$dst],          $comment ) );
+        $mbb->add_instruction( _mi( 'sete', [$dst], $comment ) );
     }
     return 1;
 }
@@ -111,9 +114,9 @@ sub seed_entry ( $mbb, $hb_vreg, $platform ) {
     my $ptr  = _ptr();
     my $fp   = _vreg( '%stk.entry.fp',   $ptr );
     my $seed = _vreg( '%stk.entry.seed', $ptr );
-    $mbb->add_instruction( _mi( 'mov', [ $fp, _phys( $platform->stack_reg ) ],     'stk: entry stack base' ) );
-    $mbb->add_instruction( _mi( 'mov', [ $seed, $fp ],                             'stk: seed = stack base' ) );
-    $mbb->add_instruction( _mi( 'sub', [ $seed, _imm( STACK_BUDGET ) ],            'stk: seed -= STACK_BUDGET' ) );
+    $mbb->add_instruction( _mi( 'mov',   [ $fp,   _phys( $platform->stack_reg ) ], 'stk: entry stack base' ) );
+    $mbb->add_instruction( _mi( 'mov',   [ $seed, $fp ],                           'stk: seed = stack base' ) );
+    $mbb->add_instruction( _mi( 'sub',   [ $seed, _imm(STACK_BUDGET) ],            'stk: seed -= STACK_BUDGET' ) );
     $mbb->add_instruction( _mi( 'store', [ _mem( $hb_vreg, Brocken::ICB::STACK_LIMIT, $ptr ), $seed ], 'stk: ICB.stack_limit = sp - budget' ) );
     return 1;
 }
@@ -129,18 +132,15 @@ sub guard_user_function ( $mbb, $hb_vreg, $platform ) {
     my $lim  = _vreg( '%stk.lim',  $ptr );
     my $tmp  = _vreg( '%stk.tmp',  $ptr );
     my $over = _vreg( '%stk.over', _i1() );
-
-    $mbb->add_instruction( _mi( 'mov',  [ $fp,  _phys( $platform->stack_reg ) ],                 'stk: stack base' ) );
+    $mbb->add_instruction( _mi( 'mov',  [ $fp,  _phys( $platform->stack_reg ) ],                     'stk: stack base' ) );
     $mbb->add_instruction( _mi( 'load', [ $lim, _mem( $hb_vreg, Brocken::ICB::STACK_LIMIT, $ptr ) ], 'stk: load limit' ) );
-    $mbb->add_instruction( _mi( 'mov',  [ $tmp, $fp ],                                          'stk: sp' ) );
+    $mbb->add_instruction( _mi( 'mov',  [ $tmp, $fp ],                                               'stk: sp' ) );
     _set_ult( $platform, $mbb, $over, $tmp, $lim, 'stk: over = sp < limit' );
-
     my $fail = Brocken::Jenny::MIR::MachineBasicBlock->new( name => '%stk.fail' );
     $fail->add_instruction( _mi( 'label', [ _label('%stk.fail') ], 'stk: fail' ) );
-
     my $err = _vreg( '%stk.err', $i64 );
-    $fail->add_instruction( _mi( 'mov',   [ $err, _imm( Brocken::ICB::ERR_STACK ) ],                  'stk: ERR_STACK' ) );
-    $fail->add_instruction( _mi( 'store', [ _mem( $hb_vreg, Brocken::ICB::ERR_CODE, $i64 ), $err ],    'stk: err_code = ERR_STACK' ) );
+    $fail->add_instruction( _mi( 'mov', [ $err, _imm(Brocken::ICB::ERR_STACK) ], 'stk: ERR_STACK' ) );
+    $fail->add_instruction( _mi( 'store', [ _mem( $hb_vreg, Brocken::ICB::ERR_CODE, $i64 ), $err ], 'stk: err_code = ERR_STACK' ) );
 
     # A live try/catch handler (ICB.exception_handler_stack != 0) wins: unwind to it like `throw` does. The record
     # of the error is already in err_code and goes into thrown_value so the catch binding can inspect it.
@@ -149,24 +149,19 @@ sub guard_user_function ( $mbb, $hb_vreg, $platform ) {
     $fail->add_instruction( _mi( 'load', [ $has, _mem( $hb_vreg, Brocken::ICB::EXCEPTION_HANDLER_STACK, $ptr ) ], 'stk: handler head' ) );
     _set_zeq( $platform, $fail, $none, $has, 'stk: none = handler == 0' );
     $fail->add_instruction( _mi( 'bne', [ $none, _label('%stk.graceful') ], 'stk: no handler -> graceful return' ) );
-
     my ( $arg0, $arg1 ) = $platform->abi->argument_locations( [ 'int', 'int' ] )->@*;
     my $jb = _vreg( '%stk.jb', $ptr );
-    $fail->add_instruction( _mi( 'load',      [ $jb, _mem( $has, 8, $ptr ) ],                                     'stk: jmp_buf = handler[8]' ) );
-    $fail->add_instruction( _mi( 'store',     [ _mem( $hb_vreg, Brocken::ICB::THROWN_VALUE, $i64 ), $err ],       'stk: thrown_value = ERR_STACK' ) );
-    $fail->add_instruction( _mi( 'mov',       [ _phys($arg0), $jb ],                                             'stk: longjmp arg0' ) );
-    $fail->add_instruction( _mi( 'mov',       [ _phys($arg1), _imm(1) ],                                         'stk: longjmp arg1' ) );
+    $fail->add_instruction( _mi( 'load',      [ $jb, _mem( $has, 8, $ptr ) ],                               'stk: jmp_buf = handler[8]' ) );
+    $fail->add_instruction( _mi( 'store',     [ _mem( $hb_vreg, Brocken::ICB::THROWN_VALUE, $i64 ), $err ], 'stk: thrown_value = ERR_STACK' ) );
+    $fail->add_instruction( _mi( 'mov',       [ _phys($arg0), $jb ],                                        'stk: longjmp arg0' ) );
+    $fail->add_instruction( _mi( 'mov',       [ _phys($arg1), _imm(1) ],                                    'stk: longjmp arg1' ) );
     $fail->add_instruction( _mi( 'call_func', [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => 'longjmp' ) ], 'stk: longjmp' ) );
-    $fail->add_instruction( _mi( 'jmp',       [ _label('%stk.graceful') ],                                       'stk: longjmp never returns' ) );
-
+    $fail->add_instruction( _mi( 'jmp',       [ _label('%stk.graceful') ], 'stk: longjmp never returns' ) );
     my $grace = Brocken::Jenny::MIR::MachineBasicBlock->new( name => '%stk.graceful' );
-    $grace->add_instruction( _mi( 'label', [ _label('%stk.graceful') ],                                  'stk: graceful' ) );
-    $grace->add_instruction( _mi( 'mov',   [ _phys( $platform->return_register ), _imm(0) ],             'stk: return 0' ) );
-    $grace->add_instruction( _mi( 'ret',   [],                                                           'stk: ret' ) );
-
-    $mbb->add_instruction(
-        _mi( 'bne', [ $over, _label('%stk.fail') ], 'stk: trap on overflow' )
-    );
+    $grace->add_instruction( _mi( 'label', [ _label('%stk.graceful') ],                      'stk: graceful' ) );
+    $grace->add_instruction( _mi( 'mov',   [ _phys( $platform->return_register ), _imm(0) ], 'stk: return 0' ) );
+    $grace->add_instruction( _mi( 'ret',   [],                                               'stk: ret' ) );
+    $mbb->add_instruction( _mi( 'bne', [ $over, _label('%stk.fail') ], 'stk: trap on overflow' ) );
     return ( $fail, $grace );
 }
 
@@ -179,11 +174,11 @@ sub seed_main_fiber_limit ( $mbb, $platform, $fcb_vreg, $icb_vreg ) {
     my $lim = _vreg( '%stk.mf.lim', $ptr );
     my $sp  = _vreg( '%stk.mf.sp',  $ptr );
     my $fcb = fcb_layout($platform);
-    $mbb->add_instruction( _mi( 'mov',   [ $sp,  _phys( $platform->stack_reg ) ],                        'stk: main stack base' ) );
-    $mbb->add_instruction( _mi( 'mov',   [ $lim, $sp ],                                                 'stk: limit = sp' ) );
-    $mbb->add_instruction( _mi( 'sub',   [ $lim, _imm( STACK_BUDGET ) ],                                'stk: limit -= budget' ) );
-    $mbb->add_instruction( _mi( 'store', [ _mem( $fcb_vreg, $fcb->{stack_limit}, $ptr ), $lim ],         'stk: FCB.stack_limit = sp - budget' ) );
-    $mbb->add_instruction( _mi( 'store', [ _mem( $icb_vreg, Brocken::ICB::STACK_LIMIT, $ptr ), $lim ],   'stk: ICB.stack_limit = sp - budget' ) );
+    $mbb->add_instruction( _mi( 'mov',   [ $sp,  _phys( $platform->stack_reg ) ], 'stk: main stack base' ) );
+    $mbb->add_instruction( _mi( 'mov',   [ $lim, $sp ],                           'stk: limit = sp' ) );
+    $mbb->add_instruction( _mi( 'sub',   [ $lim, _imm(STACK_BUDGET) ],            'stk: limit -= budget' ) );
+    $mbb->add_instruction( _mi( 'store', [ _mem( $fcb_vreg, $fcb->{stack_limit}, $ptr ), $lim ], 'stk: FCB.stack_limit = sp - budget' ) );
+    $mbb->add_instruction( _mi( 'store', [ _mem( $icb_vreg, Brocken::ICB::STACK_LIMIT, $ptr ), $lim ], 'stk: ICB.stack_limit = sp - budget' ) );
     my ($arg0) = $platform->abi->argument_locations( ['int'] )->@*;
     $mbb->add_instruction( _mi( 'mov', [ _phys($arg0), _vreg( $icb_vreg, $ptr ) ], 'stk: param0 = ICB for _real_main' ) );
     return 1;
@@ -199,11 +194,11 @@ sub swap_stack_limit ( $mbb, $platform, $tag, $cur_fcb, $target ) {
     my $icb  = _vreg( "%stk.$tag.icb",  $ptr );
     my $live = _vreg( "%stk.$tag.live", $ptr );
     my $tgt  = _vreg( "%stk.$tag.tgt",  $ptr );
-    $mbb->add_instruction( _mi( 'load',  [ $icb,  _mem( $cur_fcb, $fcb->{os_thread}, $ptr ) ],                    'stk: ICB = FCB.os_thread' ) );
-    $mbb->add_instruction( _mi( 'load',  [ $live, _mem( $icb, Brocken::ICB::STACK_LIMIT, $ptr ) ],                'stk: live limit' ) );
-    $mbb->add_instruction( _mi( 'store', [ _mem( $cur_fcb, $fcb->{stack_limit}, $ptr ), $live ],                  'stk: persist outgoing limit' ) );
-    $mbb->add_instruction( _mi( 'load',  [ $tgt,  _mem( $target, $fcb->{stack_limit}, $ptr ) ],                   'stk: incoming limit' ) );
-    $mbb->add_instruction( _mi( 'store', [ _mem( $icb, Brocken::ICB::STACK_LIMIT, $ptr ), $tgt ],                 'stk: ICB.limit = incoming limit' ) );
+    $mbb->add_instruction( _mi( 'load',  [ $icb,  _mem( $cur_fcb, $fcb->{os_thread}, $ptr ) ],     'stk: ICB = FCB.os_thread' ) );
+    $mbb->add_instruction( _mi( 'load',  [ $live, _mem( $icb, Brocken::ICB::STACK_LIMIT, $ptr ) ], 'stk: live limit' ) );
+    $mbb->add_instruction( _mi( 'store', [ _mem( $cur_fcb, $fcb->{stack_limit}, $ptr ), $live ], 'stk: persist outgoing limit' ) );
+    $mbb->add_instruction( _mi( 'load',  [ $tgt, _mem( $target, $fcb->{stack_limit}, $ptr ) ], 'stk: incoming limit' ) );
+    $mbb->add_instruction( _mi( 'store', [ _mem( $icb, Brocken::ICB::STACK_LIMIT, $ptr ), $tgt ], 'stk: ICB.limit = incoming limit' ) );
 
     # Hand the ICB to the incoming fiber's first function so a guarded fresh fiber reads %__heap_base from arg slot 0.
     # This is emitted on every backend. On ABIs where the return register *is* arg0 (AArch64 x0, RISC-V a0) the write
@@ -215,5 +210,4 @@ sub swap_stack_limit ( $mbb, $platform, $tag, $cur_fcb, $target ) {
     $mbb->add_instruction( _mi( 'mov', [ _phys($arg0), $icb ], 'stk: param0 = ICB' ) );
     return 1;
 }
-
 1;

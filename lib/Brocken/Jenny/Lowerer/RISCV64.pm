@@ -10,8 +10,9 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
     method _abi() { $platform->abi }
 
     method lower($ir_func) {
-        my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
-        my $fcl      = fcb_layout($platform);
+        my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        my $fcl = fcb_layout($platform);
+
         # Seeding ICB.stack_limit writes through %__heap_base. A pure-IR _BROCKEN_ENTRY has no parameters at all;
         # the real entry receives the hidden ICB as its first parameter. The guard builder names that vreg
         # literally too, so a function only qualifies when its first parameter really is `%__heap_base`: the
@@ -3624,7 +3625,11 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                             opcode   => 'add',
                             operands => [
                                 $riscv_fiber_limit,
-                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz / 4, type => Brocken::Lindsay::IR::Type::i64() )
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'imm',
+                                    value => $stack_sz / 4,
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                )
                             ],
                             comment => 'fiber stack limit += stack_sz/4 (16 KiB cushion)'
                         )
@@ -3694,6 +3699,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                             comment => 'transfer value -> target FCB'
                         )
                     );
+
                     # Keep the shared ICB's stack_limit pointing at the fiber that is about to run.
                     Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'xfer', 's11', $target );
                     $mbb->add_instruction(
@@ -3716,16 +3722,16 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                                         type  => $i64
                                     )
                                 ],
-                                comment  => 'transfer result from own FCB'
+                                comment => 'transfer result from own FCB'
                             )
                         );
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberYield') ) {
-                    my ($val)     = $inst->operands->@*;
-                    my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 's11' );
-                    my $ptr       = Brocken::Lindsay::IR::Type::ptr();
-                    my $i64       = Brocken::Lindsay::IR::Type::i64();
+                    my ($val)      = $inst->operands->@*;
+                    my $fiber_reg  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 's11' );
+                    my $ptr        = Brocken::Lindsay::IR::Type::ptr();
+                    my $i64        = Brocken::Lindsay::IR::Type::i64();
                     my $parent_tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.parent', type => $ptr );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3741,6 +3747,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                             comment => 'load parent FCB from current FCB'
                         )
                     );
+
                     # Hand the yield value to the parent through its FCB, for the same reason FiberTransfer does: a0
                     # carries the ICB into a fresh fiber and so cannot also carry the yield value.
                     my $lowered_val = $self->_lower_opnd($val);
@@ -3758,6 +3765,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                             comment => 'yield value -> parent FCB'
                         )
                     );
+
                     # Keep the shared ICB's stack_limit pointing at the parent we are about to resume.
                     Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'yield', 's11', $parent_tmp );
                     $mbb->add_instruction(
@@ -3767,7 +3775,6 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                             comment  => 'swap to parent FCB'
                         )
                     );
-
                     if ( defined $inst->name ) {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         $mbb->add_instruction(
@@ -3781,7 +3788,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                                         type  => $i64
                                     )
                                 ],
-                                comment  => 'yield result from own FCB'
+                                comment => 'yield result from own FCB'
                             )
                         );
                     }
@@ -4039,9 +4046,11 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                             comment => 'FCB.os_thread = ICB'
                         )
                     );
+
                     # The isolate's guards run on its own 64 KiB stack; seed the same cushion the fibers use so a
                     # guarded isolate function compares sp against this stack, not the main thread's budget.
-                    my $riscv_isol_limit = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.stklim', type => $ptr );
+                    my $riscv_isol_limit
+                        = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.stklim', type => $ptr );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'mv',
@@ -4053,8 +4062,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'add',
                             operands => [
-                                $riscv_isol_limit,
-                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz / 4, type => $i64 )
+                                $riscv_isol_limit, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $stack_sz / 4, type => $i64 )
                             ],
                             comment => 'isolate stack limit += stack_sz/4 (16 KiB cushion)'
                         )

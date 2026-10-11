@@ -9,7 +9,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
     use Brocken::Jenny::MIR;
     use Brocken::ICB;
     use Brocken::Jenny::StackGuard;
-    use Brocken::Jenny::FCB qw[fcb_layout];
+    use Brocken::Jenny::FCB                         qw[fcb_layout];
     use Brocken::Jenny::Codegen::RISCV64::Encodings qw[:all];
     field $platform : param;
 
@@ -218,8 +218,10 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{os_thread} }, type => $ptr ), $icb_ptr ],
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{os_thread} }, type => $ptr ),
+                    $icb_ptr
+                ],
                 comment => 'FCB.os_thread = ICB'
             )
         );
@@ -238,8 +240,10 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'load',
-                operands =>
-                    [ $func_addr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{resume_pc} }, type => $ptr ) ],
+                operands => [
+                    $func_addr,
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{resume_pc} }, type => $ptr )
+                ],
                 comment => 'func = FCB.resume_pc'
             )
         );
@@ -434,8 +438,10 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{self} }, type => $i64 ), $fcb ],
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{self} }, type => $i64 ),
+                    $fcb
+                ],
                 comment => 'FCB.self = FCB addr'
             )
         );
@@ -466,8 +472,14 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
-                operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{os_thread} }, type => $i64 ), $icb ],
+                operands => [
+                    Brocken::Jenny::MIR::MachineOperand->new(
+                        kind  => 'mem',
+                        value => { base => '%init.fcb', disp => $fcl->{os_thread} },
+                        type  => $i64
+                    ),
+                    $icb
+                ],
                 comment => 'FCB.os_thread = &ICB'
             )
         );
@@ -618,11 +630,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # range, and masking the displacement would wrap it onto an unrelated slot (silently corrupting both).  When
         # the displacement does not fit, materialise the effective address into a scratch register and use a zero
         # displacement instead.  Indexed addresses are folded into the same scratch as well.
-        my $fits_disp = sub ($d) { $d >= -2048 && $d <= 2047 };
+        my $fits_disp       = sub ($d) { $d >= -2048 && $d <= 2047 };
         my $emit_mem_access = sub {
             my ( $funct3, $data_id, $base_id, $disp, $store, $index_id, @extra_forbidden ) = @_;
             my %forbidden = ( $data_id => 1, $base_id => 1 );
-            $forbidden{$_} = 1 for grep {defined} @extra_forbidden;
+            $forbidden{$_}        = 1 for grep {defined} @extra_forbidden;
             $forbidden{$index_id} = 1 if defined $index_id;
             my $pick = sub () {
                 my %used;
@@ -634,7 +646,6 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 }
                 return undef;
             };
-
             my $bid = $base_id;
             my $off = $disp;
             if ( defined $index_id ) {
@@ -656,7 +667,6 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 $bid = $tid;
                 $off = 0;
             }
-
             if ($store) {
                 my $imm_lo = $off & 0x1F;
                 my $imm_hi = ( $off >> 5 ) & 0x7F;
@@ -683,8 +693,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $signed = $mem->type && $mem->type->kind eq 'int'     ? $mem->type->signed : 1;
             my $funct3 = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
             my $disp   = $final_disp->($addr);
-
             my $iid;
+
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                 $iid = $reg_id->($index_r);
@@ -1258,11 +1268,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     $bytes .= pack( 'V', $base | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                 }
                 elsif ( $opcode eq 'ctx_swap' ) {
-                    my $ctx_r    = $resolve->($dst);                                  # fiber register (s11)
+                    my $ctx_r    = $resolve->($dst);        # fiber register (s11)
                     my $cid      = $reg_id->($ctx_r);
-                    my $target_r = $resolve->($src);                                  # target FCB pointer
+                    my $target_r = $resolve->($src);        # target FCB pointer
                     my $tid      = $reg_id->($target_r);
-                    my $adj_tmp  = 28;                                                # t3
+                    my $adj_tmp  = 28;                      # t3
                     my $fcl      = fcb_layout($platform);
                     my @callee   = $fcl->{saved}->@*;
 
