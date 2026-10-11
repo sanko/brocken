@@ -625,13 +625,22 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # displacement scratch drawn from them would clobber the value the return is about to hand back, so the pair
         # stays out of every scratch pool.
         my %ret_regs = map { $_ => 1 } grep {defined} $platform->abi->return_pair_registers;
-        my $pick_scratch = sub () {
+
+        # A scratch must not name any register the current instruction reads or writes, so the caller passes those in
+        # @forbidden.  An assigned register is never free, but a function that keeps enough values live assigns every
+        # caller register, so the allocator's own reload scratch is the fallback: it holds a reloaded value only for
+        # the single instruction that reads it, which is exactly the one that lists it in @forbidden.
+        my $pick_scratch = sub (@forbidden) {
+            my %forbid = map { $_ => 1 } grep {defined} @forbidden;
             my %used;
             @used{ values %$assignment } = ();
             $used{$_} = 1 for keys %reserved;
             $used{$_} = 1 for keys %ret_regs;
             for my $r ( $platform->registers('caller')->@* ) {
-                return $r unless $used{$r};
+                return $r unless exists $used{$r} || $forbid{$r};
+            }
+            for my $r ( grep {defined} @$reserved ) {
+                return $r unless $forbid{$r};
             }
             return undef;
         };
@@ -668,7 +677,15 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
 
                 for my $r ( $platform->registers('caller')->@* ) {
                     my $rid = $reg_id->($r);
-                    return $r unless $used{$r} || $forbidden{$rid};
+                    return $r unless exists $used{$r} || $forbidden{$rid};
+                }
+
+                # Every caller register can be assigned in a function with enough live values, so fall back to the
+                # allocator's reload scratch.  It holds a reloaded value only for the instruction that reads it,
+                # which lists that register in %forbidden, so a scratch drawn from it here is dead.
+                for my $r ( grep {defined} @$reserved ) {
+                    my $rid = $reg_id->($r);
+                    return $r unless $forbidden{$rid};
                 }
                 return undef;
             };
@@ -741,11 +758,14 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # rather than reloaded, because these are the opcodes the spiller will hand memory to.  No RISC-V encoding
         # here takes a memory source, so the value is pulled into a scratch register first and the register form is
         # emitted.
-        my $load_mem_scratch = sub ( $mem, $what ) {
+        my $load_mem_scratch = sub ( $mem, $what, @extra_forbidden ) {
             my $addr   = $mem->value;
             my $base_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
             my $bid    = $reg_id->($base_r);
-            my $tmp_r  = $pick_scratch->();
+            my @forbid = ( $base_r, @extra_forbidden );
+            push @forbid, $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) )
+                if defined $addr->{index};
+            my $tmp_r  = $pick_scratch->(@forbid);
             die "no temp register for the memory source of $what" unless $tmp_r;
             my $tid    = $reg_id->($tmp_r);
             my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits   : 64;
@@ -1038,7 +1058,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                             $src_r = $tmp_r;
                         }
                         else {
-                            $sid = $src->kind eq 'mem' ? $load_mem_scratch->( $src, $opcode ) : $reg_id->( $resolve->($src) );
+                            $sid = $src->kind eq 'mem' ? $load_mem_scratch->( $src, $opcode, $dst_r ) : $reg_id->( $resolve->($src) );
                         }
                         my $r_op = OP;
                         $r_op = 0x3B if ( ( $opcode eq 'div' || $opcode eq 'mul' ) && $dst->type && $dst->type->bits < 64 );
