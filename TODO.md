@@ -15,6 +15,8 @@ These bugs cause silent miscompilations in the code generators and register allo
 - [x] **`umulh` Liveness Gap:** `umulh` is missing from both `%reads_dst` and `%rmw` in `RegAlloc.pm`, causing omitted reloads and latent liveness issues.
 - [x] **x86-64 Mixed Arg Sum:** A sum of many mixed integer and floating-point arguments returns the wrong value on x86-64 Linux ELF targets due to register pressure spilling bugs.
 - [x] **F17 - Unbounded Stack Growth:** `alloca_dyn` inside a loop grows `rsp` every iteration until the function epilogue. Fixed by heap-promoting dynamic-sized arrays (and static arrays exceeding 4 KiB) through `alloc_array`, freeing and reusing the slab at each loop back edge so growth is bounded. The dynamic-stack machinery (`alloca_dyn`/`stack_save`/`stack_restore`) and its MIR consumers were removed entirely. Tests: `3308_dynamic_array_alloca.t`, `3309_dynamic_alloca_loop.t`.
+- [x] **i128 Unsigned Div/Rem:** `udiv`/`urem` on 128-bit integers produced wrong results on ARM64 (the partial remainder was accumulated in the wrong 64-bit half, inflating it by 2^64) and on RISC-V (12-bit spill displacements for the i128 operand pairs overflowed the machine addressing mode). Test: `3268_i128_unsigned_divrem_native.t`.
+- [x] **Fresh-Fiber Stack Guard:** On ARM64 and RISC-V `arg0` is also the return register, so the stack-guard handoff that gives a fresh fiber its ICB was skipped to preserve the fiber transfer value; the fresh entry then read `%__heap_base` from a zeroed register and faulted. Transfer/yield values now travel through an FCB slot, leaving `arg0` free for the ICB. Test: `3406_fiber_stack_guard.t`.
 
 ---
 

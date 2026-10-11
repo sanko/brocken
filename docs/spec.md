@@ -4,6 +4,8 @@
 **Version:** v0.0.1
 **Status:** Active Development
 
+> **Implementation Note:** This document specifies the target language and is written ahead of the implementation. Brocken is under active development, so sections below range from fully shipped and covered by the test suite to planned or partially implemented. Read it as the design of record, not a status report; see [`TODO.md`](../TODO.md) for what is shipped versus outstanding.
+
 ---
 
 ## 1. Philosophy & Compiler Architecture
