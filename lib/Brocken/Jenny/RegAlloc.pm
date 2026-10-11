@@ -163,7 +163,14 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 next unless defined $name;
                 if ( $i == 0 && $writes ) {
                     $dst = $name;
-                    $used{$name} = 1 if $rmw{ $inst->opcode };
+
+                    # A two-operand slt/sltu/sltiu reads its destination: the encoder emits `rd, rd, src`, so the old
+                    # value of rd is the first source.  Treat it as read-modify-write, or the read is dropped from the
+                    # live interval and a later value is free to take the register.  The three-operand form names its
+                    # two sources explicitly and does not read rd, so only the two-operand shape joins the RMW set.
+                    $used{$name} = 1
+                        if $rmw{ $inst->opcode }
+                        || ( @ops == 2 && $inst->opcode =~ /^(?:slt|sltu|sltiu)$/ );
                     next;
                 }
                 $used{$name} = 1;
@@ -653,7 +660,9 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     my $scr = $n_reload++ ? $addr_reg : $spill_temp;
                     $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $scr, type => $ops[$i]->type );
                     if ( $i == 0 ) {
-                        push @load_offsets, [ $sp{0}, $scr ] if $reads_dst{$opcode};
+                        push @load_offsets, [ $sp{0}, $scr ]
+                            if $reads_dst{$opcode}
+                            || ( @ops == 2 && $opcode =~ /^(?:slt|sltu|sltiu)$/ );
                         $store_off = $sp{0};
                     }
                     else {

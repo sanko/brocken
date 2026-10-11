@@ -616,10 +616,20 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # A spill reload lands in the register the allocator reserved for it, so a scratch chosen for a memory source
         # must not be one of those: it would overwrite the reloaded value the instruction is about to use.
         my %reserved     = map { $_ => 1 } grep {defined} @$reserved;
+
+        # Set while encoding a `caller-save`/`caller-restore` instruction (see the encoding loop below).
+        my $caller_io    = 0;
+
+        # The ABI return registers (a0/a1 on RISC-V: the low and high halves of a value) hold the result across the
+        # return sequence, where they are not virtual registers and so never appear in %assignment.  A large-
+        # displacement scratch drawn from them would clobber the value the return is about to hand back, so the pair
+        # stays out of every scratch pool.
+        my %ret_regs = map { $_ => 1 } grep {defined} $platform->abi->return_pair_registers;
         my $pick_scratch = sub () {
             my %used;
             @used{ values %$assignment } = ();
             $used{$_} = 1 for keys %reserved;
+            $used{$_} = 1 for keys %ret_regs;
             for my $r ( $platform->registers('caller')->@* ) {
                 return $r unless $used{$r};
             }
@@ -632,7 +642,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # displacement instead.  Indexed addresses are folded into the same scratch as well.
         my $fits_disp       = sub ($d) { $d >= -2048 && $d <= 2047 };
         my $emit_mem_access = sub {
-            my ( $funct3, $data_id, $base_id, $disp, $store, $index_id, @extra_forbidden ) = @_;
+            my ( $funct3, $data_id, $base_id, $disp, $store, $index_id, $float, @extra_forbidden ) = @_;
+            my $op = $float ? ( $store ? FSTORE : FLOAD ) : ( $store ? STORE : LOAD );
             my %forbidden = ( $data_id => 1, $base_id => 1 );
             $forbidden{$_}        = 1 for grep {defined} @extra_forbidden;
             $forbidden{$index_id} = 1 if defined $index_id;
@@ -640,6 +651,21 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 my %used;
                 @used{ values %$assignment } = ();
                 $used{$_} = 1 for keys %reserved;
+
+                # The return registers carry the function result across the return sequence, where they are not
+                # virtual registers; never hand one out as an address scratch.
+                $used{$_} = 1 for keys %ret_regs;
+
+                # Around a call the parameter registers carry fixed, live values that are not virtual registers: the
+                # outgoing arguments sit in a0-a7 up to the call, and the callee's result sits in a0/a1 right after it.
+                # They therefore never turn up in %assignment, and a scratch drawn from them would silently destroy the
+                # value.  Reserve them while the caller-save stores and caller-restore loads are encoded; the scratch
+                # then comes from t0-t6, which those sequences spill first (before any wide displacement needs a
+                # scratch) and reload last (after it), so clobbering one costs nothing.
+                if ($caller_io) {
+                    $used{$_} = 1 for $platform->abi->param_registers->@*;
+                }
+
                 for my $r ( $platform->registers('caller')->@* ) {
                     my $rid = $reg_id->($r);
                     return $r unless $used{$r} || $forbidden{$rid};
@@ -670,10 +696,10 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             if ($store) {
                 my $imm_lo = $off & 0x1F;
                 my $imm_hi = ( $off >> 5 ) & 0x7F;
-                $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $data_id << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
+                $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $data_id << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | $op );
             }
             else {
-                $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $data_id << 7 ) | LOAD );
+                $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $data_id << 7 ) | $op );
             }
         };
 
@@ -783,6 +809,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     $source_map->{ $inst->ir_inst_idx } = length($bytes);
                 }
                 my $opcode = $inst->opcode;
+                $caller_io
+                    = ( ( $inst->comment // '' ) =~ /^caller-(?:save|restore) / ) ? 1 : 0;
                 my @ops    = $inst->operands->@*;
                 my ( $dst, $src ) = @ops;
                 if ( $opcode eq 'label' ) {
@@ -1149,58 +1177,36 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     $emit_mem_access->( $funct3, $tid, $bid, $disp, 1, $iid );
                 }
                 elsif ( $opcode eq 'fload' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $addr  = $src->value;
+                    my $dst_r  = $resolve->($dst);
+                    my $did    = $reg_id->($dst_r);
+                    my $addr   = $src->value;
                     my $base_r
                         = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $funct3 = ( $dst->type && $dst->type->bits <= 32 ) ? 2 : 3;
                     my $disp   = $final_disp->($addr);
+                    my $iid;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                        my $iid     = $reg_id->($index_r);
-                        my %used;
-                        @used{ values %$assignment } = ();
-                        my $tmp_r;
-                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
-                        die 'no temp register for indexed fload' unless $tmp_r;
-                        my $tid = $reg_id->($tmp_r);
-                        $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | FLOAD );
+                        $iid = $reg_id->($index_r);
                     }
-                    else {
-                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | FLOAD );
-                    }
+                    $emit_mem_access->( $funct3, $did, $bid, $disp, 0, $iid, 1 );
                 }
                 elsif ( $opcode eq 'fstore' ) {
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $addr  = $dst->value;
+                    my $src_r  = $resolve->($src);
+                    my $sid    = $reg_id->($src_r);
+                    my $addr   = $dst->value;
                     my $base_r
                         = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $funct3 = ( $src->type && $src->type->bits <= 32 ) ? 2 : 3;
                     my $disp   = $final_disp->($addr);
+                    my $iid;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                        my $iid     = $reg_id->($index_r);
-                        my %used;
-                        @used{ values %$assignment } = ();
-                        my $tmp_r;
-                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
-                        die 'no temp register for indexed fstore' unless $tmp_r;
-                        my $tid = $reg_id->($tmp_r);
-                        $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $imm_lo = $disp & 0x1F;
-                        my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
+                        $iid = $reg_id->($index_r);
                     }
-                    else {
-                        my $imm_lo = $disp & 0x1F;
-                        my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | FSTORE );
-                    }
+                    $emit_mem_access->( $funct3, $sid, $bid, $disp, 1, $iid, 1 );
                 }
                 elsif ( $opcode eq 'fmov' ) {
                     my $dst_r = $resolve->($dst);
