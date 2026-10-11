@@ -677,6 +677,39 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             }
         };
 
+        # Frame-pointer setup and the callee-save slots live at the top of the frame, where a large spill area pushes
+        # their displacement past the 12-bit SD/LD range.  These are emitted before the body (prologue) and after it
+        # (epilogue), so the scratch has to be a register that is dead on both sides rather than one drawn from the live
+        # allocation: in the prologue the incoming arguments still sit in a0-a7, and in the epilogue the return value
+        # sits in a0/a1.  t0 is caller-saved and neither, so it is safe in both places.
+        my $emit_frame_mem = sub ( $funct3, $data_id, $off, $store, $float ) {
+            my $op     = $float ? ( $store ? FSTORE : FLOAD ) : ( $store ? STORE : LOAD );
+            if ( $fits_disp->($off) ) {
+                my $bid = 2;    # sp
+                if ($store) {
+                    my $imm_lo = $off & 0x1F;
+                    my $imm_hi = ( $off >> 5 ) & 0x7F;
+                    $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $data_id << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | $op );
+                }
+                else {
+                    $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $data_id << 7 ) | $op );
+                }
+                return;
+            }
+            my $tid = 5;    # t0
+            my $hi  = ( $off + 0x800 ) >> 12;
+            my $lo  = $off & 0xFFF;
+            $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( $tid << 7 ) | LUI );
+            $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM ) if $lo;
+            $bytes .= pack( 'V', ( 0 << 25 ) | ( 2 << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );    # t0 = t0 + sp
+            if ($store) {
+                $bytes .= pack( 'V', ( 0 << 25 ) | ( $data_id << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( 0 << 7 ) | $op );
+            }
+            else {
+                $bytes .= pack( 'V', ( 0 << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $data_id << 7 ) | $op );
+            }
+        };
+
         # A spilled virtual register reaches this back end as a memory operand, and when both the source and the
         # destination of an arithmetic or logical instruction are spilled the source is left as a memory operand
         # rather than reloaded, because these are the opcodes the spiller will hand memory to.  No RISC-V encoding
@@ -716,13 +749,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );
             }
             for my $i ( 0 .. $#to_save ) {
-                my $reg      = $to_save[$i];
-                my $rid      = $reg_id->($reg);
-                my $off      = $extra_frame + $i * 8;
-                my $imm_lo   = $off & 0x1F;
-                my $imm_hi   = ( $off >> 5 ) & 0x7F;
-                my $store_op = $reg =~ /^f/ ? FSTORE : STORE;
-                $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $rid << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | $store_op );
+                my $reg = $to_save[$i];
+                my $rid = $reg_id->($reg);
+                my $off = $extra_frame + $i * 8;
+                my $is_float = ( $reg =~ /^f/ ) ? 1 : 0;
+                $emit_frame_mem->( 3, $rid, $off, 1, $is_float );
             }
 
             # Set s0 to point to saved s0 (frame pointer for backtrace)
@@ -731,7 +762,16 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 $fp_idx = $i if $to_save[$i] eq 's0';
             }
             my $fp_off = $extra_frame + $fp_idx * 8;
-            $bytes .= pack( 'V', ( ( $fp_off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 8 << 7 ) | OP_IMM );
+            if ( $fits_disp->($fp_off) ) {
+                $bytes .= pack( 'V', ( ( $fp_off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 8 << 7 ) | OP_IMM );
+            }
+            else {
+                my $hi = ( $fp_off + 0x800 ) >> 12;
+                my $lo = $fp_off & 0xFFF;
+                $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
+                $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
+                $bytes .= pack( 'V', ( 0 << 25 ) | ( 2 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 8 << 7 ) | OP );
+            }
         }
         my %labels;
         my @fixups;
@@ -1363,11 +1403,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 elsif ( $opcode eq 'ret' ) {
                     if ( $callee_size > 0 ) {
                         for my $i ( reverse 0 .. $#to_save ) {
-                            my $reg     = $to_save[$i];
-                            my $rid     = $reg_id->($reg);
-                            my $off     = $extra_frame + $i * 8;
-                            my $load_op = $reg =~ /^f/ ? FLOAD : LOAD;
-                            $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | $load_op );
+                            my $reg = $to_save[$i];
+                            my $rid = $reg_id->($reg);
+                            my $off = $extra_frame + $i * 8;
+                            my $is_float = ( $reg =~ /^f/ ) ? 1 : 0;
+                            $emit_frame_mem->( 3, $rid, $off, 0, $is_float );
                         }
                     }
                     if ( $total_frame > 0 ) {
