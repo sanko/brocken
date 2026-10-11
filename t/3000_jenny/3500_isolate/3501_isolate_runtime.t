@@ -29,8 +29,12 @@ SKIP: {
         $mb->build_ret( Brocken::Lindsay::IR::Constant->new( type => $i32, value => 99 ) );
 
         # Compile with isolate trampoline support
-        my $funcs           = $brocken->codegen->emit_functions( [ $main, $worker ] );
-        my $expect_fn_count = $platform->is_windows ? 4 : 3;
+        my $funcs = $brocken->codegen->emit_functions( [ $main, $worker ] );
+
+        # x86_64 Windows needs an extra _create_thread shim to bridge the Win64
+        # ABI to CreateThread; ARM64 Windows calls CreateThread directly.
+        my $expect_fn_count =
+            ( $platform->is_windows && $platform->arch eq 'x86_64' ) ? 4 : 3;
         ok( scalar @$funcs == $expect_fn_count, "emit_functions produced $expect_fn_count functions" ) or
             diag( join( ', ', map { $_->{name} // '?' } $funcs->@* ) );
         my $output_file = $brocken->tmpdir . '/isolate_test' . $brocken->ext;
