@@ -1273,6 +1273,21 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                             comment  => 'i128 div fast r_hi = hi - q*lo'
                                         )
                                     );
+                                    # Initialize remainder: low word = hi % divisor, high word = 0
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $r_lo, $r_hi ],
+                                            comment  => 'i128 div fast r_lo = hi % lo'
+                                        )
+                                    );
+                                    $mbb->add_instruction(
+                                        Brocken::Jenny::MIR::MachineInstruction->new(
+                                            opcode   => 'mv',
+                                            operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                            comment  => 'i128 div fast r_hi = 0'
+                                        )
+                                    );
 
                                     # 64-iteration MIR loop for q_lo and final remainder
                                     my $fcnt = Brocken::Jenny::MIR::MachineOperand->new(

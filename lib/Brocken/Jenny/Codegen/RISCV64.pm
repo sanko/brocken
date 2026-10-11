@@ -611,6 +611,59 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             return undef;
         };
 
+        # RISC-V LD/SD carry a 12-bit signed displacement.  A spill slot far enough down a large frame exceeds that
+        # range, and masking the displacement would wrap it onto an unrelated slot (silently corrupting both).  When
+        # the displacement does not fit, materialise the effective address into a scratch register and use a zero
+        # displacement instead.  Indexed addresses are folded into the same scratch as well.
+        my $fits_disp = sub ($d) { $d >= -2048 && $d <= 2047 };
+        my $emit_mem_access = sub {
+            my ( $funct3, $data_id, $base_id, $disp, $store, $index_id, @extra_forbidden ) = @_;
+            my %forbidden = ( $data_id => 1, $base_id => 1 );
+            $forbidden{$_} = 1 for grep {defined} @extra_forbidden;
+            $forbidden{$index_id} = 1 if defined $index_id;
+            my $pick = sub () {
+                my %used;
+                @used{ values %$assignment } = ();
+                $used{$_} = 1 for keys %reserved;
+                for my $r ( $platform->registers('caller')->@* ) {
+                    my $rid = $reg_id->($r);
+                    return $r unless $used{$r} || $forbidden{$rid};
+                }
+                return undef;
+            };
+
+            my $bid = $base_id;
+            my $off = $disp;
+            if ( defined $index_id ) {
+                my $tmp_r = $pick->();
+                die 'no temp register for indexed memory address' unless defined $tmp_r;
+                my $tid = $reg_id->($tmp_r);
+                $bytes .= pack( 'V', ( $index_id << 20 ) | ( $base_id << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
+                $bid = $tid;
+            }
+            if ( !$fits_disp->($off) ) {
+                my $tmp_r = $pick->();
+                die 'no temp register for large memory displacement' unless defined $tmp_r;
+                my $tid = $reg_id->($tmp_r);
+                my $hi  = ( $off + 0x800 ) >> 12;
+                my $lo  = $off & 0xFFF;
+                $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( $tid << 7 ) | LUI );
+                $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM ) if $lo;
+                $bytes .= pack( 'V', ( 0 << 25 ) | ( $bid << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
+                $bid = $tid;
+                $off = 0;
+            }
+
+            if ($store) {
+                my $imm_lo = $off & 0x1F;
+                my $imm_hi = ( $off >> 5 ) & 0x7F;
+                $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $data_id << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
+            }
+            else {
+                $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $data_id << 7 ) | LOAD );
+            }
+        };
+
         # A spilled virtual register reaches this back end as a memory operand, and when both the source and the
         # destination of an arithmetic or logical instruction are spilled the source is left as a memory operand
         # rather than reloaded, because these are the opcodes the spiller will hand memory to.  No RISC-V encoding
@@ -628,15 +681,12 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $funct3 = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
             my $disp   = $final_disp->($addr);
 
+            my $iid;
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                my $iid     = $reg_id->($index_r);
-                $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $tid << 7 ) | LOAD );
+                $iid = $reg_id->($index_r);
             }
-            else {
-                $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $tid << 7 ) | LOAD );
-            }
+            $emit_mem_access->( $funct3, $tid, $bid, $disp, 0, $iid );
             return $tid;
         };
         if ( $total_frame > 0 ) {
@@ -974,17 +1024,10 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
-                        my %used;
-                        @used{ values %$assignment } = ();
-                        my $tmp_r;
-                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
-                        die 'no temp register for indexed load' unless $tmp_r;
-                        my $tid = $reg_id->($tmp_r);
-                        $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | LOAD );
+                        $emit_mem_access->( $funct3, $did, $bid, $disp, 0, $iid );
                     }
                     else {
-                        $bytes .= pack( 'V', ( ( $disp & 0xFFF ) << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $did << 7 ) | LOAD );
+                        $emit_mem_access->( $funct3, $did, $bid, $disp, 0 );
                     }
                 }
                 elsif ( $opcode eq 'store' ) {
@@ -1001,21 +1044,10 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
-                        my %used;
-                        @used{ values %$assignment } = ();
-                        my $tmp_r;
-                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
-                        die 'no temp register for indexed store' unless $tmp_r;
-                        my $tid = $reg_id->($tmp_r);
-                        $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
-                        my $imm_lo = $disp & 0x1F;
-                        my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
+                        $emit_mem_access->( $funct3, $sid, $bid, $disp, 1, $iid );
                     }
                     else {
-                        my $imm_lo = $disp & 0x1F;
-                        my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $sid << 20 ) | ( $bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
+                        $emit_mem_access->( $funct3, $sid, $bid, $disp, 1 );
                     }
                 }
                 elsif ( $opcode eq 'store_imm' ) {
@@ -1055,24 +1087,13 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                             $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
                         }
                     }
-                    my $disp      = $final_disp->($addr);
-                    my $store_bid = $bid;
+                    my $disp = $final_disp->($addr);
+                    my $iid;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                        my $iid     = $reg_id->($index_r);
-                        my $tmp2    = $tid;
-                        my %used2;
-                        @used2{ values %$assignment } = ();
-                        $used2{$tmp_r} = 1;
-                        for my $r ( $platform->registers('caller')->@* ) { $tmp2 = $r, last unless exists $used2{$r} }
-                        die 'no temp register for indexed store_imm' unless $tmp2;
-                        my $tid2 = $reg_id->($tmp2);
-                        $bytes .= pack( 'V', ( $iid << 20 ) | ( $bid << 15 ) | ( 0 << 12 ) | ( $tid2 << 7 ) | OP );
-                        $store_bid = $tid2;
+                        $iid = $reg_id->($index_r);
                     }
-                    my $imm_lo = $disp & 0x1F;
-                    my $imm_hi = ( $disp >> 5 ) & 0x7F;
-                    $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $tid << 20 ) | ( $store_bid << 15 ) | ( $funct3 << 12 ) | ( $imm_lo << 7 ) | STORE );
+                    $emit_mem_access->( $funct3, $tid, $bid, $disp, 1, $iid );
                 }
                 elsif ( $opcode eq 'fload' ) {
                     my $dst_r = $resolve->($dst);
