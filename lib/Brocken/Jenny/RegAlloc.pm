@@ -428,8 +428,34 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         # therefore drawn first from the registers this function cannot use anyway, which costs the assignment nothing,
         # and only falls back to the pool when there is no such register left.  The register is reserved at all only
         # when the function can need it; see _has_addr_hazard for why that is decided after the first pass.
-        my $spill_temp           = pop @caller_regs;
+        my $spill_temp;
         my $spill_temp_is_callee = 0;
+        if ( $is_float ) {
+
+            # AArch64's and RISC-V's floating-point caller-saved registers are exactly their parameter registers
+            # (v0-v7 / f10-f17), so there is no non-argument caller register to prefer.  The floating-point entry
+            # shuffle already parks its cycle value in the dedicated fp_entry_shuffle_temp register instead; keep the
+            # float temporary as the last caller-saved register.
+            $spill_temp = pop @caller_regs;
+        }
+        else {
+
+            # The spill temporary is also the scratch an entry capture that is spilled carries the incoming argument
+            # in (mov <temp>, <arg>; store [slot], <temp>), so a temp drawn from the argument registers overwrites
+            # whichever argument is still waiting to be captured in it.  AArch64 and RISC-V order their caller-saved
+            # lists with the argument registers last, so a plain `pop` lands on one (x7 / a7) -- exactly what made the
+            # stack guards' extra entry registers spill %__heap_base through the register still holding the 8th
+            # argument and corrupt the tail of ever wider argument lists.  Prefer the last non-argument caller-saved
+            # register (x9-x15 on AArch64, t0-t6 on RISC-V; x86-64's lists already end with one, r11, so it is
+            # unaffected).
+            my %param = map { $_ => 1 } ( $platform->can('abi') ? $platform->abi->param_registers->@* : () );
+            for ( my $i = $#caller_regs ; $i >= 0 ; $i-- ) {
+                next if $param{ $caller_regs[$i] };
+                $spill_temp = splice( @caller_regs, $i, 1 );
+                last;
+            }
+            $spill_temp //= pop @caller_regs;
+        }
         if ( !defined $spill_temp ) {
 
             # Register exhaustion: every caller register is live, so the reload

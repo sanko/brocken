@@ -764,9 +764,22 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                     else {
                         my $src_r = $resolve->($src);
                         my $sid   = $reg_id->($src_r);
-                        my $bits  = $dst->type      ? $dst->type->bits : 64;
-                        my $op    = ( $bits >= 64 ) ? MOV_X            : MOV_W;
-                        $bytes .= pack( 'V', $op | ( $sid << 16 ) | $did );
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        if ( $sid == 31 || $did == 31 ) {
+
+                            # Register 31 is both XZR (zero) and SP, picked by encoding: the ORR alias MOV
+                            # uses the XZR reading, so `mov dst, sp` silently becomes `mov dst, xzr` and
+                            # zeroes the stack pointer.  The stack guards move sp into a virtual register
+                            # at every function entry, so that reading turned every guarded call into a
+                            # spurious overflow that returned 0.  ADD #0 is the standard SP-aware move:
+                            # in ADD immediate both Rd and Rn read 31 as SP.
+                            my $op = ( $bits >= 64 ) ? ADD_IMM_64 : ADD_IMM;
+                            $bytes .= pack( 'V', $op | ( $sid << 5 ) | $did );
+                        }
+                        else {
+                            my $op = ( $bits >= 64 ) ? MOV_X : MOV_W;
+                            $bytes .= pack( 'V', $op | ( $sid << 16 ) | $did );
+                        }
                     }
                 }
                 elsif ( $opcode eq 'movzx' ) {
