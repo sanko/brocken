@@ -356,6 +356,7 @@ Objects are allocated using the Immix algorithm:
 - Memory is managed in 32KB blocks, sub-divided into 256-byte lines.
 - **Hot Path:** Freed 16-byte fat scalars are immediately pushed to a segregated singly-linked list (`free16_head`) threaded directly through the freed payload slots. `bump_alloc` consumes this list first.
 - **Cold Path:** Line-aware bump allocation using a 128-bit availability bitmap stored in the header of the 32KB block.
+- **Block Ownership:** Blocks tile a single `BLOCK_SIZE` grid anchored at the first block (`heap_base + ICB::SIZE`). A freed object is charged to the block that contains its address, so `live_count` is always decremented on the owning block regardless of which block is currently allocating.
 
 ### 10.3 Trial Deletion (Bacon & Rajan Cycle Detection) (Layer 2)
 

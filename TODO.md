@@ -24,7 +24,7 @@ These bugs cause silent miscompilations in the code generators and register allo
 
 Implement the **Caller-Borrows** contract: passing arguments does not touch refcounts. Callees only `incref` if storing or escaping a reference.
 
-- [ ] **Fix Immix Block Pointer Bug:** In `core.brocken`'s `decref()`, `live_count` is erroneously decremented on `get_current_block()`. It must decrement the object's actual owning block by masking its address: `obj & ~0x7FFF`.
+- [x] **Fix Immix Block Pointer Bug:** `decref()` charged `live_count` to `get_current_block()` rather than the object's owning block, and the legacy allocator carved new blocks on a `heap_base`-anchored grid that overlapped block 0 by `ICB::SIZE` bytes. Added an arena-anchored `block_of()` and routed `decref`, `gc_decref` and `gc_drain` through it; the naive `obj & ~0x7FFF` mask is wrong because `heap_base` is only 16-byte aligned and block 0 sits off any `heap_base`-anchored grid. Covered by `t/40000_runtime/40330_block_owner.t`.
 - [ ] **Wire up Bacon/Rajan Cycle Detection:** `gc_drain()` is currently dead code. It must be called when the suspect buffer is full. Additionally, `gc_scan_obj` must be updated to scan `Tag 3` (Class instances), as it currently only scans Lists and Hashes.
 - [ ] **F2 - `//=` RC Leak:** `//=` on dynamic types stores the select result without emitting `incref` or an old-value `decref`.
 - [ ] **F3 - Borrowed `Any` UAF:** Callers pass `Any` arguments without `incref`, but callees erroneously `decref` them on exit. Causes Use-After-Free. Remove the callee exit decref for borrowed params.
