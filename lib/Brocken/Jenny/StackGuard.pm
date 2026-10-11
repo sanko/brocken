@@ -203,16 +203,13 @@ sub swap_stack_limit ( $mbb, $platform, $tag, $cur_fcb, $target, $os_thread_off,
     $mbb->add_instruction( _mi( 'store', [ _mem( $icb, Brocken::ICB::STACK_LIMIT, $ptr ), $tgt ],                  'stk: ICB.limit = incoming limit' ) );
 
     # Hand the ICB to the incoming fiber's first function so a guarded fresh fiber reads %__heap_base from arg slot 0.
-    # On ABIs where the return register *is* arg0 (AArch64 x0, RISC-V a0) this would clobber the fiber transfer value,
-    # which lives in the return register across ctx_swap (ctx_swap only saves callee-saved regs, so the value survives
-    # the jump and the resumed side reads it back from the return register). There the transfer value wins: skipping
-    # the handoff leaves the pre-existing fresh-fiber %__heap_base behaviour untouched while the stack_limit swap
-    # above still lands correctly. x86-64 puts arg0 in rcx/rdi, distinct from rax, so it emits the handoff.
+    # This is emitted on every backend. On ABIs where the return register *is* arg0 (AArch64 x0, RISC-V a0) the write
+    # would clobber a fiber transfer value carried in the return register, so the ARM64/RISC-V lowerers no longer keep
+    # that value in the return register across ctx_swap: they route it through the target FCB's transfer slot, which
+    # the resumed side reads back after the switch. That leaves arg0 free to carry the ICB into a fresh fiber without
+    # ambiguity. x86-64 puts arg0 in rcx/rdi, distinct from rax, so the handoff never collided there.
     my ($arg0) = $platform->abi->argument_locations( ['int'] )->@*;
-    my $ret    = $platform->abi->return_register;
-    if ( !defined $ret || $arg0 ne $ret ) {
-        $mbb->add_instruction( _mi( 'mov', [ _phys($arg0), $icb ], 'stk: param0 = ICB' ) );
-    }
+    $mbb->add_instruction( _mi( 'mov', [ _phys($arg0), $icb ], 'stk: param0 = ICB' ) );
     return 1;
 }
 

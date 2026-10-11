@@ -424,7 +424,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'alloca',
-                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 144, type => $i64 ) ],
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 152, type => $i64 ) ],
                 comment  => 'main fiber FCB'
             )
         );

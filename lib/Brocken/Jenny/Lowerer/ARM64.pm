@@ -3898,7 +3898,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
                     my $callee   = $inst->callee;
                     my $stack_sz = 64 * 1024;
-                    my $fcb_sz   = 136;                                        # +8 os_thread at 120, +8 stack_limit at 128
+                    my $fcb_sz   = 144;                                        # +8 os_thread at 120, +8 stack_limit at 128, +8 transfer value at 136
                     my $stack    = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'virt_reg',
                         value => $inst->name . '.stk',
@@ -4129,6 +4129,23 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                             comment => 'FCB.stack_limit = stack + 16 KiB'
                         )
                     );
+
+                    # Seed the fiber's transfer slot. FiberTransfer overwrites it before every switch into this fiber,
+                    # so this only keeps a never-switched-to fiber's slot from reading uninitialised frame memory.
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => 'store_imm',
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $inst->name . '.fcb', disp => 136 },
+                                    type  => Brocken::Lindsay::IR::Type::i64()
+                                ),
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => Brocken::Lindsay::IR::Type::i64() )
+                            ],
+                            comment => 'FCB.transfer_value = 0'
+                        )
+                    );
                     my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4141,21 +4158,34 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberTransfer') ) {
                     my ( $fiber, $val ) = $inst->operands->@*;
                     my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x28' );
-                    my $ret_reg   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
+                    my $i64       = Brocken::Lindsay::IR::Type::i64();
+                    my $target    = $self->_lower_opnd($fiber);
+
+                    # Hand the transfer value to the target through its own FCB instead of through x0. x0 is also the
+                    # first argument register on AArch64 and swap_stack_limit needs it for the ICB that a fresh fiber
+                    # reads as its hidden %__heap_base, so the two cannot share the register. The resumed side reads the
+                    # value back from its own FCB once ctx_swap has restored x28 to point at it.
+                    my $lowered_val = $self->_lower_opnd($val);
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'mov',
-                            operands => [ $ret_reg, $self->_lower_opnd($val) ],
-                            comment  => 'transfer value'
+                            opcode   => ( $lowered_val->kind eq 'imm' ? 'store_imm' : 'store' ),
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $target->value, disp => 136 },
+                                    type  => $i64
+                                ),
+                                $lowered_val
+                            ],
+                            comment => 'transfer value -> target FCB'
                         )
                     );
                     # Keep the shared ICB's stack_limit pointing at the fiber that is about to run.
-                    Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'xfer', 'x28',
-                        $self->_lower_opnd($fiber), 120, 128 );
+                    Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'xfer', 'x28', $target, 120, 128 );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'ctx_swap',
-                            operands => [ $fiber_reg, $self->_lower_opnd($fiber) ],
+                            operands => [ $fiber_reg, $target ],
                             comment  => 'swap to target FCB'
                         )
                     );
@@ -4163,9 +4193,16 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mov',
-                                operands => [ $dst, $ret_reg ],
-                                comment  => 'transfer result'
+                                opcode   => 'load',
+                                operands => [
+                                    $dst,
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'mem',
+                                        value => { base => 'x28', disp => 136 },
+                                        type  => $i64
+                                    )
+                                ],
+                                comment => 'transfer result from own FCB'
                             )
                         );
                     }
@@ -4174,14 +4211,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                     my ($val)     = $inst->operands->@*;
                     my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x28' );
                     my $ptr       = Brocken::Lindsay::IR::Type::ptr();
-                    my $ret_reg   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'x0' );
-                    $mbb->add_instruction(
-                        Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'mov',
-                            operands => [ $ret_reg, $self->_lower_opnd($val) ],
-                            comment  => 'yield value'
-                        )
-                    );
+                    my $i64       = Brocken::Lindsay::IR::Type::i64();
                     my $parent_tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '.parent', type => $ptr );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4195,6 +4225,23 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                 )
                             ],
                             comment => 'load parent FCB from current FCB'
+                        )
+                    );
+                    # Hand the yield value to the parent through its FCB, for the same reason FiberTransfer does: x0
+                    # carries the ICB into a fresh fiber and so cannot also carry the yield value.
+                    my $lowered_val = $self->_lower_opnd($val);
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new(
+                            opcode   => ( $lowered_val->kind eq 'imm' ? 'store_imm' : 'store' ),
+                            operands => [
+                                Brocken::Jenny::MIR::MachineOperand->new(
+                                    kind  => 'mem',
+                                    value => { base => $parent_tmp->value, disp => 136 },
+                                    type  => $i64
+                                ),
+                                $lowered_val
+                            ],
+                            comment => 'yield value -> parent FCB'
                         )
                     );
                     # Keep the shared ICB's stack_limit pointing at the parent we are about to resume.
@@ -4211,9 +4258,16 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'mov',
-                                operands => [ $dst, $ret_reg ],
-                                comment  => 'yield result'
+                                opcode   => 'load',
+                                operands => [
+                                    $dst,
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'mem',
+                                        value => { base => 'x28', disp => 136 },
+                                        type  => $i64
+                                    )
+                                ],
+                                comment  => 'yield result from own FCB'
                             )
                         );
                     }
