@@ -509,6 +509,20 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
                 }
             }
         }
+
+        # The entry stub's exit() call is emitted against the .got RVA computed before the import stubs grow .text.
+        # Appending those stubs can push .__const past that RVA, so the final layout moves .got by a page. The import
+        # stubs above are re-fixed for that; the entry stub is not, and a stale displacement there makes the process
+        # return through a slot inside .__const and fault on exit. Rebuild the entry stub against the final .got.
+        if ( $self->type eq 'exe' && length($entry_stub) ) {
+            my $got_sec = $self->layout->get('.got');
+            my $txt_sec = $self->layout->get('.text');
+            if ( $got_sec && $txt_sec ) {
+                my $got_exit = $got_sec->{rva} + ( $got_offsets{'exit'} // 0 );
+                my $rebuilt  = $self->_build_entry_stub( $platform, \%func_offsets, $got_exit, $txt_sec->{rva} );
+                substr( $text, 0, length($entry_stub), $rebuilt ) if length($rebuilt) == length($entry_stub);
+            }
+        }
         my %seg_names = ( '.text' => '__TEXT', '.__const' => '__TEXT',  '.data' => '__DATA', '.got' => '__DATA', '.brk_sym' => '__TEXT' );
         my %sec_names = ( '.text' => '__text', '.__const' => '__const', '.data' => '__data', '.got' => '__got',  '.brk_sym' => '__brk_sym' );
         for my $s ( $self->layout->sections ) {

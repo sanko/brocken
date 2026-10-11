@@ -65,4 +65,91 @@ SKIP: {
     }
     unlink $output_file;
 }
+
+# The entry stub's exit() call is emitted before the import stubs are appended. Appending them grows .text, which can
+# push .__const (and therefore .got) a page, leaving the entry stub's exit reference pointing at the stale slot. Verify
+# the reference always resolves inside the final __got, sweeping text sizes so at least one forces the shift.
+sub _macho_sections {
+    my ($path) = @_;
+    open my $fh, '<:raw', $path or die $!;
+    local $/;
+    my $d = <$fh>;
+    close $fh;
+    my $ncmds = unpack 'V', substr( $d, 16, 4 );
+    my $off   = 32;
+    my %sec;
+    while ( $ncmds-- > 0 ) {
+        my ( $cmd, $sz ) = unpack 'V2', substr( $d, $off, 8 );
+        if ( $cmd == 0x19 ) {
+            my $so = $off + 72;
+            my $ns = unpack 'V', substr( $d, $off + 64, 4 );
+            for ( 1 .. $ns ) {
+                my $sn = substr( $d, $so, 16 );
+                $sn =~ s/\0.*//s;
+                my ( $addr, $size ) = unpack 'Q2', substr( $d, $so + 32, 16 );
+                my $sectoff = unpack 'V', substr( $d, $so + 48, 4 );
+                $sec{$sn} = { addr => $addr, size => $size, off => $sectoff };
+                $so += 80;
+            }
+        }
+        $off += $sz;
+    }
+    return \%sec;
+}
+
+sub _macho_entry_exit_target {
+    my ( $path, $platform ) = @_;
+    my $sec = _macho_sections($path);
+    my ( $addr, $off ) = ( $sec->{__text}{addr}, $sec->{__text}{off} );
+    open my $fh, '<:raw', $path or die $!;
+    local $/;
+    my $d = <$fh>;
+    close $fh;
+    if ( $platform->is_arm64 ) {
+        my $adrp  = unpack 'V', substr( $d, $off + 12, 4 );
+        my $immlo = ( $adrp >> 29 ) & 3;
+        my $immhi = ( $adrp >> 5 ) & 0x7FFFF;
+        my $imm   = ( $immhi << 2 ) | $immlo;
+        $imm -= 0x200000 if $imm & 0x100000;
+        my $page  = ( ( $addr + 12 ) & ~0xFFF ) + ( $imm << 12 );
+        my $ldr   = unpack 'V', substr( $d, $off + 16, 4 );
+        my $imm12 = ( $ldr >> 10 ) & 0xFFF;
+        return $page + ( $imm12 << 3 );
+    }
+    my $disp = unpack 'l<', substr( $d, $off + 24, 4 );
+    return $addr + 28 + $disp;
+}
+
+subtest 'Mach-O entry-stub exit() GOT reference survives a .got shift' => sub {
+    my $tmp = Brocken->new->tmpdir;
+    for my $triple (qw[x86_64-apple-darwin-macho aarch64-apple-darwin-macho]) {
+        my $platform = Brocken::Katsuro::Platform::parse($triple);
+        my $linker   = Brocken::Jenny::Linker::MachO->new();
+        my $page     = $platform->page_size;                # 4 KiB Intel, 16 KiB Apple Silicon
+        my $esize    = $linker->entry_stub_len($platform);  # bytes the entry stub adds to .text
+        my $stub     = $platform->is_arm64 ? 12 : 6;        # one import stub
+        my $out      = $tmp . '/entry_got_' . ( $platform->is_arm64 ? 'arm' : 'x64' );
+        my @bad;
+
+        # Sweep .text sizes that straddle a page boundary by less than one import stub, so the stub append moves
+        # .__const (and hence .got) a page while the already-emitted entry stub still holds the pre-shift RVA.
+        for my $pad ( ( $page - $esize - $stub - 2 ) .. ( $page - $esize + 2 ) ) {
+            my $funcs = [
+                {   name   => '_BROCKEN_ENTRY',
+                    bytes  => "\x90" x $pad,
+                    fixups => [ { type => 'call_rel32', target => 'puts', offset => 0 } ],
+                }
+            ];
+            my $lnk = Brocken::Jenny::Linker::MachO->new();
+            $lnk->write_executable( $out, $funcs, $platform );
+            my $sec    = _macho_sections($out);
+            my $target = _macho_entry_exit_target( $out, $platform );
+            my $got    = $sec->{__got};
+            push @bad, sprintf( 'pad=%#x target=%#x not in .got [%#x,%#x)', $pad, $target, $got->{addr}, $got->{addr} + $got->{size} )
+                unless $target >= $got->{addr} && $target < $got->{addr} + $got->{size};
+        }
+        is \@bad, [], "$triple: entry exit() reference lands inside .got across the page boundary";
+    }
+    unlink glob "$tmp/entry_got_*";
+};
 done_testing;
