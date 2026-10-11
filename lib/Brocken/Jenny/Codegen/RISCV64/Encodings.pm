@@ -2,6 +2,7 @@ use v5.42;
 
 package Brocken::Jenny::Codegen::RISCV64::Encodings v0.0.1 {
     use Exporter 'import';
+    use Brocken::Jenny::FCB;
     our %EXPORT_TAGS = (
         all => [
             qw[
@@ -66,7 +67,7 @@ package Brocken::Jenny::Codegen::RISCV64::Encodings v0.0.1 {
         LUI => 0x37,               # LUI: load upper 20 bits into rd (0110111)
 
         # Misc
-        FCB_RESUME_OFF => 120      # FCB resume offset (function call boundary stack delta)
+        FCB_RESUME_OFF => Brocken::Jenny::FCB::arch_layout('riscv64')->{resume_pc}    # from the FCB layout, never a second copy
     };
 };
 1;

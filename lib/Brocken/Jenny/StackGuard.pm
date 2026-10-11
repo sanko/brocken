@@ -34,6 +34,7 @@ no warnings qw[experimental::class portable];
 use Brocken::Jenny::MIR;
 use Brocken::Lindsay::IR;
 use Brocken::ICB;
+use Brocken::Jenny::FCB qw[fcb_layout];
 
 use constant STACK_BUDGET => 2 * 1024 * 1024;    # main-thread margin below the entry stack pointer
 
@@ -173,15 +174,16 @@ sub guard_user_function ( $mbb, $hb_vreg, $platform ) {
 # fiber's FCB, so both get the same margin below the current stack pointer and the first context switch can hand the
 # ICB to a child fiber without losing the main thread's limit. Also load the ICB into the first argument register,
 # because the wrapper calls the real main function which takes %__heap_base (the ICB) as its register parameter.
-sub seed_main_fiber_limit ( $mbb, $platform, $fcb_vreg, $icb_vreg, $fcb_limit_off ) {
+sub seed_main_fiber_limit ( $mbb, $platform, $fcb_vreg, $icb_vreg ) {
     my $ptr = _ptr();
-    my $sp  = _vreg( '%stk.mf.sp',  $ptr );
     my $lim = _vreg( '%stk.mf.lim', $ptr );
-    $mbb->add_instruction( _mi( 'mov',   [ $sp,  _phys( $platform->stack_reg ) ],                     'stk: main stack base' ) );
-    $mbb->add_instruction( _mi( 'mov',   [ $lim, $sp ],                                              'stk: limit = sp' ) );
-    $mbb->add_instruction( _mi( 'sub',   [ $lim, _imm( STACK_BUDGET ) ],                             'stk: limit -= budget' ) );
-    $mbb->add_instruction( _mi( 'store', [ _mem( $fcb_vreg, $fcb_limit_off, $ptr ), $lim ],          'stk: FCB.stack_limit = sp - budget' ) );
-    $mbb->add_instruction( _mi( 'store', [ _mem( $icb_vreg, Brocken::ICB::STACK_LIMIT, $ptr ), $lim ], 'stk: ICB.stack_limit = sp - budget' ) );
+    my $sp  = _vreg( '%stk.mf.sp',  $ptr );
+    my $fcb = fcb_layout($platform);
+    $mbb->add_instruction( _mi( 'mov',   [ $sp,  _phys( $platform->stack_reg ) ],                        'stk: main stack base' ) );
+    $mbb->add_instruction( _mi( 'mov',   [ $lim, $sp ],                                                 'stk: limit = sp' ) );
+    $mbb->add_instruction( _mi( 'sub',   [ $lim, _imm( STACK_BUDGET ) ],                                'stk: limit -= budget' ) );
+    $mbb->add_instruction( _mi( 'store', [ _mem( $fcb_vreg, $fcb->{stack_limit}, $ptr ), $lim ],         'stk: FCB.stack_limit = sp - budget' ) );
+    $mbb->add_instruction( _mi( 'store', [ _mem( $icb_vreg, Brocken::ICB::STACK_LIMIT, $ptr ), $lim ],   'stk: ICB.stack_limit = sp - budget' ) );
     my ($arg0) = $platform->abi->argument_locations( ['int'] )->@*;
     $mbb->add_instruction( _mi( 'mov', [ _phys($arg0), _vreg( $icb_vreg, $ptr ) ], 'stk: param0 = ICB for _real_main' ) );
     return 1;
@@ -191,16 +193,17 @@ sub seed_main_fiber_limit ( $mbb, $platform, $fcb_vreg, $icb_vreg, $fcb_limit_of
 # the ICB to the incoming fiber's first function call (a freshly scheduled fiber's callee reads %__heap_base from arg
 # slot 0). Emitted around every context switch so each fiber's functions compare the stack pointer against their own
 # stack, not the main thread's.
-sub swap_stack_limit ( $mbb, $platform, $tag, $cur_fcb, $target, $os_thread_off, $fcb_limit_off ) {
+sub swap_stack_limit ( $mbb, $platform, $tag, $cur_fcb, $target ) {
     my $ptr  = _ptr();
+    my $fcb  = fcb_layout($platform);
     my $icb  = _vreg( "%stk.$tag.icb",  $ptr );
     my $live = _vreg( "%stk.$tag.live", $ptr );
     my $tgt  = _vreg( "%stk.$tag.tgt",  $ptr );
-    $mbb->add_instruction( _mi( 'load',  [ $icb,  _mem( $cur_fcb, $os_thread_off, $ptr ) ],                       'stk: ICB = FCB.os_thread' ) );
-    $mbb->add_instruction( _mi( 'load',  [ $live, _mem( $icb, Brocken::ICB::STACK_LIMIT, $ptr ) ],                 'stk: live limit' ) );
-    $mbb->add_instruction( _mi( 'store', [ _mem( $cur_fcb, $fcb_limit_off, $ptr ), $live ],                        'stk: persist outgoing limit' ) );
-    $mbb->add_instruction( _mi( 'load',  [ $tgt,  _mem( $target, $fcb_limit_off, $ptr ) ],                         'stk: incoming limit' ) );
-    $mbb->add_instruction( _mi( 'store', [ _mem( $icb, Brocken::ICB::STACK_LIMIT, $ptr ), $tgt ],                  'stk: ICB.limit = incoming limit' ) );
+    $mbb->add_instruction( _mi( 'load',  [ $icb,  _mem( $cur_fcb, $fcb->{os_thread}, $ptr ) ],                    'stk: ICB = FCB.os_thread' ) );
+    $mbb->add_instruction( _mi( 'load',  [ $live, _mem( $icb, Brocken::ICB::STACK_LIMIT, $ptr ) ],                'stk: live limit' ) );
+    $mbb->add_instruction( _mi( 'store', [ _mem( $cur_fcb, $fcb->{stack_limit}, $ptr ), $live ],                  'stk: persist outgoing limit' ) );
+    $mbb->add_instruction( _mi( 'load',  [ $tgt,  _mem( $target, $fcb->{stack_limit}, $ptr ) ],                   'stk: incoming limit' ) );
+    $mbb->add_instruction( _mi( 'store', [ _mem( $icb, Brocken::ICB::STACK_LIMIT, $ptr ), $tgt ],                 'stk: ICB.limit = incoming limit' ) );
 
     # Hand the ICB to the incoming fiber's first function so a guarded fresh fiber reads %__heap_base from arg slot 0.
     # This is emitted on every backend. On ABIs where the return register *is* arg0 (AArch64 x0, RISC-V a0) the write

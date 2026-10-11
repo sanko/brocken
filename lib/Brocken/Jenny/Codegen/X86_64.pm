@@ -9,6 +9,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     use Brocken::Jenny::RegAlloc;
     use Brocken::Jenny::MIR;
     use Brocken::Jenny::StackGuard;
+    use Brocken::Jenny::FCB qw[fcb_layout];
     use Brocken::ICB;
     use Brocken::Jenny::Codegen::X86_64::Encodings qw[:all];
     field $platform : param;
@@ -264,6 +265,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     method _build_isolate_trampoline_mf() {
         my $i64     = Brocken::Lindsay::IR::Type::i64();
         my $ptr     = Brocken::Lindsay::IR::Type::ptr();
+        my $fcl     = fcb_layout($platform);
         my $mf      = Brocken::Jenny::MIR::MachineFunction->new( name => '_isolate_trampoline' );
         my $mbb     = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
         my $arg_reg = $platform->is_windows ? 'rcx' : 'rdi';
@@ -294,12 +296,12 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             )
         );
 
-        # FCB.os_thread = icb  (offset 72)
+        # FCB.os_thread = icb
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
                 operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => 72 }, type => $ptr ), $icb_ptr ],
+                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{os_thread} }, type => $ptr ), $icb_ptr ],
                 comment => 'FCB.os_thread = ICB'
             )
         );
@@ -313,13 +315,13 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             )
         );
 
-        # func_addr = FCB.resume_pc (offset 64)
+        # func_addr = FCB.resume_pc
         my $func_addr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%func', type => $ptr );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'load',
                 operands =>
-                    [ $func_addr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => 64 }, type => $ptr ) ],
+                    [ $func_addr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{resume_pc} }, type => $ptr ) ],
                 comment => 'func = FCB.resume_pc'
             )
         );
@@ -574,23 +576,24 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     method _build_fiber_init_mf() {
         my $i64 = Brocken::Lindsay::IR::Type::i64();
         my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        my $fcl = fcb_layout($platform);
         my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => 'main' );
         my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
         my $fcb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%init.fcb', type => $ptr );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'alloca',
-                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 88, type => $i64 ) ],
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $fcl->{size}, type => $i64 ) ],
                 comment  => 'main fiber FCB'
             )
         );
 
-        # Store self-pointer at FCB[16] (r12 slot)
+        # Store self-pointer in the fiber register's FCB slot
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
                 operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 16 }, type => $i64 ), $fcb ],
+                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{self} }, type => $i64 ), $fcb ],
                 comment => 'FCB.self = FCB addr'
             )
         );
@@ -617,20 +620,20 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             )
         );
 
-        # Store ICB pointer in FCB.os_thread slot (offset 72)
+        # Store ICB pointer in FCB.os_thread slot
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
                 operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 72 }, type => $i64 ), $icb ],
+                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{os_thread} }, type => $i64 ), $icb ],
                 comment => 'FCB.os_thread = &ICB'
             )
         );
 
-        # Seed the main fiber's stack limit (FCB[80] and ICB.stack_limit) from the current stack pointer so the first
-        # fiber switch can hand the ICB to a child without losing the main thread's runway. Also put the ICB in arg0,
-        # because _real_main takes it as its hidden first parameter.
-        Brocken::Jenny::StackGuard::seed_main_fiber_limit( $mbb, $platform, '%init.fcb', '%init.icb', 80 );
+        # Seed the main fiber's stack limit (FCB.stack_limit and ICB.stack_limit) from the current stack pointer so the
+        # first fiber switch can hand the ICB to a child without losing the main thread's runway. Also put the ICB in
+        # arg0, because _real_main takes it as its hidden first parameter.
+        Brocken::Jenny::StackGuard::seed_main_fiber_limit( $mbb, $platform, '%init.fcb', '%init.icb' );
 
         # mov r12, fcb
         $mbb->add_instruction(
@@ -1514,12 +1517,13 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     my $cid      = $reg_id->($ctx_r);
                     my $target_r = $resolve->($src);       # target FCB pointer
                     my $tid      = $reg_id->($target_r);
+                    my $fcl      = fcb_layout($platform);
 
                     # 1. mov r11, rsp -- save current SP
                     $bytes .= pack( 'CCC', 0x4C, 0x8B, 0xDC );
 
                     # 2. Save callee regs to current FCB
-                    my @callee = qw(rbx rbp r12 r13 r14 r15);
+                    my @callee = $fcl->{saved}->@*;
                     for my $off_idx ( 0 .. $#callee ) {
                         my $reg  = $callee[$off_idx];
                         my $rid  = $reg_id->($reg);
@@ -1541,8 +1545,8 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                         elsif ( $mod == 1 ) { $bytes .= "\x00" }
                     }
 
-                    # 3. Save SP (r11) at FCB[48]
-                    my $rsp_off = 48;
+                    # 3. Save SP (r11) at FCB.saved_sp
+                    my $rsp_off = $fcl->{saved_sp};
                     my $rex_s   = 0x48 | 0x04 | ( $cid >= 8 ? 0x01 : 0 );
                     my $rm_s    = $cid & 7;
                     my $mod_s   = $rsp_off ? 2 : 0;
@@ -1573,10 +1577,10 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                     #    it was set to the target FCB address in step 6 and the FCB
                     #    self-pointer at FCB[16] equals the same value, so skipping it
                     #    avoids a redundant load that clobbers the base register mid-loop)
-                    my @cregs = qw(rbx rbp r12 r13 r14 r15 rsp);
+                    my @cregs = ( $fcl->{saved}->@*, 'rsp' );
                     for my $off_idx ( 0 .. $#cregs ) {
                         my $reg = $cregs[$off_idx];
-                        next if $reg eq 'r12';
+                        next if $reg eq $platform->fiber_reg;
                         my $rid  = $reg_id->($reg);
                         my $disp = $off_idx * 8;
                         my $rex  = 0x48 | ( $rid >= 8 ? 4 : 0 ) | ( $cid >= 8 ? 1 : 0 );

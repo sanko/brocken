@@ -5,6 +5,7 @@ no warnings qw[portable experimental::class];
 class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
     use Brocken::Jenny::MIR;
     use Brocken::Jenny::StackGuard;
+    use Brocken::Jenny::FCB qw[fcb_layout];
     use Brocken::ICB;
     use List::Util qw[min max];
     field $platform : param;
@@ -12,6 +13,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
 
     method lower($ir_func) {
         my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => $ir_func->name );
+        my $fcl      = fcb_layout($platform);
         # Seeding ICB.stack_limit writes through %__heap_base. A pure-IR _BROCKEN_ENTRY has no parameters at all;
         # the real entry receives the hidden ICB as its first parameter. The guard builder also names that vreg
         # literally, so a function only qualifies when its first parameter really is `%__heap_base`: the
@@ -3831,7 +3833,6 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FiberCreate') ) {
                     my $callee   = $inst->callee;
                     my $stack_sz = 64 * 1024;
-                    my $fcb_sz   = 88;                                         # +8 os_thread at 72, +8 stack_limit at 80
                     my $stack    = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'virt_reg',
                         value => $inst->name . '.stk',
@@ -3875,7 +3876,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                 $fcb,
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'imm',
-                                    value => $fcb_sz,
+                                    value => $fcl->{size},
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 )
                             ],
@@ -3910,7 +3911,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     );
                     my $fcb_rsp_field = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
-                        value => { base => $inst->name . '.fcb', disp => 48 },
+                        value => { base => $inst->name . '.fcb', disp => $fcl->{saved_sp} },
                         type  => Brocken::Lindsay::IR::Type::i64()
                     );
                     $mbb->add_instruction(
@@ -3924,7 +3925,13 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     # Zero-initialize callee-save slots before setting specific values.
                     # The alloca does not zero memory, so uninitialized slots would load garbage into callee registers
                     # on the fiber's first entry.
-                    for my $off ( 0, 8, 24, 32, 40, 72, 80 ) {
+                    # Zero every spilled callee slot except saved_sp, which was just seeded; the named fields are
+                    # written explicitly below. The list comes from the shared FCB layout so it always covers the
+                    # registers ctx_swap will later restore.
+                    my $saved_regs = $fcl->{saved};
+                    for my $idx ( 0 .. $#$saved_regs ) {
+                        my $off = $idx * 8;
+                        next if $off == $fcl->{saved_sp};
                         my $f = Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'mem',
                             value => { base => $inst->name . '.fcb', disp => $off },
@@ -3937,15 +3944,15 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                     $f,
                                     Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => Brocken::Lindsay::IR::Type::i64() )
                                 ],
-                                comment => "FCB[$off] = 0"
+                                comment => "FCB.callee[$idx] = 0"
                             )
                         );
                     }
 
-                    # Store self-pointer in FCB.r12 slot (offset 16)
+                    # Store the self-pointer in the fiber register's slot.
                     my $fcb_self_field = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
-                        value => { base => $inst->name . '.fcb', disp => 16 },
+                        value => { base => $inst->name . '.fcb', disp => $fcl->{self} },
                         type  => Brocken::Lindsay::IR::Type::i64()
                     );
                     $mbb->add_instruction(
@@ -3956,10 +3963,10 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                         )
                     );
 
-                    # Store parent FCB pointer (current fiber's r12) in FCB.parent slot (offset 56)
+                    # Store parent FCB pointer (current fiber's r12) in the parent slot.
                     my $fcb_parent_field = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
-                        value => { base => $inst->name . '.fcb', disp => 56 },
+                        value => { base => $inst->name . '.fcb', disp => $fcl->{parent} },
                         type  => Brocken::Lindsay::IR::Type::i64()
                     );
                     my $fiber_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'r12' );
@@ -3971,10 +3978,10 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                         )
                     );
 
-                    # Store entry function address in FCB.resume_pc (offset 64)
+                    # Store entry function address in FCB.resume_pc
                     my $fcb_resume_field = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
-                        value => { base => $inst->name . '.fcb', disp => 64 },
+                        value => { base => $inst->name . '.fcb', disp => $fcl->{resume_pc} },
                         type  => Brocken::Lindsay::IR::Type::i64()
                     );
                     $mbb->add_instruction(
@@ -3985,9 +3992,9 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                         )
                     );
 
-                    # Copy the thread ICB pointer from the current fiber ([r12+72]) to the new FCB[72]. FCB[72] is the
-                    # per-thread os_thread/ICB slot -- r12 itself is the FCB address, not the ICB, so storing r12 would
-                    # leave the child fiber's ctx_swap limit exchange reading a stale base.
+                    # Copy the thread ICB pointer from the current fiber's FCB.os_thread to the new FCB.os_thread. The
+                    # slot holds the per-thread os_thread/ICB pointer -- r12 itself is the FCB address, not the ICB, so
+                    # storing r12 would leave the child fiber's ctx_swap limit exchange reading a stale base.
                     my $thread_icb = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'virt_reg',
                         value => $inst->name . '.os',
@@ -4000,7 +4007,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                 $thread_icb,
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
-                                    value => { base => 'r12', disp => 72 },
+                                    value => { base => 'r12', disp => $fcl->{os_thread} },
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 )
                             ],
@@ -4009,7 +4016,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     );
                     my $fcb_os_thread = Brocken::Jenny::MIR::MachineOperand->new(
                         kind  => 'mem',
-                        value => { base => $inst->name . '.fcb', disp => 72 },
+                        value => { base => $inst->name . '.fcb', disp => $fcl->{os_thread} },
                         type  => Brocken::Lindsay::IR::Type::i64()
                     );
                     $mbb->add_instruction(
@@ -4054,7 +4061,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             operands => [
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
-                                    value => { base => $inst->name . '.fcb', disp => 80 },
+                                    value => { base => $inst->name . '.fcb', disp => $fcl->{stack_limit} },
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 ),
                                 $fiber_limit
@@ -4085,7 +4092,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
 
                     # Keep the shared ICB's stack_limit pointing at the fiber that is about to run.
                     Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'xfer', 'r12',
-                        $self->_lower_opnd($fiber), 72, 80 );
+                        $self->_lower_opnd($fiber) );
 
                     # Atomic context switch: save current FCB, restore target FCB, jump
                     $mbb->add_instruction(
@@ -4128,7 +4135,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                 $parent_tmp,
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
-                                    value => { base => 'r12', disp => 56 },
+                                    value => { base => 'r12', disp => $fcl->{parent} },
                                     type  => Brocken::Lindsay::IR::Type::i64()
                                 )
                             ],
@@ -4137,7 +4144,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     );
 
                     # Keep the shared ICB's stack_limit pointing at the parent we are about to resume.
-                    Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'yield', 'r12', $parent_tmp, 72, 80 );
+                    Brocken::Jenny::StackGuard::swap_stack_limit( $mbb, $platform, $inst->name // 'yield', 'r12', $parent_tmp );
 
                     # Atomic context switch: save current FCB, restore parent FCB, jump
                     $mbb->add_instruction(
@@ -4287,7 +4294,6 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::IsolateCreate') ) {
                     my $callee   = $inst->callee;
                     my $stack_sz = 64 * 1024;
-                    my $fcb_sz   = 88;                                         # +8 os_thread at 72, +8 stack_limit at 80
                     my $icb_sz   = Brocken::ICB::SIZE;
                     my $i64      = Brocken::Lindsay::IR::Type::i64();
                     my $ptr      = Brocken::Lindsay::IR::Type::ptr();
@@ -4311,7 +4317,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'alloca',
-                            operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $fcb_sz, type => $i64 ) ],
+                            operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $fcl->{size}, type => $i64 ) ],
                             comment  => 'isolate FCB'
                         )
                     );
@@ -4337,7 +4343,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             operands => [
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
-                                    value => { base => $inst->name . '.fcb', disp => 48 },
+                                    value => { base => $inst->name . '.fcb', disp => $fcl->{saved_sp} },
                                     type  => $i64
                                 ),
                                 $saved_rsp
@@ -4346,7 +4352,11 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                         )
                     );
 
-                    for my $off ( 0, 8, 24, 32, 40, 80 ) {
+                    # Zero every spilled callee slot except saved_sp; the named fields are written explicitly below.
+                    my $saved_regs = $fcl->{saved};
+                    for my $idx ( 0 .. $#$saved_regs ) {
+                        my $off = $idx * 8;
+                        next if $off == $fcl->{saved_sp};
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'store_imm',
@@ -4358,7 +4368,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                     ),
                                     Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
                                 ],
-                                comment => "FCB[$off] = 0"
+                                comment => "FCB.callee[$idx] = 0"
                             )
                         );
                     }
@@ -4368,7 +4378,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             operands => [
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
-                                    value => { base => $inst->name . '.fcb', disp => 16 },
+                                    value => { base => $inst->name . '.fcb', disp => $fcl->{self} },
                                     type  => $i64
                                 ),
                                 $fcb
@@ -4382,7 +4392,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             operands => [
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
-                                    value => { base => $inst->name . '.fcb', disp => 56 },
+                                    value => { base => $inst->name . '.fcb', disp => $fcl->{parent} },
                                     type  => $i64
                                 ),
                                 Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0, type => $i64 )
@@ -4396,7 +4406,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             operands => [
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
-                                    value => { base => $inst->name . '.fcb', disp => 64 },
+                                    value => { base => $inst->name . '.fcb', disp => $fcl->{resume_pc} },
                                     type  => $i64
                                 ),
                                 $fptr
@@ -4432,7 +4442,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             operands => [
                                 Brocken::Jenny::MIR::MachineOperand->new(
                                     kind  => 'mem',
-                                    value => { base => $inst->name . '.fcb', disp => 72 },
+                                    value => { base => $inst->name . '.fcb', disp => $fcl->{os_thread} },
                                     type  => $i64
                                 ),
                                 $icb

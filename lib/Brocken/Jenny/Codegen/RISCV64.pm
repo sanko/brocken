@@ -9,6 +9,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
     use Brocken::Jenny::MIR;
     use Brocken::ICB;
     use Brocken::Jenny::StackGuard;
+    use Brocken::Jenny::FCB qw[fcb_layout];
     use Brocken::Jenny::Codegen::RISCV64::Encodings qw[:all];
     field $platform : param;
 
@@ -183,6 +184,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
     method _build_isolate_trampoline_mf() {
         my $i64     = Brocken::Lindsay::IR::Type::i64();
         my $ptr     = Brocken::Lindsay::IR::Type::ptr();
+        my $fcl     = fcb_layout($platform);
         my $mf      = Brocken::Jenny::MIR::MachineFunction->new( name => '_isolate_trampoline' );
         my $mbb     = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
         my $arg_ptr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%arg', type => $ptr );
@@ -212,12 +214,12 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             )
         );
 
-        # FCB.os_thread = icb (offset 128)
+        # FCB.os_thread = icb
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
                 operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => 128 }, type => $ptr ), $icb_ptr ],
+                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{os_thread} }, type => $ptr ), $icb_ptr ],
                 comment => 'FCB.os_thread = ICB'
             )
         );
@@ -231,13 +233,13 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             )
         );
 
-        # func_addr = FCB.resume_pc (offset 120)
+        # func_addr = FCB.resume_pc
         my $func_addr = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%func', type => $ptr );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'load',
                 operands =>
-                    [ $func_addr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => 120 }, type => $ptr ) ],
+                    [ $func_addr, Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%fcb', disp => $fcl->{resume_pc} }, type => $ptr ) ],
                 comment => 'func = FCB.resume_pc'
             )
         );
@@ -418,13 +420,14 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
     method _build_fiber_init_mf() {
         my $i64 = Brocken::Lindsay::IR::Type::i64();
         my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        my $fcl = fcb_layout($platform);
         my $mf  = Brocken::Jenny::MIR::MachineFunction->new( name => 'main' );
         my $mbb = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
         my $fcb = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%init.fcb', type => $ptr );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'alloca',
-                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 152, type => $i64 ) ],
+                operands => [ $fcb, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $fcl->{size}, type => $i64 ) ],
                 comment  => 'main fiber FCB'
             )
         );
@@ -432,7 +435,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
                 operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 88 }, type => $i64 ), $fcb ],
+                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{self} }, type => $i64 ), $fcb ],
                 comment => 'FCB.self = FCB addr'
             )
         );
@@ -459,20 +462,20 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             )
         );
 
-        # Store ICB pointer in FCB.os_thread slot (offset 128)
+        # Store ICB pointer in FCB.os_thread slot
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'store',
                 operands =>
-                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => 128 }, type => $i64 ), $icb ],
+                    [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => '%init.fcb', disp => $fcl->{os_thread} }, type => $i64 ), $icb ],
                 comment => 'FCB.os_thread = &ICB'
             )
         );
 
-        # Seed the main fiber's stack limit (FCB[136] and ICB.stack_limit) from the current stack pointer so the first
-        # fiber switch can hand the ICB to a child without losing the main thread's runway. Also put the ICB in arg0,
-        # because _real_main takes it as its hidden first parameter.
-        Brocken::Jenny::StackGuard::seed_main_fiber_limit( $mbb, $platform, '%init.fcb', '%init.icb', 136 );
+        # Seed the main fiber's stack limit (FCB.stack_limit and ICB.stack_limit) from the current stack pointer so the
+        # first fiber switch can hand the ICB to a child without losing the main thread's runway. Also put the ICB in
+        # arg0, because _real_main takes it as its hidden first parameter.
+        Brocken::Jenny::StackGuard::seed_main_fiber_limit( $mbb, $platform, '%init.fcb', '%init.icb' );
         $mbb->add_instruction(
             Brocken::Jenny::MIR::MachineInstruction->new(
                 opcode   => 'mv',
@@ -1260,7 +1263,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $target_r = $resolve->($src);                                  # target FCB pointer
                     my $tid      = $reg_id->($target_r);
                     my $adj_tmp  = 28;                                                # t3
-                    my @callee   = qw(s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 ra sp);
+                    my $fcl      = fcb_layout($platform);
+                    my @callee   = $fcl->{saved}->@*;
 
                     # 1. mv t3, sp -- save current SP
                     $bytes .= pack( 'V', OP_IMM | ( $adj_tmp << 7 ) | ( 0 << 12 ) | ( 2 << 15 ) );

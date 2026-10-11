@@ -2,6 +2,7 @@ use v5.42;
 
 package Brocken::Jenny::Codegen::ARM64::Encodings v0.0.1 {
     use Exporter 'import';
+    use Brocken::Jenny::FCB;
     our %EXPORT_TAGS = (
         all => [
             qw[
@@ -215,7 +216,7 @@ package Brocken::Jenny::Codegen::ARM64::Encodings v0.0.1 {
 
         # Immediate/Flag bits
         SF             => 0x80000000,    # SF bit - OR'd into ADD/SUB when operating on 64-bit X regs
-        FCB_RESUME_OFF => 112,           # FCB resume offset (function call boundary stack delta)
+        FCB_RESUME_OFF => Brocken::Jenny::FCB::arch_layout('aarch64')->{resume_pc},    # from the FCB layout, never a second copy
 
         # Exception generation
         BRK  => 0xD4200000,              # BRK #imm16: 11010100 001 imm16 00000 00000
