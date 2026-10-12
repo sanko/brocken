@@ -597,6 +597,14 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             return $1       if $r =~ /^f(\d+)$/ && $1 <= 31;
             return 0;
         };
+
+        # The inverse of $reg_id for the integer registers, so an address scratch can be named back from the operand
+        # id a caller already computed.  Only the integer pools are needed: an address is always an integer register.
+        my %id_to_name;
+        for my $r ( $platform->registers('caller')->@*, $platform->registers('callee')->@* ) {
+            my $i = $reg_id->($r);
+            $id_to_name{$i} = $r unless exists $id_to_name{$i};
+        }
         my $resolve = sub ($op) {
             die "resolve: operand value is undef" unless defined $op->value;
             return $assignment->{ $op->value } // $op->value if $op->kind eq 'virt_reg';
@@ -653,10 +661,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         my $emit_mem_access = sub {
             my ( $funct3, $data_id, $base_id, $disp, $store, $index_id, $float, @extra_forbidden ) = @_;
             my $op = $float ? ( $store ? FSTORE : FLOAD ) : ( $store ? STORE : LOAD );
-            my %forbidden = ( $data_id => 1, $base_id => 1 );
-            $forbidden{$_}        = 1 for grep {defined} @extra_forbidden;
-            $forbidden{$index_id} = 1 if defined $index_id;
-            my $pick = sub () {
+            my $pick = sub ($allow_data, @excl) {
+                my %forbidden = ( $base_id => 1, map { $_ => 1 } grep {defined} @excl );
+                $forbidden{$_}        = 1 for grep {defined} @extra_forbidden;
+                $forbidden{$index_id} = 1 if defined $index_id;
+                $forbidden{$data_id}  = 1 unless $allow_data;
                 my %used;
                 @used{ values %$assignment } = ();
                 $used{$_} = 1 for sort keys %reserved;
@@ -680,6 +689,15 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     return $r unless exists $used{$r} || $forbidden{$rid};
                 }
 
+                # A load overwrites its destination, so the destination register can materialise the address and be
+                # loaded through: it is the fallback before the allocator's reload scratch, whose sibling may be
+                # holding another reload for this very instruction.  The destination is never the base or the index,
+                # and the address is consumed by the load that writes the register, so reusing it is exact.  A store
+                # cannot: the destination is the value being stored and must survive until the store reads it.
+                if ( $allow_data && !$forbidden{$data_id} && defined( my $dn = $id_to_name{$data_id} ) ) {
+                    return $dn;
+                }
+
                 # Every caller register can be assigned in a function with enough live values, so fall back to the
                 # allocator's reload scratch.  It holds a reloaded value only for the instruction that reads it,
                 # which lists that register in %forbidden, so a scratch drawn from it here is dead.
@@ -691,15 +709,18 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             };
             my $bid = $base_id;
             my $off = $disp;
+            my $load_reuse = ( !$store && !$float ) ? 1 : 0;
+            my $scratch_id;
             if ( defined $index_id ) {
-                my $tmp_r = $pick->();
+                my $tmp_r = $pick->( $load_reuse );
                 die 'no temp register for indexed memory address' unless defined $tmp_r;
                 my $tid = $reg_id->($tmp_r);
+                $scratch_id = $tid;
                 $bytes .= pack( 'V', ( $index_id << 20 ) | ( $base_id << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );
                 $bid = $tid;
             }
             if ( !$fits_disp->($off) ) {
-                my $tmp_r = $pick->();
+                my $tmp_r = $pick->( $load_reuse, ( defined $scratch_id ? $scratch_id : () ) );
                 die 'no temp register for large memory displacement' unless defined $tmp_r;
                 my $tid = $reg_id->($tmp_r);
                 my $hi  = ( $off + 0x800 ) >> 12;
