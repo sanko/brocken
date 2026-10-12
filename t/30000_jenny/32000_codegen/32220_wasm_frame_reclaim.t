@@ -54,13 +54,13 @@ subtest 'the frame region starts above the runtime state' => sub {
 
     # Recursion deep enough for the frames to reach past the ICB. Eight levels fit inside it by luck; this one does not,
     # and reads the fuel counter back as 0 once they do.
-    answers( 'sub fib(i64 $n) -> i64 { if ($n < 2) { return $n; } return fib($n - 1) + fib($n - 2); } return fib(12);',
+    answers( 'sub fib(i64 $n) :returns(i64) { if ($n < 2) { return $n; } return fib($n - 1) + fib($n - 2); } return fib(12);',
         144, 'a recursion deeper than the ICB still gets its fuel' );
 
     # The same shape one frame at a time, so the frames cannot all be live at
     # once and only the address they are handed matters.
     answers(
-        'sub d(i64 $n) -> i64 { my i64 $a = $n; my i64 $b = $a + 1; return $b; }
+        'sub d(i64 $n) :returns(i64) { my i64 $a = $n; my i64 $b = $a + 1; return $b; }
               my i64 $i = 0; my i64 $t = 0; while ($i < 500) { $t = d($i); $i = $i + 1; } return $t;', 500,
         'repeated calls past the ICB keep their own frames'
     );
@@ -70,14 +70,14 @@ subtest 'a frame is reclaimed when the call returns' => sub {
     # The regression this file exists for. Each call takes a 24 byte frame, so 100000 of them is 2.4MB against a 1MB
     # heap: with nothing restoring the pointer this traps with "out of bounds memory access" long before the end.
     answers(
-        'sub f(i64 $n) -> i64 { my i64 $a = $n; my i64 $b = $a + 1; my i64 $c = $b + 1; return $c; }
+        'sub f(i64 $n) :returns(i64) { my i64 $a = $n; my i64 $b = $a + 1; my i64 $c = $b + 1; return $c; }
               my i64 $i = 0; my i64 $t = 0; while ($i < 100000) { $t = f($i); $i = $i + 1; } return $t & 255;', 100001 & 255,
         '100000 calls in a loop do not walk off the heap'
     );
 
     # Recursion is the same allocator from the other side: the frames have to
     # nest and come back, rather than all being live at once.
-    answers( 'sub f(i64 $n) -> i64 { if ($n <= 0) { return 0; } return 1 + f($n - 1); } return f(5000) & 255;',
+    answers( 'sub f(i64 $n) :returns(i64) { if ($n <= 0) { return 0; } return 1 + f($n - 1); } return f(5000) & 255;',
         5000 & 255, 'a 5000 deep recursion still nests and unwinds' );
 };
 subtest 'the pointer moves back' => sub {
@@ -88,7 +88,7 @@ subtest 'the pointer moves back' => sub {
     # allocating, so the read has to be a `global.get` of index 0 rather than a load from its own frame.
     my $file = temp_path('wasm_reclaim') . '.wasm';
     Brocken::Jenny::Linker::Wasm->new->write_executable( $file,
-        $brocken->codegen->emit_functions( $brocken->compile('sub f(i64 $n) -> i64 { my i64 $a = $n; return $a; } return f(1);')->functions ),
+        $brocken->codegen->emit_functions( $brocken->compile('sub f(i64 $n) :returns(i64) { my i64 $a = $n; return $a; } return f(1);')->functions ),
         $platform );
     my $bytes = do { open my $fh, '<:raw', $file or die $!; local $/; <$fh> };
     unlink $file if -e $file;

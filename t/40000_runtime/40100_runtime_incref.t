@@ -50,7 +50,7 @@ subtest 'Any var passed to helper function' => sub {
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub double(i64 $n) -> i64 {
+sub double(i64 $n) :returns(i64) {
     return $n * 2;
 }
 my $x = 21;
@@ -70,7 +70,7 @@ subtest 'Any var returned from helper function' => sub {
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub make_val(i64 $n) -> i64 {
+sub make_val(i64 $n) :returns(i64) {
     return $n;
 }
 my $x = make_val(42);
@@ -94,7 +94,7 @@ SKIP: {
         # -> 0) and returned a dangling pointer.
         # The fix adds build_incref($val) before the decref loop.
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub wrap(i64 $n) -> i64 {
+sub wrap(i64 $n) :returns(i64) {
     my $inner = $n;
     return $inner;
 }
@@ -154,10 +154,10 @@ subtest 'Call returning boxed Any — cross-function RC' => sub {
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub make(i64 $n) -> i64 {
+sub make(i64 $n) :returns(i64) {
     return $n * 2;
 }
-sub chain(i64 $n) -> i64 {
+sub chain(i64 $n) :returns(i64) {
     my $tmp = $n;
     return make($tmp);
 }

@@ -2,7 +2,7 @@
 # gcc test: pthread_create/join a worker that returns 42
 # Brocken: isolate_create/join a worker that returns 42
 
-sub worker_fn() -> i32 {
+sub worker_fn() :returns(i32) {
     return 42;
 }
 

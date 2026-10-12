@@ -34,7 +34,7 @@ my $brocken = Brocken->new;
 is(
     dies {
         my $module
-            = Brocken->new->compile( 'sub g(f64 $a, f64 $b, f64 $c, f64 $d) -> i64 {' .
+            = Brocken->new->compile( 'sub g(f64 $a, f64 $b, f64 $c, f64 $d) :returns(i64) {' .
                 ' my f64 $s = $a + $b + $c + $d; my i64 $j = $s; return $j; }' .
                 ' return g(1.0, 2.0, 3.0, 4.0);' );
         $brocken->codegen->emit_functions( $module->functions );
@@ -52,7 +52,7 @@ is(
 sub entry_words ( $cg_class, $arch ) {
     my $plat   = Brocken::Katsuro::Platform::parse($arch);
     my $cg     = $cg_class->new( platform => $plat );
-    my $module = Brocken->new->compile( 'sub g(f32 $a) -> i64 { my f32 $s = $a; my i64 $j = $s; return $j; }' . ' return g(1.0);' );
+    my $module = Brocken->new->compile( 'sub g(f32 $a) :returns(i64) { my f32 $s = $a; my i64 $j = $s; return $j; }' . ' return g(1.0);' );
     my @words;
     for my $func ( $module->functions->@* ) {
         next unless $func->name eq '_BROCKEN_ENTRY';
@@ -82,7 +82,7 @@ SKIP: {
             my $sum    = join ' + ', map {"\$v$_"} 0 .. $n - 1;
             my $total  = $n * ( $n + 1 ) / 2;
             my $src    = <<"BROCKEN";
-sub g( @{[ join ', ', @params ]} ) -> i64 {
+sub g( @{[ join ', ', @params ]} ) :returns(i64) {
     my $width \$s = $sum;
     my i64 \$j = \$s;
     return \$j;
@@ -97,7 +97,7 @@ BROCKEN
     # An integer literal argument is retagged to the parameter's float type and
     # takes the same materialisation path.
     my $src = <<'BROCKEN';
-sub g(f64 $a, f64 $b, f64 $c, f64 $d) -> i64 {
+sub g(f64 $a, f64 $b, f64 $c, f64 $d) :returns(i64) {
     my f64 $s = $a + $b + $c + $d;
     my i64 $j = $s;
     return $j;

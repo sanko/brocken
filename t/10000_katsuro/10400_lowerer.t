@@ -22,7 +22,7 @@ subtest 'Empty program produces empty module' => sub {
 };
 subtest 'Function with no body becomes declare' => sub {
     my $c   = Brocken->new;
-    my $mod = $c->compile('sub foo() -> i64;');
+    my $mod = $c->compile('sub foo() :returns(i64);');
     my $f   = find_function( $mod, 'foo' );
     ok( $f, 'found function foo' );
     is( $f->name,                   'foo' );
@@ -34,7 +34,7 @@ subtest 'Function with no body becomes declare' => sub {
 subtest 'Function with parameters' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub add(i64 $a, i64 $b) -> i64 {
+sub add(i64 $a, i64 $b) :returns(i64) {
     return 0;
 }
 BROCKEN
@@ -200,7 +200,7 @@ subtest 'Class field access via $self->field in method' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 class Point {
     field i64 $x;
-    method get_x() -> i64 { return $self->x; }
+    method get_x() :returns(i64) { return $self->x; }
 }
 BROCKEN
     my $f = find_function( $mod, 'Point::get_x' );
@@ -273,7 +273,7 @@ subtest 'Method declaration with params and return type' => sub {
     my $mod = $c->compile(<<'BROCKEN');
 class Counter {
     field i64 $count;
-    method add(i64 $n) -> i64 { $count = $count + $n; return $count; }
+    method add(i64 $n) :returns(i64) { $count = $count + $n; return $count; }
 }
 BROCKEN
     my $f = find_function( $mod, 'Counter::add' );
@@ -289,7 +289,7 @@ BROCKEN
 subtest 'Function calls' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub helper() -> i64 {
+sub helper() :returns(i64) {
     return 42;
 }
 return helper();
@@ -303,7 +303,7 @@ BROCKEN
 subtest 'Full pipeline: lex -> parse -> lower' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub factorial(i64 $n) -> i64 {
+sub factorial(i64 $n) :returns(i64) {
     my i64 $result = 1;
     my i64 $i = 1;
     while ($i <= $n) {
@@ -352,7 +352,7 @@ subtest 'Complex expression field access (function returning class)' => sub {
 class Point {
     field i64 $x :param;
 }
-sub make() -> Point {
+sub make() :returns(Point) {
     return Point->new(x => 42);
 }
 return make()->x;
@@ -609,7 +609,7 @@ subtest 'syscall_by_name resolves to correct syscall number' => sub {
     skip 'Platform does not resolve syscall names', 3 unless defined $exit_num;
     my $c   = Brocken->new;
     my $mod = $c->compile( <<'BROCKEN', 'test.br', $platform );
-sub foo() -> i64 {
+sub foo() :returns(i64) {
     return Brocken::syscall_by_name("exit", 42);
 }
 BROCKEN
@@ -642,7 +642,7 @@ subtest 'syscall_by_name errors on non-string first argument' => sub {
 subtest 'libc intrinsic produces call to named function' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub foo() -> i64 {
+sub foo() :returns(i64) {
     return Brocken::libc("write", 1, 0, 6);
 }
 BROCKEN

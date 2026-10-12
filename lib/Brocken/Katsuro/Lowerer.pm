@@ -780,9 +780,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 # If $val refers to the same object as one of the locals, this bump keeps RC >= 1 across the cleanup,
                 # preventing a premature free + dangling pointer.
                 # Only applies when $val is a dynamic type (heap-allocated with RC). The kind is `dynamic`, not `any`:
-                # an earlier rename left this test comparing against `any`, so the incref never fired and `sub f() ->
-                # Any { my $u = 7; return $u; }` freed the box in the exit decref and handed the caller a pointer onto
-                # the free list, whose payload slot had been overwritten with the list link.
+                # an earlier rename left this test comparing against `any`, so the incref never fired and `sub f()
+                # :returns(Any) { my $u = 7; return $u; }` freed the box in the exit decref and handed the caller a
+                # pointer onto the free list, whose payload slot had been overwritten with the list link.
                 if ( $val->type && $val->type->kind eq 'dynamic' ) {
                     $builder->build_incref( $val, $line, $col );
                 }

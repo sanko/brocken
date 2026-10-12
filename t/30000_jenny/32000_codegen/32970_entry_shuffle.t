@@ -46,7 +46,7 @@ SKIP: {
         my $total  = 0;
         $total += $_ for @args;
         my $free = <<"BROCKEN";
-sub f( @{[ join ', ', @params ]} ) -> i64 { return $sum; }
+sub f( @{[ join ', ', @params ]} ) :returns(i64) { return $sum; }
 if ( f( @{[ join ', ', @args ]} ) == $total ) { return 42; }
 return 1;
 BROCKEN
@@ -98,7 +98,7 @@ SKIP: {
         my $terms  = join ' + ', @terms;
         my $call   = join ', ',  @args;
         my $src    = <<"BROCKEN";
-sub g( $params ) -> i64 {
+sub g( $params ) :returns(i64) {
     my f64 \$s = $terms;
     my i64 \$j = \$s;
     return \$j;

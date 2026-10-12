@@ -46,24 +46,24 @@ subtest 'a nested call does not reuse the caller\'s frame' => sub {
     # Two frames, live at the same time. `inner` is called from a function that has already allocated its own slots, so
     # if the bump pointer is per-function the two frames overlap and `outer`'s parameter slot is overwritten.
     answers(
-        'sub inner(i64 $x) -> i64 { my i64 $t = $x + 1; my i64 $u = $t * 3; return $u; }
-         sub outer(i64 $x) -> i64 { my i64 $k = $x * 2; my i64 $v = inner($k); return $v + $x; }
+        'sub inner(i64 $x) :returns(i64) { my i64 $t = $x + 1; my i64 $u = $t * 3; return $u; }
+         sub outer(i64 $x) :returns(i64) { my i64 $k = $x * 2; my i64 $v = inner($k); return $v + $x; }
          return outer(10) & 255;', ( ( ( 10 * 2 + 1 ) * 3 ) + 10 ) & 255, 'the callee carves its frame above the caller\'s'
     );
 
     # The same, with the inner call made twice: a per-function bump pointer hands the caller the same addresses back on
     # the second call, which the first call has already filled with its own live values.
     answers(
-        'sub d(i64 $x) -> i64 { my i64 $t = $x * 2; return $t; }
-         sub c(i64 $x) -> i64 { my i64 $a = d($x); my i64 $b = d($x + 1); return $a + $b; }
+        'sub d(i64 $x) :returns(i64) { my i64 $t = $x * 2; return $t; }
+         sub c(i64 $x) :returns(i64) { my i64 $a = d($x); my i64 $b = d($x + 1); return $a + $b; }
          return c(20) & 255;', ( 40 + 42 ) & 255, 'two calls in one function each get their own frame'
     );
 
     # A caller that keeps a value live across the call. This is the shape the
     # runtime helpers have: `unbox_i64` saves `$dyn` and `$payload`, then calls `box_tag`, then reads them back.
     answers(
-        'sub g(i64 $p) -> i64 { my i64 $h = $p; my i64 $r = f($h); return $r + $h; }
-         sub f(i64 $p) -> i64 { my i64 $a = $p; my i64 $b = $a + 5; my i64 $c = $b + 5; return $c; }
+        'sub g(i64 $p) :returns(i64) { my i64 $h = $p; my i64 $r = f($h); return $r + $h; }
+         sub f(i64 $p) :returns(i64) { my i64 $a = $p; my i64 $b = $a + 5; my i64 $c = $b + 5; return $c; }
          return g(7) & 255;', ( 7 + 5 + 5 ) + 7, 'a value live across a call survives it'
     );
 };
@@ -71,12 +71,12 @@ subtest 'recursion frames do not overlap' => sub {
 
     # Every activation of `f` is live at once, so a per-function bump pointer collapses the whole chain onto one frame
     # and the recursion has nothing left to distinguish.
-    answers( 'sub f(i64 $n) -> i64 { if ($n <= 0) { return 0; } return f($n - 1) + 1; } return f(100) & 255;',
+    answers( 'sub f(i64 $n) :returns(i64) { if ($n <= 0) { return 0; } return f($n - 1) + 1; } return f(100) & 255;',
         100, 'a 100 deep recursion accumulates correctly' );
 
     # Each activation has several live values, so a shared frame shows up as a
     # wrong result rather than as a trap.
-    answers( 'sub fib(i64 $n) -> i64 { if ($n < 2) { return $n; } return fib($n - 1) + fib($n - 2); } return fib(16) & 255;',
+    answers( 'sub fib(i64 $n) :returns(i64) { if ($n < 2) { return $n; } return fib($n - 1) + fib($n - 2); } return fib(16) & 255;',
         987 & 255, 'a recursive call tree keeps every frame intact' );
 };
 subtest 'the runtime unbox helpers work on the Wasm target' => sub {

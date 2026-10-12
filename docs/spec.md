@@ -480,7 +480,7 @@ my i64 $x = 42;
 return $x;
 
 # Is equivalent to:
-sub _BROCKEN_ENTRY(i64 $__heap_base) -> i64 {
+sub _BROCKEN_ENTRY(i64 $__heap_base) :returns(i64) {
     my i64 $x = 42;
     return $x;
 }

@@ -145,7 +145,7 @@ subtest 'Function call' => sub {
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub helper() -> i64 {
+sub helper() :returns(i64) {
     return 42;
 }
 return helper();
@@ -164,7 +164,7 @@ subtest 'Factorial' => sub {
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub factorial(i64 $n) -> i64 {
+sub factorial(i64 $n) :returns(i64) {
     my i64 $result = 1;
     my i64 $i = 1;
     while ($i <= $n) {
@@ -273,7 +273,7 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param;
-    method double() -> i64 { return $x * 2; }
+    method double() :returns(i64) { return $x * 2; }
 }
 my ptr $p = Point->new(x => 21);
 return $p->double();

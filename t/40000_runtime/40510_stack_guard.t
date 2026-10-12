@@ -39,7 +39,7 @@ SKIP: {
             my $f = shift;
             return <<"BROCKEN";
 use feature 'brocken_native_types';
-sub f(i64 \$n) -> i64 {
+sub f(i64 \$n) :returns(i64) {
     my i64 \$x = 0;
     if (\$n > 0) { \$x = f(\$n - 1); }
     return \$x + 1;
@@ -69,7 +69,7 @@ BROCKEN
         $run_case->(
             'catch_deep',
             $driver->(<<'BROCKEN')
-sub main() -> i64 {
+sub main() :returns(i64) {
     my i64 $caught = -1;
     try {
         my i64 $r = f(200000);
@@ -89,7 +89,7 @@ BROCKEN
         $run_case->(
             'throw_control',
             $driver->(<<'BROCKEN')
-sub main() -> i64 {
+sub main() :returns(i64) {
     my i64 $caught = -1;
     try {
         throw 7;

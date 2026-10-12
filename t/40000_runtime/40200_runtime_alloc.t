@@ -59,7 +59,7 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 class Point {
     field i64 $x :param;
-    method double() -> i64 { return $x * 2; }
+    method double() :returns(i64) { return $x * 2; }
 }
 my ptr $p = Point->new(x => 21);
 return $p->double();

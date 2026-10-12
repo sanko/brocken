@@ -8,7 +8,7 @@ no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'hash literal parses as Expr::Hash' => sub {
     my $c    = Brocken->new;
-    my $prog = $c->parse('sub foo() -> ptr { return (a => 1, b => 2); }');
+    my $prog = $c->parse('sub foo() :returns(ptr) { return (a => 1, b => 2); }');
     my $func = $prog->statements->[0];
     my $ret  = $func->body->statements->[0];
     isa_ok( $ret, ['Brocken::Katsuro::AST::Stmt::Return'] );
@@ -24,7 +24,7 @@ subtest 'hash literal parses as Expr::Hash' => sub {
 };
 subtest 'fat comma auto-quotes bareword key' => sub {
     my $c    = Brocken->new;
-    my $prog = $c->parse('sub foo() -> ptr { return (name => "hello"); }');
+    my $prog = $c->parse('sub foo() :returns(ptr) { return (name => "hello"); }');
     my $ret  = $prog->statements->[0]->body->statements->[0];
     my $hash = $ret->expr;
     isa_ok( $hash, ['Brocken::Katsuro::AST::Expr::Hash'] );
@@ -34,21 +34,21 @@ subtest 'fat comma auto-quotes bareword key' => sub {
 };
 subtest 'bare paren without => is not hash' => sub {
     my $c    = Brocken->new;
-    my $prog = $c->parse('sub foo() -> ptr { return (42); }');
+    my $prog = $c->parse('sub foo() :returns(ptr) { return (42); }');
     my $ret  = $prog->statements->[0]->body->statements->[0];
     my $expr = $ret->expr;
     isa_ok( $expr, ['Brocken::Katsuro::AST::Expr::List'] );
 };
 subtest 'comma paren without => is list' => sub {
     my $c    = Brocken->new;
-    my $prog = $c->parse('sub foo() -> ptr { return (1, 2, 3); }');
+    my $prog = $c->parse('sub foo() :returns(ptr) { return (1, 2, 3); }');
     my $ret  = $prog->statements->[0]->body->statements->[0];
     my $expr = $ret->expr;
     isa_ok( $expr, ['Brocken::Katsuro::AST::Expr::List'] );
 };
 subtest 'mixed positional and named call arguments keep the positional prefix' => sub {
     my $c    = Brocken->new;
-    my $prog = $c->parse('sub foo() -> i64 { return bar(1, x => 2); }');
+    my $prog = $c->parse('sub foo() :returns(i64) { return bar(1, x => 2); }');
     my $ret  = $prog->statements->[0]->body->statements->[0];
     my $call = $ret->expr;
     isa_ok( $call, ['Brocken::Katsuro::AST::Expr::Call'] );
@@ -61,7 +61,7 @@ subtest 'mixed positional and named call arguments keep the positional prefix' =
 subtest 'hash literal produces ptr type' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
-sub make_hash() -> ptr {
+sub make_hash() :returns(ptr) {
     return (x => 10, y => 20);
 }
 BROCKEN

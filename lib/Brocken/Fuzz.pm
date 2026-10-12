@@ -1667,7 +1667,7 @@ class Brocken::Fuzz v0.0.1 {
         my $ret_var    = $all_body_var_names[ $self->_rand_int($#all_body_var_names) ];
         my $param_code = join ', ',     map { $self->_type_keyword( $_->{bits}, $_->{signed} ) . ' $' . $_->{name} } @params;
         my $body_code  = join "\n    ", @local_decls, map { $_->{code} } @body_items;
-        my $code       = "sub $name($param_code) -> $ret_keyword {\n    $body_code\n    return \$$ret_var;\n}";
+        my $code       = "sub $name($param_code) :returns($ret_keyword) {\n    $body_code\n    return \$$ret_var;\n}";
         return {
             name           => $name,
             params         => \@params,
@@ -1689,7 +1689,7 @@ class Brocken::Fuzz v0.0.1 {
         my $code;
         my $sim;
         if ( $name eq 'factorial' ) {
-            $code = "sub factorial(i64 \$n) -> i64 {\n    if (\$n <= 1) { return 1; }\n    return \$n * factorial(\$n - 1);\n}";
+            $code = "sub factorial(i64 \$n) :returns(i64) {\n    if (\$n <= 1) { return 1; }\n    return \$n * factorial(\$n - 1);\n}";
             $sim  = sub {
                 my $n = shift;
                 return 1 if $n <= 1;
@@ -1699,7 +1699,7 @@ class Brocken::Fuzz v0.0.1 {
             };
         }
         else {
-            $code = "sub sum_to(i64 \$n) -> i64 {\n    if (\$n <= 0) { return 0; }\n    return \$n + sum_to(\$n - 1);\n}";
+            $code = "sub sum_to(i64 \$n) :returns(i64) {\n    if (\$n <= 0) { return 0; }\n    return \$n + sum_to(\$n - 1);\n}";
             $sim  = sub {
                 my $n = shift;
                 return 0 if $n <= 0;

@@ -22,7 +22,7 @@ my $platform = Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu');
 my $abi      = $platform->abi;
 is( $abi->fp_param_registers, [qw(f10 f11 f12 f13 f14 f15 f16 f17)], 'RISC-V floating-point arguments are fa0-fa7 (f10-f17)' );
 is( $abi->fp_return_register, 'f10',                                 'RISC-V floating-point return is fa0 (f10)' );
-my $module = Brocken->new->compile('sub g(f64 $a, f64 $b) -> f64 { return $b; } return g(1.0, 6.0);');
+my $module = Brocken->new->compile('sub g(f64 $a, f64 $b) :returns(f64) { return $b; } return g(1.0, 6.0);');
 my %mf;
 for my $func ( $module->functions->@* ) {
     next unless $func->blocks->@*;

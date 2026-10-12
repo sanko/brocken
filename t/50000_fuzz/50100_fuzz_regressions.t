@@ -559,7 +559,7 @@ return $v1;
 PROG
 };
 
-# Bug: sub call return type widening — sub adder() -> i128 returns $p3 (i32=61)
+# Bug: sub call return type widening — sub adder() :returns(i128) returns $p3 (i32=61)
 #   but compiled binary returns 0 instead of 61. The fuzzer simulation correctly
 #   predicts 61, so this is a compiler codegen bug, likely involving mixed-width
 #   parameter/return types or stack frame interference from the f64→i128 fptosi
@@ -569,7 +569,7 @@ PROG
 subtest 'i128 sub return with i32 return_var (Fuzz #73)' => sub {
     test_prog( 'fptosi + neg + call', <<'PROG', 61 );
 use feature 'brocken_native_types';
-sub adder(i64 $p1, i32 $p2, i32 $p3) -> i128 {
+sub adder(i64 $p1, i32 $p2, i32 $p3) :returns(i128) {
     return $p3;
 }
 my i32 $v1 = 61;
@@ -584,7 +584,7 @@ return $v1;
 PROG
     test_prog( 'i128 sub return with i32 return_var', <<'PROG', 61 );
 use feature 'brocken_native_types';
-sub double() -> i8 {
+sub double() :returns(i8) {
     my i16 $l1 = 47;
     my u32 $l2 = 4294967238;
     my i8 $l3 = 30;
@@ -593,7 +593,7 @@ sub double() -> i8 {
     return $l3;
 }
 
-sub adder(i64 $p1, i32 $p2, i32 $p3) -> i128 {
+sub adder(i64 $p1, i32 $p2, i32 $p3) :returns(i128) {
     my u16 $l1 = 65518;
     my i32 $l2 = -59;
     my u8 $l3 = 232;
@@ -699,7 +699,7 @@ PROG
 subtest 'u128 helper entry shuffle debug' => sub {
     test_prog( 'u128 param helper', <<'PROG', 0xEF );
 use feature 'brocken_native_types';
-sub helper(u128 $x) -> u64 {
+sub helper(u128 $x) :returns(u64) {
     return $x;
 }
 return helper(0xDEADBEEF);
@@ -849,7 +849,7 @@ return 1;
 PROG
     test_prog( 'full fuzz case 7 (seed 100)', <<'PROG', 1 );
 use feature 'brocken_native_types';
-sub fold() -> i8 {
+sub fold() :returns(i8) {
     my bool $l1 = false;
     $l1 = -$l1;
     $l1 = -$l1;

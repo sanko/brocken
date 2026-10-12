@@ -27,31 +27,31 @@ SKIP: {
 }
 subtest 'a returned box survives the callee exit decref' => sub {
     run_case( <<'BROCKEN', 8, 'return a local, add in the caller' );
-sub mk() -> Any { my $u = 7; return $u; }
+sub mk() :returns(Any) { my $u = 7; return $u; }
 my $a = mk();
 return $a + 1;
 BROCKEN
     run_case( <<'BROCKEN', 10, 'the returned box holds a computed value' );
-sub mk() -> Any { my $u = 7; my $v = 9; return $u + $v; }
+sub mk() :returns(Any) { my $u = 7; my $v = 9; return $u + $v; }
 my $a = mk();
 return $a - 6;
 BROCKEN
 };
 subtest 'a box passed through a parameter comes back alive' => sub {
     run_case( <<'BROCKEN', 5, 'identity through an Any parameter' );
-sub id(Any $v) -> Any { return $v; }
+sub id(Any $v) :returns(Any) { return $v; }
 my $x = 5;
 return id($x);
 BROCKEN
     run_case( <<'BROCKEN', 11, 'a returned box passed through identity' );
-sub id(Any $v) -> Any { return $v; }
-sub mk() -> Any { my $u = 11; return $u; }
+sub id(Any $v) :returns(Any) { return $v; }
+sub mk() :returns(Any) { my $u = 11; return $u; }
 return id(mk());
 BROCKEN
 };
 subtest 'two calls do not free each others boxes' => sub {
     run_case( <<'BROCKEN', 6, 'two independent Any returns' );
-sub mk() -> Any { my $u = 3; return $u; }
+sub mk() :returns(Any) { my $u = 3; return $u; }
 my $a = mk();
 my $b = mk();
 return $a + $b;

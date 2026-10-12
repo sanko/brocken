@@ -40,7 +40,7 @@ is( [ $win64->param_pair_registers(0) ], [qw(rcx rdx)], 'Win64 pairs the first t
 is( [ $win64->param_pair_registers(3) ], [],            'Win64 has no pair once only one integer register is left' );
 
 # A 128-bit result for every backend, lowered on any host.
-my $src = "use feature 'brocken_native_types';\n" . "sub g(i64 \$x) -> i128 { my i128 \$v = \$x; return \$v; }\n" . "return g(5);\n";
+my $src = "use feature 'brocken_native_types';\n" . "sub g(i64 \$x) :returns(i128) { my i128 \$v = \$x; return \$v; }\n" . "return g(5);\n";
 for my $arch ( sort keys %lowerer_for ) {
     my $platform = Brocken::Katsuro::Platform::parse($arch);
     my $abi      = $platform->abi;

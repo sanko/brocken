@@ -77,10 +77,10 @@ subtest 'Return statement' => sub {
 subtest 'Subroutine declaration' => sub {
     my $c    = Brocken->new;
     my $prog = $c->parse(<<'BROCKEN');
-sub add(i64 $a, i64 $b) -> i64 {
+sub add(i64 $a, i64 $b) :returns(i64) {
     return 0;
 }
-sub empty() -> ptr;
+sub empty() :returns(ptr);
 BROCKEN
     is( $prog->statements->@*, 2, 'two declarations' );
     my $s0 = $prog->statements->[0];
@@ -99,6 +99,26 @@ BROCKEN
     is( $s1->name,        'empty' );
     is( $s1->return_type, 'ptr' );
     is( $s1->body->statements->@*, 0, 'forward decl has empty body' );
+};
+subtest 'Return annotation :returns(Type)' => sub {
+    my $c = Brocken->new;
+
+    # Class-typed and pointer returns on subs.
+    my $prog = $c->parse('sub make() :returns(Point); sub raw() :returns(ptr);');
+    is( $prog->statements->[0]->return_type, 'Point', 'class-typed return' );
+    is( $prog->statements->[1]->return_type, 'ptr',   'ptr return' );
+
+    # The old '-> Type' spelling has been removed.
+    eval { $c->parse('sub old() -> i64 { return 0; }') };
+    ok( $@, 'legacy -> TYPE syntax rejected' );
+
+    # Tuple returns parse far enough to give a clear "not yet implemented" error.
+    eval { $c->parse('sub pair() :returns(i64, bool) { return 0; }') };
+    like( $@, qr/Tuple returns are not yet implemented/, 'tuple returns rejected with a clear message' );
+
+    # ':returns' is the only understood sub/method attribute.
+    eval { $c->parse('sub weird() :nope(1) { return 0; }') };
+    like( $@, qr/Unknown sub\/method attribute ':nope'/, 'unknown attribute rejected' );
 };
 subtest 'Class declaration' => sub {
     my $c    = Brocken->new;
@@ -259,8 +279,8 @@ subtest 'Method declaration inside class' => sub {
 class Counter {
     field i64 $count :reader;
     method increment() { $count = $count + 1; }
-    method get_value() -> i64 { return $count; }
-    method add(i64 $n) -> i64 { $count = $count + $n; return $count; }
+    method get_value() :returns(i64) { return $count; }
+    method add(i64 $n) :returns(i64) { $count = $count + $n; return $count; }
 }
 BROCKEN
     is( $prog->statements->@*, 1, 'one declaration' );
@@ -270,7 +290,7 @@ BROCKEN
     my $m0 = $s->methods->[0];
     is( $m0->name,       'increment' );
     is( $m0->params->@*, 0 );
-    ok( !defined $m0->return_type, 'return_type undef (no -> TYPE)' );
+    ok( !defined $m0->return_type, 'return_type undef (no annotation)' );
     isa_ok( $m0->body, ['Brocken::Katsuro::AST::Stmt::Block'] );
     my $m1 = $s->methods->[1];
     is( $m1->name,        'get_value' );
@@ -304,7 +324,7 @@ BROCKEN
 subtest 'Field access and method call syntax' => sub {
     my $c    = Brocken->new;
     my $prog = $c->parse(<<'BROCKEN');
-sub test() -> i64 {
+sub test() :returns(i64) {
     my ptr $p;
     $p->count;
     $p->increment();
@@ -347,7 +367,7 @@ class Channel {
     field i32 $closed;
 }
 
-sub channel_send(ptr $chan, i64 $val) -> i64 {
+sub channel_send(ptr $chan, i64 $val) :returns(i64) {
     my i64 $result = 0;
     if ($closed) {
         return 0;
@@ -485,7 +505,7 @@ subtest 'Source positions on expressions and statements' => sub {
 my i64 $x = 42;
 return $x;
 if (1) { return 1; }
-sub foo(i64 $n) -> i64 { return $n; }
+sub foo(i64 $n) :returns(i64) { return $n; }
 class Point { field i64 $x; }
 BROCKEN
 

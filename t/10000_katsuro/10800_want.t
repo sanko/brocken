@@ -82,7 +82,7 @@ subtest 'want(TypeName) in user-defined function' => sub {
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub is_i64() -> i64 {
+sub is_i64() :returns(i64) {
     return want(i64);
 }
 return is_i64();

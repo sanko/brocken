@@ -12,7 +12,7 @@ use Brocken;
 my $brocken = Brocken->new;
 
 my $module = $brocken->compile(<<'BROCKEN');
-sub fib( i64 $n ) -> i64 {
+sub fib( i64 $n ) :returns(i64) {
     if ( $n < 2 ) { return $n; }
     return fib( $n - 1 ) + fib( $n - 2 );
 }
@@ -115,7 +115,7 @@ return $sum;    # 45
 Functions are declared with `sub`, and the return type follows the parameter list:
 
 ```perl
-sub classify( i64 $n ) -> i64 {
+sub classify( i64 $n ) :returns(i64) {
     if ( $n < 0 ) { return -1; }
     if ( $n == 0 ) { return 0; }
     return 1;
@@ -132,7 +132,7 @@ print( 42 );
 Errors are `throw` and a `try` block that catches them, with an optional `finally` that runs either way:
 
 ```perl
-sub parse_port( i64 $raw ) -> i64 {
+sub parse_port( i64 $raw ) :returns(i64) {
     my i64 $n = 0;
     try {
         if ( $raw < 0 ) { throw 1; }
@@ -161,7 +161,7 @@ class Point {
     field i64 $x : param;
     field i64 $y : param;
 
-    method sum() -> i64 {
+    method sum() :returns(i64) {
         return $x + $y;
     }
 }

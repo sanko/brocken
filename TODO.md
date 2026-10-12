@@ -42,7 +42,8 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
 
 ## 3. Syntax, Signatures & Grammar Updates
 
-- [ ] **`:returns(...)` Syntax:** Replace `-> RetType` (on both `sub` and `method` declarations) in `Parser.pm`, `AST.pm`, and `Lowerer.pm` with the attribute `:returns(Type)`. Support multi-type register tuples `:returns(i64, bool)`. The spec already documents this form (§7.4, §8); the front end still accepts the old `-> RetType` spelling until this lands.
+- [x] **`:returns(Type)` Syntax:** The return annotation is now the attribute `:returns(Type)` on both `sub` and `method` declarations; the old `-> RetType` spelling has been removed from `Parser.pm`, the core runtime (`src/runtime/core.brocken`), tests, and examples. The spec documents this form (§7.4, §8).
+- [ ] **Tuple Returns:** Extend `:returns(...)` to multi-type register tuples `:returns(i64, bool)`. The parser currently parses up to the comma and rejects tuples with a clear "not yet implemented" error; the `AST`/`Lowerer` still model a single scalar `return_type`.
 - [ ] **Post-Dereference Syntax (`postderef`):** Implement post-deref parsing and lowering: `$ref->@*`, `$ref->%*`, `$ref->$*`, `$ref->[0]`, `$ref->{key}`.
 - [ ] **Strict String Interpolation:** Update `Lexer.pm` and `Parser.pm` double-quote interpolation: support `$scalars`, `@arr[0]`, `%map{key}`, `${var}`. Method calls like `"$pt->x"` must remain raw text (no method call interpolation).
 - [ ] **Anonymous Subs & Closures:** Add parser and lowerer support for anonymous `sub (...) :returns(...) { ... }`.

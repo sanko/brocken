@@ -12,7 +12,7 @@ subtest 'list return and unpack produces correct values' => sub {
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub make_list() -> ptr {
+sub make_list() :returns(ptr) {
     return (3, 4);
 }
 my ($a, $b) = make_list();
@@ -32,7 +32,7 @@ subtest 'list return with three elements' => sub {
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub make_list() -> ptr {
+sub make_list() :returns(ptr) {
     return (10, 20, 30);
 }
 my ($x, $y, $z) = make_list();
@@ -52,7 +52,7 @@ subtest 'list return with single element' => sub {
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub make_one() -> ptr {
+sub make_one() :returns(ptr) {
     return (42);
 }
 my ($v) = make_one();
@@ -72,7 +72,7 @@ subtest 'list return with expression elements' => sub {
 SKIP: {
         skip 'Not native', 1 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub make_list() -> ptr {
+sub make_list() :returns(ptr) {
     my $x = 5;
     return ($x * 2, $x + 3);
 }
@@ -103,28 +103,28 @@ SKIP: {
         # list-slot ownership fix, 0 after it).
         my @cases = (
             [ <<'BROCKEN', 4, 'a list of floats' ],
-sub make_list() -> ptr {
+sub make_list() :returns(ptr) {
     return (1.5, 2.5);
 }
 my ($a, $b) = make_list();
 return $a + $b;
 BROCKEN
             [ <<'BROCKEN', 5, 'a list of an integer and a float' ],
-sub make_list() -> ptr {
+sub make_list() :returns(ptr) {
     return (3, 2.5);
 }
 my ($a, $b) = make_list();
 return $a + $b;
 BROCKEN
             [ <<'BROCKEN', 4, 'a float list unpacked into f64 targets' ],
-sub make_list() -> ptr {
+sub make_list() :returns(ptr) {
     return (1.5, 2.5);
 }
 my (f64 $a, f64 $b) = make_list();
 return $a + $b;
 BROCKEN
             [ <<'BROCKEN', 9, 'an untyped element survives the return of its maker' ],
-sub make_list() -> ptr {
+sub make_list() :returns(ptr) {
     my $u = 7;
     return ($u, 2);
 }
@@ -151,7 +151,7 @@ subtest 'a float element is not read back as its bit pattern' => sub {
 SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub make_list() -> ptr {
+sub make_list() :returns(ptr) {
     return (2.5);
 }
 my ($a) = make_list();
@@ -164,7 +164,7 @@ BROCKEN
         is( $? >> 8, 1, 'a float element compares equal to itself' );
         unlink $file;
         my $again = Brocken->new->compile(<<'BROCKEN');
-sub make_list() -> ptr {
+sub make_list() :returns(ptr) {
     return (2.5);
 }
 my ($a) = make_list();

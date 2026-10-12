@@ -33,7 +33,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
 use feature 'brocken_native_types';
-sub do_div() -> i64 {
+sub do_div() :returns(i64) {
     my i64 $x = 42;
     my i64 $y = 0;
     my i64 $r = $x / $y;

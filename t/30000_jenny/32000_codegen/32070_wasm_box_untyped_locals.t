@@ -148,13 +148,13 @@ SKIP: {
     # the same programs returned 0 on native -- and it is why every returned list element looked like a freed pointer
     # even after the frame region was separated from the arena.
     subtest 'a box returned from a function survives the callee' => sub {
-        answers( 'sub mk() -> Any { my $u = 7; return $u; } my $a = mk(); return $a + 1;', 8, 'return a local, use it in the caller' );
-        answers( 'sub mk() -> Any { my $u = 7; my $v = 9; return $u + $v; } my $a = mk(); return $a - 6;',
+        answers( 'sub mk() :returns(Any) { my $u = 7; return $u; } my $a = mk(); return $a + 1;', 8, 'return a local, use it in the caller' );
+        answers( 'sub mk() :returns(Any) { my $u = 7; my $v = 9; return $u + $v; } my $a = mk(); return $a - 6;',
             10, 'the returned box holds a computed value' );
-        answers( 'sub id(Any $v) -> Any { return $v; } my $x = 5; return id($x);', 5, 'a box passed through an Any parameter' );
-        answers( 'sub mk() -> Any { my $u = 3; return $u; } my $a = mk(); my $b = mk(); return $a + $b;',
+        answers( 'sub id(Any $v) :returns(Any) { return $v; } my $x = 5; return id($x);', 5, 'a box passed through an Any parameter' );
+        answers( 'sub mk() :returns(Any) { my $u = 3; return $u; } my $a = mk(); my $b = mk(); return $a + $b;',
             6, 'two Any returns do not free each other' );
-        answers( 'sub mk() -> ptr { my $u = 7; return ($u, 2); } my ($a, $b) = mk(); return $a + $b;',
+        answers( 'sub mk() :returns(ptr) { my $u = 7; return ($u, 2); } my ($a, $b) = mk(); return $a + $b;',
             9, 'an untyped list element survives its maker' );
     };
     subtest 'the generated modules validate' => sub {

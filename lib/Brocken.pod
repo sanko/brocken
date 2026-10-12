@@ -15,7 +15,7 @@ Compiling a program is four calls. This is the whole path, start to finish:
     my $brocken = Brocken->new;
 
     my $module = $brocken->compile(<<'BROCKEN');
-    sub fib( i64 $n ) -> i64 {
+    sub fib( i64 $n ) :returns(i64) {
         if ( $n < 2 ) { return $n; }
         return fib( $n - 1 ) + fib( $n - 2 );
     }
@@ -120,7 +120,7 @@ Control flow is C<if> and C<while>. Both take a braced block, and C<elsif> chain
 
 Functions are declared with C<sub>, and the return type follows the parameter list:
 
-    sub classify( i64 $n ) -> i64 {
+    sub classify( i64 $n ) :returns(i64) {
         if ( $n < 0 ) { return -1; }
         if ( $n == 0 ) { return 0; }
         return 1;
@@ -133,7 +133,7 @@ C<say> and C<print> are calls, so they take a parenthesized argument list and a 
 
 Errors are C<throw> and a C<try> block that catches them, with an optional C<finally> that runs either way:
 
-    sub parse_port( i64 $raw ) -> i64 {
+    sub parse_port( i64 $raw ) :returns(i64) {
         my i64 $n = 0;
         try {
             if ( $raw < 0 ) { throw 1; }
@@ -160,7 +160,7 @@ name with named arguments:
         field i64 $x : param;
         field i64 $y : param;
 
-        method sum() -> i64 {
+        method sum() :returns(i64) {
             return $x + $y;
         }
     }

@@ -22,9 +22,9 @@ SKIP: {
     skip 'Not ARM64', 1 unless $host->is_arm64 && $host->is_native;
     my $rc = do {
         my $module = Brocken->new->compile(<<'BROCKEN');
-sub always_shl_63() -> i64 { return Brocken::shl(1, 63); }
+sub always_shl_63() :returns(i64) { return Brocken::shl(1, 63); }
 
-sub diag_shl_param(i64 $p) -> i64 {
+sub diag_shl_param(i64 $p) :returns(i64) {
     return Brocken::shl(1, $p);
 }
 

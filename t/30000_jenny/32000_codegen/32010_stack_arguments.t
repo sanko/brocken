@@ -96,7 +96,7 @@ sub overflow_src($triple) {
     my @args     = map { $_ + 1 } 0 .. $n - 1;
     my $sum      = join ' + ', map {"\$p$_"} 0 .. $n - 1;
     my $src      = <<"BROCKEN";
-sub over( @{[ join ', ', @params ]} ) -> i64 {
+sub over( @{[ join ', ', @params ]} ) :returns(i64) {
     my i64 \$s = $sum;
     return \$s;
 }
@@ -125,7 +125,7 @@ for my $target (@TARGETS) {
     my $fp    = $platform->abi->fp_param_registers;
     my $mix_n = scalar(@$fp) + 1;
     my $mix   = <<"BROCKEN";
-sub mixed( @{[ join ', ', map {"f64 \$f$_"} 0 .. $mix_n - 1 ]}, i64 \$j ) -> i64 {
+sub mixed( @{[ join ', ', map {"f64 \$f$_"} 0 .. $mix_n - 1 ]}, i64 \$j ) :returns(i64) {
     my i64 \$s = \$j;
     return \$s;
 }
@@ -303,13 +303,13 @@ sub exec_pairs () {
                     $sum += $v;
                 }
             }
-            my $src  = sprintf "sub g(%s) -> f64 { return %s; } return g(%s);", join( ', ', @params ), join( ' + ', @terms ), join( ', ', @args );
+            my $src  = sprintf "sub g(%s) :returns(f64) { return %s; } return g(%s);", join( ', ', @params ), join( ' + ', @terms ), join( ', ', @args );
             my $name = sprintf '%s: %d integer and %d floating-point arguments arrive intact', $triple, $nint, $nfloat;
             run_case( $platform, $class, $src, $sum, $name );
 
             # A float return read out of a general register came back as the first float the caller passed, which is a
             # wrong answer that no offset check can see.
-            my $ret = "sub h(f64 \$a, f64 \$b) -> f64 { return \$b; } return h(1.0, 6.0);";
+            my $ret = "sub h(f64 \$a, f64 \$b) :returns(f64) { return \$b; } return h(1.0, 6.0);";
             run_case( $platform, $class, $ret, 6, "$triple: a floating-point return lands in the floating-point return register" );
         }
     }

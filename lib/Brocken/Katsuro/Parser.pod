@@ -10,7 +10,7 @@ Brocken::Katsuro::Parser - Recursive descent parser for the Katsuro language
     use Brocken::Katsuro::Parser;
 
     my $tokens = Brocken::Katsuro::Lexer->new(
-        source   => 'sub fib( i64 $n ) -> i64 { return $n; }',
+        source   => 'sub fib( i64 $n ) :returns(i64) { return $n; }',
         filename => 'fib.brocken',
     )->lex;
 
@@ -87,6 +87,25 @@ initializer, which the lowerer materializes as a zero value.
 
 Three forms hang off C<my>: a plain C<my i64 $x = 0;>, a fixed-size array on C<my i64 [ $a, $b ];>, and a list
 destructuring declaration on C<my ( $a, $b ) = f();>.
+
+=head2 C<sub> and C<method> declarations
+
+A subroutine is C<sub NAME( params )> followed by an optional return annotation and then either a braced body or a
+C<;> for a forward declaration. A method is the same form inside a C<class> block. Parameters are a comma-separated
+list of an optional type keyword and a sigil-led name.
+
+The return annotation is the attribute C<:returns(Type)>, written after the parameter list:
+
+    sub fib( i64 $n ) :returns(i64) { return $n; }
+    method commit( String $sql ) :returns(ptr) { ... }
+
+C<Type> is a type keyword or a class name. The annotation is optional; without it the lowerer infers the return type
+from the body. The older C<< -> RetType >> spelling has been removed, and a C<sub> or C<method> that still uses it
+fails to parse.
+
+Tuple returns such as C<:returns(i64, bool)> are not implemented yet: the parser accepts the attribute name and the
+first type, then rejects the comma with a clear message. C<:returns> is currently the only attribute understood on a
+subroutine or method; any other name is rejected.
 
 =head2 C<if>
 

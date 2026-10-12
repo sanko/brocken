@@ -347,6 +347,29 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return Brocken::Katsuro::AST::Stmt::Block->new( $self->_pos_token($brace_token), statements => \@stmts );
     }
 
+    # Parse an optional return annotation following a signature. Brocken uses the attribute form
+    # ':returns(Type)' exclusively; the old '-> Type' spelling has been removed (TODO 3, spec 7.4).
+    method parse_return_annotation() {
+        return undef unless $self->check( 'OP', ':' );
+        $self->advance();    # ':'
+        my $attr = $self->consume( 'IDENT', undef, "Expected attribute name after ':'" );
+        Carp::croak("Unknown sub/method attribute ':" . $attr->{value} . "' at line $attr->{line}, col $attr->{col}")
+            unless $attr->{value} eq 'returns';
+        $self->consume('(');
+        my $type = $self->_parse_type_name("Expected type in ':returns(...)'");
+        if ( $self->check(',') ) {
+            my $t = $self->peek();
+            Carp::croak("Tuple returns are not yet implemented at line $t->{line}, col $t->{col} (see TODO 3)");
+        }
+        $self->consume(')');
+        return $type;
+    }
+
+    method _parse_type_name($msg) {
+        return $self->advance()->{value} if $self->is_type( $self->peek() );
+        return $self->consume( 'IDENT', undef, $msg )->{value};
+    }
+
     # === Sub declarations ===
     method parse_sub_decl() {
         my $sub_token  = $self->advance();
@@ -368,17 +391,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             push @params, { type => $ptype, sigil => $psigil, name => $pname };
         }
         $self->consume(')');
-        my $return_type = undef;
-        if ( $self->check( 'OP', '->' ) ) {
-            $self->advance();
-            if ( $self->is_type( $self->peek() ) ) {
-                $return_type = $self->advance()->{value};
-            }
-            else {
-                my $t = $self->consume( 'IDENT', undef, "Expected return type after '->'" );
-                $return_type = $t->{value};
-            }
-        }
+        my $return_type = $self->parse_return_annotation();
         if ( $self->check(';') ) {
             $self->advance();
             return Brocken::Katsuro::AST::Stmt::SubDecl->new(
@@ -483,17 +496,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             push @params, { type => $ptype, sigil => $psigil, name => $pname };
         }
         $self->consume(')');
-        my $return_type = undef;
-        if ( $self->check( 'OP', '->' ) ) {
-            $self->advance();
-            if ( $self->is_type( $self->peek() ) ) {
-                $return_type = $self->advance()->{value};
-            }
-            else {
-                my $t = $self->consume( 'IDENT', undef, "Expected return type after '->'" );
-                $return_type = $t->{value};
-            }
-        }
+        my $return_type = $self->parse_return_annotation();
         my $body = $self->parse_block();
         return Brocken::Katsuro::AST::Stmt::MethodDecl->new(
             $self->_pos_token($method_tok),

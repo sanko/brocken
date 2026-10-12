@@ -39,7 +39,7 @@ SKIP: {
         my $call   = join ', ', map {"\$a$_"} 0 .. $n - 1;
         my $src    = <<"BROCKEN";
 my i64 \$base = $seed;
-sub g( @{[ join ', ', @params ]} ) -> i64 {
+sub g( @{[ join ', ', @params ]} ) :returns(i64) {
     my f64 \$s = $sum;
     my i64 \$j = \$s;
     return \$j;

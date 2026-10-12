@@ -50,7 +50,7 @@ sub sum_src($n) {
     my $params = join ', ',  map {"i64 \$p$_"} 0 .. $n - 1;
     my $body   = join ' + ', map {"\$p$_"} 0 .. $n - 1;
     return <<"BROCKEN";
-sub f($params) -> i64 {
+sub f($params) :returns(i64) {
     my i64 \$s = $body;
     return \$s;
 }

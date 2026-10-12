@@ -68,7 +68,7 @@ subtest 'an untyped variable holding a float converts to a declared float' => su
     answers( 'my $x = 1.5; my f64 $y = $x; my f64 $z = $y; return $z == 1.5 ? 1 : 0;', 1, 'untyped -> f64 -> f64' );
 };
 subtest 'a boxed float survives a store and a call' => sub {
-    answers( 'sub get(f64 $v) -> f64 { return $v; } my $x = 1.5; my f64 $y = get($x); return $y == 1.5 ? 1 : 0;', 1, 'box -> call' );
+    answers( 'sub get(f64 $v) :returns(f64) { return $v; } my $x = 1.5; my f64 $y = get($x); return $y == 1.5 ? 1 : 0;', 1, 'box -> call' );
     answers( 'my $a = 1.5; my $b = 2; return $a == 1.5 && $b == 2 ? 1 : 0;', 1, 'float and int boxes side by side' );
     answers( 'my $a = 2; my $b = 1.5; return $a == 2 && $b == 1.5 ? 1 : 0;', 1, 'int and float boxes side by side' );
 };

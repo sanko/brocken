@@ -31,7 +31,7 @@ is(
     [ 'rdi', 'rsi', 'xmm0', 'rdx', 'xmm1', 'rcx' ],
     'SysV keeps an independent counter per register file'
 );
-my $module = Brocken->new->compile('sub g(i64 $x, f64 $y) -> f64 { return $y; } return g(7, 2.0);');
+my $module = Brocken->new->compile('sub g(i64 $x, f64 $y) :returns(f64) { return $y; } return g(7, 2.0);');
 my %mf;
 for my $func ( $module->functions->@* ) {
     next unless $func->blocks->@*;

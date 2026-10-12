@@ -63,7 +63,7 @@ those are marked **Diverge** and argued in 1.6.
 | C19 | Constructor takes `%arguments` named hash; fields looked up by name | Accepts positional **and** trailing hash | Diverge (superset) |
 | C20 | `reftype($obj) eq "OBJECT"` | Native value; no Perl `reftype` | Diverge (n/a) |
 | C21 | `DESTROY` (spec 8.1) | Missing | Planned (see TODO 2) |
-| C22 | `:returns(Type)` return annotation replacing `-> RET` | `-> RET` | Planned (TODO 3) |
+| C22 | `:returns(Type)` return annotation replacing `-> RET` | `:returns(Type)` (single type) | Shipped; multi-type tuples pending (TODO 3) |
 | C23 | Roles | Missing | v0.0.2 (perlclass still lists roles as TODO) |
 | C24 | `ADJUST` parameters | Missing | v0.0.2 (perlclass still TODO) |
 | C25 | Metaprogramming API (PPC0022) | Missing | Defer |
@@ -99,7 +99,7 @@ Store `version` and an attribute list on `AST::Stmt::ClassDecl`; validate that `
 
 ### 1.3 Methods (C16–C18, C22)
 
-- **`:returns(Type)`.** Replace the `-> RET` spelling with the attribute form on both `sub` and `method` (already tracked in TODO 3; the spec 7.4/8 examples already use it). Support `:returns(i64, bool)` tuples per the spec.
+- **`:returns(Type)`.** Done: the attribute form is now the only spelled return annotation on both `sub` and `method`, and the old `-> RET` form has been removed from the parser, core runtime, tests, and examples (TODO 3). Still to do: `:returns(i64, bool)` register tuples per the spec, which need the `AST`/`Lowerer` to model more than one return value; the parser currently accepts the attribute and first type, then rejects the comma with a clear error.
 - **Parameter defaults.** `method greet(String $name = "someone")`.
 - **Lexical `my method`** and **anonymous `method { ... }`.** Lexical methods are a scoping change in the parser plus a private symbol naming scheme. Anonymous methods need a code-pointer value; if the body captures no fields/locals it can lower to a raw code address (like the existing non-capturing anonymous `sub`), otherwise it needs the closure environment planned for logic. Recommend shipping the non-capturing form first, and documenting the capture limitation.
 - **Method attributes** beyond `:returns` (`:override`, `:common`, `:lvalue`) are Object::Pad territory; see 2.
