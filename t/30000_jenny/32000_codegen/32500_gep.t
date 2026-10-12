@@ -85,7 +85,7 @@ use feature qw[class];
     }
 }
 
-# ARM64 GEP: variable index -> add with vreg
+# ARM64 GEP: variable index -> shift the index by the element scale, then add the base
 {
     my $func    = Brocken::Lindsay::IR::Function->new( name => 'gep_var', return_type => Brocken::Lindsay::IR::Type::ptr() );
     my $builder = Brocken::Lindsay::IR::Builder->new();
@@ -102,13 +102,20 @@ use feature qw[class];
     my $mf      = $lowerer->lower($func);
     my $ops     = $mf->blocks->[0]->instructions;
     my @adds    = grep { $_->opcode eq 'add' } $ops->@*;
+    my @shls    = grep { $_->opcode eq 'shl' } $ops->@*;
     ok( scalar @adds >= 1, 'ARM64 var GEP: add produced' );
+    ok( scalar @shls >= 1, 'ARM64 var GEP: index is shifted by the element scale' );
+
+    if (@shls) {
+        is( $shls[0]->operands->[1]->kind,  'imm', 'ARM64 var GEP: shift is by immediate' );
+        is( $shls[0]->operands->[1]->value, 2,     'ARM64 var GEP: shift = 2 (i32 -> *4)' );
+    }
 
     if (@adds) {
         my $gep_add = ( grep { $_->operands->[1]->kind eq 'virt_reg' } @adds )[0];
         ok( defined $gep_add, 'ARM64 var GEP: add with vreg operand' );
         if ($gep_add) {
-            is( $gep_add->operands->[1]->value, '%idx', 'ARM64 var GEP: index = %idx' );
+            is( $gep_add->operands->[1]->value, '%arr', 'ARM64 var GEP: base = %arr' );
         }
     }
 }

@@ -3071,13 +3071,45 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         );
                     }
                     else {
-                        $mbb->add_instruction(
-                            Brocken::Jenny::MIR::MachineInstruction->new(
-                                opcode   => 'add',
-                                operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $indices[0]->name ) ],
-                                comment  => 'gep: add index'
-                            )
-                        );
+                        my $scale = $inst->base_type->bits / 8;
+                        if ( $scale == 1 ) {
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'add',
+                                    operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $indices[0]->name ) ],
+                                    comment  => 'gep: add index'
+                                )
+                            );
+                        }
+                        else {
+                            # The index counts elements, not bytes, so it has to be scaled by the element size before
+                            # it is added to the base. The add below only takes an unscaled register, so shift the
+                            # index into dst first (the base copy above is dead once overwritten) and add the base back.
+                            my $shift = 0;
+                            my $s     = $scale;
+                            while ( $s > 1 ) { $s >>= 1; $shift++; }
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'mov',
+                                    operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $indices[0]->name ) ],
+                                    comment  => 'gep: idx'
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'shl',
+                                    operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $shift ) ],
+                                    comment  => 'gep: scale index by ' . $scale
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'add',
+                                    operands => [ $dst, Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ptr->name ) ],
+                                    comment  => 'gep: add scaled index'
+                                )
+                            );
+                        }
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ICmp') ) {
