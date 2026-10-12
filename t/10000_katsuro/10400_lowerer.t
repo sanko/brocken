@@ -232,8 +232,56 @@ class Point {
 BROCKEN
     my $f = find_function( $mod, 'Point::set_x' );
     ok( $f, 'found auto-generated writer Point::set_x' );
-    is( $f->return_type->as_string, 'void', 'returns void' );
+    is( $f->return_type->as_string, 'ptr', 'returns ptr so writer calls can be chained' );
     is( $f->params->@*,             4,      'four params (__heap_base, __want, $self, $value)' );
+    like( $f->as_string, qr/ret\s+ptr\s+%/, 'returns $self' );
+};
+subtest 'Field :accessor generates reader and writer' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+class Point {
+    field i64 $x :accessor;
+}
+BROCKEN
+    my $r = find_function( $mod, 'Point::x' );
+    ok( $r, 'found generated reader Point::x' );
+    is( $r->return_type->as_string, 'i64', 'reader returns i64' );
+    my $w = find_function( $mod, 'Point::set_x' );
+    ok( $w, 'found generated writer Point::set_x' );
+    is( $w->return_type->as_string, 'ptr', 'writer returns ptr' );
+};
+subtest 'Field ||= default lowers to a false-check select' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+class Counter {
+    field i64 $count :param ||= 3;
+}
+my ptr $a = Counter->new(count => 0);
+return 1;
+BROCKEN
+    my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
+    my $text = $f->as_string();
+    like( $text, qr/icmp\s+eq\s+i64/,    'compares the supplied value to zero' );
+    like( $text, qr/select\s+i1\s+%[^,]+, i64 3,/, 'selects between the default and the supplied value' );
+};
+subtest 'Multiple ADJUST blocks lower in declaration order' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+class Counter {
+    field i64 $count;
+    ADJUST { if ($count < 1) { $count = 1; } }
+    ADJUST { if ($count > 100) { $count = 100; } }
+}
+BROCKEN
+    my $f = find_function( $mod, 'Counter::ADJUST' );
+    ok( $f, 'found ADJUST function' );
+    my $text = $f->as_string();
+    my $i_lo = index( $text, 'store i64 1, ptr' );
+    my $i_hi = index( $text, 'store i64 100, ptr' );
+    ok( $i_lo >= 0,                     'first ADJUST stores its clamp' );
+    ok( $i_hi > $i_lo,                  'second ADJUST stores after the first (declaration order)' );
+    like( $text, qr/icmp\s+slt\s+i64/,  'first ADJUST comparison present' );
+    like( $text, qr/icmp\s+sgt\s+i64/,  'second ADJUST comparison present' );
 };
 subtest 'Named constructor with fields' => sub {
     my $c   = Brocken->new;

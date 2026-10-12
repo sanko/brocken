@@ -273,6 +273,25 @@ BROCKEN
     is( $f2->default->value, 0 );
     is( $f2->default_op,     '//=' );
 };
+subtest 'Field :accessor attribute and ||= default' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse(<<'BROCKEN');
+class Point {
+    field i64 $x :accessor ||= 7;
+}
+BROCKEN
+    is( $prog->statements->@*, 1, 'one declaration' );
+    my $s = $prog->statements->[0];
+    isa_ok( $s, ['Brocken::Katsuro::AST::Stmt::ClassDecl'] );
+    my $f0 = $s->fields->[0];
+    is( $f0->type,                'i64' );
+    is( $f0->name,                'x' );
+    is( scalar( $f0->attrs->@* ), 1, 'attrs count' );
+    is( $f0->attrs->[0],          'accessor' );
+    isa_ok( $f0->default, ['Brocken::Katsuro::AST::Expr::Const'] );
+    is( $f0->default->value, 7 );
+    is( $f0->default_op,     '||=' );
+};
 subtest 'Method declaration inside class' => sub {
     my $c    = Brocken->new;
     my $prog = $c->parse(<<'BROCKEN');
@@ -304,7 +323,7 @@ BROCKEN
     is( $m2->params->[0]{name}, 'n' );
     is( $m2->return_type,       'i64' );
 };
-subtest 'ADJUST block inside class' => sub {
+subtest 'ADJUST blocks inside class' => sub {
     my $c    = Brocken->new;
     my $prog = $c->parse(<<'BROCKEN');
 class Channel {
@@ -312,14 +331,18 @@ class Channel {
     ADJUST {
         if ($capacity < 1) { $capacity = 1; }
     }
+    ADJUST {
+        if ($capacity > 100) { $capacity = 100; }
+    }
 }
 BROCKEN
     is( $prog->statements->@*, 1, 'one declaration' );
     my $s = $prog->statements->[0];
     isa_ok( $s, ['Brocken::Katsuro::AST::Stmt::ClassDecl'] );
-    ok( defined $s->adjust, 'has ADJUST block' );
-    isa_ok( $s->adjust,       ['Brocken::Katsuro::AST::Stmt::Adjust'] );
-    isa_ok( $s->adjust->body, ['Brocken::Katsuro::AST::Stmt::Block'] );
+    is( $s->adjusts->@*, 2, 'has two ADJUST blocks' );
+    isa_ok( $s->adjusts->[0], ['Brocken::Katsuro::AST::Stmt::Adjust'] );
+    isa_ok( $s->adjusts->[1], ['Brocken::Katsuro::AST::Stmt::Adjust'] );
+    isa_ok( $s->adjusts->[0]->body, ['Brocken::Katsuro::AST::Stmt::Block'] );
 };
 subtest 'Field access and method call syntax' => sub {
     my $c    = Brocken->new;

@@ -557,8 +557,11 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         return unless $spill_slots && scalar keys %$spill_slots;
         my $load_op   = $is_float ? 'fload'  : 'load';
         my $store_op  = $is_float ? 'fstore' : 'store';
+        # `fcmp` is not a read-modify-write: operand 0 is a plain source, so it must be reloaded when spilled, but
+        # the value is never written back.  It is listed here anyway so the first comparand is reloaded; the
+        # resulting write-back stores the same value it just loaded and is therefore harmless.
         my %reads_dst = map { $_ => 1 }
-            qw(add sub mul umulh sdiv udiv div rem urem adc sbb and or xor cmp shl lshr ashr neg inc dec not bne beq fadd fsub fmul fdiv fmin fmax fxor fand);
+            qw(add sub mul umulh sdiv udiv div rem urem adc sbb and or xor cmp shl lshr ashr neg inc dec not bne beq fcmp fadd fsub fmul fdiv fmin fmax fxor fand);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
 

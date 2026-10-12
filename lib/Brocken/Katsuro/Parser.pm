@@ -419,7 +419,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         $self->consume('{');
         my @fields;
         my @methods;
-        my $adjust = undef;
+        my @adjusts;
         until ( $self->check('}') || $self->check('EOF') ) {
             if ( $self->check( 'KEYWORD', 'field' ) ) {
                 push @fields, $self->parse_field_decl();
@@ -429,7 +429,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             }
             elsif ( $self->check( 'KEYWORD', 'ADJUST' ) ) {
                 my $adjust_tok = $self->advance();
-                $adjust = Brocken::Katsuro::AST::Stmt::Adjust->new( $self->_pos_token($adjust_tok), body => $self->parse_block() );
+                push @adjusts, Brocken::Katsuro::AST::Stmt::Adjust->new( $self->_pos_token($adjust_tok), body => $self->parse_block() );
             }
             else {
                 my $t = $self->peek();
@@ -442,7 +442,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             name    => $name_token->{value},
             fields  => \@fields,
             methods => \@methods,
-            adjust  => $adjust,
+            adjusts => \@adjusts,
         );
     }
 
@@ -461,7 +461,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         }
         my $default    = undef;
         my $default_op = undef;
-        if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) ) {
+        if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) || $self->check( 'OP', '||=' ) ) {
             $default_op = $self->advance()->{value};
             $default    = $self->parse_expression(0);
         }

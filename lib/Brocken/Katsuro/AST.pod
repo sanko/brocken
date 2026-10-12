@@ -70,9 +70,9 @@ The list form of a variable declaration, C<my ($a, $b) = ...>, carrying a sigil 
 
 =head2 C<Assign>
 
-An assignment: C<target>, the node being written; C<expr>, the value; and C<op>, which is C<=> by default or C<//=> for
-assign-or. The default is in the field rather than supplied by the parser, so a node built by hand is an ordinary
-assignment.
+An assignment: C<target>, the node being written; C<expr>, the value; and C<op>, which is C<=> by default, C<//=> for
+assign-or-undef, or C<||=> for assign-or-false. The default is in the field rather than supplied by the parser, so a
+node built by hand is an ordinary assignment.
 
 =head2 C<Block>
 
@@ -107,15 +107,18 @@ as a block.
 
 =head2 C<ClassDecl>
 
-A class declaration: C<name> and a C<body> of declarations. The parser collects C<field>, C<method>, and C<ADJUST>
-declarations from the body; C<Brocken::Katsuro::Lowerer> turns them into a struct layout, a constructor, and the
+A class declaration: C<name>, C<fields>, C<methods>, and C<adjusts>. The parser collects C<field>, C<method>, and
+C<ADJUST> declarations from the body; C<adjusts> is a list because a class may declare several C<ADJUST> blocks, which
+the lowerer runs in declaration order.
+C<Brocken::Katsuro::Lowerer> turns them into a struct layout, a constructor, and the
 accessors.
 
 =head2 C<FieldDecl>
 
-A field declaration: C<name>, C<type>, an optional C<attributes> hashref, and a C<default>. The attributes are where
-C<: param> and C<: pack(N)> come from, and the default is an expression rather than a value so that a field can be
-initialised from another field.
+A field declaration: C<name>, C<type>, an C<attrs> list, an optional C<default>, and a C<default_op>. The attributes are
+where C<:param>, C<:reader>, C<:writer>, and C<:accessor> are recorded, and the default is an expression rather than a
+value so that a field can be initialised from another field. C<default_op> is C<=>, C<//=>, or C<||=>, and decides how the
+constructor applies the default.
 
 =head2 C<MethodDecl>
 
@@ -125,7 +128,8 @@ method on the current C<__CLASS__>.
 
 =head2 C<Adjust>
 
-An C<ADJUST> block attached to a class, with a C<body>.
+An C<ADJUST> block attached to a class, with a C<body>. A class keeps a list of these (C<ClassDecl::adjusts>); the
+lowerer concatenates them into one C<Class::ADJUST> function so they run in declaration order after the fields are set.
 
 =head2 C<TryCatch>
 

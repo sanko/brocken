@@ -43,6 +43,7 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
 ## 3. Syntax, Signatures & Grammar Updates
 
 - [x] **`:returns(Type)` Syntax:** The return annotation is now the attribute `:returns(Type)` on both `sub` and `method` declarations; the old `-> RetType` spelling has been removed from `Parser.pm`, the core runtime (`src/runtime/core.brocken`), tests, and examples. The spec documents this form (§7.4, §8).
+- [ ] **`package NAME` Declaration Scoping:** Support a `package NAME;` statement (and optionally `package NAME { ... }`) that prefixes the declarations that follow, so a module can write `sub heap_cursor(...)` inside `package Brocken::Runtime;` instead of spelling `sub Brocken::Runtime::heap_cursor` on every sub. This is a compile-time namespace prefix for `sub`/`method`/`class`/field and constant names within one compilation unit; cross-unit `require`/import stays gated on the module system (spec §17.4). The core runtime (`src/runtime/core.brocken`) is the immediate motivation: it currently names every sub with its full package, e.g. `sub Brocken::Runtime::bump_alloc`.
 - [ ] **Tuple Returns:** Extend `:returns(...)` to multi-type register tuples `:returns(i64, bool)`. The parser currently parses up to the comma and rejects tuples with a clear "not yet implemented" error; the `AST`/`Lowerer` still model a single scalar `return_type`.
 - [ ] **Post-Dereference Syntax (`postderef`):** Implement post-deref parsing and lowering: `$ref->@*`, `$ref->%*`, `$ref->$*`, `$ref->[0]`, `$ref->{key}`.
 - [ ] **Strict String Interpolation:** Update `Lexer.pm` and `Parser.pm` double-quote interpolation: support `$scalars`, `@arr[0]`, `%map{key}`, `${var}`. Method calls like `"$pt->x"` must remain raw text (no method call interpolation).
@@ -154,10 +155,10 @@ v0.0.1 brings classes to `perlclass` (`use feature 'class'`) parity; v0.0.2 adds
 features. The feature-by-feature plan, decisions, and open questions live in
 [`docs/class_roadmap.md`](docs/class_roadmap.md). Summary of the work:
 
-- [ ] **v0.0.1 — syntax sugar:** `:returns(Type)` (replacing `-> RET`), parameter defaults, `||=`
-  defaults, `:param(NAME)`/`:reader(NAME)`/`:writer(NAME)` with `_`-stripping, `:writer` returns
-  `$self` for chaining, multiple `ADJUST` blocks, earlier-field visibility in field initializers,
-  `:accessor`, `:weak`, and array/hash fields.
+- [ ] **v0.0.1 — syntax sugar:** `:returns(Type)` (replacing `-> RET`) [done], parameter defaults, `||=`
+  defaults [done], `:param(NAME)`/`:reader(NAME)`/`:writer(NAME)` with `_`-stripping, `:writer` returns
+  `$self` for chaining [done], multiple `ADJUST` blocks [done], earlier-field visibility in field
+  initializers, `:accessor` [done], `:weak`, and array/hash fields.
 - [ ] **v0.0.1 — object model:** class versions and attributes, `:isa` single inheritance, static
   ancestor resolution and `SUPER::`, constructor chaining over a copied `:param` name map, `DESTROY`
   chaining with cascading field teardown, and field alignment/padding.

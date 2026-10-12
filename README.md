@@ -152,14 +152,15 @@ The `catch` block receives the thrown value, and a `try` with no `catch` is a `t
 The `setjmp` and `longjmp` behind this live in the runtime, not in generated code, which is what lets a `return` out
 of a `try` still run the `finally`.
 
-Classes hold typed fields and methods, and the runtime generates a constructor, a reader, and a writer for each field.
-A `: param` field becomes a constructor argument. A class value is a `ptr`, and construction is a call on the class
+Classes hold typed fields and methods. A field marked `:reader` gets a reader, `:writer` gets a `set_` writer that
+returns `$self` (so writer calls chain), and `:accessor` gets both. A `:param` field becomes a constructor argument,
+and fields may carry an `=`, `//=`, or `||=` default. A class value is a `ptr`, and construction is a call on the class
 name with named arguments:
 
 ```perl
 class Point {
-    field i64 $x : param;
-    field i64 $y : param;
+    field i64 $x :param;
+    field i64 $y :param;
 
     method sum() :returns(i64) {
         return $x + $y;

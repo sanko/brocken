@@ -17,7 +17,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $current_class;                 # class name when inside a method/ADJUST
     field $symbols               = {};    # "name" -> ptr (alloca or GEP result)
     field $functions             = {};    # "name" -> Brocken::Lindsay::IR::Function
-    field $classes : reader      = {};    # "ClassName" -> { fields => [...], total_size => N, methods => [...], adjust => undef }
+    field $classes : reader      = {};    # "ClassName" -> { fields => [...], total_size => N, methods => [...], struct_type => T }
     field $block_id              = 0;
     field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
@@ -241,10 +241,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $current_class = $class_name;
         my $class_data = $classes->{$class_name};
 
-        # Lower the ADJUST block if present
-        if ( defined $ast->adjust ) {
+        # Lower the ADJUST blocks if present, in declaration order.
+        if ( $ast->adjusts->@* ) {
             $self->register_method( $class_name, 'ADJUST', 'void', [] );
-            $self->lower_adjust( $class_name, $ast->adjust );
+            $self->lower_adjust( $class_name, $ast->adjusts );
         }
 
         # Lower explicit methods
@@ -257,21 +257,22 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->lower_method( $class_name, $m );
         }
 
-        # Auto-generate :reader methods
+        # Auto-generate :reader methods (:accessor is reader + writer)
         for my $f ( $ast->fields->@* ) {
-            if ( grep { $_ eq 'reader' } $f->attrs->@* ) {
+            if ( grep { $_ eq 'reader' || $_ eq 'accessor' } $f->attrs->@* ) {
                 my $mname = $f->name;
                 $self->register_method( $class_name, $mname, $f->type, [] );
                 $self->generate_reader( $class_name, $f );
             }
         }
 
-        # Auto-generate :writer methods
+        # Auto-generate :writer methods (:accessor is reader + writer). Writers return $self so that
+        # calls can be chained: $obj->set_x(1)->set_y(2).
         for my $f ( $ast->fields->@* ) {
-            if ( grep { $_ eq 'writer' } $f->attrs->@* ) {
+            if ( grep { $_ eq 'writer' || $_ eq 'accessor' } $f->attrs->@* ) {
                 my $mname  = 'set_' . $f->name;
                 my @params = ( { type => $f->type, sigil => '$', name => 'value' } );
-                $self->register_method( $class_name, $mname, 'void', \@params );
+                $self->register_method( $class_name, $mname, 'ptr', \@params );
                 $self->generate_writer( $class_name, $f );
             }
         }
@@ -373,6 +374,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 idx        => $#fields + 1,
                 default    => $f->default,
                 default_op => $f->default_op,
+                attrs      => [ $f->attrs->@* ],
                 param      => ( grep { $_ eq 'param' } $f->attrs->@* ) ? 1 : 0,
                 };
             $offset += $self->type_size($ir_type);
@@ -386,7 +388,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             bits           => $offset * 8,
             signed         => 0,
         );
-        $classes->{ $ast->name } = { fields => \@fields, total_size => $offset, methods => [], adjust => undef, struct_type => $struct_type, };
+        $classes->{ $ast->name } = { fields => \@fields, total_size => $offset, methods => [], struct_type => $struct_type, };
     }
 
     method register_function($ast) {
@@ -2099,7 +2101,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     # Class field helpers
     method resolve_class_name($ast) {
-        my $obj = $ast->obj;
+        my $cls = $self->_expr_class( $ast->obj );
+        return $cls if defined $cls;
+        Carp::croak( "Cannot determine class for field or method access at " . $self->_loc($ast) ) unless $current_class;
+        return $current_class;
+    }
+
+    # Statically determine the class a receiver expression evaluates to, or undef if it cannot be known.
+    method _expr_class($obj) {
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
             Carp::croak( "Unknown class '" . $obj->name . "' at " . $self->_loc($obj) ) unless $classes->{ $obj->name };
             return $obj->name;
@@ -2110,8 +2119,24 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Call') && exists $function_return_class->{ $obj->func_name } ) {
             return $function_return_class->{ $obj->func_name };
         }
-        Carp::croak( "Cannot determine class for field or method access at " . $self->_loc($ast) ) unless $current_class;
-        return $current_class;
+        if ( $obj->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
+            my $recv = $self->_expr_class( $obj->obj );
+            if ( defined $recv ) {
+                my $full = $recv . '::' . $obj->method;
+                my $ret_class = $function_return_class->{$full};
+                return $ret_class if $ret_class;
+                # A :writer / :accessor method returns its receiver, so a chained call such as
+                # $obj->set_x(1)->set_y(2) keeps the same class.
+                if ( $obj->method =~ /^set_(.+)$/ ) {
+                    my $cd = $classes->{$recv};
+                    my ($fd) = grep { $_->{name} eq $1 } ( $cd ? $cd->{fields}->@* : () );
+                    if ( $fd && grep { $_ eq 'writer' || $_ eq 'accessor' } $fd->{attrs}->@* ) {
+                        return $recv;
+                    }
+                }
+            }
+        }
+        return undef;
     }
 
     method lower_field_addr($ast) {
@@ -2195,11 +2220,29 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $seen{$field_name} = 1;
             }
             for my $f ( $cd->{fields}->@* ) {
-                next if $seen{ $f->{name} };
                 next unless defined $f->{default};
+                my $op     = $f->{default_op} // '=';
+                my $is_set = $seen{ $f->{name} };
+
+                # `=` and `//=` apply only to a field the caller left unset; `||=` also rewrites a
+                # supplied-but-false value.
+                next if $is_set && $op ne '||=';
+                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{idx}, '%' . $f->{name} . '.default', $line, $col );
+                if ( $op eq '||=' && $is_set ) {
+
+                    # `||=` applies when the value supplied for the field is false, not merely
+                    # absent: keep the caller's value only when it is truthy.
+                    my $default_val = $self->lower_expression( $f->{default} );
+                    $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
+                    my $existing = $builder->build_load( $f->{ir_type}, $field_ptr, undef, $line, $col );
+                    my $zero     = Brocken::Lindsay::IR::Constant->new( type => $f->{ir_type}, value => 0 );
+                    my $is_false = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+                    my $new_val  = $builder->build_select( $is_false, $default_val, $existing, undef, $line, $col );
+                    $builder->build_store( $new_val, $field_ptr, $line, $col );
+                    next;
+                }
                 my $default_val = $self->lower_expression( $f->{default} );
                 $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
-                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{idx}, '%' . $f->{name} . '.default', $line, $col );
                 $builder->build_store( $default_val, $field_ptr, $line, $col );
             }
             my $adjust_fn = $functions->{ $class_name . '::ADJUST' };
@@ -2411,7 +2454,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
     }
 
-    method lower_adjust( $class_name, $adjust_ast ) {
+    method lower_adjust( $class_name, $adjust_asts ) {
         my $full_name = $class_name . '::ADJUST';
         $current_func = $functions->{$full_name};
         return unless $current_func;
@@ -2443,7 +2486,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $self_val = $current_func->params->[2];
         $symbols->{self} = $self_val;
         $self->populate_field_geps( $class_name, $self_val );
-        $self->lower_block_body( $adjust_ast->body );
+        for my $adjust_ast ( $adjust_asts->@* ) {
+            $self->lower_block_body( $adjust_ast->body );
+        }
         unless ( $current_block && $current_block->terminator ) {
             my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
             for my $name ( sort keys %$needs_rc ) {
@@ -2515,7 +2560,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my ($fd) = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
         my $field_ptr = $builder->build_struct_gep( $struct_type, $self_val, $field_idx, '%' . $fd->{name} . '.addr' );
         $builder->build_store( $value_val, $field_ptr );
-        $builder->build_ret();
+        $builder->build_ret($self_val);
     }
 };
 #

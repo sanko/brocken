@@ -3606,17 +3606,26 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$end_lbl] ) );
                     }
                     else {
+                        my $is_float = $result_type && $result_type->kind eq 'float';
                         my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $result_type );
                         my $else_lbl = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label',    value => $inst->name . '_sel_else' );
                         my $end_lbl  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label',    value => $inst->name . '_sel_end' );
+                        my $move_op  = $is_float ? 'fmov' : 'mov';
+
+                        # A float operand has to reach an FP register, and no `fmov` can take the literal
+                        # itself, so a constant is materialised first and only then selected.
+                        if ($is_float) {
+                            $true_op  = $self->_materialize( $mbb, $true_val );
+                            $false_op = $self->_materialize( $mbb, $false_val );
+                        }
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'beq', operands => [ $cond_op, $else_lbl ], comment => 'select' )
                         );
-                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov',   operands => [ $dst, $true_op ] ) );
-                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'jmp',   operands => [$end_lbl] ) );
-                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$else_lbl] ) );
-                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov',   operands => [ $dst, $false_op ] ) );
-                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$end_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => $move_op, operands => [ $dst, $true_op ] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'jmp',     operands => [$end_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label',   operands => [$else_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => $move_op, operands => [ $dst, $false_op ] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label',   operands => [$end_lbl] ) );
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {

@@ -152,13 +152,14 @@ The C<catch> block receives the thrown value, and a C<try> with no C<catch> is a
 The C<setjmp> and C<longjmp> behind this live in the runtime, not in generated code, which is what lets a C<return> out
 of a C<try> still run the C<finally>.
 
-Classes hold typed fields and methods, and the runtime generates a constructor, a reader, and a writer for each field.
-A C<: param> field becomes a constructor argument. A class value is a C<ptr>, and construction is a call on the class
+Classes hold typed fields and methods. A field marked C<:reader> gets a reader, C<:writer> gets a C<set_> writer that
+returns C<$self> (so writer calls chain), and C<:accessor> gets both. A C<:param> field becomes a constructor argument,
+and fields may carry an C<=>, C<//=>, or C<||=> default. A class value is a C<ptr>, and construction is a call on the class
 name with named arguments:
 
     class Point {
-        field i64 $x : param;
-        field i64 $y : param;
+        field i64 $x :param;
+        field i64 $y :param;
 
         method sum() :returns(i64) {
             return $x + $y;

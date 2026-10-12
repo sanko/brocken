@@ -99,4 +99,11 @@ subtest 'FLOAT token for exponent and leading-dot notation' => sub {
     is( $floats[3]->{value}, 300,    '3.0e2' );
     is( scalar @nums,        0,      'no NUM tokens' );
 };
+subtest 'Lexer recognizes ||= as a single operator' => sub {
+    my $lexer  = Brocken::Katsuro::Lexer->new( source => 'my i64 $x = 0; $x ||= 5;' );
+    my $tokens = $lexer->lex();
+    my @ops    = map { $_->{value} } grep { $_->{type} eq 'OP' } @$tokens;
+    ok( ( grep { $_ eq '||=' } @ops ), '||= is lexed as one operator' );
+    is( scalar( grep { $_ eq '||' } @ops ), 0, 'no bare || token produced' );
+};
 done_testing;

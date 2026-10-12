@@ -61,4 +61,15 @@ subtest 'integer ordering is unchanged' => sub {
     answers( 'my i32 $a = 2; my i32 $b = 2; return $a <= $b ? 1 : 0;', 1, 'i32 2 <= 2' );
     answers( 'my u32 $a = 1; my u32 $b = 2; return $a < $b ? 1 : 0;',  1, 'u32 1 < 2' );
 };
+subtest 'a ternary that yields a float selects through a float register' => sub {
+
+    # The generic select chose between the arms with an integer `mov`, so a float
+    # result was read out of the wrong register file and came back as 0.  The arm
+    # value is returned directly and truncated, so the literal identifies the arm.
+    for my $ty (qw[f32 f64]) {
+        answers( "my $ty \$a = 1.5; my $ty \$b = 2.5; return (\$a < \$b) ? \$a : \$b;", 1, "$ty select keeps the true arm" );
+        answers( "my $ty \$a = 3.5; my $ty \$b = 2.5; return (\$a < \$b) ? \$a : \$b;", 2, "$ty select keeps the false arm" );
+        answers( "my $ty \$a = 4.5; my $ty \$b = 2.5; return (\$a > \$b) ? \$a : \$b;", 4, "$ty select true arm when the test is >" );
+    }
+};
 done_testing;

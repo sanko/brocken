@@ -259,7 +259,7 @@ Attributes provide compile-time metadata for the optimizer and linker:
 **Class Field Attributes:**
 - `:param` - Generates constructor argument: `Class->new(field => $val)`.
 - `:reader` - Generates accessor: `$obj->field()`.
-- `:writer` - Generates mutator: `$obj->set_field($val)`.
+- `:writer` - Generates mutator: `$obj->set_field($val)`, which returns `$self` so calls can be chained.
 - `:accessor` - Generates both reader and writer.
 - `:weak` - Weak reference; prevents reference cycles by bypassing `incref`/`decref`.
 
@@ -269,7 +269,7 @@ Attributes provide compile-time metadata for the optimizer and linker:
 
 Brocken uses Corinna-style classes with strict encapsulation. Fields are strictly private unless exposed via attributes.
 
-**Implementation status.** The class system is being brought up in two milestones. v0.0.1 targets parity with Perl's core `class` feature (`perlclass`); v0.0.2 adds selected `Object::Pad` features. Today the front end implements `class` (block form), typed `field` with the `:param`/`:reader`/`:writer` attributes, `method`, and a single `ADJUST`, with static (compile-time) method resolution and no inheritance. `:isa`, `SUPER::`, versioned classes, roles, and `DESTROY` are **planned, not yet implemented** — the `DatabaseConnection::Static` example below is forward-looking. See [`class_roadmap.md`](class_roadmap.md) for the full shipped-versus-planned breakdown.
+**Implementation status.** The class system is being brought up in two milestones. v0.0.1 targets parity with Perl's core `class` feature (`perlclass`); v0.0.2 adds selected `Object::Pad` features. Today the front end implements `class` (block form), typed `field` with the `:param`/`:reader`/`:writer`/`:accessor` attributes, `=`/`//=`/`||=` defaults, `method`, and any number of `ADJUST` blocks (run in declaration order); writers return `$self` so calls can be chained. Method resolution is static (compile-time) and there is no inheritance. `:isa`, `SUPER::`, versioned classes, roles, and `DESTROY` are **planned, not yet implemented** — the `DatabaseConnection::Static` example below is forward-looking. See [`class_roadmap.md`](class_roadmap.md) for the full shipped-versus-planned breakdown.
 
 ```perl
 class DatabaseConnection {
@@ -299,7 +299,7 @@ class DatabaseConnection {
 class DatabaseConnection::Static :isa(DatabaseConnection) {
     field bool $toggle = true;
 
-    method commit( String $sql ) : returns(ptr) {
+    method commit( String $sql ) :returns(ptr) {
         return $self->SUPER::commit( $sql ) if $toggle;
     }
 }

@@ -23,13 +23,13 @@ The current front end (`Brocken::Katsuro`) and lowerer implement a deliberately 
 | Area | Supported today | Notes |
 |---|---|---|
 | Declaration | `class NAME { ... }` block form only | No version, no class attributes, no `;` statement form |
-| Fields | `field TYPE $name [:attr...] [= EXPR \| //= EXPR];` | Scalar only. `TYPE` is required (a Brocken extension over `perlclass`) |
-| Field attributes | `:param`, `:reader`, `:writer` | Only these three are read. `:accessor`/`:weak` are documented in spec 7.4 but **not implemented** |
+| Fields | `field TYPE $name [:attr...] [= EXPR \| //= EXPR \| \|\|= EXPR];` | Scalar only. `TYPE` is required (a Brocken extension over `perlclass`) |
+| Field attributes | `:param`, `:reader`, `:writer`, `:accessor` | `:accessor` expands to a reader plus a chaining writer. `:weak` is documented in spec 7.4 but **not implemented** |
 | Accessor names | Fixed: reader = field name, writer = `set_<field>` | No `:reader(NAME)` / `:writer(NAME)` |
-| Methods | `method NAME(TYPE $p, ...) -> RET { ... }` | Typed params required; `RET` explicit or inferred; `$self` is a hidden receiver |
-| ADJUST | `ADJUST { ... }` | One block in practice (a second overwrites the first); sees `$self` and fields declared up to it |
+| Methods | `method NAME(TYPE $p, ...) :returns(RET) { ... }` | Typed params required; `RET` explicit or inferred; `$self` is a hidden receiver |
+| ADJUST | `ADJUST { ... }` | Any number of blocks, run in declaration order; each sees `$self` and fields declared so far |
 | `__CLASS__` | Partial | Usable inside methods; in a field default it currently croaks (`__CLASS__ used outside of a class`) because the constructor is lowered at the call site with no class context |
-| Constructor | `Class->new(...)` (synthesised, never declared) | Positional values for `:param` fields in declaration order, then an optional trailing Hash of `name => value` overrides; `=`/`//=` defaults; then `ADJUST`. Inlined at **every** call site, not emitted as a single `Class::new` function |
+| Constructor | `Class->new(...)` (synthesised, never declared) | Positional values for `:param` fields in declaration order, then an optional trailing Hash of `name => value` overrides; `=`/`//=`/`||=` defaults; then `ADJUST`. Inlined at **every** call site, not emitted as a single `Class::new` function |
 | Field access | Bare `$field` inside methods/`ADJUST`; `$obj->field` outside | Bare access is a compile-time GEP, not a call |
 | Dispatch | Fully static: `$obj->m` resolves to `Class::m` from the receiver's static class | No vtable, no runtime lookup |
 | Instance | `bump_alloc(total_size)`; 8-byte header `refcount \| (tag << 24)`; fields packed from offset 8 | No alignment padding between fields |
@@ -48,10 +48,10 @@ those are marked **Diverge** and argued in 1.6.
 | C4 | `:param(NAME)` + `_`-stripping default names | Missing | Planned |
 | C5 | `:reader(NAME)` / `:writer(NAME)` + `_`-stripping | Missing | Planned |
 | C6 | `:reader` on array/hash (list = contents, scalar = count) | Missing | Planned (with C3) |
-| C7 | `:writer` returns `$self` for chaining | Returns `void` | Planned |
+| C7 | `:writer` returns `$self` for chaining | Writer returns `ptr` (`$self`), so `$obj->set_x(1)->set_y(2)` chains | **Shipped** |
 | C8 | `:writer` scalar-only | Writer is scalar-only | Match |
-| C9 | Default operators `=`, `//=`, `||=` | `=` and `//=` only | Planned (`||=`) |
-| C10 | Multiple `ADJUST`, run in declaration order | Single block | Planned |
+| C9 | Default operators `=`, `//=`, `||=` | All three; `||=` applies when the supplied value is false | **Shipped** |
+| C10 | Multiple `ADJUST`, run in declaration order | `adjusts` is a list, lowered in order into one `Class::ADJUST` | **Shipped** |
 | C11 | Superclass `ADJUST` blocks merged and run | No inheritance | Planned (with C13) |
 | C12 | Field initializers see earlier fields' values and may use `__CLASS__` | Not wired; no class context in the inlined constructor | Planned |
 | C13 | `:isa(CLASS [VER])`, single superclass, `require` on demand | Missing | Planned |
@@ -93,8 +93,8 @@ Store `version` and an attribute list on `AST::Stmt::ClassDecl`; validate that `
 - **Types stay.** Brocken is statically typed; `field` keeps its required `TYPE`. A bare `field $x` can default to `Any` so `perlclass` code ports, but the type must remain expressible.
 - **Array/hash fields.** Extend the layout and `populate_field_geps` to `@`/`%` fields; a hash field stores a pointer to heap hash data, an array field to heap array data (matching the existing `ArrayDecl`/`Hash` lowering). `:reader` on these returns contents in list context / count in scalar context; implement via the existing array/hash runtime helpers.
 - **Accessor naming.** Parse `:reader(NAME)` / `:writer(NAME)` / `:param(NAME)` with their payloads, including the single-underscore stripping rule. This changes `attrs` from `['reader']` to a small list of `{name, arg}` records.
-- **Chaining.** `:writer` should return `$self`, not `void`. This is a small change to `generate_writer` and its registered return type; it is source-compatible.
-- **`||=` defaults.** Accept the operator in `parse_field_decl` and thread it through the constructor lowering (apply when the passed value is false, not merely absent/undefined).
+- **Chaining (done).** `:writer` returns `$self` (registered as `ptr`); `_expr_class` in the Lowerer resolves the class of a chained writer call so `$obj->set_x(1)->set_y(2)` type-checks.
+- **`||= defaults` (done).** Accepted in `parse_field_decl` and threaded through the constructor lowering: when a value is supplied and is false, the default replaces it (`icmp eq 0` + `select`); when the field is absent, the default is stored directly.
 - **Field-init visibility (C12).** Lower field defaults in the constructor and bind each already-set field's GEP before lowering the next default, so `field $y = $x + 1` works, and lower them with `current_class` set so `__CLASS__` resolves. Today the constructor is inlined at the call site, lowers each default expression without the field GEPs in scope, and has no class context (so `__CLASS__` in a default croaks).
 
 ### 1.3 Methods (C16–C18, C22)
@@ -106,7 +106,7 @@ Store `version` and an attribute list on `AST::Stmt::ClassDecl`; validate that `
 
 ### 1.4 ADJUST (C10, C11, C12)
 
-- Store a *list* of ADJUST blocks, not one, and run them in declaration order.
+- **Multiple blocks (done).** `ClassDecl::adjusts` stores a *list*; `lower_adjust` lowers each body into one `Class::ADJUST` in declaration order.
 - When inheritance lands, the constructor runs the merged ancestor→descendant ADJUST chain.
 - Keep the current behaviour that ADJUST sees `$self` and fields assigned so far.
 
@@ -187,10 +187,10 @@ dispatch, RC/Immix). Decisions are recommendations for sign-off.
 | `:strict(params)` | Constructor rejects unknown named args | Better diagnostics; cheap once the `:param` map exists | Small |
 | ADJUST `:params` (and/or `ADJUSTPARAMS`) | ADJUST blocks consume named constructor params | Direct extension of the `:param` map; typed in Brocken | Moderate |
 | `:mutator` | lvalue accessor for a scalar field | Static lowering to get/set; useful sugar | Small |
-| `:accessor` | Combined reader/writer | Already documented in spec 7.4; just not implemented | Small |
+| `:accessor` | Combined reader/writer | Implemented as an M0 win (reader + chaining writer) | Done |
 | `:weak` | Accessor/constructor assignments don't take ownership | Maps to a no-`incref` store in the RC contract | Small–moderate |
 | `:reader`/`:writer`/`:param(NAME)` + `_` rule | Custom accessor names | Same as C4/C5; adopt fully | Small |
-| Default `//=` and `||=` | Field default operators | Same as C9 | Small |
+| Default `//=` and `||=` | Field default operators | `||=` implemented (C9); custom names still planned | Done (`||=`) |
 | Method `:override` | Assert a method overrides an ancestor's | Compile-time check over the static method table | Small |
 | Lexical / anonymous methods | Private methods; method values | Same as C17/C18 | Moderate |
 
@@ -264,10 +264,11 @@ Ordered by dependency.
 ## 5. Suggested sequencing
 
 1. **M0 (v0.0.1, no model change):** `:returns`, parameter defaults, `||=`, custom accessor names, `_`-stripping, `:writer` chaining return, multiple `ADJUST`, field-init visibility, `:accessor`, `:weak`, array/hash fields.
+   *Done so far:* `:returns` (C22), `||=` (C9), `:writer` chaining (C7), multiple `ADJUST` (C10), `:accessor`. *Remaining:* parameter defaults, custom accessor names + `_`-stripping, field-init visibility (C12), `:weak`, array/hash fields.
 2. **M1 (v0.0.1, object model):** field-map/alignment rework; class versions and attributes; `:isa`; static ancestor resolution; `SUPER::`; constructor chaining; `DESTROY`.
 3. **M2 (v0.0.2):** `role`/`apply`/`:does`/`requires` flattening; `:abstract`; ADJUST `:params`; `:strict(params)`; `:lexical_new`; `my class`; `inherit`; `:override`/`:common`; lexical/anonymous
    methods.
 4. **M3 (v0.0.2+):** `BUILDARGS`; metaprogramming descriptor tables; extension attributes; lvalue methods.
 
 Each milestone should add a focused test alongside the feature (the existing class tests live in
-`t/10000_katsuro/` and `t/40000_runtime/40300_immix_alloc.t`).
+`t/10000_katsuro/` and `t/40000_runtime/40200_runtime_alloc.t`).

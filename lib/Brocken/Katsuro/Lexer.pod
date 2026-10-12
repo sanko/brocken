@@ -73,7 +73,7 @@ which is a placeholder for real escape handling.
 
 =item C<OP>
 
-An operator, from the multi-character set C<< << >> >> == != <= >= <=> => -> && || //= // ... >> >> and the
+An operator, from the multi-character set C<< << >> >> == != <= >= <=> => -> && || ||= //= // ... >> >> and the
 single-character set C<+ - * / % = < > ! & | ^ ~ ? : .>.
 
 =item Punctuation

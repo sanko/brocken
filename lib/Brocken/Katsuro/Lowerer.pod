@@ -42,7 +42,7 @@ and attached by the caller, because they are side tables rather than part of the
 =item C<classes>
 
 A reader, a hashref keyed by class name whose value holds the field list, the computed C<total_size>, the method list,
-the C<ADJUST> block, and the struct type. Pass it to C<set_class_info> on the module, or the back end will not know how
+and the struct type. Pass it to C<set_class_info> on the module, or the back end will not know how
 big a C<new> is.
 
 =item C<rodata>
@@ -124,7 +124,9 @@ call, so field access has no runtime cost beyond the addressing.
 
 A C<new> therefore is not a keyword in the source; C<< Point->new(x => 1) >> is a method call on the class name, and
 the class name resolves to a synthesised function. Method declarations become functions with the receiver as a hidden
-first parameter, and C<ADJUST> becomes a function the constructor calls after the fields are stored.
+first parameter, and the C<ADJUST> blocks become one function the constructor calls after the fields are stored, so
+several C<ADJUST> blocks run in declaration order. C<:reader> generates a field-name reader, C<:writer> a C<set_> writer
+that returns C<$self> so writer calls chain, and C<:accessor> both.
 
 C<__CLASS__> inside a method is bound to the class being lowered, which is how a method can reach a sibling method
 without naming its class.

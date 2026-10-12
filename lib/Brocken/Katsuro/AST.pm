@@ -77,14 +77,14 @@ class Brocken::Katsuro::AST::Stmt::ClassDecl v0.0.1 : isa(Brocken::Katsuro::AST:
     field $name    : param : reader;
     field $fields  : param : reader = [];           # Array of AST::Stmt::FieldDecl
     field $methods : param : reader = [];           # Array of AST::Stmt::MethodDecl
-    field $adjust  : param : reader = undef;        # AST::Stmt::Adjust | undef
+    field $adjusts : param : reader = [];           # Array of AST::Stmt::Adjust (run in declaration order)
 };
 class Brocken::Katsuro::AST::Stmt::FieldDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $type       : param : reader;
     field $name       : param : reader;             # without sigil
     field $attrs      : param : reader = [];        # ['reader', 'writer', 'param']
     field $default    : param : reader = undef;     # default value expression
-    field $default_op : param : reader = undef;     # '=' or '//='
+    field $default_op : param : reader = undef;     # '=', '//=', or '||='
 };
 class Brocken::Katsuro::AST::Stmt::MethodDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $name        : param : reader;
