@@ -681,8 +681,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $ast->type eq 'Any' ) {
             $self->_note_rc( $ast->name );
         }
-        if ( !defined $ast->init && $ast->type eq 'Any' ) {
-            my $zero = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+        if ( !defined $ast->init && ( $ir_type->kind eq 'dynamic' || $ir_type->kind eq 'ptr' ) ) {
+
+            # A pointer-shaped slot starts out null, mirroring the Any box. That is what lets `//=`, `||=`, and the `//`
+            # operator see an uninitialized `String` (or other ptr) as "undefined" instead of the garbage the fresh
+            # stack slot happened to hold.
+            my $zero = Brocken::Lindsay::IR::Constant->new( type => $ir_type, value => 0 );
             $builder->build_store( $zero, $alloca, $line, $col );
         }
         if ( defined $ast->init ) {
@@ -741,12 +745,26 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             Carp::croak( "Assignment target must be a variable, field access, or array index at " . $self->_loc($target) );
         }
         $val = $self->maybe_convert_type( $val, $stored_type );
-        if ( $ast->op eq '//=' ) {
-            if ( $stored_type->kind eq 'ptr' || $stored_type->kind eq 'dynamic' ) {
-                my $existing = $builder->build_load( $stored_type, $addr, undef, $line, $col );
-                my $zero     = Brocken::Lindsay::IR::Constant->new( type => $stored_type, value => 0 );
-                my $is_undef = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
-                my $new_val  = $builder->build_select( $is_undef, $val, $existing, undef, $line, $col );
+        if ( $ast->op eq '//=' || $ast->op eq '||=' ) {
+
+            # `//=` and `||=` both keep the value already in the slot when it counts as "present" and store the RHS
+            # otherwise. They differ in what "present" means: `//=` wants the slot to be defined (non-null), so it
+            # tests a pointer-shaped or boxed value against null; `||=` wants it to be true, so it tests its type
+            # against zero (false, 0, 0.0, or null).
+            #
+            # A native int/float/bool has no undefined value, so `//=` on one has no null test to make and degrades
+            # to a plain store -- deliberate, and pinned by t/10000_katsuro/10980_defined_or_assign.t. `||=` still
+            # compares a native against zero.
+            #
+            # RC note: as with the field-default `||=` in a constructor, the selected value is stored without an
+            # incref on the replacement or a decref of the displaced old value; that is tracked as F2/F9 in TODO
+            # section 2. The common case -- the slot starts out null -- loses no refcounts either way.
+            my $is_nullable = $stored_type->kind eq 'ptr' || $stored_type->kind eq 'dynamic';
+            if ( $is_nullable || $ast->op eq '||=' ) {
+                my $existing  = $builder->build_load( $stored_type, $addr, undef, $line, $col );
+                my $zero      = Brocken::Lindsay::IR::Constant->new( type => $stored_type, value => 0 );
+                my $is_absent = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+                my $new_val   = $builder->build_select( $is_absent, $val, $existing, undef, $line, $col );
                 $builder->build_store( $new_val, $addr, $line, $col );
             }
             else {
@@ -1439,11 +1457,43 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $builder->build_load( $addr->base_type, $addr, undef, $ast->line, $ast->col );
     }
 
+    # `//` is defined-or: the left operand, unless it is undefined -- the null value of a pointer-shaped or boxed type
+    # (a `String`, a class reference, or an `Any` box) -- in which case the right operand.
+    #
+    # Only pointer-shaped values can be undefined in Brocken: a native int, float, or bool is always defined, so `//`
+    # on one is simply that operand. The right operand is promoted to the type the result will carry:
+    #
+    #   * two pointer operands stay a `ptr` (`$s // "default"`);
+    #   * anything that meets an `Any` box becomes the box, with native values boxed and a `ptr` payload keeping its
+    #     pointer tag (`$earnings // $reserve // 0`);
+    #   * a numeric right operand against a pointer left operand also becomes the box, since the two sides have no
+    #     common native type.
+    method lower_defined_or( $lhs, $rhs, $line, $col ) {
+        my $lhs_kind = $lhs->type->kind;
+        return $lhs unless $lhs_kind eq 'ptr' || $lhs_kind eq 'dynamic';
+        my $result_type =
+            $lhs_kind eq 'ptr' && $rhs->type->kind eq 'ptr' ?
+            Brocken::Lindsay::IR::Type::ptr() :
+            Brocken::Lindsay::IR::Type::dynamic();
+        $lhs = $self->maybe_convert_type( $lhs, $result_type, $line, $col );
+        $rhs = $self->maybe_convert_type( $rhs, $result_type, $line, $col );
+        my $zero     = Brocken::Lindsay::IR::Constant->new( type => $result_type, value => 0 );
+        my $is_undef = $builder->build_icmp( 'eq', $lhs, $zero, undef, $line, $col );
+        return $builder->build_select( $is_undef, $rhs, $lhs, undef, $line, $col );
+    }
+
     method lower_binop($ast) {
         my $lhs = $self->lower_expression( $ast->lhs );
         my $rhs = $self->lower_expression( $ast->rhs );
         my $op  = $ast->op;
         my ( $line, $col ) = ( $ast->line, $ast->col );
+
+        # `//` (defined-or) is not an integer operator. It is handled before the type unification so that the boxed
+        # form can keep its tags (see `lower_defined_or`). Both operands are lowered above so `//` stays parallel with
+        # `&&` and `||`, which also evaluate both sides.
+        if ( $op eq '//' ) {
+            return $self->lower_defined_or( $lhs, $rhs, $line, $col );
+        }
 
         # A float has no bits to shift and no bit pattern to mask, so these operators have no float form. `%` is an
         # integer modulus here for the same reason it is one in Perl.

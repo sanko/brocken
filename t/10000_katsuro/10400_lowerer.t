@@ -264,6 +264,56 @@ BROCKEN
     like( $text, qr/icmp\s+eq\s+i64/,    'compares the supplied value to zero' );
     like( $text, qr/select\s+i1\s+%[^,]+, i64 3,/, 'selects between the default and the supplied value' );
 };
+subtest '//= on a ptr lowers to a null-check select' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my ptr $p;
+my ptr $b = 100;
+$p //= $b;
+return 0;
+BROCKEN
+    my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
+    my $text = $f->as_string();
+    like( $text, qr/icmp\s+eq\s+ptr/, 'compares the pointer to null' );
+    like( $text, qr/select\s+i1\s+%[^,]+, ptr %/, 'selects between the RHS pointer and the existing pointer' );
+};
+subtest '//= on a native scalar is a plain store' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my i64 $x = 0;
+$x //= 42;
+return $x;
+BROCKEN
+    my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
+    my $text = $f->as_string();
+    like( $text, qr/store\s+i64\s+42/, 'stores the RHS' );
+    unlike( $text, qr/select\s+i1\s+%[^,]+, i64 42/, 'the RHS never appears in a select' );
+};
+subtest '||= on a native scalar lowers to a zero-check select' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my i64 $x = 0;
+$x ||= 5;
+return $x;
+BROCKEN
+    my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
+    my $text = $f->as_string();
+    like( $text, qr/icmp\s+eq\s+i64/,               'compares the scalar to zero' );
+    like( $text, qr/select\s+i1\s+%[^,]+, i64 5,/,  'selects between the RHS and the existing scalar' );
+};
+subtest '// in expression position lowers to a defined-check select' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my ptr $a;
+my ptr $b;
+my ptr $c = $a // $b;
+return 0;
+BROCKEN
+    my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
+    my $text = $f->as_string();
+    like( $text, qr/icmp\s+eq\s+ptr/, 'compares the left operand to null' );
+    like( $text, qr/select\s+i1/,     'selects the right operand when it is null' );
+};
 subtest 'Multiple ADJUST blocks lower in declaration order' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');

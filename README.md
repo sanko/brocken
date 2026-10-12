@@ -152,6 +152,24 @@ The `catch` block receives the thrown value, and a `try` with no `catch` is a `t
 The `setjmp` and `longjmp` behind this live in the runtime, not in generated code, which is what lets a `return` out
 of a `try` still run the `finally`.
 
+The defined-or operator `//` yields its left operand when that is defined and its right operand otherwise, and `//=`
+and `||=` are its assignment forms:
+
+```perl
+my Any $name;                 # undefined
+my Any $alias = 'guest';
+my $who = $name // $alias;    # 'guest'
+$name //= 'John';             # 'John'
+$name //= 'Jane';             # still 'John'
+
+my i64 $count = 0;
+$count ||= 3;                 # 3 -- zero is false
+```
+
+`//=` fires on an undefined slot (a null `ptr` or null `Any` box); it has nothing to test on a native `int`/`float`,
+which is never undefined, so there it is a plain `=`. `||=` fires on any false value (`0`, `0.0`, null). A fresh `my`
+declaration has no prior value, so `my $x //= 5;` is just `my $x = 5;`. `//` is eager, like `&&` and `||`.
+
 Classes hold typed fields and methods. A field marked `:reader` gets a reader, `:writer` gets a `set_` writer that
 returns `$self` (so writer calls chain), and `:accessor` gets both. A `:param` field becomes a constructor argument,
 and fields may carry an `=`, `//=`, or `||=` default. A class value is a `ptr`, and construction is a call on the class

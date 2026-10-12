@@ -189,6 +189,11 @@ package Test2::Tools::Brocken v0.0.1 {
             my $module  = eval { $brocken->compile($src) };
             if ($@) { fail("$label: compile died: $@"); next }
             my $funcs = $brocken->codegen->emit_functions( $module->functions );
+
+            # String literals live in rodata, and the linker needs that map before it writes the image. Nothing else
+            # seeds it here, so a snippet that mentions a string would otherwise be linked with the constants missing
+            # and read a dangling address.
+            $brocken->linker->set_rodata( $module->rodata ) if $module->rodata && keys %{ $module->rodata };
             if ( $platform && $platform->arch =~ /^wasm/ ) {
                 my $file = temp_path($basename) . '.wasm';
                 Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $funcs, $platform );

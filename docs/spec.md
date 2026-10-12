@@ -43,7 +43,7 @@ Unlike older versions of Perl where sigils change based on context (e.g., `$arr[
 Variables are lexically scoped.
 - `my` - Lexical variable declaration.
 - `our` - Package-scoped global variable.
-- `state` - Persistent lexical variable (initialized once).
+- `state` - Persistent lexical variable (initialized once). **Planned, not yet implemented** — the keyword is reserved but there is no writable program-global storage yet (TODO §3).
 - `const` - Compile-time constant (emitted into the `.rodata` section).
 
 ---
@@ -160,6 +160,39 @@ Brocken evaluates target addresses exactly once during compound assignments (`+=
 ```perl
 %map{"total"} += 5; # The hash key "total" is looked up only once.
 ```
+
+#### Defined-or and logical-or (`//`, `//=`, `||=`)
+
+`//` is the defined-or operator: it yields its left operand when that is **defined** and its right operand otherwise.
+
+```perl
+my $first = $earnings // $reserve // 0;   # the first of the three that is defined
+```
+
+`//=` (defined-or assign) and `||=` (logical-or assign) are the corresponding assignments. Both keep the value
+already in the slot when that value counts as "present" and store the right operand otherwise, but they differ in what
+"present" means:
+
+* `//=` fires when the slot is **undefined** — for a `ptr` or an untyped `Any` that is a null pointer / null box. A
+  native `int`/`float`/`bool` can never be undefined, so `//=` on one has no test to make and degrades to a plain `=`
+  store.
+* `||=` fires when the slot is **false**: a native `0` / `0.0`, or a null `ptr` / `Any`. On an `Any` box, `||=` currently
+  tests the box pointer for null only, so a *boxed* `0` is not yet treated as false (see TODO §4).
+
+```perl
+my Any $name;      # starts undefined
+$name //= 'John';  # 'John'
+$name //= 'Jane';  # still 'John' -- the slot is now defined
+
+my i64 $count = 0;
+$count ||= 3;      # 3 -- zero is false, so the RHS is stored
+```
+
+In a `my` declaration the conditional form is accepted but behaves exactly like `=`, because a fresh variable has no
+prior value to test. `state $x //= EXPR` — the form whose condition can actually be observed on a variable that
+persists across calls — is **not implemented yet**, because writable program-global storage is still missing (TODO §3).
+
+Like `&&` and `||`, `//` is **eager**: both operands are evaluated, there is no short-circuit.
 
 ---
 

@@ -3093,8 +3093,13 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Select') ) {
                     my ( $cond, $true_val, $false_val ) = $inst->operands->@*;
                     my $cond_op     = $self->_lower_opnd($cond);
-                    my $true_op     = $self->_lower_opnd($true_val);
-                    my $false_op    = $self->_lower_opnd($false_val);
+
+                    # Both arms go through `_materialize` rather than `_lower_opnd`: a string literal arrives as a
+                    # RodataRef, which carries a label but no register name, and must be turned into a `lea_rodata`
+                    # first; a float constant likewise has to be built in an FP register. `_materialize` passes an
+                    # ordinary value straight through, so this changes nothing for a plain vreg or integer constant.
+                    my $true_op     = $self->_materialize( $mbb, $true_val );
+                    my $false_op    = $self->_materialize( $mbb, $false_val );
                     my $result_type = $inst->type;
                     my $is_i128     = $result_type && $result_type->kind eq 'int' && $result_type->bits == 128;
                     if ($is_i128) {
@@ -3133,13 +3138,6 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         my $else_lbl = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label',    value => $inst->name . '_sel_else' );
                         my $end_lbl  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label',    value => $inst->name . '_sel_end' );
                         my $move_op  = $is_float ? 'fmov' : 'mov';
-
-                        # A float operand has to reach an FP register, and no `fmov` can take the literal
-                        # itself, so a constant is materialised first and only then selected.
-                        if ($is_float) {
-                            $true_op  = $self->_materialize( $mbb, $true_val );
-                            $false_op = $self->_materialize( $mbb, $false_val );
-                        }
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'beq', operands => [ $cond_op, $else_lbl ], comment => 'select' )
                         );

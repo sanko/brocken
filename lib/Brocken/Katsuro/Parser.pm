@@ -117,11 +117,11 @@ class Brocken::Katsuro::Parser v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
             Carp::croak( "Unexpected bare identifier '" . $expr->name . "' at " . $self->_loc() . ' -- did you forget parentheses?' );
         }
-        if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) ) {
+        if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) || $self->check( 'OP', '||=' ) ) {
             my $op_tok = $self->advance();
             my $rhs    = $self->parse_expression(0);
             $self->consume( ';', undef, "Expected ';' after assignment" );
-            return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($op_tok), target => $expr, expr => $rhs );
+            return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($op_tok), target => $expr, expr => $rhs, op => $op_tok->{value} );
         }
         $self->consume( ';', undef, "Expected ';' after expression" );
         return $expr;
@@ -145,7 +145,12 @@ class Brocken::Katsuro::Parser v0.0.1 {
         my $sigil     = substr( $var_token->{value}, 0, 1 );
         my $name      = substr( $var_token->{value}, 1 );
         my $init      = undef;
-        if ( $self->check( 'OP', '=' ) ) {
+        if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) || $self->check( 'OP', '||=' ) ) {
+
+            # A declaration has no previous value, so its initializer is always taken: `my $x //= 5` and `my $x ||= 5`
+            # both set the fresh, undefined variable to 5, exactly as `my $x = 5` would. The distinct operators are
+            # accepted here only so the Perl spelling parses; see the `state` work in TODO 3 for the form where the
+            # condition is observable across calls.
             $self->advance();
             $init = $self->parse_expression(0);
         }
@@ -619,7 +624,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
     method led( $left, $token ) {
         if ( $token->{type} eq 'OP' ) {
             my $op = $token->{value};
-            if ( $op eq '=' || $op eq '//=' ) {
+            if ( $op eq '=' || $op eq '//=' || $op eq '||=' ) {
                 my $right = $self->parse_expression( PREC_ASSIGN - 1 );
                 return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $right, op => $op );
             }
@@ -639,7 +644,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                     return Brocken::Katsuro::AST::Expr::FieldAccess->new( $self->_pos_token($token), obj => $left, field => $ident->{value} );
                 }
             }
-            if ( $op eq '||' ) {
+            if ( $op eq '||' || $op eq '//' ) {
                 return Brocken::Katsuro::AST::Expr::BinOp->new(
                     $self->_pos_token($token),
                     op  => $op,
@@ -798,10 +803,10 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return 0 unless $token;
         if ( $token->{type} eq 'OP' ) {
             my $op = $token->{value};
-            return PREC_ASSIGN  if $op eq '=' || $op eq '//=';
+            return PREC_ASSIGN  if $op eq '=' || $op eq '//=' || $op eq '||=';
             return PREC_DEREF   if $op eq '->';
             return PREC_TERNARY if $op eq '?';
-            return PREC_OR      if $op eq '||';
+            return PREC_OR      if $op eq '||' || $op eq '//';
             return PREC_AND     if $op eq '&&';
             return PREC_BITOR   if $op eq '|';
             return PREC_BITXOR  if $op eq '^';

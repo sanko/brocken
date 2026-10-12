@@ -39,6 +39,59 @@ subtest 'Assignment statement' => sub {
     isa_ok( $s1->target, ['Brocken::Katsuro::AST::Expr::Var'] );
     is( $s1->target->name, 'x', 'assign to x' );
     isa_ok( $s1->expr, ['Brocken::Katsuro::AST::Expr::Const'] );
+    is( $s1->op, '=', 'plain assignment carries op =' );
+};
+subtest 'Compound assignment operators //= and ||=' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse('my i64 $x; $x = 1; $x //= 2; $x ||= 3;');
+    is( $prog->statements->@*, 4, 'four statements' );
+    is( $prog->statements->[1]->op, '=',  'plain =' );
+    is( $prog->statements->[2]->op, '//=', 'defined-or assign' );
+    is( $prog->statements->[3]->op, '||=', 'or assign' );
+    isa_ok( $prog->statements->[2]->target, ['Brocken::Katsuro::AST::Expr::Var'] );
+    is( $prog->statements->[2]->expr->value, 2, '//= rhs value' );
+    is( $prog->statements->[3]->expr->value, 3, '||= rhs value' );
+};
+subtest 'Declaration with //= or ||= parses as an initializer' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse('my Any $x //= 5; my Any $y ||= 6;');
+    is( $prog->statements->@*, 2, 'two declarations' );
+    isa_ok( $prog->statements->[0], ['Brocken::Katsuro::AST::Stmt::VarDecl'] );
+    isa_ok( $prog->statements->[0]->init, ['Brocken::Katsuro::AST::Expr::Const'] );
+    is( $prog->statements->[0]->init->value, 5, '//= initializer value' );
+    is( $prog->statements->[1]->init->value, 6, '||= initializer value' );
+};
+subtest 'Defined-or operator //' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse('my Any $r = $a // $b;');
+    my $init = $prog->statements->[0]->init;
+    isa_ok( $init, ['Brocken::Katsuro::AST::Expr::BinOp'] );
+    is( $init->op, '//', 'top op is //' );
+    isa_ok( $init->lhs, ['Brocken::Katsuro::AST::Expr::Var'] );
+    isa_ok( $init->rhs, ['Brocken::Katsuro::AST::Expr::Var'] );
+};
+subtest '// and || share precedence and are left-associative' => sub {
+    my $c    = Brocken->new;
+
+    # `$a // $b // $c` groups as `($a // $b) // $c`.
+    my $chain = $c->parse('my Any $r = $a // $b // $c;')->statements->[0]->init;
+    isa_ok( $chain, ['Brocken::Katsuro::AST::Expr::BinOp'] );
+    is( $chain->op, '//', 'top op is //' );
+    isa_ok( $chain->lhs, ['Brocken::Katsuro::AST::Expr::BinOp'] );
+    is( $chain->lhs->op, '//', 'inner op is // (left associative)' );
+    isa_ok( $chain->rhs, ['Brocken::Katsuro::AST::Expr::Var'] );
+
+    # `$a || $b // $c` groups as `($a || $b) // $c`: same precedence, still left.
+    my $mixed = $c->parse('my Any $r = $a || $b // $c;')->statements->[0]->init;
+    is( $mixed->op, '//', '// is the top op' );
+    isa_ok( $mixed->lhs, ['Brocken::Katsuro::AST::Expr::BinOp'] );
+    is( $mixed->lhs->op, '||', '|| binds first (left to right)' );
+
+    # `+` binds tighter than `//`, so `$a + $b // $c` is `($a + $b) // $c`.
+    my $arith = $c->parse('my Any $r = $a + $b // $c;')->statements->[0]->init;
+    is( $arith->op, '//', '// is the top op over +' );
+    isa_ok( $arith->lhs, ['Brocken::Katsuro::AST::Expr::BinOp'] );
+    is( $arith->lhs->op, '+', '+ binds tighter than //' );
 };
 subtest 'If/elsif/else' => sub {
     my $c    = Brocken->new;

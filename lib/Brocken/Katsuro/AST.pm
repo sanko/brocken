@@ -26,7 +26,7 @@ class Brocken::Katsuro::AST::Stmt::ArrayDecl v0.0.1 : isa(Brocken::Katsuro::AST:
 class Brocken::Katsuro::AST::Stmt::Assign v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $target : param : reader;               # AST::Node
     field $expr   : param : reader;               # AST::Node
-    field $op     : param : reader = '=';         # '=', '//='
+    field $op     : param : reader = '=';         # '=', '//=', '||='
 };
 class Brocken::Katsuro::AST::Stmt::Block v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $statements : param : reader = [];
