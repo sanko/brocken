@@ -120,12 +120,12 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
 
 ## 10. Fuzzer Expansion Plan (F0-F9)
 
-- [ ] **F0: Types** — Add `bool`, `i8`-`u64`, `i128`, `f64`, `Int` (fat scalars), and `String`.
-- [ ] **F1: Control Flow** — `while` loops, nested `if/else`, chained logic (`&&`/`||`), `break`/`continue`, ternary.
-- [ ] **F2: Functions** — Generate random subroutines, inter-procedural calls, and recursion.
-- [ ] **F3: Memory** — Arrays, structs/classes, GEP lowering, `say`/`print` stdout capture.
-- [ ] **F4/F5: Mutation & Minimization** — Delta-debugging minimizer (`_minimize`) to automatically extract minimal regression tests from a seeded corpus.
-- [ ] **F8: Wasm CI** — Execute `.wasm` output via `wasmtime` or `node`. Treat Wasm traps (e.g., out of bounds) as test failures.
+- [ ] **F0: Types** - Add `bool`, `i8`-`u64`, `i128`, `f64`, `Int` (fat scalars), and `String`.
+- [ ] **F1: Control Flow** - `while` loops, nested `if/else`, chained logic (`&&`/`||`), `break`/`continue`, ternary.
+- [ ] **F2: Functions** - Generate random subroutines, inter-procedural calls, and recursion.
+- [ ] **F3: Memory** - Arrays, structs/classes, GEP lowering, `say`/`print` stdout capture.
+- [ ] **F4/F5: Mutation & Minimization** - Delta-debugging minimizer (`_minimize`) to automatically extract minimal regression tests from a seeded corpus.
+- [ ] **F8: Wasm CI** - Execute `.wasm` output via `wasmtime` or `node`. Treat Wasm traps (e.g., out of bounds) as test failures.
 
 ---
 
