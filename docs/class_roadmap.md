@@ -95,7 +95,7 @@ Store `version` and an attribute list on `AST::Stmt::ClassDecl`; validate that `
 - **Accessor naming.** Parse `:reader(NAME)` / `:writer(NAME)` / `:param(NAME)` with their payloads, including the single-underscore stripping rule. This changes `attrs` from `['reader']` to a small list of `{name, arg}` records.
 - **Chaining.** `:writer` should return `$self`, not `void`. This is a small change to `generate_writer` and its registered return type; it is source-compatible.
 - **`||=` defaults.** Accept the operator in `parse_field_decl` and thread it through the constructor lowering (apply when the passed value is false, not merely absent/undefined).
-- **Field-init visibility (C12).** Lower field defaults in the constructor and bind each already-set field's GEP before lowering the next default, so `field $y = $x + 1` works. Today the constructor lowers each default expression without the field GEPs in scope.
+- **Field-init visibility (C12).** Lower field defaults in the constructor and bind each already-set field's GEP before lowering the next default, so `field $y = $x + 1` works, and lower them with `current_class` set so `__CLASS__` resolves. Today the constructor is inlined at the call site, lowers each default expression without the field GEPs in scope, and has no class context (so `__CLASS__` in a default croaks).
 
 ### 1.3 Methods (C16–C18, C22)
 
@@ -228,21 +228,13 @@ dispatch, RC/Immix). Decisions are recommendations for sign-off.
 
 Ordered by dependency.
 
-1. **Class metadata registry.** Extend the `classes` hash entry with `parent`, `version`, `abstract`,
-   `roles`, `required_methods`, and a `param_map` copied from the parent chain. This is the Brocken
-   analogue of `xhv_class_*` in `perlclassguts`.
-2. **Field map and alignment.** Absolute field indices over the whole chain; introduce alignment
-   padding in `register_class` (currently fields are packed with no padding, which is fine for the
-   i64-only tests but not for mixed widths).
-3. **Accessor attribute records.** `[{name, arg}]` instead of bare strings; honour custom names and
-   `_`-stripping.
-4. **Constructor chaining.** `new` walks root→derived initializers and ADJUST blocks over the merged
-   `param_map`; `:strict(params)` checks leftovers; ADJUST `:params` consumes named args.
-5. **Static ancestor resolution + `SUPER::`.** Extend `resolve_class_name`/`lower_method_call` to walk
-   the chain; add an AST node for `SUPER::m`.
+1. **Class metadata registry.** Extend the `classes` hash entry with `parent`, `version`, `abstract`, `roles`, `required_methods`, and a `param_map` copied from the parent chain. This is the Brocken analogue of `xhv_class_*` in `perlclassguts`.
+2. **Field map and alignment.** Absolute field indices over the whole chain; introduce alignment padding in `register_class` (currently fields are packed with no padding, which is fine for the i64-only tests but not for mixed widths).
+3. **Accessor attribute records.** `[{name, arg}]` instead of bare strings; honour custom names and `_`-stripping.
+4. **Constructor chaining.** Emit a real `Class::new` function instead of inlining the constructor at every call site (today it is inlined, which duplicates field initializers and has no class context). `new` walks root => derived initializers and ADJUST blocks over the merged `param_map`; `:strict(params)` checks leftovers; ADJUST `:params` consumes named args.
+5. **Static ancestor resolution + `SUPER::`.** Extend `resolve_class_name`/`lower_method_call` to walk the chain; add an AST node for `SUPER::m`.
 6. **`DESTROY` chaining + cascading teardown.**
-7. **Role flattening.** Compose members at class-registration time; run `requires`/`:abstract` checks
-   after all declarations are known.
+7. **Role flattening.** Compose members at class-registration time; run `requires`/`:abstract` checks after all declarations are known.
 8. **Anonymous/lexical methods.** Private naming; code-pointer lowering for non-capturing bodies.
 
 ---
@@ -271,16 +263,11 @@ Ordered by dependency.
 
 ## 5. Suggested sequencing
 
-1. **M0 (v0.0.1, no model change):** `:returns`, parameter defaults, `||=`, custom accessor names,
-   `_`-stripping, `:writer` chaining return, multiple `ADJUST`, field-init visibility, `:accessor`,
-   `:weak`, array/hash fields.
-2. **M1 (v0.0.1, object model):** field-map/alignment rework; class versions and attributes;
-   `:isa`; static ancestor resolution; `SUPER::`; constructor chaining; `DESTROY`.
-3. **M2 (v0.0.2):** `role`/`apply`/`:does`/`requires` flattening; `:abstract`; ADJUST `:params`;
-   `:strict(params)`; `:lexical_new`; `my class`; `inherit`; `:override`/`:common`; lexical/anonymous
+1. **M0 (v0.0.1, no model change):** `:returns`, parameter defaults, `||=`, custom accessor names, `_`-stripping, `:writer` chaining return, multiple `ADJUST`, field-init visibility, `:accessor`, `:weak`, array/hash fields.
+2. **M1 (v0.0.1, object model):** field-map/alignment rework; class versions and attributes; `:isa`; static ancestor resolution; `SUPER::`; constructor chaining; `DESTROY`.
+3. **M2 (v0.0.2):** `role`/`apply`/`:does`/`requires` flattening; `:abstract`; ADJUST `:params`; `:strict(params)`; `:lexical_new`; `my class`; `inherit`; `:override`/`:common`; lexical/anonymous
    methods.
-4. **M3 (v0.0.2+):** `BUILDARGS`; metaprogramming descriptor tables; extension attributes; lvalue
-   methods.
+4. **M3 (v0.0.2+):** `BUILDARGS`; metaprogramming descriptor tables; extension attributes; lvalue methods.
 
 Each milestone should add a focused test alongside the feature (the existing class tests live in
 `t/10000_katsuro/` and `t/40000_runtime/40300_immix_alloc.t`).
