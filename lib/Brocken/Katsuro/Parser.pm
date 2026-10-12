@@ -458,11 +458,53 @@ class Brocken::Katsuro::Parser v0.0.1 {
 
     method parse_field_decl() {
         my $field_tok = $self->advance();    # consume 'field'
-        my $ft        = $self->peek();
+
+        # Array/hash fields get two shapes beyond the scalar `field T $name`:
+        #
+        #   field [T; N] $name   -- N elements stored inline in the object
+        #   field T @name        -- one pointer slot holding an array's element base
+        #   field T %name        -- one pointer slot holding hash data
+        #
+        # The sigil in the variable token decides which of the latter two is meant; a `[` type is always inline.
+        if ( $self->check('[') ) {
+            $self->advance();
+            my $elem = 'Any';
+            $elem = $self->advance()->{value} if $self->is_type( $self->peek() );
+            $self->consume( ';', undef, "Expected ';' between element type and size in inline array field" );
+            my $size        = $self->parse_expression(0);
+            $self->consume( ']', undef, "Expected ']' after inline array field type" );
+            my $fvar_token  = $self->consume( 'VAR', undef, "Expected field name" );
+            my $fname       = substr( $fvar_token->{value}, 1 );
+            return $self->_finish_field_decl(
+                $field_tok,
+                type      => $elem,
+                name      => $fname,
+                sigil     => substr( $fvar_token->{value}, 0, 1 ),
+                kind      => 'array',
+                elem_type => $elem,
+                size_expr => $size,
+                inline    => 1,
+            );
+        }
+        my $ft = $self->peek();
         Carp::croak("Expected field type, got $ft->{type} '$ft->{value}' at line $ft->{line}, col $ft->{col}") unless $self->is_type($ft);
         my $ftype      = $self->advance()->{value};
         my $fvar_token = $self->consume( 'VAR', undef, "Expected field name" );
         my $fname      = substr( $fvar_token->{value}, 1 );
+        my $sigil      = substr( $fvar_token->{value}, 0, 1 );
+        my $kind       = $sigil eq '@' ? 'array' : $sigil eq '%' ? 'hash' : 'scalar';
+        return $self->_finish_field_decl(
+            $field_tok,
+            type      => $ftype,
+            name      => $fname,
+            sigil     => $sigil,
+            kind      => $kind,
+            elem_type => $kind eq 'array' ? $ftype : undef,
+            inline    => 0,
+        );
+    }
+
+    method _finish_field_decl( $field_tok, %args ) {
         my @attrs;
 
         # Attributes are small records rather than bare words so that the custom-name payload parses too:
@@ -488,8 +530,13 @@ class Brocken::Katsuro::Parser v0.0.1 {
         $self->consume(';');
         return Brocken::Katsuro::AST::Stmt::FieldDecl->new(
             $self->_pos_token($field_tok),
-            type       => $ftype,
-            name       => $fname,
+            type       => $args{type},
+            name       => $args{name},
+            sigil      => $args{sigil},
+            kind       => $args{kind},
+            elem_type  => $args{elem_type},
+            size_expr  => $args{size_expr},
+            inline     => $args{inline},
             attrs      => \@attrs,
             default    => $default,
             default_op => $default_op,

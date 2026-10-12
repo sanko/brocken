@@ -284,11 +284,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
         # Auto-generate :reader methods (:accessor is reader + writer). The method name is the custom
         # :reader(name) payload if one was given, otherwise the field name with one leading underscore
-        # removed, so `field $_x :reader` generates `x()`.
+        # removed, so `field $_x :reader` generates `x()`. An array/hash field's reader is a `ptr`: the
+        # element/hash base for an array, the hash pointer for a hash.
         for my $f ( $ast->fields->@* ) {
             if ( $self->has_attr( $f->attrs, 'reader' ) || $self->has_attr( $f->attrs, 'accessor' ) ) {
                 my $mname = $self->attr_arg( $f->attrs, 'reader' ) // $self->attr_arg( $f->attrs, 'accessor' ) // $self->strip_underscore( $f->name );
-                $self->register_method( $class_name, $mname, $f->type, [] );
+                my $ret   = $f->kind eq 'scalar' ? $f->type : 'ptr';
+                $self->register_method( $class_name, $mname, $ret, [] );
                 $self->generate_reader( $class_name, $f, $mname );
             }
         }
@@ -296,12 +298,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # Auto-generate :writer methods (:accessor is reader + writer). Writers return $self so that
         # calls can be chained: $obj->set_x(1)->set_y(2). As in Perl, the default name is set_ plus the
         # field name with one leading underscore removed (`$_x` -> `set_x`), unless :writer(name) says
-        # otherwise.
+        # otherwise. An inline array field has no whole-value writer -- its elements are set in place.
         for my $f ( $ast->fields->@* ) {
+            next if $f->kind eq 'array' && $f->inline;
             if ( $self->has_attr( $f->attrs, 'writer' ) || $self->has_attr( $f->attrs, 'accessor' ) ) {
                 my $base   = $self->attr_arg( $f->attrs, 'accessor' ) // $self->strip_underscore( $f->name );
                 my $mname  = $self->attr_arg( $f->attrs, 'writer' )   // 'set_' . $base;
-                my @params = ( { type => $f->type, sigil => '$', name => 'value' } );
+                my $ptype  = $f->kind eq 'scalar' ? $f->type : 'ptr';
+                my @params = ( { type => $ptype, sigil => '$', name => 'value' } );
                 $self->register_method( $class_name, $mname, 'ptr', \@params );
                 $writer_map->{ $class_name . '::' . $mname } = $class_name;
                 $self->generate_writer( $class_name, $f, $mname );
@@ -383,6 +387,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
     }
 
+    # The element count of an inline array field must be a compile-time constant, because the struct's size and each
+    # element's byte offset are computed before any function body is lowered.
+    method field_array_count($f) {
+        my $sz = $f->size_expr;
+        if ( $sz && $sz->isa('Brocken::Katsuro::AST::Expr::Const') && $sz->type eq 'Int' ) {
+            return $sz->value;
+        }
+        Carp::croak("Inline array field '" . $f->name . "' needs a constant element count (e.g. field [i64; 4] \$" . $f->name . ")");
+    }
+
     # Pass 1: Register declarations
     method register_class($ast) {
         my @fields;
@@ -391,26 +405,62 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my @field_names;
         my @field_offsets;
         for my $f ( $ast->fields->@* ) {
-            my $ir_type = $self->type_from_name( $f->type );
-            push @field_types,   $ir_type;
-            push @field_names,   $f->name;
-            push @field_offsets, $offset;
+            my $kind   = $f->kind // 'scalar';
+            my $inline = $kind eq 'array' && $f->inline ? 1 : 0;
+
+            # The IR type of the storage slot, the element type (arrays), and how many struct slots the field spans.
+            # A scalar or pointer slot is one slot; an inline array claims one slot per element so a struct GEP at
+            # slot_idx + i lands on element i.
+            my ( $ir_type, $elem_ir_type, $span, $size );
+            if ( $kind eq 'array' ) {
+                $elem_ir_type = $self->type_from_name( $f->elem_type );
+                if ($inline) {
+                    my $count = $self->field_array_count($f);
+                    ( $ir_type, $span, $size ) = ( $elem_ir_type, $count, $count * $self->type_size($elem_ir_type) );
+                }
+                else {
+                    ( $ir_type, $span, $size ) = ( Brocken::Lindsay::IR::Type::ptr(), 1, 8 );
+                }
+            }
+            elsif ( $kind eq 'hash' ) {
+                ( $ir_type, $span, $size ) = ( Brocken::Lindsay::IR::Type::ptr(), 1, 8 );
+            }
+            else {
+                $ir_type = $self->type_from_name( $f->type );
+                ( $span, $size ) = ( 1, $self->type_size($ir_type) );
+            }
+
+            if ( $inline && $self->has_attr( $f->attrs, 'param' ) ) {
+                Carp::croak( "Inline array field '" . $f->name . "' cannot be :param; use a pointer array (field " . $f->elem_type . " \@" . $f->name . ")" );
+            }
+
+            my $slot_idx = scalar @field_types;
+            for my $k ( 0 .. $span - 1 ) {
+                push @field_types,   $inline ? $elem_ir_type : $ir_type;
+                push @field_names,   $f->name;
+                push @field_offsets, $offset + $k * ( $inline ? $self->type_size($elem_ir_type) : $size );
+            }
             push @fields,
                 {
-                name       => $f->name,
-                type       => $f->type,
-                ir_type    => $ir_type,
-                offset     => $offset,
-                size       => $self->type_size($ir_type),
-                idx        => $#fields + 1,
-                default    => $f->default,
-                default_op => $f->default_op,
-                attrs      => [ $f->attrs->@* ],
-                param      => $self->has_attr( $f->attrs, 'param' ) ? 1 : 0,
-                param_name => $self->has_attr( $f->attrs, 'param' ) ?
+                name         => $f->name,
+                type         => $f->type,
+                kind         => $kind,
+                inline       => $inline,
+                ir_type      => $ir_type,
+                elem_ir_type => $elem_ir_type,
+                span         => $span,
+                slot_idx     => $slot_idx,
+                offset       => $offset,
+                size         => $size,
+                idx          => $#fields + 1,
+                default      => $f->default,
+                default_op   => $f->default_op,
+                attrs        => [ $f->attrs->@* ],
+                param        => $self->has_attr( $f->attrs, 'param' ) ? 1 : 0,
+                param_name   => $self->has_attr( $f->attrs, 'param' ) ?
                     ( $self->attr_arg( $f->attrs, 'param' ) // $self->strip_underscore( $f->name ) ) : undef,
                 };
-            $offset += $self->type_size($ir_type);
+            $offset += $size;
         }
         my $struct_type = Brocken::Lindsay::IR::Type->new(
             kind           => 'struct',
@@ -1361,7 +1411,22 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $ast->sigil eq '@' ) {
             my $sym = $symbols->{ '@' . $ast->name } // $symbols->{ $ast->name };
             Carp::croak( "Undefined array variable '\@" . $ast->name . "' at " . $self->_loc($ast) ) unless $sym;
+
+            # A field array bound to a struct GEP: inline storage is its own base, but a pointer array keeps the base
+            # in the slot and must be dereferenced. A local `@name` is an alloca and is returned unchanged.
+            if ( $sym->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
+                my $fd = $self->field_array_record( $current_class, $ast->name );
+                return $sym if !$fd || $fd->{inline};
+                return $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $sym, undef, $line, $col );
+            }
             return $sym;
+        }
+
+        # Hash field: %h yields the heap hash pointer held in the slot.
+        if ( $ast->sigil eq '%' ) {
+            my $sym = $symbols->{ '%' . $ast->name } // $symbols->{ $ast->name };
+            Carp::croak( "Undefined hash variable '%" . $ast->name . "' at " . $self->_loc($ast) ) unless $sym;
+            return $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $sym, undef, $line, $col );
         }
         my $sym = $symbols->{ $ast->name };
         Carp::croak( "Undefined variable '" . $ast->name . "' at " . $self->_loc($ast) ) unless $sym;
@@ -1465,19 +1530,49 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $key = '@' . $array_expr->name;
             my $sym = $symbols->{$key};
             Carp::croak( "Unknown array variable '\@" . $array_expr->name . "' at " . $self->_loc($array_expr) ) unless $sym;
-            my $slot_type = $sym->allocated_type;
-            if ( $needs_rc->{$key} ) {
-                $array_base = $builder->build_load( $slot_type, $sym, undef, $line, $col );
 
-                # Heap arrays carry a 24-byte header (tag/rc, count, bytes) before the elements; step past it so the
-                # element GEP below lands on element 0 rather than the header.  Stack arrays have no header.
-                my $header_off = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 24 );
-                $array_base = $builder->build_gep( Brocken::Lindsay::IR::Type::i8(), $array_base, [$header_off], undef, $line, $col );
+            # A field array's symbol is a struct GEP, which is how it is told apart from a local `@name` (an alloca).
+            # Inline storage already sits at that GEP; a pointer array's GEP addresses the slot holding the base, so
+            # the base has to be loaded. Neither carries the 24-byte heap header a runtime-sized `my [...] @a` does.
+            my $is_field_gep =
+                $sym->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $sym->base_type && $sym->base_type->kind eq 'struct';
+            my $fd = $is_field_gep ? $self->field_array_record( $current_class, $array_expr->name ) : undef;
+            if ($fd) {
+                $array_base = $fd->{inline} ? $sym : $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $sym, undef, $line, $col );
+                $elem_type  = $fd->{elem_ir_type};
             }
             else {
-                $array_base = $sym;
+                my $slot_type = $sym->allocated_type;
+                if ( $needs_rc->{$key} ) {
+                    $array_base = $builder->build_load( $slot_type, $sym, undef, $line, $col );
+
+                    # Heap arrays carry a 24-byte header (tag/rc, count, bytes) before the elements; step past it so
+                    # the element GEP below lands on element 0 rather than the header.  Stack arrays have no header.
+                    my $header_off =
+                        Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 24 );
+                    $array_base = $builder->build_gep( Brocken::Lindsay::IR::Type::i8(), $array_base, [$header_off], undef, $line, $col );
+                }
+                else {
+                    $array_base = $sym;
+                }
+                $elem_type = $array_elem_types->{$key} // $slot_type;
             }
-            $elem_type = $array_elem_types->{$key} // $slot_type;
+        }
+        elsif ( $array_expr->isa('Brocken::Katsuro::AST::Expr::FieldAccess') ) {
+            my $class_name = $self->resolve_class_name($array_expr);
+            my $fd         = $self->field_array_record( $class_name, $array_expr->field );
+            if ($fd) {
+
+                # `$obj->xs[i]`: take the field's address, then dereference a pointer slot so indexing lands on the
+                # elements. An inline array is addressed directly by its GEP.
+                my $field_ptr = $self->lower_field_addr($array_expr);
+                $array_base = $fd->{inline} ? $field_ptr : $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $field_ptr, undef, $line, $col );
+                $elem_type = $fd->{elem_ir_type};
+            }
+            else {
+                $array_base = $self->lower_expression($array_expr);
+                $elem_type  = $array_base->type;
+            }
         }
         else {
             $array_base = $self->lower_expression($array_expr);
@@ -2258,7 +2353,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my ( $line, $col ) = ( $ast->line, $ast->col );
         for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
             if ( $cd->{fields}[$i]{name} eq $ast->field ) {
-                $field_idx = $i;
+                $field_idx = $cd->{fields}[$i]{slot_idx};
                 last;
             }
         }
@@ -2271,6 +2366,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $class_name = $self->resolve_class_name($ast);
         my $cd         = $classes->{$class_name};
         my ($field)    = grep { $_->{name} eq $ast->field } $cd->{fields}->@*;
+
+        # A bare array/hash field read yields the element/hash base pointer, as `@arr` does, rather than loading a
+        # single scalar out of the storage.
+        if ( $field->{kind} eq 'array' ) {
+            return $field_ptr if $field->{inline};
+            return $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $field_ptr, undef, $ast->line, $ast->col );
+        }
+        if ( $field->{kind} eq 'hash' ) {
+            return $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $field_ptr, undef, $ast->line, $ast->col );
+        }
         return $builder->build_load( $field->{ir_type}, $field_ptr, undef, $ast->line, $ast->col );
     }
 
@@ -2291,6 +2396,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $self_ptr     = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
             my $header_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => ( 1 | ( 4 << 24 ) ) );
             $builder->build_store( $header_const, $self_ptr, $line, $col );
+
+            # bump_alloc does not zero its memory, so every pointer-shaped array/hash field is nulled up front. A
+            # :param or default below overwrites its slot; one that is left out stays a null pointer rather than a
+            # dangling word the object header happened to leave behind.
+            my $null_ptr = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+            for my $f ( $cd->{fields}->@* ) {
+                next unless $f->{kind} eq 'hash' || ( $f->{kind} eq 'array' && !$f->{inline} );
+                my $slot = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{slot_idx}, '%' . $f->{name} . '.null', $line, $col );
+                $builder->build_store( $null_ptr, $slot, $line, $col );
+            }
 
             # A field initializer can read the fields assigned before it (`field $y = $x + 1`), so each field's GEP
             # is bound to its name as it is assigned. The bindings are restored at the end so they never leak into
@@ -2318,7 +2433,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $val = $self->lower_expression( $positional[$i] );
                 $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
                 my $field_ptr
-                    = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $field_idx{ $fd->{name} }, '%' . $fd->{name} . '.init', $line,
+                    = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line,
                     $col );
                 $builder->build_store( $val, $field_ptr, $line, $col );
                 $seen{ $fd->{name} } = 1;
@@ -2345,7 +2460,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $fd  = $cd->{fields}[$fi];
                 my $val = $self->lower_expression( $pair->{value} );
                 $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
-                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fi, '%' . $fd->{name} . '.init', $line, $col );
+                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line, $col );
                 $builder->build_store( $val, $field_ptr, $line, $col );
                 $seen{ $fd->{name} } = 1;
 
@@ -2374,7 +2489,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 # `=` and `//=` apply only to a field the caller left unset; `||=` also rewrites a
                 # supplied-but-false value.
                 next if $is_set && $op ne '||=';
-                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{idx}, '%' . $f->{name} . '.default', $line, $col );
+                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{slot_idx}, '%' . $f->{name} . '.default', $line, $col );
                 if ( $op eq '||=' && $is_set ) {
 
                     # `||=` applies when the value supplied for the field is false, not merely
@@ -2685,9 +2800,30 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $struct_type = $cd->{struct_type};
         for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
             my $fd        = $cd->{fields}[$i];
-            my $field_ptr = $builder->build_struct_gep( $struct_type, $self_val, $i, '%' . $fd->{name} . '.addr' );
-            $symbols->{ $fd->{name} } = $field_ptr;
+            my $field_ptr = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.addr' );
+
+            # An array field is addressed by its element base. Inline storage already sits at that GEP, while a
+            # pointer array's GEP points at the slot holding the base, so `@name` must dereference it. A hash field
+            # is an opaque pointer slot and answers to `%name`.
+            if ( $fd->{kind} eq 'array' ) {
+                $symbols->{ '@' . $fd->{name} } = $field_ptr;
+            }
+            elsif ( $fd->{kind} eq 'hash' ) {
+                $symbols->{ '%' . $fd->{name} } = $field_ptr;
+            }
+            else {
+                $symbols->{ $fd->{name} } = $field_ptr;
+            }
         }
+    }
+
+    # If `$name` names an array field of `$class_name`, return its record; otherwise undef. The symbol for a field
+    # array is always a struct GEP, which is how a field array is told apart from a local `@name` (an alloca).
+    method field_array_record( $class_name, $name ) {
+        my $cd = $class_name ? $classes->{$class_name} : undef;
+        return undef unless $cd;
+        my ($fd) = grep { $_->{name} eq $name && $_->{kind} eq 'array' } $cd->{fields}->@*;
+        return $fd;
     }
 
     # Auto-generated accessor and constructor lowering
@@ -2702,17 +2838,21 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $self_val    = $current_func->params->[2];
         my $cd          = $classes->{$class_name};
         my $struct_type = $cd->{struct_type};
-        my $field_idx;
+        my ($fd)        = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
+        my $field_ptr   = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.addr' );
 
-        for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
-            if ( $cd->{fields}[$i]{name} eq $field_ast->name ) {
-                $field_idx = $i;
-                last;
-            }
+        # A scalar field loads its value. An array/hash reader hands back a pointer: the element base for an inline
+        # array (the GEP itself), or the pointer held in the slot for a pointer array or a hash.
+        my $loaded;
+        if ( $fd->{kind} eq 'array' ) {
+            $loaded = $fd->{inline} ? $field_ptr : $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $field_ptr );
         }
-        my ($fd)      = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
-        my $field_ptr = $builder->build_struct_gep( $struct_type, $self_val, $field_idx, '%' . $fd->{name} . '.addr' );
-        my $loaded    = $builder->build_load( $fd->{ir_type}, $field_ptr );
+        elsif ( $fd->{kind} eq 'hash' ) {
+            $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $field_ptr );
+        }
+        else {
+            $loaded = $builder->build_load( $fd->{ir_type}, $field_ptr );
+        }
         $builder->build_ret($loaded);
     }
 
@@ -2728,16 +2868,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $value_val   = $current_func->params->[3];
         my $cd          = $classes->{$class_name};
         my $struct_type = $cd->{struct_type};
-        my $field_idx;
-
-        for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
-            if ( $cd->{fields}[$i]{name} eq $field_ast->name ) {
-                $field_idx = $i;
-                last;
-            }
-        }
-        my ($fd) = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
-        my $field_ptr = $builder->build_struct_gep( $struct_type, $self_val, $field_idx, '%' . $fd->{name} . '.addr' );
+        my ($fd)        = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
+        my $field_ptr   = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.addr' );
         $builder->build_store( $value_val, $field_ptr );
         $builder->build_ret($self_val);
     }

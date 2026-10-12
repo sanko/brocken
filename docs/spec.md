@@ -303,13 +303,20 @@ exactly **one leading underscore removed**: `field $_foo :param;` is addressed b
 `:reader` on `$_foo` generates `foo()`, and `:writer` on `$_foo` generates `set_foo()`. A field `$__bar` keeps one
 underscore (`_bar`), matching Perl's rule.
 
+A field may also hold several values. `field [T; N] $name` reserves `N` elements of `T` inline in the object, read
+in the class as `@name[i]` and outside it as `$obj->name[i]`; `field T @name` is a single pointer slot whose
+elements live elsewhere; and `field T %name` is an opaque pointer slot for hash data. A `:reader` on any of the
+three returns the element/hash base pointer, and `:param`/`:writer` on the pointer forms take a `ptr`. The inline
+count must be a compile-time constant, and an inline array cannot be `:param` because there is no whole-array value
+to pass. Indexing a pointer form does not follow a heap header — the slot is the element base itself.
+
 ---
 
 ## 8. Object-Oriented Programming (Classes)
 
 Brocken uses Corinna-style classes with strict encapsulation. Fields are strictly private unless exposed via attributes.
 
-**Implementation status.** The class system is being brought up in two milestones. v0.0.1 targets parity with Perl's core `class` feature (`perlclass`); v0.0.2 adds selected `Object::Pad` features. Today the front end implements `class` (block form), typed `field` with the `:param`/`:reader`/`:writer`/`:accessor` attributes, `=`/`//=`/`||=` field defaults (an initializer sees the earlier fields and may use `$self`/`__CLASS__`), `method`, positional parameter defaults (`method greet(String $name = "someone")`), and any number of `ADJUST` blocks (run in declaration order); writers return `$self` so calls can be chained. Method resolution is static (compile-time) and there is no inheritance. `:isa`, `SUPER::`, versioned classes, roles, and `DESTROY` are **planned, not yet implemented** — the `DatabaseConnection::Static` example below is forward-looking. See [`class_roadmap.md`](class_roadmap.md) for the full shipped-versus-planned breakdown.
+**Implementation status.** The class system is being brought up in two milestones. v0.0.1 targets parity with Perl's core `class` feature (`perlclass`); v0.0.2 adds selected `Object::Pad` features. Today the front end implements `class` (block form), typed `field` with the `:param`/`:reader`/`:writer`/`:accessor` attributes, inline/pointer array fields (`field [T; N] $x`, `field T @x`) and opaque hash fields (`field T %x`), `=`/`//=`/`||=` field defaults (an initializer sees the earlier fields and may use `$self`/`__CLASS__`), `method`, positional parameter defaults (`method greet(String $name = "someone")`), and any number of `ADJUST` blocks (run in declaration order); writers return `$self` so calls can be chained. Method resolution is static (compile-time) and there is no inheritance. `:isa`, `SUPER::`, versioned classes, roles, and `DESTROY` are **planned, not yet implemented** — the `DatabaseConnection::Static` example below is forward-looking. See [`class_roadmap.md`](class_roadmap.md) for the full shipped-versus-planned breakdown.
 
 ```perl
 class DatabaseConnection {

@@ -80,11 +80,21 @@ class Brocken::Katsuro::AST::Stmt::ClassDecl v0.0.1 : isa(Brocken::Katsuro::AST:
     field $adjusts : param : reader = [];           # Array of AST::Stmt::Adjust (run in declaration order)
 };
 class Brocken::Katsuro::AST::Stmt::FieldDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
-    field $type       : param : reader;
+    field $type       : param : reader;             # scalar type, or the array/hash element/value type
     field $name       : param : reader;             # without sigil
     field $attrs      : param : reader = [];        # [{ name => 'reader', arg => undef }, ...]
     field $default    : param : reader = undef;     # default value expression
     field $default_op : param : reader = undef;     # '=', '//=', or '||='
+
+    # Array/hash fields. `kind` is 'scalar', 'array', or 'hash'. An array field written `[T; N] $name` is
+    # `inline` (N elements of `elem_type` reserved in the object); one written `T @name` is a single pointer slot
+    # to element data. A `%name` field is a pointer slot holding hash data. `size_expr` is only set for the inline
+    # form.
+    field $sigil     : param : reader = '$';
+    field $kind      : param : reader = 'scalar';
+    field $elem_type : param : reader = undef;
+    field $size_expr : param : reader = undef;
+    field $inline    : param : reader = 0;
 };
 class Brocken::Katsuro::AST::Stmt::MethodDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $name        : param : reader;
