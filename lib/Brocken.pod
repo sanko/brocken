@@ -154,8 +154,12 @@ of a C<try> still run the C<finally>.
 
 Classes hold typed fields and methods. A field marked C<:reader> gets a reader, C<:writer> gets a C<set_> writer that
 returns C<$self> (so writer calls chain), and C<:accessor> gets both. A C<:param> field becomes a constructor argument,
-and fields may carry an C<=>, C<//=>, or C<||=> default. A class value is a C<ptr>, and construction is a call on the class
-name with named arguments:
+and fields may carry an C<=>, C<//=>, or C<||=> default. Any of the names can be overridden with a payload --
+C<:reader(get_x)>, C<:writer(put_x)>, C<:param(amount)> -- and a leading underscore on the field name is stripped when
+deriving the defaults, as in C<perlclass>: C<field $_x :param;> is set by C<new(x =E<gt> ...)>. A field default runs in
+the constructor and can read the fields declared before it (C<field $y = $x + 1;>). Method and sub parameters may carry
+defaults (C<method greet(String $name = "someone")>), applied when trailing arguments are omitted. A class value is a
+C<ptr>, and construction is a call on the class name with named arguments:
 
     class Point {
         field i64 $x :param;

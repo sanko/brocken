@@ -152,32 +152,14 @@ The `catch` block receives the thrown value, and a `try` with no `catch` is a `t
 The `setjmp` and `longjmp` behind this live in the runtime, not in generated code, which is what lets a `return` out
 of a `try` still run the `finally`.
 
-The defined-or operator `//` yields its left operand when that is defined and its right operand otherwise, and `//=`
-and `||=` are its assignment forms:
-
-```perl
-my Any $name;                 # undefined
-my Any $alias = 'guest';
-my $who = $name // $alias;    # 'guest'
-$name //= 'John';             # 'John'
-$name //= 'Jane';             # still 'John'
-
-my i64 $count = 0;
-$count ||= 3;                 # 3 -- zero is false
-```
-
-`//=` fires on an undefined slot (a null `ptr` or null `Any` box); it has nothing to test on a native `int`/`float`,
-which is never undefined, so there it is a plain `=`. `||=` fires on any false value (`0`, `0.0`, null). A fresh `my`
-declaration has no prior value, so `my $x //= 5;` is just `my $x = 5;`. `//` is eager, like `&&` and `||`.
-
 Classes hold typed fields and methods. A field marked `:reader` gets a reader, `:writer` gets a `set_` writer that
 returns `$self` (so writer calls chain), and `:accessor` gets both. A `:param` field becomes a constructor argument,
-and fields may carry an `=`, `//=`, or `||=` default. Any of the names can be overridden with a payload —
-`:reader(get_x)`, `:writer(put_x)`, `:param(amount)` — and a leading underscore on the field name is stripped when
-deriving the defaults, as in `perlclass`: `field $_x :param;` is set by `new(x => ...)`. A field default runs in the
-constructor and can read the fields declared before it (`field $y = $x + 1;`). Method and sub parameters may
-carry defaults (`method greet(String $name = "someone")`), applied when trailing arguments are omitted. A class value is a `ptr`,
-and construction is a call on the class name with named arguments:
+and fields may carry an `=`, `//=`, or `||=` default. Any of the names can be overridden with a payload --
+`:reader(get_x)`, `:writer(put_x)`, `:param(amount)` -- and a leading underscore on the field name is stripped when
+deriving the defaults, as in `perlclass`: `field $_x :param;` is set by `new(x => ...)`. A field default runs in
+the constructor and can read the fields declared before it (`field $y = $x + 1;`). Method and sub parameters may carry
+defaults (`method greet(String $name = "someone")`), applied when trailing arguments are omitted. A class value is a
+`ptr`, and construction is a call on the class name with named arguments:
 
 ```perl
 class Point {
@@ -268,8 +250,8 @@ my $brocken = Brocken->new( stack_reserve => 8 * 1024 * 1024, stack_commit => 10
 
 The initial thread's stack reservation and commit, in bytes, written into a PE executable's optional header
 (`SizeOfStackReserve` and `SizeOfStackCommit`). They default to 4 MiB and 2 MiB. Only the PE linker can express them
-today; the other linkers accept and ignore the values, since an ELF or Mach-O image carries no thread-stack size of
-its own. Keep the reserve above the 2 MiB runway the stack guard sets aside below the entry stack pointer.
+today; the other linkers accept and ignore the values, since an ELF or Mach-O image carries no thread-stack size of its
+own. Keep the reserve above the 2 MiB runway the stack guard sets aside below the entry stack pointer.
 
 ## `platform( ... )`
 

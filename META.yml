@@ -59,6 +59,8 @@ provides:
   Brocken::Jenny::Codegen::X86_64::Encodings:
     file: lib/Brocken/Jenny/Codegen/X86_64/Encodings.pm
     version: v0.0.1
+  Brocken::Jenny::FCB:
+    file: lib/Brocken/Jenny/FCB.pm
   Brocken::Jenny::Linker:
     file: lib/Brocken/Jenny/Linker.pm
     version: v0.0.1
@@ -113,6 +115,8 @@ provides:
   Brocken::Jenny::RegAlloc::LiveInterval:
     file: lib/Brocken/Jenny/RegAlloc.pm
     version: v0.0.1
+  Brocken::Jenny::StackGuard:
+    file: lib/Brocken/Jenny/StackGuard.pm
   Brocken::Katsuro:
     file: lib/Brocken/Katsuro.pm
     version: v0.0.1

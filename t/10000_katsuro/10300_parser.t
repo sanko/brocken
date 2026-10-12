@@ -44,8 +44,8 @@ subtest 'Assignment statement' => sub {
 subtest 'Compound assignment operators //= and ||=' => sub {
     my $c    = Brocken->new;
     my $prog = $c->parse('my i64 $x; $x = 1; $x //= 2; $x ||= 3;');
-    is( $prog->statements->@*, 4, 'four statements' );
-    is( $prog->statements->[1]->op, '=',  'plain =' );
+    is( $prog->statements->@*,      4,     'four statements' );
+    is( $prog->statements->[1]->op, '=',   'plain =' );
     is( $prog->statements->[2]->op, '//=', 'defined-or assign' );
     is( $prog->statements->[3]->op, '||=', 'or assign' );
     isa_ok( $prog->statements->[2]->target, ['Brocken::Katsuro::AST::Expr::Var'] );
@@ -56,7 +56,7 @@ subtest 'Declaration with //= or ||= parses as an initializer' => sub {
     my $c    = Brocken->new;
     my $prog = $c->parse('my Any $x //= 5; my Any $y ||= 6;');
     is( $prog->statements->@*, 2, 'two declarations' );
-    isa_ok( $prog->statements->[0], ['Brocken::Katsuro::AST::Stmt::VarDecl'] );
+    isa_ok( $prog->statements->[0],       ['Brocken::Katsuro::AST::Stmt::VarDecl'] );
     isa_ok( $prog->statements->[0]->init, ['Brocken::Katsuro::AST::Expr::Const'] );
     is( $prog->statements->[0]->init->value, 5, '//= initializer value' );
     is( $prog->statements->[1]->init->value, 6, '||= initializer value' );
@@ -71,7 +71,7 @@ subtest 'Defined-or operator //' => sub {
     isa_ok( $init->rhs, ['Brocken::Katsuro::AST::Expr::Var'] );
 };
 subtest '// and || share precedence and are left-associative' => sub {
-    my $c    = Brocken->new;
+    my $c = Brocken->new;
 
     # `$a // $b // $c` groups as `($a // $b) // $c`.
     my $chain = $c->parse('my Any $r = $a // $b // $c;')->statements->[0]->init;
@@ -324,10 +324,10 @@ BROCKEN
     is( $f0->type,                'i64' );
     is( $f0->name,                'x' );
     is( scalar( $f0->attrs->@* ), 2, 'attrs count' );
-    is( $f0->attrs->[0]->{name}, 'reader' );
-    is( $f0->attrs->[0]->{arg},  undef );
-    is( $f0->attrs->[1]->{name}, 'param' );
-    is( $f0->attrs->[1]->{arg},  undef );
+    is( $f0->attrs->[0]->{name},  'reader' );
+    is( $f0->attrs->[0]->{arg},   undef );
+    is( $f0->attrs->[1]->{name},  'param' );
+    is( $f0->attrs->[1]->{arg},   undef );
     isa_ok( $f0->default, ['Brocken::Katsuro::AST::Expr::Const'] );
     is( $f0->default->value, 0 );
     is( $f0->default_op,     '=' );
@@ -335,15 +335,15 @@ BROCKEN
     is( $f1->type,                'i64' );
     is( $f1->name,                'y' );
     is( scalar( $f1->attrs->@* ), 3, 'attrs count' );
-    is( $f1->attrs->[0]->{name}, 'reader' );
-    is( $f1->attrs->[1]->{name}, 'writer' );
-    is( $f1->attrs->[2]->{name}, 'param' );
+    is( $f1->attrs->[0]->{name},  'reader' );
+    is( $f1->attrs->[1]->{name},  'writer' );
+    is( $f1->attrs->[2]->{name},  'param' );
     ok( !defined $f1->default, 'no default' );
     my $f2 = $s->fields->[2];
     is( $f2->type,                'i64' );
     is( $f2->name,                'z' );
     is( scalar( $f2->attrs->@* ), 1, 'attrs count' );
-    is( $f2->attrs->[0]->{name}, 'reader' );
+    is( $f2->attrs->[0]->{name},  'reader' );
     isa_ok( $f2->default, ['Brocken::Katsuro::AST::Expr::Const'] );
     is( $f2->default->value, 0 );
     is( $f2->default_op,     '//=' );
@@ -362,8 +362,8 @@ BROCKEN
     is( $f0->type,                'i64' );
     is( $f0->name,                'x' );
     is( scalar( $f0->attrs->@* ), 1, 'attrs count' );
-    is( $f0->attrs->[0]->{name}, 'accessor' );
-    is( $f0->attrs->[0]->{arg},  undef );
+    is( $f0->attrs->[0]->{name},  'accessor' );
+    is( $f0->attrs->[0]->{arg},   undef );
     isa_ok( $f0->default, ['Brocken::Katsuro::AST::Expr::Const'] );
     is( $f0->default->value, 7 );
     is( $f0->default_op,     '||=' );
@@ -377,18 +377,18 @@ class Point {
 }
 BROCKEN
     is( $prog->statements->@*, 1, 'one declaration' );
-    my $s = $prog->statements->[0];
+    my $s  = $prog->statements->[0];
     my $f0 = $s->fields->[0];
-    is( $f0->name, 'x' );
-    is( scalar( $f0->attrs->@* ), 3, 'three attributes' );
-    is( $f0->attrs->[0]->{name}, 'param',   'param attribute name' );
-    is( $f0->attrs->[0]->{arg},  'x_amount', 'param custom name' );
-    is( $f0->attrs->[1]->{name}, 'reader' );
-    is( $f0->attrs->[1]->{arg},  'get_x', 'reader custom name' );
-    is( $f0->attrs->[2]->{name}, 'writer' );
-    is( $f0->attrs->[2]->{arg},  'set_x', 'writer custom name' );
+    is( $f0->name,                'x' );
+    is( scalar( $f0->attrs->@* ), 3,          'three attributes' );
+    is( $f0->attrs->[0]->{name},  'param',    'param attribute name' );
+    is( $f0->attrs->[0]->{arg},   'x_amount', 'param custom name' );
+    is( $f0->attrs->[1]->{name},  'reader' );
+    is( $f0->attrs->[1]->{arg},   'get_x', 'reader custom name' );
+    is( $f0->attrs->[2]->{name},  'writer' );
+    is( $f0->attrs->[2]->{arg},   'set_x', 'writer custom name' );
     my $f1 = $s->fields->[1];
-    is( $f1->name, '_total' );
+    is( $f1->name,               '_total' );
     is( $f1->attrs->[0]->{name}, 'param' );
     ok( !defined $f1->attrs->[0]->{arg}, 'no payload on plain :param' );
 };
@@ -440,8 +440,8 @@ BROCKEN
     my $s = $prog->statements->[0];
     isa_ok( $s, ['Brocken::Katsuro::AST::Stmt::ClassDecl'] );
     is( $s->adjusts->@*, 2, 'has two ADJUST blocks' );
-    isa_ok( $s->adjusts->[0], ['Brocken::Katsuro::AST::Stmt::Adjust'] );
-    isa_ok( $s->adjusts->[1], ['Brocken::Katsuro::AST::Stmt::Adjust'] );
+    isa_ok( $s->adjusts->[0],       ['Brocken::Katsuro::AST::Stmt::Adjust'] );
+    isa_ok( $s->adjusts->[1],       ['Brocken::Katsuro::AST::Stmt::Adjust'] );
     isa_ok( $s->adjusts->[0]->body, ['Brocken::Katsuro::AST::Stmt::Block'] );
 };
 subtest 'Field access and method call syntax' => sub {

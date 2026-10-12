@@ -7,23 +7,23 @@ use Brocken::Katsuro::Platform;
 use Brocken::Jenny::Codegen::RISCV64;
 use constant { OP_IMM => 0x13, OP => 0x33, LOAD => 0x03, STORE => 0x23, };
 my %rid = (
-    a0 => 10,
-    a1 => 11,
-    a2 => 12,
-    a3 => 13,
-    a4 => 14,
-    a5 => 15,
-    a6 => 16,
-    a7 => 17,
-    t0 => 5,
-    t1 => 6,
-    t2 => 7,
-    t3 => 28,
-    t4 => 29,
-    t5 => 30,
-    t6 => 31,
-    sp => 2,
-    s0 => 8,
+    a0  => 10,
+    a1  => 11,
+    a2  => 12,
+    a3  => 13,
+    a4  => 14,
+    a5  => 15,
+    a6  => 16,
+    a7  => 17,
+    t0  => 5,
+    t1  => 6,
+    t2  => 7,
+    t3  => 28,
+    t4  => 29,
+    t5  => 30,
+    t6  => 31,
+    sp  => 2,
+    s0  => 8,
     s10 => 26
 );
 sub word { return unpack( 'V', substr( $_[0], $_[1] * 4, 4 ) ) }
@@ -64,6 +64,7 @@ subtest 'encode a spilled arithmetic source by pulling it into a scratch registe
     );
 };
 subtest 'a wide-displacement spilled source reuses its scratch for the address' => sub {
+
     # The allocator's reload scratch (t6) can hold the destination of the very instruction whose memory source is
     # being loaded.  When the source slot is far enough down a large frame to need address materialisation, the
     # address scratch must not be that reload register: computing the address into t6 would destroy the value the
@@ -74,9 +75,10 @@ subtest 'a wide-displacement spilled source reuses its scratch for the address' 
     my $mf       = Brocken::Jenny::MIR::MachineFunction->new( name => 'wide_source', frame_size => 0 );
     my $bb       = Brocken::Jenny::MIR::MachineBasicBlock->new( name => 'entry' );
     $mf->add_block($bb);
-    my $mem   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem',      value => { base => 'sp', disp => 4096 }, type => $i64 );
+    my $mem   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => 'sp', disp => 4096 }, type => $i64 );
     my $spill = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 't6' );
-    $bb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mul', operands => [ $spill, $mem ], comment => 'spilled mul wide' ) );
+    $bb->add_instruction(
+        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mul', operands => [ $spill, $mem ], comment => 'spilled mul wide' ) );
     $bb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [], comment => 'ret' ) );
 
     # Every non-reserved caller register carries a live value, so the only candidates for the source scratch are the
@@ -84,16 +86,14 @@ subtest 'a wide-displacement spilled source reuses its scratch for the address' 
     my %assignment;
     my @pressure = qw(a0 a1 a2 a3 a4 a5 a6 a7 t0 t1 t2 t3 t4 t5);
     $assignment{"%p$_"} = $pressure[$_] for 0 .. $#pressure;
-
-    my $codegen = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
-    my ($bytes) = $codegen->_encode( $mf, \%assignment, [], undef, undef, [ 't6', 's10' ] );
-    my @w = map { unpack( 'V', substr( $bytes, $_ * 4, 4 ) ) } 0 .. length($bytes) / 4 - 1;
-
+    my $codegen   = Brocken::Jenny::Codegen::RISCV64->new( platform => $platform );
+    my ($bytes)   = $codegen->_encode( $mf, \%assignment, [], undef, undef, [ 't6', 's10' ] );
+    my @w         = map { unpack( 'V', substr( $bytes, $_ * 4, 4 ) ) } 0 .. length($bytes) / 4 - 1;
     my ($mul_idx) = grep { ( ( $w[$_] & 0x7f ) == OP ) && ( ( ( $w[$_] >> 25 ) & 0x7f ) == 0x01 ) } 0 .. $#w;
     ok defined $mul_idx, 'the spilled mul was encoded';
     my $src = ( $w[$mul_idx] >> 20 ) & 0x1f;    # second source of `mul a, a, src`
     my $ld  = $w[ $mul_idx - 1 ];
-    is( $ld & 0x7f, LOAD, 'the source load precedes the mul' );
+    is( $ld & 0x7f,           LOAD, 'the source load precedes the mul' );
     is( ( $ld >> 7 ) & 0x1f,  $src, 'the load writes the source scratch' );
     is( ( $ld >> 15 ) & 0x1f, $src, 'and addresses through that same scratch, not the reload register' );
     isnt( ( $ld >> 15 ) & 0x1f, $rid{t6}, 'the destination reload register t6 is never the address scratch' );

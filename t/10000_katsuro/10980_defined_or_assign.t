@@ -31,10 +31,10 @@ subtest '// is the left operand when it is defined' => sub {
 
 # On an untyped (Any) slot a null box stands in for undef.
 subtest '// falls back on a null Any box' => sub {
-    answers( 'my Any $a; my Any $b = 7; return $a // $b;',                    7, 'a null box takes the right operand' );
-    answers( 'my Any $a = 5; my Any $b = 7; return $a // $b;',                5, 'a set box keeps its value' );
-    answers( 'my Any $a = 0; my Any $b = 6; return $a // $b;',                0, 'a boxed zero is defined' );
-    answers( 'my Any $a; my Any $b; my Any $c = 9; return $a // $b // $c;',   9, 'a chain reaches the first set box' );
+    answers( 'my Any $a; my Any $b = 7; return $a // $b;',                  7, 'a null box takes the right operand' );
+    answers( 'my Any $a = 5; my Any $b = 7; return $a // $b;',              5, 'a set box keeps its value' );
+    answers( 'my Any $a = 0; my Any $b = 6; return $a // $b;',              0, 'a boxed zero is defined' );
+    answers( 'my Any $a; my Any $b; my Any $c = 9; return $a // $b // $c;', 9, 'a chain reaches the first set box' );
 };
 
 # `||=` stores the RHS when the slot is false, not merely when it is undefined.
@@ -64,16 +64,15 @@ subtest 'a declaration initialises with //= or ||=' => sub {
 # A String on each side makes `//` a pointer-shaped select whose taken arm is a rodata address -- the case a plain
 # `_lower_opnd` could not build, on any backend.
 subtest '// and //= on a String' => sub {
-    answers( 'my String $s; my String $t = "abc"; return length($s // $t);',
-        3, 'a null String takes the rodata fallback', targets => [@native_targets] );
-    answers( 'my String $s = "hello"; my String $t = "abc"; return length($s // $t);',
-        5, 'a set String is kept', targets => [@native_targets] );
-    answers( 'my String $s; $s //= "hi"; return length($s);',
-        2, 'a null String is filled in by //=', targets => [@native_targets] );
-    answers( 'my String $s; $s ||= "yes"; return length($s);',
-        3, 'a null String is filled in by ||=', targets => [@native_targets] );
-    answers( 'my String $s = "no"; $s ||= "yes"; return length($s);',
-        2, 'a live String keeps ||= away', targets => [@native_targets] );
+    answers(
+        'my String $s; my String $t = "abc"; return length($s // $t);',
+        3,
+        'a null String takes the rodata fallback',
+        targets => [@native_targets]
+    );
+    answers( 'my String $s = "hello"; my String $t = "abc"; return length($s // $t);', 5, 'a set String is kept', targets => [@native_targets] );
+    answers( 'my String $s; $s //= "hi"; return length($s);',         2, 'a null String is filled in by //=',     targets => [@native_targets] );
+    answers( 'my String $s; $s ||= "yes"; return length($s);',        3, 'a null String is filled in by ||=',     targets => [@native_targets] );
+    answers( 'my String $s = "no"; $s ||= "yes"; return length($s);', 2, 'a live String keeps ||= away',          targets => [@native_targets] );
 };
-
 done_testing;

@@ -233,7 +233,7 @@ BROCKEN
     my $f = find_function( $mod, 'Point::set_x' );
     ok( $f, 'found auto-generated writer Point::set_x' );
     is( $f->return_type->as_string, 'ptr', 'returns ptr so writer calls can be chained' );
-    is( $f->params->@*,             4,      'four params (__heap_base, __want, $self, $value)' );
+    is( $f->params->@*,             4,     'four params (__heap_base, __want, $self, $value)' );
     like( $f->as_string, qr/ret\s+ptr\s+%/, 'returns $self' );
 };
 subtest 'Field :accessor generates reader and writer' => sub {
@@ -259,10 +259,10 @@ class Point {
 my ptr $p = Point->new(amount => 3);
 return $p->get_x();
 BROCKEN
-    ok( find_function( $mod, 'Point::get_x' ),   'reader is named get_x, not x' );
-    ok( find_function( $mod, 'Point::write_x' ), 'writer is named write_x, not set__x' );
-    ok( !find_function( $mod, 'Point::_x' ),     'no reader under the raw field name' );
-    ok( !find_function( $mod, 'Point::set__x' ), 'no writer under the derived set_ name' );
+    ok( find_function( $mod,  'Point::get_x' ),   'reader is named get_x, not x' );
+    ok( find_function( $mod,  'Point::write_x' ), 'writer is named write_x, not set__x' );
+    ok( !find_function( $mod, 'Point::_x' ),      'no reader under the raw field name' );
+    ok( !find_function( $mod, 'Point::set__x' ),  'no writer under the derived set_ name' );
     my $entry = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $entry, 'found entry function' );
 };
@@ -275,9 +275,9 @@ class Point {
 my ptr $p = Point->new(coordinate => 5);
 return $p->coordinate();
 BROCKEN
-    ok( find_function( $mod, 'Point::coordinate' ),   'reader name has the leading underscore stripped' );
-    ok( find_function( $mod, 'Point::set_coordinate' ), 'writer name is set_ plus the stripped name' );
-    ok( !find_function( $mod, 'Point::_coordinate' ), 'no raw-name reader' );
+    ok( find_function( $mod,  'Point::coordinate' ),     'reader name has the leading underscore stripped' );
+    ok( find_function( $mod,  'Point::set_coordinate' ), 'writer name is set_ plus the stripped name' );
+    ok( !find_function( $mod, 'Point::_coordinate' ),    'no raw-name reader' );
     my $entry = find_function( $mod, '_BROCKEN_ENTRY' );
     ok( $entry, 'found entry function' );
 };
@@ -292,7 +292,7 @@ return 1;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
-    like( $text, qr/icmp\s+eq\s+i64/,    'compares the supplied value to zero' );
+    like( $text, qr/icmp\s+eq\s+i64/,              'compares the supplied value to zero' );
     like( $text, qr/select\s+i1\s+%[^,]+, i64 3,/, 'selects between the default and the supplied value' );
 };
 subtest '//= on a ptr lowers to a null-check select' => sub {
@@ -305,7 +305,7 @@ return 0;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
-    like( $text, qr/icmp\s+eq\s+ptr/, 'compares the pointer to null' );
+    like( $text, qr/icmp\s+eq\s+ptr/,             'compares the pointer to null' );
     like( $text, qr/select\s+i1\s+%[^,]+, ptr %/, 'selects between the RHS pointer and the existing pointer' );
 };
 subtest '//= on a native scalar is a plain store' => sub {
@@ -329,8 +329,8 @@ return $x;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
-    like( $text, qr/icmp\s+eq\s+i64/,               'compares the scalar to zero' );
-    like( $text, qr/select\s+i1\s+%[^,]+, i64 5,/,  'selects between the RHS and the existing scalar' );
+    like( $text, qr/icmp\s+eq\s+i64/,              'compares the scalar to zero' );
+    like( $text, qr/select\s+i1\s+%[^,]+, i64 5,/, 'selects between the RHS and the existing scalar' );
 };
 subtest '// in expression position lowers to a defined-check select' => sub {
     my $c   = Brocken->new;
@@ -359,10 +359,10 @@ BROCKEN
     my $text = $f->as_string();
     my $i_lo = index( $text, 'store i64 1, ptr' );
     my $i_hi = index( $text, 'store i64 100, ptr' );
-    ok( $i_lo >= 0,                     'first ADJUST stores its clamp' );
-    ok( $i_hi > $i_lo,                  'second ADJUST stores after the first (declaration order)' );
-    like( $text, qr/icmp\s+slt\s+i64/,  'first ADJUST comparison present' );
-    like( $text, qr/icmp\s+sgt\s+i64/,  'second ADJUST comparison present' );
+    ok( $i_lo >= 0,    'first ADJUST stores its clamp' );
+    ok( $i_hi > $i_lo, 'second ADJUST stores after the first (declaration order)' );
+    like( $text, qr/icmp\s+slt\s+i64/, 'first ADJUST comparison present' );
+    like( $text, qr/icmp\s+sgt\s+i64/, 'second ADJUST comparison present' );
 };
 subtest 'Named constructor with fields' => sub {
     my $c   = Brocken->new;

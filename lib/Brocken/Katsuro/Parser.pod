@@ -90,9 +90,9 @@ destructuring declaration on C<my ( $a, $b ) = f();>.
 
 =head2 C<sub> and C<method> declarations
 
-A subroutine is C<sub NAME( params )> followed by an optional return annotation and then either a braced body or a
-C<;> for a forward declaration. A method is the same form inside a C<class> block. Parameters are a comma-separated
-list of an optional type keyword and a sigil-led name.
+A subroutine is C<sub NAME( params )> followed by an optional return annotation and then either a braced body or a C<;>
+for a forward declaration. A method is the same form inside a C<class> block. Parameters are a comma-separated list of
+an optional type keyword and a sigil-led name.
 
 The return annotation is the attribute C<:returns(Type)>, written after the parameter list:
 

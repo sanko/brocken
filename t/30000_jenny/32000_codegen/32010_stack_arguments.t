@@ -303,7 +303,8 @@ sub exec_pairs () {
                     $sum += $v;
                 }
             }
-            my $src  = sprintf "sub g(%s) :returns(f64) { return %s; } return g(%s);", join( ', ', @params ), join( ' + ', @terms ), join( ', ', @args );
+            my $src = sprintf "sub g(%s) :returns(f64) { return %s; } return g(%s);", join( ', ', @params ), join( ' + ', @terms ),
+                join( ', ', @args );
             my $name = sprintf '%s: %d integer and %d floating-point arguments arrive intact', $triple, $nint, $nfloat;
             run_case( $platform, $class, $src, $sum, $name );
 

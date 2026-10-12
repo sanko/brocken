@@ -159,10 +159,11 @@ v0.0.1 brings classes to `perlclass` (`use feature 'class'`) parity; v0.0.2 adds
 features. The feature-by-feature plan, decisions, and open questions live in
 [`docs/class_roadmap.md`](docs/class_roadmap.md). Summary of the work:
 
-- [ ] **v0.0.1 — syntax sugar:** `:returns(Type)` (replacing `-> RET`) [done], parameter defaults, `||=`
-  defaults [done], `:param(NAME)`/`:reader(NAME)`/`:writer(NAME)` with `_`-stripping, `:writer` returns
+- [ ] **v0.0.1 — syntax sugar:** `:returns(Type)` (replacing `-> RET`) [done], parameter defaults [done], `||=`
+  defaults [done], `:param(NAME)`/`:reader(NAME)`/`:writer(NAME)` with `_`-stripping [done], `:writer` returns
   `$self` for chaining [done], multiple `ADJUST` blocks [done], earlier-field visibility in field
-  initializers, `:accessor` [done], `:weak`, and array/hash fields.
+  initializers [done], `:accessor` [done], array/hash fields, and `:weak` (deferred until class-typed fields
+  take ownership — see the roadmap M0 note).
 - [ ] **v0.0.1 — object model:** class versions and attributes, `:isa` single inheritance, static
   ancestor resolution and `SUPER::`, constructor chaining over a copied `:param` name map, `DESTROY`
   chaining with cascading field teardown, and field alignment/padding.

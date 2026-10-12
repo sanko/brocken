@@ -623,10 +623,10 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
 
         # A spill reload lands in the register the allocator reserved for it, so a scratch chosen for a memory source
         # must not be one of those: it would overwrite the reloaded value the instruction is about to use.
-        my %reserved     = map { $_ => 1 } grep {defined} @$reserved;
+        my %reserved = map { $_ => 1 } grep {defined} @$reserved;
 
         # Set while encoding a `caller-save`/`caller-restore` instruction (see the encoding loop below).
-        my $caller_io    = 0;
+        my $caller_io = 0;
 
         # The ABI return registers (a0/a1 on RISC-V: the low and high halves of a value) hold the result across the
         # return sequence, where they are not virtual registers and so never appear in %assignment.  A large-
@@ -642,8 +642,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my %forbid = map { $_ => 1 } grep {defined} @forbidden;
             my %used;
             @used{ values %$assignment } = ();
-            $used{$_} = 1 for sort keys %reserved;
-            $used{$_} = 1 for sort keys %ret_regs;
+            $used{$_}                    = 1 for sort keys %reserved;
+            $used{$_}                    = 1 for sort keys %ret_regs;
             for my $r ( $platform->registers('caller')->@* ) {
                 return $r unless exists $used{$r} || $forbid{$r};
             }
@@ -660,8 +660,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         my $fits_disp       = sub ($d) { $d >= -2048 && $d <= 2047 };
         my $emit_mem_access = sub {
             my ( $funct3, $data_id, $base_id, $disp, $store, $index_id, $float, @extra_forbidden ) = @_;
-            my $op = $float ? ( $store ? FSTORE : FLOAD ) : ( $store ? STORE : LOAD );
-            my $pick = sub ($allow_data, @excl) {
+            my $op   = $float ? ( $store ? FSTORE : FLOAD ) : ( $store ? STORE : LOAD );
+            my $pick = sub ( $allow_data, @excl ) {
                 my %forbidden = ( $base_id => 1, map { $_ => 1 } grep {defined} @excl );
                 $forbidden{$_}        = 1 for grep {defined} @extra_forbidden;
                 $forbidden{$index_id} = 1 if defined $index_id;
@@ -683,7 +683,6 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 if ($caller_io) {
                     $used{$_} = 1 for $platform->abi->param_registers->@*;
                 }
-
                 for my $r ( $platform->registers('caller')->@* ) {
                     my $rid = $reg_id->($r);
                     return $r unless exists $used{$r} || $forbidden{$rid};
@@ -707,12 +706,12 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 }
                 return undef;
             };
-            my $bid = $base_id;
-            my $off = $disp;
+            my $bid        = $base_id;
+            my $off        = $disp;
             my $load_reuse = ( !$store && !$float ) ? 1 : 0;
             my $scratch_id;
             if ( defined $index_id ) {
-                my $tmp_r = $pick->( $load_reuse );
+                my $tmp_r = $pick->($load_reuse);
                 die 'no temp register for indexed memory address' unless defined $tmp_r;
                 my $tid = $reg_id->($tmp_r);
                 $scratch_id = $tid;
@@ -747,7 +746,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # allocation: in the prologue the incoming arguments still sit in a0-a7, and in the epilogue the return value
         # sits in a0/a1.  t0 is caller-saved and neither, so it is safe in both places.
         my $emit_frame_mem = sub ( $funct3, $data_id, $off, $store, $float ) {
-            my $op     = $float ? ( $store ? FSTORE : FLOAD ) : ( $store ? STORE : LOAD );
+            my $op = $float ? ( $store ? FSTORE : FLOAD ) : ( $store ? STORE : LOAD );
             if ( $fits_disp->($off) ) {
                 my $bid = 2;    # sp
                 if ($store) {
@@ -760,12 +759,12 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 }
                 return;
             }
-            my $tid = 5;    # t0
+            my $tid = 5;                                                                                                       # t0
             my $hi  = ( $off + 0x800 ) >> 12;
             my $lo  = $off & 0xFFF;
             $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( $tid << 7 ) | LUI );
             $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM ) if $lo;
-            $bytes .= pack( 'V', ( 0 << 25 ) | ( 2 << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );    # t0 = t0 + sp
+            $bytes .= pack( 'V', ( 0 << 25 ) | ( 2 << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP );              # t0 = t0 + sp
             if ($store) {
                 $bytes .= pack( 'V', ( 0 << 25 ) | ( $data_id << 20 ) | ( $tid << 15 ) | ( $funct3 << 12 ) | ( 0 << 7 ) | $op );
             }
@@ -786,7 +785,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my @forbid = ( $base_r, @extra_forbidden );
             push @forbid, $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) )
                 if defined $addr->{index};
-            my $tmp_r  = $pick_scratch->(@forbid);
+            my $tmp_r = $pick_scratch->(@forbid);
             die "no temp register for the memory source of $what" unless $tmp_r;
             my $tid    = $reg_id->($tmp_r);
             my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits   : 64;
@@ -816,9 +815,9 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 $bytes .= pack( 'V', ( 0x20 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );
             }
             for my $i ( 0 .. $#to_save ) {
-                my $reg = $to_save[$i];
-                my $rid = $reg_id->($reg);
-                my $off = $extra_frame + $i * 8;
+                my $reg      = $to_save[$i];
+                my $rid      = $reg_id->($reg);
+                my $off      = $extra_frame + $i * 8;
                 my $is_float = ( $reg =~ /^f/ ) ? 1 : 0;
                 $emit_frame_mem->( 3, $rid, $off, 1, $is_float );
             }
@@ -852,7 +851,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # overflows.
         my %long_branch;
         my $current_offset = sub { return length $bytes };
-        my $redo    = 1;
+        my $redo           = 1;
         my $changed;
         while ($redo) {
             $bytes          = $prologue;
@@ -863,225 +862,116 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             $changed        = 0;
             $source_map->%* = () if $source_map;
             $alloca_map->%* = () if $alloca_map;
-        for my $mbb ( $mf->blocks->@* ) {
-            for my $inst ( $mbb->instructions->@* ) {
-                if ( $source_map && $inst->ir_inst_idx >= 0 && !exists $source_map->{ $inst->ir_inst_idx } ) {
-                    $source_map->{ $inst->ir_inst_idx } = length($bytes);
-                }
-                my $opcode = $inst->opcode;
-                $caller_io
-                    = ( ( $inst->comment // '' ) =~ /^caller-(?:save|restore) / ) ? 1 : 0;
-                my @ops    = $inst->operands->@*;
-                my ( $dst, $src ) = @ops;
-                if ( $opcode eq 'label' ) {
-                    $labels{ $dst->value } = $current_offset->();
-                }
-                elsif ( $opcode eq 'jmp' ) {
-                    push @fixups, { offset => $current_offset->(), type => 'jal', target => $dst->value };
-                    $bytes .= pack( 'V', JAL );
-                }
-                elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
-                    my $cond_r = $resolve->($dst);
-                    my $cid    = $reg_id->($cond_r);
-                    my $funct3 = ( $opcode eq 'bne' ? 1 : 0 );
 
-                    if ( $long_branch{ 0 + $inst } ) {
-
-                        # Invert the condition so it skips the `jal` that follows when the branch is not taken.  The
-                        # unconditional jump then carries the far target, which the 13-bit branch field cannot.
-                        my $inv   = 1 - $funct3;
-                        my $imm13 = ( 8 >> 1 ) & 0x1FFF;
-                        my $enc   = ( ( $imm13 >> 11 ) & 1 ) << 31 | ( ( $imm13 >> 4 ) & 0x3F ) << 25 | ( $cid << 15 )
-                            | ( $inv << 12 ) | ( ( $imm13 & 0x0F ) << 8 ) | ( ( $imm13 >> 10 ) & 1 ) << 7 | BCC;
-                        $bytes .= pack( 'V', $enc );
-                        push @fixups, { offset => $current_offset->(), type => 'jal', target => $src->value };
+            for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    if ( $source_map && $inst->ir_inst_idx >= 0 && !exists $source_map->{ $inst->ir_inst_idx } ) {
+                        $source_map->{ $inst->ir_inst_idx } = length($bytes);
+                    }
+                    my $opcode = $inst->opcode;
+                    $caller_io = ( ( $inst->comment // '' ) =~ /^caller-(?:save|restore) / ) ? 1 : 0;
+                    my @ops = $inst->operands->@*;
+                    my ( $dst, $src ) = @ops;
+                    if ( $opcode eq 'label' ) {
+                        $labels{ $dst->value } = $current_offset->();
+                    }
+                    elsif ( $opcode eq 'jmp' ) {
+                        push @fixups, { offset => $current_offset->(), type => 'jal', target => $dst->value };
                         $bytes .= pack( 'V', JAL );
                     }
-                    else {
+                    elsif ( $opcode eq 'beq' || $opcode eq 'bne' ) {
+                        my $cond_r = $resolve->($dst);
+                        my $cid    = $reg_id->($cond_r);
+                        my $funct3 = ( $opcode eq 'bne' ? 1 : 0 );
+                        if ( $long_branch{ 0 + $inst } ) {
 
-                        # BEQ/BNE rs1=cond, rs2=x0, offset placeholder
-                        push @fixups, { offset => $current_offset->(), type => 'bcc', target => $src->value, rs1 => $cid, funct3 => $funct3, inst_key => ( 0 + $inst ) };
-                        $bytes .= pack( 'V', ( $cid << 15 ) | ( $funct3 << 12 ) | BCC );
-                    }
-                }
-                elsif ( $opcode eq 'mov' || $opcode eq 'mv' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    if ( $src->kind eq 'imm' ) {
-                        my $val = $src->value;
-                        if ( $val >= -2048 && $val <= 2047 ) {
-
-                            # li rd, imm (addi rd, zero, imm)
-                            my $imm = $val & 0xFFF;
-                            $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            # Invert the condition so it skips the `jal` that follows when the branch is not taken.  The
+                            # unconditional jump then carries the far target, which the 13-bit branch field cannot.
+                            my $inv   = 1 - $funct3;
+                            my $imm13 = ( 8 >> 1 ) & 0x1FFF;
+                            my $enc   = ( ( $imm13 >> 11 ) & 1 ) << 31 | ( ( $imm13 >> 4 ) & 0x3F ) << 25 | ( $cid << 15 ) | ( $inv << 12 )
+                                | ( ( $imm13 & 0x0F ) << 8 ) | ( ( $imm13 >> 10 ) & 1 ) << 7 | BCC;
+                            $bytes .= pack( 'V', $enc );
+                            push @fixups, { offset => $current_offset->(), type => 'jal', target => $src->value };
+                            $bytes .= pack( 'V', JAL );
                         }
                         else {
-                            # Full 64-bit immediate: decompose into 11-bit chunks using ADDI+SLLI sequence to avoid LUI
-                            # sign-extension issues
-                            my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
-                            my @chunks;
-                            while ( $tmp != 0 ) {
-                                push @chunks, $tmp & 0x7FF;
-                                $tmp >>= 11;
-                            }
-                            my $first = pop @chunks;
-                            $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
-                            for my $chunk ( reverse @chunks ) {
-                                $bytes .= pack( 'V', ( 11 << 20 ) | ( $did << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
-                                $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
-                            }
+                            # BEQ/BNE rs1=cond, rs2=x0, offset placeholder
+                            push @fixups,
+                                {
+                                offset   => $current_offset->(),
+                                type     => 'bcc',
+                                target   => $src->value,
+                                rs1      => $cid,
+                                funct3   => $funct3,
+                                inst_key => ( 0 + $inst )
+                                };
+                            $bytes .= pack( 'V', ( $cid << 15 ) | ( $funct3 << 12 ) | BCC );
                         }
                     }
-                    else {
-                        my $src_r = $resolve->($src);
-                        my $sid   = $reg_id->($src_r);
+                    elsif ( $opcode eq 'mov' || $opcode eq 'mv' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        if ( $src->kind eq 'imm' ) {
+                            my $val = $src->value;
+                            if ( $val >= -2048 && $val <= 2047 ) {
 
-                        # mv rd, rs (addi rd, rs, 0)
-                        $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
-                    }
-                }
-                elsif ( $opcode eq 'movzx' ) {
-                    my $src_bits = $src->type ? $src->type->bits : 64;
-                    my $dst_r    = $resolve->($dst);
-                    my $did      = $reg_id->($dst_r);
-                    my $src_r    = $resolve->($src);
-                    my $sid      = $reg_id->($src_r);
-                    if ( $src_bits <= 8 ) {
-
-                        # andi rd, rs, 255
-                        $bytes .= pack( 'V', ( 255 << 20 ) | ( $sid << 15 ) | ( 7 << 12 ) | ( $did << 7 ) | OP_IMM );
-                    }
-                    elsif ( $src_bits <= 16 ) {
-
-                        # slli rd, rs, 48; srli rd, rd, 48
-                        $bytes .= pack( 'V', ( 48 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
-                        $bytes .= pack( 'V', ( 48 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
-                    }
-                    else {
-                        # slli rd, rs, 32; srli rd, rd, 32
-                        $bytes .= pack( 'V', ( 32 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
-                        $bytes .= pack( 'V', ( 32 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
-                    }
-                }
-                elsif ( $opcode eq 'movsx' ) {
-                    my $src_bits = $src->type ? $src->type->bits : 64;
-                    my $dst_r    = $resolve->($dst);
-                    my $did      = $reg_id->($dst_r);
-                    my $src_r;
-                    my $sid;
-                    if ( $src->kind eq 'imm' ) {
-                        my %used;
-                        @used{ values %$assignment } = ();
-                        my $tmp_r;
-                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
-                        die 'no temp register for imm operand' unless $tmp_r;
-                        $sid = $reg_id->($tmp_r);
-                        my $val = $src->value;
-                        if ( $val >= -2048 && $val <= 2047 ) {
-                            my $imm = $val & 0xFFF;
-                            $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
+                                # li rd, imm (addi rd, zero, imm)
+                                my $imm = $val & 0xFFF;
+                                $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            }
+                            else {
+                                # Full 64-bit immediate: decompose into 11-bit chunks using ADDI+SLLI sequence to avoid LUI
+                                # sign-extension issues
+                                my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
+                                my @chunks;
+                                while ( $tmp != 0 ) {
+                                    push @chunks, $tmp & 0x7FF;
+                                    $tmp >>= 11;
+                                }
+                                my $first = pop @chunks;
+                                $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                                for my $chunk ( reverse @chunks ) {
+                                    $bytes .= pack( 'V', ( 11 << 20 ) | ( $did << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                                    $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                                }
+                            }
                         }
                         else {
-                            my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
-                            my @chunks;
-                            while ( $tmp != 0 ) {
-                                push @chunks, $tmp & 0x7FF;
-                                $tmp >>= 11;
-                            }
-                            my $first = pop @chunks;
-                            $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
-                            for my $chunk ( reverse @chunks ) {
-                                $bytes .= pack( 'V', ( 11 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $sid << 7 ) | OP_IMM );
-                                $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
-                            }
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+
+                            # mv rd, rs (addi rd, rs, 0)
+                            $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
                         }
-                        $src_r = $tmp_r;
                     }
-                    else {
-                        $src_r = $resolve->($src);
-                        $sid   = $reg_id->($src_r);
-                    }
-                    if ( $src_bits <= 8 ) {
+                    elsif ( $opcode eq 'movzx' ) {
+                        my $src_bits = $src->type ? $src->type->bits : 64;
+                        my $dst_r    = $resolve->($dst);
+                        my $did      = $reg_id->($dst_r);
+                        my $src_r    = $resolve->($src);
+                        my $sid      = $reg_id->($src_r);
+                        if ( $src_bits <= 8 ) {
 
-                        # slli rd, rs, 56; srai rd, rd, 56
-                        $bytes .= pack( 'V', ( 56 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
-                        $bytes .= pack( 'V', SRAI_B | ( 56 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
-                    }
-                    elsif ( $src_bits <= 16 ) {
+                            # andi rd, rs, 255
+                            $bytes .= pack( 'V', ( 255 << 20 ) | ( $sid << 15 ) | ( 7 << 12 ) | ( $did << 7 ) | OP_IMM );
+                        }
+                        elsif ( $src_bits <= 16 ) {
 
-                        # slli rd, rs, 48; srai rd, rd, 48
-                        $bytes .= pack( 'V', ( 48 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
-                        $bytes .= pack( 'V', SRAI_B | ( 48 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            # slli rd, rs, 48; srli rd, rd, 48
+                            $bytes .= pack( 'V', ( 48 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            $bytes .= pack( 'V', ( 48 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
+                        }
+                        else {
+                            # slli rd, rs, 32; srli rd, rd, 32
+                            $bytes .= pack( 'V', ( 32 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            $bytes .= pack( 'V', ( 32 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
+                        }
                     }
-                    else {
-                        # addiw rd, rs, 0 (sign-extends 32-bit to 64-bit)
-                        $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x1B );
-                    }
-                }
-                elsif ( $opcode eq 'add' ||
-                    $opcode eq 'sub'   ||
-                    $opcode eq 'and'   ||
-                    $opcode eq 'or'    ||
-                    $opcode eq 'xor'   ||
-                    $opcode eq 'mul'   ||
-                    $opcode eq 'mulhu' ||
-                    $opcode eq 'div'   ||
-                    $opcode eq 'divu'  ||
-                    $opcode eq 'slt'   ||
-                    $opcode eq 'sltu'  ||
-                    $opcode eq 'sltiu' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-
-                    # 3-operand sltu/slt (R-type: rd, rs1, rs2) - used by i128 carry/borrow detection
-                    if ( scalar @ops == 3 && ( $opcode eq 'sltu' || $opcode eq 'slt' ) ) {
-                        my ( undef, $rs1_op, $rs2_op ) = @ops;
-                        my $s1id = $reg_id->( $resolve->($rs1_op) );
-                        my $s2id = $reg_id->( $resolve->($rs2_op) );
-                        my $f3   = $opcode eq 'sltu' ? 3 : 2;
-                        $bytes .= pack( 'V', ( 0x00 << 25 ) | ( $s2id << 20 ) | ( $s1id << 15 ) | ( $f3 << 12 ) | ( $did << 7 ) | OP );
-                        next;
-                    }
-                    my %imm_f3 = ( add => 0, sub => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3, sltiu => 3 );
-                    my %reg_f7 = (
-                        add   => 0x00,
-                        sub   => 0x20,
-                        mul   => 0x01,
-                        mulhu => 0x01,
-                        div   => 0x01,
-                        divu  => 0x01,
-                        and   => 0x00,
-                        or    => 0x00,
-                        xor   => 0x00,
-                        slt   => 0x00,
-                        sltu  => 0x00
-                    );
-                    my %reg_f3 = (
-                        add   => 0,
-                        sub   => 0,
-                        mul   => 0,
-                        mulhu => 3,
-                        div   => 4,
-                        divu  => 5,
-                        and   => 7,
-                        or    => 6,
-                        xor   => 4,
-                        slt   => 2,
-                        sltu  => 3,
-                        sltiu => 3
-                    );
-                    if (
-                        $src->kind eq 'imm' &&
-                        exists $imm_f3{$opcode} &&
-                        do { my $x = $src->value; $x = -$x if $opcode eq 'sub'; $x >= -2048 && $x <= 2047 }
-                    ) {
-                        # I-type: opcode 0x13, funct3 from %imm_f3
-                        my $imm = $src->value;
-                        $imm = -$imm if $opcode eq 'sub';
-                        $imm &= 0xFFF;
-                        $bytes .= pack( 'V', ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
-                    }
-                    else {
+                    elsif ( $opcode eq 'movsx' ) {
+                        my $src_bits = $src->type ? $src->type->bits : 64;
+                        my $dst_r    = $resolve->($dst);
+                        my $did      = $reg_id->($dst_r);
                         my $src_r;
                         my $sid;
                         if ( $src->kind eq 'imm' ) {
@@ -1113,432 +1003,551 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                             $src_r = $tmp_r;
                         }
                         else {
-                            $sid = $src->kind eq 'mem' ? $load_mem_scratch->( $src, $opcode, $dst_r ) : $reg_id->( $resolve->($src) );
+                            $src_r = $resolve->($src);
+                            $sid   = $reg_id->($src_r);
                         }
-                        my $r_op = OP;
-                        $r_op = 0x3B if ( ( $opcode eq 'div' || $opcode eq 'mul' ) && $dst->type && $dst->type->bits < 64 );
-                        $bytes .= pack( 'V',
-                            ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | $r_op );
-                    }
-                }
-                elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    if ( $src->kind eq 'imm' ) {
+                        if ( $src_bits <= 8 ) {
 
-                        # I-type shift: SLLI/SRLI/SRAI, funct3=1/5/5, opcode=0x13
-                        my $shamt = $src->value;
-                        my %f3    = ( shl => 1, lshr => 5, ashr => 5 );
-                        my $extra = ( $opcode eq 'ashr' ? SRAI_B : 0x00000000 );
-                        $bytes .= pack( 'V', $extra | ( $shamt << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
-                    }
-                    else {
-                        # R-type shift: SLL/SRL/SRA, funct7=0x00/0x00/0x20, funct3=1/5/5
-                        my $src_r = $resolve->($src);
-                        my $sid   = $reg_id->($src_r);
-                        my %f3    = ( shl => 1,    lshr => 5,    ashr => 5 );
-                        my %f7    = ( shl => 0x00, lshr => 0x00, ashr => 0x20 );
-                        $bytes .= pack( 'V', ( $f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
-                    }
-                }
-                elsif ( $opcode eq 'alloca' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $off   = $alloca_frame;
-                    $alloca_map->{ $dst->value } = $off if $alloca_map;
-
-                    # The static alloca lives at a fixed offset from the entry stack pointer, which is where the
-                    # prologue left sp.
-                    if ( $off >= -2048 && $off <= 2047 ) {
-                        my $imm = $off & 0xFFF;
-                        $bytes .= pack( 'V', ( $imm << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
-                    }
-                    else {
-                        my $hi = ( $off + 0x800 ) >> 12;
-                        my $lo = $off & 0xFFF;
-                        $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( $did << 7 ) | LUI );
-                        $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM ) if $lo;
-                        $bytes .= pack( 'V', ( 0x00 << 25 ) | ( $did << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP );
-                    }
-
-                    # alloca_frame tracks where the next alloca starts (grows forward from stack top)
-                    $alloca_frame += $src->value;
-                    $alloca_frame = ( $alloca_frame + 15 ) & ~15;
-                }
-                elsif ( $opcode eq 'load' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $addr  = $src->value;
-                    my $base_r
-                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
-                    my $bid    = $reg_id->($base_r);
-                    my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
-                    my $signed = $src->type && $src->type->kind eq 'int'     ? $src->type->signed : 1;
-                    my $funct3 = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
-                    my $disp   = $final_disp->($addr);
-
-                    if ( defined $addr->{index} ) {
-                        my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                        my $iid     = $reg_id->($index_r);
-                        $emit_mem_access->( $funct3, $did, $bid, $disp, 0, $iid );
-                    }
-                    else {
-                        $emit_mem_access->( $funct3, $did, $bid, $disp, 0 );
-                    }
-                }
-                elsif ( $opcode eq 'store' ) {
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $addr  = $dst->value;
-                    my $base_r
-                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
-                    my $bid    = $reg_id->($base_r);
-                    my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
-                    my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
-                    my $disp   = $final_disp->($addr);
-
-                    if ( defined $addr->{index} ) {
-                        my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                        my $iid     = $reg_id->($index_r);
-                        $emit_mem_access->( $funct3, $sid, $bid, $disp, 1, $iid );
-                    }
-                    else {
-                        $emit_mem_access->( $funct3, $sid, $bid, $disp, 1 );
-                    }
-                }
-                elsif ( $opcode eq 'store_imm' ) {
-                    my ( $mem, $imm ) = $inst->operands->@*;
-                    my $addr = $mem->value;
-                    my $base_r
-                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
-                    my $bid    = $reg_id->($base_r);
-                    my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits : 64;
-                    my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
-
-                    # find a temporary register not in use
-                    my %used;
-                    @used{ values %$assignment } = ();
-                    my $tmp_r;
-                    for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
-                    die 'no temp register for store_imm' unless $tmp_r;
-                    my $tid = $reg_id->($tmp_r);
-
-                    # li xtmp, imm (full 64-bit immediate via SLLI+ADDI sequence)
-                    my $val = $imm->value;
-                    if ( $val >= -2048 && $val <= 2047 ) {
-                        my $im = $val & 0xFFF;
-                        $bytes .= pack( 'V', ( $im << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
-                    }
-                    else {
-                        my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
-                        my @chunks;
-                        while ( $tmp != 0 ) {
-                            push @chunks, $tmp & 0x7FF;
-                            $tmp >>= 11;
+                            # slli rd, rs, 56; srai rd, rd, 56
+                            $bytes .= pack( 'V', ( 56 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            $bytes .= pack( 'V', SRAI_B | ( 56 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
                         }
-                        my $first = pop @chunks;
-                        $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
-                        for my $chunk ( reverse @chunks ) {
-                            $bytes .= pack( 'V', ( 11 << 20 ) | ( $tid << 15 ) | ( 1 << 12 ) | ( $tid << 7 ) | OP_IMM );
-                            $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
-                        }
-                    }
-                    my $disp = $final_disp->($addr);
-                    my $iid;
-                    if ( defined $addr->{index} ) {
-                        my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                        $iid = $reg_id->($index_r);
-                    }
-                    $emit_mem_access->( $funct3, $tid, $bid, $disp, 1, $iid );
-                }
-                elsif ( $opcode eq 'fload' ) {
-                    my $dst_r  = $resolve->($dst);
-                    my $did    = $reg_id->($dst_r);
-                    my $addr   = $src->value;
-                    my $base_r
-                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
-                    my $bid    = $reg_id->($base_r);
-                    my $funct3 = ( $dst->type && $dst->type->bits <= 32 ) ? 2 : 3;
-                    my $disp   = $final_disp->($addr);
-                    my $iid;
-                    if ( defined $addr->{index} ) {
-                        my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                        $iid = $reg_id->($index_r);
-                    }
-                    $emit_mem_access->( $funct3, $did, $bid, $disp, 0, $iid, 1 );
-                }
-                elsif ( $opcode eq 'fstore' ) {
-                    my $src_r  = $resolve->($src);
-                    my $sid    = $reg_id->($src_r);
-                    my $addr   = $dst->value;
-                    my $base_r
-                        = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
-                    my $bid    = $reg_id->($base_r);
-                    my $funct3 = ( $src->type && $src->type->bits <= 32 ) ? 2 : 3;
-                    my $disp   = $final_disp->($addr);
-                    my $iid;
-                    if ( defined $addr->{index} ) {
-                        my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
-                        $iid = $reg_id->($index_r);
-                    }
-                    $emit_mem_access->( $funct3, $sid, $bid, $disp, 1, $iid, 1 );
-                }
-                elsif ( $opcode eq 'fmov' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $bits  = $dst->type ? $dst->type->bits : 64;
-                    if ( $bits <= 32 ) {
-                        $bytes .= pack( 'V', FSGNJ | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
-                    }
-                    else {
-                        $bytes .= pack( 'V', FSGNJ | FP_FMT | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
-                    }
-                }
-                elsif ( $opcode eq 'fmov_gp2f' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $bits  = $dst->type ? $dst->type->bits : 64;
-                    if ( $bits <= 32 ) {
-                        $bytes .= pack( 'V', FMV_W_X | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
-                    }
-                    else {
-                        $bytes .= pack( 'V', FMV_D_X | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
-                    }
-                }
-                elsif ( $opcode eq 'fcmp' ) {
-                    my ( $result, $lhs, $rhs ) = $inst->operands->@*;
-                    my $rd   = $reg_id->( $resolve->($result) );
-                    my $rs1  = $reg_id->( $resolve->($lhs) );
-                    my $rs2  = $reg_id->( $resolve->($rhs) );
-                    my $bits = $lhs->type ? $lhs->type->bits : 64;
-                    my $pred = ( $inst->comment =~ /fcmp (\w+)/ ? $1 : 'eq' );
-                    my $fmt  = $bits > 32 ? 1 : 0;
-                    if ( $pred eq 'gt' || $pred eq 'ge' ) { ( $rs1, $rs2 ) = ( $rs2, $rs1 ) }
-                    my $funct5 = 0x14;
-                    my $funct3 = $pred eq 'eq' || $pred eq 'ne' ? 2 : ( $pred eq 'lt' || $pred eq 'gt' ? 1 : 0 );
-                    my $enc    = ( $funct5 << 27 ) | ( $fmt << 25 ) | ( $rs2 << 20 ) | ( $rs1 << 15 ) | ( $funct3 << 12 ) | ( $rd << 7 ) | FP_OP;
-                    $bytes .= pack( 'V', $enc );
-                    if ( $pred eq 'ne' ) { $bytes .= pack( 'V', ( 1 << 20 ) | ( $rd << 15 ) | ( 4 << 12 ) | ( $rd << 7 ) | OP_IMM ) }
-                }
-                elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' ) {
-                    my $dst_r  = $resolve->($dst);
-                    my $did    = $reg_id->($dst_r);
-                    my $src_r  = $resolve->($src);
-                    my $sid    = $reg_id->($src_r);
-                    my $bits   = $dst->type ? $dst->type->bits : 64;
-                    my %fop5   = ( fadd => 0x00, fsub => 0x01, fmul => 0x02, fdiv => 0x03 );
-                    my $funct5 = $fop5{$opcode};
-                    my $enc    = ( $funct5 << 27 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $did << 7 ) | FP_OP;
-                    $enc |= FP_FMT if $bits > 32;
-                    $bytes .= pack( 'V', $enc );
-                }
-                elsif ( $opcode eq 'fneg' || $opcode eq 'fabs' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $bits  = $dst->type        ? $dst->type->bits : 64;
-                    my $rm    = $opcode eq 'fneg' ? 1                : 2;
-                    my $enc   = FSGNJ | ( $sid << 20 ) | ( $sid << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | FP_OP;
-                    $enc |= FP_FMT if $bits > 32;
-                    $bytes .= pack( 'V', $enc );
-                }
-                elsif ( $opcode eq 'fmin' || $opcode eq 'fmax' ) {
+                        elsif ( $src_bits <= 16 ) {
 
-                    # fmin/fmax take two source registers (rs1, rs2), unlike the other unary float ops that read only
-                    # rs1.  The shared ( $dst, $src ) unpack above drops the third operand, so it is read back from @ops
-                    # here rather than encoding rs1 as the destination (which made the result depend on whatever stale
-                    # value the destination register happened to hold).
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $lhs_r = $resolve->($src);
-                    my $lhs   = $reg_id->($lhs_r);
-                    my $rhs_r = $resolve->( $ops[2] );
-                    my $rhs   = $reg_id->($rhs_r);
-                    my $bits  = $dst->type ? $dst->type->bits : 64;
-                    my $rm    = $opcode eq 'fmin' ? 0 : 1;
-                    my $enc   = FMINMAX | ( $rhs << 20 ) | ( $lhs << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | FP_OP;
-                    $enc |= FP_FMT if $bits > 32;
-                    $bytes .= pack( 'V', $enc );
-                }
-                elsif ( $opcode eq 'fsqrt' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $bits  = $dst->type ? $dst->type->bits : 64;
-                    my $enc   = FSQRT | ( $sid << 15 ) | ( $did << 7 ) | FP_OP;
-                    $enc |= FP_FMT if $bits > 32;
-                    $bytes .= pack( 'V', $enc );
-                }
-                elsif ( $opcode eq 'scvtf' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $fbits = $dst->type  ? $dst->type->bits                      : 64;
-                    my $ibits = $src->type  ? $src->type->bits                      : 64;
-                    my $base  = $fbits > 32 ? ( $ibits > 32 ? FCVT_D_L : FCVT_D_W ) : ( $ibits > 32 ? FCVT_S_L : FCVT_S_W );
-                    $bytes .= pack( 'V', $base | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
-                }
-                elsif ( $opcode eq 'fcvtzs' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $fbits = $src->type  ? $src->type->bits                      : 64;
-                    my $ibits = $dst->type  ? $dst->type->bits                      : 64;
-                    my $base  = $fbits > 32 ? ( $ibits > 32 ? FCVT_L_D : FCVT_W_D ) : ( $ibits > 32 ? FCVT_L_S : FCVT_W_S );
-                    $bytes .= pack( 'V', $base | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
-                }
-                elsif ( $opcode eq 'ctx_swap' ) {
-                    my $ctx_r    = $resolve->($dst);        # fiber register (s11)
-                    my $cid      = $reg_id->($ctx_r);
-                    my $target_r = $resolve->($src);        # target FCB pointer
-                    my $tid      = $reg_id->($target_r);
-                    my $adj_tmp  = 28;                      # t3
-                    my $fcl      = fcb_layout($platform);
-                    my @callee   = $fcl->{saved}->@*;
-
-                    # 1. mv t3, sp -- save current SP
-                    $bytes .= pack( 'V', OP_IMM | ( $adj_tmp << 7 ) | ( 0 << 12 ) | ( 2 << 15 ) );
-
-                    # 2. Save callee regs to current FCB (sp saved via t3)
-                    for my $off_idx ( 0 .. $#callee ) {
-                        my $reg    = $callee[$off_idx];
-                        my $rid    = $reg_id->($reg);
-                        my $off    = $off_idx * 8;
-                        my $srid   = ( $reg eq 'sp' ) ? $adj_tmp : $rid;
-                        my $imm_lo = $off & 0x1F;
-                        my $imm_hi = ( $off >> 5 ) & 0x7F;
-                        $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $srid << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | STORE );
-                    }
-
-                    # 3. AUIPC t3, 0 + ADDI t3, t3, 0 placeholder, patched after JALR
-                    my $auipc_off = $current_offset->();
-                    $bytes .= pack( 'V', ( $adj_tmp << 7 ) | 0x17 );
-                    $bytes .= pack( 'V', OP_IMM | ( $adj_tmp << 7 ) | ( 0 << 12 ) | ( $adj_tmp << 15 ) );
-
-                    # 4. Store resume_pc at FCB[FCB_RESUME_OFF]
-                    my $res_off = FCB_RESUME_OFF;
-                    my $res_lo  = $res_off & 0x1F;
-                    my $res_hi  = ( $res_off >> 5 ) & 0x7F;
-                    $bytes .= pack( 'V', ( $res_hi << 25 ) | ( $adj_tmp << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $res_lo << 7 ) | STORE );
-
-                    # 5. Switch fiber register to target FCB
-                    $bytes .= pack( 'V', OP_IMM | ( $cid << 7 ) | ( 0 << 12 ) | ( $tid << 15 ) );
-
-                    # 6. Load target resume_pc before restoring s11
-                    $bytes .= pack( 'V', LOAD | ( $adj_tmp << 7 ) | ( 3 << 12 ) | ( $cid << 15 ) | ( $res_off << 20 ) );
-
-                    # 7. Restore callee regs from target FCB (includes sp)
-                    for my $off_idx ( 0 .. $#callee ) {
-                        my $reg = $callee[$off_idx];
-                        my $rid = $reg_id->($reg);
-                        my $off = $off_idx * 8;
-                        $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | LOAD );
-                    }
-
-                    # 8. JALR zero, t3, 0 -- jump to target resume_pc
-                    $bytes .= pack( 'V', 0x67 | ( $adj_tmp << 15 ) );
-
-                    # 9. Patch AUIPC+ADDI to point after JALR
-                    my $end   = $current_offset->();
-                    my $rel   = $end - $auipc_off;
-                    my $upper = $rel >> 12;
-                    my $lower = $rel & 0xFFF;
-                    if ( $lower >= 0x800 ) {
-                        $upper = ( $upper + 1 ) & 0xFFFFF;
-                    }
-                    substr $bytes, $auipc_off,     4, pack( 'V', ( $upper << 12 ) | ( $adj_tmp << 7 ) | 0x17 );
-                    substr $bytes, $auipc_off + 4, 4, pack( 'V', ( ( $lower & 0xFFF ) << 20 ) | ( $adj_tmp << 15 ) | ( $adj_tmp << 7 ) | OP_IMM );
-                }
-                elsif ( $opcode eq 'syscall' ) {
-
-                    # ecall
-                    $bytes .= pack( 'V', 0x00000073 );
-                }
-                elsif ( $opcode eq 'lea_func' ) {
-                    my $dst_r     = $resolve->($dst);
-                    my $did       = $reg_id->($dst_r);
-                    my $func_name = $src->value;
-                    push @func_fixups, { offset => $current_offset->(), type => 'auipc_pcrel', target => $func_name, rd => $did };
-                    $bytes .= pack( 'V', ( $did << 7 ) | 0x17 );
-                    $bytes .= pack( 'V', ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
-                }
-                elsif ( $opcode eq 'lea_rodata' ) {
-                    my $dst_r = $resolve->($dst);
-                    my $did   = $reg_id->($dst_r);
-                    my $label = $src->value;
-                    push @func_fixups, { offset => $current_offset->(), type => 'lea_rodata_adr', target => $label, rd => $did };
-                    $bytes .= pack( 'V', ( $did << 7 ) | 0x17 );
-                    $bytes .= pack( 'V', ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
-                }
-                elsif ( $opcode eq 'call_func' ) {
-                    my $func_name = $dst->value;
-                    push @func_fixups, { offset => $current_offset->(), type => 'call_jal', target => $func_name };
-                    $bytes .= pack( 'V', JAL | ( 1 << 7 ) | 0x6F );
-                }
-                elsif ( $opcode eq 'call_indirect' ) {
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    $bytes .= pack( 'V', 0x67 | ( 1 << 7 ) | ( $sid << 15 ) );
-                }
-                elsif ( $opcode eq 'ret' ) {
-                    if ( $callee_size > 0 ) {
-                        for my $i ( reverse 0 .. $#to_save ) {
-                            my $reg = $to_save[$i];
-                            my $rid = $reg_id->($reg);
-                            my $off = $extra_frame + $i * 8;
-                            my $is_float = ( $reg =~ /^f/ ) ? 1 : 0;
-                            $emit_frame_mem->( 3, $rid, $off, 0, $is_float );
-                        }
-                    }
-                    if ( $total_frame > 0 ) {
-                        my $tf = $total_frame;
-                        if ( $tf <= 2047 ) {
-                            $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                            # slli rd, rs, 48; srai rd, rd, 48
+                            $bytes .= pack( 'V', ( 48 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $did << 7 ) | OP_IMM );
+                            $bytes .= pack( 'V', SRAI_B | ( 48 << 20 ) | ( $did << 15 ) | ( 5 << 12 ) | ( $did << 7 ) | OP_IMM );
                         }
                         else {
-                            my $hi = ( $tf + 0x800 ) >> 12;
-                            my $lo = $tf & 0xFFF;
-                            $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
-                            $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
-                            $bytes .= pack( 'V', ( 0x00 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );
+                            # addiw rd, rs, 0 (sign-extends 32-bit to 64-bit)
+                            $bytes .= pack( 'V', ( 0 << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | 0x1B );
                         }
                     }
-                    $bytes .= pack( 'V', JALR );
+                    elsif ( $opcode eq 'add' ||
+                        $opcode eq 'sub'   ||
+                        $opcode eq 'and'   ||
+                        $opcode eq 'or'    ||
+                        $opcode eq 'xor'   ||
+                        $opcode eq 'mul'   ||
+                        $opcode eq 'mulhu' ||
+                        $opcode eq 'div'   ||
+                        $opcode eq 'divu'  ||
+                        $opcode eq 'slt'   ||
+                        $opcode eq 'sltu'  ||
+                        $opcode eq 'sltiu' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+
+                        # 3-operand sltu/slt (R-type: rd, rs1, rs2) - used by i128 carry/borrow detection
+                        if ( scalar @ops == 3 && ( $opcode eq 'sltu' || $opcode eq 'slt' ) ) {
+                            my ( undef, $rs1_op, $rs2_op ) = @ops;
+                            my $s1id = $reg_id->( $resolve->($rs1_op) );
+                            my $s2id = $reg_id->( $resolve->($rs2_op) );
+                            my $f3   = $opcode eq 'sltu' ? 3 : 2;
+                            $bytes .= pack( 'V', ( 0x00 << 25 ) | ( $s2id << 20 ) | ( $s1id << 15 ) | ( $f3 << 12 ) | ( $did << 7 ) | OP );
+                            next;
+                        }
+                        my %imm_f3 = ( add => 0, sub => 0, and => 7, or => 6, xor => 4, slt => 2, sltu => 3, sltiu => 3 );
+                        my %reg_f7 = (
+                            add   => 0x00,
+                            sub   => 0x20,
+                            mul   => 0x01,
+                            mulhu => 0x01,
+                            div   => 0x01,
+                            divu  => 0x01,
+                            and   => 0x00,
+                            or    => 0x00,
+                            xor   => 0x00,
+                            slt   => 0x00,
+                            sltu  => 0x00
+                        );
+                        my %reg_f3 = (
+                            add   => 0,
+                            sub   => 0,
+                            mul   => 0,
+                            mulhu => 3,
+                            div   => 4,
+                            divu  => 5,
+                            and   => 7,
+                            or    => 6,
+                            xor   => 4,
+                            slt   => 2,
+                            sltu  => 3,
+                            sltiu => 3
+                        );
+                        if (
+                            $src->kind eq 'imm' &&
+                            exists $imm_f3{$opcode} &&
+                            do { my $x = $src->value; $x = -$x if $opcode eq 'sub'; $x >= -2048 && $x <= 2047 }
+                        ) {
+                            # I-type: opcode 0x13, funct3 from %imm_f3
+                            my $imm = $src->value;
+                            $imm = -$imm if $opcode eq 'sub';
+                            $imm &= 0xFFF;
+                            $bytes .= pack( 'V', ( $imm << 20 ) | ( $did << 15 ) | ( $imm_f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
+                        }
+                        else {
+                            my $src_r;
+                            my $sid;
+                            if ( $src->kind eq 'imm' ) {
+                                my %used;
+                                @used{ values %$assignment } = ();
+                                my $tmp_r;
+                                for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
+                                die 'no temp register for imm operand' unless $tmp_r;
+                                $sid = $reg_id->($tmp_r);
+                                my $val = $src->value;
+                                if ( $val >= -2048 && $val <= 2047 ) {
+                                    my $imm = $val & 0xFFF;
+                                    $bytes .= pack( 'V', ( $imm << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
+                                }
+                                else {
+                                    my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
+                                    my @chunks;
+                                    while ( $tmp != 0 ) {
+                                        push @chunks, $tmp & 0x7FF;
+                                        $tmp >>= 11;
+                                    }
+                                    my $first = pop @chunks;
+                                    $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
+                                    for my $chunk ( reverse @chunks ) {
+                                        $bytes .= pack( 'V', ( 11 << 20 ) | ( $sid << 15 ) | ( 1 << 12 ) | ( $sid << 7 ) | OP_IMM );
+                                        $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $sid << 15 ) | ( 0 << 12 ) | ( $sid << 7 ) | OP_IMM );
+                                    }
+                                }
+                                $src_r = $tmp_r;
+                            }
+                            else {
+                                $sid = $src->kind eq 'mem' ? $load_mem_scratch->( $src, $opcode, $dst_r ) : $reg_id->( $resolve->($src) );
+                            }
+                            my $r_op = OP;
+                            $r_op = 0x3B if ( ( $opcode eq 'div' || $opcode eq 'mul' ) && $dst->type && $dst->type->bits < 64 );
+                            $bytes .= pack( 'V',
+                                ( $reg_f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $reg_f3{$opcode} << 12 ) | ( $did << 7 ) | $r_op );
+                        }
+                    }
+                    elsif ( $opcode eq 'shl' || $opcode eq 'lshr' || $opcode eq 'ashr' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        if ( $src->kind eq 'imm' ) {
+
+                            # I-type shift: SLLI/SRLI/SRAI, funct3=1/5/5, opcode=0x13
+                            my $shamt = $src->value;
+                            my %f3    = ( shl => 1, lshr => 5, ashr => 5 );
+                            my $extra = ( $opcode eq 'ashr' ? SRAI_B : 0x00000000 );
+                            $bytes .= pack( 'V', $extra | ( $shamt << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | OP_IMM );
+                        }
+                        else {
+                            # R-type shift: SLL/SRL/SRA, funct7=0x00/0x00/0x20, funct3=1/5/5
+                            my $src_r = $resolve->($src);
+                            my $sid   = $reg_id->($src_r);
+                            my %f3    = ( shl => 1,    lshr => 5,    ashr => 5 );
+                            my %f7    = ( shl => 0x00, lshr => 0x00, ashr => 0x20 );
+                            $bytes .= pack( 'V',
+                                ( $f7{$opcode} << 25 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $f3{$opcode} << 12 ) | ( $did << 7 ) | OP );
+                        }
+                    }
+                    elsif ( $opcode eq 'alloca' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $off   = $alloca_frame;
+                        $alloca_map->{ $dst->value } = $off if $alloca_map;
+
+                        # The static alloca lives at a fixed offset from the entry stack pointer, which is where the
+                        # prologue left sp.
+                        if ( $off >= -2048 && $off <= 2047 ) {
+                            my $imm = $off & 0xFFF;
+                            $bytes .= pack( 'V', ( $imm << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                        }
+                        else {
+                            my $hi = ( $off + 0x800 ) >> 12;
+                            my $lo = $off & 0xFFF;
+                            $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( $did << 7 ) | LUI );
+                            $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM ) if $lo;
+                            $bytes .= pack( 'V', ( 0x00 << 25 ) | ( $did << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP );
+                        }
+
+                        # alloca_frame tracks where the next alloca starts (grows forward from stack top)
+                        $alloca_frame += $src->value;
+                        $alloca_frame = ( $alloca_frame + 15 ) & ~15;
+                    }
+                    elsif ( $opcode eq 'load' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $addr  = $src->value;
+                        my $base_r
+                            = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                        my $bid    = $reg_id->($base_r);
+                        my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
+                        my $signed = $src->type && $src->type->kind eq 'int'     ? $src->type->signed : 1;
+                        my $funct3
+                            = $bits > 32 ? 3 : ( $bits > 16 ? ( $signed ? 2 : 6 ) : ( $bits > 8 ? ( $signed ? 1 : 5 ) : ( $signed ? 0 : 4 ) ) );
+                        my $disp = $final_disp->($addr);
+
+                        if ( defined $addr->{index} ) {
+                            my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
+                            my $iid     = $reg_id->($index_r);
+                            $emit_mem_access->( $funct3, $did, $bid, $disp, 0, $iid );
+                        }
+                        else {
+                            $emit_mem_access->( $funct3, $did, $bid, $disp, 0 );
+                        }
+                    }
+                    elsif ( $opcode eq 'store' ) {
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $addr  = $dst->value;
+                        my $base_r
+                            = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                        my $bid    = $reg_id->($base_r);
+                        my $bits   = ( $dst->type && $dst->type->kind eq 'int' ) ? $dst->type->bits : 64;
+                        my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
+                        my $disp   = $final_disp->($addr);
+
+                        if ( defined $addr->{index} ) {
+                            my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
+                            my $iid     = $reg_id->($index_r);
+                            $emit_mem_access->( $funct3, $sid, $bid, $disp, 1, $iid );
+                        }
+                        else {
+                            $emit_mem_access->( $funct3, $sid, $bid, $disp, 1 );
+                        }
+                    }
+                    elsif ( $opcode eq 'store_imm' ) {
+                        my ( $mem, $imm ) = $inst->operands->@*;
+                        my $addr = $mem->value;
+                        my $base_r
+                            = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                        my $bid    = $reg_id->($base_r);
+                        my $bits   = ( $mem->type && $mem->type->kind eq 'int' ) ? $mem->type->bits : 64;
+                        my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
+
+                        # find a temporary register not in use
+                        my %used;
+                        @used{ values %$assignment } = ();
+                        my $tmp_r;
+                        for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
+                        die 'no temp register for store_imm' unless $tmp_r;
+                        my $tid = $reg_id->($tmp_r);
+
+                        # li xtmp, imm (full 64-bit immediate via SLLI+ADDI sequence)
+                        my $val = $imm->value;
+                        if ( $val >= -2048 && $val <= 2047 ) {
+                            my $im = $val & 0xFFF;
+                            $bytes .= pack( 'V', ( $im << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                        }
+                        else {
+                            my $tmp = $val & 0xFFFFFFFFFFFFFFFF;
+                            my @chunks;
+                            while ( $tmp != 0 ) {
+                                push @chunks, $tmp & 0x7FF;
+                                $tmp >>= 11;
+                            }
+                            my $first = pop @chunks;
+                            $bytes .= pack( 'V', ( ( $first & 0xFFF ) << 20 ) | ( 0 << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                            for my $chunk ( reverse @chunks ) {
+                                $bytes .= pack( 'V', ( 11 << 20 ) | ( $tid << 15 ) | ( 1 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                                $bytes .= pack( 'V', ( ( $chunk & 0xFFF ) << 20 ) | ( $tid << 15 ) | ( 0 << 12 ) | ( $tid << 7 ) | OP_IMM );
+                            }
+                        }
+                        my $disp = $final_disp->($addr);
+                        my $iid;
+                        if ( defined $addr->{index} ) {
+                            my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
+                            $iid = $reg_id->($index_r);
+                        }
+                        $emit_mem_access->( $funct3, $tid, $bid, $disp, 1, $iid );
+                    }
+                    elsif ( $opcode eq 'fload' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $addr  = $src->value;
+                        my $base_r
+                            = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                        my $bid    = $reg_id->($base_r);
+                        my $funct3 = ( $dst->type && $dst->type->bits <= 32 ) ? 2 : 3;
+                        my $disp   = $final_disp->($addr);
+                        my $iid;
+
+                        if ( defined $addr->{index} ) {
+                            my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
+                            $iid = $reg_id->($index_r);
+                        }
+                        $emit_mem_access->( $funct3, $did, $bid, $disp, 0, $iid, 1 );
+                    }
+                    elsif ( $opcode eq 'fstore' ) {
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $addr  = $dst->value;
+                        my $base_r
+                            = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
+                        my $bid    = $reg_id->($base_r);
+                        my $funct3 = ( $src->type && $src->type->bits <= 32 ) ? 2 : 3;
+                        my $disp   = $final_disp->($addr);
+                        my $iid;
+
+                        if ( defined $addr->{index} ) {
+                            my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
+                            $iid = $reg_id->($index_r);
+                        }
+                        $emit_mem_access->( $funct3, $sid, $bid, $disp, 1, $iid, 1 );
+                    }
+                    elsif ( $opcode eq 'fmov' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        if ( $bits <= 32 ) {
+                            $bytes .= pack( 'V', FSGNJ | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
+                        }
+                        else {
+                            $bytes .= pack( 'V', FSGNJ | FP_FMT | ( $sid << 20 ) | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
+                        }
+                    }
+                    elsif ( $opcode eq 'fmov_gp2f' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        if ( $bits <= 32 ) {
+                            $bytes .= pack( 'V', FMV_W_X | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
+                        }
+                        else {
+                            $bytes .= pack( 'V', FMV_D_X | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
+                        }
+                    }
+                    elsif ( $opcode eq 'fcmp' ) {
+                        my ( $result, $lhs, $rhs ) = $inst->operands->@*;
+                        my $rd   = $reg_id->( $resolve->($result) );
+                        my $rs1  = $reg_id->( $resolve->($lhs) );
+                        my $rs2  = $reg_id->( $resolve->($rhs) );
+                        my $bits = $lhs->type ? $lhs->type->bits : 64;
+                        my $pred = ( $inst->comment =~ /fcmp (\w+)/ ? $1 : 'eq' );
+                        my $fmt  = $bits > 32 ? 1 : 0;
+                        if ( $pred eq 'gt' || $pred eq 'ge' ) { ( $rs1, $rs2 ) = ( $rs2, $rs1 ) }
+                        my $funct5 = 0x14;
+                        my $funct3 = $pred eq 'eq' || $pred eq 'ne' ? 2 : ( $pred eq 'lt' || $pred eq 'gt' ? 1 : 0 );
+                        my $enc    = ( $funct5 << 27 ) | ( $fmt << 25 ) | ( $rs2 << 20 ) | ( $rs1 << 15 ) | ( $funct3 << 12 ) | ( $rd << 7 ) | FP_OP;
+                        $bytes .= pack( 'V', $enc );
+                        if ( $pred eq 'ne' ) { $bytes .= pack( 'V', ( 1 << 20 ) | ( $rd << 15 ) | ( 4 << 12 ) | ( $rd << 7 ) | OP_IMM ) }
+                    }
+                    elsif ( $opcode eq 'fadd' || $opcode eq 'fsub' || $opcode eq 'fmul' || $opcode eq 'fdiv' ) {
+                        my $dst_r  = $resolve->($dst);
+                        my $did    = $reg_id->($dst_r);
+                        my $src_r  = $resolve->($src);
+                        my $sid    = $reg_id->($src_r);
+                        my $bits   = $dst->type ? $dst->type->bits : 64;
+                        my %fop5   = ( fadd => 0x00, fsub => 0x01, fmul => 0x02, fdiv => 0x03 );
+                        my $funct5 = $fop5{$opcode};
+                        my $enc    = ( $funct5 << 27 ) | ( $sid << 20 ) | ( $did << 15 ) | ( $did << 7 ) | FP_OP;
+                        $enc |= FP_FMT if $bits > 32;
+                        $bytes .= pack( 'V', $enc );
+                    }
+                    elsif ( $opcode eq 'fneg' || $opcode eq 'fabs' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type        ? $dst->type->bits : 64;
+                        my $rm    = $opcode eq 'fneg' ? 1                : 2;
+                        my $enc   = FSGNJ | ( $sid << 20 ) | ( $sid << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | FP_OP;
+                        $enc |= FP_FMT if $bits > 32;
+                        $bytes .= pack( 'V', $enc );
+                    }
+                    elsif ( $opcode eq 'fmin' || $opcode eq 'fmax' ) {
+
+                        # fmin/fmax take two source registers (rs1, rs2), unlike the other unary float ops that read only
+                        # rs1.  The shared ( $dst, $src ) unpack above drops the third operand, so it is read back from @ops
+                        # here rather than encoding rs1 as the destination (which made the result depend on whatever stale
+                        # value the destination register happened to hold).
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $lhs_r = $resolve->($src);
+                        my $lhs   = $reg_id->($lhs_r);
+                        my $rhs_r = $resolve->( $ops[2] );
+                        my $rhs   = $reg_id->($rhs_r);
+                        my $bits  = $dst->type        ? $dst->type->bits : 64;
+                        my $rm    = $opcode eq 'fmin' ? 0                : 1;
+                        my $enc   = FMINMAX | ( $rhs << 20 ) | ( $lhs << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | FP_OP;
+                        $enc |= FP_FMT if $bits > 32;
+                        $bytes .= pack( 'V', $enc );
+                    }
+                    elsif ( $opcode eq 'fsqrt' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $bits  = $dst->type ? $dst->type->bits : 64;
+                        my $enc   = FSQRT | ( $sid << 15 ) | ( $did << 7 ) | FP_OP;
+                        $enc |= FP_FMT if $bits > 32;
+                        $bytes .= pack( 'V', $enc );
+                    }
+                    elsif ( $opcode eq 'scvtf' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $fbits = $dst->type  ? $dst->type->bits                      : 64;
+                        my $ibits = $src->type  ? $src->type->bits                      : 64;
+                        my $base  = $fbits > 32 ? ( $ibits > 32 ? FCVT_D_L : FCVT_D_W ) : ( $ibits > 32 ? FCVT_S_L : FCVT_S_W );
+                        $bytes .= pack( 'V', $base | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
+                    }
+                    elsif ( $opcode eq 'fcvtzs' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        my $fbits = $src->type  ? $src->type->bits                      : 64;
+                        my $ibits = $dst->type  ? $dst->type->bits                      : 64;
+                        my $base  = $fbits > 32 ? ( $ibits > 32 ? FCVT_L_D : FCVT_W_D ) : ( $ibits > 32 ? FCVT_L_S : FCVT_W_S );
+                        $bytes .= pack( 'V', $base | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
+                    }
+                    elsif ( $opcode eq 'ctx_swap' ) {
+                        my $ctx_r    = $resolve->($dst);        # fiber register (s11)
+                        my $cid      = $reg_id->($ctx_r);
+                        my $target_r = $resolve->($src);        # target FCB pointer
+                        my $tid      = $reg_id->($target_r);
+                        my $adj_tmp  = 28;                      # t3
+                        my $fcl      = fcb_layout($platform);
+                        my @callee   = $fcl->{saved}->@*;
+
+                        # 1. mv t3, sp -- save current SP
+                        $bytes .= pack( 'V', OP_IMM | ( $adj_tmp << 7 ) | ( 0 << 12 ) | ( 2 << 15 ) );
+
+                        # 2. Save callee regs to current FCB (sp saved via t3)
+                        for my $off_idx ( 0 .. $#callee ) {
+                            my $reg    = $callee[$off_idx];
+                            my $rid    = $reg_id->($reg);
+                            my $off    = $off_idx * 8;
+                            my $srid   = ( $reg eq 'sp' ) ? $adj_tmp : $rid;
+                            my $imm_lo = $off & 0x1F;
+                            my $imm_hi = ( $off >> 5 ) & 0x7F;
+                            $bytes .= pack( 'V', ( $imm_hi << 25 ) | ( $srid << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $imm_lo << 7 ) | STORE );
+                        }
+
+                        # 3. AUIPC t3, 0 + ADDI t3, t3, 0 placeholder, patched after JALR
+                        my $auipc_off = $current_offset->();
+                        $bytes .= pack( 'V', ( $adj_tmp << 7 ) | 0x17 );
+                        $bytes .= pack( 'V', OP_IMM | ( $adj_tmp << 7 ) | ( 0 << 12 ) | ( $adj_tmp << 15 ) );
+
+                        # 4. Store resume_pc at FCB[FCB_RESUME_OFF]
+                        my $res_off = FCB_RESUME_OFF;
+                        my $res_lo  = $res_off & 0x1F;
+                        my $res_hi  = ( $res_off >> 5 ) & 0x7F;
+                        $bytes .= pack( 'V', ( $res_hi << 25 ) | ( $adj_tmp << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $res_lo << 7 ) | STORE );
+
+                        # 5. Switch fiber register to target FCB
+                        $bytes .= pack( 'V', OP_IMM | ( $cid << 7 ) | ( 0 << 12 ) | ( $tid << 15 ) );
+
+                        # 6. Load target resume_pc before restoring s11
+                        $bytes .= pack( 'V', LOAD | ( $adj_tmp << 7 ) | ( 3 << 12 ) | ( $cid << 15 ) | ( $res_off << 20 ) );
+
+                        # 7. Restore callee regs from target FCB (includes sp)
+                        for my $off_idx ( 0 .. $#callee ) {
+                            my $reg = $callee[$off_idx];
+                            my $rid = $reg_id->($reg);
+                            my $off = $off_idx * 8;
+                            $bytes .= pack( 'V', ( ( $off & 0xFFF ) << 20 ) | ( $cid << 15 ) | ( 3 << 12 ) | ( $rid << 7 ) | LOAD );
+                        }
+
+                        # 8. JALR zero, t3, 0 -- jump to target resume_pc
+                        $bytes .= pack( 'V', 0x67 | ( $adj_tmp << 15 ) );
+
+                        # 9. Patch AUIPC+ADDI to point after JALR
+                        my $end   = $current_offset->();
+                        my $rel   = $end - $auipc_off;
+                        my $upper = $rel >> 12;
+                        my $lower = $rel & 0xFFF;
+                        if ( $lower >= 0x800 ) {
+                            $upper = ( $upper + 1 ) & 0xFFFFF;
+                        }
+                        substr $bytes, $auipc_off,     4, pack( 'V', ( $upper << 12 ) | ( $adj_tmp << 7 ) | 0x17 );
+                        substr $bytes, $auipc_off + 4, 4, pack( 'V', ( ( $lower & 0xFFF ) << 20 ) | ( $adj_tmp << 15 ) | ( $adj_tmp << 7 ) | OP_IMM );
+                    }
+                    elsif ( $opcode eq 'syscall' ) {
+
+                        # ecall
+                        $bytes .= pack( 'V', 0x00000073 );
+                    }
+                    elsif ( $opcode eq 'lea_func' ) {
+                        my $dst_r     = $resolve->($dst);
+                        my $did       = $reg_id->($dst_r);
+                        my $func_name = $src->value;
+                        push @func_fixups, { offset => $current_offset->(), type => 'auipc_pcrel', target => $func_name, rd => $did };
+                        $bytes .= pack( 'V', ( $did << 7 ) | 0x17 );
+                        $bytes .= pack( 'V', ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    }
+                    elsif ( $opcode eq 'lea_rodata' ) {
+                        my $dst_r = $resolve->($dst);
+                        my $did   = $reg_id->($dst_r);
+                        my $label = $src->value;
+                        push @func_fixups, { offset => $current_offset->(), type => 'lea_rodata_adr', target => $label, rd => $did };
+                        $bytes .= pack( 'V', ( $did << 7 ) | 0x17 );
+                        $bytes .= pack( 'V', ( $did << 15 ) | ( 0 << 12 ) | ( $did << 7 ) | OP_IMM );
+                    }
+                    elsif ( $opcode eq 'call_func' ) {
+                        my $func_name = $dst->value;
+                        push @func_fixups, { offset => $current_offset->(), type => 'call_jal', target => $func_name };
+                        $bytes .= pack( 'V', JAL | ( 1 << 7 ) | 0x6F );
+                    }
+                    elsif ( $opcode eq 'call_indirect' ) {
+                        my $src_r = $resolve->($src);
+                        my $sid   = $reg_id->($src_r);
+                        $bytes .= pack( 'V', 0x67 | ( 1 << 7 ) | ( $sid << 15 ) );
+                    }
+                    elsif ( $opcode eq 'ret' ) {
+                        if ( $callee_size > 0 ) {
+                            for my $i ( reverse 0 .. $#to_save ) {
+                                my $reg      = $to_save[$i];
+                                my $rid      = $reg_id->($reg);
+                                my $off      = $extra_frame + $i * 8;
+                                my $is_float = ( $reg =~ /^f/ ) ? 1 : 0;
+                                $emit_frame_mem->( 3, $rid, $off, 0, $is_float );
+                            }
+                        }
+                        if ( $total_frame > 0 ) {
+                            my $tf = $total_frame;
+                            if ( $tf <= 2047 ) {
+                                $bytes .= pack( 'V', ( ( $tf & 0xFFF ) << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP_IMM );
+                            }
+                            else {
+                                my $hi = ( $tf + 0x800 ) >> 12;
+                                my $lo = $tf & 0xFFF;
+                                $bytes .= pack( 'V', ( ( $hi & 0xFFFFF ) << 12 ) | ( 5 << 7 ) | LUI );
+                                $bytes .= pack( 'V', ( ( $lo & 0xFFF ) << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 5 << 7 ) | OP_IMM ) if $lo;
+                                $bytes .= pack( 'V', ( 0x00 << 25 ) | ( 5 << 20 ) | ( 2 << 15 ) | ( 0 << 12 ) | ( 2 << 7 ) | OP );
+                            }
+                        }
+                        $bytes .= pack( 'V', JALR );
+                    }
                 }
             }
-        }
-        for my $fixup (@fixups) {
-            my $target_pos = $labels{ $fixup->{target} };
-            die "undefined label: $fixup->{target}" unless defined $target_pos;
-            my $rel = $target_pos - $fixup->{offset};
-            if ( $fixup->{type} eq 'jal' ) {
-                my $imm20 = ( $rel >> 1 ) & 0xFFFFF;
-                my $enc   = ( ( $imm20 >> 19 ) & 1 ) << 31 | ( ( $imm20 & 0x3FF ) << 21 ) | ( ( $imm20 >> 10 ) & 1 ) << 20
-                    | ( ( $imm20 >> 11 ) & 0xFF ) << 12 | JAL;
-                substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
-            }
-            elsif ( $fixup->{type} eq 'bcc' ) {
-                if ( abs($rel) > 4094 ) {
-                    $long_branch{ $fixup->{inst_key} } = 1;
-                    $changed = 1;
-                }
-                else {
-                    my $imm13 = ( $rel >> 1 ) & 0x1FFF;
-                    my $enc   = ( ( $imm13 >> 11 ) & 1 ) << 31 | ( ( $imm13 >> 4 ) & 0x3F ) << 25 | ( $fixup->{rs1} << 15 ) | ( $fixup->{funct3} << 12 )
-                        | ( ( $imm13 & 0x0F ) << 8 ) | ( ( $imm13 >> 10 ) & 1 ) << 7 | BCC;
+            for my $fixup (@fixups) {
+                my $target_pos = $labels{ $fixup->{target} };
+                die "undefined label: $fixup->{target}" unless defined $target_pos;
+                my $rel = $target_pos - $fixup->{offset};
+                if ( $fixup->{type} eq 'jal' ) {
+                    my $imm20 = ( $rel >> 1 ) & 0xFFFFF;
+                    my $enc   = ( ( $imm20 >> 19 ) & 1 ) << 31 | ( ( $imm20 & 0x3FF ) << 21 ) | ( ( $imm20 >> 10 ) & 1 ) << 20
+                        | ( ( $imm20 >> 11 ) & 0xFF ) << 12 | JAL;
                     substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
                 }
+                elsif ( $fixup->{type} eq 'bcc' ) {
+                    if ( abs($rel) > 4094 ) {
+                        $long_branch{ $fixup->{inst_key} } = 1;
+                        $changed = 1;
+                    }
+                    else {
+                        my $imm13 = ( $rel >> 1 ) & 0x1FFF;
+                        my $enc   = ( ( $imm13 >> 11 ) & 1 ) << 31 | ( ( $imm13 >> 4 ) & 0x3F ) << 25 | ( $fixup->{rs1} << 15 )
+                            | ( $fixup->{funct3} << 12 ) | ( ( $imm13 & 0x0F ) << 8 ) | ( ( $imm13 >> 10 ) & 1 ) << 7 | BCC;
+                        substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
+                    }
+                }
             }
-        }
-        $redo = $changed;
+            $redo = $changed;
         }
         return ( $bytes, \@func_fixups );
     }

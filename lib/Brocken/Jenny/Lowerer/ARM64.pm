@@ -3570,7 +3570,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Select') ) {
                     my ( $cond, $true_val, $false_val ) = $inst->operands->@*;
-                    my $cond_op     = $self->_lower_opnd($cond);
+                    my $cond_op = $self->_lower_opnd($cond);
 
                     # Both arms go through `_materialize` rather than `_lower_opnd`: a string literal arrives as a
                     # RodataRef, which carries a label but no register name, and must be turned into a `lea_rodata`
@@ -3620,10 +3620,10 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                             Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'beq', operands => [ $cond_op, $else_lbl ], comment => 'select' )
                         );
                         $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => $move_op, operands => [ $dst, $true_op ] ) );
-                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'jmp',     operands => [$end_lbl] ) );
-                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label',   operands => [$else_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'jmp',    operands => [$end_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label',  operands => [$else_lbl] ) );
                         $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => $move_op, operands => [ $dst, $false_op ] ) );
-                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label',   operands => [$end_lbl] ) );
+                        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label',  operands => [$end_lbl] ) );
                     }
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Call') ) {

@@ -662,9 +662,10 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             my @forbid = ( $base_r, @extra_forbidden );
             push @forbid, $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) )
                 if defined $addr->{index};
-            my $tmp_r  = $pick_scratch->(@forbid);
+            my $tmp_r = $pick_scratch->(@forbid);
             die "no temp register for the memory source of $what" unless $tmp_r;
             my $tid = $reg_id->($tmp_r);
+
             if ( defined $addr->{index} ) {
                 my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                 my $iid     = $reg_id->($index_r);

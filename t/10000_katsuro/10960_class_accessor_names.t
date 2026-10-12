@@ -9,14 +9,13 @@ use Test2::Tools::Brocken qw[answers executable_targets];
 # Each attribute also accepts an explicit name in parentheses, `:param(name)` / `:reader(name)` / `:writer(name)`,
 # and `:accessor(name)` names its reader (the writer is `set_` + that name).
 subtest 'leading underscore is stripped from default names' => sub {
-    answers( 'class P { field i64 $_x :param :reader; } my ptr $p = P->new(x => 42); return $p->x();',
-        42, 'new(x => ...) sets $_x and x() reads it' );
+    answers( 'class P { field i64 $_x :param :reader; } my ptr $p = P->new(x => 42); return $p->x();', 42,
+        'new(x => ...) sets $_x and x() reads it' );
     answers( 'class C { field i64 $_count :param :writer; } my ptr $c = C->new(count => 1); $c->set_count(9); return $c->_count;',
         9, 'set_count() is the default writer for $_count' );
     answers( 'class D { field i64 $__bar :param; } my ptr $d = D->new(_bar => 5); return $d->__bar;',
         5, 'only one underscore is stripped: $__bar -> param _bar' );
 };
-
 subtest 'custom accessor names via payloads' => sub {
     answers( 'class P { field i64 $x :param :reader(get_x); } my ptr $p = P->new(x => 7); return $p->get_x();',
         7, ':reader(get_x) generates get_x()' );
@@ -25,7 +24,6 @@ subtest 'custom accessor names via payloads' => sub {
     answers( 'class V { field i64 $v :param :accessor(get_v); } my ptr $x = V->new(v => 3); $x->set_get_v(4); return $x->get_v();',
         4, ':accessor(get_v) reads as get_v and writes as set_get_v' );
 };
-
 subtest 'custom constructor parameter names' => sub {
     answers( 'class B { field i64 $size :param(amount); } my ptr $b = B->new(amount => 11); return $b->size;',
         11, ':param(amount) is set through new(amount => ...)' );
@@ -34,7 +32,6 @@ subtest 'custom constructor parameter names' => sub {
     answers( 'class A { field i64 $a :param(first); field i64 $b :param(second); } my ptr $p = A->new(7, 8); return $p->a + $p->b;',
         15, 'positional construction still follows declaration order' );
 };
-
 subtest 'custom param names combine with defaults' => sub {
     answers( 'class Cnt { field i64 $_count :param(total) ||= 3; } my ptr $c = Cnt->new(); return $c->_count;',
         3, 'a default applies when the custom-named param is absent' );

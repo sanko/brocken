@@ -78,6 +78,7 @@ sub _macho_sections {
     my $ncmds = unpack 'V', substr( $d, 16, 4 );
     my $off   = 32;
     my %sec;
+
     while ( $ncmds-- > 0 ) {
         my ( $cmd, $sz ) = unpack 'V2', substr( $d, $off, 8 );
         if ( $cmd == 0x19 ) {
@@ -119,27 +120,22 @@ sub _macho_entry_exit_target {
     my $disp = unpack 'l<', substr( $d, $off + 24, 4 );
     return $addr + 28 + $disp;
 }
-
 subtest 'Mach-O entry-stub exit() GOT reference survives a .got shift' => sub {
     my $tmp = Brocken->new->tmpdir;
     for my $triple (qw[x86_64-apple-darwin-macho aarch64-apple-darwin-macho]) {
         my $platform = Brocken::Katsuro::Platform::parse($triple);
         my $linker   = Brocken::Jenny::Linker::MachO->new();
-        my $page     = $platform->page_size;                # 4 KiB Intel, 16 KiB Apple Silicon
-        my $esize    = $linker->entry_stub_len($platform);  # bytes the entry stub adds to .text
-        my $stub     = $platform->is_arm64 ? 12 : 6;        # one import stub
+        my $page     = $platform->page_size;                                             # 4 KiB Intel, 16 KiB Apple Silicon
+        my $esize    = $linker->entry_stub_len($platform);                               # bytes the entry stub adds to .text
+        my $stub     = $platform->is_arm64 ? 12 : 6;                                     # one import stub
         my $out      = $tmp . '/entry_got_' . ( $platform->is_arm64 ? 'arm' : 'x64' );
         my @bad;
 
         # Sweep .text sizes that straddle a page boundary by less than one import stub, so the stub append moves
         # .__const (and hence .got) a page while the already-emitted entry stub still holds the pre-shift RVA.
         for my $pad ( ( $page - $esize - $stub - 2 ) .. ( $page - $esize + 2 ) ) {
-            my $funcs = [
-                {   name   => '_BROCKEN_ENTRY',
-                    bytes  => "\x90" x $pad,
-                    fixups => [ { type => 'call_rel32', target => 'puts', offset => 0 } ],
-                }
-            ];
+            my $funcs
+                = [ { name => '_BROCKEN_ENTRY', bytes => "\x90" x $pad, fixups => [ { type => 'call_rel32', target => 'puts', offset => 0 } ], } ];
             my $lnk = Brocken::Jenny::Linker::MachO->new();
             $lnk->write_executable( $out, $funcs, $platform );
             my $sec    = _macho_sections($out);

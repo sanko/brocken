@@ -20,7 +20,6 @@ use feature qw[class];
 # These assertions pin the caller-side encoding. The macOS CI matrix runs the whole suite on Apple
 # Silicon (macos-15, aarch64), so this is exercised on the real target there; the encoding itself is
 # platform-independent once the macOS platform object is in hand, so it also runs on the Linux hosts.
-
 sub sub_sp_imm {
     my ($w) = @_;
     return undef unless ( $w & 0xFFC003FF ) == 0xD10003FF;    # sub sp, sp, #imm  (imm12, shift 0)
@@ -51,10 +50,10 @@ sub word_at {
 # ($total - 1) variadic arguments. Only main is inspected; the callee exists so the call resolves.
 sub build_main {
     my ($total) = @_;
-    my $i64 = Brocken::Lindsay::IR::Type::i64();
-    my $b   = Brocken::Lindsay::IR::Builder->new();
-    my $p   = Brocken::Lindsay::IR::Value->new( type => $i64, name => 'a' );
-    my $callee = Brocken::Lindsay::IR::Function->new( name => 'variadic_c', return_type => $i64, params => [$p] );
+    my $i64     = Brocken::Lindsay::IR::Type::i64();
+    my $b       = Brocken::Lindsay::IR::Builder->new();
+    my $p       = Brocken::Lindsay::IR::Value->new( type => $i64, name => 'a' );
+    my $callee  = Brocken::Lindsay::IR::Function->new( name => 'variadic_c', return_type => $i64, params => [$p] );
     $b->position_at_end( $callee->append_block('entry') );
     $b->build_ret($p);
     my $main = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => $i64, params => [] );
@@ -69,15 +68,14 @@ sub emit_main {
     my $platform = Brocken::Katsuro::Platform::parse($triple);
     my $codegen  = Brocken::Jenny::Codegen::ARM64->new( platform => $platform );
     my $funcs    = $codegen->emit_functions( [ build_main($total) ] );
-    my ($main) = grep { $_->{name} eq 'main' } $funcs->@*;
-    my ($fixup) = grep { $_->{type} eq 'call_bl' && $_->{target} eq 'variadic_c' } $main->{fixups}->@*;
+    my ($main)   = grep { $_->{name} eq 'main' } $funcs->@*;
+    my ($fixup)  = grep { $_->{type} eq 'call_bl' && $_->{target} eq 'variadic_c' } $main->{fixups}->@*;
     return ( $main, $fixup, $platform );
 }
-
 subtest 'macOS saves seven variadic arguments into a 64-byte register save area' => sub {
     my ( $main, $fixup, $platform ) = emit_main( 'aarch64-apple-darwin', 8 );
     ok $platform->is_macos, 'the parsed platform reports macOS';
-    ok $fixup, 'the call to the variadic callee is recorded as a BL fixup';
+    ok $fixup,              'the call to the variadic callee is recorded as a BL fixup';
     my $o = $fixup->{offset};
     is $o % 4, 0, 'the branch lands on an instruction boundary';
 
@@ -91,23 +89,21 @@ subtest 'macOS saves seven variadic arguments into a 64-byte register save area'
         is( $imm12, $j,     "variant slot $j stores to [sp, #" . ( $j * 8 ) . ']' );
         is( $rt,    1 + $j, "variant slot $j captures x" . ( 1 + $j ) );
     }
-
-    is word_at( $main, $o ) & 0xFC000000, 0x94000000, 'the branch itself is a BL';
-    is add_sp_imm( word_at( $main, $o + 4 ) ), 64, 'the save area is released straight after the call';
+    is word_at( $main, $o ) & 0xFC000000,      0x94000000, 'the branch itself is a BL';
+    is add_sp_imm( word_at( $main, $o + 4 ) ), 64,         'the save area is released straight after the call';
 };
-
 subtest 'a non-Apple ARM64 target passes variadic arguments without a save area' => sub {
     my ( $main, $fixup, $platform ) = emit_main( 'aarch64-unknown-linux-gnu', 8 );
     ok !$platform->is_macos, 'the parsed platform is not macOS';
-    ok $fixup, 'the call is still recorded as a BL fixup';
+    ok $fixup,               'the call is still recorded as a BL fixup';
     my $o = $fixup->{offset};
 
     # AAPCS64 leaves the extra values in the argument registers; the caller writes nothing to the stack
     # for them, so the instruction immediately before the branch is not a save-area store and none of
     # the register slots precede the call.
     ok !defined str_64_sp( word_at( $main, $o - 4 ) ), 'no variadic store sits before the branch';
-    ok !defined sub_sp_imm( word_at( $main, $o - 8 ) ),  'no save-area reservation sits before the branch';
-    ok !defined add_sp_imm( word_at( $main, $o + 4 ) ),  'no save-area release follows the branch';
+    ok !defined sub_sp_imm( word_at( $main, $o - 8 ) ), 'no save-area reservation sits before the branch';
+    ok !defined add_sp_imm( word_at( $main, $o + 4 ) ), 'no save-area release follows the branch';
 };
 #
 done_testing;

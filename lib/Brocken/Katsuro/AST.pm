@@ -82,7 +82,7 @@ class Brocken::Katsuro::AST::Stmt::ClassDecl v0.0.1 : isa(Brocken::Katsuro::AST:
 class Brocken::Katsuro::AST::Stmt::FieldDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $type       : param : reader;
     field $name       : param : reader;             # without sigil
-    field $attrs      : param : reader = [];   # [{ name => 'reader', arg => undef }, ...]
+    field $attrs      : param : reader = [];        # [{ name => 'reader', arg => undef }, ...]
     field $default    : param : reader = undef;     # default value expression
     field $default_op : param : reader = undef;     # '=', '//=', or '||='
 };

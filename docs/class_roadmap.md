@@ -24,7 +24,7 @@ The current front end (`Brocken::Katsuro`) and lowerer implement a deliberately 
 |---|---|---|
 | Declaration | `class NAME { ... }` block form only | No version, no class attributes, no `;` statement form |
 | Fields | `field TYPE $name [:attr...] [= EXPR \| //= EXPR \| \|\|= EXPR];` | Scalar only. `TYPE` is required (a Brocken extension over `perlclass`) |
-| Field attributes | `:param`, `:reader`, `:writer`, `:accessor` | `:accessor` expands to a reader plus a chaining writer. `:weak` is documented in spec 7.4 but **not implemented** |
+| Field attributes | `:param`, `:reader`, `:writer`, `:accessor` | `:accessor` expands to a reader plus a chaining writer. `:weak` is documented in spec 7.4 and deferred (see M0 below) — without field ownership there is no `incref` to skip |
 | Accessor names | Fixed: reader = field name, writer = `set_<field>` | No `:reader(NAME)` / `:writer(NAME)` |
 | Methods | `method NAME(TYPE $p, ...) :returns(RET) { ... }` | Typed params required; `RET` explicit or inferred; `$self` is a hidden receiver |
 | ADJUST | `ADJUST { ... }` | Any number of blocks, run in declaration order; each sees `$self` and fields declared so far |
@@ -188,7 +188,7 @@ dispatch, RC/Immix). Decisions are recommendations for sign-off.
 | ADJUST `:params` (and/or `ADJUSTPARAMS`) | ADJUST blocks consume named constructor params | Direct extension of the `:param` map; typed in Brocken | Moderate |
 | `:mutator` | lvalue accessor for a scalar field | Static lowering to get/set; useful sugar | Small |
 | `:accessor` | Combined reader/writer | Implemented as an M0 win (reader + chaining writer) | Done |
-| `:weak` | Accessor/constructor assignments don't take ownership | Maps to a no-`incref` store in the RC contract | Small–moderate |
+| `:weak` | Accessor/constructor assignments don't take ownership | Maps to a no-`incref` store in the RC contract; **deferred** until class-typed fields actually take ownership (C21) | Small–moderate |
 | `:reader`/`:writer`/`:param(NAME)` + `_` rule | Custom accessor names | Same as C4/C5; adopt fully | Done (C4/C5) |
 | Default `//=` and `||=` | Field default operators | `||=` implemented (C9); custom names still planned | Done (`||=`) |
 | Method `:override` | Assert a method overrides an ancestor's | Compile-time check over the static method table | Small |
@@ -264,7 +264,7 @@ Ordered by dependency.
 ## 5. Suggested sequencing
 
 1. **M0 (v0.0.1, no model change):** `:returns`, parameter defaults, `||=`, custom accessor names, `_`-stripping, `:writer` chaining return, multiple `ADJUST`, field-init visibility, `:accessor`, `:weak`, array/hash fields.
-   *Done so far:* `:returns` (C22), `||=` (C9), `:writer` chaining (C7), multiple `ADJUST` (C10), `:accessor`, custom accessor names + `_`-stripping (C4, C5), parameter defaults, field-init visibility (C12). *Remaining:* `:weak`, array/hash fields.
+   *Done so far:* `:returns` (C22), `||=` (C9), `:writer` chaining (C7), multiple `ADJUST` (C10), `:accessor`, custom accessor names + `_`-stripping (C4, C5), parameter defaults, field-init visibility (C12). *Remaining:* array/hash fields. *Deferred:* `:weak` — class-typed fields do not take ownership yet (only `Any` slots are RC-tracked; a field store is a bare `store` and the object header's refcount is set to 1 and never released), so a no-`incref` store has nothing to skip. Land it with field ownership/`DESTROY` (C21).
 2. **M1 (v0.0.1, object model):** field-map/alignment rework; class versions and attributes; `:isa`; static ancestor resolution; `SUPER::`; constructor chaining; `DESTROY`.
 3. **M2 (v0.0.2):** `role`/`apply`/`:does`/`requires` flattening; `:abstract`; ADJUST `:params`; `:strict(params)`; `:lexical_new`; `my class`; `inherit`; `:override`/`:common`; lexical/anonymous
    methods.

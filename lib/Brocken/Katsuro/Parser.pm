@@ -358,7 +358,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return undef unless $self->check( 'OP', ':' );
         $self->advance();    # ':'
         my $attr = $self->consume( 'IDENT', undef, "Expected attribute name after ':'" );
-        Carp::croak("Unknown sub/method attribute ':" . $attr->{value} . "' at line $attr->{line}, col $attr->{col}")
+        Carp::croak( "Unknown sub/method attribute ':" . $attr->{value} . "' at line $attr->{line}, col $attr->{col}" )
             unless $attr->{value} eq 'returns';
         $self->consume('(');
         my $type = $self->_parse_type_name("Expected type in ':returns(...)'");
@@ -522,7 +522,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         }
         $self->consume(')');
         my $return_type = $self->parse_return_annotation();
-        my $body = $self->parse_block();
+        my $body        = $self->parse_block();
         return Brocken::Katsuro::AST::Stmt::MethodDecl->new(
             $self->_pos_token($method_tok),
             name        => $name_token->{value},

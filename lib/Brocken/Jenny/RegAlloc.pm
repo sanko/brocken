@@ -168,9 +168,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     # value of rd is the first source.  Treat it as read-modify-write, or the read is dropped from the
                     # live interval and a later value is free to take the register.  The three-operand form names its
                     # two sources explicitly and does not read rd, so only the two-operand shape joins the RMW set.
-                    $used{$name} = 1
-                        if $rmw{ $inst->opcode }
-                        || ( @ops == 2 && $inst->opcode =~ /^(?:slt|sltu|sltiu)$/ );
+                    $used{$name} = 1 if $rmw{ $inst->opcode } || ( @ops == 2 && $inst->opcode =~ /^(?:slt|sltu|sltiu)$/ );
                     next;
                 }
                 $used{$name} = 1;
@@ -555,8 +553,9 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
 
     method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0, $spill_addr_temp = undef ) {
         return unless $spill_slots && scalar keys %$spill_slots;
-        my $load_op   = $is_float ? 'fload'  : 'load';
-        my $store_op  = $is_float ? 'fstore' : 'store';
+        my $load_op  = $is_float ? 'fload'  : 'load';
+        my $store_op = $is_float ? 'fstore' : 'store';
+
         # `fcmp` is not a read-modify-write: operand 0 is a plain source, so it must be reloaded when spilled, but
         # the value is never written back.  It is listed here anyway so the first comparand is reloaded; the
         # resulting write-back stores the same value it just loaded and is therefore harmless.
@@ -664,9 +663,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     my $scr = $n_reload++ ? $addr_reg : $spill_temp;
                     $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $scr, type => $ops[$i]->type );
                     if ( $i == 0 ) {
-                        push @load_offsets, [ $sp{0}, $scr ]
-                            if $reads_dst{$opcode}
-                            || ( @ops == 2 && $opcode =~ /^(?:slt|sltu|sltiu)$/ );
+                        push @load_offsets, [ $sp{0}, $scr ] if $reads_dst{$opcode} || ( @ops == 2 && $opcode =~ /^(?:slt|sltu|sltiu)$/ );
                         $store_off = $sp{0};
                     }
                     else {

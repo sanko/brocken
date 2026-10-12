@@ -21,7 +21,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $block_id              = 0;
     field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
-    field $param_defaults         = {};    # "name" -> [ {name, default}, ... ] per user parameter, for omitted trailing args
+    field $param_defaults        = {};    # "name" -> [ {name, default}, ... ] per user parameter, for omitted trailing args
     field $needs_rc              = {};    # var_name -> 1 (Any-typed variable needing refcounting)
     field $rc_owner              = {};    # var_name -> owning $_dyn_scope_stack entry (declaring block/loop scope)
     field $array_elem_types      = {};    # '@name' -> element IR type (for heap-array GEP scaling)
@@ -45,9 +45,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $r ( $recs->@* ) { return $r if $r->{name} eq $name; }
         return undef;
     }
+
     method has_attr( $recs, $name ) {
         return defined $self->attr_rec( $recs, $name );
     }
+
     method attr_arg( $recs, $name ) {
         my $r = $self->attr_rec( $recs, $name );
         return defined $r ? $r->{arg} : undef;
@@ -285,9 +287,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # removed, so `field $_x :reader` generates `x()`.
         for my $f ( $ast->fields->@* ) {
             if ( $self->has_attr( $f->attrs, 'reader' ) || $self->has_attr( $f->attrs, 'accessor' ) ) {
-                my $mname = $self->attr_arg( $f->attrs, 'reader' ) //
-                    $self->attr_arg( $f->attrs, 'accessor' ) //
-                    $self->strip_underscore( $f->name );
+                my $mname = $self->attr_arg( $f->attrs, 'reader' ) // $self->attr_arg( $f->attrs, 'accessor' ) // $self->strip_underscore( $f->name );
                 $self->register_method( $class_name, $mname, $f->type, [] );
                 $self->generate_reader( $class_name, $f, $mname );
             }
@@ -299,8 +299,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # otherwise.
         for my $f ( $ast->fields->@* ) {
             if ( $self->has_attr( $f->attrs, 'writer' ) || $self->has_attr( $f->attrs, 'accessor' ) ) {
-                my $base  = $self->attr_arg( $f->attrs, 'accessor' ) // $self->strip_underscore( $f->name );
-                my $mname = $self->attr_arg( $f->attrs, 'writer' ) // 'set_' . $base;
+                my $base   = $self->attr_arg( $f->attrs, 'accessor' ) // $self->strip_underscore( $f->name );
+                my $mname  = $self->attr_arg( $f->attrs, 'writer' )   // 'set_' . $base;
                 my @params = ( { type => $f->type, sigil => '$', name => 'value' } );
                 $self->register_method( $class_name, $mname, 'ptr', \@params );
                 $writer_map->{ $class_name . '::' . $mname } = $class_name;
@@ -408,8 +408,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 attrs      => [ $f->attrs->@* ],
                 param      => $self->has_attr( $f->attrs, 'param' ) ? 1 : 0,
                 param_name => $self->has_attr( $f->attrs, 'param' ) ?
-                    ( $self->attr_arg( $f->attrs, 'param' ) // $self->strip_underscore( $f->name ) ) :
-                    undef,
+                    ( $self->attr_arg( $f->attrs, 'param' ) // $self->strip_underscore( $f->name ) ) : undef,
                 };
             $offset += $self->type_size($ir_type);
         }
@@ -1507,10 +1506,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_defined_or( $lhs, $rhs, $line, $col ) {
         my $lhs_kind = $lhs->type->kind;
         return $lhs unless $lhs_kind eq 'ptr' || $lhs_kind eq 'dynamic';
-        my $result_type =
-            $lhs_kind eq 'ptr' && $rhs->type->kind eq 'ptr' ?
-            Brocken::Lindsay::IR::Type::ptr() :
-            Brocken::Lindsay::IR::Type::dynamic();
+        my $result_type = $lhs_kind eq 'ptr' && $rhs->type->kind eq 'ptr' ? Brocken::Lindsay::IR::Type::ptr() : Brocken::Lindsay::IR::Type::dynamic();
         $lhs = $self->maybe_convert_type( $lhs, $result_type, $line, $col );
         $rhs = $self->maybe_convert_type( $rhs, $result_type, $line, $col );
         my $zero     = Brocken::Lindsay::IR::Constant->new( type => $result_type, value => 0 );
@@ -1918,7 +1914,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             push @args, $want_val;
         }
         my $param_idx = ( $callee_has_heap_base ? 1 : 0 ) + ( $callee_has_want ? 1 : 0 );
-        my $defaults = $param_defaults->{$name};
+        my $defaults  = $param_defaults->{$name};
 
         # A default for one omitted trailing argument may reference an earlier one, so each value that lands in a
         # parameter is bound to that parameter's name while the rest of the call is lowered. The bindings are
@@ -1946,12 +1942,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ($defaults) {
             my $base = ( $callee_has_heap_base ? 1 : 0 ) + ( $callee_has_want ? 1 : 0 );
             while ( $param_idx < $callee->params->@* ) {
-                my $di   = $param_idx - $base;
-                my $rec  = $di < $defaults->@* ? $defaults->[$di] : undef;
+                my $di  = $param_idx - $base;
+                my $rec = $di < $defaults->@* ? $defaults->[$di] : undef;
                 last unless $rec && defined $rec->{default};
                 my $val = $self->lower_expression( $rec->{default} );
                 $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
-                push @args, $val;
+                push @args,  $val;
                 push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
                 $symbols->{ $rec->{name} } = $val;
                 $param_idx++;
@@ -2240,9 +2236,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
             my $recv = $self->_expr_class( $obj->obj );
             if ( defined $recv ) {
-                my $full = $recv . '::' . $obj->method;
+                my $full      = $recv . '::' . $obj->method;
                 my $ret_class = $function_return_class->{$full};
                 return $ret_class if $ret_class;
+
                 # An auto-generated :writer / :accessor method returns its receiver, so a chained call such
                 # as $obj->set_x(1)->set_y(2) keeps the same class. The writer name may be custom
                 # (:writer(write_x)), so it is looked up in the writer map rather than by a set_ prefix.
@@ -2351,16 +2348,18 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fi, '%' . $fd->{name} . '.init', $line, $col );
                 $builder->build_store( $val, $field_ptr, $line, $col );
                 $seen{ $fd->{name} } = 1;
+
                 if ( !$ctor_bound{ $fd->{name} } ) {
                     push @ctor_bindings, [ $fd->{name}, $symbols->{ $fd->{name} } ];
                     $symbols->{ $fd->{name} } = $field_ptr;
                     $ctor_bound{ $fd->{name} } = 1;
                 }
             }
+
             # The field initializers are the only class-context expressions, so establish it now: bind `$self`
             # and set `$current_class` so `__CLASS__` and `$self->method` resolve. All earlier fields are bound.
             my $saved_class = $current_class;
-            $current_class  = $class_name;
+            $current_class = $class_name;
             push @ctor_bindings, [ 'self', $symbols->{self} ];
             my $self_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::ptr(), '%self.addr' );
             $builder->build_store( $self_ptr, $self_alloca, $line, $col );
@@ -2434,11 +2433,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         if ($defaults) {
             while ( $param_idx < $callee->params->@* ) {
-                my $rec  = $param_idx - 3 < $defaults->@* ? $defaults->[ $param_idx - 3 ] : undef;
+                my $rec = $param_idx - 3 < $defaults->@* ? $defaults->[ $param_idx - 3 ] : undef;
                 last unless $rec && defined $rec->{default};
                 my $val = $self->lower_expression( $rec->{default} );
                 $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
-                push @args, $val;
+                push @args,  $val;
                 push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
                 $symbols->{ $rec->{name} } = $val;
                 $param_idx++;

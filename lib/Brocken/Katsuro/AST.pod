@@ -109,16 +109,15 @@ as a block.
 
 A class declaration: C<name>, C<fields>, C<methods>, and C<adjusts>. The parser collects C<field>, C<method>, and
 C<ADJUST> declarations from the body; C<adjusts> is a list because a class may declare several C<ADJUST> blocks, which
-the lowerer runs in declaration order.
-C<Brocken::Katsuro::Lowerer> turns them into a struct layout, a constructor, and the
-accessors.
+the lowerer runs in declaration order. C<Brocken::Katsuro::Lowerer> turns them into a struct layout, a constructor, and
+the accessors.
 
 =head2 C<FieldDecl>
 
-A field declaration: C<name>, C<type>, an C<attrs> list, an optional C<default>, and a C<default_op>. The attributes are
-where C<:param>, C<:reader>, C<:writer>, and C<:accessor> are recorded, and the default is an expression rather than a
-value so that a field can be initialised from another field. C<default_op> is C<=>, C<//=>, or C<||=>, and decides how the
-constructor applies the default.
+A field declaration: C<name>, C<type>, an C<attrs> list, an optional C<default>, and a C<default_op>. The attributes
+are where C<:param>, C<:reader>, C<:writer>, and C<:accessor> are recorded, and the default is an expression rather
+than a value so that a field can be initialised from another field. C<default_op> is C<=>, C<//=>, or C<||=>, and
+decides how the constructor applies the default.
 
 =head2 C<MethodDecl>
 
