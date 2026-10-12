@@ -840,10 +840,29 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 $bytes .= pack( 'V', ( 0 << 25 ) | ( 2 << 20 ) | ( 5 << 15 ) | ( 0 << 12 ) | ( 8 << 7 ) | OP );
             }
         }
+        my $prologue = $bytes;
         my %labels;
         my @fixups;
         my @func_fixups;
+
+        # A conditional branch only reaches +/-4KiB, but a large function -- the runtime allocator expands each call
+        # with a full caller-save/restore -- places branch targets further away.  Relaxing such a branch to an
+        # inverted short branch over an unconditional `jal` (which reaches the whole function) changes the layout,
+        # which can push other branches out of range, so the encoding is repeated until no conditional branch
+        # overflows.
+        my %long_branch;
         my $current_offset = sub { return length $bytes };
+        my $redo    = 1;
+        my $changed;
+        while ($redo) {
+            $bytes          = $prologue;
+            $alloca_frame   = $unified_frame;
+            %labels         = ();
+            @fixups         = ();
+            @func_fixups    = ();
+            $changed        = 0;
+            $source_map->%* = () if $source_map;
+            $alloca_map->%* = () if $alloca_map;
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 if ( $source_map && $inst->ir_inst_idx >= 0 && !exists $source_map->{ $inst->ir_inst_idx } ) {
@@ -866,9 +885,24 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     my $cid    = $reg_id->($cond_r);
                     my $funct3 = ( $opcode eq 'bne' ? 1 : 0 );
 
-                    # BEQ/BNE rs1=cond, rs2=x0, offset placeholder
-                    push @fixups, { offset => $current_offset->(), type => 'bcc', target => $src->value, rs1 => $cid, funct3 => $funct3 };
-                    $bytes .= pack( 'V', ( $cid << 15 ) | ( $funct3 << 12 ) | BCC );
+                    if ( $long_branch{ 0 + $inst } ) {
+
+                        # Invert the condition so it skips the `jal` that follows when the branch is not taken.  The
+                        # unconditional jump then carries the far target, which the 13-bit branch field cannot.
+                        my $inv   = 1 - $funct3;
+                        my $imm13 = ( 8 >> 1 ) & 0x1FFF;
+                        my $enc   = ( ( $imm13 >> 11 ) & 1 ) << 31 | ( ( $imm13 >> 4 ) & 0x3F ) << 25 | ( $cid << 15 )
+                            | ( $inv << 12 ) | ( ( $imm13 & 0x0F ) << 8 ) | ( ( $imm13 >> 10 ) & 1 ) << 7 | BCC;
+                        $bytes .= pack( 'V', $enc );
+                        push @fixups, { offset => $current_offset->(), type => 'jal', target => $src->value };
+                        $bytes .= pack( 'V', JAL );
+                    }
+                    else {
+
+                        # BEQ/BNE rs1=cond, rs2=x0, offset placeholder
+                        push @fixups, { offset => $current_offset->(), type => 'bcc', target => $src->value, rs1 => $cid, funct3 => $funct3, inst_key => ( 0 + $inst ) };
+                        $bytes .= pack( 'V', ( $cid << 15 ) | ( $funct3 << 12 ) | BCC );
+                    }
                 }
                 elsif ( $opcode eq 'mov' || $opcode eq 'mv' ) {
                     my $dst_r = $resolve->($dst);
@@ -1314,13 +1348,20 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                     $bytes .= pack( 'V', $enc );
                 }
                 elsif ( $opcode eq 'fmin' || $opcode eq 'fmax' ) {
+
+                    # fmin/fmax take two source registers (rs1, rs2), unlike the other unary float ops that read only
+                    # rs1.  The shared ( $dst, $src ) unpack above drops the third operand, so it is read back from @ops
+                    # here rather than encoding rs1 as the destination (which made the result depend on whatever stale
+                    # value the destination register happened to hold).
                     my $dst_r = $resolve->($dst);
                     my $did   = $reg_id->($dst_r);
-                    my $src_r = $resolve->($src);
-                    my $sid   = $reg_id->($src_r);
-                    my $bits  = $dst->type        ? $dst->type->bits : 64;
-                    my $rm    = $opcode eq 'fmin' ? 0                : 1;
-                    my $enc   = FMINMAX | ( $sid << 20 ) | ( $did << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | FP_OP;
+                    my $lhs_r = $resolve->($src);
+                    my $lhs   = $reg_id->($lhs_r);
+                    my $rhs_r = $resolve->( $ops[2] );
+                    my $rhs   = $reg_id->($rhs_r);
+                    my $bits  = $dst->type ? $dst->type->bits : 64;
+                    my $rm    = $opcode eq 'fmin' ? 0 : 1;
+                    my $enc   = FMINMAX | ( $rhs << 20 ) | ( $lhs << 15 ) | ( $rm << 12 ) | ( $did << 7 ) | FP_OP;
                     $enc |= FP_FMT if $bits > 32;
                     $bytes .= pack( 'V', $enc );
                 }
@@ -1485,11 +1526,19 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
             }
             elsif ( $fixup->{type} eq 'bcc' ) {
-                my $imm13 = ( $rel >> 1 ) & 0x1FFF;
-                my $enc   = ( ( $imm13 >> 11 ) & 1 ) << 31 | ( ( $imm13 >> 4 ) & 0x3F ) << 25 | ( $fixup->{rs1} << 15 ) | ( $fixup->{funct3} << 12 )
-                    | ( ( $imm13 & 0x0F ) << 8 ) | ( ( $imm13 >> 10 ) & 1 ) << 7 | BCC;
-                substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
+                if ( abs($rel) > 4094 ) {
+                    $long_branch{ $fixup->{inst_key} } = 1;
+                    $changed = 1;
+                }
+                else {
+                    my $imm13 = ( $rel >> 1 ) & 0x1FFF;
+                    my $enc   = ( ( $imm13 >> 11 ) & 1 ) << 31 | ( ( $imm13 >> 4 ) & 0x3F ) << 25 | ( $fixup->{rs1} << 15 ) | ( $fixup->{funct3} << 12 )
+                        | ( ( $imm13 & 0x0F ) << 8 ) | ( ( $imm13 >> 10 ) & 1 ) << 7 | BCC;
+                    substr $bytes, $fixup->{offset}, 4, pack( 'V', $enc );
+                }
             }
+        }
+        $redo = $changed;
         }
         return ( $bytes, \@func_fixups );
     }

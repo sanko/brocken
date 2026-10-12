@@ -35,6 +35,9 @@ class Brocken::Katsuro::Platform::ABI::X86_64 v0.0.1 : isa(Brocken::Katsuro::Pla
     method return_pair_registers() { return (qw(rax rdx)) }
     method fiber_reg()             {'r12'}
 
+    # The ctx_swap encoder materialises its saved SP and resume PC in r11/r10.
+    method ctx_swap_scratch() { [qw[r10 r11]] }
+
     # System V AMD64 DWARF register numbers (rax=0, rdx=1, etc.)
     # Reference: https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf
     method dwarf_reg_num($name) {

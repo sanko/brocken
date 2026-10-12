@@ -368,12 +368,13 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
             }
         }
 
-        # Exclude r10/r11 when the function contains ctx_swap. The ctx_swap encoding body uses these as internal
-        # temporaries (resume_pc and saved_rsp), making them invisible to the per-function phys_reg destination scan
-        # above. Any virtual register allocated to r10 or r11 would have its value silently corrupted within ctx_swap.
-        if ( $has_ctx_swap && !$is_float ) {
-            $defined_phys{r10} = 1;
-            $defined_phys{r11} = 1;
+        # Exclude the registers the ctx_swap encoding body uses as internal temporaries (its resume PC and saved SP).
+        # They are clobbered invisibly -- nothing in the MIR operand list names them -- so the per-function phys_reg
+        # destination scan above never sees them.  Any virtual register allocated to one of them would have its value
+        # silently corrupted within ctx_swap.  The set is ABI-specific: r10/r11 on x86-64, t3 on RISC-V, x16/x17 on
+        # AArch64 (which already keeps them out of its pool).
+        if ( $has_ctx_swap && !$is_float && $platform->can('abi') ) {
+            $defined_phys{$_} = 1 for $platform->ctx_swap_scratch->@*;
         }
 
         # Exclude rax/rdx when the function contains udiv, sdiv, umulh, div128_64, or rem128_64. Their codegen emits

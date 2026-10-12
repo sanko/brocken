@@ -25,6 +25,12 @@ class Brocken::Katsuro::Platform::ABI v0.0.1 {
     method fp_return_register()                    {undef}
     method fiber_reg()                             {undef}
 
+    # The registers the `ctx_swap` encoding body uses as internal temporaries (its resume PC and saved SP).  They are
+    # clobbered invisibly -- they never appear in the instruction's MIR operand list -- so the register allocator must
+    # keep every virtual register out of them for any function that swaps contexts.  An ABI whose scratch registers are
+    # already absent from its `available` pool can leave this empty; today only AArch64 (x16/x17) does.
+    method ctx_swap_scratch()                      { [] }
+
     # Whether the two register classes share their positions.  SysV, AArch64, and RISC-V keep an independent counter per
     # class; Win64 numbers positions 1-4 across both, so the position decides the register and the fifth argument goes
     # on the stack whatever its class.

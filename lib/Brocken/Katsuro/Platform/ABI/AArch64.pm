@@ -29,6 +29,10 @@ class Brocken::Katsuro::Platform::ABI::AArch64 v0.0.1 : isa(Brocken::Katsuro::Pl
     method return_pair_registers() { return (qw(x0 x1)) }
     method fiber_reg()             {'x28'}
 
+    # The ctx_swap encoder materialises its resume PC and saved SP in x16/x17.  They are already outside the `available`
+    # pool, but naming them here keeps the contract explicit if the pool ever grows.
+    method ctx_swap_scratch() { [qw[x16 x17]] }
+
     # The register a floating-point entry-block shuffle may park a value in.
     #
     # The allocator's floating-point spill temporary is the last caller-saved register, which is v7 here, and v0-v7 are

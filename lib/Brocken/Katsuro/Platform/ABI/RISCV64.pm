@@ -33,6 +33,9 @@ class Brocken::Katsuro::Platform::ABI::RISCV64 v0.0.1 : isa(Brocken::Katsuro::Pl
     method return_pair_registers() { return (qw(a0 a1)) }
     method fiber_reg()             {'s11'}
 
+    # The ctx_swap encoder materialises its saved SP and resume PC in t3.
+    method ctx_swap_scratch() { [qw[t3]] }
+
     # Arguments past the last of a0-a7 arrive on the stack.  RISC-V's `call` puts the return address in ra rather than
     # pushing it, so nothing sits
     # below the arguments: on entry sp points directly at the first stack argument and the offset does not skip a return
