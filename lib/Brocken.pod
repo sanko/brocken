@@ -118,7 +118,7 @@ Control flow is C<if> and C<while>. Both take a braced block, and C<elsif> chain
     }
     return $sum;    # 45
 
-Functions are declared with C<sub>, and the return type follows the parameter list:
+Functions are declared with C<sub>, and the return type is the C<:returns(Type)> attribute after the parameter list:
 
     sub classify( i64 $n ) :returns(i64) {
         if ( $n < 0 ) { return -1; }

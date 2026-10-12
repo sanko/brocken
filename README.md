@@ -112,7 +112,7 @@ while ( $i < 10 ) {
 return $sum;    # 45
 ```
 
-Functions are declared with `sub`, and the return type follows the parameter list:
+Functions are declared with `sub`, and the return type is the `:returns(Type)` attribute after the parameter list:
 
 ```perl
 sub classify( i64 $n ) :returns(i64) {
