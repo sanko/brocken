@@ -269,6 +269,8 @@ Attributes provide compile-time metadata for the optimizer and linker:
 
 Brocken uses Corinna-style classes with strict encapsulation. Fields are strictly private unless exposed via attributes.
 
+**Implementation status.** The class system is being brought up in two milestones. v0.0.1 targets parity with Perl's core `class` feature (`perlclass`); v0.0.2 adds selected `Object::Pad` features. Today the front end implements `class` (block form), typed `field` with the `:param`/`:reader`/`:writer` attributes, `method`, and a single `ADJUST`, with static (compile-time) method resolution and no inheritance. `:isa`, `SUPER::`, versioned classes, roles, and `DESTROY` are **planned, not yet implemented** — the `DatabaseConnection::Static` example below is forward-looking. See [`class_roadmap.md`](class_roadmap.md) for the full shipped-versus-planned breakdown.
+
 ```perl
 class DatabaseConnection {
     field ptr $handle   :param :reader;
@@ -290,6 +292,15 @@ class DatabaseConnection {
             Brocken::syscall_by_name("close", $handle);
             $is_open = false;
         }
+    }
+}
+
+# Planned (v0.0.1): :isa, versioned classes, and SUPER:: are not yet implemented.
+class DatabaseConnection::Static :isa(DatabaseConnection) {
+    field bool $toggle = true;
+
+    method commit( String $sql ) : returns(ptr) {
+        return $self->SUPER::commit( $sql ) if $toggle;
     }
 }
 ```

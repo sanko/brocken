@@ -36,13 +36,13 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
 - [ ] **F9 - Class Field RC Leaks:** Constructors and field assignments store without an `incref` and displace old values without a `decref`.
 - [ ] **F12 - Loop/If RC Leak:** `if` and `while` bodies skip block-scoped RC cleanup because they call `lower_block_body` directly instead of `lower_block`.
 - [ ] **F13 - Double-Incref on Return:** Dynamic return values are incref'd twice (by the callee and the caller) leading to a permanent +1 leak.
-- [ ] **Object Destructors (`DESTROY`):** Implement `DESTROY { ... }` block lowering for classes, with automated cascading `decref`s for fields.
+- [ ] **Object Destructors (`DESTROY`):** Implement `DESTROY { ... }` block lowering for classes, with automated cascading `decref`s for fields. Chains derived→root; part of the class object-model work (see §12 and `docs/class_roadmap.md` §1.6).
 
 ---
 
 ## 3. Syntax, Signatures & Grammar Updates
 
-- [ ] **`:returns(...)` Syntax:** Replace `-> RetType` in `Parser.pm` and `Lowerer.pm` with the subroutine attribute `:returns(...)`. Support multi-type register tuples `:returns(i64, bool)`.
+- [ ] **`:returns(...)` Syntax:** Replace `-> RetType` (on both `sub` and `method` declarations) in `Parser.pm`, `AST.pm`, and `Lowerer.pm` with the attribute `:returns(Type)`. Support multi-type register tuples `:returns(i64, bool)`. The spec already documents this form (§7.4, §8); the front end still accepts the old `-> RetType` spelling until this lands.
 - [ ] **Post-Dereference Syntax (`postderef`):** Implement post-deref parsing and lowering: `$ref->@*`, `$ref->%*`, `$ref->$*`, `$ref->[0]`, `$ref->{key}`.
 - [ ] **Strict String Interpolation:** Update `Lexer.pm` and `Parser.pm` double-quote interpolation: support `$scalars`, `@arr[0]`, `%map{key}`, `${var}`. Method calls like `"$pt->x"` must remain raw text (no method call interpolation).
 - [ ] **Anonymous Subs & Closures:** Add parser and lowerer support for anonymous `sub (...) :returns(...) { ... }`.
@@ -144,3 +144,24 @@ These items are deferred to the subsequent release:
 - [ ] **Big-Endian Targets:** `i128` math has no handling for big-endian byte layouts.
 - [ ] **illumos Isolate Segfaults:** `Platform::Solaris` crashes on isolate tests. Requires an OmniOS VM to debug.
 - [ ] **Apple AAPCS Varargs:** Test and verify the 64-byte vararg register save area on Apple Silicon.
+
+---
+
+## 12. Class System
+
+v0.0.1 brings classes to `perlclass` (`use feature 'class'`) parity; v0.0.2 adds selected `Object::Pad`
+features. The feature-by-feature plan, decisions, and open questions live in
+[`docs/class_roadmap.md`](docs/class_roadmap.md). Summary of the work:
+
+- [ ] **v0.0.1 — syntax sugar:** `:returns(Type)` (replacing `-> RET`), parameter defaults, `||=`
+  defaults, `:param(NAME)`/`:reader(NAME)`/`:writer(NAME)` with `_`-stripping, `:writer` returns
+  `$self` for chaining, multiple `ADJUST` blocks, earlier-field visibility in field initializers,
+  `:accessor`, `:weak`, and array/hash fields.
+- [ ] **v0.0.1 — object model:** class versions and attributes, `:isa` single inheritance, static
+  ancestor resolution and `SUPER::`, constructor chaining over a copied `:param` name map, `DESTROY`
+  chaining with cascading field teardown, and field alignment/padding.
+- [ ] **v0.0.2:** `role`/`apply`/`:does`/`requires` compile-time flattening, `:abstract`, ADJUST
+  `:params`, `:strict(params)`, `:lexical_new`, `my class`, `inherit`, `:override`/`:common`, and
+  lexical/anonymous methods.
+- [ ] **Deferred:** `BUILD`/`BUILDARGS`, the metaprogramming API, extension attributes,
+  `:inheritable` field inheritance, `:lvalue` methods, and `:repr(...)`.
