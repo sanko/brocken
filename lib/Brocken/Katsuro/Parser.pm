@@ -393,7 +393,12 @@ class Brocken::Katsuro::Parser v0.0.1 {
             my $var_token = $self->consume( 'VAR', undef, "Expected parameter variable" );
             my $psigil    = substr( $var_token->{value}, 0, 1 );
             my $pname     = substr( $var_token->{value}, 1 );
-            push @params, { type => $ptype, sigil => $psigil, name => $pname };
+            my $default   = undef;
+            if ( $self->check( 'OP', '=' ) ) {
+                $self->advance();
+                $default = $self->parse_expression( PREC_ASSIGN - 1 );
+            }
+            push @params, { type => $ptype, sigil => $psigil, name => $pname, default => $default };
         }
         $self->consume(')');
         my $return_type = $self->parse_return_annotation();
@@ -459,10 +464,20 @@ class Brocken::Katsuro::Parser v0.0.1 {
         my $fvar_token = $self->consume( 'VAR', undef, "Expected field name" );
         my $fname      = substr( $fvar_token->{value}, 1 );
         my @attrs;
+
+        # Attributes are small records rather than bare words so that the custom-name payload parses too:
+        # :param(name), :reader(name), :writer(name). `arg` is undef for a plain `:reader`.
         while ( $self->check( 'OP', ':' ) ) {
             $self->advance();
             my $attr_token = $self->consume( 'IDENT', undef, "Expected attribute name after ':'" );
-            push @attrs, $attr_token->{value};
+            my $arg        = undef;
+            if ( $self->check('(') ) {
+                $self->advance();
+                my $arg_token = $self->consume( 'IDENT', undef, "Expected attribute argument after '('" );
+                $arg = $arg_token->{value};
+                $self->consume( ')', undef, "Expected ')' after attribute argument" );
+            }
+            push @attrs, { name => $attr_token->{value}, arg => $arg };
         }
         my $default    = undef;
         my $default_op = undef;
@@ -498,7 +513,12 @@ class Brocken::Katsuro::Parser v0.0.1 {
             my $var_token = $self->consume( 'VAR', undef, "Expected parameter variable" );
             my $psigil    = substr( $var_token->{value}, 0, 1 );
             my $pname     = substr( $var_token->{value}, 1 );
-            push @params, { type => $ptype, sigil => $psigil, name => $pname };
+            my $default   = undef;
+            if ( $self->check( 'OP', '=' ) ) {
+                $self->advance();
+                $default = $self->parse_expression( PREC_ASSIGN - 1 );
+            }
+            push @params, { type => $ptype, sigil => $psigil, name => $pname, default => $default };
         }
         $self->consume(')');
         my $return_type = $self->parse_return_annotation();

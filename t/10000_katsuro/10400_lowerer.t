@@ -250,6 +250,37 @@ BROCKEN
     ok( $w, 'found generated writer Point::set_x' );
     is( $w->return_type->as_string, 'ptr', 'writer returns ptr' );
 };
+subtest 'Custom accessor and param names' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+class Point {
+    field i64 $_x :param(amount) :reader(get_x) :writer(write_x);
+}
+my ptr $p = Point->new(amount => 3);
+return $p->get_x();
+BROCKEN
+    ok( find_function( $mod, 'Point::get_x' ),   'reader is named get_x, not x' );
+    ok( find_function( $mod, 'Point::write_x' ), 'writer is named write_x, not set__x' );
+    ok( !find_function( $mod, 'Point::_x' ),     'no reader under the raw field name' );
+    ok( !find_function( $mod, 'Point::set__x' ), 'no writer under the derived set_ name' );
+    my $entry = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $entry, 'found entry function' );
+};
+subtest 'Underscore-stripped default names' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+class Point {
+    field i64 $_coordinate :param :reader :writer;
+}
+my ptr $p = Point->new(coordinate => 5);
+return $p->coordinate();
+BROCKEN
+    ok( find_function( $mod, 'Point::coordinate' ),   'reader name has the leading underscore stripped' );
+    ok( find_function( $mod, 'Point::set_coordinate' ), 'writer name is set_ plus the stripped name' );
+    ok( !find_function( $mod, 'Point::_coordinate' ), 'no raw-name reader' );
+    my $entry = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $entry, 'found entry function' );
+};
 subtest 'Field ||= default lowers to a false-check select' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -397,6 +428,17 @@ BROCKEN
     );
     my $text = $mod->as_string();
     like( $text, qr/call\s+i64\s+\@helper/, 'call to helper' );
+};
+subtest 'Omitted trailing parameters are filled with their defaults at the call site' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+sub add(i64 $a = 3, i64 $b = 4) :returns(i64) {
+    return $a + $b;
+}
+return add();
+BROCKEN
+    my $text = $mod->as_string();
+    like( $text, qr/call\s+i64\s+\@add\s*\([^)]*i64\s+3[^)]*i64\s+4/, 'both defaults materialised as literal i64 args' );
 };
 subtest 'Full pipeline: lex -> parse -> lower' => sub {
     my $c   = Brocken->new;

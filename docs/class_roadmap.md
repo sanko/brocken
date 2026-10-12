@@ -28,7 +28,7 @@ The current front end (`Brocken::Katsuro`) and lowerer implement a deliberately 
 | Accessor names | Fixed: reader = field name, writer = `set_<field>` | No `:reader(NAME)` / `:writer(NAME)` |
 | Methods | `method NAME(TYPE $p, ...) :returns(RET) { ... }` | Typed params required; `RET` explicit or inferred; `$self` is a hidden receiver |
 | ADJUST | `ADJUST { ... }` | Any number of blocks, run in declaration order; each sees `$self` and fields declared so far |
-| `__CLASS__` | Partial | Usable inside methods; in a field default it currently croaks (`__CLASS__ used outside of a class`) because the constructor is lowered at the call site with no class context |
+| `__CLASS__` | Partial | Usable inside methods and field initializers (the constructor now runs with class context); its *value* is still the placeholder from TODO F15 |
 | Constructor | `Class->new(...)` (synthesised, never declared) | Positional values for `:param` fields in declaration order, then an optional trailing Hash of `name => value` overrides; `=`/`//=`/`||=` defaults; then `ADJUST`. Inlined at **every** call site, not emitted as a single `Class::new` function |
 | Field access | Bare `$field` inside methods/`ADJUST`; `$obj->field` outside | Bare access is a compile-time GEP, not a call |
 | Dispatch | Fully static: `$obj->m` resolves to `Class::m` from the receiver's static class | No vtable, no runtime lookup |
@@ -45,15 +45,15 @@ those are marked **Diverge** and argued in 1.6.
 | C1 | `class NAME VERSION :ATTRS BLOCK` | Block, no version/attrs | Planned |
 | C2 | `class NAME;` statement form | Missing | Planned |
 | C3 | Untyped fields `field $x`, `@x`, `%x` | Type required; scalar only | Diverge (types) + Planned (array/hash) |
-| C4 | `:param(NAME)` + `_`-stripping default names | Missing | Planned |
-| C5 | `:reader(NAME)` / `:writer(NAME)` + `_`-stripping | Missing | Planned |
+| C4 | `:param(NAME)` + `_`-stripping default names | Custom param names and one-underscore stripping | **Shipped** |
+| C5 | `:reader(NAME)` / `:writer(NAME)` + `_`-stripping | Custom accessor names and one-underscore stripping | **Shipped** |
 | C6 | `:reader` on array/hash (list = contents, scalar = count) | Missing | Planned (with C3) |
 | C7 | `:writer` returns `$self` for chaining | Writer returns `ptr` (`$self`), so `$obj->set_x(1)->set_y(2)` chains | **Shipped** |
 | C8 | `:writer` scalar-only | Writer is scalar-only | Match |
 | C9 | Default operators `=`, `//=`, `||=` | All three; `||=` applies when the supplied value is false | **Shipped** |
 | C10 | Multiple `ADJUST`, run in declaration order | `adjusts` is a list, lowered in order into one `Class::ADJUST` | **Shipped** |
 | C11 | Superclass `ADJUST` blocks merged and run | No inheritance | Planned (with C13) |
-| C12 | Field initializers see earlier fields' values and may use `__CLASS__` | Not wired; no class context in the inlined constructor | Planned |
+| C12 | Field initializers see earlier fields' values and may use `__CLASS__` | Initializers run with class context and see earlier fields; `__CLASS__` no longer croaks (its value is still TODO F15) | **Shipped** |
 | C13 | `:isa(CLASS [VER])`, single superclass, `require` on demand | Missing | Planned |
 | C14 | Inherited methods callable; fields *not* inherited | Missing | Planned (with C13) |
 | C15 | `SUPER::` static ancestor call | Missing | Planned (with C13) |
@@ -92,15 +92,15 @@ Store `version` and an attribute list on `AST::Stmt::ClassDecl`; validate that `
 
 - **Types stay.** Brocken is statically typed; `field` keeps its required `TYPE`. A bare `field $x` can default to `Any` so `perlclass` code ports, but the type must remain expressible.
 - **Array/hash fields.** Extend the layout and `populate_field_geps` to `@`/`%` fields; a hash field stores a pointer to heap hash data, an array field to heap array data (matching the existing `ArrayDecl`/`Hash` lowering). `:reader` on these returns contents in list context / count in scalar context; implement via the existing array/hash runtime helpers.
-- **Accessor naming.** Parse `:reader(NAME)` / `:writer(NAME)` / `:param(NAME)` with their payloads, including the single-underscore stripping rule. This changes `attrs` from `['reader']` to a small list of `{name, arg}` records.
+- **Accessor naming (done).** The parser now reads attributes as `{name, arg}` records, so `:reader(NAME)` / `:writer(NAME)` / `:param(NAME)` carry their payloads, and the default accessor/param name strips exactly one leading underscore from the field name, matching `perlclass` (`$_x :param` is `new(x => ...)`, `$_x :reader` is `x()`, `$_x :writer` is `set_x()`). Chained writer calls resolve through a writer-method map rather than the `set_` prefix, so custom writer names chain too. Tests: `t/10000_katsuro/10960_class_accessor_names.t` (runtime, all native targets), parser and lowerer cases.
 - **Chaining (done).** `:writer` returns `$self` (registered as `ptr`); `_expr_class` in the Lowerer resolves the class of a chained writer call so `$obj->set_x(1)->set_y(2)` type-checks.
 - **`||= defaults` (done).** Accepted in `parse_field_decl` and threaded through the constructor lowering: when a value is supplied and is false, the default replaces it (`icmp eq 0` + `select`); when the field is absent, the default is stored directly. The operators themselves were then generalised off fields: `//`, `//=`, and `||=` now work on ordinary variables and in expressions (`my Any $x; $x //= 5;`, `$a // $b // 0`), with `//=`/`//` testing a `ptr`/`Any` slot against null and `||=` against zero (TODO §3, spec §4.6).
-- **Field-init visibility (C12).** Lower field defaults in the constructor and bind each already-set field's GEP before lowering the next default, so `field $y = $x + 1` works, and lower them with `current_class` set so `__CLASS__` resolves. Today the constructor is inlined at the call site, lowers each default expression without the field GEPs in scope, and has no class context (so `__CLASS__` in a default croaks).
+- **Field-init visibility (C12) (done).** Field defaults are lowered in the inlined constructor with class context: the constructor binds `$self`, sets `$current_class` (so `__CLASS__` and `$self->m` resolve), and binds each field's GEP to its name as the field is assigned, so `field $y = $x + 1` reads an earlier field — whether it was set positionally, by name, or by its own initializer. All bindings are restored at the end so they never leak into the caller, and class context is established only around the initializers so a caller passing its own field to a constructor still gets its own type. Tests: `t/10000_katsuro/10965_field_init_visibility.t` (runtime, native targets). Note: the *value* of `__CLASS__` is still the placeholder pointer (TODO F15), so a default may mention it without croaking but cannot yet use it as a real class handle.
 
 ### 1.3 Methods (C16–C18, C22)
 
 - **`:returns(Type)`.** Done: the attribute form is now the only spelled return annotation on both `sub` and `method`, and the old `-> RET` form has been removed from the parser, core runtime, tests, and examples (TODO 3). Still to do: `:returns(i64, bool)` register tuples per the spec, which need the `AST`/`Lowerer` to model more than one return value; the parser currently accepts the attribute and first type, then rejects the comma with a clear error.
-- **Parameter defaults.** `method greet(String $name = "someone")`.
+- **Parameter defaults (done).** `method greet(String $name = "someone")`. A default parses as an expression after `=`, and omitted *trailing* parameters are filled at the call site: a default may reference any earlier parameter (including one that was itself defaulted), because each value that lands in a parameter is bound to the parameter's name while the call lowers. Filling stops at the first omitted parameter without a default. Defaults evaluate in the caller's context, so they can use caller-scope variables but not the callee's fields or `$self`. Tests: `t/10000_katsuro/10950_param_defaults.t` (runtime, cross-target), parser and lowerer cases.
 - **Lexical `my method`** and **anonymous `method { ... }`.** Lexical methods are a scoping change in the parser plus a private symbol naming scheme. Anonymous methods need a code-pointer value; if the body captures no fields/locals it can lower to a raw code address (like the existing non-capturing anonymous `sub`), otherwise it needs the closure environment planned for logic. Recommend shipping the non-capturing form first, and documenting the capture limitation.
 - **Method attributes** beyond `:returns` (`:override`, `:common`, `:lvalue`) are Object::Pad territory; see 2.
 
@@ -189,7 +189,7 @@ dispatch, RC/Immix). Decisions are recommendations for sign-off.
 | `:mutator` | lvalue accessor for a scalar field | Static lowering to get/set; useful sugar | Small |
 | `:accessor` | Combined reader/writer | Implemented as an M0 win (reader + chaining writer) | Done |
 | `:weak` | Accessor/constructor assignments don't take ownership | Maps to a no-`incref` store in the RC contract | Small–moderate |
-| `:reader`/`:writer`/`:param(NAME)` + `_` rule | Custom accessor names | Same as C4/C5; adopt fully | Small |
+| `:reader`/`:writer`/`:param(NAME)` + `_` rule | Custom accessor names | Same as C4/C5; adopt fully | Done (C4/C5) |
 | Default `//=` and `||=` | Field default operators | `||=` implemented (C9); custom names still planned | Done (`||=`) |
 | Method `:override` | Assert a method overrides an ancestor's | Compile-time check over the static method table | Small |
 | Lexical / anonymous methods | Private methods; method values | Same as C17/C18 | Moderate |
@@ -230,7 +230,7 @@ Ordered by dependency.
 
 1. **Class metadata registry.** Extend the `classes` hash entry with `parent`, `version`, `abstract`, `roles`, `required_methods`, and a `param_map` copied from the parent chain. This is the Brocken analogue of `xhv_class_*` in `perlclassguts`.
 2. **Field map and alignment.** Absolute field indices over the whole chain; introduce alignment padding in `register_class` (currently fields are packed with no padding, which is fine for the i64-only tests but not for mixed widths).
-3. **Accessor attribute records.** `[{name, arg}]` instead of bare strings; honour custom names and `_`-stripping.
+3. **Accessor attribute records.** `[{name, arg}]` instead of bare strings; custom names and `_`-stripping are handled (a name is stored with the record that overrides it, and the registry keeps each field's resolved `param_name`).
 4. **Constructor chaining.** Emit a real `Class::new` function instead of inlining the constructor at every call site (today it is inlined, which duplicates field initializers and has no class context). `new` walks root => derived initializers and ADJUST blocks over the merged `param_map`; `:strict(params)` checks leftovers; ADJUST `:params` consumes named args.
 5. **Static ancestor resolution + `SUPER::`.** Extend `resolve_class_name`/`lower_method_call` to walk the chain; add an AST node for `SUPER::m`.
 6. **`DESTROY` chaining + cascading teardown.**
@@ -264,7 +264,7 @@ Ordered by dependency.
 ## 5. Suggested sequencing
 
 1. **M0 (v0.0.1, no model change):** `:returns`, parameter defaults, `||=`, custom accessor names, `_`-stripping, `:writer` chaining return, multiple `ADJUST`, field-init visibility, `:accessor`, `:weak`, array/hash fields.
-   *Done so far:* `:returns` (C22), `||=` (C9), `:writer` chaining (C7), multiple `ADJUST` (C10), `:accessor`. *Remaining:* parameter defaults, custom accessor names + `_`-stripping, field-init visibility (C12), `:weak`, array/hash fields.
+   *Done so far:* `:returns` (C22), `||=` (C9), `:writer` chaining (C7), multiple `ADJUST` (C10), `:accessor`, custom accessor names + `_`-stripping (C4, C5), parameter defaults, field-init visibility (C12). *Remaining:* `:weak`, array/hash fields.
 2. **M1 (v0.0.1, object model):** field-map/alignment rework; class versions and attributes; `:isa`; static ancestor resolution; `SUPER::`; constructor chaining; `DESTROY`.
 3. **M2 (v0.0.2):** `role`/`apply`/`:does`/`requires` flattening; `:abstract`; ADJUST `:params`; `:strict(params)`; `:lexical_new`; `my class`; `inherit`; `:override`/`:common`; lexical/anonymous
    methods.

@@ -21,11 +21,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $block_id              = 0;
     field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
+    field $param_defaults         = {};    # "name" -> [ {name, default}, ... ] per user parameter, for omitted trailing args
     field $needs_rc              = {};    # var_name -> 1 (Any-typed variable needing refcounting)
     field $rc_owner              = {};    # var_name -> owning $_dyn_scope_stack entry (declaring block/loop scope)
     field $array_elem_types      = {};    # '@name' -> element IR type (for heap-array GEP scaling)
     field $rodata : reader       = {};    # label -> bytes for string constants
     field $_rodata_label_counter = 0;
+    field $writer_map            = {};    # "Class::name" -> class name (auto-generated writers return their receiver)
     field $_loop_header_blocks   = [];    # stack of header block labels
     field $_loop_check_blocks    = [];    # stack of iteration-check block labels (counter guard)
     field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
@@ -35,6 +37,27 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     method unique_block_name($prefix) {
         return $prefix . '_' . $block_id++;
+    }
+
+    # Field attribute records -- Parser stores each attribute as { name => 'reader', arg => undef } and
+    # { name => 'param', arg => 'amount' } -- so accessor/param naming can consult the custom-name payload.
+    method attr_rec( $recs, $name ) {
+        for my $r ( $recs->@* ) { return $r if $r->{name} eq $name; }
+        return undef;
+    }
+    method has_attr( $recs, $name ) {
+        return defined $self->attr_rec( $recs, $name );
+    }
+    method attr_arg( $recs, $name ) {
+        my $r = $self->attr_rec( $recs, $name );
+        return defined $r ? $r->{arg} : undef;
+    }
+
+    # Perl strips exactly one leading underscore when deriving a default accessor/param name from a field named
+    # `$_foo`, and `$__bar` keeps one underscore:  _foo -> foo, __bar -> _bar.
+    method strip_underscore($name) {
+        $name =~ s/^_//;
+        return $name;
     }
     my %TYPE_MAP = (
         i1     => Brocken::Lindsay::IR::Type::i1(),
@@ -257,23 +280,31 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->lower_method( $class_name, $m );
         }
 
-        # Auto-generate :reader methods (:accessor is reader + writer)
+        # Auto-generate :reader methods (:accessor is reader + writer). The method name is the custom
+        # :reader(name) payload if one was given, otherwise the field name with one leading underscore
+        # removed, so `field $_x :reader` generates `x()`.
         for my $f ( $ast->fields->@* ) {
-            if ( grep { $_ eq 'reader' || $_ eq 'accessor' } $f->attrs->@* ) {
-                my $mname = $f->name;
+            if ( $self->has_attr( $f->attrs, 'reader' ) || $self->has_attr( $f->attrs, 'accessor' ) ) {
+                my $mname = $self->attr_arg( $f->attrs, 'reader' ) //
+                    $self->attr_arg( $f->attrs, 'accessor' ) //
+                    $self->strip_underscore( $f->name );
                 $self->register_method( $class_name, $mname, $f->type, [] );
-                $self->generate_reader( $class_name, $f );
+                $self->generate_reader( $class_name, $f, $mname );
             }
         }
 
         # Auto-generate :writer methods (:accessor is reader + writer). Writers return $self so that
-        # calls can be chained: $obj->set_x(1)->set_y(2).
+        # calls can be chained: $obj->set_x(1)->set_y(2). As in Perl, the default name is set_ plus the
+        # field name with one leading underscore removed (`$_x` -> `set_x`), unless :writer(name) says
+        # otherwise.
         for my $f ( $ast->fields->@* ) {
-            if ( grep { $_ eq 'writer' || $_ eq 'accessor' } $f->attrs->@* ) {
-                my $mname  = 'set_' . $f->name;
+            if ( $self->has_attr( $f->attrs, 'writer' ) || $self->has_attr( $f->attrs, 'accessor' ) ) {
+                my $base  = $self->attr_arg( $f->attrs, 'accessor' ) // $self->strip_underscore( $f->name );
+                my $mname = $self->attr_arg( $f->attrs, 'writer' ) // 'set_' . $base;
                 my @params = ( { type => $f->type, sigil => '$', name => 'value' } );
                 $self->register_method( $class_name, $mname, 'ptr', \@params );
-                $self->generate_writer( $class_name, $f );
+                $writer_map->{ $class_name . '::' . $mname } = $class_name;
+                $self->generate_writer( $class_name, $f, $mname );
             }
         }
         $current_class = undef;
@@ -375,7 +406,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 default    => $f->default,
                 default_op => $f->default_op,
                 attrs      => [ $f->attrs->@* ],
-                param      => ( grep { $_ eq 'param' } $f->attrs->@* ) ? 1 : 0,
+                param      => $self->has_attr( $f->attrs, 'param' ) ? 1 : 0,
+                param_name => $self->has_attr( $f->attrs, 'param' ) ?
+                    ( $self->attr_arg( $f->attrs, 'param' ) // $self->strip_underscore( $f->name ) ) :
+                    undef,
                 };
             $offset += $self->type_size($ir_type);
         }
@@ -410,6 +444,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $p ( $ast->params->@* ) {
             push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
         }
+        $param_defaults->{ $ast->name } = [ map { { name => $_->{name}, default => $_->{default} } } $ast->params->@* ];
         my $fn = Brocken::Lindsay::IR::Function->new( name => $ast->name, return_type => $ret_type, params => \@params, );
         $module->add_function($fn);
         $functions->{ $ast->name } = $fn;
@@ -432,6 +467,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $p ( $params_ast->@* ) {
             push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
         }
+        $param_defaults->{$name} = [ map { { name => $_->{name}, default => $_->{default} } } $params_ast->@* ];
         my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params, );
         $module->add_function($fn);
         $functions->{$name} = $fn;
@@ -1882,14 +1918,46 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             push @args, $want_val;
         }
         my $param_idx = ( $callee_has_heap_base ? 1 : 0 ) + ( $callee_has_want ? 1 : 0 );
+        my $defaults = $param_defaults->{$name};
+
+        # A default for one omitted trailing argument may reference an earlier one, so each value that lands in a
+        # parameter is bound to that parameter's name while the rest of the call is lowered. The bindings are
+        # restored afterwards so they never leak into the caller's scope.
+        my @saved;
         for my $arg ( $ast->args->@* ) {
             my $val = $self->lower_expression($arg);
             if ( $param_idx < $callee->params->@* ) {
                 $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
             }
             push @args, $val;
+            if ($defaults) {
+                my $di  = $param_idx - ( $callee_has_heap_base ? 1 : 0 ) - ( $callee_has_want ? 1 : 0 );
+                my $rec = $di < $defaults->@* ? $defaults->[$di] : undef;
+                if ($rec) {
+                    push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
+                    $symbols->{ $rec->{name} } = $val;
+                }
+            }
             $param_idx++;
         }
+
+        # Omitted trailing parameters take their defaults in order. Filling stops at the first parameter without a
+        # default: a required parameter cannot be skipped so that a later one can be provided.
+        if ($defaults) {
+            my $base = ( $callee_has_heap_base ? 1 : 0 ) + ( $callee_has_want ? 1 : 0 );
+            while ( $param_idx < $callee->params->@* ) {
+                my $di   = $param_idx - $base;
+                my $rec  = $di < $defaults->@* ? $defaults->[$di] : undef;
+                last unless $rec && defined $rec->{default};
+                my $val = $self->lower_expression( $rec->{default} );
+                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
+                push @args, $val;
+                push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
+                $symbols->{ $rec->{name} } = $val;
+                $param_idx++;
+            }
+        }
+        $symbols->{ $_->[0] } = $_->[1] for @saved;
         $self->_emit_fuel_check( $line, $col );
         return $builder->build_call( $callee, \@args, undef, $line, $col );
     }
@@ -2175,15 +2243,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $full = $recv . '::' . $obj->method;
                 my $ret_class = $function_return_class->{$full};
                 return $ret_class if $ret_class;
-                # A :writer / :accessor method returns its receiver, so a chained call such as
-                # $obj->set_x(1)->set_y(2) keeps the same class.
-                if ( $obj->method =~ /^set_(.+)$/ ) {
-                    my $cd = $classes->{$recv};
-                    my ($fd) = grep { $_->{name} eq $1 } ( $cd ? $cd->{fields}->@* : () );
-                    if ( $fd && grep { $_ eq 'writer' || $_ eq 'accessor' } $fd->{attrs}->@* ) {
-                        return $recv;
-                    }
-                }
+                # An auto-generated :writer / :accessor method returns its receiver, so a chained call such
+                # as $obj->set_x(1)->set_y(2) keeps the same class. The writer name may be custom
+                # (:writer(write_x)), so it is looked up in the writer map rather than by a set_ prefix.
+                return $writer_map->{$full} if $writer_map->{$full};
             }
         }
         return undef;
@@ -2232,6 +2295,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $header_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => ( 1 | ( 4 << 24 ) ) );
             $builder->build_store( $header_const, $self_ptr, $line, $col );
 
+            # A field initializer can read the fields assigned before it (`field $y = $x + 1`), so each field's GEP
+            # is bound to its name as it is assigned. The bindings are restored at the end so they never leak into
+            # the caller's scope (C12). Class context (`$self`, `$current_class`) is established only around the
+            # initializers below, so the caller's own expressions are lowered in the caller's class context.
+            my @ctor_bindings;
+            my %ctor_bound;
+
             # Constructors take positional values for :param fields in declaration order, followed by an optional
             # Hash of named field overrides: new(1, 2, y => 3).
             my @positional = $ast->args->@*;
@@ -2255,20 +2325,48 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     $col );
                 $builder->build_store( $val, $field_ptr, $line, $col );
                 $seen{ $fd->{name} } = 1;
+                if ( !$ctor_bound{ $fd->{name} } ) {
+                    push @ctor_bindings, [ $fd->{name}, $symbols->{ $fd->{name} } ];
+                    $symbols->{ $fd->{name} } = $field_ptr;
+                    $ctor_bound{ $fd->{name} } = 1;
+                }
             }
             for my $pair ( $hash ? $hash->pairs->@* : () ) {
                 my $key_expr = $pair->{key};
                 next unless $key_expr->isa('Brocken::Katsuro::AST::Expr::Const') && $key_expr->type eq 'String';
-                my $field_name = $key_expr->value;
-                my $fi         = $field_idx{$field_name};
-                Carp::croak( "Unknown field '$field_name' in class '$class_name' at " . $self->_loc($ast) ) unless defined $fi;
+                my $key = $key_expr->value;
+                my $fi  = $field_idx{$key};
+
+                # A :param field with a custom (or underscore-stripped) name is addressed by that name:
+                # `field $_total :param(total);` is set by `new(total => 42)`.
+                if ( !defined $fi ) {
+                    for my $f ( $cd->{fields}->@* ) {
+                        if ( defined $f->{param_name} && $f->{param_name} eq $key ) { $fi = $f->{idx}; last; }
+                    }
+                }
+                Carp::croak( "Unknown field '$key' in class '$class_name' at " . $self->_loc($ast) ) unless defined $fi;
                 my $fd  = $cd->{fields}[$fi];
                 my $val = $self->lower_expression( $pair->{value} );
                 $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
                 my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fi, '%' . $fd->{name} . '.init', $line, $col );
                 $builder->build_store( $val, $field_ptr, $line, $col );
-                $seen{$field_name} = 1;
+                $seen{ $fd->{name} } = 1;
+                if ( !$ctor_bound{ $fd->{name} } ) {
+                    push @ctor_bindings, [ $fd->{name}, $symbols->{ $fd->{name} } ];
+                    $symbols->{ $fd->{name} } = $field_ptr;
+                    $ctor_bound{ $fd->{name} } = 1;
+                }
             }
+            # The field initializers are the only class-context expressions, so establish it now: bind `$self`
+            # and set `$current_class` so `__CLASS__` and `$self->method` resolve. All earlier fields are bound.
+            my $saved_class = $current_class;
+            $current_class  = $class_name;
+            push @ctor_bindings, [ 'self', $symbols->{self} ];
+            my $self_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::ptr(), '%self.addr' );
+            $builder->build_store( $self_ptr, $self_alloca, $line, $col );
+            $symbols->{self} = $self_alloca;
+            $ctor_bound{self} = 1;
+
             for my $f ( $cd->{fields}->@* ) {
                 next unless defined $f->{default};
                 my $op     = $f->{default_op} // '=';
@@ -2294,11 +2392,18 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $default_val = $self->lower_expression( $f->{default} );
                 $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
                 $builder->build_store( $default_val, $field_ptr, $line, $col );
+                if ( !$ctor_bound{ $f->{name} } ) {
+                    push @ctor_bindings, [ $f->{name}, $symbols->{ $f->{name} } ];
+                    $symbols->{ $f->{name} } = $field_ptr;
+                    $ctor_bound{ $f->{name} } = 1;
+                }
             }
             my $adjust_fn = $functions->{ $class_name . '::ADJUST' };
             if ($adjust_fn) {
                 $builder->build_call( $adjust_fn, [ $hb, $want_val, $self_ptr ], undef, $line, $col );
             }
+            $current_class = $saved_class;
+            $symbols->{ $_->[0] } = $_->[1] for @ctor_bindings;
             return $self_ptr;
         }
         my $callee = $functions->{$full_name};
@@ -2307,14 +2412,39 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->lower_expression( $ast->obj );
         my @args      = ( $hb, $want_val, $obj_ptr );
         my $param_idx = 3;
+        my $defaults  = $param_defaults->{$full_name};
+
+        # Same omitted-argument handling as plain calls: defaults fill the trailing parameters in order, and a default
+        # may reference an earlier one because each landed value is bound to its parameter name until the call is done.
+        my @saved;
         for my $arg ( $ast->args->@* ) {
             my $val = $self->lower_expression($arg);
             if ( $param_idx < $callee->params->@* ) {
                 $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
             }
             push @args, $val;
+            if ($defaults) {
+                my $rec = $param_idx - 3 < $defaults->@* ? $defaults->[ $param_idx - 3 ] : undef;
+                if ($rec) {
+                    push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
+                    $symbols->{ $rec->{name} } = $val;
+                }
+            }
             $param_idx++;
         }
+        if ($defaults) {
+            while ( $param_idx < $callee->params->@* ) {
+                my $rec  = $param_idx - 3 < $defaults->@* ? $defaults->[ $param_idx - 3 ] : undef;
+                last unless $rec && defined $rec->{default};
+                my $val = $self->lower_expression( $rec->{default} );
+                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
+                push @args, $val;
+                push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
+                $symbols->{ $rec->{name} } = $val;
+                $param_idx++;
+            }
+        }
+        $symbols->{ $_->[0] } = $_->[1] for @saved;
         $self->_emit_fuel_check( $line, $col );
         return $builder->build_call( $callee, \@args, undef, $line, $col );
     }
@@ -2562,8 +2692,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     # Auto-generated accessor and constructor lowering
-    method generate_reader( $class_name, $field_ast ) {
-        my $full_name = $class_name . '::' . $field_ast->name;
+    method generate_reader( $class_name, $field_ast, $mname ) {
+        my $full_name = $class_name . '::' . $mname;
         $current_func = $functions->{$full_name};
         return unless $current_func;
         $current_func->set_blocks( [] );
@@ -2587,8 +2717,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $builder->build_ret($loaded);
     }
 
-    method generate_writer( $class_name, $field_ast ) {
-        my $full_name = $class_name . '::set_' . $field_ast->name;
+    method generate_writer( $class_name, $field_ast, $mname ) {
+        my $full_name = $class_name . '::' . $mname;
         $current_func = $functions->{$full_name};
         return unless $current_func;
         $current_func->set_blocks( [] );

@@ -172,8 +172,12 @@ declaration has no prior value, so `my $x //= 5;` is just `my $x = 5;`. `//` is 
 
 Classes hold typed fields and methods. A field marked `:reader` gets a reader, `:writer` gets a `set_` writer that
 returns `$self` (so writer calls chain), and `:accessor` gets both. A `:param` field becomes a constructor argument,
-and fields may carry an `=`, `//=`, or `||=` default. A class value is a `ptr`, and construction is a call on the class
-name with named arguments:
+and fields may carry an `=`, `//=`, or `||=` default. Any of the names can be overridden with a payload —
+`:reader(get_x)`, `:writer(put_x)`, `:param(amount)` — and a leading underscore on the field name is stripped when
+deriving the defaults, as in `perlclass`: `field $_x :param;` is set by `new(x => ...)`. A field default runs in the
+constructor and can read the fields declared before it (`field $y = $x + 1;`). Method and sub parameters may
+carry defaults (`method greet(String $name = "someone")`), applied when trailing arguments are omitted. A class value is a `ptr`,
+and construction is a call on the class name with named arguments:
 
 ```perl
 class Point {

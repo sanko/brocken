@@ -153,6 +153,26 @@ BROCKEN
     is( $s1->return_type, 'ptr' );
     is( $s1->body->statements->@*, 0, 'forward decl has empty body' );
 };
+subtest 'Parameter defaults parse' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse(<<'BROCKEN');
+sub greet(String $name = "someone") :returns(i64) {
+    return 0;
+}
+sub add(i64 $a = 1, i64 $b = $a + 1) :returns(i64) {
+    return 0;
+}
+BROCKEN
+    my $s0 = $prog->statements->[0];
+    isa_ok( $s0, ['Brocken::Katsuro::AST::Stmt::SubDecl'] );
+    is( $s0->params->[0]{name}, 'name' );
+    isa_ok( $s0->params->[0]{default}, ['Brocken::Katsuro::AST::Expr::Const'] );
+    my $s1 = $prog->statements->[1];
+    isa_ok( $s1->params->[0]{default}, ['Brocken::Katsuro::AST::Expr::Const'], 'first param default' );
+    is( $s1->params->[1]{name}, 'b' );
+    isa_ok( $s1->params->[1]{default}, ['Brocken::Katsuro::AST::Expr::BinOp'] );
+    is( $s1->params->[1]{default}->op, '+', 'default expression stops at the comma' );
+};
 subtest 'Return annotation :returns(Type)' => sub {
     my $c = Brocken->new;
 
@@ -304,8 +324,10 @@ BROCKEN
     is( $f0->type,                'i64' );
     is( $f0->name,                'x' );
     is( scalar( $f0->attrs->@* ), 2, 'attrs count' );
-    is( $f0->attrs->[0],          'reader' );
-    is( $f0->attrs->[1],          'param' );
+    is( $f0->attrs->[0]->{name}, 'reader' );
+    is( $f0->attrs->[0]->{arg},  undef );
+    is( $f0->attrs->[1]->{name}, 'param' );
+    is( $f0->attrs->[1]->{arg},  undef );
     isa_ok( $f0->default, ['Brocken::Katsuro::AST::Expr::Const'] );
     is( $f0->default->value, 0 );
     is( $f0->default_op,     '=' );
@@ -313,15 +335,15 @@ BROCKEN
     is( $f1->type,                'i64' );
     is( $f1->name,                'y' );
     is( scalar( $f1->attrs->@* ), 3, 'attrs count' );
-    is( $f1->attrs->[0],          'reader' );
-    is( $f1->attrs->[1],          'writer' );
-    is( $f1->attrs->[2],          'param' );
+    is( $f1->attrs->[0]->{name}, 'reader' );
+    is( $f1->attrs->[1]->{name}, 'writer' );
+    is( $f1->attrs->[2]->{name}, 'param' );
     ok( !defined $f1->default, 'no default' );
     my $f2 = $s->fields->[2];
     is( $f2->type,                'i64' );
     is( $f2->name,                'z' );
     is( scalar( $f2->attrs->@* ), 1, 'attrs count' );
-    is( $f2->attrs->[0],          'reader' );
+    is( $f2->attrs->[0]->{name}, 'reader' );
     isa_ok( $f2->default, ['Brocken::Katsuro::AST::Expr::Const'] );
     is( $f2->default->value, 0 );
     is( $f2->default_op,     '//=' );
@@ -340,10 +362,35 @@ BROCKEN
     is( $f0->type,                'i64' );
     is( $f0->name,                'x' );
     is( scalar( $f0->attrs->@* ), 1, 'attrs count' );
-    is( $f0->attrs->[0],          'accessor' );
+    is( $f0->attrs->[0]->{name}, 'accessor' );
+    is( $f0->attrs->[0]->{arg},  undef );
     isa_ok( $f0->default, ['Brocken::Katsuro::AST::Expr::Const'] );
     is( $f0->default->value, 7 );
     is( $f0->default_op,     '||=' );
+};
+subtest 'Field attributes carry custom-name payloads' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse(<<'BROCKEN');
+class Point {
+    field i64 $x :param(x_amount) :reader(get_x) :writer(set_x);
+    field i64 $_total :param;
+}
+BROCKEN
+    is( $prog->statements->@*, 1, 'one declaration' );
+    my $s = $prog->statements->[0];
+    my $f0 = $s->fields->[0];
+    is( $f0->name, 'x' );
+    is( scalar( $f0->attrs->@* ), 3, 'three attributes' );
+    is( $f0->attrs->[0]->{name}, 'param',   'param attribute name' );
+    is( $f0->attrs->[0]->{arg},  'x_amount', 'param custom name' );
+    is( $f0->attrs->[1]->{name}, 'reader' );
+    is( $f0->attrs->[1]->{arg},  'get_x', 'reader custom name' );
+    is( $f0->attrs->[2]->{name}, 'writer' );
+    is( $f0->attrs->[2]->{arg},  'set_x', 'writer custom name' );
+    my $f1 = $s->fields->[1];
+    is( $f1->name, '_total' );
+    is( $f1->attrs->[0]->{name}, 'param' );
+    ok( !defined $f1->attrs->[0]->{arg}, 'no payload on plain :param' );
 };
 subtest 'Method declaration inside class' => sub {
     my $c    = Brocken->new;

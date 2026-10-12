@@ -261,9 +261,11 @@ sub divide(i64 $num, i64 $denom) :returns(i64, bool) {
 my ($result, $ok) = divide(10, 2);
 ```
 
+**Positional parameter defaults.** Typed positional parameters may carry a default (`sub add(i64 $a = 1, i64 $b = 2)`), and omitted *trailing* arguments take their default. The default is then lowered and filled at the call site, so it may reference any earlier parameter — including one that was itself defaulted (`sub pair(i64 $a = 3, i64 $b = $a + 1)`). Filling stops at the first omitted parameter that has no default. Defaults evaluate in the caller's context, so they can use caller-scope variables but not the callee's fields or `$self`. (M0, shipped; see [`class_roadmap.md`](class_roadmap.md) §1.3.)
+
 ### 7.2 Named Parameters
 
-Named parameters are prefixed with `:` and passed via `name => value` pairs.
+**Planned.** Named parameters are prefixed with `:` and passed via `name => value` pairs.
 ```perl
 sub configure(String $host, :i64 $port = 5432, :bool $ssl = true) { ... }
 configure("localhost", port => 8080);
@@ -290,11 +292,16 @@ Attributes provide compile-time metadata for the optimizer and linker:
 - `:aligned(N)` - Enforces N-byte memory alignment (useful for SIMD arrays).
 
 **Class Field Attributes:**
-- `:param` - Generates constructor argument: `Class->new(field => $val)`.
-- `:reader` - Generates accessor: `$obj->field()`.
-- `:writer` - Generates mutator: `$obj->set_field($val)`, which returns `$self` so calls can be chained.
-- `:accessor` - Generates both reader and writer.
+- `:param` - Generates constructor argument: `Class->new(field => $val)`. An explicit name may be given: `:param(name)`.
+- `:reader` - Generates accessor: `$obj->field()`. An explicit name may be given: `:reader(name)`.
+- `:writer` - Generates mutator: `$obj->set_field($val)`, which returns `$self` so calls can be chained. An explicit name may be given: `:writer(name)`.
+- `:accessor` - Generates both reader and writer; `:accessor(name)` names the reader (and the writer becomes `set_` + that name).
 - `:weak` - Weak reference; prevents reference cycles by bypassing `incref`/`decref`.
+
+As in `perlclass`, when no explicit name is given, the generated name is the field name minus its sigil with
+exactly **one leading underscore removed**: `field $_foo :param;` is addressed by the caller as `new(foo => ...)`,
+`:reader` on `$_foo` generates `foo()`, and `:writer` on `$_foo` generates `set_foo()`. A field `$__bar` keeps one
+underscore (`_bar`), matching Perl's rule.
 
 ---
 
@@ -302,7 +309,7 @@ Attributes provide compile-time metadata for the optimizer and linker:
 
 Brocken uses Corinna-style classes with strict encapsulation. Fields are strictly private unless exposed via attributes.
 
-**Implementation status.** The class system is being brought up in two milestones. v0.0.1 targets parity with Perl's core `class` feature (`perlclass`); v0.0.2 adds selected `Object::Pad` features. Today the front end implements `class` (block form), typed `field` with the `:param`/`:reader`/`:writer`/`:accessor` attributes, `=`/`//=`/`||=` defaults, `method`, and any number of `ADJUST` blocks (run in declaration order); writers return `$self` so calls can be chained. Method resolution is static (compile-time) and there is no inheritance. `:isa`, `SUPER::`, versioned classes, roles, and `DESTROY` are **planned, not yet implemented** — the `DatabaseConnection::Static` example below is forward-looking. See [`class_roadmap.md`](class_roadmap.md) for the full shipped-versus-planned breakdown.
+**Implementation status.** The class system is being brought up in two milestones. v0.0.1 targets parity with Perl's core `class` feature (`perlclass`); v0.0.2 adds selected `Object::Pad` features. Today the front end implements `class` (block form), typed `field` with the `:param`/`:reader`/`:writer`/`:accessor` attributes, `=`/`//=`/`||=` field defaults (an initializer sees the earlier fields and may use `$self`/`__CLASS__`), `method`, positional parameter defaults (`method greet(String $name = "someone")`), and any number of `ADJUST` blocks (run in declaration order); writers return `$self` so calls can be chained. Method resolution is static (compile-time) and there is no inheritance. `:isa`, `SUPER::`, versioned classes, roles, and `DESTROY` are **planned, not yet implemented** — the `DatabaseConnection::Static` example below is forward-looking. See [`class_roadmap.md`](class_roadmap.md) for the full shipped-versus-planned breakdown.
 
 ```perl
 class DatabaseConnection {
