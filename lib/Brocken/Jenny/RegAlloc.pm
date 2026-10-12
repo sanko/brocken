@@ -57,7 +57,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
     # A load with only a spilled destination does not collide: the destination write consumes the address, and the
     # store-after reuses a scratch only after the instruction has finished reading it.
     method _has_addr_hazard( $mf, $spill_slots ) {
-        return 0 unless $spill_slots && keys %$spill_slots;
+        return 0 unless $spill_slots && scalar keys %$spill_slots;
         my %store_after = map { $_ => 1 } qw(load fload lea);
         my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
         for my $bb ( $mf->blocks->@* ) {
@@ -239,16 +239,16 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
 
                 # use = pre_use U (pre_def ^ post_use)
                 # def = pre_def U post_def
-                for my $v ( keys %$pre_used ) {
+                for my $v ( sort keys %$pre_used ) {
                     $used{$v} = 1;
                 }
-                for my $v ( keys %$pre_defd ) {
+                for my $v ( sort keys %$pre_defd ) {
                     $used{$v} = 1 if $post_used->{$v};
                 }
-                for my $v ( keys %$pre_defd ) {
+                for my $v ( sort keys %$pre_defd ) {
                     $defd{$v} = 1;
                 }
-                for my $v ( keys %$post_defd ) {
+                for my $v ( sort keys %$post_defd ) {
                     $defd{$v} = 1;
                 }
             }
@@ -273,7 +273,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 for my $succ ( $bb->successors->@* ) {
                     my $si = 0;
                     for my $b (@blocks) { last if $b == $succ; $si++ }
-                    for my $v ( keys %{ $live_in{$si} // {} } ) {
+                    for my $v ( sort keys %{ $live_in{$si} // {} } ) {
                         $new_out{$v} = 1;
                     }
                 }
@@ -282,7 +282,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     $live_out{$bi} = \%new_out;
                 }
                 my %new_in = ( %{ $use{$bi} } );
-                for my $v ( keys %new_out ) {
+                for my $v ( sort keys %new_out ) {
                     $new_in{$v} = 1 unless $def{$bi}{$v};
                 }
                 if ( join( "\0", sort keys %new_in ) ne join( "\0", sort keys %{ $live_in{$bi} // {} } ) ) {
@@ -300,7 +300,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
             my @insts    = $bb->instructions->@*;
             my $bi_first = $bi_range[$bi][0];
             my $bi_last  = $bi_range[$bi][1];
-            for my $v ( keys %{ $live_in{$bi} // {} } ) {
+            for my $v ( sort keys %{ $live_in{$bi} // {} } ) {
                 $first{$v} //= $bi_first;
                 $last{$v} = List::Util::max( $last{$v} // 0, $bi_last );
             }
@@ -318,7 +318,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 }
                 $bi_first++;
             }
-            for my $v ( keys %{ $live_out{$bi} // {} } ) {
+            for my $v ( sort keys %{ $live_out{$bi} // {} } ) {
                 $first{$v} //= $bi_range[$bi][0];
                 $last{$v} = List::Util::max( $last{$v} // 0, $bi_range[$bi][1] );
             }
@@ -553,7 +553,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
     }
 
     method insert_spill_code( $mf, $spill_slots, $spill_temp, $stack_reg, $is_float = 0, $spill_addr_temp = undef ) {
-        return unless $spill_slots && keys %$spill_slots;
+        return unless $spill_slots && scalar keys %$spill_slots;
         my $load_op   = $is_float ? 'fload'  : 'load';
         my $store_op  = $is_float ? 'fstore' : 'store';
         my %reads_dst = map { $_ => 1 }
@@ -616,11 +616,11 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     if ( $index ne '' && defined( my $off = $spill_slots->{$index} ) ) {
                         $ind_off     = $off;
                         $ind_scratch = defined $smem_off ? $spill_temp :
-                            ( keys(%sp) ? ( defined $spill_addr_temp ? $spill_addr_temp : $spill_temp ) : $spill_temp );
+                            ( scalar keys(%sp) ? ( defined $spill_addr_temp ? $spill_addr_temp : $spill_temp ) : $spill_temp );
                         $op->value->{index} = $ind_scratch;
                     }
                 }
-                if ( !keys %sp && !defined $smem_off && !defined $ind_off ) {
+                if ( !scalar keys %sp && !defined $smem_off && !defined $ind_off ) {
                     push @new, $inst;
                     next;
                 }

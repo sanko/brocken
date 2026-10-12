@@ -640,7 +640,7 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             my %forbid = map { $_ => 1 } grep {defined} @forbidden;
             my %used;
             @used{ values %$assignment } = ();
-            $used{$_} = 1 for keys %reserved;
+            $used{$_} = 1 for sort keys %reserved;
             for my $r ( $platform->registers('caller')->@* ) {
                 return $r unless exists $used{$r} || $forbid{$r};
             }

@@ -998,7 +998,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $nchain  = $sym_idx;
         my @buckets = (0) x $nbucket;
         my @chains  = (0) x $nchain;
-        for my $name ( keys %sym_indices ) {
+        for my $name ( sort keys %sym_indices ) {
             my $idx = $sym_indices{$name};
             my $h   = $elf_hash->($name);
             my $b   = $h % $nbucket;

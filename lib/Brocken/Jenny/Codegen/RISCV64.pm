@@ -634,8 +634,8 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my %forbid = map { $_ => 1 } grep {defined} @forbidden;
             my %used;
             @used{ values %$assignment } = ();
-            $used{$_} = 1 for keys %reserved;
-            $used{$_} = 1 for keys %ret_regs;
+            $used{$_} = 1 for sort keys %reserved;
+            $used{$_} = 1 for sort keys %ret_regs;
             for my $r ( $platform->registers('caller')->@* ) {
                 return $r unless exists $used{$r} || $forbid{$r};
             }
@@ -659,11 +659,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $pick = sub () {
                 my %used;
                 @used{ values %$assignment } = ();
-                $used{$_} = 1 for keys %reserved;
+                $used{$_} = 1 for sort keys %reserved;
 
                 # The return registers carry the function result across the return sequence, where they are not
                 # virtual registers; never hand one out as an address scratch.
-                $used{$_} = 1 for keys %ret_regs;
+                $used{$_} = 1 for sort keys %ret_regs;
 
                 # Around a call the parameter registers carry fixed, live values that are not virtual registers: the
                 # outgoing arguments sit in a0-a7 up to the call, and the callee's result sits in a0/a1 right after it.

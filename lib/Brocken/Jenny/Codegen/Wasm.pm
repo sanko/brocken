@@ -59,7 +59,7 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
                 push @param_valtypes, $self->_wasm_valtype( $p->type );
             }
             my $locals_size = length( $result->{locals} );
-            for my $idx ( keys %source_map ) {
+            for my $idx ( sort keys %source_map ) {
                 $source_map{$idx} += $locals_size;
             }
             my @adjusted_fixups;
@@ -452,7 +452,7 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
         # with an empty stack and a function that returns a value fails to validate at its final end.
         $emit->( pack( 'C', UNREACHABLE ) );
         if ($source_map) {
-            for my $idx ( keys %raw_offsets ) {
+            for my $idx ( sort keys %raw_offsets ) {
                 my ( $bi, $buf_off ) = $raw_offsets{$idx}->@*;
                 $source_map->{$idx} = $block_start[$bi] + $buf_off;
             }
