@@ -27,6 +27,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $needs_rc              = {};        # var_name -> 1 (Any-typed variable needing refcounting)
     field $rc_owner              = {};        # var_name -> owning $_dyn_scope_stack entry (declaring block/loop scope)
     field $borrowed_params       = {};        # param_name -> 1 (caller-owned Any parameter; the callee must not release it)
+    field $returns_owned         = {};        # func_name -> 1 (a dynamic return hands the caller an owned +1 reference)
     field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
     field $rodata : reader       = {};        # label -> bytes for string constants
     field $_rodata_label_counter = 0;
@@ -177,6 +178,83 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return ( $value + $align - 1 ) & ~( $align - 1 );
     }
 
+    # Decide whether a dynamic-returning function hands the caller an owned reference (+1) or a borrowed one (+0).
+    # Caller-Borrows means a bare `return $param` yields the caller's own box, so no reference changes hands and the
+    # caller must incref when it stores the result (F3). Every other dynamic return -- a local, a fresh box, a field
+    # load, or a nested call -- yields a reference the callee owns and transfers, so the caller must not incref again
+    # (F13). A function is owned if any dynamic return is not a bare, never-reassigned `Any` parameter; a parameter that
+    # is assigned has been promoted to an owned slot and no longer qualifies. Owned functions normalize every dynamic
+    # return to +1 in `lower_return`, so a single flag describes the whole function even when its returns mix.
+    method _classify_return_ownership( $name, $return_type_name, $params_ast, $body, $field_names = {} ) {
+        return unless defined $return_type_name && $return_type_name eq 'Any';
+        my %any_param = map { $_->{name} => 1 } grep { ( $_->{type} // 'Any' ) eq 'Any' } $params_ast->@*;
+        my %assigned;
+        my %locals;
+        my @returns;
+        $self->_scan_function_body( $body, \%assigned, \%locals, \@returns );
+        my $owned = 0;
+        for my $expr (@returns) {
+            if ( defined $expr && $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+                my $n = $expr->name;
+
+                # A bare value the callee does not own is handed back unchanged, so the caller owns the box it stores
+                # and must incref. Two cases qualify: a local shadow always wins (the exit cleanup will free it, so it
+                # is owned), otherwise a field (the object owns the box) or a parameter that is never reassigned (the
+                # caller owns the box, Caller-Borrows). An assigned parameter has been promoted to an owned slot.
+                next if !$locals{$n} && ( $field_names->{$n} || ( $any_param{$n} && !$assigned{$n} ) );
+            }
+            $owned = 1;
+            last;
+        }
+        $returns_owned->{$name} = $owned;
+    }
+
+    # Collect the local variable names, assignment targets, and return expressions anywhere in a function body.
+    # Assignment is a statement, so the walk only descends statement containers; nested blocks, branches, and loops are
+    # followed so a declaration or assignment on any path counts.
+    method _scan_function_body( $block, $assigned, $locals, $returns ) {
+        return unless $block;
+        for my $stmt ( $block->statements->@* ) {
+            if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') ) {
+                $locals->{ $stmt->name } = 1;
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ListVarDecl') ) {
+                $locals->{ $_->{name} } = 1 for $stmt->targets->@*;
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Assign') ) {
+                my $t = $stmt->target;
+                $assigned->{ $t->name } = 1 if $t->isa('Brocken::Katsuro::AST::Expr::Var');
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') ) {
+                push @$returns, $stmt->expr;
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Block') ) {
+                $self->_scan_function_body( $stmt, $assigned, $locals, $returns );
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') ) {
+                $self->_scan_function_body( $stmt->then, $assigned, $locals, $returns );
+                for my $e ( $stmt->elsif->@* ) { $self->_scan_function_body( $e->[1], $assigned, $locals, $returns ); }
+                $self->_scan_function_body( $stmt->else, $assigned, $locals, $returns ) if $stmt->else;
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') ) {
+                $self->_scan_function_body( $stmt->body, $assigned, $locals, $returns );
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::TryCatch') ) {
+                $self->_scan_function_body( $stmt->try_body,     $assigned, $locals, $returns );
+                $self->_scan_function_body( $stmt->catch_body,   $assigned, $locals, $returns );
+                $self->_scan_function_body( $stmt->finally_body, $assigned, $locals, $returns );
+            }
+        }
+    }
+
+    # A call that returns a dynamic (`Any`) value whose callee was classified as owned hands back a reference the
+    # callee already owns. The caller consumes it instead of taking a second reference (F13).
+    method _owned_call_result($val) {
+        return 0 unless ref $val && $val->isa('Brocken::Lindsay::IR::Instruction::Call');
+        return 0 unless $val->type && $val->type->kind eq 'dynamic';
+        return $returns_owned->{ $val->callee->name } ? 1 : 0;
+    }
+
     # Return type inference
     method _infer_return_type($ast) {
         my $body = $ast->body;
@@ -283,6 +361,26 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # every class is registered so a parent may be declared after its child.
         $self->resolve_inheritance;
         $self->_layout_class($_) for keys %$classes;
+
+        # Pass 1.6: Classify every dynamic-returning function's return ownership before any body is lowered, so a call
+        # site knows whether the callee hands back an owned reference (+1) or a borrowed one (+0). Bodies are still AST,
+        # so this reads them directly; it must run before Pass 2/3 so forward and cross-class calls see the answer.
+        for my $stmt (@decls) {
+            if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl') ) {
+                my $name = $self->_qualify( $stmt->name, $stmt->package );
+                my $ret  = $stmt->return_type // $self->_infer_return_type($stmt);
+                $self->_classify_return_ownership( $name, $ret, $stmt->params, $stmt->body );
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') ) {
+                my $class = $self->_qualify( $stmt->name, $stmt->package );
+                my $cd    = $classes->{$class};
+                my %fields = map { $_->{name} => 1 } ( $cd && $cd->{fields} ? $cd->{fields}->@* : () );
+                for my $m ( $stmt->methods->@* ) {
+                    my $ret = $m->return_type // $self->_infer_return_type($m);
+                    $self->_classify_return_ownership( $class . '::' . $m->name, $ret, $m->params, $m->body, \%fields );
+                }
+            }
+        }
 
         # Pass 2: Generate class runtimes ancestors-first so an inherited method is registered before a descendant's
         # body tries to call it (static dispatch resolves against $functions).
@@ -990,7 +1088,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
             my $val = $self->lower_expression( $ast->init );
             $val = $self->maybe_convert_type( $val, $ir_type );
-            if ( $needs_rc->{ $ast->name } ) {
+
+            # An owned dynamic call result already carries the reference the slot needs (F13); take a second one only
+            # for values that arrive borrowed (a local, a parameter, a fresh box).
+            if ( $needs_rc->{ $ast->name } && !$self->_owned_call_result($val) ) {
                 $builder->build_incref( $val, $line, $col );
             }
             $builder->build_store( $val, $alloca, $line, $col );
@@ -1004,7 +1105,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # auto-generated accessors have no `__heap_base` symbol, so they pass their own parameter).
     method _emit_owned_store( $val, $addr, $ir_type, $line, $col, $heap_base = undef ) {
         my $old = $builder->build_load( $ir_type, $addr, undef, $line, $col );
-        $builder->build_incref( $val, $line, $col );
+
+        # A dynamic call result already carries an owned reference (F13); the slot consumes it rather than taking a
+        # second one. Anything else -- a borrowed argument, an owned local, a fresh box -- needs its own reference.
+        $builder->build_incref( $val, $line, $col ) unless $self->_owned_call_result($val);
         $builder->build_store( $val, $addr, $line, $col );
         my $hb = $heap_base;
         if ( !defined $hb && $symbols->{'__heap_base'} ) {
@@ -1043,7 +1147,30 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $existing  = $builder->build_load( $ir_type, $addr, undef, $line, $col );
         my $zero      = Brocken::Lindsay::IR::Constant->new( type => $ir_type, value => 0 );
         my $is_absent = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
-        my $chosen    = $builder->build_select( $is_absent, $val, $existing, undef, $line, $col );
+        if ( $self->_owned_call_result($val) ) {
+
+            # The RHS is a call result that already owns a reference, so the two outcomes need different references:
+            # storing it consumes that reference, while keeping the slot's borrowed box needs a fresh one. A select
+            # cannot express that, so branch.
+            my $func        = $current_func;
+            my $store_block = $func->append_block( $self->unique_block_name('rc_borrow_store') );
+            my $keep_block  = $func->append_block( $self->unique_block_name('rc_borrow_keep') );
+            my $merge_block = $func->append_block( $self->unique_block_name('rc_borrow_end') );
+            $builder->position_at_end($current_block);
+            $builder->build_cond_br( $is_absent, $store_block, $keep_block, $line, $col );
+            $builder->position_at_end($store_block);
+            $current_block = $store_block;
+            $builder->build_store( $val, $addr, $line, $col );
+            $builder->build_br( $merge_block, $line, $col );
+            $builder->position_at_end($keep_block);
+            $current_block = $keep_block;
+            $builder->build_incref( $existing, $line, $col );
+            $builder->build_br( $merge_block, $line, $col );
+            $builder->position_at_end($merge_block);
+            $current_block = $merge_block;
+            return;
+        }
+        my $chosen = $builder->build_select( $is_absent, $val, $existing, undef, $line, $col );
         $builder->build_incref( $chosen, $line, $col );
         $builder->build_store( $chosen, $addr, $line, $col );
     }
@@ -1147,8 +1274,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 # Storing into a parameter slot that still holds the caller's borrowed reference. Take our own
                 # reference to the new value but do NOT release the old one: we never owned it (Caller-Borrows), and
                 # releasing it could free the caller's box. From here on the slot is owned, so it is cleaned up at
-                # function exit like any other Any local.
-                $builder->build_incref( $val, $line, $col );
+                # function exit like any other Any local. An owned call result already carries its reference (F13).
+                $builder->build_incref( $val, $line, $col ) unless $self->_owned_call_result($val);
                 $builder->build_store( $val, $addr, $line, $col );
                 delete $borrowed_params->{ $target->name };
                 $self->_note_rc( $target->name );
@@ -1166,22 +1293,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $ret_type = $current_func->return_type;
             $val = $self->maybe_convert_type( $val, $ret_type );
             my @rc_names = sort keys %$needs_rc;
-            if (@rc_names) {
 
-                # Incref the return value so it survives the decref of all RC locals below.
-                # If $val refers to the same object as one of the locals, this bump keeps RC >= 1 across the cleanup,
-                # preventing a premature free + dangling pointer.
-                # Only applies when $val is a dynamic type (heap-allocated with RC). The kind is `dynamic`, not `any`:
-                # an earlier rename left this test comparing against `any`, so the incref never fired and `sub f()
-                # :returns(Any) { my $u = 7; return $u; }` freed the box in the exit decref and handed the caller a
-                # pointer onto the free list, whose payload slot had been overwritten with the list link.
-                # Protect the returned value from the cleanup decref below when it may alias an owned local. A
-                # borrowed parameter is never cleaned up, so incref'ing it would only leak the caller's reference.
-                my $ret_is_borrowed
-                    = $ast->expr->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $ast->expr->name };
-                if ( !$ret_is_borrowed && $val->type && $val->type->kind eq 'dynamic' ) {
-                    $builder->build_incref( $val, $line, $col );
-                }
+            # Hand the caller an owned reference for a dynamic return. An owned-returning function (+1) increfs the
+            # value unless it already carries a reference (a call result, F13); the cleanup below then releases its own
+            # locals, so the returned box survives with exactly the caller's reference. The incref must also protect an
+            # owned local that the cleanup is about to decref, which is why it runs even when the type test would have
+            # said `dynamic` and an earlier rename once left it comparing against `any`.
+            #
+            # A function whose every dynamic return is a bare borrowed parameter (+0) is left alone: the box belongs to
+            # the caller, who passed it in, and the caller increfs when it stores the result (F3).
+            if ( $val->type && $val->type->kind eq 'dynamic' && $returns_owned->{ $current_func->name } ) {
+                $builder->build_incref( $val, $line, $col ) unless $self->_owned_call_result($val);
+            }
+            if (@rc_names) {
                 my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
                 for my $name (@rc_names) {
                     my $addr   = $symbols->{$name} or next;

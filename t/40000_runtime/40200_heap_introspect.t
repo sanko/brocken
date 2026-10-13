@@ -441,6 +441,35 @@ BROCKEN
         unlink $file;
     }
 };
+subtest 'last cleanup releases only loop-scoped Any locals' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken->new->compile(<<'BROCKEN');
+my ptr $hb = Brocken::heap_base();
+my Any $keep = 7;
+my i64 $before = Brocken::Runtime::free16_count($hb);
+while (1 == 1) {
+    my Any $tmp = 9;
+    last;
+}
+my i64 $after = Brocken::Runtime::free16_count($hb);
+# The enclosing Any must survive the break cleanup; the loop-body Any must be released exactly once.
+my i64 $n = $keep;
+if ($n != 7) { return 1; }
+my i64 $diff = Brocken::i64_sub($after, $before);
+if ($diff != 1) { return 2; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_last_scope' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, 'break cleanup keeps outer Any alive and frees the loop-body Any once' );
+        unlink $file;
+    }
+};
 subtest 'mark_line and sweep_block' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
