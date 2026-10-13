@@ -9,6 +9,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
     field $filename : param = '';
     field $pos      : param = 0;
     field $features = {};
+    field $current_package = undef;    # namespace from a `package NAME` declaration; stamped onto following nodes
 
     # Precedence constants
     use constant {
@@ -81,13 +82,60 @@ class Brocken::Katsuro::Parser v0.0.1 {
     }
 
     method parse_decl_or_stmt() {
-        return $self->parse_class_decl() if $self->check( 'KEYWORD', 'class' );
-        return $self->parse_sub_decl()   if $self->check( 'KEYWORD', 'sub' );
+        return $self->parse_class_decl()   if $self->check( 'KEYWORD', 'class' );
+        return $self->parse_sub_decl()     if $self->check( 'KEYWORD', 'sub' );
+        return $self->parse_package_decl() if $self->check( 'KEYWORD', 'package' );
         return $self->parse_statement();
     }
 
+    # `package NAME;` sets the namespace for later declarations in the same scope; `package NAME { ... }` scopes it to
+    # the block. Either way the parser stamps its `$current_package` onto every node it builds, so the lowerer never has
+    # to replay a package declaration.
+    method parse_package_decl() {
+        my $pkg_token  = $self->advance();
+        my $name_token = $self->consume( 'IDENT', undef, "Expected package name after 'package'" );
+        my $name       = $name_token->{value};
+        my $version;
+        if ( $self->check('VERSION') || $self->check('FLOAT') || $self->check('NUM') ) {
+            $version = $self->advance()->{value};
+        }
+        if ( $self->check('{') ) {
+            my $saved        = $current_package;
+            $current_package = $name;
+            my $body         = $self->parse_package_block();
+            $current_package = $saved;
+            return Brocken::Katsuro::AST::Stmt::PackageDecl->new(
+                $self->_pos_token($pkg_token), name => $name, version => $version, body => $body );
+        }
+        $self->consume( ';', undef, "Expected ';' or '{' after 'package $name'" );
+        $current_package = $name;
+        return Brocken::Katsuro::AST::Stmt::PackageDecl->new( $self->_pos_token($pkg_token), name => $name, version => $version );
+    }
+
+    # A package block is a declaration scope, like the program itself: it holds sub/class/package declarations as well
+    # as loose statements, so it is parsed with parse_decl_or_stmt rather than the statement-only parse_block.
+    method parse_package_block() {
+        my $brace_token = $self->consume('{');
+        my @stmts;
+        until ( $self->check('}') || $self->check('EOF') ) {
+            my $stmt = $self->parse_decl_or_stmt();
+            push @stmts, $stmt if defined $stmt;
+        }
+        $self->consume('}');
+        return Brocken::Katsuro::AST::Stmt::Block->new( $self->_pos_token($brace_token), statements => \@stmts );
+    }
+
     # === Statements ===
+
+    # Every statement is stamped with the package in effect where it was written, so the lowerer can resolve an
+    # unqualified name through the enclosing `package NAME` without replaying the declarations.
     method parse_statement() {
+        my $stmt = $self->_parse_statement();
+        $stmt->set_package($current_package) if defined $stmt;
+        return $stmt;
+    }
+
+    method _parse_statement() {
         if ( $self->check( 'KEYWORD', 'use' ) ) {
             $self->advance();
             my $feat = $self->consume( 'IDENT', undef, "Expected 'feature' after 'use'" );
@@ -410,6 +458,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 params      => \@params,
                 return_type => $return_type,
                 body        => Brocken::Katsuro::AST::Stmt::Block->new( statements => [] ),
+                package     => $current_package,
             );
         }
         my $body = $self->parse_block();
@@ -419,6 +468,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             params      => \@params,
             return_type => $return_type,
             body        => $body,
+            package     => $current_package,
         );
     }
 
@@ -453,6 +503,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             fields  => \@fields,
             methods => \@methods,
             adjusts => \@adjusts,
+            package => $current_package,
         );
     }
 

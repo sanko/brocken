@@ -113,6 +113,7 @@ class Brocken v0.0.1 {
         my $module  = $lowerer->lower_program($merged_ast);
         $module->set_class_info( $lowerer->classes );
         $module->set_rodata( $lowerer->rodata );
+        $module->set_package_versions( $lowerer->package_versions );
         return $module;
     }
     #

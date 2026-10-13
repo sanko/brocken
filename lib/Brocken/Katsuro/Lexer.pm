@@ -9,7 +9,7 @@ class Brocken::Katsuro::Lexer v0.0.1 {
     field $line = 1;
     field $col  = 1;
     my %KEYWORDS = map { $_ => 1 } qw[
-        my our state const type sub method class role has field ADJUST DESTROY
+        my our state const type sub method class role has field ADJUST DESTROY package
         return exit fiber yield transfer try catch finally throw defer
         if elsif else unless while until for foreach next last redo map say print
         true false True False __CLASS__ want Int String Any Bool ptr int bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64
@@ -36,7 +36,13 @@ class Brocken::Katsuro::Lexer v0.0.1 {
                 next;
             }
 
-            # 2. Match Identifiers & Package-qualified namespaces (e.g. Brocken::load_i64)
+            # A version literal, as written after `package NAME`: a v-string (`v1.2.3`) or a dotted decimal with three
+            # or more parts (`1.0.0`). It must precede the identifier and number rules, which would otherwise split it.
+            if ( $remaining =~ /^(v\d+(?:\.\d+)+|\d+(?:\.\d+){2,})/ ) {
+                push @tokens, $self->_token( 'VERSION', $1 );
+                $self->_advance_pos( length($1) );
+                next;
+            }
             if ( $remaining =~ /^([\$@%]?[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/ ) {
                 my $val  = $1;
                 my $type = 'IDENT';

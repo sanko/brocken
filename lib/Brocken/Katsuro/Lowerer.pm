@@ -15,9 +15,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $current_func;
     field $current_block;
     field $current_class;                 # class name when inside a method/ADJUST
+    field $current_package;               # namespace from the innermost `package NAME` (see _qualify)
     field $symbols               = {};    # "name" -> ptr (alloca or GEP result)
     field $functions             = {};    # "name" -> Brocken::Lindsay::IR::Function
     field $classes : reader      = {};    # "ClassName" -> { fields => [...], total_size => N, methods => [...], struct_type => T }
+    field $package_versions : reader = {};    # "Package::Name" -> declared version, from `package NAME VERSION`
     field $block_id              = 0;
     field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
@@ -122,6 +124,25 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $TYPE_MAP{$name} // Carp::croak("Unknown type '$name'");
     }
 
+    # Prefix a bare declaration name with its package. A name that already contains `::` is absolute, so
+    # `package P; sub P::x` stays `P::x` rather than becoming `P::P::x`.
+    method _qualify( $name, $package ) {
+        return $name unless defined $package && length $package;
+        return $name if index( $name, '::' ) >= 0;
+        return $package . '::' . $name;
+    }
+
+    # Resolve a class name as written inside the current package: a declared fully-qualified name first, then the bare
+    # spelling (for classes declared at the top level and referenced from another package).
+    method _resolve_class_ident($name) {
+        return $name if $classes->{$name};
+        if ( defined $current_package && length $current_package ) {
+            my $qualified = $current_package . '::' . $name;
+            return $qualified if $classes->{$qualified};
+        }
+        return $name;
+    }
+
     method native_type_from_name($name) {
         return $TYPE_NATIVE_MAP{$name} // $self->type_from_name($name);
     }
@@ -216,17 +237,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     # Main entry point
     method lower_program($ast) {
-        my @all_stmts = $ast->statements->@*;
         my @decls;
         my @top_stmts;
-        for my $stmt (@all_stmts) {
-            if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') || $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl') ) {
-                push @decls, $stmt;
-            }
-            else {
-                push @top_stmts, $stmt;
-            }
-        }
+        $self->collect_decls( $ast->statements, \@decls, \@top_stmts );
         if (@top_stmts) {
             my $main_body = Brocken::Katsuro::AST::Stmt::Block->new( statements => \@top_stmts );
             my $main_sub
@@ -261,9 +274,29 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $module;
     }
 
+    # Flatten the program's top-level statements. A `package NAME { ... }` block is a container, not a runtime
+    # statement: its declarations join the program's declaration list and its loose statements join the entry, in
+    # source order. The parser already stamped the package onto each node, so this only has to descend.
+    method collect_decls( $stmts, $decls, $top_stmts ) {
+        for my $stmt ( $stmts->@* ) {
+            if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::PackageDecl') ) {
+                $package_versions->{ $stmt->name } = $stmt->version if defined $stmt->version;
+                $self->collect_decls( $stmt->body->statements, $decls, $top_stmts ) if $stmt->body;
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') || $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl') ) {
+                push @$decls, $stmt;
+            }
+            else {
+                push @$top_stmts, $stmt;
+            }
+        }
+    }
+
     method generate_class_runtime($ast) {
-        my $class_name = $ast->name;
-        $current_class = $class_name;
+        my $class_name   = $self->_qualify( $ast->name, $ast->package );
+        my $saved_package = $current_package;
+        $current_package = $ast->package;
+        $current_class   = $class_name;
         my $class_data = $classes->{$class_name};
 
         # Lower the ADJUST blocks if present, in declaration order.
@@ -312,6 +345,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
         }
         $current_class = undef;
+        $current_package = $saved_package;
     }
 
     # Register built-in FFI functions
@@ -399,6 +433,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     # Pass 1: Register declarations
     method register_class($ast) {
+        my $full_name = $self->_qualify( $ast->name, $ast->package );
         my @fields;
         my $offset = 8;
         my @field_types;
@@ -464,39 +499,45 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         my $struct_type = Brocken::Lindsay::IR::Type->new(
             kind           => 'struct',
-            struct_name    => $ast->name,
+            struct_name    => $full_name,
             field_types    => \@field_types,
             field_names    => \@field_names,
             _field_offsets => \@field_offsets,
             bits           => $offset * 8,
             signed         => 0,
         );
-        $classes->{ $ast->name } = { fields => \@fields, total_size => $offset, methods => [], struct_type => $struct_type, };
+        $classes->{$full_name} = { fields => \@fields, total_size => $offset, methods => [], struct_type => $struct_type, package => $ast->package };
     }
 
     method register_function($ast) {
+        my $name          = $self->_qualify( $ast->name, $ast->package );
         my $ret_type_name = $ast->return_type;
         if ( !defined $ret_type_name ) {
             $ret_type_name = $self->_infer_return_type($ast);
         }
-        my $ret_class = $classes->{$ret_type_name} ? $ret_type_name : undef;
-        $ret_type_name = $classes->{$ret_type_name} ? 'ptr' : $ret_type_name;
-        $function_return_class->{ $ast->name } = $ret_class;
+        my $resolved_ret = $ret_type_name;
+        if ( defined $ret_type_name ) {
+            my $qualified = $self->_qualify( $ret_type_name, $ast->package );
+            $resolved_ret = $qualified if $classes->{$qualified};
+        }
+        my $ret_class = $classes->{$resolved_ret} ? $resolved_ret : undef;
+        $ret_type_name = $classes->{$resolved_ret} ? 'ptr' : $ret_type_name;
+        $function_return_class->{$name} = $ret_class;
         my $ret_type = $self->type_from_name($ret_type_name);
         my @params;
-        unless ( $ast->name =~ /^Brocken::Runtime::/ ) {
+        unless ( $name =~ /^Brocken::Runtime::/ ) {
             push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%__heap_base', );
-            unless ( $ast->name eq '_BROCKEN_ENTRY' ) {
+            unless ( $name eq '_BROCKEN_ENTRY' ) {
                 push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64(), name => '%__want', );
             }
         }
         for my $p ( $ast->params->@* ) {
             push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
         }
-        $param_defaults->{ $ast->name } = [ map { { name => $_->{name}, default => $_->{default} } } $ast->params->@* ];
-        my $fn = Brocken::Lindsay::IR::Function->new( name => $ast->name, return_type => $ret_type, params => \@params, );
+        $param_defaults->{$name} = [ map { { name => $_->{name}, default => $_->{default} } } $ast->params->@* ];
+        my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params, );
         $module->add_function($fn);
-        $functions->{ $ast->name } = $fn;
+        $functions->{$name} = $fn;
     }
 
     method register_method( $class_name, $method_name, $return_type_name, $params_ast ) {
@@ -526,7 +567,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_function($ast) {
         $fuel_exit_block = undef;
         return if $ast->body->statements->@* == 0;
-        $current_func = $functions->{ $ast->name };
+        my $name = $self->_qualify( $ast->name, $ast->package );
+        $current_package = $ast->package;
+        $current_func = $functions->{$name};
         $symbols      = {};
         $needs_rc     = {};
         $rc_owner     = {};
@@ -679,6 +722,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # body, which needs its scope recognizable for last/next cleanup).
     method lower_block_statements($block_ast) {
         for my $stmt ( $block_ast->statements->@* ) {
+
+            # Restore the namespace each statement was parsed in. A synthesized block (the entry body) carries
+            # statements from several packages, and a `package NAME { ... }` block's statements were stamped inside
+            # it, so the statement is the authority on the current package while it lowers.
+            $current_package = $stmt->package if defined $stmt->package;
             $self->lower_statement($stmt);
         }
     }
@@ -778,7 +826,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             if ( $ast->init->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
                 $ast->init->method eq 'new' &&
                 $ast->init->obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
-                $var_class->{ $ast->name } = $ast->init->obj->name;
+                $var_class->{ $ast->name } = $self->_resolve_class_ident( $ast->init->obj->name );
             }
             my $val = $self->lower_expression( $ast->init );
             $val = $self->maybe_convert_type( $val, $ir_type );
@@ -796,7 +844,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $ast->expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
             $ast->expr->method eq 'new' &&
             $ast->expr->obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
-            $var_class->{ $target->name } = $ast->expr->obj->name;
+            $var_class->{ $target->name } = $self->_resolve_class_ident( $ast->expr->obj->name );
         }
         my $val = $self->lower_expression( $ast->expr );
         my $addr;
@@ -1971,6 +2019,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_call_expr($ast) {
         my $name   = $ast->func_name;
         my $callee = $functions->{$name};
+        my $resolved = $name;
+        if ( !$callee && defined $current_package && length $current_package ) {
+            my $qualified = $current_package . '::' . $name;
+            if ( my $f = $functions->{$qualified} ) { $callee = $f; $resolved = $qualified; }
+        }
         my ( $line, $col ) = ( $ast->line, $ast->col );
         unless ($callee) {
             if ( $name eq 'say' || $name eq 'print' ) {
@@ -2009,7 +2062,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             push @args, $want_val;
         }
         my $param_idx = ( $callee_has_heap_base ? 1 : 0 ) + ( $callee_has_want ? 1 : 0 );
-        my $defaults  = $param_defaults->{$name};
+        my $defaults  = $param_defaults->{$resolved};
 
         # A default for one omitted trailing argument may reference an earlier one, so each value that lands in a
         # parameter is bound to that parameter's name while the rest of the call is lowered. The bindings are
@@ -2319,8 +2372,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # Statically determine the class a receiver expression evaluates to, or undef if it cannot be known.
     method _expr_class($obj) {
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
-            Carp::croak( "Unknown class '" . $obj->name . "' at " . $self->_loc($obj) ) unless $classes->{ $obj->name };
-            return $obj->name;
+            my $class = $self->_resolve_class_ident( $obj->name );
+            Carp::croak( "Unknown class '" . $obj->name . "' at " . $self->_loc($obj) ) unless $classes->{$class};
+            return $class;
         }
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Var') && exists $var_class->{ $obj->name } ) {
             return $var_class->{ $obj->name };

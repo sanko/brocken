@@ -515,6 +515,9 @@ class Brocken::Lindsay::IR::Module v0.0.1 {
     field $_rodata = {};
     method rodata         { return $_rodata }
     method set_rodata($v) { $_rodata = $v }
+    field $_package_versions = {};
+    method package_versions         { return $_package_versions }
+    method set_package_versions($v) { $_package_versions = $v }
 
     method add_function($func) {
         push $functions->@*, $func;

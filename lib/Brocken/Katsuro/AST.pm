@@ -5,6 +5,9 @@ class Brocken::Katsuro::AST::Node v0.0.1 {
     field $file : param : reader = '';
     field $line : param : reader = 0;
     field $col  : param : reader = 0;
+    field $package : param : reader = undef;    # namespace a `package NAME` declaration put this node in
+
+    method set_package($name) { $package = $name; }
 };
 class Brocken::Katsuro::AST::Program v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $statements : param : reader = [];    # Array of Statement Nodes
@@ -78,6 +81,14 @@ class Brocken::Katsuro::AST::Stmt::ClassDecl v0.0.1 : isa(Brocken::Katsuro::AST:
     field $fields  : param : reader = [];           # Array of AST::Stmt::FieldDecl
     field $methods : param : reader = [];           # Array of AST::Stmt::MethodDecl
     field $adjusts : param : reader = [];           # Array of AST::Stmt::Adjust (run in declaration order)
+};
+# `package NAME;` prefixes the declarations that follow until the end of the enclosing scope; `package NAME { ... }`
+# scopes the prefix to the block. The parser resolves the current package and stamps it onto every statement, so the
+# lowerer reads `package` off the node rather than replaying the declarations.
+class Brocken::Katsuro::AST::Stmt::PackageDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $name : param : reader;                   # e.g. "Brocken::Runtime"
+    field $body : param : reader = undef;           # AST::Stmt::Block for the block form, undef for `name;`
+    field $version : param : reader = undef;        # strict version literal (v1.2.3 or 1.2.3), or undef
 };
 class Brocken::Katsuro::AST::Stmt::FieldDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $type       : param : reader;             # scalar type, or the array/hash element/value type
