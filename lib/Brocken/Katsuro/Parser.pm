@@ -8,7 +8,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
     field $tokens   : param;
     field $filename : param = '';
     field $pos      : param = 0;
-    field $features = {};
+    field $features        = {};
     field $current_package = undef;    # namespace from a `package NAME` declaration; stamped onto following nodes
 
     # Precedence constants
@@ -100,12 +100,11 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $version = $self->advance()->{value};
         }
         if ( $self->check('{') ) {
-            my $saved        = $current_package;
+            my $saved = $current_package;
             $current_package = $name;
-            my $body         = $self->parse_package_block();
+            my $body = $self->parse_package_block();
             $current_package = $saved;
-            return Brocken::Katsuro::AST::Stmt::PackageDecl->new(
-                $self->_pos_token($pkg_token), name => $name, version => $version, body => $body );
+            return Brocken::Katsuro::AST::Stmt::PackageDecl->new( $self->_pos_token($pkg_token), name => $name, version => $version, body => $body );
         }
         $self->consume( ';', undef, "Expected ';' or '{' after 'package $name'" );
         $current_package = $name;
@@ -126,7 +125,6 @@ class Brocken::Katsuro::Parser v0.0.1 {
     }
 
     # === Statements ===
-
     # Every statement is stamped with the package in effect where it was written, so the lowerer can resolve an
     # unqualified name through the enclosing `package NAME` without replaying the declarations.
     method parse_statement() {
@@ -522,10 +520,10 @@ class Brocken::Katsuro::Parser v0.0.1 {
             my $elem = 'Any';
             $elem = $self->advance()->{value} if $self->is_type( $self->peek() );
             $self->consume( ';', undef, "Expected ';' between element type and size in inline array field" );
-            my $size        = $self->parse_expression(0);
+            my $size = $self->parse_expression(0);
             $self->consume( ']', undef, "Expected ']' after inline array field type" );
-            my $fvar_token  = $self->consume( 'VAR', undef, "Expected field name" );
-            my $fname       = substr( $fvar_token->{value}, 1 );
+            my $fvar_token = $self->consume( 'VAR', undef, "Expected field name" );
+            my $fname      = substr( $fvar_token->{value}, 1 );
             return $self->_finish_field_decl(
                 $field_tok,
                 type      => $elem,

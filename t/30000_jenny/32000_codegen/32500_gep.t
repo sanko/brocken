@@ -110,7 +110,6 @@ use feature qw[class];
         is( $shls[0]->operands->[1]->kind,  'imm', 'ARM64 var GEP: shift is by immediate' );
         is( $shls[0]->operands->[1]->value, 2,     'ARM64 var GEP: shift = 2 (i32 -> *4)' );
     }
-
     if (@adds) {
         my $gep_add = ( grep { $_->operands->[1]->kind eq 'virt_reg' } @adds )[0];
         ok( defined $gep_add, 'ARM64 var GEP: add with vreg operand' );

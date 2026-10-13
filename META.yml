@@ -207,6 +207,9 @@ provides:
   Brocken::Katsuro::AST::Stmt::MethodDecl:
     file: lib/Brocken/Katsuro/AST.pm
     version: v0.0.1
+  Brocken::Katsuro::AST::Stmt::PackageDecl:
+    file: lib/Brocken/Katsuro/AST.pm
+    version: v0.0.1
   Brocken::Katsuro::AST::Stmt::Return:
     file: lib/Brocken/Katsuro/AST.pm
     version: v0.0.1

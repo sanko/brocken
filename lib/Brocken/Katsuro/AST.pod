@@ -119,10 +119,10 @@ are where C<:param>, C<:reader>, C<:writer>, and C<:accessor> are recorded, and 
 than a value so that a field can be initialised from another field. C<default_op> is C<=>, C<//=>, or C<||=>, and
 decides how the constructor applies the default.
 
-C<kind> is C<scalar>, C<array>, or C<hash>, and describes the storage the field reserves in the object. A scalar is
-one slot of C<type>. An array is either inline (C<field [T; N] $name>, C<inline> true, C<elem_type> C<T>, and
-C<size_expr> the count) and claims C<N> slots, or a pointer slot (C<field T @name>) whose element base lives
-elsewhere. A hash (C<field T %name>) is an opaque pointer slot. C<sigil> keeps the sigil the programmer wrote.
+C<kind> is C<scalar>, C<array>, or C<hash>, and describes the storage the field reserves in the object. A scalar is one
+slot of C<type>. An array is either inline (C<field [T; N] $name>, C<inline> true, C<elem_type> C<T>, and C<size_expr>
+the count) and claims C<N> slots, or a pointer slot (C<field T @name>) whose element base lives elsewhere. A hash
+(C<field T %name>) is an opaque pointer slot. C<sigil> keeps the sigil the programmer wrote.
 
 =head2 C<MethodDecl>
 

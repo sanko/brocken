@@ -14,28 +14,28 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $builder = Brocken::Lindsay::IR::Builder->new();
     field $current_func;
     field $current_block;
-    field $current_class;                 # class name when inside a method/ADJUST
-    field $current_package;               # namespace from the innermost `package NAME` (see _qualify)
-    field $symbols               = {};    # "name" -> ptr (alloca or GEP result)
-    field $functions             = {};    # "name" -> Brocken::Lindsay::IR::Function
-    field $classes : reader      = {};    # "ClassName" -> { fields => [...], total_size => N, methods => [...], struct_type => T }
+    field $current_class;                     # class name when inside a method/ADJUST
+    field $current_package;                   # namespace from the innermost `package NAME` (see _qualify)
+    field $symbols   = {};                    # "name" -> ptr (alloca or GEP result)
+    field $functions = {};                    # "name" -> Brocken::Lindsay::IR::Function
+    field $classes          : reader = {};    # "ClassName" -> { fields => [...], total_size => N, methods => [...], struct_type => T }
     field $package_versions : reader = {};    # "Package::Name" -> declared version, from `package NAME VERSION`
     field $block_id              = 0;
-    field $var_class             = {};    # var_name -> class_name (for ptr vars from constructors)
-    field $function_return_class = {};    # func_name -> class_name (for functions returning a class ptr)
-    field $param_defaults        = {};    # "name" -> [ {name, default}, ... ] per user parameter, for omitted trailing args
-    field $needs_rc              = {};    # var_name -> 1 (Any-typed variable needing refcounting)
-    field $rc_owner              = {};    # var_name -> owning $_dyn_scope_stack entry (declaring block/loop scope)
-    field $array_elem_types      = {};    # '@name' -> element IR type (for heap-array GEP scaling)
-    field $rodata : reader       = {};    # label -> bytes for string constants
+    field $var_class             = {};        # var_name -> class_name (for ptr vars from constructors)
+    field $function_return_class = {};        # func_name -> class_name (for functions returning a class ptr)
+    field $param_defaults        = {};        # "name" -> [ {name, default}, ... ] per user parameter, for omitted trailing args
+    field $needs_rc              = {};        # var_name -> 1 (Any-typed variable needing refcounting)
+    field $rc_owner              = {};        # var_name -> owning $_dyn_scope_stack entry (declaring block/loop scope)
+    field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
+    field $rodata : reader       = {};        # label -> bytes for string constants
     field $_rodata_label_counter = 0;
-    field $writer_map            = {};    # "Class::name" -> class name (auto-generated writers return their receiver)
-    field $_loop_header_blocks   = [];    # stack of header block labels
-    field $_loop_check_blocks    = [];    # stack of iteration-check block labels (counter guard)
-    field $_loop_exit_blocks     = [];    # stack of exit block labels for break (last)
-    field $_loop_body_scopes     = [];    # stack of dynamic-stack scopes opened for each in-progress loop body
-    field $_dyn_scope_stack      = [];    # stack of scope records for each in-progress block/loop (RC ownership)
-    field $fuel_exit_block;               # set in lower_function, used by call-site fuel checks
+    field $writer_map            = {};        # "Class::name" -> class name (auto-generated writers return their receiver)
+    field $_loop_header_blocks   = [];        # stack of header block labels
+    field $_loop_check_blocks    = [];        # stack of iteration-check block labels (counter guard)
+    field $_loop_exit_blocks     = [];        # stack of exit block labels for break (last)
+    field $_loop_body_scopes     = [];        # stack of dynamic-stack scopes opened for each in-progress loop body
+    field $_dyn_scope_stack      = [];        # stack of scope records for each in-progress block/loop (RC ownership)
+    field $fuel_exit_block;                   # set in lower_function, used by call-site fuel checks
 
     method unique_block_name($prefix) {
         return $prefix . '_' . $block_id++;
@@ -280,7 +280,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method collect_decls( $stmts, $decls, $top_stmts ) {
         for my $stmt ( $stmts->@* ) {
             if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::PackageDecl') ) {
-                $package_versions->{ $stmt->name } = $stmt->version if defined $stmt->version;
+                $package_versions->{ $stmt->name } = $stmt->version                 if defined $stmt->version;
                 $self->collect_decls( $stmt->body->statements, $decls, $top_stmts ) if $stmt->body;
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') || $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl') ) {
@@ -293,7 +293,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     method generate_class_runtime($ast) {
-        my $class_name   = $self->_qualify( $ast->name, $ast->package );
+        my $class_name    = $self->_qualify( $ast->name, $ast->package );
         my $saved_package = $current_package;
         $current_package = $ast->package;
         $current_class   = $class_name;
@@ -344,7 +344,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $self->generate_writer( $class_name, $f, $mname );
             }
         }
-        $current_class = undef;
+        $current_class   = undef;
         $current_package = $saved_package;
     }
 
@@ -428,7 +428,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $sz && $sz->isa('Brocken::Katsuro::AST::Expr::Const') && $sz->type eq 'Int' ) {
             return $sz->value;
         }
-        Carp::croak("Inline array field '" . $f->name . "' needs a constant element count (e.g. field [i64; 4] \$" . $f->name . ")");
+        Carp::croak( "Inline array field '" . $f->name . "' needs a constant element count (e.g. field [i64; 4] \$" . $f->name . ")" );
     }
 
     # Pass 1: Register declarations
@@ -464,11 +464,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $ir_type = $self->type_from_name( $f->type );
                 ( $span, $size ) = ( 1, $self->type_size($ir_type) );
             }
-
             if ( $inline && $self->has_attr( $f->attrs, 'param' ) ) {
-                Carp::croak( "Inline array field '" . $f->name . "' cannot be :param; use a pointer array (field " . $f->elem_type . " \@" . $f->name . ")" );
+                Carp::croak(
+                    "Inline array field '" . $f->name . "' cannot be :param; use a pointer array (field " . $f->elem_type . " \@" . $f->name . ")" );
             }
-
             my $slot_idx = scalar @field_types;
             for my $k ( 0 .. $span - 1 ) {
                 push @field_types,   $inline ? $elem_ir_type : $ir_type;
@@ -569,10 +568,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return if $ast->body->statements->@* == 0;
         my $name = $self->_qualify( $ast->name, $ast->package );
         $current_package = $ast->package;
-        $current_func = $functions->{$name};
-        $symbols      = {};
-        $needs_rc     = {};
-        $rc_owner     = {};
+        $current_func    = $functions->{$name};
+        $symbols         = {};
+        $needs_rc        = {};
+        $rc_owner        = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -1582,9 +1581,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # A field array's symbol is a struct GEP, which is how it is told apart from a local `@name` (an alloca).
             # Inline storage already sits at that GEP; a pointer array's GEP addresses the slot holding the base, so
             # the base has to be loaded. Neither carries the 24-byte heap header a runtime-sized `my [...] @a` does.
-            my $is_field_gep =
-                $sym->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $sym->base_type && $sym->base_type->kind eq 'struct';
-            my $fd = $is_field_gep ? $self->field_array_record( $current_class, $array_expr->name ) : undef;
+            my $is_field_gep = $sym->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $sym->base_type && $sym->base_type->kind eq 'struct';
+            my $fd           = $is_field_gep ? $self->field_array_record( $current_class, $array_expr->name ) : undef;
             if ($fd) {
                 $array_base = $fd->{inline} ? $sym : $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $sym, undef, $line, $col );
                 $elem_type  = $fd->{elem_ir_type};
@@ -1596,8 +1594,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
                     # Heap arrays carry a 24-byte header (tag/rc, count, bytes) before the elements; step past it so
                     # the element GEP below lands on element 0 rather than the header.  Stack arrays have no header.
-                    my $header_off =
-                        Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 24 );
+                    my $header_off = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 24 );
                     $array_base = $builder->build_gep( Brocken::Lindsay::IR::Type::i8(), $array_base, [$header_off], undef, $line, $col );
                 }
                 else {
@@ -1615,7 +1612,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 # elements. An inline array is addressed directly by its GEP.
                 my $field_ptr = $self->lower_field_addr($array_expr);
                 $array_base = $fd->{inline} ? $field_ptr : $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $field_ptr, undef, $line, $col );
-                $elem_type = $fd->{elem_ir_type};
+                $elem_type  = $fd->{elem_ir_type};
             }
             else {
                 $array_base = $self->lower_expression($array_expr);
@@ -2017,8 +2014,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     method lower_call_expr($ast) {
-        my $name   = $ast->func_name;
-        my $callee = $functions->{$name};
+        my $name     = $ast->func_name;
+        my $callee   = $functions->{$name};
         my $resolved = $name;
         if ( !$callee && defined $current_package && length $current_package ) {
             my $qualified = $current_package . '::' . $name;
@@ -2487,8 +2484,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $val = $self->lower_expression( $positional[$i] );
                 $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
                 my $field_ptr
-                    = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line,
-                    $col );
+                    = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line, $col );
                 $builder->build_store( $val, $field_ptr, $line, $col );
                 $seen{ $fd->{name} } = 1;
                 if ( !$ctor_bound{ $fd->{name} } ) {
@@ -2514,7 +2510,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $fd  = $cd->{fields}[$fi];
                 my $val = $self->lower_expression( $pair->{value} );
                 $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
-                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line, $col );
+                my $field_ptr
+                    = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line, $col );
                 $builder->build_store( $val, $field_ptr, $line, $col );
                 $seen{ $fd->{name} } = 1;
 
@@ -2543,7 +2540,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 # `=` and `//=` apply only to a field the caller left unset; `||=` also rewrites a
                 # supplied-but-false value.
                 next if $is_set && $op ne '||=';
-                my $field_ptr = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{slot_idx}, '%' . $f->{name} . '.default', $line, $col );
+                my $field_ptr
+                    = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{slot_idx}, '%' . $f->{name} . '.default', $line, $col );
                 if ( $op eq '||=' && $is_set ) {
 
                     # `||=` applies when the value supplied for the field is false, not merely

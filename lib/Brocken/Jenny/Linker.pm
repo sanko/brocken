@@ -42,7 +42,6 @@ class Brocken::Jenny::Linker v0.0.1 {
         return $ENV{SOURCE_DATE_EPOCH} if defined $ENV{SOURCE_DATE_EPOCH};
         return time();
     }
-
     method set_debug_data($d)     { $debug_data = $d; }
     method debug_section($name)   { return $self->debug_data->{$name} // ''; }
     method set_debug_level($l)    { $debug_level    = $l; }

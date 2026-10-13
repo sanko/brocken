@@ -174,8 +174,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     # value of rd is the first source.  Treat it as read-modify-write, or the read is dropped from the
                     # live interval and a later value is free to take the register.  The three-operand form names its
                     # two sources explicitly and does not read rd, so only the two-operand shape joins the RMW set.
-                    $used{$name} = 1
-                        if !$defd{$name} && ( $rmw{ $inst->opcode } || ( @ops == 2 && $inst->opcode =~ /^(?:slt|sltu|sltiu)$/ ) );
+                    $used{$name} = 1 if !$defd{$name} && ( $rmw{ $inst->opcode } || ( @ops == 2 && $inst->opcode =~ /^(?:slt|sltu|sltiu)$/ ) );
                     next;
                 }
                 $used{$name} = 1 unless $defd{$name};
@@ -426,6 +425,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 }
             }
         }
+
         # Exclude every caller-saved register when the function calls setjmp.
         #
         # A value parked in a caller-saved register is kept across a call by insert_caller_save_code, which spills it to a
@@ -436,7 +436,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         # both of those survive the throw; caller-saved registers do not.  Keeping them out of the pool for any function
         # that calls setjmp leaves the allocator the callee-saved registers and spills, both of which cross the throw.
         if ( !$is_float && $mf && $mf->blocks->@* ) {
-            CALLER_SAVE_UNSAFE: for my $mbb ( $mf->blocks->@* ) {
+        CALLER_SAVE_UNSAFE: for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
                     next unless $inst->opcode eq 'call_func';
                     my ($callee) = $inst->operands->@*;
@@ -446,7 +446,6 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 }
             }
         }
-
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         @callee_regs = grep { !$defined_phys{$_} } @callee_regs;
 

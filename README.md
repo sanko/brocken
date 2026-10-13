@@ -178,12 +178,6 @@ return $p->x + $p->y;    # 42
 Inside a method, a field is a bare `$name` with no sigil-pair and no `->`, because the method is already in the
 class. Outside one, a field read is `$p->x`, and there is a writer for it too.
 
-A field can also reserve several elements or hold a pointer to elements. `field [i64; 4] $xs` stores four `i64`s
-inline; inside the class they are `@xs[0]`...`@xs[3]` and outside `$p->xs[0]`, and a `:reader` returns the element
-base. `field i64 @ys` is a single pointer slot whose elements live elsewhere, and `field i64 %h` is an opaque
-pointer slot for hash data; both take `:param`/`:writer` as a `ptr`. The element count of an inline array must be a
-constant, and an inline array cannot be `:param` (there is no whole-array value to pass).
-
 # PACKAGE VARIABLES
 
 These are the runtime defaults, read by [Brocken](https://metacpan.org/pod/Brocken) and [Brocken::Katsuro::Lowerer](https://metacpan.org/pod/Brocken%3A%3AKatsuro%3A%3ALowerer) when they construct themselves.

@@ -16,8 +16,7 @@ subtest 'inline array field: read and write in place' => sub {
         'class Vec {' .
             ' field [i64; 3] $xs :reader;' .
             ' method fill() :returns(i64) { @xs[0] = 10; @xs[1] = 20; @xs[2] = 12; return 0; }' .
-            ' method sum() :returns(i64) { return @xs[0] + @xs[1] + @xs[2]; }' .
-            ' }' .
+            ' method sum() :returns(i64) { return @xs[0] + @xs[1] + @xs[2]; }' . ' }' .
             ' my ptr $v = Vec->new(); $v->fill(); return $v->sum();',
         42, '@xs[i] reads and writes the inline storage', %native
     );
@@ -37,8 +36,7 @@ subtest 'fields after an inline array keep their offsets' => sub {
             ' field [i64; 2] $b :reader;' .
             ' field i64 $c :param :reader;' .
             ' method setb(i64 $x, i64 $y) :returns(i64) { @b[0] = $x; @b[1] = $y; return 0; }' .
-            ' method sum() :returns(i64) { return $a + @b[0] + @b[1] + $c; }' .
-            ' }' .
+            ' method sum() :returns(i64) { return $a + @b[0] + @b[1] + $c; }' . ' }' .
             ' my ptr $m = Mix->new(a => 1, c => 100); $m->setb(20, 21); return $m->sum();',
         142, 'a scalar field declared after an inline array is still reachable', %native
     );
@@ -64,7 +62,6 @@ subtest 'pointer array field' => sub {
         50, 'the writer replaces the base pointer', %native
     );
 };
-
 subtest 'a reader supplies another object a pointer array' => sub {
     answers(
         'class Src { field [i64; 2] $xs :reader; method put() :returns(i64) { @xs[0] = 5; @xs[1] = 6; return 0; } }' .
@@ -78,23 +75,21 @@ subtest 'a reader supplies another object a pointer array' => sub {
 # A hash field, `field T %name`, is an opaque pointer slot holding heap hash data; it stores and returns the pointer
 # but has no lookup yet.
 subtest 'hash field stores and returns its pointer' => sub {
-    answers( 'class H { field i64 %h :param :reader; method ok() :returns(i64) { return 0; } }' .
-            ' my ptr $h = H->new(h => (a => 1)); return $h->ok();',
+    answers(
+        'class H { field i64 %h :param :reader; method ok() :returns(i64) { return 0; } }' . ' my ptr $h = H->new(h => (a => 1)); return $h->ok();',
         0, 'a hash literal may be passed to a hash field', %native );
-    answers( 'class HB { field i64 %h :reader :writer; method ok() :returns(i64) { return 0; } }' .
+    answers(
+        'class HB { field i64 %h :reader :writer; method ok() :returns(i64) { return 0; } }' .
             ' my ptr $b = HB->new(); $b->set_h((a => 1))->ok(); return $b->ok();',
-        0, 'the hash writer chains and returns the receiver', %native );
+        0, 'the hash writer chains and returns the receiver', %native
+    );
 };
-
 subtest 'the forms that cannot work are rejected at compile time' => sub {
-    my $inline_param
-        = eval { Brocken->new->compile('class C { field [i64; 2] $xs :param; } C->new(); return 0;'); 1 };
+    my $inline_param = eval { Brocken->new->compile('class C { field [i64; 2] $xs :param; } C->new(); return 0;'); 1 };
     ok( !$inline_param, 'an inline array field cannot be :param' );
     like( $@, qr/cannot be :param/, 'the error says why' );
-
     my $dynamic_size = eval { Brocken->new->compile('class C { field [i64; n] $xs; } C->new(); return 0;'); 1 };
     ok( !$dynamic_size, 'an inline array field needs a constant element count' );
     like( $@, qr/constant element count/, 'the error says why' );
 };
-
 done_testing;

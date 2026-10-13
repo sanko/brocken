@@ -223,7 +223,7 @@ sub _init( ptr $heap_base, i64 $heap_size ) {
 
     # Zero the block metadata: bitmap at [block+0..15], live_count and next_free in the block trailer.
     Brocken::store_i64( $block_base, 0 );
-    Brocken::store_i64( Brocken::ptr_add( $block_base, 8 ),                                           0 );
+    Brocken::store_i64( Brocken::ptr_add( $block_base, 8 ),                         0 );
     Brocken::store_i64( Brocken::ptr_add( $block_base, block_live_count_offset() ), 0 );
     Brocken::store_i64( Brocken::ptr_add( $block_base, block_next_free_offset() ),  0 );
     mark_line( $block_base, 0 );
@@ -344,11 +344,11 @@ sub bump_alloc( ptr $heap_base, i64 $size ) : returns(ptr) {
         my ptr $arena_base    = Brocken::ptr_add( $heap_base, icb_size() );
         my ptr $legacy_cursor = get_heap_cursor($heap_base);
         my i64 $cursor_off    = Brocken::ptr_sub( $legacy_cursor, $arena_base );
-        my i64 $aligned_off   = Brocken::band( Brocken::i64_add( $cursor_off, Brocken::i64_sub( block_size(), 1 ) ),
-            Brocken::i64_sub( 0, block_size() ) );
+        my i64 $aligned_off
+            = Brocken::band( Brocken::i64_add( $cursor_off, Brocken::i64_sub( block_size(), 1 ) ), Brocken::i64_sub( 0, block_size() ) );
         my ptr $new_block = Brocken::ptr_add( $arena_base, $aligned_off );
         Brocken::store_i64( $new_block, 0 );
-        Brocken::store_i64( Brocken::ptr_add( $new_block, 8 ),                                           0 );
+        Brocken::store_i64( Brocken::ptr_add( $new_block, 8 ),                         0 );
         Brocken::store_i64( Brocken::ptr_add( $new_block, block_live_count_offset() ), 0 );
         Brocken::store_i64( Brocken::ptr_add( $new_block, block_next_free_offset() ),  1 );
         mark_line( $new_block, 0 );

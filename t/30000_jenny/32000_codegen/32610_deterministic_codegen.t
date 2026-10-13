@@ -13,7 +13,6 @@ use feature qw[class];
 # The hash seed is fixed when a process starts, so the emission has to be repeated in child processes under different
 # seeds and compared.  The emitter is written to a file rather than re-exec'ing this test so no Test2 output can leak
 # into the captured digest.
-
 my $emitter = <<'PERL';
 use v5.42;
 use Brocken;
@@ -38,8 +37,7 @@ for my $spec ( [ 'udiv', 100, 7 ], [ 'sdiv', -42, 2 ] ) {
 }
 print Digest::SHA::sha256_hex($acc), "\n";
 PERL
-
-my $tmp     = Brocken->new()->tmpdir;
+my $tmp          = Brocken->new()->tmpdir;
 my $emitter_file = "$tmp/determinism_emitter.pl";
 open my $efh, '>', $emitter_file or die "$emitter_file: $!";
 print {$efh} $emitter;
@@ -56,12 +54,9 @@ sub emit_under_seed {
     chomp $out;
     return $out;
 }
-
 my $digest_a = emit_under_seed(0);
 my $digest_b = emit_under_seed(1);
-
 like( $digest_a, qr/\A[0-9a-f]{64}\z/, 'the emitter produced a sha256 digest' );
 is( $digest_b, $digest_a, 'i128 codegen is byte-identical under different Perl hash seeds' );
-
 unlink $emitter_file;
 done_testing;

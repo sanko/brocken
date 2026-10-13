@@ -2,11 +2,10 @@ use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
 class Brocken::Katsuro::AST::Node v0.0.1 {
-    field $file : param : reader = '';
-    field $line : param : reader = 0;
-    field $col  : param : reader = 0;
+    field $file    : param : reader = '';
+    field $line    : param : reader = 0;
+    field $col     : param : reader = 0;
     field $package : param : reader = undef;    # namespace a `package NAME` declaration put this node in
-
     method set_package($name) { $package = $name; }
 };
 class Brocken::Katsuro::AST::Program v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
@@ -82,20 +81,21 @@ class Brocken::Katsuro::AST::Stmt::ClassDecl v0.0.1 : isa(Brocken::Katsuro::AST:
     field $methods : param : reader = [];           # Array of AST::Stmt::MethodDecl
     field $adjusts : param : reader = [];           # Array of AST::Stmt::Adjust (run in declaration order)
 };
+
 # `package NAME;` prefixes the declarations that follow until the end of the enclosing scope; `package NAME { ... }`
 # scopes the prefix to the block. The parser resolves the current package and stamps it onto every statement, so the
 # lowerer reads `package` off the node rather than replaying the declarations.
 class Brocken::Katsuro::AST::Stmt::PackageDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
-    field $name : param : reader;                   # e.g. "Brocken::Runtime"
-    field $body : param : reader = undef;           # AST::Stmt::Block for the block form, undef for `name;`
-    field $version : param : reader = undef;        # strict version literal (v1.2.3 or 1.2.3), or undef
+    field $name    : param : reader;            # e.g. "Brocken::Runtime"
+    field $body    : param : reader = undef;    # AST::Stmt::Block for the block form, undef for `name;`
+    field $version : param : reader = undef;    # strict version literal (v1.2.3 or 1.2.3), or undef
 };
 class Brocken::Katsuro::AST::Stmt::FieldDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
-    field $type       : param : reader;             # scalar type, or the array/hash element/value type
-    field $name       : param : reader;             # without sigil
-    field $attrs      : param : reader = [];        # [{ name => 'reader', arg => undef }, ...]
-    field $default    : param : reader = undef;     # default value expression
-    field $default_op : param : reader = undef;     # '=', '//=', or '||='
+    field $type       : param : reader;            # scalar type, or the array/hash element/value type
+    field $name       : param : reader;            # without sigil
+    field $attrs      : param : reader = [];       # [{ name => 'reader', arg => undef }, ...]
+    field $default    : param : reader = undef;    # default value expression
+    field $default_op : param : reader = undef;    # '=', '//=', or '||='
 
     # Array/hash fields. `kind` is 'scalar', 'array', or 'hash'. An array field written `[T; N] $name` is
     # `inline` (N elements of `elem_type` reserved in the object); one written `T @name` is a single pointer slot

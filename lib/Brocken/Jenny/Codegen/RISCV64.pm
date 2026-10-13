@@ -555,6 +555,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             return $disp                if $addr->{raw};
             return $disp + $call_arg_frame;
         };
+
         # Register name -> encoding number.  Built once; the closure runs several times per encoded instruction, and
         # rebuilding the table on every call was measurable on a function the size of a spilled 128-bit divide.
         my %reg_number = (

@@ -122,10 +122,10 @@ from the heap and stores the field initialisers. C<$p->x> becomes a load at a co
 call, so field access has no runtime cost beyond the addressing.
 
 An inline array field C<field [T; N] $x> spends C<N> struct slots, one per element, so a struct GEP at the field's
-C<slot_idx> plus the element index lands on element C<i>; a pointer array C<field T @x> and a hash
-C<field T %x> each spend one pointer slot, and the element/hash base is loaded from it. Every generated GEP in the
-constructor, in C<populate_field_geps>, and in the synthesised accessors uses C<slot_idx> rather than the 0-based
-field index so that a field declared after an inline array is still addressed correctly.
+C<slot_idx> plus the element index lands on element C<i>; a pointer array C<field T @x> and a hash C<field T %x> each
+spend one pointer slot, and the element/hash base is loaded from it. Every generated GEP in the constructor, in
+C<populate_field_geps>, and in the synthesised accessors uses C<slot_idx> rather than the 0-based field index so that a
+field declared after an inline array is still addressed correctly.
 
 A C<new> therefore is not a keyword in the source; C<< Point->new(x => 1) >> is a method call on the class name, and
 the class name resolves to a synthesised function. Method declarations become functions with the receiver as a hidden
