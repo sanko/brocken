@@ -149,6 +149,12 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
     # interval would stop at the self-move instead of running to the end of the block, and a later temporary would be
     # free to take the same physical register.  That silently destroyed a value across the loop back edge -- the q-bit
     # scratch was handed the register holding the running remainder high word of an i128 division.
+    #
+    # USE is the upward-exposed uses: a read only counts when the name has not already been defined earlier in this
+    # instruction list.  A straight-line block that computes thousands of independent temporaries -- an unrolled
+    # shift-subtract i128 divide -- otherwise put every one of them in USE, and each interval then stretched from the
+    # block start to its end.  With ~1500 intervals all overlapping, linear scan spilled almost the whole file (a 20KB
+    # routine became 200KB of reloads), so the check is what keeps the intervals tight.
     method _scan_insts( $insts, $is_float, $platform ) {
         my %defd;
         my %used;
@@ -168,13 +174,16 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                     # value of rd is the first source.  Treat it as read-modify-write, or the read is dropped from the
                     # live interval and a later value is free to take the register.  The three-operand form names its
                     # two sources explicitly and does not read rd, so only the two-operand shape joins the RMW set.
-                    $used{$name} = 1 if $rmw{ $inst->opcode } || ( @ops == 2 && $inst->opcode =~ /^(?:slt|sltu|sltiu)$/ );
+                    $used{$name} = 1
+                        if !$defd{$name} && ( $rmw{ $inst->opcode } || ( @ops == 2 && $inst->opcode =~ /^(?:slt|sltu|sltiu)$/ ) );
                     next;
                 }
-                $used{$name} = 1;
+                $used{$name} = 1 unless $defd{$name};
             }
             unless ($is_float) {
-                $used{$_} = 1 for $self->_vreg_names_from_mem_operands( $inst, $platform );
+                for my $name ( $self->_vreg_names_from_mem_operands( $inst, $platform ) ) {
+                    $used{$name} = 1 unless $defd{$name};
+                }
             }
             $defd{$dst} = 1 if defined $dst;
         }
@@ -417,6 +426,27 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 }
             }
         }
+        # Exclude every caller-saved register when the function calls setjmp.
+        #
+        # A value parked in a caller-saved register is kept across a call by insert_caller_save_code, which spills it to a
+        # per-call slot shared by every call in the function.  That works for a normal call, where the save and the
+        # restore are adjacent.  setjmp returns twice: the exceptional return runs the restore after longjmp, by which
+        # time the throw path's own calls have overwritten the shared slots, so the restore reloads garbage.  longjmp
+        # restores the callee-saved registers from the jmp_buf itself, and a spilled value lives in a dedicated slot, so
+        # both of those survive the throw; caller-saved registers do not.  Keeping them out of the pool for any function
+        # that calls setjmp leaves the allocator the callee-saved registers and spills, both of which cross the throw.
+        if ( !$is_float && $mf && $mf->blocks->@* ) {
+            CALLER_SAVE_UNSAFE: for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    next unless $inst->opcode eq 'call_func';
+                    my ($callee) = $inst->operands->@*;
+                    next unless $callee && defined $callee->value && $callee->value eq 'setjmp';
+                    $defined_phys{$_} = 1 for @caller_regs;
+                    last CALLER_SAVE_UNSAFE;
+                }
+            }
+        }
+
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         @callee_regs = grep { !$defined_phys{$_} } @callee_regs;
 
