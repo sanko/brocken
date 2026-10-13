@@ -164,9 +164,11 @@ features. The feature-by-feature plan, decisions, and open questions live in
   `$self` for chaining [done], multiple `ADJUST` blocks [done], earlier-field visibility in field
   initializers [done], `:accessor` [done], array/hash fields, and `:weak` (deferred until class-typed fields
   take ownership — see the roadmap M0 note).
-- [ ] **v0.0.1 — object model:** class versions and attributes, `:isa` single inheritance, static
-  ancestor resolution and `SUPER::`, constructor chaining over a copied `:param` name map, `DESTROY`
-  chaining with cascading field teardown, and field alignment/padding.
+- [ ] **v0.0.1 — object model:** class versions and attributes [done], `class NAME;` statement form [done],
+  field alignment/padding [done], `:isa` single inheritance [done], static ancestor resolution and `SUPER::`
+  [done], constructor chaining over a copied `:param` name map [done], and `DESTROY` chaining derived→root
+  [done, callable as a method]. Still open: `DESTROY`'s automatic decref-triggered invocation and cascading
+  field teardown, which wait on class-typed field ownership (F9).
 - [ ] **v0.0.2:** `role`/`apply`/`:does`/`requires` compile-time flattening, `:abstract`, ADJUST
   `:params`, `:strict(params)`, `:lexical_new`, `my class`, `inherit`, `:override`/`:common`, and
   lexical/anonymous methods.

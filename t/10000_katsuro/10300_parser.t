@@ -240,6 +240,25 @@ subtest 'A v-string class version parses' => sub {
     my $prog = $c->parse('class V v1.2.3 { field i64 $x; }');
     is( $prog->statements->[0]->version, 'v1.2.3', 'v-string version' );
 };
+subtest 'DESTROY parses as a class member and a method call' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse(<<'BROCKEN');
+class Resource {
+    field ptr $handle;
+    DESTROY { cleanup(); }
+}
+BROCKEN
+    my $s = $prog->statements->[0];
+    isa_ok( $s, ['Brocken::Katsuro::AST::Stmt::ClassDecl'] );
+    is( $s->destroys->@*, 1, 'one DESTROY member' );
+    is( $s->adjusts->@*,  0, 'DESTROY is not recorded as an ADJUST' );
+    isa_ok( $s->destroys->[0]->body, ['Brocken::Katsuro::AST::Stmt::Block'] );
+
+    # The lexer reserves DESTROY, so the member name is a keyword; after `->` it names a method like any other.
+    my $call = $c->parse('$obj->DESTROY();')->statements->[0];
+    isa_ok( $call, ['Brocken::Katsuro::AST::Expr::MethodCall'] );
+    is( $call->method, 'DESTROY', 'the reserved word reaches the call as the method name' );
+};
 subtest 'Binary expressions (precedence)' => sub {
     my $c    = Brocken->new;
     my $prog = $c->parse('my i64 $r = 1 + 2 * 3;');

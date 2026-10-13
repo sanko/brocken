@@ -364,6 +364,23 @@ BROCKEN
     like( $text, qr/icmp\s+slt\s+i64/, 'first ADJUST comparison present' );
     like( $text, qr/icmp\s+sgt\s+i64/, 'second ADJUST comparison present' );
 };
+subtest 'DESTROY lowers to a Class::DESTROY that chains to the ancestor' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+class Base {
+    field i64 $n;
+    DESTROY { $n = 1; }
+}
+class Leaf :isa(Base) {
+    DESTROY { }
+}
+BROCKEN
+    my $base = find_function( $mod, 'Base::DESTROY' );
+    ok( $base, 'found Base::DESTROY' );
+    my $leaf = find_function( $mod, 'Leaf::DESTROY' );
+    ok( $leaf, 'found Leaf::DESTROY' );
+    like( $leaf->as_string(), qr/call.*Base::DESTROY/, 'the derived destructor calls the ancestor destructor' );
+};
 subtest 'Named constructor with fields' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');

@@ -334,6 +334,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->lower_adjust( $class_name, $ast->adjusts );
         }
 
+        # Register DESTROY up front (so a method or accessor can call it) but lower its body last (so it can call
+        # this class's own methods and accessors, which are generated below).
+        my $has_destroy = $ast->destroys->@* ? 1 : 0;
+        $self->register_method( $class_name, 'DESTROY', 'void', [] ) if $has_destroy;
+
         # Lower explicit methods
         for my $m ( $ast->methods->@* ) {
             my $ret_type = $m->return_type;
@@ -373,6 +378,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $self->generate_writer( $class_name, $f, $mname );
             }
         }
+
+        # Lower DESTROY last: its body may call this class's own methods and accessors, all now registered. The
+        # generated body runs its own code then chains to the nearest ancestor's Class::DESTROY (derived-to-root).
+        $self->lower_destroy( $class_name, $ast->destroys ) if $has_destroy;
         $current_class   = undef;
         $current_package = $saved_package;
     }
@@ -467,7 +476,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # A body-less `class NAME;` is a forward declaration. It never clobbers a definition that already
         # registered (a definition may be written first); it only supplies metadata the earlier one lacked.
         my $existing = $classes->{$full_name};
-        if ( $existing && !$ast->fields->@* && !$ast->methods->@* && !$ast->adjusts->@* ) {
+        if ( $existing && !$ast->fields->@* && !$ast->methods->@* && !$ast->adjusts->@* && !$ast->destroys->@* ) {
             $existing->{version} //= $ast->version;
             push $existing->{attrs}->@*, $ast->attrs->@*;
             return;
@@ -3016,6 +3025,69 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $adjust_ast ( $adjust_asts->@* ) {
             $self->lower_block_body( $adjust_ast->body );
         }
+        unless ( $current_block && $current_block->terminator ) {
+            my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+            for my $name ( sort keys %$needs_rc ) {
+                my $addr   = $symbols->{$name} or next;
+                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+                $builder->build_decref( $loaded, 0, 0, $decref_hb );
+            }
+            $builder->build_ret();
+        }
+    }
+
+    # Generate Class::DESTROY. The body runs this class's own user DESTROY blocks in declaration order, then chains
+    # to the nearest ancestor that defines DESTROY, so teardown runs derived-to-root. A parent runtime is generated
+    # before its child, so an ancestor's Class::DESTROY is already registered when this runs. Managed-field teardown
+    # joins here once class-typed fields take ownership (TODO F9); until then a field does not own its referent and
+    # releasing it here would double-free.
+    method lower_destroy( $class_name, $destroy_asts ) {
+        my $full_name = $class_name . '::DESTROY';
+        $current_func = $functions->{$full_name};
+        return unless $current_func;
+        $symbols  = {};
+        $needs_rc = {};
+        $rc_owner = {};
+        $current_func->set_blocks( [] );
+        my $entry = $current_func->append_block('entry');
+        $builder->position_at_end($entry);
+        $current_block = $entry;
+
+        # %__heap_base is the first param (ptr) at index 0
+        {
+            my $heap_base_param  = $current_func->params->[0];
+            my $heap_base_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::ptr(), '%__heap_base.addr' );
+            $builder->build_store( $heap_base_param, $heap_base_alloca );
+            $symbols->{'__heap_base'} = $heap_base_alloca;
+        }
+
+        # %__want is the second param (i64) at index 1
+        {
+            my $want_param  = $current_func->params->[1];
+            my $want_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%__want.addr' );
+            $builder->build_store( $want_param, $want_alloca );
+            $symbols->{'__want'} = $want_alloca;
+        }
+
+        # $self is the third param (ptr) at index 2
+        my $self_val = $current_func->params->[2];
+        $symbols->{self} = $self_val;
+        $self->populate_field_geps( $class_name, $self_val );
+        for my $destroy_ast ( $destroy_asts->@* ) {
+            $self->lower_block_body( $destroy_ast->body );
+        }
+
+        # Chain to the nearest ancestor DESTROY, strictly above this class.
+        unless ( $current_block && $current_block->terminator ) {
+            my $cd       = $classes->{$class_name};
+            my $ancestor = $cd ? $self->_resolve_method( $cd->{parent}, 'DESTROY' ) : undef;
+            if ( $ancestor && $functions->{$ancestor} ) {
+                my $hb   = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+                my $want = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'} );
+                $builder->build_call( $functions->{$ancestor}, [ $hb, $want, $self_val ], undef );
+            }
+        }
+
         unless ( $current_block && $current_block->terminator ) {
             my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
             for my $name ( sort keys %$needs_rc ) {

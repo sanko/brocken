@@ -82,6 +82,7 @@ class Brocken::Katsuro::AST::Stmt::ClassDecl v0.0.1 : isa(Brocken::Katsuro::AST:
     field $fields  : param : reader = [];           # Array of AST::Stmt::FieldDecl
     field $methods : param : reader = [];           # Array of AST::Stmt::MethodDecl
     field $adjusts : param : reader = [];           # Array of AST::Stmt::Adjust (run in declaration order)
+    field $destroys : param : reader = [];          # Array of AST::Stmt::Adjust wrapping DESTROY blocks
 };
 
 # `package NAME;` prefixes the declarations that follow until the end of the enclosing scope; `package NAME { ... }`

@@ -518,6 +518,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         my @fields;
         my @methods;
         my @adjusts;
+        my @destroys;
         until ( $self->check('}') || $self->check('EOF') ) {
             if ( $self->check( 'KEYWORD', 'field' ) ) {
                 push @fields, $self->parse_field_decl();
@@ -529,21 +530,26 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 my $adjust_tok = $self->advance();
                 push @adjusts, Brocken::Katsuro::AST::Stmt::Adjust->new( $self->_pos_token($adjust_tok), body => $self->parse_block() );
             }
+            elsif ( $self->check( 'KEYWORD', 'DESTROY' ) ) {
+                my $destroy_tok = $self->advance();
+                push @destroys, Brocken::Katsuro::AST::Stmt::Adjust->new( $self->_pos_token($destroy_tok), body => $self->parse_block() );
+            }
             else {
                 my $t = $self->peek();
-                Carp::croak("Expected 'field', 'method', or 'ADJUST' in class body, got $t->{type} '$t->{value}' at line $t->{line}, col $t->{col}");
+                Carp::croak("Expected 'field', 'method', 'ADJUST', or 'DESTROY' in class body, got $t->{type} '$t->{value}' at line $t->{line}, col $t->{col}");
             }
         }
         $self->consume('}');
         return Brocken::Katsuro::AST::Stmt::ClassDecl->new(
             $self->_pos_token($class_token),
-            name    => $name_token->{value},
-            version => $version,
-            attrs   => $attrs,
-            fields  => \@fields,
-            methods => \@methods,
-            adjusts => \@adjusts,
-            package => $current_package,
+            name     => $name_token->{value},
+            version  => $version,
+            attrs    => $attrs,
+            fields   => \@fields,
+            methods  => \@methods,
+            adjusts  => \@adjusts,
+            destroys => \@destroys,
+            package  => $current_package,
         );
     }
 
@@ -772,7 +778,20 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $right, op => $op );
             }
             if ( $op eq '->' ) {
-                my $ident = $self->consume( 'IDENT', undef, "Expected field or method name after '->'" );
+                my $ident;
+                if ( $self->check('IDENT') ) {
+                    $ident = $self->advance();
+                }
+                elsif ( $self->check( 'KEYWORD', 'DESTROY' ) ) {
+
+                    # `$obj->DESTROY` is an ordinary method call even though the lexer reserves the word as the
+                    # class-body DESTROY member.
+                    $ident = $self->advance();
+                }
+                else {
+                    my $t = $self->peek();
+                    Carp::croak("Expected field or method name after '->' at line $t->{line}, col $t->{col}");
+                }
                 if ( $self->check('(') ) {
                     $self->advance();
                     my $args = $self->parse_call_args_after_paren();
