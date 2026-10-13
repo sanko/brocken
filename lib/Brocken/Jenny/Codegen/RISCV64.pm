@@ -555,46 +555,48 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             return $disp                if $addr->{raw};
             return $disp + $call_arg_frame;
         };
+        # Register name -> encoding number.  Built once; the closure runs several times per encoded instruction, and
+        # rebuilding the table on every call was measurable on a function the size of a spilled 128-bit divide.
+        my %reg_number = (
+            zero => 0,
+            ra   => 1,
+            sp   => 2,
+            gp   => 3,
+            tp   => 4,
+            t0   => 5,
+            t1   => 6,
+            t2   => 7,
+            s0   => 8,
+            fp   => 8,
+            s1   => 9,
+            a0   => 10,
+            a1   => 11,
+            a2   => 12,
+            a3   => 13,
+            a4   => 14,
+            a5   => 15,
+            a6   => 16,
+            a7   => 17,
+            s2   => 18,
+            s3   => 19,
+            s4   => 20,
+            s5   => 21,
+            s6   => 22,
+            s7   => 23,
+            s8   => 24,
+            s9   => 25,
+            s10  => 26,
+            s11  => 27,
+            t3   => 28,
+            t4   => 29,
+            t5   => 30,
+            t6   => 31
+        );
         my $reg_id = sub ($r) {
             return 0 unless defined $r;
-            my %map = (
-                zero => 0,
-                ra   => 1,
-                sp   => 2,
-                gp   => 3,
-                tp   => 4,
-                t0   => 5,
-                t1   => 6,
-                t2   => 7,
-                s0   => 8,
-                fp   => 8,
-                s1   => 9,
-                a0   => 10,
-                a1   => 11,
-                a2   => 12,
-                a3   => 13,
-                a4   => 14,
-                a5   => 15,
-                a6   => 16,
-                a7   => 17,
-                s2   => 18,
-                s3   => 19,
-                s4   => 20,
-                s5   => 21,
-                s6   => 22,
-                s7   => 23,
-                s8   => 24,
-                s9   => 25,
-                s10  => 26,
-                s11  => 27,
-                t3   => 28,
-                t4   => 29,
-                t5   => 30,
-                t6   => 31
-            );
-            return $map{$r} if exists $map{$r};
-            return $1       if $r =~ /^x(\d+)$/;
-            return $1       if $r =~ /^f(\d+)$/ && $1 <= 31;
+            return $reg_number{$r} if exists $reg_number{$r};
+            return $1              if $r =~ /^x(\d+)$/;
+            return $1              if $r =~ /^f(\d+)$/ && $1 <= 31;
             return 0;
         };
 
@@ -634,16 +636,25 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         # stays out of every scratch pool.
         my %ret_regs = map { $_ => 1 } grep {defined} $platform->abi->return_pair_registers;
 
+        # The allocation table also carries a `spill(N)` marker for every spilled virtual register.  Only the physical
+        # registers it names can collide with a scratch, and a spilled 128-bit divide produces well over a thousand of
+        # those markers.  Collect the register names once; rebuilding the whole set inside the per-instruction scratch
+        # search walked thousands of spill markers for every memory access and dominated encoding a large function.
+        my %assigned_reg;
+        for my $r ( values %$assignment ) {
+            next if !defined $r || $r =~ /^spill\(/;
+            $assigned_reg{$r} = 1;
+        }
+
         # A scratch must not name any register the current instruction reads or writes, so the caller passes those in
         # @forbidden.  An assigned register is never free, but a function that keeps enough values live assigns every
         # caller register, so the allocator's own reload scratch is the fallback: it holds a reloaded value only for
         # the single instruction that reads it, which is exactly the one that lists it in @forbidden.
         my $pick_scratch = sub (@forbidden) {
             my %forbid = map { $_ => 1 } grep {defined} @forbidden;
-            my %used;
-            @used{ values %$assignment } = ();
-            $used{$_}                    = 1 for sort keys %reserved;
-            $used{$_}                    = 1 for sort keys %ret_regs;
+            my %used   = %assigned_reg;
+            $used{$_} = 1 for sort keys %reserved;
+            $used{$_} = 1 for sort keys %ret_regs;
             for my $r ( $platform->registers('caller')->@* ) {
                 return $r unless exists $used{$r} || $forbid{$r};
             }
@@ -666,8 +677,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 $forbidden{$_}        = 1 for grep {defined} @extra_forbidden;
                 $forbidden{$index_id} = 1 if defined $index_id;
                 $forbidden{$data_id}  = 1 unless $allow_data;
-                my %used;
-                @used{ values %$assignment } = ();
+                my %used = %assigned_reg;
                 $used{$_} = 1 for sort keys %reserved;
 
                 # The return registers carry the function result across the return sequence, where they are not
@@ -975,8 +985,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         my $src_r;
                         my $sid;
                         if ( $src->kind eq 'imm' ) {
-                            my %used;
-                            @used{ values %$assignment } = ();
+                            my %used = %assigned_reg;
                             my $tmp_r;
                             for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
                             die 'no temp register for imm operand' unless $tmp_r;
@@ -1090,8 +1099,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                             my $src_r;
                             my $sid;
                             if ( $src->kind eq 'imm' ) {
-                                my %used;
-                                @used{ values %$assignment } = ();
+                                my %used = %assigned_reg;
                                 my $tmp_r;
                                 for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
                                 die 'no temp register for imm operand' unless $tmp_r;
@@ -1223,8 +1231,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                         my $funct3 = $bits > 32                                  ? 3                : ( $bits > 16 ? 2 : ( $bits > 8 ? 1 : 0 ) );
 
                         # find a temporary register not in use
-                        my %used;
-                        @used{ values %$assignment } = ();
+                        my %used = %assigned_reg;
                         my $tmp_r;
                         for my $r ( $platform->registers('caller')->@* ) { $tmp_r = $r, last unless exists $used{$r} }
                         die 'no temp register for store_imm' unless $tmp_r;
