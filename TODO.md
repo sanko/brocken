@@ -172,3 +172,16 @@ features. The feature-by-feature plan, decisions, and open questions live in
   lexical/anonymous methods.
 - [ ] **Deferred:** `BUILD`/`BUILDARGS`, the metaprogramming API, extension attributes,
   `:inheritable` field inheritance, `:lvalue` methods, and `:repr(...)`.
+
+---
+
+## 13. Codegen Performance & Code Size
+
+- [ ] **RISC-V i128 Divide Unroll Replacement:** RISC-V 128-bit `div`/`rem` lower to a fully unrolled
+  128-iteration shift/subtract sequence (`reverse 0..127` in `lib/Brocken/Jenny/Lowerer/RISCV64.pm`),
+  about 5191 instructions and 23 KiB of code for a single operator -- an order of magnitude more than
+  the rest of the function and enough register pressure to have masked the allocator defects in §1.
+  Replace the unrolled expansion with a runtime loop (the step sequence emitted once and iterated), or
+  a hardware-assisted fast path analogous to x86's `div128_64` and the ARM64 partial fast path, so
+  both the code size and the allocator pressure drop. The result must stay bit-identical to today's
+  sequence; `t/30000_jenny/32000_codegen/32650_i128_arithmetic_native.t` is the regression guard.
