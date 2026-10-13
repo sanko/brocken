@@ -1,6 +1,6 @@
 # Brocken Class System Roadmap
 
-**Status:** Active Development (M0 complete; M1 object model shipped, including the instance-ownership contract, its `DESTROY` teardown, class-instance cycle scanning, and `:weak` fields)
+**Status:** Active Development (M0 complete; M1 object model shipped, including the instance-ownership contract, its `DESTROY` teardown, class-instance cycle scanning, `:weak` fields and locals, and the `builtin::` namespace with `weaken`/`unweaken`/`is_weak`)
 **Targets:** v0.0.1 = `perlclass` (`use feature 'class'`) parity; v0.0.2 = selected `Object::Pad` features.
 
 This document is the written plan for Brocken's object system. It records what ships today, what
@@ -193,7 +193,7 @@ dispatch, RC/Immix). Decisions are recommendations for sign-off.
 | ADJUST `:params` (and/or `ADJUSTPARAMS`) | ADJUST blocks consume named constructor params | Direct extension of the `:param` map; typed in Brocken | Moderate |
 | `:mutator` | lvalue accessor for a scalar field | Static lowering to get/set; useful sugar | Small |
 | `:accessor` | Combined reader/writer | Implemented as an M0 win (reader + chaining writer) | Done |
-| `:weak` | Accessor/constructor assignments don't take ownership | Shipped. The constructor, the generated writer, and a plain field assignment all store without an `incref` (and never `decref` the displaced value); the generated destructor and the `__scan`/`__restore` hooks skip the field, so a weak edge cannot hold a cycle open. The referent must outlive the instance (the field may dangle otherwise) | Done |
+| `:weak` | Accessor/constructor assignments don't take ownership | Shipped. The constructor, the generated writer, and a plain field assignment all store without an `incref` (and never `decref` the displaced value); the generated destructor and the `__scan`/`__restore` hooks skip the field, so a weak edge cannot hold a cycle open. The referent must outlive the instance (the field may dangle otherwise). The same rule applies to a `:weak` local, and ownership can be toggled at runtime with `builtin::weaken`/`unweaken`/`is_weak` (`t/10000_katsuro/10998_weak_vars.t`) | Done |
 | `:reader`/`:writer`/`:param(NAME)` + `_` rule | Custom accessor names | Same as C4/C5; adopt fully | Done (C4/C5) |
 | Default `//=` and `||=` | Field default operators | `||=` implemented (C9); custom names still planned | Done (`||=`) |
 | Method `:override` | Assert a method overrides an ancestor's | Compile-time check over the static method table | Small |

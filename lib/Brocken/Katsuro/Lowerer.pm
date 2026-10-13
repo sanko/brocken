@@ -30,6 +30,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $class_owned           = {};        # var_name -> class_name (an owned class instance; released through its destructor)
     field $class_escaped         = {};        # var_name -> 1 (used as a value, so its instance must not be reclaimed)
     field $borrowed_params       = {};        # param_name -> 1 (caller-owned Any parameter; the callee must not release it)
+    field $weak_var              = {};        # var_name -> 1 (a weak local: it stores without owning a reference)
     field $returns_owned         = {};        # func_name -> 1 (a dynamic return hands the caller an owned +1 reference)
     field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
     field $rodata : reader       = {};        # label -> bytes for string constants
@@ -449,6 +450,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->_scan_value_escapes($_) for $expr->args->@*;
         }
         elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::IntrinsicCall') ) {
+
+            # The weak-reference builtins act on a variable's ownership in place: they neither share the pointer nor
+            # return it. Classifying the argument as an escaping value would keep a fresh instance out of the owned
+            # set, so `weaken` could not release the reference it is meant to drop.
+            return if $expr->name =~ /^builtin::(?:weaken|unweaken|is_weak)$/;
             $self->_scan_value_escapes($_) for $expr->args->@*;
         }
         elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::List') ) {
@@ -998,6 +1004,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $borrowed_params = {};
         $class_owned     = {};
         $class_escaped   = {};
+        $weak_var        = {};
         $self->_scan_escapes( $ast->body );
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
@@ -1296,7 +1303,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my ( $line, $col ) = ( $ast->line, $ast->col );
         my $alloca = $builder->build_alloca( $ir_type, $self->unique_value_name( '%' . $ast->name . '.addr' ), undef, $line, $col, $ast->name, $ast->type );
         $symbols->{ $ast->name } = $alloca;
-        if ( $ast->type eq 'Any' ) {
+        for my $a ( $ast->attrs->@* ) {
+            Carp::croak( "Unknown variable attribute ':" . $a->{name} . "' at " . $self->_loc($ast) ) unless $a->{name} eq 'weak';
+        }
+        my $is_weak = $self->has_attr( $ast->attrs, 'weak' ) ? 1 : 0;
+        $weak_var->{ $ast->name } = 1 if $is_weak;
+        if ( $ast->type eq 'Any' && !$is_weak ) {
             $self->_note_rc( $ast->name );
         }
         if ( !defined $ast->init && ( $ir_type->kind eq 'dynamic' || $ir_type->kind eq 'ptr' ) ) {
@@ -1320,15 +1332,17 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
             # A fresh instance already carries the reference the slot needs -- the constructor wrote a refcount of 1.
             # Track the local for release at scope exit only when nothing can reach it another way (the escape scan
-            # above leaves it off the escaped set); otherwise it stays owned, which leaks rather than dangles.
-            if ( $fresh_class && !$class_escaped->{ $ast->name } ) {
+            # above leaves it off the escaped set); otherwise it stays owned, which leaks rather than dangles. A
+            # `:weak` local never takes that reference, so it is stored plainly and left untracked.
+            if ( $fresh_class && !$class_escaped->{ $ast->name } && !$is_weak ) {
                 $self->_note_class( $ast->name, $fresh_class );
                 $builder->build_store( $val, $alloca, $line, $col );
             }
             else {
 
                 # An owned dynamic call result already carries the reference the slot needs (F13); take a second one
-                # only for values that arrive borrowed (a local, a parameter, a fresh box).
+                # only for values that arrive borrowed (a local, a parameter, a fresh box). A `:weak` slot owns nothing
+                # and so never takes a reference.
                 if ( $needs_rc->{ $ast->name } && !$self->_owned_call_result($val) ) {
                     $builder->build_incref( $val, $line, $col );
                 }
@@ -2743,6 +2757,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $name = $ast->name;
         my @args;
         my ( $line, $col ) = ( $ast->line, $ast->col );
+        return $self->lower_builtin( substr( $name, length('builtin::') ), $ast ) if $name =~ /^builtin::/;
         for my $arg ( $ast->args->@* ) {
             push @args, $self->lower_expression($arg);
         }
@@ -2828,6 +2843,71 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb, undef, $line, $col );
         }
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
+    }
+
+    # == builtin:: namespace ==
+    # Mirrors Perl's `builtin` pragma: utility functions present in the interpreter and callable by their
+    # fully-qualified `builtin::NAME` name. Pure value builtins lower to a constant or an op; the weak-reference
+    # builtins (`weaken`, `unweaken`, `is_weak`) operate on a variable's ownership rather than its value. Brocken has
+    # no dynamic value provenance and no taint model, so a few of Perl's builtins are intentionally absent (see
+    # docs/spec.md, `builtin::`).
+    method lower_builtin( $name, $ast ) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        if ( $name eq 'true' )  { return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i1(), value => 1 ); }
+        if ( $name eq 'false' ) { return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i1(), value => 0 ); }
+
+        # There is no taint model: a value is never tainted. The argument is still evaluated for side effects.
+        if ( $name eq 'is_tainted' ) {
+            $self->lower_expression( $ast->args->[0] ) if $ast->args->@*;
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i1(), value => 0 );
+        }
+
+        if ( $name eq 'weaken' || $name eq 'unweaken' || $name eq 'is_weak' ) {
+            return $self->lower_weaken_builtin( $name, $ast, $line, $col );
+        }
+        Carp::croak( "Unknown builtin 'builtin::$name' at " . $self->_loc($ast) );
+    }
+
+    # `builtin::weaken`/`unweaken`/`is_weak` take a variable, not a value. Weakness is a static property of the
+    # storage (like a `:weak` field or local): a weak slot stores without taking a reference and is skipped by the
+    # scope-exit release. `weaken` drops the reference the variable currently holds, so an object it alone owned may
+    # be freed and leave the slot dangling -- the documented weak hazard; Brocken has no weak-ref hook that could null
+    # it. `unweaken` re-takes a reference. `is_weak` folds to a compile-time boolean.
+    method lower_weaken_builtin( $name, $ast, $line, $col ) {
+        my $arg = $ast->args->[0];
+        Carp::croak( "builtin::$name expects a variable argument at " . $self->_loc($ast) )
+            unless $arg && $arg->isa('Brocken::Katsuro::AST::Expr::Var');
+        my $vname = $arg->name;
+        my $addr  = $symbols->{$vname};
+        Carp::croak( "Undefined variable '$vname' for builtin::$name at " . $self->_loc($ast) ) unless $addr;
+
+        if ( $name eq 'is_weak' ) {
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i1(), value => ( $weak_var->{$vname} ? 1 : 0 ) );
+        }
+
+        if ( $name eq 'weaken' ) {
+            return undef if $weak_var->{$vname};
+            if ( $needs_rc->{$vname} ) {
+                my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+                $self->_emit_rc_release( $vname, $hb );
+                $self->_forget_rc($vname);
+            }
+            $weak_var->{$vname} = 1;
+            return undef;
+        }
+
+        # unweaken: re-take a reference to the value the variable currently holds.
+        return undef unless $weak_var->{$vname};
+        delete $weak_var->{$vname};
+        my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::ptr(), $addr, undef, $line, $col );
+        $builder->build_incref( $loaded, $line, $col );
+        if ( my $class = $var_class->{$vname} ) {
+            $self->_note_class( $vname, $class );
+        }
+        else {
+            $self->_note_rc($vname);
+        }
+        return undef;
     }
 
     # Condition conversion
@@ -3449,6 +3529,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $borrowed_params = {};
         $class_owned   = {};
         $class_escaped = {};
+        $weak_var      = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -3518,6 +3599,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $borrowed_params = {};
         $class_owned   = {};
         $class_escaped = {};
+        $weak_var      = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -3571,6 +3653,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $borrowed_params = {};
         $class_owned   = {};
         $class_escaped = {};
+        $weak_var      = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -3635,6 +3718,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $borrowed_params = {};
         $class_owned   = {};
         $class_escaped = {};
+        $weak_var      = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);

@@ -251,6 +251,24 @@ Hashes in `core.brocken` use an **O(1) Open Addressing with Linear Probing** arc
 - `exists %hash{"key"}` (Returns `bool`)
 - `delete %hash{"key"}` (Removes the entry and returns the deleted value)
 
+### 6.3 The `builtin::` Namespace
+
+`builtin::NAME(...)` calls mirror Perl's `builtin` pragma: utility functions present in the interpreter and callable by
+their fully-qualified name. They share the `Brocken::` intrinsic-call node but are dispatched separately, and may
+operate on a variable's ownership rather than its value. The implemented set is:
+
+| Builtin | Semantics |
+|---------|-----------|
+| `builtin::true()` / `builtin::false()` | The boolean constants, lowered to an `i1` literal. |
+| `builtin::is_tainted(EXPR)` | Always `false`; Brocken has no taint model. The argument is still evaluated for side effects. |
+| `builtin::weaken($v)` | Drops the reference the local `$v` holds and marks it weak (see 7.4). |
+| `builtin::unweaken($v)` | Re-takes a reference for a weak local `$v`. |
+| `builtin::is_weak($v)` | Whether `$v` is weak; folds to a compile-time boolean. |
+
+The rest of Perl's `builtin` set — `refaddr`, `reftype`, `blessed`, `ceil`, `floor`, `indexed`, `trim`, `stringify`,
+`numify`, `created_as_string`, `created_as_number`, `inf`, `nan`, `export_lexically`, `load_module` — is **not yet
+implemented** (see [`class_roadmap.md`](class_roadmap.md) and `TODO.md`); an unknown `builtin::` name is a compile error.
+
 ---
 
 ## 7. Subroutines, Attributes & Closures
@@ -296,6 +314,7 @@ Attributes provide compile-time metadata for the optimizer and linker:
 **Variable Attributes:**
 - `:const` - Immutable after initialization; re-assignment is a compile error.
 - `:aligned(N)` - Enforces N-byte memory alignment (useful for SIMD arrays).
+- `:weak` - Declares a non-owning local: it stores without taking a refcount reference and is skipped by the scope-exit release, exactly like a `:weak` field. The referent must outlive the local (the slot may dangle otherwise). Weakening can also be toggled at runtime with `builtin::weaken`/`unweaken`/`is_weak` (6.3).
 
 **Class Field Attributes:**
 - `:param` - Generates constructor argument: `Class->new(field => $val)`. An explicit name may be given: `:param(name)`.
@@ -2068,6 +2087,7 @@ Attributes are compile-time directives to the parser, middle end, and code gener
 
 - `:aligned(N)` — Enforce N-byte alignment on a stack slot or static address.
 - `:const` — Assert single assignment; mutation is a compile-time diagnostic.
+- `:weak` — Declare a non-owning local, like a `:weak` field (see 7.4).
 
 ---
 
@@ -3960,6 +3980,7 @@ Attributes provide compile-time directives to the parser, middle-end, and code g
 ### Variable Attributes
 - `:aligned(N)`: Enforces N-byte memory alignment (essential for SIMD registers).
 - `:const`: Asserts single assignment; mutation triggers a compile-time diagnostic.
+- `:weak`: Declares a non-owning local, like a `:weak` field (see 7.4).
 
 ---
 

@@ -190,6 +190,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         my $var_token = $self->consume( 'VAR', undef, "Expected variable name after 'my'" );
         my $sigil     = substr( $var_token->{value}, 0, 1 );
         my $name      = substr( $var_token->{value}, 1 );
+        my $attrs     = $self->parse_attrs();
         my $init      = undef;
         if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) || $self->check( 'OP', '||=' ) ) {
 
@@ -202,7 +203,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         }
         $self->consume( ';', undef, "Expected ';' after variable declaration" );
         return Brocken::Katsuro::AST::Stmt::VarDecl->new( $self->_pos_token($var_token), sigil => $sigil, name => $name, type => $type,
-            init => $init );
+            attrs => $attrs, init => $init );
     }
 
     # my ($a, $b) = expr
@@ -913,6 +914,13 @@ class Brocken::Katsuro::Parser v0.0.1 {
             my $args = $self->parse_call_args_after_paren();
             if ( $name =~ /^Brocken::([^:]+)$/ ) {
                 return Brocken::Katsuro::AST::Expr::IntrinsicCall->new( $self->_pos_token($token), name => $1, args => $args );
+            }
+
+            # The `builtin::` namespace mirrors Perl's `builtin` pragma: a utility function present in the
+            # interpreter and callable by its fully-qualified name. It shares the intrinsic call node and is
+            # dispatched by `lower_builtin`.
+            if ( $name =~ /^builtin::([^:]+)$/ ) {
+                return Brocken::Katsuro::AST::Expr::IntrinsicCall->new( $self->_pos_token($token), name => 'builtin::' . $1, args => $args );
             }
             return Brocken::Katsuro::AST::Expr::Call->new( $self->_pos_token($token), func_name => $name, args => $args );
         }

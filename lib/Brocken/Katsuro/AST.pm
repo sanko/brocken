@@ -17,6 +17,7 @@ class Brocken::Katsuro::AST::Stmt::VarDecl v0.0.1 : isa(Brocken::Katsuro::AST::N
     field $sigil : param : reader;              # '$', '@', '%'
     field $name  : param : reader;              # e.g. "cursor"
     field $type  : param : reader = 'Any';
+    field $attrs : param : reader = [];         # [{name,arg}, ...] e.g. :weak
     field $init  : param : reader = undef;      # Initial expression Node
 };
 class Brocken::Katsuro::AST::Stmt::ArrayDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
