@@ -33,7 +33,7 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
 - [ ] **F2 - `//=`/`||=` RC Leak:** A conditional assignment on a dynamic (`Any`) slot stores the select result without emitting an `incref` on the replacement or a `decref` of the displaced old value (the same gap as the constructor field-default `||=`, F9).
 - [x] **F3 - Borrowed `Any` UAF:** Callers pass `Any` arguments without `incref`, but callees erroneously `decref` them on exit. Causes Use-After-Free. The lowerer now tracks `Any` parameters as *borrowed* (`$borrowed_params`) instead of owned, so neither the function nor the method exit cleanup touches them; a store into a parameter slot takes its own `incref` and promotes the slot to owned without releasing the caller's value, and a bare `return $param` no longer bumps a reference it does not own. Covered by `t/40000_runtime/40110_runtime_borrow.t` (all four cases fail without the fix).
 - [ ] **F5 - Overzealous Loop Cleanup:** `_emit_loop_cleanup` decrefs *all* function-wide `needs_rc` variables on `last`/`next`, instead of only loop-scoped ones.
-- [ ] **F9 - Class Field RC Leaks:** Constructors and field assignments store without an `incref` and displace old values without a `decref`.
+- [x] **F9 - Class Field RC Leaks:** Constructors and field assignments stored without an `incref` and displaced the value they replaced without a `decref`, so a dynamic (`Any`) field aliased whatever box the caller passed in and dangled once the caller's local was released. A dynamic field store now takes its own reference and releases the value it displaces, covering constructor positional/named/default field stores, `$obj->field = v` and bare-field assignment, and the generated writer; fresh dynamic fields are nulled up front so the displaced load always reads a valid pointer. The select-based `||=`/`//=` stores (constructor field defaults and `lower_assign`) still need a conditional form and are tracked under F2. Covered by `t/40000_runtime/40120_runtime_field_rc.t` (four of five cases fail without the fix).
 - [x] **F12 - Branch-Body RC Leak:** `if`/`elsif`/`else` bodies lowered their statements directly instead of as a block, so an `Any` declared in a branch was released only at function exit; inside a loop that leaked one box per iteration. Branch bodies now run the same block-scoped cleanup a bare block gets (a `return` inside the branch still short-circuits before the cleanup). `while` bodies were already covered by the loop back-edge cleanup. Covered by two new subtests in `t/40000_runtime/40200_heap_introspect.t` (both fail without the fix).
 - [ ] **F13 - Double-Incref on Return:** Dynamic return values are incref'd twice (by the callee and the caller) leading to a permanent +1 leak.
 - [ ] **Object Destructors (`DESTROY`):** Implement `DESTROY { ... }` block lowering for classes, with automated cascading `decref`s for fields. Chains derived→root; part of the class object-model work (see §12 and `docs/class_roadmap.md` §1.6).
@@ -162,13 +162,13 @@ features. The feature-by-feature plan, decisions, and open questions live in
 - [ ] **v0.0.1 — syntax sugar:** `:returns(Type)` (replacing `-> RET`) [done], parameter defaults [done], `||=`
   defaults [done], `:param(NAME)`/`:reader(NAME)`/`:writer(NAME)` with `_`-stripping [done], `:writer` returns
   `$self` for chaining [done], multiple `ADJUST` blocks [done], earlier-field visibility in field
-  initializers [done], `:accessor` [done], array/hash fields, and `:weak` (deferred until class-typed fields
-  take ownership — see the roadmap M0 note).
+  initializers [done], `:accessor` [done], array/hash fields, and `:weak` (deferred — dynamic fields own
+  on store (F9), but the weak no-`incref` store is not built; see the roadmap M0 note).
 - [ ] **v0.0.1 — object model:** class versions and attributes [done], `class NAME;` statement form [done],
   field alignment/padding [done], `:isa` single inheritance [done], static ancestor resolution and `SUPER::`
   [done], constructor chaining over a copied `:param` name map [done], and `DESTROY` chaining derived→root
   [done, callable as a method]. Still open: `DESTROY`'s automatic decref-triggered invocation and cascading
-  field teardown, which wait on class-typed field ownership (F9).
+  field teardown, which wait on the instance-ownership contract (field stores already own since F9).
 - [ ] **v0.0.2:** `role`/`apply`/`:does`/`requires` compile-time flattening, `:abstract`, ADJUST
   `:params`, `:strict(params)`, `:lexical_new`, `my class`, `inherit`, `:override`/`:common`, and
   lexical/anonymous methods.
