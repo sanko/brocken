@@ -1,6 +1,6 @@
 # Brocken Class System Roadmap
 
-**Status:** Planning
+**Status:** Active Development (M0 complete; M1 in progress)
 **Targets:** v0.0.1 = `perlclass` (`use feature 'class'`) parity; v0.0.2 = selected `Object::Pad` features.
 
 This document is the written plan for Brocken's object system. It records what ships today, what
@@ -57,7 +57,7 @@ those are marked **Diverge** and argued in 1.6.
 | C13 | `:isa(CLASS [VER])`, single superclass, `require` on demand | Missing | Planned |
 | C14 | Inherited methods callable; fields *not* inherited | Missing | Planned (with C13) |
 | C15 | `SUPER::` static ancestor call | Missing | Planned (with C13) |
-| C16 | Method auto-signatures (defaults) | Typed, no defaults | Planned (defaults) |
+| C16 | Method auto-signatures (defaults) | Typed; omitted trailing params take their `=` default | **Shipped** |
 | C17 | Anonymous `method { ... }` | Missing | Planned |
 | C18 | Lexical `my method` | Missing | Planned |
 | C19 | Constructor takes `%arguments` named hash; fields looked up by name | Accepts positional **and** trailing hash | Diverge (superset) |
