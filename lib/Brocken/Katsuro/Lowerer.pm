@@ -1158,7 +1158,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         $builder->position_at_end($then_block);
         $current_block = $then_block;
-        $self->lower_block_body( $ast->then );
+
+        # Branch bodies are block-scoped, so they get the same cleanup a bare block does: an `Any` declared in the
+        # branch is released when the branch ends rather than at function exit. Without this a branch inside a loop
+        # leaks one box per iteration (F12).
+        $self->lower_block( $ast->then );
         unless ( $current_block->terminator ) {
             $builder->build_br( $merge_block, $line, $col );
         }
@@ -1170,7 +1174,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $self->lower_elsif_chain( $first_elsif, $merge_block, \@{ $ast->elsif }, 0 );
             }
             elsif ( defined $ast->else ) {
-                $self->lower_block_body( $ast->else );
+                $self->lower_block( $ast->else );
             }
             unless ( $current_block->terminator ) {
                 $builder->build_br( $merge_block, $line, $col );
@@ -1200,7 +1204,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         $builder->position_at_end($then);
         $current_block = $then;
-        $self->lower_block_body($body);
+        $self->lower_block($body);
         unless ( $current_block->terminator ) {
             $builder->build_br( $merge_block, $line, $col );
         }

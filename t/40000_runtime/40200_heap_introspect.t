@@ -364,6 +364,57 @@ BROCKEN
         unlink $file;
     }
 };
+subtest 'live_count decrements at if-body exit' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken->new->compile(<<'BROCKEN');
+my ptr $hb = Brocken::heap_base();
+my i64 $lc0 = Brocken::Runtime::live_count($hb);
+if ($lc0 == 0) {
+    my $x = 42;
+    my i64 $inside = Brocken::Runtime::live_count($hb);
+    if ($inside != 1) { return 2; }
+}
+my i64 $after = Brocken::Runtime::live_count($hb);
+if ($after != 0) { return 3; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_if_then' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, 'then-block Any is freed at the end of the then-block' );
+        unlink $file;
+    }
+};
+subtest 'live_count decrements at else-body exit' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken->new->compile(<<'BROCKEN');
+my ptr $hb = Brocken::heap_base();
+if (1 == 2) {
+}
+else {
+    my $y = 7;
+    my i64 $inside = Brocken::Runtime::live_count($hb);
+    if ($inside != 1) { return 2; }
+}
+my i64 $after = Brocken::Runtime::live_count($hb);
+if ($after != 0) { return 3; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_if_else' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, 'else-block Any is freed at the end of the else-block' );
+        unlink $file;
+    }
+};
 subtest 'mark_line and sweep_block' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
