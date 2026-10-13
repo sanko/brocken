@@ -147,12 +147,33 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $TYPE_NATIVE_MAP{$name} // $self->type_from_name($name);
     }
 
-    # Type size in bytes for field offset calculation
+    # Type size in bytes for field offset calculation. A sub-byte integer (`i1`/`bool`) still occupies one byte of
+    # storage, so it rounds up rather than returning a fraction.
     method type_size($ir_type) {
-        return 0                  if $ir_type->kind eq 'void';
-        return 8                  if $ir_type->kind eq 'ptr' || $ir_type->kind eq 'dynamic';
-        return $ir_type->bits / 8 if $ir_type->kind eq 'int' || $ir_type->kind eq 'float';
+        return 0 if $ir_type->kind eq 'void';
+        return 8 if $ir_type->kind eq 'ptr' || $ir_type->kind eq 'dynamic';
+        if ( $ir_type->kind eq 'int' || $ir_type->kind eq 'float' ) {
+            my $bytes = $ir_type->bits / 8;
+            return $bytes < 1 ? 1 : $bytes;
+        }
         return 8;
+    }
+
+    # Natural alignment of a field. A field is placed at the next multiple of this, so mixed widths leave the gaps
+    # the target ABI expects (`i64` after `i8` starts at an 8-byte boundary). The object header is 8 bytes, so every
+    # instance starts 8-aligned.
+    method type_align($ir_type) {
+        return 8 if $ir_type->kind eq 'ptr' || $ir_type->kind eq 'dynamic';
+        if ( $ir_type->kind eq 'int' || $ir_type->kind eq 'float' ) {
+            my $bytes = $ir_type->bits / 8;
+            return $bytes < 1 ? 1 : $bytes;
+        }
+        return 1;
+    }
+
+    method _align_up( $value, $align ) {
+        return $value if $align <= 1;
+        return ( $value + $align - 1 ) & ~( $align - 1 );
     }
 
     # Return type inference
@@ -435,7 +456,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method register_class($ast) {
         my $full_name = $self->_qualify( $ast->name, $ast->package );
         my @fields;
-        my $offset = 8;
+        my $offset    = 8;
+        my $max_align = 8;    # the 8-byte object header already forces at least this
         my @field_types;
         my @field_names;
         my @field_offsets;
@@ -468,6 +490,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 Carp::croak(
                     "Inline array field '" . $f->name . "' cannot be :param; use a pointer array (field " . $f->elem_type . " \@" . $f->name . ")" );
             }
+            my $align = $self->type_align( $inline ? $elem_ir_type : $ir_type );
+            $offset = $self->_align_up( $offset, $align );
+            $max_align = $align if $align > $max_align;
             my $slot_idx = scalar @field_types;
             for my $k ( 0 .. $span - 1 ) {
                 push @field_types,   $inline ? $elem_ir_type : $ir_type;
@@ -496,6 +521,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 };
             $offset += $size;
         }
+        $offset = $self->_align_up( $offset, $max_align );
         my $struct_type = Brocken::Lindsay::IR::Type->new(
             kind           => 'struct',
             struct_name    => $full_name,
