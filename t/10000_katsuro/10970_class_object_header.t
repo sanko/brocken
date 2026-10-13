@@ -27,7 +27,10 @@ BROCKEN
     ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/Brocken::Runtime::bump_alloc\(ptr\s+\S+,\s+i64\s+24/, 'new allocates header + both fields (8 + 16 = 24)' );
-    like( $text, qr/store\s+i64\s+67108865/,                              'new initializes the object header (refcount 1, tag 4 = ptr)' );
+    # refcount 1 | Leaf flag (bit 2, no owned dynamic field to scan) | class-instance tag 4 |
+    # class id 1 in the auxiliary bits.
+    my $header = 1 | ( 4 << 16 ) | ( 4 << 24 ) | ( 1 << 32 );
+    like( $text, qr/store\s+i64\s+\Q$header\E/, 'new initializes the object header (refcount 1, Leaf, tag 4, class id 1)' );
     my ($gep)
         = grep { $_->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $_->base_type->kind eq 'struct' }
         map { $_->instructions->@* } $f->blocks->@*;

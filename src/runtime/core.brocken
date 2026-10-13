@@ -785,6 +785,15 @@ sub gc_scan_obj( ptr $obj, ptr $hb ) {
     elsif ( Brocken::ptr_cmp_eq( $tag, 8 ) ) {
         gc_scan_hash( $obj, $hb );
     }
+    elsif ( Brocken::ptr_cmp_eq( $tag, 4 ) ) {
+
+        # A class instance carries its dense class id in the auxiliary bits; a boxed `ptr` shares the tag byte but
+        # leaves them zero. The generated dispatch selects the instance's own __scan by that id.
+        my i64 $class_id = Brocken::shr( $header, 32 );
+        if ( Brocken::ptr_cmp_gt( $class_id, 0 ) ) {
+            gc_scan_class( $obj, $hb );
+        }
+    }
     return;
 }
 
@@ -814,6 +823,12 @@ sub gc_restore_refs( ptr $obj ) {
                 incref($val);
             }
             $i = Brocken::i64_add( $i, 1 );
+        }
+    }
+    elsif ( Brocken::ptr_cmp_eq( $tag, 4 ) ) {
+        my i64 $class_id = Brocken::shr( $header, 32 );
+        if ( Brocken::ptr_cmp_gt( $class_id, 0 ) ) {
+            gc_restore_class($obj);
         }
     }
     return;

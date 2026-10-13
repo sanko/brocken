@@ -85,6 +85,12 @@ Offset  Size  Field
 8       8     Payload (u64 / f64 / ptr)
 ```
 
+A **class instance** reuses this 8-byte header but stores its field block from offset 8 instead of a single
+payload word. It carries type tag `4` (shared with a boxed `ptr`) and, unlike a boxed `ptr`, a nonzero class
+id in the 4-byte auxiliary word. The runtime's cycle collector reads that id to reach the compiler-generated
+`Class::__scan` / `Class::__restore` methods for the instance; a class with no owned dynamic field against
+its whole ancestor chain is marked Leaf, so it is never buffered as a cycle suspect.
+
 **Nullability:** Managed containers **default to `undef`** (Type Tag 0, Payload 0).
 
 ### 3.3 `undef` and `defined`
@@ -316,7 +322,7 @@ to pass. Indexing a pointer form does not follow a heap header — the slot is t
 
 Brocken uses Corinna-style classes with strict encapsulation. Fields are strictly private unless exposed via attributes.
 
-**Implementation status.** The class system is being brought up in two milestones. v0.0.1 targets parity with Perl's core `class` feature (`perlclass`); v0.0.2 adds selected `Object::Pad` features. Today the front end implements `class` (block form, with an optional version and attributes) and the `class NAME;` statement form, typed `field` with the `:param`/`:reader`/`:writer`/`:accessor` attributes, inline/pointer array fields (`field [T; N] $x`, `field T @x`) and opaque hash fields (`field T %x`), `=`/`//=`/`||=` field defaults (an initializer sees the earlier fields and may use `$self`/`__CLASS__`), `method`, positional parameter defaults (`method greet(String $name = "someone")`), any number of `ADJUST` blocks (run in declaration order), single inheritance via `:isa(CLASS)`, `SUPER::`, and `DESTROY`; writers return `$self` so calls can be chained. Method resolution and dispatch are static (compile-time): `$obj->m` walks the receiver's ancestor chain, so an inherited method is callable and fields remain lexical to the class that declares them. `DESTROY` runs derived-to-root when called, but is not yet invoked automatically on reference count zero; dynamic fields take ownership on store, but the destructor does not yet release them. Roles, the optional `:isa` version argument, and `__CLASS__`'s value are **planned, not yet implemented** — the `DatabaseConnection::Static` example below is forward-looking. See [`class_roadmap.md`](class_roadmap.md) for the full shipped-versus-planned breakdown.
+**Implementation status.** The class system is being brought up in two milestones. v0.0.1 targets parity with Perl's core `class` feature (`perlclass`); v0.0.2 adds selected `Object::Pad` features. Today the front end implements `class` (block form, with an optional version and attributes) and the `class NAME;` statement form, typed `field` with the `:param`/`:reader`/`:writer`/`:accessor` attributes, inline/pointer array fields (`field [T; N] $x`, `field T @x`) and opaque hash fields (`field T %x`), `=`/`//=`/`||=` field defaults (an initializer sees the earlier fields and may use `$self`/`__CLASS__`), `method`, positional parameter defaults (`method greet(String $name = "someone")`), any number of `ADJUST` blocks (run in declaration order), single inheritance via `:isa(CLASS)`, `SUPER::`, and `DESTROY`; writers return `$self` so calls can be chained. Method resolution and dispatch are static (compile-time): `$obj->m` walks the receiver's ancestor chain, so an inherited method is callable and fields remain lexical to the class that declares them. `DESTROY` runs derived-to-root when called. A non-escaping `Class->new` local is reclaimed at scope exit through a generated `Class::__destroy` thunk that runs `DESTROY` exactly once, releases the owned dynamic fields, and frees the instance (an instance that escapes, or whose local is later bound to a non-fresh value, leaks by design). The cycle collector can scan class instances through generated per-class `__scan` / `__restore` methods, selected by the class id in the header. Roles, the optional `:isa` version argument, and `__CLASS__`'s value are **planned, not yet implemented** — the `DatabaseConnection::Static` example below is forward-looking. See [`class_roadmap.md`](class_roadmap.md) for the full shipped-versus-planned breakdown.
 
 ```perl
 class DatabaseConnection {
@@ -354,8 +360,8 @@ class DatabaseConnection::Static :isa(DatabaseConnection) {
 
 ### 8.1 Destructor (`DESTROY`) Semantics
 
-1. **Automatic Trigger:** When `decref` drops a class instance's refcount to 0, `ClassName::DESTROY($self)` executes immediately.
-2. **Cascading Field Teardown:** The user only writes code to clean up external OS resources (file handles, sockets). After `DESTROY` finishes, the compiler automatically emits hidden teardown code to `decref` all fields containing managed types (Strings, Arrays, Hashes, other Objects).
+1. **Release Site:** A compiled site that drops an instance's last reference calls the runtime's `decref_obj`, which returns the new count without freeing; when that count is zero the site branches to the statically-known `Class::__destroy` thunk. (Boxed scalars keep the single runtime `decref`; the split exists so the class's destructor is chosen at compile time rather than through runtime dispatch.)
+2. **Cascading Field Teardown:** The user only writes code to clean up external OS resources (file handles, sockets). After `DESTROY` finishes, the generated `Class::__destroy` thunk `decref`s every field containing a managed type (Strings, Arrays, Hashes, other Objects) and then calls `free_obj` to return the instance to the allocator.
 3. **Destructor Panics:** Throwing an unhandled exception inside `DESTROY` during stack unwinding is illegal and triggers a hard runtime abort.
 
 ---
@@ -423,6 +429,7 @@ Objects are allocated using the Immix algorithm:[^immix]
 To collect circular references without a tracing pause, Brocken uses Bacon & Rajan trial deletion.[^trialdeletion]
 - When `decref` leaves an object with `RC > 0` (and it is not marked as a Leaf), it is pushed to a suspect ring buffer on the ICB.
 - When the buffer fills, `gc_drain()` executes a local sub-graph trace: marking nodes Purple -> Gray -> White, scanning, and collecting isolated cycles.
+- Arrays and hashes are scanned by the runtime (`gc_scan_list` / `gc_scan_hash`). Class instances are scanned through per-class `__scan` / `__restore` methods the compiler emits; `gc_scan_obj` / `gc_restore_refs` select them by the class id in the object header (tag `4` with a nonzero auxiliary word, which is how a class instance is told apart from a boxed `ptr`).
 
 ---
 
@@ -3910,8 +3917,8 @@ Offset  Size  Field
 --------------------------------------------------------------------------------
  0      2     Reference Count (u16, saturated at 65535 = pinned)
  2      1     GC Flags (Cycle suspect, Buffered, Leaf, BRC color)
- 3      1     Type Tag (Tag 3 = Class)
- 4      4     Auxiliary / Alignment padding
+ 3      1     Type Tag (Tag 4 = Class)
+ 4      4     Auxiliary: class id (u32, 0 for a boxed ptr)
  8      8     Superclass field: $account_id (u64)
 16      8     Superclass field: $owner_name (Managed string ptr)
 24      8     Superclass field: $balance (i64)
@@ -5750,8 +5757,8 @@ Offset  Size  Field
 --------------------------------------------------------------------------------
  0      2     Reference Count (u16, saturated at 65535 = pinned)
  2      1     GC Flags (Cycle suspect, Buffered, Leaf, BRC color)
- 3      1     Type Tag (Tag 3 = Class)
- 4      4     Auxiliary Data / Padding
+ 3      1     Type Tag (Tag 4 = Class)
+ 4      4     Auxiliary: class id (u32, 0 for a boxed ptr)
  8      8     Superclass field: $account_id (u64)
 16      8     Superclass field: $owner_name (managed string pointer)
 24      8     Superclass field: $balance (i64)

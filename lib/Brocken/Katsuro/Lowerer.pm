@@ -504,6 +504,17 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $self->resolve_inheritance;
         $self->_layout_class($_) for keys %$classes;
 
+        # Pass 1.55: A dense class id per class, assigned by sorted name so it does not depend on declaration
+        # order. The id travels in the object header's auxiliary bits and is what the runtime's cycle collector
+        # hands to the generated class scan/restore dispatch (see `generate_gc_dispatch`). Id 0 is reserved for
+        # "not a class instance" -- the value a boxed `ptr` carries -- so the shared tag byte never collides.
+        {
+            my $id = 1;
+            for my $name ( sort keys %$classes ) {
+                $classes->{$name}{id} = $id++;
+            }
+        }
+
         # Pass 1.6: Classify every dynamic-returning function's return ownership before any body is lowered, so a call
         # site knows whether the callee hands back an owned reference (+1) or a borrowed one (+0). Bodies are still AST,
         # so this reads them directly; it must run before Pass 2/3 so forward and cross-class calls see the answer.
@@ -534,6 +545,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $stmt (@class_decls) {
             $self->generate_class_runtime($stmt);
         }
+
+        # Pass 2.5: Emit the id -> per-class scan/restore dispatch the runtime's cycle collector calls. The runtime
+        # cannot see a class's field layout, so `gc_scan_obj`/`gc_restore_refs` hand a class instance here and this
+        # picks the class's own __scan/__restore by the id in the header. A direct-call chain keeps the runtime free
+        # of indirect calls; it is emitted before Pass 3 so the runtime's calls resolve against it.
+        $self->generate_gc_dispatch;
 
         # Pass 3: Lower sub and method bodies
         for my $stmt (@decls) {
@@ -629,6 +646,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # generated body runs its own code then chains to the nearest ancestor's Class::DESTROY (derived-to-root).
         $self->lower_destroy( $class_name, $ast->destroys ) if $has_destroy;
         $self->lower_class_destroy($class_name);
+        $self->generate_class_gc($class_name);
         $current_class   = undef;
         $current_package = $saved_package;
     }
@@ -3088,7 +3106,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $total_size );
             $self->_emit_fuel_check( $line, $col );
             my $self_ptr     = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
-            my $header_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => ( 1 | ( 4 << 24 ) ) );
+
+            # The header packs refcount 1, the GC flags, the class-instance tag (4), and the class id in the
+            # auxiliary bits. A class with no owned dynamic field against its whole chain is marked Leaf (flag bit
+            # 2) so the runtime never buffers it as a cycle suspect. The tag-4 + nonzero-id pair is also what tells
+            # `gc_scan_obj` that this is a class instance rather than a boxed `ptr`, whose aux id is 0.
+            my $class_id    = $cd->{id} // 0;
+            my $has_dynamic = scalar grep { $_->{ir_type} && $_->{ir_type}->kind eq 'dynamic' } $cd->{fields}->@*;
+            my $gc_flags    = $has_dynamic ? 0 : 4;
+            my $header_val  = 1 | ( $gc_flags << 16 ) | ( 4 << 24 ) | ( $class_id << 32 );
+            my $header_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $header_val );
             $builder->build_store( $header_const, $self_ptr, $line, $col );
 
             # bump_alloc does not zero its memory, so every pointer-shaped array/hash field and every dynamic (`Any`)
@@ -3656,6 +3683,111 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $builder->build_call( $free, [ $self_val, $hb ], undef );
         }
         $builder->build_ret();
+    }
+
+    # Register a runtime-shaped function: explicit parameters and no hidden __heap_base/__want, so the runtime and
+    # the generated id dispatch can call it positionally like any other Brocken::Runtime function.
+    method _register_plain_function( $name, $return_type_name, $param_names ) {
+        my @params = map { Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%' . $_ ) } @$param_names;
+        my $fn = Brocken::Lindsay::IR::Function->new(
+            name        => $name,
+            return_type => $self->type_from_name($return_type_name),
+            params      => \@params,
+        );
+        $module->add_function($fn);
+        $functions->{$name} = $fn;
+        return $fn;
+    }
+
+    # Generate `Class::__scan` (MarkGray: drop one reference to each owned dynamic field) and `Class::__restore`
+    # (Undo: take it back). These mirror the field cascade in `Class::__destroy`, but are entered from the runtime's
+    # id dispatch rather than from a compiled release site. A class with no owned dynamic field against its whole
+    # ancestor chain still gets both methods; they are empty, and the constructor marks such an instance Leaf so
+    # the collector never buffers it.
+    method generate_class_gc($class_name) {
+        my $cd = $classes->{$class_name};
+        return unless $cd;
+        my $gc_decref = $functions->{'Brocken::Runtime::gc_decref'};
+        my $incref    = $functions->{'Brocken::Runtime::incref'};
+        return unless $gc_decref && $incref;
+
+        my $scan    = $self->_register_plain_function( $class_name . '::__scan',    'void', [ 'self', 'hb' ] );
+        my $restore = $self->_register_plain_function( $class_name . '::__restore', 'void', ['self'] );
+        $self->_lower_gc_method( $class_name, $scan,    $gc_decref, 'scan' );
+        $self->_lower_gc_method( $class_name, $restore, $incref,    'restore' );
+    }
+
+    # Walk the whole ancestor chain's fields and call `$callee` on each owned dynamic one. `scan` passes the heap
+    # base so a field whose count drops to zero is reclaimed; `restore` calls incref, which needs only the box.
+    method _lower_gc_method( $class_name, $fn, $callee, $kind ) {
+        $current_func  = $fn;
+        $symbols       = {};
+        $current_block = undef;
+        $fn->set_blocks( [] );
+        my $entry = $fn->append_block('entry');
+        $builder->position_at_end($entry);
+        $current_block = $entry;
+        my $self_val = $fn->params->[0];
+        my $hb       = $kind eq 'scan' ? $fn->params->[1] : undef;
+        my $cd       = $classes->{$class_name};
+        for my $fd ( $cd->{fields}->@* ) {
+            next unless $fd->{ir_type} && $fd->{ir_type}->kind eq 'dynamic';
+            my $fptr = $builder->build_struct_gep( $cd->{struct_type}, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.' . $kind );
+            my $fval = $builder->build_load( $fd->{ir_type}, $fptr );
+            my @args = $kind eq 'scan' ? ( $fval, $hb ) : ($fval);
+            $builder->build_call( $callee, \@args, undef );
+        }
+        $builder->build_ret();
+    }
+
+    # Emit `Brocken::Runtime::gc_scan_class` and `gc_restore_class`: a direct-call switch over the class id in the
+    # header, calling each class's `__scan`/`__restore`. They are always emitted, even for a class-less program, so
+    # the runtime's `gc_scan_obj`/`gc_restore_refs` always resolve.
+    method generate_gc_dispatch() {
+        $self->_lower_gc_dispatch( 'Brocken::Runtime::gc_scan_class',    'scan' );
+        $self->_lower_gc_dispatch( 'Brocken::Runtime::gc_restore_class', 'restore' );
+    }
+
+    method _lower_gc_dispatch( $name, $kind ) {
+        my $restore = $kind eq 'restore';
+        my $fn      = $self->_register_plain_function( $name, 'void', $restore ? ['obj'] : [ 'obj', 'hb' ] );
+        $current_func  = $fn;
+        $symbols       = {};
+        $current_block = undef;
+        $fn->set_blocks( [] );
+        my $entry = $fn->append_block('entry');
+        $builder->position_at_end($entry);
+        $current_block = $entry;
+        my $ret_block = $fn->append_block('ret');
+
+        my @classes = sort { $classes->{$a}{id} <=> $classes->{$b}{id} } grep { $classes->{$_}{id} } keys %$classes;
+        if (@classes) {
+            my $obj    = $fn->params->[0];
+            my $hb     = $restore ? undef : $fn->params->[1];
+            my $header = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $obj );
+            my $id     = $builder->build_lshr( $header, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 32 ) );
+            my $test_block = $entry;
+            for my $class_name (@classes) {
+                my $cid    = $classes->{$class_name}{id};
+                my $target = $functions->{ $class_name . ( $restore ? '::__restore' : '::__scan' ) };
+                next unless $target;
+                my $match = $fn->append_block( $kind . '_match_' . $cid );
+                my $next  = $fn->append_block( $kind . '_next_' . $cid );
+                $builder->position_at_end($test_block);
+                my $cond = $builder->build_icmp( 'eq', $id, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $cid ) );
+                $builder->build_cond_br( $cond, $match, $next );
+                $builder->position_at_end($match);
+                my @args = $restore ? ($obj) : ( $obj, $hb );
+                $builder->build_call( $target, \@args, undef );
+                $builder->build_br($ret_block);
+                $test_block = $next;
+            }
+            $builder->position_at_end($test_block);
+            $builder->build_br($ret_block);
+        }
+        $builder->position_at_end($ret_block);
+        $builder->build_ret();
+        return;
     }
 
     # Bind a symbol for each field this class *declares*, so a method body can name it bare. An inherited field is
