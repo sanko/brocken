@@ -451,6 +451,8 @@ To eliminate massive Reference Counting churn, Brocken strictly enforces a **Cal
 - The callee *borrows* the parameter and is strictly forbidden from decrementing it upon exit.
 - The callee only emits `incref` if it explicitly stores the value into an array, hash, class field, or global variable.
 
+Return ownership is the mirror image. A callee that constructs the value it returns hands back an owned reference and the caller consumes it, so the caller releases it exactly once at scope exit. A dynamic (`Any`) return is classified per function: it is *owned* unless every dynamic return is a bare, never-reassigned `Any` parameter, in which case the caller's own box is passed straight back. Class instances use a stricter classification: a function that returns a class is owned only when every class-typed return is a fresh `Class->new`, a never-reassigned local that a fresh construction initialized, or a call to a function already known owned. A return of `$self`, of a parameter, or of a field is a borrow, and the caller keeps the reference it was handed. The verdict is deliberately conservative — an unprovable case leaks rather than hands the caller a reference it must not release.
+
 ### 10.2 Immix Bump Allocator (Layer 1)
 
 Objects are allocated using the Immix algorithm:[^immix]

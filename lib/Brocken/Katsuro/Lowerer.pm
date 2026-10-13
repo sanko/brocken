@@ -32,6 +32,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $borrowed_params       = {};        # param_name -> 1 (caller-owned Any parameter; the callee must not release it)
     field $weak_var              = {};        # var_name -> 1 (a weak local: it stores without owning a reference)
     field $returns_owned         = {};        # func_name -> 1 (a dynamic return hands the caller an owned +1 reference)
+    field $class_returns_owned   = {};        # func_name -> 1 (a class-returning call hands the caller an owned instance)
     field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
     field $rodata : reader       = {};        # label -> bytes for string constants
     field $_rodata_label_counter = 0;
@@ -224,11 +225,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # Collect the local variable names, assignment targets, and return expressions anywhere in a function body.
     # Assignment is a statement, so the walk only descends statement containers; nested blocks, branches, and loops are
     # followed so a declaration or assignment on any path counts.
-    method _scan_function_body( $block, $assigned, $locals, $returns ) {
+    method _scan_function_body( $block, $assigned, $locals, $returns, $fresh = undef ) {
         return unless $block;
         for my $stmt ( $block->statements->@* ) {
             if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') ) {
                 $locals->{ $stmt->name } = 1;
+                $fresh->{ $stmt->name } = 1 if $fresh && $self->_is_fresh_construction( $stmt->init );
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ListVarDecl') ) {
                 $locals->{ $_->{name} } = 1 for $stmt->targets->@*;
@@ -241,20 +243,20 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 push @$returns, $stmt->expr;
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Block') ) {
-                $self->_scan_function_body( $stmt, $assigned, $locals, $returns );
+                $self->_scan_function_body( $stmt, $assigned, $locals, $returns, $fresh );
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') ) {
-                $self->_scan_function_body( $stmt->then, $assigned, $locals, $returns );
-                for my $e ( $stmt->elsif->@* ) { $self->_scan_function_body( $e->[1], $assigned, $locals, $returns ); }
-                $self->_scan_function_body( $stmt->else, $assigned, $locals, $returns ) if $stmt->else;
+                $self->_scan_function_body( $stmt->then, $assigned, $locals, $returns, $fresh );
+                for my $e ( $stmt->elsif->@* ) { $self->_scan_function_body( $e->[1], $assigned, $locals, $returns, $fresh ); }
+                $self->_scan_function_body( $stmt->else, $assigned, $locals, $returns, $fresh ) if $stmt->else;
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') ) {
-                $self->_scan_function_body( $stmt->body, $assigned, $locals, $returns );
+                $self->_scan_function_body( $stmt->body, $assigned, $locals, $returns, $fresh );
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::TryCatch') ) {
-                $self->_scan_function_body( $stmt->try_body,     $assigned, $locals, $returns );
-                $self->_scan_function_body( $stmt->catch_body,   $assigned, $locals, $returns );
-                $self->_scan_function_body( $stmt->finally_body, $assigned, $locals, $returns );
+                $self->_scan_function_body( $stmt->try_body,     $assigned, $locals, $returns, $fresh );
+                $self->_scan_function_body( $stmt->catch_body,   $assigned, $locals, $returns, $fresh );
+                $self->_scan_function_body( $stmt->finally_body, $assigned, $locals, $returns, $fresh );
             }
         }
     }
@@ -265,6 +267,90 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return 0 unless ref $val && $val->isa('Brocken::Lindsay::IR::Instruction::Call');
         return 0 unless $val->type && $val->type->kind eq 'dynamic';
         return $returns_owned->{ $val->callee->name } ? 1 : 0;
+    }
+
+    # Whether an expression constructs a fresh instance of a registered class (`Class->new(...)`). A fresh
+    # construction is the one class-typed return shape that is unambiguously owned: the constructor writes refcount 1
+    # and no other local holds a second reference.
+    method _is_fresh_construction($expr) {
+        return 0 unless ref $expr && $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall');
+        return 0 unless $expr->method eq 'new';
+        return 0 unless $expr->obj->isa('Brocken::Katsuro::AST::Expr::Ident');
+        return $classes->{ $self->_resolve_class_ident( $expr->obj->name ) } ? 1 : 0;
+    }
+
+    # Classify a class-returning function's return ownership. Unlike a dynamic return (where a non-parameter return is
+    # always a fresh box the callee owns), a returned instance may be a borrow of `$self`, of a class-typed parameter
+    # (Caller-Borrows), or of an instance field. Releasing a borrow would double-free the caller's object, so this
+    # classifier is deliberately conservative: a function is owned only when EVERY class-typed return is provably an
+    # owned instance -- a fresh `Class->new`, a local that a fresh construction initialized and nothing reassigned, or
+    # a call to a function already known owned. Anything else leaves the function borrowed, and the caller keeps the
+    # reference it was handed (a leak, never a dangling free).
+    method _classify_class_return_ownership( $name, $return_class, $params_ast, $body ) {
+        return unless defined $return_class && $classes->{$return_class};
+        my ( %assigned, %locals, %fresh, @returns );
+        $self->_scan_function_body( $body, \%assigned, \%locals, \@returns, \%fresh );
+
+        # A `return 0` (or `return false`) hands back no instance and a null pointer is safe to release, so such a path
+        # neither proves nor disproves ownership and is dropped before the verdict. Only the class-typed returns decide;
+        # a function that never hands back an instance stays borrowed.
+        my @substantive = grep { !$self->_is_null_return($_) } @returns;
+        my $owned = @substantive ? 1 : 0;
+        for my $expr (@substantive) {
+            unless ( $self->_class_return_is_owned( $expr, \%assigned, \%locals, \%fresh ) ) {
+                $owned = 0;
+                last;
+            }
+        }
+        $class_returns_owned->{$name} = $owned;
+    }
+
+    # Whether a return expression is a null literal (`0` or `false`). Such a path yields no instance, and the caller's
+    # scope-exit release tolerates a null instance (the runtime's release path short-circuits on it).
+    method _is_null_return($expr) {
+        return 0 unless defined $expr && $expr->isa('Brocken::Katsuro::AST::Expr::Const');
+        return 1 if $expr->type eq 'Int'  && $expr->value == 0;
+        return 1 if $expr->type eq 'Bool' && !$expr->value;
+        return 0;
+    }
+
+    # One class-typed return is owned only for a proven-fresh instance; every other shape is treated as a borrow.
+    method _class_return_is_owned( $expr, $assigned, $locals, $fresh ) {
+        return 0 unless defined $expr;
+        return 1 if $self->_is_fresh_construction($expr);
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Call') ) {
+            return $class_returns_owned->{ $expr->func_name } ? 1 : 0;
+        }
+
+        # A bare variable is a borrow by default: `$self`, a class-typed parameter (Caller-Borrows), or an instance
+        # field. It is owned only when it names a local that a fresh construction initialized and nothing reassigned.
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            my $n = $expr->name;
+            return 0 if $n eq 'self';
+            return 0 unless $locals->{$n} && !$assigned->{$n};
+            return $fresh->{$n} ? 1 : 0;
+        }
+        return 0;
+    }
+
+    # A call (free sub or method) to a function classified as class-return-owned hands the caller an owned instance of
+    # its known return class; anything else returns undef.
+    method _owned_class_call($expr) {
+        return undef unless ref $expr;
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Call') ) {
+            return undef unless $class_returns_owned->{ $expr->func_name };
+            return $function_return_class->{ $expr->func_name };
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
+            my $recv = $self->_expr_class( $expr->obj );
+            $recv = $current_class
+                if !defined $recv && $expr->obj->isa('Brocken::Katsuro::AST::Expr::Var') && $expr->obj->name eq 'self';
+            return undef unless defined $recv;
+            my $full = $self->_resolve_method( $recv, $expr->method );
+            return undef unless $full && $class_returns_owned->{$full};
+            return $function_return_class->{$full};
+        }
+        return undef;
     }
 
     # Return type inference
@@ -523,12 +609,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
         # Pass 1.6: Classify every dynamic-returning function's return ownership before any body is lowered, so a call
         # site knows whether the callee hands back an owned reference (+1) or a borrowed one (+0). Bodies are still AST,
-        # so this reads them directly; it must run before Pass 2/3 so forward and cross-class calls see the answer.
+        # so this reads them directly; it must run before Pass 2/3 so forward and cross-class calls see the answer. The
+        # same pass classifies class-returning functions, whose returned instance may be an owned fresh construction or
+        # a borrow of `$self`, a parameter, or a field (see `_classify_class_return_ownership`).
         for my $stmt (@decls) {
             if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl') ) {
                 my $name = $self->_qualify( $stmt->name, $stmt->package );
                 my $ret  = $stmt->return_type // $self->_infer_return_type($stmt);
                 $self->_classify_return_ownership( $name, $ret, $stmt->params, $stmt->body );
+                $self->_classify_class_return_ownership( $name, $function_return_class->{$name}, $stmt->params, $stmt->body );
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') ) {
                 my $class = $self->_qualify( $stmt->name, $stmt->package );
@@ -536,7 +625,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my %fields = map { $_->{name} => 1 } ( $cd && $cd->{fields} ? $cd->{fields}->@* : () );
                 for my $m ( $stmt->methods->@* ) {
                     my $ret = $m->return_type // $self->_infer_return_type($m);
-                    $self->_classify_return_ownership( $class . '::' . $m->name, $ret, $m->params, $m->body, \%fields );
+                    my $full = $class . '::' . $m->name;
+                    $self->_classify_return_ownership( $full, $ret, $m->params, $m->body, \%fields );
+
+                    # Method return classes are resolved as written against the global class map, matching
+                    # `register_function_raw` (which registers them later, in Pass 2).
+                    $self->_classify_class_return_ownership( $full, ( $classes->{$ret} ? $ret : undef ), $m->params, $m->body );
                 }
             }
         }
@@ -1327,6 +1421,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $var_class->{ $ast->name } = $self->_resolve_class_ident( $ast->init->obj->name );
                 $fresh_class = $var_class->{ $ast->name } if $ir_type->kind eq 'ptr';
             }
+            elsif ( my $owned_class = $self->_owned_class_call( $ast->init ) ) {
+
+                # A call the callee classified as handing back an owned instance transfers the reference its
+                # constructor already wrote, exactly like an inlined `Class->new`: record the class so later
+                # field/method access on the local resolves, and let the scope-exit release finalize it.
+                $var_class->{ $ast->name } = $owned_class;
+                $fresh_class = $owned_class if $ir_type->kind eq 'ptr';
+            }
             my $val = $self->lower_expression( $ast->init );
             $val = $self->maybe_convert_type( $val, $ir_type );
 
@@ -1437,6 +1539,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $ast->expr->obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
             $var_class->{ $target->name } = $self->_resolve_class_ident( $ast->expr->obj->name );
         }
+        elsif ( $target->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            my $owned_class = $self->_owned_class_call( $ast->expr );
+            $var_class->{ $target->name } = $owned_class if $owned_class;
+        }
         my $val = $self->lower_expression( $ast->expr );
         my $addr;
         my $stored_type;
@@ -1485,30 +1591,43 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $is_dyn_rc = $is_dyn_field || ( $stored_type->kind eq 'dynamic' && ( $is_rc || $is_borrowed ) );
 
         # Reassigning a plain local that owns a class instance takes the same ownership contract as an `Any` slot,
-        # but the displaced instance is released through its destructor. A fresh `Class->new` RHS already carries the
-        # reference the slot consumes; any other RHS is borrowed and would alias, so the local is dropped from
-        # ownership instead (it leaks the value it held -- never a dangling free). A field target is excluded: field
-        # stores go through the accessor/constructor path, which has its own ownership rules.
+        # but the displaced instance is released through its destructor. Two RHS shapes hand over an owned reference:
+        # a fresh `Class->new`, and a call the callee classified as class-return-owned (see
+        # `_classify_class_return_ownership`); either already carries the reference the slot consumes. Any other RHS
+        # is borrowed and would alias, so an owned local is dropped from ownership instead (it leaks the value it
+        # held -- never a dangling free). A field target is excluded: field stores go through the
+        # accessor/constructor path, which has its own ownership rules.
         if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') && !$is_field_target && $ast->op eq '=' ) {
-            my $is_fresh_rhs = $stored_type->kind eq 'ptr'
+            my $rhs_class;
+            if ( $stored_type->kind eq 'ptr'
                 && $ast->expr->isa('Brocken::Katsuro::AST::Expr::MethodCall')
                 && $ast->expr->method eq 'new'
-                && $ast->expr->obj->isa('Brocken::Katsuro::AST::Expr::Ident')
-                && !$class_escaped->{ $target->name };
+                && $ast->expr->obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
+                $rhs_class = $self->_resolve_class_ident( $ast->expr->obj->name );
+            }
+            else {
+                $rhs_class = $self->_owned_class_call( $ast->expr );
+            }
             my $tracked = $class_owned->{ $target->name };
-            if ( $tracked || $is_fresh_rhs ) {
+
+            # An escaped local is one the escape scan saw used as a value somewhere else, so it was never tracked and
+            # must not become so here: that use may have retained the pointer without taking a reference (a `ptr`
+            # store does not incref), and a scope-exit release would then free it out from under the other holder.
+            # Store plainly and leak instead.
+            if ( $rhs_class && !$class_escaped->{ $target->name } ) {
                 my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
-                if ($is_fresh_rhs) {
-                    my $class = $tracked // $self->_resolve_class_ident( $ast->expr->obj->name );
-                    $self->_note_class( $target->name, $class ) unless $tracked;
-                    my $old = $builder->build_load( $stored_type, $addr, undef, $line, $col );
-                    $builder->build_store( $val, $addr, $line, $col );
-                    $self->_emit_obj_release( $old, $class, $hb );
-                }
-                else {
-                    $self->_forget_rc( $target->name );
-                    $builder->build_store( $val, $addr, $line, $col );
-                }
+
+                # Only a slot already tracking its referent owns the value it displaces: an untracked slot holds a
+                # borrow or null, which must not be released. Release through the old instance's own class.
+                my $old = $tracked ? $builder->build_load( $stored_type, $addr, undef, $line, $col ) : undef;
+                $self->_note_class( $target->name, $rhs_class );
+                $builder->build_store( $val, $addr, $line, $col );
+                $self->_emit_obj_release( $old, $tracked, $hb ) if $tracked;
+                return;
+            }
+            if ($tracked) {
+                $self->_forget_rc( $target->name );
+                $builder->build_store( $val, $addr, $line, $col );
                 return;
             }
         }

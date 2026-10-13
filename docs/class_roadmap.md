@@ -1,6 +1,6 @@
 # Brocken Class System Roadmap
 
-**Status:** Active Development (M0 complete; M1 object model shipped, including the instance-ownership contract, its `DESTROY` teardown, class-instance cycle scanning, `:weak` fields and locals, and the `builtin::` namespace with `weaken`/`unweaken`/`is_weak` plus the value introspection set `is_bool`/`created_as_*`/`stringify`/`numify`/`refaddr`/`reftype`/`blessed`)
+**Status:** Active Development (M0 complete; M1 object model shipped, including the instance-ownership contract with class-returning-call transfer, its `DESTROY` teardown, class-instance cycle scanning, `:weak` fields and locals, and the `builtin::` namespace with `weaken`/`unweaken`/`is_weak` plus the value introspection set `is_bool`/`created_as_*`/`stringify`/`numify`/`refaddr`/`reftype`/`blessed`)
 **Targets:** v0.0.1 = `perlclass` (`use feature 'class'`) parity; v0.0.2 = selected `Object::Pad` features.
 
 This document is the written plan for Brocken's object system. It records what ships today, what
@@ -63,7 +63,7 @@ those are marked **Diverge** and argued in 1.6.
 | C18 | Lexical `my method` | Missing | Planned |
 | C19 | Constructor takes `%arguments` named hash; fields looked up by name | Accepts positional **and** trailing hash | Diverge (superset) |
 | C20 | `reftype($obj) eq "OBJECT"` | Native value; no Perl `reftype` | Diverge (n/a) |
-| C21 | `DESTROY` (spec 8.1) | Class-body `DESTROY { ... }` lowers to `Class::DESTROY`, which runs its own body then chains to the nearest ancestor's, derived-to-root; it is an ordinary inherited method, so `$obj->DESTROY` reaches it. A non-escaping `Class->new` local is reclaimed at scope exit through a generated `Class::__destroy` thunk that runs `DESTROY` exactly once, releases owned dynamic fields, then `free_obj`s the instance | Shipped (escaped instances leak by design; class-typed fields still pending) |
+| C21 | `DESTROY` (spec 8.1) | Class-body `DESTROY { ... }` lowers to `Class::DESTROY`, which runs its own body then chains to the nearest ancestor's, derived-to-root; it is an ordinary inherited method, so `$obj->DESTROY` reaches it. A non-escaping `Class->new` local is reclaimed at scope exit through a generated `Class::__destroy` thunk that runs `DESTROY` exactly once, releases owned dynamic fields, then `free_obj`s the instance. A call that hands back a class-typed value is classified per function in a pre-pass: it transfers ownership only when every class-typed return is a fresh construction (or a proven-owned local/call), so the caller reclaims the instance at scope exit, while a returned `$self`/parameter/field stays borrowed and is never released by the caller (`t/10000_katsuro/10996_class_return_ownership.t`) | Shipped (escaped instances and unprovable whole-function borrows leak by design; class-typed fields still pending) |
 | C22 | `:returns(Type)` return annotation replacing `-> RET` | `:returns(Type)` (single type) | Shipped; multi-type tuples pending (TODO 3) |
 | C23 | Roles | Missing | v0.0.2 (perlclass still lists roles as TODO) |
 | C24 | `ADJUST` parameters | Missing | v0.0.2 (perlclass still TODO) |
