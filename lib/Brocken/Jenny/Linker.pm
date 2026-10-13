@@ -31,7 +31,16 @@ class Brocken::Jenny::Linker v0.0.1 {
     method set_frame_size($s)     { $frame_size     = $s; }
     method set_rodata($r)         { $rodata         = $r; }
     method set_timestamp($t)      { $timestamp      = $t; }
-    method effective_timestamp()  { $timestamp // time() }
+
+    # A wall-clock value must never leak into a linked image: compiling the same module twice has to be byte-identical
+    # (TODO section 1, "Nondeterministic Codegen").  An explicit set_timestamp or SOURCE_DATE_EPOCH wins; otherwise the stamp
+    # falls back to the Unix epoch, matching ELF, Mach-O, and Wasm, which write no timestamp at all.
+    method effective_timestamp() {
+        return $timestamp              if defined $timestamp;
+        return $ENV{SOURCE_DATE_EPOCH} if defined $ENV{SOURCE_DATE_EPOCH};
+        return 0;
+    }
+
     method set_debug_data($d)     { $debug_data = $d; }
     method debug_section($name)   { return $self->debug_data->{$name} // ''; }
     method set_debug_level($l)    { $debug_level    = $l; }

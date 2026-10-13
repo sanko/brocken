@@ -138,7 +138,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 $edata_bytes .= pack( 'v', $idx++ );
             }
             $edata_bytes .= "\x00" x 4;
-            my $timestamp        = $ENV{SOURCE_DATE_EPOCH} || time();
+            my $timestamp        = $self->effective_timestamp();
             my $export_dir_table = pack( 'V2 v2 V7',
                 0, $timestamp, 0, 0, $edata_rva + $dll_name_off,
                 1, scalar(@sorted_exports), scalar(@sorted_exports),
@@ -576,7 +576,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         # COFF File Header (Exactly 20 bytes)
         # Machine types: IMAGE_FILE_MACHINE_AMD64=0x8664, IMAGE_FILE_MACHINE_ARM64=0xAA64
         my $machine         = $platform->is_arm64 ? 0xAA64 : 0x8664;
-        my $timestamp       = $ENV{SOURCE_DATE_EPOCH} || time();
+        my $timestamp       = $self->effective_timestamp();
         my $section_table   = '';
         my $size_of_headers = ( 392 + ( $num_sections * 40 ) + 511 ) & ~511;
         my $sec_raw_ptr     = $size_of_headers;
