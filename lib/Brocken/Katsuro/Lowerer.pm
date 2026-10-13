@@ -26,6 +26,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $param_defaults        = {};        # "name" -> [ {name, default}, ... ] per user parameter, for omitted trailing args
     field $needs_rc              = {};        # var_name -> 1 (Any-typed variable needing refcounting)
     field $rc_owner              = {};        # var_name -> owning $_dyn_scope_stack entry (declaring block/loop scope)
+    field $borrowed_params       = {};        # param_name -> 1 (caller-owned Any parameter; the callee must not release it)
     field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
     field $rodata : reader       = {};        # label -> bytes for string constants
     field $_rodata_label_counter = 0;
@@ -729,6 +730,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $symbols         = {};
         $needs_rc        = {};
         $rc_owner        = {};
+        $borrowed_params = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -799,7 +801,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $builder->build_store( $p, $alloca );
             $symbols->{$pname} = $alloca;
             if ( $ptype eq 'Any' ) {
-                $needs_rc->{$pname} = 1;
+                # Caller-Borrows: an Any argument is not incref'd by the caller, so the callee must not decref it on
+                # exit. Track it as borrowed, not owned; a store into the slot (or an escape) takes its own reference.
+                $borrowed_params->{$pname} = 1;
             }
         }
         my $body_block = $current_func->append_block( $self->unique_block_name('entry_body') );
@@ -1061,7 +1065,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
         }
         else {
-            my $is_rc = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
+            my $is_rc       = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
+            my $is_borrowed = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $target->name };
             if ($is_rc) {
                 my $old = $builder->build_load( $stored_type, $addr, undef, $line, $col );
                 $builder->build_incref( $val, $line, $col );
@@ -1069,6 +1074,17 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $decref_hb
                     = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
                 $builder->build_decref( $old, $line, $col, $decref_hb );
+            }
+            elsif ($is_borrowed) {
+
+                # Storing into a parameter slot that still holds the caller's borrowed reference. Take our own
+                # reference to the new value but do NOT release the old one: we never owned it (Caller-Borrows), and
+                # releasing it could free the caller's box. From here on the slot is owned, so it is cleaned up at
+                # function exit like any other Any local.
+                $builder->build_incref( $val, $line, $col );
+                $builder->build_store( $val, $addr, $line, $col );
+                delete $borrowed_params->{ $target->name };
+                $self->_note_rc( $target->name );
             }
             else {
                 $builder->build_store( $val, $addr, $line, $col );
@@ -1092,7 +1108,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 # an earlier rename left this test comparing against `any`, so the incref never fired and `sub f()
                 # :returns(Any) { my $u = 7; return $u; }` freed the box in the exit decref and handed the caller a
                 # pointer onto the free list, whose payload slot had been overwritten with the list link.
-                if ( $val->type && $val->type->kind eq 'dynamic' ) {
+                # Protect the returned value from the cleanup decref below when it may alias an owned local. A
+                # borrowed parameter is never cleaned up, so incref'ing it would only leak the caller's reference.
+                my $ret_is_borrowed
+                    = $ast->expr->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $ast->expr->name };
+                if ( !$ret_is_borrowed && $val->type && $val->type->kind eq 'dynamic' ) {
                     $builder->build_incref( $val, $line, $col );
                 }
                 my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
@@ -2932,6 +2952,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $symbols  = {};
         $needs_rc = {};
         $rc_owner = {};
+        $borrowed_params = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -2969,7 +2990,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $builder->build_store( $p, $alloca );
             $symbols->{$pname} = $alloca;
             if ( $ptype eq 'Any' ) {
-                $needs_rc->{$pname} = 1;
+                # Caller-Borrows: an Any argument is not incref'd by the caller, so the callee must not decref it on
+                # exit. Track it as borrowed, not owned; a store into the slot (or an escape) takes its own reference.
+                $borrowed_params->{$pname} = 1;
             }
         }
         $self->lower_block_body( $method_ast->body );
@@ -2997,6 +3020,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $symbols  = {};
         $needs_rc = {};
         $rc_owner = {};
+        $borrowed_params = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -3048,6 +3072,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $symbols  = {};
         $needs_rc = {};
         $rc_owner = {};
+        $borrowed_params = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
