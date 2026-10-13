@@ -797,6 +797,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 param        => $self->has_attr( $f->attrs, 'param' ) ? 1 : 0,
                 param_name   => $self->has_attr( $f->attrs, 'param' ) ?
                     ( $self->attr_arg( $f->attrs, 'param' ) // $self->strip_underscore( $f->name ) ) : undef,
+                weak         => $self->has_attr( $f->attrs, 'weak' ) ? 1 : 0,
                 };
         }
         $classes->{$full_name} = {
@@ -1426,6 +1427,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $addr;
         my $stored_type;
         my $is_field_target = 0;
+        my $is_weak_field   = 0;
         if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') ) {
             my $key = $target->sigil eq '@' ? '@' . $target->name : $target->name;
             $addr = $symbols->{$key};
@@ -1435,6 +1437,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my ($field) = $cd ? grep { $_->{name} eq $target->name } $cd->{own_fields}->@* : ();
                 $stored_type    = $field ? $field->{ir_type} : Brocken::Lindsay::IR::Type::i64();
                 $is_field_target = 1;    # a bare field name in a method body is a Var bound to its struct GEP
+                $is_weak_field   = 1 if $field && $field->{weak};
             }
             else {
                 $stored_type = $addr->allocated_type // $val->type;
@@ -1448,6 +1451,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             Carp::croak( "Unknown field '" . $target->field . "' in class '" . $cls . "' at " . $self->_loc($target) ) unless $field;
             $stored_type     = $field->{ir_type};
             $is_field_target = 1;
+            $is_weak_field   = 1 if $field->{weak};
         }
         elsif ( $target->isa('Brocken::Katsuro::AST::Expr::ArrayIndex') ) {
             $addr        = $self->lower_array_addr($target);
@@ -1459,10 +1463,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $val = $self->maybe_convert_type( $val, $stored_type );
         my $is_rc        = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
         my $is_borrowed  = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $target->name };
-        my $is_dyn_field = $is_field_target && $stored_type->kind eq 'dynamic';
+        my $is_dyn_field = $is_field_target && $stored_type->kind eq 'dynamic' && !$is_weak_field;
 
         # Only an RC-tracked dynamic slot owns its referent: an `Any` local, a dynamic field, or a borrowed `Any`
-        # parameter. A dynamic array element is not tracked (a plain store), so it keeps the branchless form below.
+        # parameter. A dynamic array element is not tracked (a plain store), and a `:weak` field deliberately keeps no
+        # reference, so both keep the branchless form below.
         my $is_dyn_rc = $is_dyn_field || ( $stored_type->kind eq 'dynamic' && ( $is_rc || $is_borrowed ) );
 
         # Reassigning a plain local that owns a class instance takes the same ownership contract as an `Any` slot,
@@ -3112,7 +3117,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # 2) so the runtime never buffers it as a cycle suspect. The tag-4 + nonzero-id pair is also what tells
             # `gc_scan_obj` that this is a class instance rather than a boxed `ptr`, whose aux id is 0.
             my $class_id    = $cd->{id} // 0;
-            my $has_dynamic = scalar grep { $_->{ir_type} && $_->{ir_type}->kind eq 'dynamic' } $cd->{fields}->@*;
+            my $has_dynamic = scalar grep { $_->{ir_type} && $_->{ir_type}->kind eq 'dynamic' && !$_->{weak} } $cd->{fields}->@*;
             my $gc_flags    = $has_dynamic ? 0 : 4;
             my $header_val  = 1 | ( $gc_flags << 16 ) | ( 4 << 24 ) | ( $class_id << 32 );
             my $header_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $header_val );
@@ -3159,7 +3164,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
                 my $field_ptr
                     = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line, $col );
-                if ( $fd->{ir_type}->kind eq 'dynamic' ) {
+                if ( $fd->{ir_type}->kind eq 'dynamic' && !$fd->{weak} ) {
                     $self->_emit_owned_store( $val, $field_ptr, $fd->{ir_type}, $line, $col );
                 }
                 else {
@@ -3191,7 +3196,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
                 my $field_ptr
                     = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line, $col );
-                if ( $fd->{ir_type}->kind eq 'dynamic' ) {
+                if ( $fd->{ir_type}->kind eq 'dynamic' && !$fd->{weak} ) {
                     $self->_emit_owned_store( $val, $field_ptr, $fd->{ir_type}, $line, $col );
                 }
                 else {
@@ -3234,7 +3239,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     # has no references to move and keeps the branchless select.
                     my $default_val = $self->lower_expression( $f->{default} );
                     $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
-                    if ( $f->{ir_type}->kind eq 'dynamic' ) {
+                    if ( $f->{ir_type}->kind eq 'dynamic' && !$f->{weak} ) {
                         $self->_emit_conditional_owned_store( $default_val, $field_ptr, $f->{ir_type}, $line, $col );
                     }
                     else {
@@ -3248,7 +3253,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 }
                 my $default_val = $self->lower_expression( $f->{default} );
                 $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
-                if ( $f->{ir_type}->kind eq 'dynamic' ) {
+                if ( $f->{ir_type}->kind eq 'dynamic' && !$f->{weak} ) {
                     $self->_emit_owned_store( $default_val, $field_ptr, $f->{ir_type}, $line, $col );
                 }
                 else {
@@ -3670,7 +3675,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ($cd) {
             my $struct_type = $cd->{struct_type};
             for my $fd ( $cd->{fields}->@* ) {
-                next unless $fd->{ir_type} && $fd->{ir_type}->kind eq 'dynamic';
+                next unless $fd->{ir_type} && $fd->{ir_type}->kind eq 'dynamic' && !$fd->{weak};
                 my $fptr = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.daddr' );
                 my $fval = $builder->build_load( $fd->{ir_type}, $fptr );
                 $builder->build_decref( $fval, 0, 0, $hb );
@@ -3731,7 +3736,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $hb       = $kind eq 'scan' ? $fn->params->[1] : undef;
         my $cd       = $classes->{$class_name};
         for my $fd ( $cd->{fields}->@* ) {
-            next unless $fd->{ir_type} && $fd->{ir_type}->kind eq 'dynamic';
+            next unless $fd->{ir_type} && $fd->{ir_type}->kind eq 'dynamic' && !$fd->{weak};
             my $fptr = $builder->build_struct_gep( $cd->{struct_type}, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.' . $kind );
             my $fval = $builder->build_load( $fd->{ir_type}, $fptr );
             my @args = $kind eq 'scan' ? ( $fval, $hb ) : ($fval);
@@ -3868,10 +3873,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $struct_type = $cd->{struct_type};
         my ($fd)        = grep { $_->{name} eq $field_ast->name } $cd->{own_fields}->@*;
         my $field_ptr   = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.addr' );
-        if ( $fd->{ir_type}->kind eq 'dynamic' ) {
+        if ( $fd->{ir_type}->kind eq 'dynamic' && !$fd->{weak} ) {
 
             # The writer takes the caller's value (borrowed) and must own a reference of its own in the field. The
-            # accessor has no `__heap_base` symbol, so hand it its own hidden parameter for the decref.
+            # accessor has no `__heap_base` symbol, so hand it its own hidden parameter for the decref. A `:weak`
+            # field stores the pointer without taking ownership, so it uses the plain store below.
             $self->_emit_owned_store( $value_val, $field_ptr, $fd->{ir_type}, 0, 0, $current_func->params->[0] );
         }
         else {

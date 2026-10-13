@@ -302,7 +302,7 @@ Attributes provide compile-time metadata for the optimizer and linker:
 - `:reader` - Generates accessor: `$obj->field()`. An explicit name may be given: `:reader(name)`.
 - `:writer` - Generates mutator: `$obj->set_field($val)`, which returns `$self` so calls can be chained. An explicit name may be given: `:writer(name)`.
 - `:accessor` - Generates both reader and writer; `:accessor(name)` names the reader (and the writer becomes `set_` + that name).
-- `:weak` - Weak reference; prevents reference cycles by bypassing `incref`/`decref`.
+- `:weak` - Stores the pointer without taking refcount ownership: the constructor, the generated writer, and a field assignment all store without an `incref` (and never release the value they displace), and the generated destructor and the cycle-scan hooks skip the field, so a weak edge cannot hold a reference cycle open. The referent must outlive the instance.
 
 As in `perlclass`, when no explicit name is given, the generated name is the field name minus its sigil with
 exactly **one leading underscore removed**: `field $_foo :param;` is addressed by the caller as `new(foo => ...)`,
