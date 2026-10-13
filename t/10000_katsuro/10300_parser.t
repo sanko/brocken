@@ -211,6 +211,35 @@ BROCKEN
     is( $s->fields->[1]->type, 'ptr' );
     is( $s->fields->[1]->name, 'buffer' );
 };
+subtest 'Class version, attributes, and the statement form' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse(<<'BROCKEN');
+class Point 1.0.0 :isa(Base) {
+    field i64 $x;
+}
+class Forward;
+BROCKEN
+    is( $prog->statements->@*, 2, 'two declarations' );
+    my $p = $prog->statements->[0];
+    is( $p->name,              'Point', 'name' );
+    is( $p->version,           '1.0.0', 'version literal' );
+    is( $p->attrs->@*,         1,       'one class attribute' );
+    is( $p->attrs->[0]{name},  'isa',   'the attribute is :isa' );
+    is( $p->attrs->[0]{arg},   'Base',  ':isa carries its argument' );
+    is( $p->fields->@*,        1,       'the body still parses' );
+
+    my $f = $prog->statements->[1];
+    is( $f->name,       'Forward', 'statement form name' );
+    is( $f->version,    undef,     'no version' );
+    is( $f->attrs->@*,  0,         'no attributes' );
+    is( $f->fields->@*, 0,         'no body' );
+};
+
+subtest 'A v-string class version parses' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse('class V v1.2.3 { field i64 $x; }');
+    is( $prog->statements->[0]->version, 'v1.2.3', 'v-string version' );
+};
 subtest 'Binary expressions (precedence)' => sub {
     my $c    = Brocken->new;
     my $prog = $c->parse('my i64 $r = 1 + 2 * 3;');

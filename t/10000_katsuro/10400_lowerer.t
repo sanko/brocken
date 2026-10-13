@@ -914,4 +914,23 @@ BROCKEN
     like( $text, qr/neg\s+i8/,           'first neg on i8' );
     like( $text, qr/and\s+i8\s+.*,\s+1/, 'result masked to 1-bit for bool storage' );
 };
+subtest 'A forward class declaration does not clobber a definition' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+class P;
+class P { field i64 $x :param :reader; }
+my ptr $p = P->new(7);
+return $p->x();
+BROCKEN
+    ok( find_function( $mod, 'P::x' ), 'the definition after the forward declaration registers its reader' );
+
+    my $c2   = Brocken->new;
+    my $mod2 = $c2->compile(<<'BROCKEN');
+class Q { field i64 $y :param :reader; }
+class Q;
+my ptr $q = Q->new(8);
+return $q->y();
+BROCKEN
+    ok( find_function( $mod2, 'Q::y' ), 'a forward declaration after the definition keeps the field' );
+};
 done_testing;

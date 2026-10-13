@@ -455,6 +455,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # Pass 1: Register declarations
     method register_class($ast) {
         my $full_name = $self->_qualify( $ast->name, $ast->package );
+
+        # A body-less `class NAME;` is a forward declaration. It never clobbers a definition that already
+        # registered (a definition may be written first); it only supplies metadata the earlier one lacked.
+        my $existing = $classes->{$full_name};
+        if ( $existing && !$ast->fields->@* && !$ast->methods->@* && !$ast->adjusts->@* ) {
+            $existing->{version} //= $ast->version;
+            push $existing->{attrs}->@*, $ast->attrs->@*;
+            return;
+        }
+
         my @fields;
         my $offset    = 8;
         my $max_align = 8;    # the 8-byte object header already forces at least this
@@ -531,7 +541,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             bits           => $offset * 8,
             signed         => 0,
         );
-        $classes->{$full_name} = { fields => \@fields, total_size => $offset, methods => [], struct_type => $struct_type, package => $ast->package };
+        $classes->{$full_name} = {
+            fields      => \@fields,
+            total_size  => $offset,
+            methods     => [],
+            struct_type => $struct_type,
+            package     => $ast->package,
+            version     => $ast->version,
+            attrs       => [ $ast->attrs->@* ],
+            parent      => undef,    # set by the :isa pass once every class is registered
+        };
     }
 
     method register_function($ast) {

@@ -471,9 +471,49 @@ class Brocken::Katsuro::Parser v0.0.1 {
     }
 
     # Class declarations
+    # `:attr` / `:attr(arg)` records, shared by class declarations and fields. `arg` is undef for a plain `:reader`.
+    method parse_attrs() {
+        my @attrs;
+        while ( $self->check( 'OP', ':' ) ) {
+            $self->advance();
+            my $attr_token = $self->consume( 'IDENT', undef, "Expected attribute name after ':'" );
+            my $arg        = undef;
+            if ( $self->check('(') ) {
+                $self->advance();
+                my $arg_token = $self->consume( 'IDENT', undef, "Expected attribute argument after '('" );
+                $arg = $arg_token->{value};
+                $self->consume( ')', undef, "Expected ')' after attribute argument" );
+            }
+            push @attrs, { name => $attr_token->{value}, arg => $arg };
+        }
+        return \@attrs;
+    }
+
     method parse_class_decl() {
         my $class_token = $self->advance();
         my $name_token  = $self->consume( 'IDENT', undef, "Expected class name after 'class'" );
+
+        # `class NAME VERSION :ATTRS { ... }`. VERSION is the same literal `package NAME VERSION` takes; the
+        # attribute list is shared with fields (`:isa(Base)` today).
+        my $version;
+        if ( $self->check('VERSION') || $self->check('FLOAT') || $self->check('NUM') ) {
+            $version = $self->advance()->{value};
+        }
+        my $attrs = $self->parse_attrs();
+
+        # `class NAME;` is a forward declaration: it registers the name, version and attributes but carries no body.
+        # A later block for the same name replaces it.
+        if ( $self->check(';') ) {
+            $self->advance();
+            return Brocken::Katsuro::AST::Stmt::ClassDecl->new(
+                $self->_pos_token($class_token),
+                name    => $name_token->{value},
+                version => $version,
+                attrs   => $attrs,
+                package => $current_package,
+            );
+        }
+
         $self->consume('{');
         my @fields;
         my @methods;
@@ -498,6 +538,8 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return Brocken::Katsuro::AST::Stmt::ClassDecl->new(
             $self->_pos_token($class_token),
             name    => $name_token->{value},
+            version => $version,
+            attrs   => $attrs,
             fields  => \@fields,
             methods => \@methods,
             adjusts => \@adjusts,
@@ -554,22 +596,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
     }
 
     method _finish_field_decl( $field_tok, %args ) {
-        my @attrs;
-
-        # Attributes are small records rather than bare words so that the custom-name payload parses too:
-        # :param(name), :reader(name), :writer(name). `arg` is undef for a plain `:reader`.
-        while ( $self->check( 'OP', ':' ) ) {
-            $self->advance();
-            my $attr_token = $self->consume( 'IDENT', undef, "Expected attribute name after ':'" );
-            my $arg        = undef;
-            if ( $self->check('(') ) {
-                $self->advance();
-                my $arg_token = $self->consume( 'IDENT', undef, "Expected attribute argument after '('" );
-                $arg = $arg_token->{value};
-                $self->consume( ')', undef, "Expected ')' after attribute argument" );
-            }
-            push @attrs, { name => $attr_token->{value}, arg => $arg };
-        }
+        my $attrs = $self->parse_attrs();
         my $default    = undef;
         my $default_op = undef;
         if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) || $self->check( 'OP', '||=' ) ) {
@@ -586,7 +613,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             elem_type  => $args{elem_type},
             size_expr  => $args{size_expr},
             inline     => $args{inline},
-            attrs      => \@attrs,
+            attrs      => $attrs,
             default    => $default,
             default_op => $default_op,
         );
