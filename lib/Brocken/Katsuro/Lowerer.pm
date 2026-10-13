@@ -2865,6 +2865,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $name eq 'weaken' || $name eq 'unweaken' || $name eq 'is_weak' ) {
             return $self->lower_weaken_builtin( $name, $ast, $line, $col );
         }
+        if ( $name eq 'is_bool' || $name eq 'created_as_string' || $name eq 'created_as_number'
+            || $name eq 'stringify' || $name eq 'numify' || $name eq 'reftype' || $name eq 'blessed'
+            || $name eq 'refaddr' )
+        {
+            return $self->lower_reflect_builtin( $name, $ast, $line, $col );
+        }
         Carp::croak( "Unknown builtin 'builtin::$name' at " . $self->_loc($ast) );
     }
 
@@ -2908,6 +2914,184 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->_note_rc($vname);
         }
         return undef;
+    }
+
+    # == builtin:: reflection ==
+    # Perl's `builtin` reflection helpers inspect a value's type. Brocken is statically typed, so a value whose IR
+    # type is known answers at compile time (a class pointer uses its statically-known class). A value typed `Any`
+    # is a runtime box, so the answer is read from the box header: `box_tag` returns the tag every box carries --
+    # 1/2 narrow/wide int, 3 float, 4 pointer (String or class instance), 6 i128, 7/9 array, 8 hash. A box carries
+    # only the tag, not a class id, so a boxed class instance is indistinguishable from a boxed String or bare
+    # pointer. What Brocken cannot recover from a box is the fine-grained Perl provenance: a bool box and a
+    # narrow-int box share tag 1, and a String box and a boxed instance share tag 4. Those cases are documented in
+    # docs/spec.md.
+    method lower_reflect_builtin( $name, $ast, $line, $col ) {
+        my $arg = $ast->args->[0];
+        Carp::croak( "builtin::$name expects an argument at " . $self->_loc($ast) ) unless $arg;
+        my $val  = $self->lower_expression($arg);
+        my $kind = $val->type->kind;
+
+        if ( $name eq 'is_bool' ) {
+            return $self->_icmp_eq_i64( $self->_reflect_box_tag( $val, $line, $col ), 1, $line, $col )
+                if $kind eq 'dynamic';
+            my $is_bool = $kind eq 'int' && $val->type->bits == 1 ? 1 : 0;
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i1(), value => $is_bool );
+        }
+
+        if ( $name eq 'created_as_number' ) {
+            if ( $kind eq 'dynamic' ) {
+                my $tag  = $self->_reflect_box_tag( $val, $line, $col );
+                my $low  = $builder->build_or( $self->_icmp_eq_i64( $tag, 1, $line, $col ),
+                                               $self->_icmp_eq_i64( $tag, 2, $line, $col ), undef, $line, $col );
+                my $high = $builder->build_or( $self->_icmp_eq_i64( $tag, 3, $line, $col ),
+                                               $self->_icmp_eq_i64( $tag, 6, $line, $col ), undef, $line, $col );
+                return $builder->build_or( $low, $high, undef, $line, $col );
+            }
+            my $is_num = ( $kind eq 'int' || $kind eq 'float' ) ? 1 : 0;
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i1(), value => $is_num );
+        }
+
+        if ( $name eq 'created_as_string' ) {
+            return $self->_icmp_eq_i64( $self->_reflect_box_tag( $val, $line, $col ), 4, $line, $col )
+                if $kind eq 'dynamic';
+            my $is_str = $kind eq 'ptr' && !defined $self->_reflect_static_class($arg) ? 1 : 0;
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i1(), value => $is_str );
+        }
+
+        if ( $name eq 'refaddr' ) {
+            return $self->_reflect_ptr_to_i64( $val, $line, $col ) if $kind eq 'dynamic' || $kind eq 'ptr';
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+        }
+
+        if ( $name eq 'reftype' ) {
+            my $scalar = $self->_reflect_rodata('SCALAR');
+            return $scalar if $kind eq 'int' || $kind eq 'float';
+            return $self->_reflect_rodata('ARRAY') if $kind eq 'list';
+            return $self->_reflect_rodata('HASH')  if $kind eq 'hash';
+            if ( $kind eq 'ptr' ) {
+                return defined $self->_reflect_static_class($arg) ? $self->_reflect_rodata('OBJECT') : $scalar;
+            }
+            if ( $kind eq 'dynamic' ) {
+                my $tag    = $self->_reflect_box_tag( $val, $line, $col );
+                my $is_arr = $builder->build_or(
+                    $self->_icmp_eq_i64( $tag, 7, $line, $col ),
+                    $self->_icmp_eq_i64( $tag, 9, $line, $col ), undef, $line, $col
+                );
+                my $is_hash = $self->_icmp_eq_i64( $tag, 8, $line, $col );
+                my $type = $builder->build_select( $is_hash, $self->_reflect_rodata('HASH'), $scalar, undef, $line, $col );
+                $type = $builder->build_select( $is_arr,  $self->_reflect_rodata('ARRAY'), $type,   undef, $line, $col );
+                return $type;
+            }
+            return $scalar;
+        }
+
+        if ( $name eq 'blessed' ) {
+            my $class = $self->_reflect_static_class($arg);
+            return $self->_reflect_rodata($class) if defined $class;
+
+            # A box's class id cannot be turned back into a name: the runtime carries no class-name table. An `Any`
+            # holding an instance is reported as undef, as a non-object always is.
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+        }
+
+        if ( $name eq 'stringify' ) {
+            if ( $kind eq 'dynamic' ) {
+                my $tag      = $self->_reflect_box_tag( $val, $line, $col );
+                my $is_float = $self->_icmp_eq_i64( $tag, 3, $line, $col );
+                my $is_str   = $self->_icmp_eq_i64( $tag, 4, $line, $col );
+                my $fstr     = $self->_stringify( $builder->build_call( $self->_reflect_runtime('unbox_f64', $ast, $line, $col), [$val], undef, $line, $col ), $line, $col );
+                my $istr     = $self->_stringify( $builder->build_call( $self->_reflect_runtime('unbox_i64', $ast, $line, $col), [$val], undef, $line, $col ), $line, $col );
+
+                # A tag-4 box holds a pointer payload. For a String that pointer is the characters themselves, so
+                # stringify is the identity on the unboxed pointer -- reading it as an integer would have rendered
+                # the address instead of the text.
+                my $pstr = $builder->build_unbox( $val, Brocken::Lindsay::IR::Type::ptr(), undef, $line, $col );
+                my $num  = $builder->build_select( $is_float, $fstr, $istr, undef, $line, $col );
+                return $builder->build_select( $is_str, $pstr, $num, undef, $line, $col );
+            }
+            return $self->_stringify( $val, $line, $col );
+        }
+
+        if ( $name eq 'numify' ) {
+            # A String numifies by parsing its leading number, the way Perl's string-to-number conversion does. The
+            # runtime has no such helper, so `numify` calls the C library's `strtod` directly, the way `_stringify`
+            # calls `sprintf` for a float.
+            my $str_to_f64 = sub ($ptr_val) {
+                my $fn = Brocken::Lindsay::IR::Function->new(
+                    name        => $self->_crt_name('strtod'),
+                    return_type => Brocken::Lindsay::IR::Type::f64(),
+                    params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                                      Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
+                );
+                my $null = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+                return $builder->build_call( $fn, [ $ptr_val, $null ], undef, $line, $col );
+            };
+            if ( $kind eq 'dynamic' ) {
+                my $tag      = $self->_reflect_box_tag( $val, $line, $col );
+                my $is_float = $self->_icmp_eq_i64( $tag, 3, $line, $col );
+                my $is_str   = $self->_icmp_eq_i64( $tag, 4, $line, $col );
+                my $f        = $builder->build_call( $self->_reflect_runtime('unbox_f64', $ast, $line, $col), [$val], undef, $line, $col );
+                my $i        = $builder->build_call( $self->_reflect_runtime('unbox_i64', $ast, $line, $col), [$val], undef, $line, $col );
+                my $fi       = $self->maybe_convert_type( $i, Brocken::Lindsay::IR::Type::f64(), $line, $col );
+                my $num      = $builder->build_select( $is_float, $f, $fi, undef, $line, $col );
+                my $pstr     = $builder->build_unbox( $val, Brocken::Lindsay::IR::Type::ptr(), undef, $line, $col );
+
+                # Both select arms are evaluated, and `strtod` dereferences its pointer, so a non-string payload (an
+                # integer or float box) must not be handed through raw: `strtod(42, NULL)` reads address 42 and traps.
+                # A non-string box parses the empty string instead, and the select discards that zero.
+                my $empty = $self->_reflect_rodata('');
+                my $safe  = $builder->build_select( $is_str, $pstr, $empty, undef, $line, $col );
+                my $snum  = $str_to_f64->($safe);
+                return $builder->build_select( $is_str, $snum, $num, undef, $line, $col );
+            }
+            return $val if $kind eq 'float';
+            return $self->maybe_convert_type( $val, Brocken::Lindsay::IR::Type::f64(), $line, $col ) if $kind eq 'int';
+            return $str_to_f64->($val) if $kind eq 'ptr' && !defined $self->_reflect_static_class($arg);
+            Carp::croak( "builtin::numify cannot convert a " . ( $kind eq 'ptr' ? 'class instance' : $kind ) . " to a number at " . $self->_loc($ast) );
+        }
+
+        Carp::croak( "Unknown builtin 'builtin::$name' at " . $self->_loc($ast) );
+    }
+
+    # A `builtin::` reflection helper that inspects a runtime box reads its header tag. `box_tag` is a runtime
+    # function because the header layout is the runtime's business, not the front end's.
+    method _reflect_box_tag( $val, $line, $col ) {
+        return $builder->build_call( $self->_reflect_runtime( 'box_tag', undef, $line, $col ), [$val], undef, $line, $col );
+    }
+
+    method _reflect_runtime( $name, $ast = undef, $line = 0, $col = 0 ) {
+        my $fn = $functions->{ 'Brocken::Runtime::' . $name };
+        Carp::croak( "Runtime function $name not found at line $line, col $col" ) unless $fn;
+        return $fn;
+    }
+
+    method _icmp_eq_i64( $lhs, $n, $line, $col ) {
+        return $builder->build_icmp( 'eq', $lhs,
+            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $n ), undef, $line, $col );
+    }
+
+    # The front end has no pointer-to-integer cast. Storing the pointer into a stack slot and reading it back as an
+    # i64 is the same bits, which is all `refaddr` needs.
+    method _reflect_ptr_to_i64( $val, $line, $col ) {
+        my $slot = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), undef, undef, $line, $col );
+        $builder->build_store( $val, $slot, $line, $col );
+        return $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $slot, undef, $line, $col );
+    }
+
+    method _reflect_rodata($str) {
+        my ( $label, $bytes ) = $self->_intern_rodata( $str . "\0" );
+        return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr() );
+    }
+
+    # The static class of an argument, or undef. `_expr_class` croaks on an unresolved bareword class, which a
+    # reflection helper must treat as "not a class" rather than as a compile error.
+    method _reflect_static_class($arg) {
+        return undef
+            unless $arg->isa('Brocken::Katsuro::AST::Expr::Var')
+            || $arg->isa('Brocken::Katsuro::AST::Expr::Call')
+            || $arg->isa('Brocken::Katsuro::AST::Expr::MethodCall');
+        my $class = eval { $self->_expr_class($arg) };
+        return $class;
     }
 
     # Condition conversion

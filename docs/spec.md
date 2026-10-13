@@ -264,10 +264,26 @@ operate on a variable's ownership rather than its value. The implemented set is:
 | `builtin::weaken($v)` | Drops the reference the local `$v` holds and marks it weak (see 7.4). |
 | `builtin::unweaken($v)` | Re-takes a reference for a weak local `$v`. |
 | `builtin::is_weak($v)` | Whether `$v` is weak; folds to a compile-time boolean. |
+| `builtin::is_bool($v)` | Whether `$v` is a boolean. A static `bool` answers directly; an `Any` box answers from its header tag. |
+| `builtin::created_as_string($v)` | Whether `$v` was created as a string: a static `String`, or an `Any` box with the pointer tag. |
+| `builtin::created_as_number($v)` | Whether `$v` was created as a number: a static `int`/`float`, or an `Any` box with a numeric tag. |
+| `builtin::stringify($v)` | Renders `$v` to a `String`. A String (static or boxed) is already a string; numbers use the same integer/`%f` conversions as interpolation. |
+| `builtin::numify($v)` | Converts `$v` to an `f64`. An `int`/`float` converts directly, and a `String` parses its leading number through the C library's `strtod`. |
+| `builtin::refaddr($v)` | The address of a boxed value or pointer as an `i64` (`0` for a non-reference). |
+| `builtin::reftype($v)` | The reference class name — `SCALAR`, `ARRAY`, `HASH`, or `OBJECT`. |
+| `builtin::blessed($v)` | The class name of a statically-known instance, or a null pointer (undef) otherwise. |
 
-The rest of Perl's `builtin` set — `refaddr`, `reftype`, `blessed`, `ceil`, `floor`, `indexed`, `trim`, `stringify`,
-`numify`, `created_as_string`, `created_as_number`, `inf`, `nan`, `export_lexically`, `load_module` — is **not yet
-implemented** (see [`class_roadmap.md`](class_roadmap.md) and `TODO.md`); an unknown `builtin::` name is a compile error.
+Reflection answers a static value at compile time from its IR type (a pointer with a statically-known class is `OBJECT`)
+and reads an `Any` box's header tag at runtime. A box sheds the fine-grained Perl provenance: a bool box and a
+narrow-integer box both carry tag 1, so `is_bool` is true for any boxed narrow integer, and a String box and a boxed
+class instance both carry tag 4, so `created_as_string` cannot separate them and `reftype` reports a boxed instance
+as `SCALAR`. `builtin::blessed` of a boxed instance is undef because the runtime carries no class-id-to-name table,
+and `builtin::refaddr` uses the one pointer-to-integer conversion the front end has (a store and a re-load, there
+being no `ptrtoint`), so it reports identity rather than a number to compute with.
+
+The rest of Perl's `builtin` set — `ceil`, `floor`, `indexed`, `trim`, `inf`, `nan`, `export_lexically`, `load_module`
+— is **not yet implemented** (see [`class_roadmap.md`](class_roadmap.md) and `TODO.md`); an unknown `builtin::` name is
+a compile error.
 
 ---
 

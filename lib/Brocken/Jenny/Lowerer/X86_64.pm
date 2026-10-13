@@ -2264,10 +2264,11 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     }
                     else {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        my $src = $self->_materialize_ext_src( $mbb, $val, $inst->name . '_src' );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'movzx',
-                                operands => [ $dst, $self->_lower_opnd($val) ],
+                                operands => [ $dst, $src ],
                                 comment  => 'zext ' . ( $val->name || $val->value )
                             )
                         );
@@ -2331,10 +2332,11 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     }
                     else {
                         my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                        my $src = $self->_materialize_ext_src( $mbb, $val, $inst->name . '_src' );
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'movsx',
-                                operands => [ $dst, $self->_lower_opnd($val) ],
+                                operands => [ $dst, $src ],
                                 comment  => 'sext ' . ( $val->name || $val->value )
                             )
                         );
@@ -3552,7 +3554,10 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     # the float was gone before anything could read it back.
                     my $is_float  = $val->type && $val->type->kind eq 'float';
                     my $store_op  = $is_float ? 'fstore' : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store';
-                    my $store_src = $is_float ? $self->_materialize( $mbb, $val ) : $self->_lower_opnd($val);
+                    # A string literal arrives as a RodataRef, which carries a label but no register name; `_lower_opnd`
+                    # would hand the store an unnamed virt_reg and the boxed pointer would be garbage.  `_materialize`
+                    # emits the `lea_rodata` first.  Constants and ordinary values pass through unchanged.
+                    my $store_src = $self->_materialize( $mbb, $val );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => $store_op,
@@ -5062,6 +5067,18 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
             return Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $value, type => $ir_val->type );
         }
         return Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name, type => $ir_val->type );
+    }
+
+    # `movzx`/`movsx` encode a register or memory source, never an immediate, so an extending copy of a constant has
+    # to stage the constant through a register first.  A boolean boxed into an `Any` reaches here as `sext i1 1 to
+    # i32`, which used to die in the encoder with "Unexpected operand kind: imm".
+    method _materialize_ext_src( $mbb, $ir_val, $name ) {
+        my $src = $self->_lower_opnd($ir_val);
+        return $src unless $src->kind eq 'imm';
+        my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $ir_val->type );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $tmp, $src ], comment => 'ext src imm' ) );
+        return $tmp;
     }
 
     # x86-64's ALU and compare opcodes take at most a 32-bit immediate, and the `cmp r/m64, imm32` and `add r/m64,

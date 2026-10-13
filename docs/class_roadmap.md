@@ -1,6 +1,6 @@
 # Brocken Class System Roadmap
 
-**Status:** Active Development (M0 complete; M1 object model shipped, including the instance-ownership contract, its `DESTROY` teardown, class-instance cycle scanning, `:weak` fields and locals, and the `builtin::` namespace with `weaken`/`unweaken`/`is_weak`)
+**Status:** Active Development (M0 complete; M1 object model shipped, including the instance-ownership contract, its `DESTROY` teardown, class-instance cycle scanning, `:weak` fields and locals, and the `builtin::` namespace with `weaken`/`unweaken`/`is_weak` plus the value introspection set `is_bool`/`created_as_*`/`stringify`/`numify`/`refaddr`/`reftype`/`blessed`)
 **Targets:** v0.0.1 = `perlclass` (`use feature 'class'`) parity; v0.0.2 = selected `Object::Pad` features.
 
 This document is the written plan for Brocken's object system. It records what ships today, what
