@@ -6860,6 +6860,55 @@ say("Estimated value of PI over $iterations iterations: $pi");
 
 ---
 
+# POD6/RakuDoc (Planned)
+
+Brocken will support a subset of RakuDoc (formerly POD6) for both embedded documentation in `.brocken` source files and standalone documentation in `.rakudoc` and `.pod` files. The goal is strict RakuDoc compatibility for the selected subset.
+
+## File Extensions
+
+- `.rakudoc`: Canonical RakuDoc files (standalone documentation).
+- `.pod`: Legacy-compatible extension (accepted for standalone documentation).
+- `.brocken`: Embedded RakuDoc may be interleaved with code as in Raku.
+
+## Embedded Documentation in Code
+
+Brocken matches Raku's model for embedding documentation:
+
+- `=pod` blocks, `=begin pod ... =end pod`, and abbreviated/directive forms are recognized.
+- `#|` declarator comments attach documentation to the next declaration.
+- `#=` comments (where applicable) may attach to preceding declarations, mirroring Raku semantics.
+
+## Supported Block Types (Early)
+
+The following block types will be supported initially:
+
+- Named blocks (`=begin NAME ... =end NAME`), including semantic blocks (`NAME`, `SYNOPSIS`, `DESCRIPTION`, `METHODS`, `AUTHOR`, etc.)
+- Headings (`=head1` through `=head6`)
+- Paragraphs (implicit and `=para`)
+- Code blocks (`=begin code ... =end code`, and abbreviated forms where appropriate)
+- Lists (`=item`, `=over`, `=back`)
+- Inline formatting (`B<>`, `I<>`, `C<>`, `L<>`, `E<>`, `K<>`, `R<>`, `T<>`, `V<>`, etc. as defined by RakuDoc)
+- Tables (`=begin table ... =end table`)
+
+Config/aliases and custom blocks are reserved for future milestones.
+
+## Runtime Introspection
+
+Embedded documentation will be introspectable at runtime:
+
+- The special variable `$=pod` will provide the Pod::Block tree for the current compilation unit (mirroring Raku's `$=pod`).
+- Cross-package/introspection access: `$=Some::Package::pod` (or equivalent fully-qualified form) will allow accessing Pod from other packages when available; the exact lookup semantics will follow Raku's behavior where applicable.
+
+## Tooling
+
+- `bkn doc` will be available to render/extract documentation and to validate parsing of Pod. Initially this is the primary way to debug Pod parsing before full runtime introspection is exercised.
+- The language server will surface Pod documentation (from `#|`/embedded blocks) in hover/completions.
+
+## Compatibility & Extensibility
+
+- Early support targets strict RakuDoc (POD6) compatibility for the subset above.
+- Brocken-specific extensions may be added later; space is reserved, but they will not be introduced in the initial implementation.
+
 ## Footnote References
 
 [^arm64]: Arm Architecture Reference Manual for A-profile (ARMv8-A) <https://developer.arm.com/documentation/ddi0487/latest> · AAPCS64 <https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst> · Apple arm64 ABI <https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms>.
@@ -6897,4 +6946,8 @@ say("Estimated value of PI over $iterations iterations: $pi");
 [^trialdeletion]: D. F. Bacon, V. T. Rajan, "Concurrent Cycle Collection in Reference Counted Systems", ECOOP 2001 <https://doi.org/10.1007/3-540-45337-7_12> · "A Unified Theory of Garbage Collection" <https://doi.org/10.1145/1028976.1028982> · Tracing/RC <https://en.wikipedia.org/wiki/Tracing_garbage_collection>.
 [^wasm]: WebAssembly Core Specification <https://webassembly.github.io/spec/core/> · WebAssembly overview <https://en.wikipedia.org/wiki/WebAssembly> · WASI <https://github.com/WebAssembly/WASI>.
 [^x86]: Intel 64 and IA-32 Architectures SDM <https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html> · AMD64 APM <https://www.amd.com/en/support/tech-docs> · System V AMD64 ABI <https://gitlab.com/x86-psABIs/x86-64-ABI> · Linux x86-64 syscall table <https://github.com/torvalds/linux/blob/master/arch/x86/entry/syscalls/syscall_64.tbl> · ASLR <https://en.wikipedia.org/wiki/Address_space_layout_randomization>.
+
+
+
+---
 
