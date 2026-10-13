@@ -415,6 +415,32 @@ BROCKEN
         unlink $file;
     }
 };
+subtest '//= on a borrowed Any parameter owns and releases the box it stores' => sub {
+    my $brocken = Brocken->new();
+    my $host    = $brocken->platform;
+SKIP: {
+        skip 'Not native', 2 unless $host->is_native;
+        my $module = Brocken->new->compile(<<'BROCKEN');
+sub fill(Any $x) :returns(i64) { $x //= 5; my i64 $v = $x; return $v; }
+my ptr $hb = Brocken::heap_base();
+my i64 $before = Brocken::Runtime::free16_count($hb);
+my Any $z;
+my i64 $r = fill($z);
+my i64 $after = Brocken::Runtime::free16_count($hb);
+if ($r != 5) { return 1; }
+# $x was null, so //= stored a fresh box; the slot is promoted to owned and the box is released at exit.
+my i64 $diff = Brocken::i64_sub($after, $before);
+if ($diff != 1) { return 2; }
+return 0;
+BROCKEN
+        my $funcs = $brocken->codegen->emit_functions( $module->functions );
+        my $file  = $brocken->tmpdir . '/r_gc_orassign_borrow' . $brocken->ext;
+        $brocken->linker->write_executable( $file, $funcs, $host );
+        system $file;
+        is( $? >> 8, 0, '//= promotes a borrowed Any parameter and frees the stored box' );
+        unlink $file;
+    }
+};
 subtest 'mark_line and sweep_block' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;

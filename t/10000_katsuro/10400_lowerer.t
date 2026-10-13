@@ -332,6 +332,36 @@ BROCKEN
     like( $text, qr/icmp\s+eq\s+i64/,              'compares the scalar to zero' );
     like( $text, qr/select\s+i1\s+%[^,]+, i64 5,/, 'selects between the RHS and the existing scalar' );
 };
+subtest '//= on a dynamic slot lowers to a conditional owned store' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my Any $a;
+my Any $b = 100;
+$a //= $b;
+return 0;
+BROCKEN
+    my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
+    my $text = $f->as_string();
+
+    # A box needs a conditional incref, which a select cannot express: the store is guarded by a branch instead.
+    like( $text,   qr/br\s+i1\s+%[^,]+,\s+label/,       'branches on whether the slot is absent' );
+    unlike( $text, qr/select\s+i1\s+%[^,]+, dynamic/,   'never selects a dynamic replacement into the slot' );
+    like( $text,   qr/incref\s+dynamic/,                'takes a reference to the replacement' );
+    like( $text,   qr/decref\s+dynamic/,                'releases the displaced value' );
+};
+subtest '||= on a dynamic slot also lowers to a conditional owned store' => sub {
+    my $c   = Brocken->new;
+    my $mod = $c->compile(<<'BROCKEN');
+my Any $a = 1;
+my Any $b = 2;
+$a ||= $b;
+return 0;
+BROCKEN
+    my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
+    my $text = $f->as_string();
+    like( $text,   qr/br\s+i1\s+%[^,]+,\s+label/,     'a dynamic ||= also branches' );
+    unlike( $text, qr/select\s+i1\s+%[^,]+, dynamic/, 'a dynamic ||= never selects a box' );
+};
 subtest '// in expression position lowers to a defined-check select' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');

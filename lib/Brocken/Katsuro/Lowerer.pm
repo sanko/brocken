@@ -1013,6 +1013,41 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $builder->build_decref( $old, $line, $col, $hb );
     }
 
+    # `//=`/`||=` on a dynamic (`Any`) slot is an owned store, but only when the slot is absent: a `select` cannot
+    # express "incref the replacement only if it is chosen", so emit a real branch. When the slot is absent (null) the
+    # RHS is stored through `_emit_owned_store`, which takes a reference to it and releases the null it displaces;
+    # otherwise the slot keeps the box it already owns and no reference changes. The null test is the same one the
+    # branchless form used for a box (a non-null box pointer is truthy).
+    method _emit_conditional_owned_store( $val, $addr, $ir_type, $line, $col ) {
+        my $existing    = $builder->build_load( $ir_type, $addr, undef, $line, $col );
+        my $zero        = Brocken::Lindsay::IR::Constant->new( type => $ir_type, value => 0 );
+        my $is_absent   = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+        my $func        = $current_func;
+        my $store_block = $func->append_block( $self->unique_block_name('rc_orassign') );
+        my $merge_block = $func->append_block( $self->unique_block_name('rc_orassign_end') );
+        $builder->position_at_end($current_block);
+        $builder->build_cond_br( $is_absent, $store_block, $merge_block, $line, $col );
+        $builder->position_at_end($store_block);
+        $current_block = $store_block;
+        $self->_emit_owned_store( $val, $addr, $ir_type, $line, $col );
+        $builder->build_br( $merge_block, $line, $col );
+        $builder->position_at_end($merge_block);
+        $current_block = $merge_block;
+    }
+
+    # `//=`/`||=` on a borrowed `Any` parameter slot. The slot may end up keeping the caller's borrowed box, so it
+    # cannot be released at exit without a matching reference: increment whichever value the test chooses (a no-op
+    # balance for the borrowed box, a real reference for a freshly stored one) and store it; the caller promotes the
+    # slot to owned afterwards, so the exit cleanup releases exactly the reference taken here.
+    method _emit_conditional_borrowed_store( $val, $addr, $ir_type, $line, $col ) {
+        my $existing  = $builder->build_load( $ir_type, $addr, undef, $line, $col );
+        my $zero      = Brocken::Lindsay::IR::Constant->new( type => $ir_type, value => 0 );
+        my $is_absent = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+        my $chosen    = $builder->build_select( $is_absent, $val, $existing, undef, $line, $col );
+        $builder->build_incref( $chosen, $line, $col );
+        $builder->build_store( $chosen, $addr, $line, $col );
+    }
+
     method lower_assign($ast) {
         my $target = $ast->target;
         my ( $line, $col ) = ( $ast->line, $ast->col );
@@ -1057,6 +1092,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             Carp::croak( "Assignment target must be a variable, field access, or array index at " . $self->_loc($target) );
         }
         $val = $self->maybe_convert_type( $val, $stored_type );
+        my $is_rc        = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
+        my $is_borrowed  = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $target->name };
+        my $is_dyn_field = $is_field_target && $stored_type->kind eq 'dynamic';
+
+        # Only an RC-tracked dynamic slot owns its referent: an `Any` local, a dynamic field, or a borrowed `Any`
+        # parameter. A dynamic array element is not tracked (a plain store), so it keeps the branchless form below.
+        my $is_dyn_rc = $is_dyn_field || ( $stored_type->kind eq 'dynamic' && ( $is_rc || $is_borrowed ) );
         if ( $ast->op eq '//=' || $ast->op eq '||=' ) {
 
             # `//=` and `||=` both keep the value already in the slot when it counts as "present" and store the RHS
@@ -1068,11 +1110,24 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # to a plain store -- deliberate, and pinned by t/10000_katsuro/10980_defined_or_assign.t. `||=` still
             # compares a native against zero.
             #
-            # RC note: as with the field-default `||=` in a constructor, the selected value is stored without an
-            # incref on the replacement or a decref of the displaced old value; that is tracked as F2/F9 in TODO
-            # section 2. The common case -- the slot starts out null -- loses no refcounts either way.
+            # A dynamic (`Any`) slot is RC-tracked, so the replacement is only incref'd when it is actually stored;
+            # that needs a branch (F2). Pointer and native slots are not RC-tracked: they keep the branchless select
+            # (a pointer's null test, a native's zero test).
             my $is_nullable = $stored_type->kind eq 'ptr' || $stored_type->kind eq 'dynamic';
-            if ( $is_nullable || $ast->op eq '||=' ) {
+            if ($is_dyn_rc) {
+                if ($is_borrowed) {
+
+                    # The slot may keep the caller's borrowed box, so the exit cleanup can only own it if that box's
+                    # reference is balanced now; increment whichever value the test chooses and promote the slot.
+                    $self->_emit_conditional_borrowed_store( $val, $addr, $stored_type, $line, $col );
+                    delete $borrowed_params->{ $target->name };
+                    $self->_note_rc( $target->name );
+                }
+                else {
+                    $self->_emit_conditional_owned_store( $val, $addr, $stored_type, $line, $col );
+                }
+            }
+            elsif ( $is_nullable || $ast->op eq '||=' ) {
                 my $existing  = $builder->build_load( $stored_type, $addr, undef, $line, $col );
                 my $zero      = Brocken::Lindsay::IR::Constant->new( type => $stored_type, value => 0 );
                 my $is_absent = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
@@ -1084,9 +1139,6 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
         }
         else {
-            my $is_rc        = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
-            my $is_borrowed  = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $target->name };
-            my $is_dyn_field = $is_field_target && $stored_type->kind eq 'dynamic';
             if ( $is_rc || $is_dyn_field ) {
                 $self->_emit_owned_store( $val, $addr, $stored_type, $line, $col );
             }
@@ -2785,14 +2837,21 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 if ( $op eq '||=' && $is_set ) {
 
                     # `||=` applies when the value supplied for the field is false, not merely
-                    # absent: keep the caller's value only when it is truthy.
+                    # absent: keep the caller's value only when it is truthy. A dynamic field is
+                    # RC-tracked, so replacing it is a conditional owned store (F2); a native field
+                    # has no references to move and keeps the branchless select.
                     my $default_val = $self->lower_expression( $f->{default} );
                     $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
-                    my $existing = $builder->build_load( $f->{ir_type}, $field_ptr, undef, $line, $col );
-                    my $zero     = Brocken::Lindsay::IR::Constant->new( type => $f->{ir_type}, value => 0 );
-                    my $is_false = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
-                    my $new_val  = $builder->build_select( $is_false, $default_val, $existing, undef, $line, $col );
-                    $builder->build_store( $new_val, $field_ptr, $line, $col );
+                    if ( $f->{ir_type}->kind eq 'dynamic' ) {
+                        $self->_emit_conditional_owned_store( $default_val, $field_ptr, $f->{ir_type}, $line, $col );
+                    }
+                    else {
+                        my $existing = $builder->build_load( $f->{ir_type}, $field_ptr, undef, $line, $col );
+                        my $zero     = Brocken::Lindsay::IR::Constant->new( type => $f->{ir_type}, value => 0 );
+                        my $is_false = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+                        my $new_val  = $builder->build_select( $is_false, $default_val, $existing, undef, $line, $col );
+                        $builder->build_store( $new_val, $field_ptr, $line, $col );
+                    }
                     next;
                 }
                 my $default_val = $self->lower_expression( $f->{default} );
