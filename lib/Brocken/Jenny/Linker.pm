@@ -32,13 +32,15 @@ class Brocken::Jenny::Linker v0.0.1 {
     method set_rodata($r)         { $rodata         = $r; }
     method set_timestamp($t)      { $timestamp      = $t; }
 
-    # A wall-clock value must never leak into a linked image: compiling the same module twice has to be byte-identical
-    # (TODO section 1, "Nondeterministic Codegen").  An explicit set_timestamp or SOURCE_DATE_EPOCH wins; otherwise the stamp
-    # falls back to the Unix epoch, matching ELF, Mach-O, and Wasm, which write no timestamp at all.
+    # The build stamp written into a linked image.  PE carries one (the COFF header and the export directory); ELF,
+    # Mach-O, and Wasm write none, so only a PE link is time-varying.  An explicit set_timestamp wins, then
+    # SOURCE_DATE_EPOCH, then the current wall clock.  A reproducible build therefore requires SOURCE_DATE_EPOCH (or
+    # set_timestamp) on every target; without it a PE image embeds the time of the link.  A stamp of 0 is honored, so
+    # `defined` rather than `||` guards the environment.
     method effective_timestamp() {
         return $timestamp              if defined $timestamp;
         return $ENV{SOURCE_DATE_EPOCH} if defined $ENV{SOURCE_DATE_EPOCH};
-        return 0;
+        return time();
     }
 
     method set_debug_data($d)     { $debug_data = $d; }
