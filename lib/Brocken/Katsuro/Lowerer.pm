@@ -278,12 +278,20 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
         }
 
-        # Pass 2: Generate class runtimes first so auto-generated methods (constructor, reader, writer) register in
-        # $functions before any function body tries to call them.
-        for my $stmt (@decls) {
-            if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') ) {
-                $self->generate_class_runtime($stmt);
-            }
+        # Pass 1.5: Resolve `:isa` and lay out each class's field block over its ancestor chain. Both wait until
+        # every class is registered so a parent may be declared after its child.
+        $self->resolve_inheritance;
+        $self->_layout_class($_) for keys %$classes;
+
+        # Pass 2: Generate class runtimes ancestors-first so an inherited method is registered before a descendant's
+        # body tries to call it (static dispatch resolves against $functions).
+        my @class_decls = grep { $_->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') } @decls;
+        @class_decls = sort {
+            $self->_class_depth( $self->_qualify( $a->name, $a->package ) )
+                <=> $self->_class_depth( $self->_qualify( $b->name, $b->package ) )
+        } @class_decls;
+        for my $stmt (@class_decls) {
+            $self->generate_class_runtime($stmt);
         }
 
         # Pass 3: Lower sub and method bodies
@@ -465,12 +473,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return;
         }
 
-        my @fields;
-        my $offset    = 8;
-        my $max_align = 8;    # the 8-byte object header already forces at least this
-        my @field_types;
-        my @field_names;
-        my @field_offsets;
+        # Only the field kinds and their sizes are decided here. Slot indices and byte offsets depend on the whole
+        # ancestor chain, so `_layout_class` assigns them once every class (and its `:isa`) is known.
+        my @own_fields;
         for my $f ( $ast->fields->@* ) {
             my $kind   = $f->kind // 'scalar';
             my $inline = $kind eq 'array' && $f->inline ? 1 : 0;
@@ -500,16 +505,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 Carp::croak(
                     "Inline array field '" . $f->name . "' cannot be :param; use a pointer array (field " . $f->elem_type . " \@" . $f->name . ")" );
             }
-            my $align = $self->type_align( $inline ? $elem_ir_type : $ir_type );
-            $offset = $self->_align_up( $offset, $align );
-            $max_align = $align if $align > $max_align;
-            my $slot_idx = scalar @field_types;
-            for my $k ( 0 .. $span - 1 ) {
-                push @field_types,   $inline ? $elem_ir_type : $ir_type;
-                push @field_names,   $f->name;
-                push @field_offsets, $offset + $k * ( $inline ? $self->type_size($elem_ir_type) : $size );
-            }
-            push @fields,
+            push @own_fields,
                 {
                 name         => $f->name,
                 type         => $f->type,
@@ -518,10 +514,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 ir_type      => $ir_type,
                 elem_ir_type => $elem_ir_type,
                 span         => $span,
-                slot_idx     => $slot_idx,
-                offset       => $offset,
                 size         => $size,
-                idx          => $#fields + 1,
+                align        => $self->type_align( $inline ? $elem_ir_type : $ir_type ),
+                idx          => $#own_fields + 1,
                 default      => $f->default,
                 default_op   => $f->default_op,
                 attrs        => [ $f->attrs->@* ],
@@ -529,28 +524,136 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 param_name   => $self->has_attr( $f->attrs, 'param' ) ?
                     ( $self->attr_arg( $f->attrs, 'param' ) // $self->strip_underscore( $f->name ) ) : undef,
                 };
-            $offset += $size;
+        }
+        $classes->{$full_name} = {
+            name       => $full_name,
+            own_fields => \@own_fields,
+            fields     => \@own_fields,    # replaced with the ancestor chain by _layout_class
+            methods    => [],
+            package    => $ast->package,
+            version    => $ast->version,
+            attrs      => [ $ast->attrs->@* ],
+            parent     => undef,           # set by resolve_inheritance
+        };
+    }
+
+    # Resolve each class's `:isa(PARENT)` once every class is registered, so a parent may be declared after its
+    # child. A single superclass, named in the same compilation unit.
+    method resolve_inheritance() {
+        for my $name ( keys %$classes ) {
+            my $cd  = $classes->{$name};
+            my @isa = grep { $_->{name} eq 'isa' } $cd->{attrs}->@*;
+            Carp::croak("Class '$name' has more than one :isa attribute") if @isa > 1;
+            next unless @isa;
+            my $parent = $isa[0]{arg};
+            if ( !$classes->{$parent} && defined $cd->{package} && length $cd->{package} ) {
+                my $qualified = $cd->{package} . '::' . $parent;
+                $parent = $qualified if $classes->{$qualified};
+            }
+            Carp::croak("Unknown superclass '$parent' of class '$name'") unless $classes->{$parent};
+            Carp::croak("Class '$name' cannot inherit from itself")       if $parent eq $name;
+            $cd->{parent} = $parent;
+        }
+
+        # A cycle would make _layout_class recurse forever; reject it up front.
+        for my $name ( keys %$classes ) {
+            my %seen;
+            my $cursor = $name;
+            while ( defined( $cursor = $classes->{$cursor}{parent} ) ) {
+                Carp::croak("Inheritance cycle involving class '$name'") if $seen{$cursor}++;
+            }
+        }
+    }
+
+    # The ancestor chain of a class, root first and the class itself last.
+    method _ancestors($name) {
+        my @chain;
+        my $cursor = $name;
+        while ( defined $cursor ) {
+            unshift @chain, $cursor;
+            $cursor = $classes->{$cursor} ? $classes->{$cursor}{parent} : undef;
+        }
+        return @chain;
+    }
+
+    # Number of ancestors a class has, for ordering class-runtime generation ancestors-first.
+    method _class_depth($name) {
+        my $depth  = 0;
+        my $cursor = $classes->{$name} ? $classes->{$name}{parent} : undef;
+        while ( defined $cursor ) {
+            $depth++;
+            $cursor = $classes->{$cursor} ? $classes->{$cursor}{parent} : undef;
+        }
+        return $depth;
+    }
+
+    # Assign absolute slot indices and byte offsets over the whole chain: the parent's field block, then this class's
+    # own fields. An inherited method keeps addressing its own fields at the same offsets because that prefix is
+    # identical. Idempotent, and recurses into the parent so layout does not depend on declaration order.
+    method _layout_class($name) {
+        my $cd = $classes->{$name} or return;
+        return if $cd->{struct_type};
+
+        my ( @chain, @field_types, @field_names, @field_offsets );
+        my $offset    = 8;
+        my $max_align = 8;
+        my $slot_base = 0;
+        if ( $cd->{parent} ) {
+            my $parent = $cd->{parent};
+            $self->_layout_class($parent);
+            my $pd         = $classes->{$parent};
+            @chain         = @{ $pd->{fields} };
+            @field_types   = @{ $pd->{struct_type}->field_types };
+            @field_names   = @{ $pd->{struct_type}->field_names };
+            @field_offsets = @{ $pd->{struct_type}->_field_offsets };
+            $offset        = $pd->{total_size};
+            $max_align     = $pd->{max_align};
+            $slot_base     = scalar @field_types;
+        }
+
+        for my $f ( $cd->{own_fields}->@* ) {
+            my $align = $f->{align};
+            $offset = $self->_align_up( $offset, $align );
+            $max_align = $align if $align > $max_align;
+            $f->{slot_idx} = $slot_base;
+            $f->{offset}   = $offset;
+            for my $k ( 0 .. $f->{span} - 1 ) {
+                push @field_types,   $f->{inline} ? $f->{elem_ir_type} : $f->{ir_type};
+                push @field_names,   $f->{name};
+                push @field_offsets, $offset + $k * ( $f->{inline} ? $self->type_size( $f->{elem_ir_type} ) : $f->{size} );
+            }
+            $slot_base += $f->{span};
+            $f->{chain_idx} = scalar @chain;
+            push @chain, $f;
+            $offset += $f->{size};
         }
         $offset = $self->_align_up( $offset, $max_align );
-        my $struct_type = Brocken::Lindsay::IR::Type->new(
+
+        $cd->{fields}      = \@chain;
+        $cd->{struct_type} = Brocken::Lindsay::IR::Type->new(
             kind           => 'struct',
-            struct_name    => $full_name,
+            struct_name    => $name,
             field_types    => \@field_types,
             field_names    => \@field_names,
             _field_offsets => \@field_offsets,
             bits           => $offset * 8,
             signed         => 0,
         );
-        $classes->{$full_name} = {
-            fields      => \@fields,
-            total_size  => $offset,
-            methods     => [],
-            struct_type => $struct_type,
-            package     => $ast->package,
-            version     => $ast->version,
-            attrs       => [ $ast->attrs->@* ],
-            parent      => undef,    # set by the :isa pass once every class is registered
-        };
+        $cd->{total_size} = $offset;
+        $cd->{max_align}  = $max_align;
+    }
+
+    # The nearest class at or above `$class_name` (walking the ancestor chain) that defines `$method`, as a
+    # `Class::method` function name, or undef.
+    method _resolve_method( $class_name, $method ) {
+        return undef unless defined $class_name;
+        my $cursor = $class_name;
+        while ( defined $cursor ) {
+            my $full = $cursor . '::' . $method;
+            return $full if $functions->{$full};
+            $cursor = $classes->{$cursor} ? $classes->{$cursor}{parent} : undef;
+        }
+        return undef;
     }
 
     method register_function($ast) {
@@ -899,7 +1002,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             Carp::croak( "Undefined variable '" . $target->name . "' at " . $self->_loc($target) ) unless $addr;
             if ( $addr->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $current_class ) {
                 my $cd      = $classes->{$current_class};
-                my ($field) = $cd ? grep { $_->{name} eq $target->name } $cd->{fields}->@* : ();
+                my ($field) = $cd ? grep { $_->{name} eq $target->name } $cd->{own_fields}->@* : ();
                 $stored_type = $field ? $field->{ir_type} : Brocken::Lindsay::IR::Type::i64();
             }
             else {
@@ -910,7 +1013,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $addr = $self->lower_field_addr($target);
             my $cls     = $self->resolve_class_name($target);
             my $cd      = $classes->{$cls};
-            my ($field) = grep { $_->{name} eq $target->field } $cd->{fields}->@*;
+            my ($field) = grep { $_->{name} eq $target->field } $cd->{own_fields}->@*;
             Carp::croak( "Unknown field '" . $target->field . "' in class '" . $cls . "' at " . $self->_loc($target) ) unless $field;
             $stored_type = $field->{ir_type};
         }
@@ -1532,7 +1635,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $loaded_type;
         if ( $sym->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $current_class ) {
             my $cd      = $classes->{$current_class};
-            my ($field) = $cd ? grep { $_->{name} eq $ast->name } $cd->{fields}->@* : ();
+            my ($field) = $cd ? grep { $_->{name} eq $ast->name } $cd->{own_fields}->@* : ();
             $loaded_type = $field ? $field->{ir_type} : Brocken::Lindsay::IR::Type::i64();
         }
         else {
@@ -2427,14 +2530,18 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
             my $recv = $self->_expr_class( $obj->obj );
             if ( defined $recv ) {
-                my $full      = $recv . '::' . $obj->method;
-                my $ret_class = $function_return_class->{$full};
-                return $ret_class if $ret_class;
 
-                # An auto-generated :writer / :accessor method returns its receiver, so a chained call such
-                # as $obj->set_x(1)->set_y(2) keeps the same class. The writer name may be custom
-                # (:writer(write_x)), so it is looked up in the writer map rather than by a set_ prefix.
-                return $writer_map->{$full} if $writer_map->{$full};
+                # Resolve through the ancestor chain: an inherited method is found on the class that declared it.
+                my $full = $self->_resolve_method( $recv, $obj->method );
+                if ($full) {
+                    my $ret_class = $function_return_class->{$full};
+                    return $ret_class if $ret_class;
+
+                    # An auto-generated :writer / :accessor method returns its receiver, so a chained call such
+                    # as $obj->set_x(1)->set_y(2) keeps the same class. The receiver's static class is kept (not the
+                    # declaring class) so chaining an inherited writer with an own writer stays on the receiver.
+                    return $recv if $writer_map->{$full};
+                }
             }
         }
         return undef;
@@ -2447,9 +2554,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $struct_type = $cd->{struct_type};
         my $field_idx;
         my ( $line, $col ) = ( $ast->line, $ast->col );
-        for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
-            if ( $cd->{fields}[$i]{name} eq $ast->field ) {
-                $field_idx = $cd->{fields}[$i]{slot_idx};
+
+        # Fields are lexical to the class that declares them, so an outside field access (`$obj->f`) sees only this
+        # class's own fields; an inherited field is reached through an inherited accessor.
+        for my $fd ( $cd->{own_fields}->@* ) {
+            if ( $fd->{name} eq $ast->field ) {
+                $field_idx = $fd->{slot_idx};
                 last;
             }
         }
@@ -2461,7 +2571,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $field_ptr  = $self->lower_field_addr($ast);
         my $class_name = $self->resolve_class_name($ast);
         my $cd         = $classes->{$class_name};
-        my ($field)    = grep { $_->{name} eq $ast->field } $cd->{fields}->@*;
+        my ($field)    = grep { $_->{name} eq $ast->field } $cd->{own_fields}->@*;
 
         # A bare array/hash field read yields the element/hash base pointer, as `@arr` does, rather than loading a
         # single scalar out of the storage.
@@ -2476,13 +2586,36 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     method lower_method_call($ast) {
-        my $class_name   = $self->resolve_class_name($ast);
         my $obj_is_class = $ast->obj->isa('Brocken::Katsuro::AST::Expr::Ident');
-        my $full_name    = $class_name . '::' . $ast->method;
+        my $method       = $ast->method;
         my ( $line, $col ) = ( $ast->line, $ast->col );
+
+        # `$self->SUPER::m(...)` binds to the nearest ancestor strictly above the current class that defines m, which
+        # is how a method reaches an overridden parent implementation. Otherwise walk up from the receiver's static
+        # class so an inherited method resolves.
+        my ( $class_name, $full_name );
+        my $super = $method =~ s/^SUPER::// ? 1 : 0;
+        if ($super) {
+            Carp::croak( 'SUPER:: can only be used inside a class at ' . $self->_loc($ast) ) unless $current_class;
+            my $anchor = $classes->{$current_class} ? $classes->{$current_class}{parent} : undef;
+            $full_name = $self->_resolve_method( $anchor, $method );
+            Carp::croak( "No ancestor of '" . $current_class . "' defines '" . $method . "' at " . $self->_loc($ast) )
+                unless $full_name;
+        }
+        else {
+            $class_name = $self->resolve_class_name($ast);
+
+            # `Class->new` is materialised inline below rather than as a named function, so it has nothing to
+            # resolve here.
+            unless ( $obj_is_class && $method eq 'new' ) {
+                $full_name = $self->_resolve_method( $class_name, $method );
+                Carp::croak( "Undefined method '" . $method . "' in class '" . $class_name . "' at " . $self->_loc($ast) )
+                    unless $full_name;
+            }
+        }
         my $hb       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
         my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'},      undef, $line, $col );
-        if ( $obj_is_class && $ast->method eq 'new' ) {
+        if ( $obj_is_class && $method eq 'new' ) {
             my $cd            = $classes->{$class_name};
             my $total_size    = $cd->{total_size};
             my $bump_alloc_fn = $functions->{'Brocken::Runtime::bump_alloc'};
@@ -2548,7 +2681,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 # `field $_total :param(total);` is set by `new(total => 42)`.
                 if ( !defined $fi ) {
                     for my $f ( $cd->{fields}->@* ) {
-                        if ( defined $f->{param_name} && $f->{param_name} eq $key ) { $fi = $f->{idx}; last; }
+                        if ( defined $f->{param_name} && $f->{param_name} eq $key ) { $fi = $f->{chain_idx}; last; }
                     }
                 }
                 Carp::croak( "Unknown field '$key' in class '$class_name' at " . $self->_loc($ast) ) unless defined $fi;
@@ -2609,8 +2742,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     $ctor_bound{ $f->{name} } = 1;
                 }
             }
-            my $adjust_fn = $functions->{ $class_name . '::ADJUST' };
-            if ($adjust_fn) {
+            # Run ADJUST root-first so a parent's validation runs before the child's, matching the order the object
+            # was initialized in.
+            for my $ancestor ( $self->_ancestors($class_name) ) {
+                my $adjust_fn = $functions->{ $ancestor . '::ADJUST' };
+                next unless $adjust_fn;
                 $builder->build_call( $adjust_fn, [ $hb, $want_val, $self_ptr ], undef, $line, $col );
             }
             $current_class = $saved_class;
@@ -2618,7 +2754,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $self_ptr;
         }
         my $callee = $functions->{$full_name};
-        Carp::croak( "Undefined method '" . $ast->method . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $callee;
+        Carp::croak( "Undefined method '" . $method . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $callee;
         my $obj_ptr = $obj_is_class ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) :
             $self->lower_expression( $ast->obj );
         my @args      = ( $hb, $want_val, $obj_ptr );
@@ -2891,12 +3027,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
     }
 
+    # Bind a symbol for each field this class *declares*, so a method body can name it bare. An inherited field is
+    # not bound: fields are lexical to the class that declares them (an inherited method sees its own class's fields
+    # because it was lowered against that class, whose slot offsets are a prefix of ours).
     method populate_field_geps( $class_name, $self_val ) {
         my $cd = $classes->{$class_name};
         return unless $cd;
         my $struct_type = $cd->{struct_type};
-        for my $i ( 0 .. $cd->{fields}->@* - 1 ) {
-            my $fd        = $cd->{fields}[$i];
+        for my $fd ( $cd->{own_fields}->@* ) {
             my $field_ptr = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.addr' );
 
             # An array field is addressed by its element base. Inline storage already sits at that GEP, while a
@@ -2919,7 +3057,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method field_array_record( $class_name, $name ) {
         my $cd = $class_name ? $classes->{$class_name} : undef;
         return undef unless $cd;
-        my ($fd) = grep { $_->{name} eq $name && $_->{kind} eq 'array' } $cd->{fields}->@*;
+        my ($fd) = grep { $_->{name} eq $name && $_->{kind} eq 'array' } $cd->{own_fields}->@*;
         return $fd;
     }
 
@@ -2935,7 +3073,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $self_val    = $current_func->params->[2];
         my $cd          = $classes->{$class_name};
         my $struct_type = $cd->{struct_type};
-        my ($fd)        = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
+        my ($fd)        = grep { $_->{name} eq $field_ast->name } $cd->{own_fields}->@*;
         my $field_ptr   = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.addr' );
 
         # A scalar field loads its value. An array/hash reader hands back a pointer: the element base for an inline
@@ -2965,7 +3103,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $value_val   = $current_func->params->[3];
         my $cd          = $classes->{$class_name};
         my $struct_type = $cd->{struct_type};
-        my ($fd)        = grep { $_->{name} eq $field_ast->name } $cd->{fields}->@*;
+        my ($fd)        = grep { $_->{name} eq $field_ast->name } $cd->{own_fields}->@*;
         my $field_ptr   = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.addr' );
         $builder->build_store( $value_val, $field_ptr );
         $builder->build_ret($self_val);
