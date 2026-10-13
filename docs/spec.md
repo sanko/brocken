@@ -6898,9 +6898,3 @@ say("Estimated value of PI over $iterations iterations: $pi");
 [^wasm]: WebAssembly Core Specification <https://webassembly.github.io/spec/core/> · WebAssembly overview <https://en.wikipedia.org/wiki/WebAssembly> · WASI <https://github.com/WebAssembly/WASI>.
 [^x86]: Intel 64 and IA-32 Architectures SDM <https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html> · AMD64 APM <https://www.amd.com/en/support/tech-docs> · System V AMD64 ABI <https://gitlab.com/x86-psABIs/x86-64-ABI> · Linux x86-64 syscall table <https://github.com/torvalds/linux/blob/master/arch/x86/entry/syscalls/syscall_64.tbl> · ASLR <https://en.wikipedia.org/wiki/Address_space_layout_randomization>.
 
-
----
-
-# Documentation & POD6/RakuDoc (Planned)
-
-(To be filled.)
