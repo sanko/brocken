@@ -3,42 +3,18 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use blib;
 use Brocken;
+use Test2::Tools::Brocken qw[answers executable_targets];
 
-# Compile a program, link it natively, run it, and hand back its exit code (undef when not native).  A program killed
-# by a signal is reported as 128 + signal so a trap cannot be mistaken for a normal exit.
-sub run_brocken {
-    my ($source) = @_;
-    my $brocken = Brocken->new();
-    my $host    = $brocken->platform;
-    return undef unless $host->is_native;
-    my $module = eval { $brocken->compile($source) };
-    die $@ if $@;
-    my $rodata = $module->rodata;
-    my $funcs  = $brocken->codegen->emit_functions( $module->functions );
-
-    # String constants live in a rodata section the linker has to be told about before it writes the executable.
-    $brocken->linker->set_rodata($rodata) if $rodata && keys %$rodata;
-    my $file = $brocken->tmpdir . '/r_introspect_' . $$ . '.' . int( rand(1_000_000) ) . $brocken->ext;
-    $brocken->linker->write_executable( $file, $funcs, $host );
-    system $file;
-    my $status = $?;
-    unlink $file;
-    return ( $status & 127 ) ? ( $status & 127 ) + 128 : $status >> 8;
-}
+# Compile a snippet and assert its exit status on every native target that can run here (the host, plus any cross
+# target with an emulator and sysroot). The exercising paths -- boxing a bool through `sext i1`, boxing a string
+# literal through `lea_rodata` -- are backend-specific, so restricting this to the host left the ARM64 copies of two
+# x86-64 fixes uncovered. Wasm is left out: its code generator has no rodata/data-segment support, so a string literal
+# cannot be boxed there regardless of this test.
+my @native_targets = grep { $_->[0] ne 'wasm32-unknown-wasi' } executable_targets();
 
 sub check {
     my ( $source, $want, $label ) = @_;
-    my $got = eval { run_brocken($source) };
-    if ($@) {
-        fail($label);
-        diag $@;
-        return;
-    }
-    unless ( defined $got ) {
-        skip 'Not native', 1;
-        return;
-    }
-    is( $got, $want, $label );
+    answers( $source, $want, $label, targets => [@native_targets] );
 }
 
 subtest 'reftype folds a static scalar to its class-name string' => sub {
