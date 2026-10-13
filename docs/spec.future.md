@@ -13,6 +13,54 @@
 
 ---
 
+# Notation and Conformance
+
+This document is the design of record for Brocken v0.2.0 and later. It specifies both the language
+and the toolchain that compiles it.
+
+## Scope
+
+It specifies the surface syntax, the static semantics a conforming compiler **MUST** enforce, and the
+observable behavior of a compiled program. It does not specify the internals of the toolchain —
+which modules exist, how the register allocator picks a register, how a section is laid out — except
+where those internals are observable. The memory layouts, the calling conventions, the diagnostics,
+and the on-disk formats **are** part of this specification, because compiled programs, foreign code,
+and existing binaries depend on them.
+
+## Normative Language
+
+The key words **MUST**, **MUST NOT**, **REQUIRED**, **SHALL**, **SHOULD**, **SHOULD NOT**,
+**RECOMMENDED**, **MAY**, and **OPTIONAL** in this document are to be interpreted as described in
+RFC 2119.
+
+- Text marked *informative*, or shown in a note, is explanatory and imposes no requirement.
+- All other text is **normative**.
+- Code examples are illustrative unless the surrounding text states that a behavior is required.
+
+A conforming implementation **MUST** accept every program this document accepts, and **MUST** reject
+the programs it marks as ill-formed. Where this document leaves behavior unspecified, an
+implementation **MAY** choose any behavior, but **SHOULD** document the choice.
+
+## Grammar Notation
+
+Grammars in this document use an extended BNF (EBNF) with the following metasyntax:
+
+| Form | Meaning |
+|---|---|
+| `rule ::= ...` | Definition of a grammar rule |
+| `A \| B` | Alternation |
+| `( x )` | Grouping |
+| `x?` or `[ x ]` | Optional: zero or one |
+| `x*` or `{ x }` | Repetition: zero or more |
+| `x+` | Repetition: one or more |
+| `'text'` | A literal terminal |
+| `Ident` | A non-terminal or a lexical class defined in prose |
+
+Whitespace between tokens is not a token and carries no meaning outside string literals and
+comments. The grammar is a summary; the token-level rules in [Syntax](#syntax) refine it.
+
+---
+
 # Development
 
 ## Installation
@@ -54,7 +102,7 @@ make install
 
 ```bash
 bkn --version
-bkn target info
+bkn target list
 ```
 
 Expected output:
@@ -284,58 +332,107 @@ ffi = false                # Forbid raw syscall / libc imports
 Brocken uses modern Perl syntax while removing historical parsing ambiguities and irregular
 grammatical forms.
 
-### Lexical Conventions
+### Source Text
 
-- **Character set:** Source files must be valid UTF-8.
-- **Identifiers:** Match `/[a-zA-Z_][a-zA-Z0-9_]*/`. Fully qualified symbols use `::` (`Net::HTTP::Client`).
-- **Separators:** Statements terminate with a semicolon `;`.
-- **Blocks:** Curly braces `{ ... }` delimit scope.
-- **Comments:** `#` runs to end-of-line; Pod6 blocks (`=begin ... =end`) carry documentation.
-- **Whitespace:** Space, tab, carriage return, and newline separate tokens and carry no syntactic meaning outside string literals.
+A compilation unit is a sequence of Unicode scalar values encoded as UTF-8. A byte-order mark is
+permitted and ignored. Source files **MUST** be valid UTF-8; a byte sequence that is not is a
+well-formedness error reported before parsing. Tabs, carriage returns, and the several Unicode line
+separators are not significant except as whitespace.
+
+### Whitespace and Line Structure
+
+Brocken is newline-terminated, not newline-sensitive: a statement ends at its `;`, not at a line
+break, so an expression **MAY** span lines. Space, horizontal tab, carriage return, and newline
+separate tokens and are otherwise ignored.
+
+### Comments
+
+| Form | Scope |
+|---|---|
+| `# ...` | A line comment, to the end of the line. |
+| `=begin ... =end` | A block of embedded documentation (Pod6), discarded by the compiler. |
+| `#\| ...` | A declarator comment attached to the declaration that follows it. |
+
+```perl
+# A line comment.
+#| Attached to the next declaration; surfaced by the language server and `bkn fmt`.
+sub checksum(ptr $buffer, i64 $len) :returns(u32) { ... }
+```
+
+### Identifiers and Namespaces
+
+An identifier matches `/[a-zA-Z_][a-zA-Z0-9_]*/` and is case-sensitive. A qualified name uses the
+namespace separator `::` (`Net::HTTP::Client`). A leading underscore is a convention, not a rule: a
+single leading underscore is stripped when a field name is used to derive a constructor parameter or
+accessor name (see [Classes](#classes)).
+
+| Item | Convention |
+|---|---|
+| Types, classes, roles, packages | `UpperCamelCase` |
+| Subroutines, methods, fields, variables | `snake_case` |
+| Constants | `UPPER_SNAKE_CASE` |
+| Native machine types | `lowercase` (`i32`, `f64`, `ptr`) |
+| Managed scalar types | `Capitalized` (`Int`, `String`, `Any`) |
+
+### Punctuation and Separators
+
+Statements terminate with `;`. Blocks are delimited by `{ ... }`. Parentheses group expressions and
+delimit call arguments; brackets `[ ... ]` index arrays and construct array references; braces
+`{ ... }` index hashes and construct hash references. A comma `,` separates items in lists,
+arguments, and declarations.
 
 ### Keywords
 
+Keywords are reserved and **MUST NOT** be used as identifiers.
+
 ```text
-ADJUST       Class post-construction phaser
-DESTROY      Deterministic instance finalizer
-adjoin       Role composition
-as           Explicit cast
-async        Asynchronous isolate task wrapper
-await        Fiber / promise resolution
-bool         Unboxed 1-bit boolean
-catch        Exception interception block
-class        Class definition
-const        Compile-time read-only constant
-decorator    Compile-time macro wrapper
-defer        Scope-exit deferral
-die          Fatal exception emitter
-f32, f64     Unboxed IEEE 754 floats
-field        Encapsulated class state slot
-finally      Guaranteed landing block
-for, foreach Iteration
-i8..i128     Unboxed signed integers
-if, elsif    Conditional control flow
-isolate      Share-nothing OS-thread allocation
-last         Loop early termination (break)
-method       Class behavior
-my           Lexical declaration
-next         Loop continuation
-our          Package-scoped global
-ptr          Opaque 64-bit machine address
-redo         Loop restart without re-testing
-return       Value return
-role         Abstract composable behavior fragment
-say, print   Standard output emissions
-state        Persistent lexical declaration
-sub          Subroutine declaration
-throw        Structured exception emitter
-try          Exception interceptor
-u8..u128     Unboxed unsigned integers
-unless       Inverted conditional
-until        Inverted loop condition
-while        Condition loop
-yield        Fiber suspension
+ADJUST  DESTROY  adjoin  and  as  async  await  catch  class  const
+decorator  defer  die  else  elsif  false  field  finally  for  foreach
+if  isolate  last  method  my  next  not  or  our  package  print  ptr
+redo  return  role  say  state  sub  throw  true  try  undef  unless
+until  use  while  xor  yield
 ```
+
+The built-in type names are **not** keywords: they are ordinary identifiers in the type namespace
+and **MAY** be shadowed by a user declaration.
+
+```text
+i8   i16   i32   i64   i128      u8   u16   u32   u64   u128
+f32  f64   bool  int   ptr       Any  Int  Float  Bool  String  Array  Hash
+```
+
+`true`, `false`, and `undef` are keyword literals. `async` and `await` are reserved by the
+[execution policies](#execution-policies) surface.
+
+### Numeric Literals
+
+| Form | Example | Notes |
+|---|---|---|
+| Decimal | `1234` | |
+| Underscore-separated | `1_000_000` | Ignored; for readability only |
+| Hexadecimal | `0xDEAD_beef` | Case-insensitive digits |
+| Octal | `0o755` | A lone leading `0` is not octal |
+| Binary | `0b1010_0101` | |
+| Floating point | `3.14159` | A digit is required on both sides of `.` |
+| Scientific | `5e+10`, `1.5e-3` | The exponent sign is optional |
+| 128-bit | `170141183460469231731687303715884105727` | Typed by context |
+
+### String Literals and Escapes
+
+A double-quoted string is delimited by `"..."` and interpolates. The following escapes are
+recognized within it:
+
+| Escape | Meaning |
+|---|---|
+| `\n` `\r` `\t` `\f` `\b` | Newline, carriage return, tab, form feed, backspace |
+| `\a` `\e` `\0` | Alert, escape, NUL |
+| `\\` `\"` | Literal backslash, literal double quote |
+| `\$` `\@` `\%` | Suppress interpolation of the following sigil |
+| `\x{HH}` | A Unicode scalar by code point (1–6 hex digits) |
+| `\N{NAME}` | A named Unicode character |
+
+A single-quoted string (`'...'`) does not interpolate and recognizes only `\\` and `\'`. The exact
+interpolation rules are specified under [UTF8](#utf8).
 
 ### Grammar (EBNF)
 
@@ -850,6 +947,38 @@ while (my ($value, $open) = chan_recv($chan)) {
    heap, preserving the thread-local heap invariant. Zero-copy ownership transfer (`move $var` with a
    scoped affine checker and a global message arena) is a later optimization.
 
+### Primitive Reference
+
+The concurrency surface is a small set of intrinsics; everything in this section is defined in terms
+of them. They carry no hidden allocation and never block while holding the isolate lock.
+
+| Intrinsic | Signature | Semantics |
+|---|---|---|
+| `isolate` | `(Code) -> ptr` | Spawns an OS thread with a fresh heap and runs `Code` on it. Returns an opaque thread handle. |
+| `isolate_join` | `(ptr) -> Any` | Blocks the caller until the isolate finishes and returns its result; the heap is reclaimed afterwards. |
+| `fiber` | `(Code) -> ptr` | Creates a suspended fiber with a 64 KiB stack. Does not run until first `transfer`. |
+| `transfer` | `(ptr, Any) -> Any` | Switches to `fiber`, delivering the second argument as the value of that fiber's pending `yield`/`transfer`, and returns the value the fiber hands back. |
+| `yield` | `(Any) -> Any` | Suspends the running fiber and hands its value to the resumer; resumes with the value passed to `transfer`. |
+| `chan_create` | `(i64) -> ptr` | Allocates a bounded channel with the given capacity (must be `> 0`). |
+| `chan_send` | `(ptr, Any) -> bool` | Enqueues a value, blocking while the ring is full; returns false if the channel is closed. |
+| `chan_recv` | `(ptr) -> (Any, bool)` | Dequeues a value, blocking while the ring is empty; the flag is false once the channel is drained and closed. |
+| `chan_close` | `(ptr) -> bool` | Marks the channel closed; further sends fail and receives drain the remaining values before signaling closed. |
+
+### Scheduling and Memory Model
+
+- **Preemptive between isolates.** Isolates are OS threads scheduled by the kernel; the runtime does
+  not intervene.
+- **Disjoint heaps.** Each isolate owns an Immix heap. There is no shared mutable state, so
+  reference counting needs no atomics and cache lines are never shared across cores.
+- **Copy across boundaries.** Every value crossing an isolate boundary is deep-copied; pointers into
+  an isolate's heap **MUST NOT** be observed from another isolate. A channel is the only sanctioned
+  crossing point.
+- **Structured teardown.** An isolate that returns or is joined reclaims its heap. An isolate that
+  panics runs its deferred blocks and unwinds, and the handle reports the failure to `isolate_join`.
+
+The `async`/`await` surface is sugar over `fiber`/`transfer`; see
+[Execution Policies](#execution-policies) for how a program selects its scheduling discipline.
+
 ---
 
 ## Exceptions
@@ -1250,7 +1379,10 @@ bkn task <name>               Execute a declared build task
 bkn upgrade                   Update the toolchain
 ```
 
-### `bkn build` options
+### `bkn build`
+
+Compiles source into a standalone native executable. Runs the full pipeline: lex, parse, check,
+type, lower to Machine IR, optimize, allocate registers, emit, and link against the runtime archive.
 
 ```text
 --release                 Optimize and strip (profile.release)
@@ -1258,7 +1390,140 @@ bkn upgrade                   Update the toolchain
 --opt-level <0..3>        Override the optimization level
 --debug-level <0..4>      DWARF emission detail
 --reproducible            Byte-identical output for a fixed SOURCE_DATE_EPOCH
+--emit <kind>             Stop early: exe | obj | asm | mir
+-o, --output <path>       Write the artifact to a specific path
+--jobs <n>                Parallel codegen units (default: CPUs)
+-v, --verbose             Print each pipeline stage and its timing
 ```
+
+### `bkn run`
+
+Builds and immediately executes the program, passing any trailing arguments to it.
+
+```text
+--release                 Run the optimized build
+--emit <kind>             Interpret `mir` directly instead of native code
+-v, --verbose             Print each pipeline stage
+-- <args>...              Arguments forwarded to the program's ARGV
+```
+
+### `bkn test`
+
+Runs the test harness and reports native TAP to standard output.
+
+```text
+--filter <pattern>        Only run tests whose path matches
+--jobs <n>                Parallel test processes (default: CPUs)
+--no-capture              Interleave test output with the harness
+--target <triple>         Run tests under the target's emulator (qemu-user)
+-v, --verbose             Show each harness invocation
+```
+
+### `bkn bench`
+
+Runs performance microbenchmarks and reports timing distributions.
+
+```text
+--filter <pattern>        Only run matching benchmarks
+--samples <n>             Samples per benchmark (default: 100)
+--warmup <n>              Warm-up iterations before sampling (default: 10)
+--json                    Emit machine-readable results
+```
+
+### `bkn fmt`
+
+Formats sources according to the [formatter](#formatter) style. Writes in place unless `--check`.
+
+```text
+--check                   Exit non-zero if any file would change
+--diff                    Print a unified diff instead of writing
+--stdin                   Read from standard input, write to standard output
+--edition <year>          Formatting rules for a language edition
+```
+
+### `bkn lint`
+
+Runs static analysis and the borrow/escape checks without producing an executable.
+
+```text
+--deny <lint>             Promote a lint to an error (repeatable)
+--allow <lint>            Silence a lint (repeatable)
+--forbid <lint>           Forbid a lint even if a `deny` attribute allows it
+--json                    Emit diagnostics as JSON for editor consumption
+```
+
+### `bkn lsp`
+
+Launches the [language server](#language-server) over the requested transport.
+
+```text
+--stdio                   Speak LSP over standard input/output (default)
+--socket <addr>           Listen on a TCP socket
+--pipe <path>             Listen on a named pipe
+--log-level <level>       trace | debug | info | warn | error
+```
+
+### `bkn clean`
+
+Removes build caches and intermediate artifacts.
+
+```text
+--all                     Also remove downloaded toolchains and vendored sources
+--target <triple>         Only clean the given target's cache
+--dry-run                 Print what would be removed
+```
+
+### `bkn new`
+
+Scaffolds a new project directory with a manifest, a source tree, and a test directory.
+
+```text
+--lib                     Create a library project (no main entry point)
+--bin                     Create an executable project (default)
+--vcs <system>            git | none (default: git)
+--edition <year>          Language edition for the manifest
+```
+
+### `bkn target`
+
+Queries and installs cross-compilation target triples.
+
+```text
+bkn target list                    Show installed and available triples
+bkn target add <triple>            Register a sysroot for a triple
+bkn target install <triple>        Download and unpack a prebuilt runtime
+bkn target remove <triple>         Forget a registered triple
+```
+
+### `bkn vendor`
+
+Copies every dependency into `vendor/` so builds are reproducible without network access.
+
+```text
+--path <dir>              Vendor directory (default: vendor/)
+--frozen                  Fail if the lockfile would change
+```
+
+### `bkn task`
+
+Executes a task declared in `Brocken.toml` under `[tasks]`.
+
+```text
+bkn task <name>           Run the named task
+bkn task --list           List every declared task and its description
+```
+
+### `bkn upgrade`
+
+Updates the installed toolchain.
+
+```text
+--version <x.y.z>         Install a specific version instead of the latest
+--check                   Report whether a newer version exists, without installing
+```
+
+Every subcommand accepts `--help` for its own usage text; `bkn --version` prints the toolchain
+version and the supported target triples.
 
 ---
 
@@ -1486,3 +1751,58 @@ my f64 $pi         = estimate_pi($iterations);
 
 say("Estimated value of PI over $iterations iterations: $pi");
 ```
+
+---
+
+# Glossary
+
+| Term | Definition |
+|---|---|
+| **Isolate** | An OS thread with its own Immix heap and its own ICB. Heaps never overlap, so no mutable state is shared. See [Concurrency](#concurrency). |
+| **Fiber** | A cooperative green thread inside an isolate, switched by `ctx_swap`; it shares the isolate's heap. See [Concurrency](#concurrency). |
+| **ICB** | Isolate Control Block: heap limit, fuel budget, capability bits, and the exception handler chain; addressed from a pinned register. See [Runtime](#runtime). |
+| **FCB** | Fiber Control Block: spilled callee-saved registers, saved stack pointer, resume PC, parent, and transfer slot. See [Concurrency](#concurrency). |
+| **CCB** | Channel Control Block: a shared, bounded ring buffer guarded by a mutex and condition variable. See [Concurrency](#concurrency). |
+| **Fat Scalar** | The 16-byte `Any` representation: a refcount word, GC flags, a type tag, and a payload. See [Type System](#type-system). |
+| **Immix** | A bump allocator over 32 KiB blocks divided into 256-byte lines, with segregated free lists. See [Performance](#performance). |
+| **Reference counting** | The primary reclamation strategy, performed without atomics because heaps are isolate-local. |
+| **Perceus** | Compile-time reference-count optimization (borrow inference, RC elision, allocation reuse). Planned. See [Performance](#performance). |
+| **Linear scan** | The register allocator used by the code generator. See [Performance](#performance). |
+| **MIR** | Machine IR: the target-independent IR between typing and instruction selection. See [Performance](#performance). |
+| **SJLJ** | `setjmp`/`longjmp` landing dispatch used to implement exceptions at zero steady-state cost. See [Exceptions](#exceptions). |
+| **Fuel** | A per-isolate step budget in the ICB, decremented at safepoints, used to bound runaway execution. See [Execution Policies](#execution-policies). |
+| **Capability bits** | Per-isolate bits in the ICB that gate privileged runtime operations (spawning, FFI, syscalls). See [Runtime](#runtime). |
+| **Attribute** | Compile-time metadata attached to a declaration with `:name(value)`. See [Attributes](#attributes). |
+| **Decorator** | A program transformation applied to the declaration that follows a `decorator` declaration. See [Decorators](#decorators). |
+| **Role** | An abstract, composable behavior fragment that a class `adjoin`s. See [Classes](#classes). |
+| **Profile** | A named bundle of build settings (`dev`, `release`) selected by `bkn build`. See [Commands](#commands). |
+| **Target triple** | An architecture/vendor/OS tuple such as `riscv64-unknown-linux-gnu`. See [Commands](#commands). |
+| **Edition** | A dated language version a project opts into via the manifest. See [Modules](#modules). |
+
+---
+
+# Index
+
+| Topic | Where |
+|---|---|
+| ABI and calling conventions | [Functions](#functions), [FFI](#ffi), [Performance](#performance) |
+| Attributes and decorators | [Attributes](#attributes), [Decorators](#decorators) |
+| Bit-widths and native types | [Variables](#variables), [Type System](#type-system) |
+| Channels and message passing | [Concurrency](#concurrency) |
+| Classes, fields, methods, roles | [Classes](#classes) |
+| Command reference | [Toolkit](#toolkit), [Commands](#commands) |
+| Exceptions and unwinding | [Exceptions](#exceptions), [Performance](#performance) |
+| FFI and foreign calls | [FFI](#ffi) |
+| Fibers and scheduling | [Concurrency](#concurrency), [Execution Policies](#execution-policies) |
+| Formatter and linter | [Formatter](#formatter), [Linting](#linting) |
+| Grammar and notation | [Notation and Conformance](#notation-and-conformance), [Syntax](#syntax) |
+| Iterators and generators | [Iterators](#iterators) |
+| Manifest and profiles | [Modules](#modules), [Commands](#commands) |
+| Memory and garbage collection | [Type System](#type-system), [Performance](#performance) |
+| Modules and imports | [Modules](#modules) |
+| Operator precedence | [Syntax](#syntax) |
+| Resources and `defer` | [Resources](#resources) |
+| Reproducible builds | [Commands](#commands), [Bundler](#bundler) |
+| Testing and benchmarking | [Testing](#testing), [Benchmarking](#benchmarking) |
+| Unicode and strings | [UTF8](#utf8), [Syntax](#syntax) |
+| Language server | [Language Server](#language-server) |
