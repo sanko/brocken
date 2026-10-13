@@ -443,6 +443,55 @@ sub decref( ptr $obj, ptr $heap_base ) {
     return;
 }
 
+# Decrement the reference count of a class instance without reclaiming it. Returns the new count so the compiled
+# release site can run the statically-known destructor (and then reclaim through free_obj) exactly when it reaches
+# zero. Splitting the decrement from the reclaim is what keeps the runtime dispatch-free: the destructor is selected
+# at the call site, where the instance's static class is known, instead of through an indirect call the runtime cannot
+# make. The suspect-buffer bookkeeping matches decref (R3) for counts that stay live.
+sub decref_obj( ptr $obj, ptr $heap_base ) : returns(i64) {
+    if ( Brocken::ptr_cmp_eq( $obj, 0 ) ) {
+        return 0;
+    }
+    my i64 $header = Brocken::load_i64($obj);
+    my i64 $old_rc = Brocken::band( $header, 65535 );
+    my i64 $new_rc = Brocken::i64_sub( $old_rc, 1 );
+    Brocken::store_i64( $obj, Brocken::i64_add( Brocken::i64_sub( $header, $old_rc ), $new_rc ) );
+    if ( Brocken::ptr_cmp_gt( $new_rc, 0 ) && Brocken::ptr_cmp_eq( $heap_base, 0 ) == 0 ) {
+        my i64 $flags = get_gc_flags($obj);
+        if ( Brocken::ptr_cmp_eq( Brocken::band( $flags, 4 ), 0 ) && Brocken::ptr_cmp_eq( Brocken::band( $flags, 2 ), 0 ) ) {
+            push_suspect_buffer( $obj, $heap_base );
+        }
+    }
+    return $new_rc;
+}
+
+# Reclaim a class instance whose reference count already reached zero (see decref_obj). Mirrors the free16 half of
+# decref -- push onto the segregated free list and decrement the owning block's live_count -- without touching the
+# header, which decref_obj already updated. Class instances always land on the 16-byte free list, so the tag-9 array
+# path of decref does not apply.
+sub free_obj( ptr $obj, ptr $heap_base ) {
+    if ( Brocken::ptr_cmp_eq( $obj, 0 ) ) {
+        return;
+    }
+    if ( Brocken::ptr_cmp_eq( $heap_base, 0 ) ) {
+        return;
+    }
+    my ptr $head = get_free16_head($heap_base);
+    Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $head );
+    set_free16_head( $heap_base, $obj );
+    my ptr $block_base = block_of( $heap_base, $obj );
+    my ptr $lc_ptr     = Brocken::ptr_add( $block_base, block_live_count_offset() );
+    my i64 $lc         = Brocken::load_i64($lc_ptr);
+    $lc = Brocken::i64_sub( $lc, 1 );
+    Brocken::store_i64( $lc_ptr, $lc );
+    if ( Brocken::ptr_cmp_eq( $lc, 0 ) ) {
+        my ptr $fb_head = get_free_blocks($heap_base);
+        Brocken::store_i64( $block_base, $fb_head );
+        set_free_blocks( $heap_base, $block_base );
+    }
+    return;
+}
+
 # Context helpers for want() (bitmask: bit0=scalar, bit1=list, bit2=void)
 sub want_is_scalar( i64 $__want ) : returns(i64) {
     return Brocken::band( $__want, 1 );

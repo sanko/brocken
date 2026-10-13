@@ -21,11 +21,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $classes          : reader = {};    # "ClassName" -> { fields => [...], total_size => N, methods => [...], struct_type => T }
     field $package_versions : reader = {};    # "Package::Name" -> declared version, from `package NAME VERSION`
     field $block_id              = 0;
+    field $value_id              = 0;         # monotonic counter making local SSA storage names unique
     field $var_class             = {};        # var_name -> class_name (for ptr vars from constructors)
     field $function_return_class = {};        # func_name -> class_name (for functions returning a class ptr)
     field $param_defaults        = {};        # "name" -> [ {name, default}, ... ] per user parameter, for omitted trailing args
-    field $needs_rc              = {};        # var_name -> 1 (Any-typed variable needing refcounting)
+    field $needs_rc              = {};        # var_name -> 1 (RC-tracked variable: an Any box or a class instance)
     field $rc_owner              = {};        # var_name -> owning $_dyn_scope_stack entry (declaring block/loop scope)
+    field $class_owned           = {};        # var_name -> class_name (an owned class instance; released through its destructor)
+    field $class_escaped         = {};        # var_name -> 1 (used as a value, so its instance must not be reclaimed)
     field $borrowed_params       = {};        # param_name -> 1 (caller-owned Any parameter; the callee must not release it)
     field $returns_owned         = {};        # func_name -> 1 (a dynamic return hands the caller an owned +1 reference)
     field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
@@ -41,6 +44,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     method unique_block_name($prefix) {
         return $prefix . '_' . $block_id++;
+    }
+
+    # Local storage names must be unique across a function: the codegen resolves every operand through its SSA
+    # name, so an alloca `%c.addr` and a field GEP `%c.addr` would otherwise alias each other and a later load would
+    # read the wrong storage. Every user local goes through here; the fixed `%__heap_base.addr` / `%self.addr` slots
+    # and the parameter spill slots keep their conventional names (DWARF derives them).
+    method unique_value_name($base) {
+        return $base . '.' . ( $value_id++ );
     }
 
     # Field attribute records -- Parser stores each attribute as { name => 'reader', arg => undef } and
@@ -335,6 +346,137 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return 'Any';
     }
 
+    # Mark every variable used in a value position in `$block` as escaped. A class instance local may only be
+    # reclaimed while nothing else can reach it: a receiver (`$obj->m()`, `$obj.f`) borrows the object and leaves the
+    # local the sole owner, but a value use (an argument, an assignment RHS, a list/hash element, a return) can hand
+    # the pointer onward, and a `ptr` store does not incref, so the local has to keep its reference -- a leak, never a
+    # dangling free. The scan is deliberately an over-approximation: anything it cannot pin as a receiver counts as a
+    # value use.
+    method _scan_escapes($block) {
+        return unless defined $block;
+        $self->_scan_stmt_escapes($_) for $block->statements->@*;
+    }
+
+    method _scan_stmt_escapes($stmt) {
+        return unless defined $stmt;
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') ) {
+            $self->_scan_value_escapes( $stmt->init );
+        }
+        elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ArrayDecl') ) {
+            $self->_scan_value_escapes( $stmt->size_expr );
+            $self->_scan_value_escapes( $stmt->init );
+        }
+        elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Assign') ) {
+            $self->_scan_receiver_escapes( $stmt->target );
+            $self->_scan_value_escapes( $stmt->expr );
+        }
+        elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ListVarDecl') ) {
+            $self->_scan_value_escapes( $stmt->expr );
+        }
+        elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') ) {
+            $self->_scan_value_escapes( $stmt->expr );
+        }
+        elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Throw') ) {
+            $self->_scan_value_escapes( $stmt->expr );
+        }
+        elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') ) {
+            $self->_scan_value_escapes( $stmt->cond );
+            $self->_scan_escapes( $stmt->then );
+            for my $pair ( $stmt->elsif->@* ) {
+                $self->_scan_value_escapes( $pair->[0] );
+                $self->_scan_escapes( $pair->[1] );
+            }
+            $self->_scan_escapes( $stmt->else ) if defined $stmt->else;
+        }
+        elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') ) {
+            $self->_scan_value_escapes( $stmt->cond );
+            $self->_scan_escapes( $stmt->body );
+        }
+        elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Block') ) {
+            $self->_scan_escapes($stmt);
+        }
+        elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::TryCatch') ) {
+            $self->_scan_escapes( $stmt->try_body );
+            $self->_scan_escapes( $stmt->catch_body )   if defined $stmt->catch_body;
+            $self->_scan_escapes( $stmt->finally_body ) if defined $stmt->finally_body;
+        }
+        else {
+            # A bare expression statement (a call, an intrinsic, a binop): its value is discarded, but any
+            # receiver-shaped sub-expression still has to be classified.
+            $self->_scan_value_escapes($stmt);
+        }
+    }
+
+    # The expression's value is consumed as a value (argument, RHS, element, return).
+    method _scan_value_escapes($expr) {
+        return unless defined $expr && ref $expr;
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            $class_escaped->{ $expr->name } = 1;
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
+            $self->_scan_value_escapes( $expr->expr );
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::UnOp') ) {
+            $self->_scan_value_escapes( $expr->expr );
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::BinOp') ) {
+            $self->_scan_value_escapes( $expr->lhs );
+            $self->_scan_value_escapes( $expr->rhs );
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Ternary') ) {
+            $self->_scan_value_escapes( $expr->cond );
+            $self->_scan_value_escapes( $expr->then );
+            $self->_scan_value_escapes( $expr->else );
+        }
+
+        # A field read borrows its object; the object pointer itself is not handed onward.
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::FieldAccess') ) {
+            $self->_scan_receiver_escapes( $expr->obj );
+        }
+
+        # An array/hash index borrows the container and consumes the index.
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::ArrayIndex') ) {
+            $self->_scan_receiver_escapes( $expr->array );
+            $self->_scan_value_escapes( $expr->index );
+        }
+
+        # A method call borrows its receiver and consumes its arguments.
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
+            $self->_scan_receiver_escapes( $expr->obj );
+            $self->_scan_value_escapes($_) for $expr->args->@*;
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Call') ) {
+            $self->_scan_value_escapes($_) for $expr->args->@*;
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::IntrinsicCall') ) {
+            $self->_scan_value_escapes($_) for $expr->args->@*;
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::List') ) {
+            $self->_scan_value_escapes($_) for $expr->elements->@*;
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Assign') ) {
+            $self->_scan_receiver_escapes( $expr->target );
+            $self->_scan_value_escapes( $expr->expr );
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Hash') ) {
+            for my $pair ( $expr->pairs->@* ) {
+                $self->_scan_value_escapes( $pair->{key} );
+                $self->_scan_value_escapes( $pair->{value} );
+            }
+        }
+    }
+
+    # The expression is used as an object receiver: a bare variable is borrowed, anything more involved is treated as
+    # a value use of its sub-expressions.
+    method _scan_receiver_escapes($expr) {
+        return unless defined $expr && ref $expr;
+        return if $expr->isa('Brocken::Katsuro::AST::Expr::Var');
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
+            return $self->_scan_receiver_escapes( $expr->expr );
+        }
+        $self->_scan_value_escapes($expr);
+    }
+
     # Main entry point
     method lower_program($ast) {
         my @decls;
@@ -438,6 +580,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $has_destroy = $ast->destroys->@* ? 1 : 0;
         $self->register_method( $class_name, 'DESTROY', 'void', [] ) if $has_destroy;
 
+        # The reclaim thunk the compiled release sites call: it runs the (chained) DESTROY, tears down the managed
+        # fields, and frees the instance. It is separate from DESTROY because DESTROY is an ordinary method a user may
+        # call more than once, while the reclaim must run exactly once, when the refcount reaches zero.
+        $self->register_method( $class_name, '__destroy', 'void', [] );
+
         # Lower explicit methods
         for my $m ( $ast->methods->@* ) {
             my $ret_type = $m->return_type;
@@ -481,6 +628,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # Lower DESTROY last: its body may call this class's own methods and accessors, all now registered. The
         # generated body runs its own code then chains to the nearest ancestor's Class::DESTROY (derived-to-root).
         $self->lower_destroy( $class_name, $ast->destroys ) if $has_destroy;
+        $self->lower_class_destroy($class_name);
         $current_class   = undef;
         $current_package = $saved_package;
     }
@@ -829,6 +977,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $needs_rc        = {};
         $rc_owner        = {};
         $borrowed_params = {};
+        $class_owned     = {};
+        $class_escaped   = {};
+        $self->_scan_escapes( $ast->body );
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -934,9 +1085,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         unless ( $current_block && $current_block->terminator ) {
             my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
             for my $name ( sort keys %$needs_rc ) {
-                my $addr   = $symbols->{$name} or next;
-                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-                $builder->build_decref( $loaded, 0, 0, $decref_hb );
+                $self->_emit_rc_release( $name, $decref_hb );
             }
             if ( $current_func->return_type->kind eq 'void' ) {
                 $builder->build_ret();
@@ -997,10 +1146,71 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $rc_owner->{$name} = @$_dyn_scope_stack ? $_dyn_scope_stack->[-1] : undef;
     }
 
+    # Register an owned class-instance variable: it is RC-tracked like an `Any`, but its release runs the instance's
+    # destructor instead of a plain decref.
+    method _note_class( $name, $class ) {
+        $class_owned->{$name} = $class;
+        $self->_note_rc($name);
+    }
+
     # Drop an RC-tracked variable from scope tracking (after it has been decref'd, or when a path no longer needs it).
     method _forget_rc($name) {
         delete $needs_rc->{$name};
         delete $rc_owner->{$name};
+        delete $class_owned->{$name};
+    }
+
+    # Release one RC-tracked variable: load its slot and hand the value to the right release path. An owned class
+    # instance goes through its destructor; everything else (an `Any` box) is a plain decref.
+    method _emit_rc_release( $name, $heap_base ) {
+        my $addr = $symbols->{$name} or return;
+        my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
+        my $class = $class_owned->{$name};
+        if ( $class && !$class_escaped->{$name} ) {
+            my $hb = $heap_base;
+            if ( !defined $hb && $symbols->{'__heap_base'} ) {
+                $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+            }
+            $self->_emit_obj_release( $loaded, $class, $hb );
+        }
+        else {
+            $builder->build_decref( $loaded, 0, 0, $heap_base );
+        }
+    }
+
+    # Drop one reference to an owned class instance and, exactly when that was the last one, run the instance's
+    # destructor. The runtime decref is split so the statically-known `Class::__destroy` can be called here rather
+    # than dispatched from inside the runtime.
+    method _emit_obj_release( $loaded, $class, $heap_base ) {
+        my $decref = $functions->{'Brocken::Runtime::decref_obj'};
+        my $destroy = $functions->{ $class . '::__destroy' };
+        if ( !$decref || !$destroy ) {
+
+            # Without the split runtime (or a generated destructor) fall back to a plain decref: the memory is
+            # reclaimed but no user DESTROY runs. This only happens for an internal class with no generated runtime.
+            $builder->build_decref( $loaded, 0, 0, $heap_base );
+            return;
+        }
+        my $hbi = defined $heap_base ? $heap_base : Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+        my $rc        = $builder->build_call( $decref, [ $loaded, $hbi ] );
+        my $zero_i64  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+        my $null_ptr  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+        my $rc_zero   = $builder->build_icmp( 'eq', $rc, $zero_i64 );
+        my $not_null  = $builder->build_icmp( 'ne', $loaded, $null_ptr );
+        my $is_dead   = $builder->build_and( $rc_zero, $not_null );
+        my $func      = $current_func;
+        my $dtor      = $func->append_block( $self->unique_block_name('obj_destroy') );
+        my $done      = $func->append_block( $self->unique_block_name('obj_release_end') );
+        $builder->position_at_end($current_block);
+        $builder->build_cond_br( $is_dead, $dtor, $done );
+        $builder->position_at_end($dtor);
+        $current_block = $dtor;
+        my $want = $symbols->{'__want'} ? $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'} )
+            : Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
+        $builder->build_call( $destroy, [ $hbi, $want, $loaded ] );
+        $builder->build_br($done);
+        $builder->position_at_end($done);
+        $current_block = $done;
     }
 
     # Lower a block with block-scoped RC cleanup.
@@ -1019,10 +1229,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return if $current_block->terminator;
         my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
         for my $name (@to_clean) {
-            my $addr   = $symbols->{$name} or next;
-            my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-            $builder->build_decref( $loaded, 0, 0, $decref_hb );
-            delete $needs_rc->{$name};
+            $self->_emit_rc_release( $name, $decref_hb );
+            $self->_forget_rc($name);
         }
     }
 
@@ -1067,7 +1275,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_var_decl($ast) {
         my $ir_type = $self->type_from_name( $ast->type );
         my ( $line, $col ) = ( $ast->line, $ast->col );
-        my $alloca = $builder->build_alloca( $ir_type, '%' . $ast->name . '.addr', undef, $line, $col, $ast->name, $ast->type );
+        my $alloca = $builder->build_alloca( $ir_type, $self->unique_value_name( '%' . $ast->name . '.addr' ), undef, $line, $col, $ast->name, $ast->type );
         $symbols->{ $ast->name } = $alloca;
         if ( $ast->type eq 'Any' ) {
             $self->_note_rc( $ast->name );
@@ -1081,20 +1289,32 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $builder->build_store( $zero, $alloca, $line, $col );
         }
         if ( defined $ast->init ) {
+            my $fresh_class;
             if ( $ast->init->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
                 $ast->init->method eq 'new' &&
                 $ast->init->obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
                 $var_class->{ $ast->name } = $self->_resolve_class_ident( $ast->init->obj->name );
+                $fresh_class = $var_class->{ $ast->name } if $ir_type->kind eq 'ptr';
             }
             my $val = $self->lower_expression( $ast->init );
             $val = $self->maybe_convert_type( $val, $ir_type );
 
-            # An owned dynamic call result already carries the reference the slot needs (F13); take a second one only
-            # for values that arrive borrowed (a local, a parameter, a fresh box).
-            if ( $needs_rc->{ $ast->name } && !$self->_owned_call_result($val) ) {
-                $builder->build_incref( $val, $line, $col );
+            # A fresh instance already carries the reference the slot needs -- the constructor wrote a refcount of 1.
+            # Track the local for release at scope exit only when nothing can reach it another way (the escape scan
+            # above leaves it off the escaped set); otherwise it stays owned, which leaks rather than dangles.
+            if ( $fresh_class && !$class_escaped->{ $ast->name } ) {
+                $self->_note_class( $ast->name, $fresh_class );
+                $builder->build_store( $val, $alloca, $line, $col );
             }
-            $builder->build_store( $val, $alloca, $line, $col );
+            else {
+
+                # An owned dynamic call result already carries the reference the slot needs (F13); take a second one
+                # only for values that arrive borrowed (a local, a parameter, a fresh box).
+                if ( $needs_rc->{ $ast->name } && !$self->_owned_call_result($val) ) {
+                    $builder->build_incref( $val, $line, $col );
+                }
+                $builder->build_store( $val, $alloca, $line, $col );
+            }
         }
     }
 
@@ -1226,6 +1446,35 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # Only an RC-tracked dynamic slot owns its referent: an `Any` local, a dynamic field, or a borrowed `Any`
         # parameter. A dynamic array element is not tracked (a plain store), so it keeps the branchless form below.
         my $is_dyn_rc = $is_dyn_field || ( $stored_type->kind eq 'dynamic' && ( $is_rc || $is_borrowed ) );
+
+        # Reassigning a plain local that owns a class instance takes the same ownership contract as an `Any` slot,
+        # but the displaced instance is released through its destructor. A fresh `Class->new` RHS already carries the
+        # reference the slot consumes; any other RHS is borrowed and would alias, so the local is dropped from
+        # ownership instead (it leaks the value it held -- never a dangling free). A field target is excluded: field
+        # stores go through the accessor/constructor path, which has its own ownership rules.
+        if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') && !$is_field_target && $ast->op eq '=' ) {
+            my $is_fresh_rhs = $stored_type->kind eq 'ptr'
+                && $ast->expr->isa('Brocken::Katsuro::AST::Expr::MethodCall')
+                && $ast->expr->method eq 'new'
+                && $ast->expr->obj->isa('Brocken::Katsuro::AST::Expr::Ident')
+                && !$class_escaped->{ $target->name };
+            my $tracked = $class_owned->{ $target->name };
+            if ( $tracked || $is_fresh_rhs ) {
+                my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+                if ($is_fresh_rhs) {
+                    my $class = $tracked // $self->_resolve_class_ident( $ast->expr->obj->name );
+                    $self->_note_class( $target->name, $class ) unless $tracked;
+                    my $old = $builder->build_load( $stored_type, $addr, undef, $line, $col );
+                    $builder->build_store( $val, $addr, $line, $col );
+                    $self->_emit_obj_release( $old, $class, $hb );
+                }
+                else {
+                    $self->_forget_rc( $target->name );
+                    $builder->build_store( $val, $addr, $line, $col );
+                }
+                return;
+            }
+        }
         if ( $ast->op eq '//=' || $ast->op eq '||=' ) {
 
             # `//=` and `||=` both keep the value already in the slot when it counts as "present" and store the RHS
@@ -1308,9 +1557,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             if (@rc_names) {
                 my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
                 for my $name (@rc_names) {
-                    my $addr   = $symbols->{$name} or next;
-                    my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-                    $builder->build_decref( $loaded, 0, 0, $hb );
+                    $self->_emit_rc_release( $name, $hb );
                 }
             }
             $builder->build_ret( $val, $line, $col );
@@ -1321,9 +1568,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $decref_hb
                     = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
                 for my $name (@rc_names) {
-                    my $addr   = $symbols->{$name} or next;
-                    my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-                    $builder->build_decref( $loaded, 0, 0, $decref_hb );
+                    $self->_emit_rc_release( $name, $decref_hb );
                 }
             }
             $builder->build_ret( undef, $line, $col );
@@ -1722,9 +1967,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return if $current_block->terminator;
         my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
         for my $name (@rc_names) {
-            my $addr   = $symbols->{$name} or next;
-            my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-            $builder->build_decref( $loaded, 0, 0, $decref_hb );
+            $self->_emit_rc_release( $name, $decref_hb );
             $self->_forget_rc($name);
         }
     }
@@ -1740,9 +1983,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $decref_hb
                     = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
                 for my $name (@rc_names) {
-                    my $addr   = $symbols->{$name} or next;
-                    my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-                    $builder->build_decref( $loaded, 0, 0, $decref_hb );
+                    $self->_emit_rc_release( $name, $decref_hb );
 
                     # A variable the loop body itself owns stays live on the fall-through back edge, so leave it in
                     # %$needs_rc for _emit_loop_back_edge_rc_cleanup.  One declared in a nested block has lexically
@@ -1891,7 +2132,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $promote      = !defined $static_bytes || $static_bytes > 4096;
         if ($promote) {
             my $ptr_type  = Brocken::Lindsay::IR::Type::ptr();
-            my $slot      = $builder->build_alloca( $ptr_type, '%' . $key . '.heap', undef, $ast->line, $ast->col, $ast->name, $ast->elem_type );
+            my $slot      = $builder->build_alloca( $ptr_type, $self->unique_value_name( '%' . $key . '.heap' ), undef, $ast->line, $ast->col, $ast->name, $ast->elem_type );
             my $hb_alloca = $symbols->{'__heap_base'} or Carp::croak( "Heap array declaration requires __heap_base at " . $self->_loc($ast) );
             my $hb        = $builder->build_load( $ptr_type, $hb_alloca, undef, $ast->line, $ast->col );
             my $alloc_fn  = $functions->{'Brocken::Runtime::alloc_array'} or
@@ -1906,7 +2147,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
 
         # A small constant-sized array stays on the stack; every other declaration was heap-promoted above.
-        my $alloca = $builder->build_alloca( $ir_type, '%' . $key . '.addr', $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
+        my $alloca = $builder->build_alloca( $ir_type, $self->unique_value_name( '%' . $key . '.addr' ), $size_val, $ast->line, $ast->col, $ast->name, $ast->elem_type );
         $symbols->{$key} = $alloca;
     }
 
@@ -1920,7 +2161,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $i ( 0 .. $#targets ) {
             my $t       = $targets[$i];
             my $ir_type = $self->type_from_name( $t->{type} );
-            my $alloca  = $builder->build_alloca( $ir_type, '%' . $t->{name} . '.addr', undef, $line, $col, $t->{name}, $t->{type} );
+            my $alloca  = $builder->build_alloca( $ir_type, $self->unique_value_name( '%' . $t->{name} . '.addr' ), undef, $line, $col, $t->{name}, $t->{type} );
             $symbols->{ $t->{name} } = $alloca;
             if ( $t->{type} eq 'Any' ) {
                 $self->_note_rc( $t->{name} );
@@ -3174,6 +3415,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $needs_rc = {};
         $rc_owner = {};
         $borrowed_params = {};
+        $class_owned   = {};
+        $class_escaped = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -3216,13 +3459,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $borrowed_params->{$pname} = 1;
             }
         }
+        $self->_scan_escapes( $method_ast->body );
         $self->lower_block_body( $method_ast->body );
         unless ( $current_block && $current_block->terminator ) {
             my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
             for my $name ( sort keys %$needs_rc ) {
-                my $addr   = $symbols->{$name} or next;
-                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-                $builder->build_decref( $loaded, 0, 0, $decref_hb );
+                $self->_emit_rc_release( $name, $decref_hb );
             }
             if ( $current_func->return_type->kind eq 'void' ) {
                 $builder->build_ret();
@@ -3242,6 +3484,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $needs_rc = {};
         $rc_owner = {};
         $borrowed_params = {};
+        $class_owned   = {};
+        $class_escaped = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -3268,14 +3512,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $symbols->{self} = $self_val;
         $self->populate_field_geps( $class_name, $self_val );
         for my $adjust_ast ( $adjust_asts->@* ) {
+            $self->_scan_escapes( $adjust_ast->body );
             $self->lower_block_body( $adjust_ast->body );
         }
         unless ( $current_block && $current_block->terminator ) {
             my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
             for my $name ( sort keys %$needs_rc ) {
-                my $addr   = $symbols->{$name} or next;
-                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-                $builder->build_decref( $loaded, 0, 0, $decref_hb );
+                $self->_emit_rc_release( $name, $decref_hb );
             }
             $builder->build_ret();
         }
@@ -3294,6 +3537,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $needs_rc = {};
         $rc_owner = {};
         $borrowed_params = {};
+        $class_owned   = {};
+        $class_escaped = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -3320,6 +3565,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $symbols->{self} = $self_val;
         $self->populate_field_geps( $class_name, $self_val );
         for my $destroy_ast ( $destroy_asts->@* ) {
+            $self->_scan_escapes( $destroy_ast->body );
             $self->lower_block_body( $destroy_ast->body );
         }
 
@@ -3337,12 +3583,79 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         unless ( $current_block && $current_block->terminator ) {
             my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
             for my $name ( sort keys %$needs_rc ) {
-                my $addr   = $symbols->{$name} or next;
-                my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
-                $builder->build_decref( $loaded, 0, 0, $decref_hb );
+                $self->_emit_rc_release( $name, $decref_hb );
             }
             $builder->build_ret();
         }
+    }
+
+    # The reclaim thunk (`Class::__destroy`): run the chained DESTROY, release the managed fields this class owns, and
+    # free the instance. A compiled release site calls it exactly when the header refcount reaches zero, so the
+    # refcount -- not method dispatch -- is what guarantees it runs once. It is split from DESTROY because DESTROY is
+    # an ordinary method a user may call repeatedly, while the reclaim must run exactly once.
+    method lower_class_destroy($class_name) {
+        my $full_name = $class_name . '::__destroy';
+        $current_func = $functions->{$full_name};
+        return unless $current_func;
+        $symbols  = {};
+        $needs_rc = {};
+        $rc_owner = {};
+        $borrowed_params = {};
+        $class_owned   = {};
+        $class_escaped = {};
+        $current_func->set_blocks( [] );
+        my $entry = $current_func->append_block('entry');
+        $builder->position_at_end($entry);
+        $current_block = $entry;
+
+        # %__heap_base is the first param (ptr) at index 0
+        {
+            my $heap_base_param  = $current_func->params->[0];
+            my $heap_base_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::ptr(), '%__heap_base.addr' );
+            $builder->build_store( $heap_base_param, $heap_base_alloca );
+            $symbols->{'__heap_base'} = $heap_base_alloca;
+        }
+
+        # %__want is the second param (i64) at index 1
+        {
+            my $want_param  = $current_func->params->[1];
+            my $want_alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%__want.addr' );
+            $builder->build_store( $want_param, $want_alloca );
+            $symbols->{'__want'} = $want_alloca;
+        }
+
+        # $self is the third param (ptr) at index 2
+        my $self_val = $current_func->params->[2];
+        $symbols->{self} = $self_val;
+
+        my $hb   = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+        my $want = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'} );
+
+        # User DESTROY first, before any managed field is released (spec 8.1).
+        my $destroy = $self->_resolve_method( $class_name, 'DESTROY' );
+        if ( $destroy && $functions->{$destroy} ) {
+            $builder->build_call( $functions->{$destroy}, [ $hb, $want, $self_val ], undef );
+        }
+
+        # Cascade: each owned dynamic field loses the reference it holds. A pointer-typed field (String, array, hash,
+        # or a raw ptr) is not RC-tracked, so it has nothing to release here.
+        my $cd = $classes->{$class_name};
+        if ($cd) {
+            my $struct_type = $cd->{struct_type};
+            for my $fd ( $cd->{fields}->@* ) {
+                next unless $fd->{ir_type} && $fd->{ir_type}->kind eq 'dynamic';
+                my $fptr = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.daddr' );
+                my $fval = $builder->build_load( $fd->{ir_type}, $fptr );
+                $builder->build_decref( $fval, 0, 0, $hb );
+            }
+        }
+
+        # Reclaim the instance itself now that its fields are gone.
+        my $free = $functions->{'Brocken::Runtime::free_obj'};
+        if ($free) {
+            $builder->build_call( $free, [ $self_val, $hb ], undef );
+        }
+        $builder->build_ret();
     }
 
     # Bind a symbol for each field this class *declares*, so a method body can name it bare. An inherited field is
