@@ -272,6 +272,10 @@ operate on a variable's ownership rather than its value. The implemented set is:
 | `builtin::refaddr($v)` | The address of a boxed value or pointer as an `i64` (`0` for a non-reference). |
 | `builtin::reftype($v)` | The reference class name — `SCALAR`, `ARRAY`, `HASH`, or `OBJECT`. |
 | `builtin::blessed($v)` | The class name of a statically-known instance, or a null pointer (undef) otherwise. |
+| `builtin::ceil($v)` / `builtin::floor($v)` | Rounds a number to an `i64` toward `+∞` / `-∞`. An integer passes through unchanged; a float is truncated with `fptosi` and corrected by one only when the truncation landed on the wrong side. |
+| `builtin::inf(SIGN)` | The `f64` positive infinity, or negative infinity when the sign argument is negative. |
+| `builtin::nan(SIGN)` | The `f64` quiet NaN. The sign argument is evaluated but ignored, since every NaN compares unequal to itself. |
+| `builtin::trim($v)` | A fresh `String` with leading and trailing whitespace removed. The original is left untouched. |
 
 Reflection answers a static value at compile time from its IR type (a pointer with a statically-known class is `OBJECT`)
 and reads an `Any` box's header tag at runtime. A box sheds the fine-grained Perl provenance: a bool box and a
@@ -281,9 +285,13 @@ as `SCALAR`. `builtin::blessed` of a boxed instance is undef because the runtime
 and `builtin::refaddr` uses the one pointer-to-integer conversion the front end has (a store and a re-load, there
 being no `ptrtoint`), so it reports identity rather than a number to compute with.
 
-The rest of Perl's `builtin` set — `ceil`, `floor`, `indexed`, `trim`, `inf`, `nan`, `export_lexically`, `load_module`
-— is **not yet implemented** (see [`class_roadmap.md`](class_roadmap.md) and `TODO.md`); an unknown `builtin::` name is
-a compile error.
+The rest of Perl's `builtin` set — `indexed`, `export_lexically`, `load_module` — is **not yet implemented** (see
+[`class_roadmap.md`](class_roadmap.md) and `TODO.md`); an unknown `builtin::` name is a compile error.
+
+`ceil`/`floor` answer an `i64`, so a magnitude beyond the `i64` range is undefined, exactly as for any integer
+conversion. The rounding is emitted in the IR (`fptosi`/`sitofp`/`fcmp`) rather than through a libm `ceil`/`floor`
+call, so the linker needs no `-lm`. `inf`/`nan` are `f64` values, and `trim` operates on bytes, so the Unicode
+whitespace Perl's `trim` also strips is out of reach.
 
 ---
 

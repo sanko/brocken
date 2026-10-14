@@ -2990,6 +2990,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         {
             return $self->lower_reflect_builtin( $name, $ast, $line, $col );
         }
+        if ( $name eq 'ceil' || $name eq 'floor' ) {
+            return $self->lower_round_builtin( $name, $ast, $line, $col );
+        }
+        if ( $name eq 'inf' || $name eq 'nan' ) {
+            return $self->lower_special_float_builtin( $name, $ast, $line, $col );
+        }
+        if ( $name eq 'trim' ) {
+            return $self->lower_trim_builtin( $ast, $line, $col );
+        }
         Carp::croak( "Unknown builtin 'builtin::$name' at " . $self->_loc($ast) );
     }
 
@@ -3170,6 +3179,125 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
 
         Carp::croak( "Unknown builtin 'builtin::$name' at " . $self->_loc($ast) );
+    }
+
+    # == builtin:: rounding ==
+    # `ceil`/`floor` answer an `i64` for any numeric argument. An integer argument is already integral, so it passes
+    # through. For a float, `fptosi` truncates toward zero, which is exactly right when the value is already
+    # integral and off by one in the direction the rounding wants otherwise -- so the truncated value is converted
+    # back and compared, and adjusted by one only when it lands on the wrong side. Doing it in the IR rather than
+    # calling libm keeps the linker free of a `-lm` dependency (`ceil`/`floor` are not libc symbols) and covers every
+    # backend through the same `fptosi`/`sitofp`/`fcmp` it already supports. A value too large for an `i64` is
+    # undefined, the same range limit every integer conversion has.
+    method lower_round_builtin( $name, $ast, $line, $col ) {
+        my $arg = $ast->args->[0];
+        Carp::croak( "builtin::$name expects a numeric argument at " . $self->_loc($ast) ) unless $arg;
+        my $val  = $self->lower_expression($arg);
+        my $kind = $val->type->kind;
+
+        my $round_float = sub ($f) {
+            my $trunc   = $builder->build_fptosi( $f, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
+            my $trunc_f = $builder->build_sitofp( $trunc, Brocken::Lindsay::IR::Type::f64(), undef, $line, $col );
+            my $cmp     = $name eq 'ceil'
+                ? $builder->build_icmp( 'lt', $trunc_f, $f, undef, $line, $col )
+                : $builder->build_icmp( 'gt', $trunc_f, $f, undef, $line, $col );
+            my $one = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
+            my $adj = $name eq 'ceil'
+                ? $builder->build_add( $trunc, $one, undef, $line, $col )
+                : $builder->build_sub( $trunc, $one, undef, $line, $col );
+            return $builder->build_select( $cmp, $adj, $trunc, undef, $line, $col );
+        };
+
+        if ( $kind eq 'int' ) {
+            return $self->maybe_convert_type( $val, Brocken::Lindsay::IR::Type::i64(), $line, $col );
+        }
+        if ( $kind eq 'float' ) {
+            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                my $v   = $val->value;
+                my $int = int($v);
+                $int -= 1 if $name eq 'floor' && $int > $v;
+                $int += 1 if $name eq 'ceil'  && $int < $v;
+                return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $int );
+            }
+            return $round_float->($val);
+        }
+        if ( $kind eq 'dynamic' ) {
+
+            # A float box rounds; an int box is returned as-is. `unbox_f64` would widen a large integer to a double
+            # and lose bits beyond 2^53, so the tag selects between the rounded float and the untouched integer
+            # rather than routing everything through the float path.
+            my $tag      = $self->_reflect_box_tag( $val, $line, $col );
+            my $is_float = $self->_icmp_eq_i64( $tag, 3, $line, $col );
+            my $f        = $builder->build_call( $self->_reflect_runtime( 'unbox_f64', $ast, $line, $col ), [$val], undef, $line, $col );
+            my $i        = $builder->build_call( $self->_reflect_runtime( 'unbox_i64', $ast, $line, $col ), [$val], undef, $line, $col );
+            return $builder->build_select( $is_float, $round_float->($f), $i, undef, $line, $col );
+        }
+        Carp::croak( "builtin::$name cannot round a $kind at " . $self->_loc($ast) );
+    }
+
+    # == builtin:: inf / nan ==
+    # `inf`/`nan` return an `f64`. An optional sign argument picks the sign of the infinity; a non-constant sign is
+    # honoured as a runtime comparison (the argument is a sign, exactly as Perl treats it), and `nan` ignores its
+    # sign but still evaluates the argument for side effects. The values are the floating-point infinities and a
+    # quiet NaN, which the backends pack from the constant's bits (`Inf`/`NaN` survive `pack 'd'`).
+    method lower_special_float_builtin( $name, $ast, $line, $col ) {
+        state $POS_INF = 9**9**9;
+        state $NEG_INF = -( 9**9**9 );
+        state $NAN     = ( 9**9**9 ) - ( 9**9**9 );
+        my $f64 = sub ($v) {
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::f64(), value => $v );
+        };
+
+        my $arg = $ast->args->[0];
+        if ( $name eq 'nan' ) {
+            $self->lower_expression($arg) if $arg;
+            return $f64->($NAN);
+        }
+        return $f64->($POS_INF) unless $arg;
+        my $val = $self->lower_expression($arg);
+        return $f64->( $val->value < 0 ? $NEG_INF : $POS_INF )
+            if $val->isa('Brocken::Lindsay::IR::Constant');
+        $val = $self->maybe_convert_type( $val, Brocken::Lindsay::IR::Type::f64(), $line, $col )
+            if $val->type->kind eq 'dynamic';
+        my $zero = Brocken::Lindsay::IR::Constant->new( type => $val->type, value => 0 );
+
+        # The ordering predicate is spelled per type: a float uses the plain `lt`, an integer the signed/unsigned
+        # `slt`/`ult` the comparison lowering uses. A bare `lt` on an integer operand is a predicate no `set`
+        # condition names, so it silently produced a `set` with no suffix.
+        my $pred = $val->type->kind eq 'float' ? 'lt' : ( $val->type->is_signed ? 'slt' : 'ult' );
+        my $neg  = $builder->build_icmp( $pred, $val, $zero, undef, $line, $col );
+        return $builder->build_select( $neg, $f64->($NEG_INF), $f64->($POS_INF), undef, $line, $col );
+    }
+
+    # == builtin:: trim ==
+    # A fresh string with leading and trailing ASCII whitespace removed. Brocken strings are byte strings, so the
+    # Unicode whitespace Perl's `trim` also strips is out of reach (the runtime helper matches ASCII `\s`). A static
+    # String is a plain pointer; a boxed string contributes its pointer payload, with a non-string box collapsing to
+    # the empty string because both `select` arms are evaluated and the runtime would otherwise read a non-pointer
+    # payload as characters.
+    method lower_trim_builtin( $ast, $line, $col ) {
+        my $arg = $ast->args->[0];
+        Carp::croak( "builtin::trim expects an argument at " . $self->_loc($ast) ) unless $arg;
+        my $val  = $self->lower_expression($arg);
+        my $kind = $val->type->kind;
+
+        my $hb = $symbols->{'__heap_base'}
+            ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col )
+            : undef;
+        Carp::croak( "builtin::trim requires __heap_base at " . $self->_loc($ast) ) unless $hb;
+        my $trim_fn = $self->_reflect_runtime( 'str_trim', $ast, $line, $col );
+
+        if ( $kind eq 'ptr' && !defined $self->_reflect_static_class($arg) ) {
+            return $builder->build_call( $trim_fn, [ $hb, $val ], undef, $line, $col );
+        }
+        if ( $kind eq 'dynamic' ) {
+            my $tag    = $self->_reflect_box_tag( $val, $line, $col );
+            my $is_str = $self->_icmp_eq_i64( $tag, 4, $line, $col );
+            my $pstr   = $builder->build_unbox( $val, Brocken::Lindsay::IR::Type::ptr(), undef, $line, $col );
+            my $safe   = $builder->build_select( $is_str, $pstr, $self->_reflect_rodata(''), undef, $line, $col );
+            return $builder->build_call( $trim_fn, [ $hb, $safe ], undef, $line, $col );
+        }
+        Carp::croak( "builtin::trim cannot trim a " . ( $kind eq 'ptr' ? 'class instance' : $kind ) . " at " . $self->_loc($ast) );
     }
 
     # A `builtin::` reflection helper that inspects a runtime box reads its header tag. `box_tag` is a runtime

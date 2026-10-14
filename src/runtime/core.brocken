@@ -1062,6 +1062,51 @@ sub str_concat( ptr $hb, ptr $lhs, ptr $rhs ) : returns(ptr) {
     return $buf;
 }
 
+# Whether a byte is ASCII whitespace -- the set `builtin::trim` strips: space, tab, newline, vertical tab, form feed,
+# carriage return. Brocken strings are bytes, so the Unicode whitespace Perl's `trim` also handles is out of reach.
+sub str_is_space( i8 $c ) : returns(i64) {
+    if ( $c == 32 ) { return 1; }
+    if ( $c == 9 )  { return 1; }
+    if ( $c == 10 ) { return 1; }
+    if ( $c == 11 ) { return 1; }
+    if ( $c == 12 ) { return 1; }
+    if ( $c == 13 ) { return 1; }
+    return 0;
+}
+
+# `builtin::trim`: a fresh NUL-terminated copy of $s with leading and trailing ASCII whitespace removed. The original
+# is untouched, matching `trim` (which is not an in-place edit even under `use builtin`). The result is a managed
+# buffer like `str_concat`'s, so it needs no refcount of its own.
+sub str_trim( ptr $hb, ptr $s ) : returns(ptr) {
+    my ptr $start = $s;
+    while ( str_is_space( Brocken::load_i8($start) ) != 0 ) {
+        $start = Brocken::ptr_add( $start, 1 );
+    }
+    my i64 $len = 0;
+    my ptr $end = $start;
+    while ( Brocken::load_i8($end) != 0 ) {
+        $end = Brocken::ptr_add( $end, 1 );
+        $len = Brocken::i64_add( $len, 1 );
+    }
+    while ( $len > 0 ) {
+        my ptr $last = Brocken::ptr_add( $start, Brocken::i64_sub( $len, 1 ) );
+        if ( str_is_space( Brocken::load_i8($last) ) == 0 ) { last; }
+        $len = Brocken::i64_sub( $len, 1 );
+    }
+    my ptr $buf = bump_alloc( $hb, Brocken::i64_add( $len, 1 ) );
+    my ptr $dst = $buf;
+    my ptr $src = $start;
+    my i64 $i   = 0;
+    while ( $i < $len ) {
+        Brocken::store_i8( $dst, Brocken::load_i8($src) );
+        $src = Brocken::ptr_add( $src, 1 );
+        $dst = Brocken::ptr_add( $dst, 1 );
+        $i   = Brocken::i64_add( $i, 1 );
+    }
+    Brocken::store_i8( $dst, 0 );
+    return $buf;
+}
+
 # Heap Array allocation (tag 9, header [tag|rc] at +0, count at +8, bytes at +16, elements at +24).
 # Freed arrays are recycled through the segregated free_big_head list (sized >= request), so loops that re-allocate
 # an array each iteration reuse the same slab instead of growing the arena unboundedly.
