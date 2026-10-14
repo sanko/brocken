@@ -86,4 +86,22 @@ subtest '//= with an owned call result on a borrowed parameter balances' => sub 
     );
 };
 
+subtest 'a discarded owned return is released' => sub {
+    run_case(
+        wrap( 'sub mk() :returns(Any) { my $u = 7; return $u; }', '{ mk(); }', 1 ),
+        0, 'a call result used only for effect is released'
+    );
+};
+
+subtest 'an unboxed owned return is released' => sub {
+    run_case(
+        wrap( 'sub mk() :returns(Any) { my $u = 7; return $u; }', '{ my i64 $n = mk(); }', 1 ),
+        0, 'the box is released once its payload is copied into an i64'
+    );
+    run_case(
+        wrap( 'sub mk() :returns(Any) { my $u = 7; return $u; }', '{ my i64 $n = 0; $n = mk(); }', 1 ),
+        0, 'the box is released once its payload is copied by an assignment'
+    );
+};
+
 done_testing;

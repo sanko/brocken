@@ -271,6 +271,17 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $returns_owned->{ $val->callee->name } ? 1 : 0;
     }
 
+    # Drop the reference an owned dynamic call result carries when it is used in a non-owning position: discarded, or
+    # unboxed on the way into a native/pointer slot. Nowhere retains the box, so leaving it would strand the reference
+    # until the arena is torn down. `decref` only returns the 16-byte header to the free list -- it never touches what
+    # the payload points at -- so releasing a box whose payload was already copied out is safe; a slot that keeps the
+    # box instead consumes the reference through `_owned_call_result` and must not call this.
+    method _release_owned_call_temp( $val, $line, $col ) {
+        return unless $self->_owned_call_result($val);
+        my $hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
+        $builder->build_decref( $val, $line, $col, $hb );
+    }
+
     # Whether an expression constructs a fresh instance of a registered class (`Class->new(...)`). A fresh
     # construction is the one class-typed return shape that is unambiguously owned: the constructor writes refcount 1
     # and no other local holds a second reference.
@@ -1372,7 +1383,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Break') )         { return $self->lower_break($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Continue') )      { return $self->lower_continue($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Block') )         { return $self->lower_block($stmt); }
-        if ( $stmt->isa('Brocken::Katsuro::AST::Expr::Call') )          { $self->lower_call_expr($stmt); return; }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Expr::Call') ) {
+            # An expression statement discards its result: an owned `Any` return is a reference nobody keeps.
+            my $val = $self->lower_call_expr($stmt);
+            $self->_release_owned_call_temp( $val, $stmt->line, $stmt->col );
+            return;
+        }
         if ( $stmt->isa('Brocken::Katsuro::AST::Expr::IntrinsicCall') ) { $self->lower_intrinsic($stmt); return; }
 
         if ( $stmt->isa('Brocken::Katsuro::AST::Expr::Assign') ) {
@@ -1389,7 +1405,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $stmt->isa('Brocken::Katsuro::AST::Expr::List')        ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Hash')        ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Ternary') ) {
-            $self->lower_expression($stmt);
+            my $val = $self->lower_expression($stmt);
+            # A bare method call as a statement has the same discarded-result shape as a call statement.
+            $self->_release_owned_call_temp( $val, $stmt->line, $stmt->col );
             return;
         }
         Carp::croak( "Unknown statement type: " . ref($stmt) . " at " . $self->_loc($stmt) );
@@ -1432,8 +1450,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $var_class->{ $ast->name } = $owned_class;
                 $fresh_class = $owned_class if $ir_type->kind eq 'ptr';
             }
-            my $val = $self->lower_expression( $ast->init );
-            $val = $self->maybe_convert_type( $val, $ir_type, $line, $col, 1 );
+            my $raw_val = $self->lower_expression( $ast->init );
+            my $val = $self->maybe_convert_type( $raw_val, $ir_type, $line, $col, 1 );
 
             # A fresh instance already carries the reference the slot needs -- the constructor wrote a refcount of 1.
             # Track the local for release at scope exit only when nothing can reach it another way (the escape scan
@@ -1452,6 +1470,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     $builder->build_incref( $val, $line, $col );
                 }
                 $builder->build_store( $val, $alloca, $line, $col );
+            }
+
+            # An owned call result converted into a non-dynamic slot was unboxed, so the box itself is not stored
+            # anywhere; drop its reference. A dynamic slot keeps the box (it consumed the reference above).
+            if ( $ir_type->kind ne 'dynamic' ) {
+                $self->_release_owned_call_temp( $raw_val, $line, $col );
             }
         }
     }
@@ -1546,7 +1570,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $owned_class = $self->_owned_class_call( $ast->expr );
             $var_class->{ $target->name } = $owned_class if $owned_class;
         }
-        my $val = $self->lower_expression( $ast->expr );
+        my $raw_val = $self->lower_expression( $ast->expr );
+        my $val = $raw_val;
         my $addr;
         my $stored_type;
         my $is_field_target = 0;
@@ -1691,6 +1716,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             else {
                 $builder->build_store( $val, $addr, $line, $col );
             }
+        }
+
+        # An owned call result stored into a non-dynamic slot was converted (unboxed) on the way in, so the box itself
+        # is not stored anywhere and its reference would otherwise be stranded. A dynamic slot keeps the box -- an RC
+        # slot consumed the reference, a `:weak`/array-element slot holds a borrow -- so those never release here.
+        if ( $stored_type->kind ne 'dynamic' ) {
+            $self->_release_owned_call_temp( $raw_val, $line, $col );
         }
     }
 
