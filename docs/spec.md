@@ -46,6 +46,36 @@ Variables are lexically scoped.
 - `state` - Persistent lexical variable (initialized once). **Planned, not yet implemented** — the keyword is reserved but there is no writable program-global storage yet (TODO §3).
 - `const` - Compile-time constant (emitted into the `.rodata` section).
 
+### 2.3 Perl Special Variables
+
+**Planned, not yet implemented** (TODO §3). Brocken reserves Perl's punctuation variables and will give the ones that
+fit a compiled, isolate-based runtime heap-backed storage. A punctuation variable outside the set below is a compile
+error, never a silent `undef`.
+
+| Variable | Meaning |
+|---|---|
+| `$_` | The default argument: the loop variable of a bare `for`/`foreach` (with no `my`), and the element name inside a `map`/`grep` block. |
+| `@_` | The arguments of the running `sub`/`method`, in call order. |
+| `$a`, `$b` | The two package variables `sort` compares; writing them anywhere else is an error. |
+| `@ARGV` | The arguments the program was invoked with, as `String`s. |
+| `$ARGV` | The name of the file `<>` is currently reading. |
+| `%ENV` | The process environment, read and written through one hash. |
+| `@INC`, `%INC` | The module search path and the table of loaded modules (gated on the module system, §17.4). |
+| `$$` / `$PID` | The isolate (or process) id. |
+| `$0` / `$PROGRAM_NAME` | The program name. |
+| `$?` / `$CHILD_ERROR` | The status of the last `system` or backtick. |
+| `$!` / `$ERRNO` | The C `errno` of the last failing call. |
+| `$@` / `$EVAL_ERROR` | The error from the last `try`/`eval`. |
+| `$1`..`$n`, `$&`, `$'`, `@-`, `@+`, `%+` | Regex capture and match state, once the regex engine exists; `` $` `` is the pre-match text. |
+
+`use English;` spellings (`$ARG`, `$LIST_SEPARATOR`, `$PROGRAM_NAME`, ...) name the same storage.
+
+**Automatic `shift` from `@_`.** Inside a `sub`/`method`, the container mutators `shift`, `unshift`, `push`, and `pop`
+with no argument — or an explicit `@_` — operate on the call's argument list. This is what makes the untyped
+`sub f { my $x = shift; ... }` spelling work beside a typed parameter list: a declaration like `sub f(i64 $x)` binds its
+parameters from `@_` in order, so both styles observe the same arguments. The mutators themselves are not yet language
+builtins (TODO §5).
+
 ---
 
 ## 3. The Type System & Nullability
@@ -424,7 +454,8 @@ last if $done;
 
 #### `for` / `foreach`
 
-`for` and `foreach` are the same statement. The loop variable is declared with `my`; Brocken has no `$_`:
+`for` and `foreach` are the same statement. The loop variable is declared with `my`; the implicit `$_` target of Perl's
+bare `for` is not supported yet (planned, §2.3):
 
 ```perl
 for my $x (1, 2, 3) { ... }                       # one variable walks every element

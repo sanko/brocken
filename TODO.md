@@ -58,6 +58,7 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
 - [ ] **Postfix Conditionals:** Support statement modifiers: `return 0 if $cond;`, `die unless $ok;`, `next if $skip;`.
 - [ ] **Compound Assignments:** Support `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`, `.=`. Ensure target addresses (like `%map{"k"}`) are evaluated only once.
 - [ ] **Range Operator Induction Loops:** Lower `for my $i (0 .. N)` to a zero-allocation while/induction loop.
+- [ ] **Perl Special Variables (`$_`, `@_`, `@ARGV`, ...) & Automatic `shift @_`:** Add the punctuation variables from `perldoc perlvar` that a compiled, isolate-based runtime can honour, plus the implicit subroutine-argument protocol. Planned: `$_` (the default argument — the loop variable of a bare `for`/`foreach` and the element name inside `map`/`grep`), `@_` (the running `sub`/`method`'s arguments, in call order), `@ARGV`/`$ARGV`, `%ENV`, `@INC`/`%INC`, `$$`/`$PID`, `$0`/`$PROGRAM_NAME`, `$?`/`$CHILD_ERROR`, `$!`/`$ERRNO`, `$@`/`$EVAL_ERROR`, `$a`/`$b`, and — once the regex engine exists — the capture/match set (`$1`..`$n`, `$&`, `` $` ``, `$'`, `@-`, `@+`, `%+`). `use English` spellings name the same storage. Punctuation variables outside the set (format and IO internals, `$^X`, `$;`, ...) stay compile errors rather than a silent `undef`. Automatic shifting needs the container mutators `shift`/`unshift`/`push`/`pop` in the language — only `array_push_i64` exists in `src/runtime/core.brocken` today — with no argument (or an explicit `@_`) operating on the current sub's argument list, so the untyped `sub f { my $x = shift; ... }` spelling works beside a typed parameter list. Spec §2.3.
 
 ---
 
@@ -79,7 +80,7 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
   - `die(@msgs)`: Formats error and emits `throw` (caught by `catch ($err)` or exits 255).
 - [ ] **Container Builtins:**
   - Implement keywords: `keys %hash`, `values %hash`, `exists %hash{"k"}`, `delete %hash{"k"}` (returns deleted value).
-  - Implement array keywords: `push @arr, $val`, `pop @arr`, `shift @arr`, `unshift @arr, $val`.
+  - Implement array keywords: `push @arr, $val`, `pop @arr`, `shift @arr`, `unshift @arr, $val`; with no argument inside a `sub`/`method` they default to `@_` (see §3, automatic `shift @_`).
 - [ ] **Auto-Increment (`++`) and Decrement (`--`):**
   - Implement numeric pre- and post-increment/decrement.
   - Implement Option A ASCII magical string increment (`"az"++` $\rightarrow$ `"ba"`, non-ASCII/symbols convert to numeric 0 and increment to 1). `--` is strictly numeric.
