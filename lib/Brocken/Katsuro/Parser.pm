@@ -31,6 +31,12 @@ class Brocken::Katsuro::Parser v0.0.1 {
     };
     my %TYPE_KEYWORDS = map { $_ => 1 } qw[Int String Any Bool ptr int bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64];
     my %FEATURE_TYPES = ( i128 => 'brocken_native_types', u128 => 'brocken_native_types' );
+
+    # Assignment operators. `=` and the short-circuit forms keep their own lowering; the arithmetic/bitwise/string
+    # compound forms (`$x += 1`) parse as `$x = $x OP 1`, so they reuse the ordinary `=` lowering and its reference
+    # counting. The target sub-expressions are re-evaluated once (a `%map{key}` key is computed twice).
+    my %ASSIGN_OPS = map { $_ => 1 } qw[= += -= *= /= %= &= |= ^= <<= >>= .= //= ||=];
+    my %COMPOUND_ASSIGN = map { $_ => 1 } qw[+= -= *= /= %= &= |= ^= <<= >>= .=];
     method peek()    { $tokens->[$pos] }
     method prev()    { $tokens->[ $pos - 1 ] }
     method advance() { $tokens->[ $pos++ ] }
@@ -164,7 +170,8 @@ class Brocken::Katsuro::Parser v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
             Carp::croak( "Unexpected bare identifier '" . $expr->name . "' at " . $self->_loc() . ' -- did you forget parentheses?' );
         }
-        if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) || $self->check( 'OP', '||=' ) ) {
+        my $assign_tok = $self->peek();
+        if ( $assign_tok && $assign_tok->{type} eq 'OP' && $ASSIGN_OPS{ $assign_tok->{value} } ) {
             my $op_tok = $self->advance();
             my $rhs    = $self->parse_expression(0);
             my $assign = Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($op_tok), target => $expr, expr => $rhs, op => $op_tok->{value} );
@@ -878,8 +885,20 @@ class Brocken::Katsuro::Parser v0.0.1 {
     method led( $left, $token ) {
         if ( $token->{type} eq 'OP' ) {
             my $op = $token->{value};
-            if ( $op eq '=' || $op eq '//=' || $op eq '||=' ) {
+            if ( $ASSIGN_OPS{$op} ) {
                 my $right = $self->parse_expression( PREC_ASSIGN - 1 );
+
+                # A compound assignment (`$x += 1`, `%h{k} .= "s"`) is sugar for `$x = $x OP 1`: build the read as a
+                # `BinOp` over a second use of the target node and hand the whole thing to the ordinary `=`
+                # assignment, so it reuses the established lowering and its reference counting. The target
+                # sub-expressions are therefore re-evaluated once (a `%map{key}` key is computed twice), which is the
+                # one place this differs from a dedicated single-evaluation lowering.
+                if ( $COMPOUND_ASSIGN{$op} ) {
+                    my $base = substr( $op, 0, -1 );
+                    my $read = Brocken::Katsuro::AST::Expr::BinOp->new(
+                        $self->_pos_token($token), op => $base, lhs => $left, rhs => $right );
+                    return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $read, op => '=' );
+                }
                 return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $right, op => $op );
             }
             if ( $op eq '->' ) {
@@ -1082,7 +1101,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return 0 unless $token;
         if ( $token->{type} eq 'OP' ) {
             my $op = $token->{value};
-            return PREC_ASSIGN  if $op eq '=' || $op eq '//=' || $op eq '||=';
+            return PREC_ASSIGN  if $ASSIGN_OPS{$op};
             return PREC_DEREF   if $op eq '->';
             return PREC_TERNARY if $op eq '?';
             return PREC_OR      if $op eq '||' || $op eq '//';
