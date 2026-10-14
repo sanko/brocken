@@ -44,6 +44,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $_loop_body_scopes     = [];        # stack of dynamic-stack scopes opened for each in-progress loop body
     field $_dyn_scope_stack      = [];        # stack of scope records for each in-progress block/loop (RC ownership)
     field $fuel_exit_block;                   # set in lower_function, used by call-site fuel checks
+    field $_want_override = undef;            # i64 mask forced on a call while lowering a context that consumes a list (e.g. a `for` iterable)
 
     method unique_block_name($prefix) {
         return $prefix . '_' . $block_id++;
@@ -1883,8 +1884,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         Carp::croak( "for requires at least one loop variable at " . $self->_loc($ast) ) unless @targets;
         my $stride = scalar @targets;
 
-        # The iterable is a tag-7 list: count at +8, one boxed element per eight-byte slot from +16.
-        my $list_ptr = $self->_lower_iterable( $ast->expr, $line, $col );
+        # The iterable is a tag-7 list: count at +8, one boxed element per eight-byte slot from +16. A call that
+        # produces it must be told want=list, or the callee boxes a single scalar and the loop reads that scalar as if
+        # it were a list pointer. The override is set just for the iterable, then the caller's own want is restored.
+        my $saved_want   = $_want_override;
+        $_want_override  = 2;
+        my $list_ptr     = $self->_lower_iterable( $ast->expr, $line, $col );
+        $_want_override  = $saved_want;
 
         # Loop variables get their slots before the loop, so the body reads them across iterations and they are bound,
         # not re-declared, each pass. A slot borrows the box the list holds: it is deliberately *not* RC-tracked, since
@@ -3020,7 +3026,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $callee_has_want
             = $callee_has_heap_base && $callee->params->@* >= 2 && defined $callee->params->[1]->name && $callee->params->[1]->name eq '%__want';
         if ($callee_has_want) {
-            my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'}, undef, $line, $col );
+            my $want_val = defined $_want_override
+                ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $_want_override )
+                : $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'}, undef, $line, $col );
             push @args, $want_val;
         }
         my $param_idx = ( $callee_has_heap_base ? 1 : 0 ) + ( $callee_has_want ? 1 : 0 );

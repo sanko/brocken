@@ -81,4 +81,15 @@ subtest 'the iterable is evaluated once' => sub {
         'indexed inside a function' );
 };
 
+subtest 'a call iterable is asked for a list' => sub {
+    # The iterable is consumed as a list, so a call producing it is told want=list even though the surrounding
+    # expression is otherwise scalar. Without the override the callee sees the caller's scalar want and returns the
+    # wrong shape (the branch is taken on the forwarded value).
+    verify( 'sub nums() :returns(ptr) { if (want("list")) { return (1, 2, 3); } return (99, 100); } my i64 $n = 0; for my $x (nums()) { $n = $n + 1; } return $n;', 3,
+        'the callee sees list want' );
+    # The override applies only to the iterable: a later scalar-context call still sees scalar want.
+    verify( 'sub nums() :returns(ptr) { if (want("list")) { return (1, 2, 3); } return (99, 100); } sub sc() :returns(i64) { return want("list"); } my i64 $n = 0; for my $x (nums()) { $n = $n + 1; } return $n * 10 + sc();', 30,
+        'the want override does not leak past the loop' );
+};
+
 done_testing;
