@@ -825,6 +825,10 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 my $arg = $self->parse_expression(PREC_UNARY);
                 return Brocken::Katsuro::AST::Expr::Exists->new( $self->_pos_token($token), expr => $arg );
             }
+            if ( $token->{value} eq 'defined' ) {
+                my $arg = $self->parse_expression(PREC_UNARY);
+                return Brocken::Katsuro::AST::Expr::Defined->new( $self->_pos_token($token), expr => $arg );
+            }
             if ( $token->{value} eq 'length' ) {
                 $self->consume( '(', undef, "Expected '(' after 'length'" );
                 my $arg = $self->parse_expression(0);

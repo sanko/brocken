@@ -548,6 +548,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Exists') ) {
             $self->_scan_value_escapes( $expr->expr );
         }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Defined') ) {
+            $self->_scan_value_escapes( $expr->expr );
+        }
 
         # A method call borrows its receiver and consumes its arguments.
         elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
@@ -1428,6 +1431,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $stmt->isa('Brocken::Katsuro::AST::Expr::ArrayIndex')  ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::HashIndex')   ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Exists')      ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::Defined')     ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::MethodCall')  ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::List')        ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Hash')        ||
@@ -2442,6 +2446,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Exists') ) {
             return $self->lower_exists($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Defined') ) {
+            return $self->lower_defined($expr);
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
             return $self->lower_method_call($expr);
         }
@@ -2598,6 +2605,20 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $has = $builder->build_call( $self->_reflect_runtime( 'hash_has', $ast, $line, $col ), [ $h, $key ], undef, $line, $col );
         my $zero = Brocken::Lindsay::IR::Constant->new( type => $has->type, value => 0 );
         return $builder->build_icmp( 'ne', $has, $zero, undef, $line, $col );
+    }
+
+    # `defined EXPR`: true when the value is not undef. Only a pointer-shaped value can be undefined -- a `String` or
+    # class reference, or an `Any` box -- so those test against null. A native int, float, or bool has no undefined
+    # value (`defined 0` is true, as in Perl), so it folds to a constant true. This is the null test, not the
+    # truthiness test: `defined "0"` is true even though `"0"` is false in a condition.
+    method lower_defined($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $val  = $self->lower_expression( $ast->expr );
+        my $kind = $val->type->kind;
+        return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i1(), value => 1 )
+            unless $kind eq 'ptr' || $kind eq 'dynamic';
+        my $zero = Brocken::Lindsay::IR::Constant->new( type => $val->type, value => 0 );
+        return $builder->build_icmp( 'ne', $val, $zero, undef, $line, $col );
     }
 
     # `%h{key}` read: the stored box pointer, reinterpreted as a dynamic value.
@@ -3786,7 +3807,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     method as_condition( $val, $line = 0, $col = 0 ) {
-        return $val if $val->type->bits == 1;
+
+        # A value already of boolean type is used as-is, except a constant: the encoders resolve only registers and
+        # memory for a branch or select operand, so a literal condition -- `if (true)`, `if (false)`, or a `defined` on
+        # a native scalar, which folds to a constant true -- is materialized as a comparison of itself against zero
+        # instead of reaching the encoder as an immediate.
+        return $val if $val->type->bits == 1 && !( ref $val && $val->isa('Brocken::Lindsay::IR::Constant') );
 
         # A dynamic value is tested with the runtime's Perl-truthiness helper rather than a blind unbox: `0`, `0.0`, "",
         # "0", and a null box are false, while "00", "0.0", 0.5, and any reference are true. Unboxing first would also

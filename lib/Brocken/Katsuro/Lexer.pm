@@ -16,6 +16,7 @@ class Brocken::Katsuro::Lexer v0.0.1 {
         eq ne lt gt le ge cmp
         length
         exists
+        defined
         use require
     ];
 
