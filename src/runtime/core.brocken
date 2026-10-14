@@ -1007,6 +1007,11 @@ sub suspect_count( ptr $hb ) : returns(i64) {
 # shifted down by 24, and the payload starts 8 bytes in. These three are the whole of "what is this dynamic value, and
 # what is in it".
 sub box_tag( ptr $dyn ) : returns(i64) {
+    # A null box is undef and has no header to read a tag from; tag 0 stands for that. Without this the dereference
+    # faults, which `builtin::stringify(undef)` and `say` of an undefined value would otherwise hit.
+    if ( Brocken::ptr_cmp_eq( $dyn, 0 ) ) {
+        return 0;
+    }
     my i64 $header = Brocken::load_i64($dyn);
     return Brocken::shr( Brocken::band( $header, 4278190080 ), 24 );
 }
@@ -1047,6 +1052,16 @@ sub unbox_f64( ptr $dyn ) : returns(f64) {
     my i64 $n = unbox_i64($dyn);
     my f64 $f = $n;
     return $f;
+}
+
+# Read a boxed payload as a pointer -- the characters of a String, or the identity of an instance. A null box (undef)
+# reads as the null pointer rather than faulting, for the same reason `unbox_i64` tolerates one.
+sub unbox_ptr( ptr $dyn ) : returns(ptr) {
+    if ( Brocken::ptr_cmp_eq( $dyn, 0 ) ) {
+        return 0;
+    }
+    my ptr $payload = Brocken::ptr_add( $dyn, 8 );
+    return Brocken::load_i64($payload);
 }
 
 # Perl truthiness for a boxed value. A null box (undef), an integer or i128 zero, a 0.0 double, the empty string, and

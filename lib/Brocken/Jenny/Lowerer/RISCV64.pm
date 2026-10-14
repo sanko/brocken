@@ -1750,7 +1750,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'movzx',
-                                operands => [ $tmp, $self->_lower_opnd($val) ],
+                                operands => [ $tmp, $self->_materialize_ext_src( $mbb, $val, $inst->name . '_esrc' ) ],
                                 comment  => 'zext to 64'
                             )
                         );
@@ -1770,7 +1770,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'movzx',
-                                operands => [ $dst, $self->_lower_opnd($val) ],
+                                operands => [ $dst, $self->_materialize_ext_src( $mbb, $val, $inst->name . '_esrc' ) ],
                                 comment  => 'zext ' . ( $val->name || $val->value )
                             )
                         );
@@ -1798,7 +1798,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'movsx',
-                                operands => [ $tmp, $self->_lower_opnd($val) ],
+                                operands => [ $tmp, $self->_materialize_ext_src( $mbb, $val, $inst->name . '_esrc' ) ],
                                 comment  => 'sext to 64'
                             )
                         );
@@ -1824,7 +1824,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
                                 opcode   => 'movsx',
-                                operands => [ $dst, $self->_lower_opnd($val) ],
+                                operands => [ $dst, $self->_materialize_ext_src( $mbb, $val, $inst->name . '_esrc' ) ],
                                 comment  => 'sext ' . ( $val->name || $val->value )
                             )
                         );
@@ -4434,6 +4434,18 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
             return $fp;
         }
         return $self->_lower_opnd($ir_val);
+    }
+
+    # `movzx`/`movsx` read a source register, and an immediate operand has no register to read, so a constant is loaded
+    # into one first. X86_64 and ARM64 materialise the same way; without it a `zext` of `true`/`false` reaches the
+    # codegen as a bare immediate and the encoder refuses it.
+    method _materialize_ext_src( $mbb, $ir_val, $name ) {
+        my $src = $self->_lower_opnd($ir_val);
+        return $src unless $src->kind eq 'imm';
+        my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $ir_val->type );
+        $mbb->add_instruction(
+            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $tmp, $src ], comment => 'ext src imm' ) );
+        return $tmp;
     }
 
     # A float constant's bit pattern, built in a general register and moved straight into $dest.  This is _materialize

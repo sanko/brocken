@@ -789,9 +789,24 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $val if $val->type->kind eq 'ptr';
         my $type = $val->type;
         my $kind = $type->kind;
+
+        # Spec 4.2 gives a Bool its own rendering: `"1"` or `""`. It is the one integer type whose text is not the
+        # integer value, so it is selected from two literals rather than routed through the integer helpers (which
+        # would render `false` as either "0" or, with a sign-extending widening, "-1"). All three backends materialise
+        # a rodata pointer in a `select` arm, which is what the dynamic path already relies on.
+        if ( $kind eq 'int' && $type->bits == 1 ) {
+            if ( $val->isa('Brocken::Lindsay::IR::Constant') ) {
+                return $self->_reflect_rodata( $val->value ? '1' : '' );
+            }
+            my $t = $self->_reflect_rodata('1');
+            my $f = $self->_reflect_rodata('');
+            return $builder->build_select( $val, $t, $f, undef, $line, $col );
+        }
         if ( $kind eq 'int' ) {
             my $sprintf_arg = $val;
             my $to_str_fn;
+
+            # A narrow signed int is sign-extended so its value survives the widening.
             if ( $type->is_signed ) {
                 if ( $type->bits < 64 ) {
                     $sprintf_arg = $builder->build_sext( $val, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
@@ -829,11 +844,36 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return_type => Brocken::Lindsay::IR::Type::i32(),
             params      => [
                 Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+
+                # `sprintf` is variadic, but the caller has to know where the conversion argument goes. Declaring the
+                # third slot as `f64` is what places the value in the float argument register; without it the operand
+                # has no parameter to land in and the buffer keeps its uninitialised contents.
                 Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::f64() ),
             ],
         );
         $builder->build_call( $sprintf_fn, [ $buf, $fmt_ref, $sprintf_arg ], undef, $line, $col );
         return $buf;
+    }
+
+    # Stringify an arbitrary value to a String pointer -- the conversion `say`, `print`, and `builtin::stringify` all
+    # need. `_stringify` already covers a String (identity), an int, and a float; a boxed `Any` is read through its
+    # header tag: tag 3 is a float, tag 4 is a String pointer (the payload is the characters themselves, so stringify
+    # is the identity on the unboxed pointer), and anything else renders through the integer payload.
+    method _stringify_value( $val, $ast, $line, $col ) {
+        return $self->_stringify( $val, $line, $col ) unless $val->type->kind eq 'dynamic';
+        my $tag      = $self->_reflect_box_tag( $val, $line, $col );
+        my $is_undef = $self->_icmp_eq_i64( $tag, 0, $line, $col );
+        my $is_float = $self->_icmp_eq_i64( $tag, 3, $line, $col );
+        my $is_str   = $self->_icmp_eq_i64( $tag, 4, $line, $col );
+        my $fstr     = $self->_stringify( $builder->build_call( $self->_reflect_runtime('unbox_f64', $ast, $line, $col), [$val], undef, $line, $col ), $line, $col );
+        my $istr     = $self->_stringify( $builder->build_call( $self->_reflect_runtime('unbox_i64', $ast, $line, $col), [$val], undef, $line, $col ), $line, $col );
+        my $pstr     = $builder->build_call( $self->_reflect_runtime('unbox_ptr', $ast, $line, $col), [$val], undef, $line, $col );
+        my $num      = $builder->build_select( $is_float, $fstr, $istr, undef, $line, $col );
+        my $str      = $builder->build_select( $is_str, $pstr, $num, undef, $line, $col );
+
+        # undef renders as the empty string (Perl's behaviour), and it is the one box left with tag 0.
+        return $builder->build_select( $is_undef, $self->_reflect_rodata(''), $str, undef, $line, $col );
     }
 
     method register_intrinsics() {
@@ -3226,6 +3266,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 Carp::croak( "Undefined function '$name' at " . $self->_loc($ast) );
             }
         }
+
+        # `say`/`print` hand their argument to `puts(ptr)`, so a non-string value is stringified first: an int or float
+        # would otherwise be passed straight through as a pointer and dereferenced (`say(42)` read address 42).
+        my $stringify_args = ( $resolved eq 'say' || $resolved eq 'print' );
         my @args;
         my $callee_has_heap_base = $callee->params->@* && defined $callee->params->[0]->name && $callee->params->[0]->name eq '%__heap_base';
         if ($callee_has_heap_base) {
@@ -3249,7 +3293,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my @saved;
         for my $arg ( $ast->args->@* ) {
             my $val = $self->lower_expression($arg);
-            if ( $param_idx < $callee->params->@* ) {
+            if ( $stringify_args && $param_idx == 0 ) {
+                $val = $self->_stringify_value( $val, $ast, $line, $col );
+            }
+            elsif ( $param_idx < $callee->params->@* ) {
                 $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
             }
             push @args, $val;
@@ -3263,6 +3310,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
             $param_idx++;
         }
+
+        # `say()`/`print()` with no argument still prints one line: hand `puts` the empty string rather than leaving
+        # its argument register unset.
+        push @args, $self->_reflect_rodata('') if $stringify_args && !$ast->args->@*;
 
         # Omitted trailing parameters take their defaults in order. Filling stops at the first parameter without a
         # default: a required parameter cannot be skipped so that a later one can be provided.
@@ -3543,21 +3594,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
 
         if ( $name eq 'stringify' ) {
-            if ( $kind eq 'dynamic' ) {
-                my $tag      = $self->_reflect_box_tag( $val, $line, $col );
-                my $is_float = $self->_icmp_eq_i64( $tag, 3, $line, $col );
-                my $is_str   = $self->_icmp_eq_i64( $tag, 4, $line, $col );
-                my $fstr     = $self->_stringify( $builder->build_call( $self->_reflect_runtime('unbox_f64', $ast, $line, $col), [$val], undef, $line, $col ), $line, $col );
-                my $istr     = $self->_stringify( $builder->build_call( $self->_reflect_runtime('unbox_i64', $ast, $line, $col), [$val], undef, $line, $col ), $line, $col );
-
-                # A tag-4 box holds a pointer payload. For a String that pointer is the characters themselves, so
-                # stringify is the identity on the unboxed pointer -- reading it as an integer would have rendered
-                # the address instead of the text.
-                my $pstr = $builder->build_unbox( $val, Brocken::Lindsay::IR::Type::ptr(), undef, $line, $col );
-                my $num  = $builder->build_select( $is_float, $fstr, $istr, undef, $line, $col );
-                return $builder->build_select( $is_str, $pstr, $num, undef, $line, $col );
-            }
-            return $self->_stringify( $val, $line, $col );
+            return $self->_stringify_value( $val, $ast, $line, $col );
         }
 
         if ( $name eq 'numify' ) {
@@ -3582,7 +3619,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $i        = $builder->build_call( $self->_reflect_runtime('unbox_i64', $ast, $line, $col), [$val], undef, $line, $col );
                 my $fi       = $self->maybe_convert_type( $i, Brocken::Lindsay::IR::Type::f64(), $line, $col );
                 my $num      = $builder->build_select( $is_float, $f, $fi, undef, $line, $col );
-                my $pstr     = $builder->build_unbox( $val, Brocken::Lindsay::IR::Type::ptr(), undef, $line, $col );
+                my $pstr     = $builder->build_call( $self->_reflect_runtime('unbox_ptr', $ast, $line, $col), [$val], undef, $line, $col );
 
                 # Both select arms are evaluated, and `strtod` dereferences its pointer, so a non-string payload (an
                 # integer or float box) must not be handed through raw: `strtod(42, NULL)` reads address 42 and traps.
