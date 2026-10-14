@@ -24,6 +24,20 @@ Brocken is a systems programming language with the ergonomics and expressiveness
 - **Deterministic Memory:** Memory is managed by Immediate Reference Counting utilizing an Immix Bump-Allocator[^immix] and segregated free lists. Circular references are handled by Bacon & Rajan trial deletion.[^trialdeletion]
 - **Ultra-Modern Perl Ergonomics:** Brocken adopts modern Perl idioms while shedding historical parsing ambiguities: invariant sigils, post-dereference syntax, Corinna-style classes with `ADJUST`/`DESTROY`, compile-time attributes, strict lexical scoping, and zero-cost exceptions.[^perldocs]
 
+### 1.3 Known Incomplete
+
+This is the design of record, written ahead of the implementation (see the note at the top). The largest shipped-versus-planned gaps at v0.0.1:
+
+- **Cycle collection (10.3):** Immediate reference counting, the Immix bump allocator, and segregated free lists are shipped, and cycle *scanning* walks lists, hashes, and class instances. Wiring the collector to a full suspect buffer and running `DESTROY` on a reclaimed cycle are still outstanding.
+- **Perceus (10.1):** Borrow inference, RC elision, and reuse analysis are not implemented; the Caller-Borrows contract is today a manual convention rather than an inferred one.
+- **Concurrency (11):** Isolates, the fiber scheduler, and thread-local heaps are shipped. The bounded channel ring buffer, inlined mutex/condvar synchronization, and zero-copy affine moves are not.
+- **Exceptions (9.2):** `try`/`catch`/`finally` parse, but the unified landing dispatcher for `return`, `last`/`next`, and `throw`/`die` is not yet lowered, so zero-cost exceptions are partial.
+- **Containers (6):** Arrays are shipped; the hash is a linear array of pairs, with the O(1) open-addressing table and recursive hash ownership still planned.
+- **Language surface:** Postfix dereferencing (5), strict double-quote interpolation (4.3), compound assignments (4.6), anonymous subs and closures (7.3), range induction loops (4.5), Perl special variables (2.3), and `undef`/`defined` (3.3) are specified but not implemented. `:isa`, versioned classes, and `SUPER::` (8) are likewise planned, and `my Int $x = 10` still lowers like `i64` rather than boxing.
+- **Backends:** x86_64 is the reference backend; ARM64 and RISC-V are supported, but RISC-V 128-bit signed `div`/`rem` miscompiles. The WebAssembly generator has no rodata/data-segment handling, so boxing a string literal does not work there.
+
+This list names the headline gaps, not every one; [`TODO.md`](../TODO.md) is the authoritative tracker.
+
 ---
 
 ## 2. Lexical Structure, Variables & Sigils
