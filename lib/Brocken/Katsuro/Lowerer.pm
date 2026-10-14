@@ -551,6 +551,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Defined') ) {
             $self->_scan_value_escapes( $expr->expr );
         }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Delete') ) {
+            $self->_scan_value_escapes( $expr->expr );
+        }
 
         # A method call borrows its receiver and consumes its arguments.
         elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
@@ -1472,6 +1475,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $stmt->isa('Brocken::Katsuro::AST::Expr::HashIndex')   ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Exists')      ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Defined')     ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::Delete')      ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::MethodCall')  ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::List')        ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Hash')        ||
@@ -2489,6 +2493,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Defined') ) {
             return $self->lower_defined($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Delete') ) {
+            return $self->lower_delete($expr);
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
             return $self->lower_method_call($expr);
         }
@@ -2659,6 +2666,30 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             unless $kind eq 'ptr' || $kind eq 'dynamic';
         my $zero = Brocken::Lindsay::IR::Constant->new( type => $val->type, value => 0 );
         return $builder->build_icmp( 'ne', $val, $zero, undef, $line, $col );
+    }
+
+    # `delete %h{key}`: remove the entry and hand back the value that was there as a boxed `Any`, or undef (a null box)
+    # when the key was absent. `hash_delete` transfers the reference the table held to the caller, so the result is an
+    # *owned* dynamic call result: as a discarded statement it is released, and a slot that stores it consumes the
+    # reference instead of taking a second one. The callee is a synthetic declaration whose return type is `dynamic`
+    # rather than the runtime's `ptr` -- the ABI shape is identical (a box pointer is a pointer-sized value in the
+    # integer return register), and it is what marks the call as an owned dynamic return to the reference counting.
+    method lower_delete($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $arg = $ast->expr;
+        Carp::croak( "delete expects a hash element like %h{key} at " . $self->_loc($ast) )
+            unless $arg->isa('Brocken::Katsuro::AST::Expr::HashIndex');
+        my $h   = $self->lower_expression( $arg->hash );
+        my $key = $self->_lower_hash_key( $arg->key, $line, $col );
+        my $hb  = $self->_hash_heap_base( $line, $col );
+        my $rt  = $self->_reflect_runtime( 'hash_delete', $ast, $line, $col );
+        my $fn  = Brocken::Lindsay::IR::Function->new(
+            name        => $rt->name,
+            return_type => Brocken::Lindsay::IR::Type::dynamic(),
+            params      => $rt->params,
+        );
+        $returns_owned->{ $fn->name } = 1;
+        return $builder->build_call( $fn, [ $hb, $h, $key ], undef, $line, $col );
     }
 
     # `%h{key}` read: the stored box pointer, reinterpreted as a dynamic value.

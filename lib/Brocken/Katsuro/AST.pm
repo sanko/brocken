@@ -151,6 +151,9 @@ class Brocken::Katsuro::AST::Expr::Exists v0.0.1 : isa(Brocken::Katsuro::AST::No
 class Brocken::Katsuro::AST::Expr::Defined v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $expr : param : reader;                   # the value to test for `undef` (null)
 };
+class Brocken::Katsuro::AST::Expr::Delete v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $expr : param : reader;                   # the hash element to remove (an Expr::HashIndex)
+};
 class Brocken::Katsuro::AST::Expr::MethodCall v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $obj    : param : reader;                 # expression evaluating to an object pointer
     field $method : param : reader;                 # method name

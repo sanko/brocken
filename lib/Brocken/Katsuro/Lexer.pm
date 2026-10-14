@@ -17,6 +17,7 @@ class Brocken::Katsuro::Lexer v0.0.1 {
         length
         exists
         defined
+        delete
         use require
     ];
 
