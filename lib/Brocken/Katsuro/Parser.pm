@@ -972,6 +972,11 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $self->consume(']');
             return Brocken::Katsuro::AST::Expr::ArrayIndex->new( $self->_pos_token($token), array => $left, index => $index );
         }
+        if ( $token->{type} eq '{' && $left->isa('Brocken::Katsuro::AST::Expr::Var') && $left->sigil eq '%' ) {
+            my $key = $self->parse_expression(0);
+            $self->consume('}');
+            return Brocken::Katsuro::AST::Expr::HashIndex->new( $self->_pos_token($token), hash => $left, key => $key );
+        }
         if ( $token->{type} eq '(' ) {
             my $name;
             if ( $left->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
@@ -1057,6 +1062,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             return 0;
         }
         return PREC_DEREF if $token->{type} eq '[';
+        return PREC_DEREF if $token->{type} eq '{';    # hash element access `%h{key}`; a block `{` never follows an expression
         return PREC_CALL  if $token->{type} eq '(';
         if ( $token->{type} eq 'KEYWORD' ) {
             my $kw = $token->{value};

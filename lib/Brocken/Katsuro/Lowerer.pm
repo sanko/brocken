@@ -35,6 +35,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $class_returns_owned   = {};        # func_name -> 1 (a class-returning call hands the caller an owned instance)
     field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
     field $array_counts          = {};        # '@name' -> compile-time element count, when it is a constant
+    field $hash_var              = {};        # var_name -> 1 (a local %hash; its slot holds a tag-8 table released by hash_release)
+    field $hash_value_type       = {};        # var_name -> IR type of the hash's stored values (defaults to dynamic)
     field $rodata : reader       = {};        # label -> bytes for string constants
     field $_rodata_label_counter = 0;
     field $writer_map            = {};        # "Class::name" -> class name (auto-generated writers return their receiver)
@@ -538,6 +540,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::ArrayIndex') ) {
             $self->_scan_receiver_escapes( $expr->array );
             $self->_scan_value_escapes( $expr->index );
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::HashIndex') ) {
+            $self->_scan_receiver_escapes( $expr->hash );
+            $self->_scan_value_escapes( $expr->key );
         }
 
         # A method call borrows its receiver and consumes its arguments.
@@ -1112,6 +1118,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned     = {};
         $class_escaped   = {};
         $weak_var        = {};
+        $hash_var        = {};
+        $hash_value_type = {};
         $self->_scan_escapes( $ast->body );
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
@@ -1297,6 +1305,20 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # instance goes through its destructor; everything else (an `Any` box) is a plain decref.
     method _emit_rc_release( $name, $heap_base ) {
         my $addr = $symbols->{$name} or return;
+
+        # A local hash holds a table rather than a plain box: hash_release drops its stored values and then the
+        # table itself, which a plain decref would skip.
+        if ( $hash_var->{$name} ) {
+            my $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $addr );
+            my $hb     = $heap_base;
+            if ( !defined $hb && $symbols->{'__heap_base'} ) {
+                $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+            }
+            $hb = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) unless defined $hb;
+            my $release = $functions->{'Brocken::Runtime::hash_release'};
+            $builder->build_call( $release, [ $hb, $loaded ] ) if $release;
+            return;
+        }
         my $loaded = $builder->build_load( $addr->allocated_type // Brocken::Lindsay::IR::Type::i64(), $addr );
         my $class = $class_owned->{$name};
         if ( $class && !$class_escaped->{$name} ) {
@@ -1401,6 +1423,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $stmt->isa('Brocken::Katsuro::AST::Expr::Paren')       ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::FieldAccess') ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::ArrayIndex')  ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::HashIndex')   ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::MethodCall')  ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::List')        ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Hash')        ||
@@ -1414,8 +1437,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     method lower_var_decl($ast) {
-        my $ir_type = $self->type_from_name( $ast->type );
         my ( $line, $col ) = ( $ast->line, $ast->col );
+        return $self->_lower_hash_decl($ast) if $ast->sigil eq '%';
+        my $ir_type = $self->type_from_name( $ast->type );
         my $alloca = $builder->build_alloca( $ir_type, $self->unique_value_name( '%' . $ast->name . '.addr' ), undef, $line, $col, $ast->name, $ast->type );
         $symbols->{ $ast->name } = $alloca;
         for my $a ( $ast->attrs->@* ) {
@@ -1502,12 +1526,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # `//=`/`||=` on a dynamic (`Any`) slot is an owned store, but only when the slot is absent: a `select` cannot
     # express "incref the replacement only if it is chosen", so emit a real branch. When the slot is absent (null) the
     # RHS is stored through `_emit_owned_store`, which takes a reference to it and releases the null it displaces;
-    # otherwise the slot keeps the box it already owns and no reference changes. The null test is the same one the
-    # branchless form used for a box (a non-null box pointer is truthy).
-    method _emit_conditional_owned_store( $val, $addr, $ir_type, $line, $col ) {
+    # otherwise the slot keeps the box it already owns and no reference changes.
+    method _emit_conditional_owned_store( $val, $addr, $ir_type, $line, $col, $op = '//=' ) {
         my $existing    = $builder->build_load( $ir_type, $addr, undef, $line, $col );
-        my $zero        = Brocken::Lindsay::IR::Constant->new( type => $ir_type, value => 0 );
-        my $is_absent   = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+        my $is_absent   = $self->_orassign_should_store( $existing, $ir_type, $op, $line, $col );
         my $func        = $current_func;
         my $store_block = $func->append_block( $self->unique_block_name('rc_orassign') );
         my $merge_block = $func->append_block( $self->unique_block_name('rc_orassign_end') );
@@ -1521,14 +1543,28 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $current_block = $merge_block;
     }
 
+    # The branch condition shared by the two `//=`/`||=` dynamic-store paths. `//=` stores only into an undefined
+    # (null) slot. `||=` stores into a slot that is false, so for a dynamic slot it is Perl truthiness -- a box
+    # holding `0`, `0.0`, `""`, or `"0"` is replaced, not just a null box.
+    method _orassign_should_store( $existing, $ir_type, $op, $line, $col ) {
+        if ( $op eq '||=' && $ir_type->kind eq 'dynamic' ) {
+            my $fn = $functions->{'Brocken::Runtime::is_truthy'}
+                or Carp::croak("Runtime function is_truthy not found at line $line, col $col");
+            my $t    = $builder->build_call( $fn, [$existing], undef, $line, $col );
+            my $zero = Brocken::Lindsay::IR::Constant->new( type => $t->type, value => 0 );
+            return $builder->build_icmp( 'eq', $t, $zero, undef, $line, $col );
+        }
+        my $zero = Brocken::Lindsay::IR::Constant->new( type => $ir_type, value => 0 );
+        return $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+    }
+
     # `//=`/`||=` on a borrowed `Any` parameter slot. The slot may end up keeping the caller's borrowed box, so it
     # cannot be released at exit without a matching reference: increment whichever value the test chooses (a no-op
     # balance for the borrowed box, a real reference for a freshly stored one) and store it; the caller promotes the
     # slot to owned afterwards, so the exit cleanup releases exactly the reference taken here.
-    method _emit_conditional_borrowed_store( $val, $addr, $ir_type, $line, $col ) {
+    method _emit_conditional_borrowed_store( $val, $addr, $ir_type, $line, $col, $op = '//=' ) {
         my $existing  = $builder->build_load( $ir_type, $addr, undef, $line, $col );
-        my $zero      = Brocken::Lindsay::IR::Constant->new( type => $ir_type, value => 0 );
-        my $is_absent = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
+        my $is_absent = $self->_orassign_should_store( $existing, $ir_type, $op, $line, $col );
         if ( $self->_owned_call_result($val) ) {
 
             # The RHS is a call result that already owns a reference, so the two outcomes need different references:
@@ -1560,6 +1596,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_assign($ast) {
         my $target = $ast->target;
         my ( $line, $col ) = ( $ast->line, $ast->col );
+        return $self->_lower_hash_store( $target, $ast->expr, $line, $col )
+            if $target->isa('Brocken::Katsuro::AST::Expr::HashIndex');
         if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') &&
             $ast->expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
             $ast->expr->method eq 'new' &&
@@ -1679,12 +1717,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
                     # The slot may keep the caller's borrowed box, so the exit cleanup can only own it if that box's
                     # reference is balanced now; increment whichever value the test chooses and promote the slot.
-                    $self->_emit_conditional_borrowed_store( $val, $addr, $stored_type, $line, $col );
+                    $self->_emit_conditional_borrowed_store( $val, $addr, $stored_type, $line, $col, $ast->op );
                     delete $borrowed_params->{ $target->name };
                     $self->_note_rc( $target->name );
                 }
                 else {
-                    $self->_emit_conditional_owned_store( $val, $addr, $stored_type, $line, $col );
+                    $self->_emit_conditional_owned_store( $val, $addr, $stored_type, $line, $col, $ast->op );
                 }
             }
             elsif ( $is_nullable || $ast->op eq '||=' ) {
@@ -2394,6 +2432,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::ArrayIndex') ) {
             return $self->lower_array_index($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::HashIndex') ) {
+            return $self->lower_hash_index($expr);
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
             return $self->lower_method_call($expr);
         }
@@ -2477,6 +2518,89 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $loaded_type = $sym->allocated_type // Brocken::Lindsay::IR::Type::i64();
         }
         return $builder->build_load( $loaded_type, $sym, undef, $line, $col );
+    }
+
+    # == Hashes ==
+    # A local `%h` is a `ptr` slot holding a tag-8 table (or null). Element access is `%h{key}`: the key is lowered to
+    # a NUL-terminated string pointer (a string literal stays rodata, another string passes through, a dynamic box is
+    # unboxed to its String payload, and an integer is stringified), and the value is always a dynamic box. The table
+    # owns its values; hash_release cascades them at scope exit. The keys are borrowed, so a key must outlive the
+    # entry -- rodata literals and the fresh managed buffers an integer key makes always do.
+    method _lower_hash_decl($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        Carp::croak( "A local \%hash must hold Any values (got '" . $ast->type . "') at " . $self->_loc($ast) )
+            unless $ast->type eq 'Any';
+        my $ptr_type = Brocken::Lindsay::IR::Type::ptr();
+        my $alloca = $builder->build_alloca( $ptr_type, $self->unique_value_name( '%' . $ast->name . '.addr' ), undef, $line, $col, $ast->name, '%' );
+        $symbols->{ '%' . $ast->name } = $alloca;
+        $symbols->{ $ast->name }       = $alloca;
+        $hash_var->{ $ast->name }        = 1;
+        $hash_value_type->{ $ast->name } = Brocken::Lindsay::IR::Type::dynamic();
+        $self->_note_rc( $ast->name );
+        my $hb = $self->_hash_heap_base( $line, $col );
+        my $h;
+        if ( defined $ast->init ) {
+            Carp::croak( "A local \%hash initializer must be a hash literal at " . $self->_loc($ast) )
+                unless $ast->init->isa('Brocken::Katsuro::AST::Expr::Hash');
+            $h = $self->lower_hash_expr( $ast->init );
+        }
+        else {
+            $h = $builder->build_call( $self->_reflect_runtime( 'hash_new', $ast, $line, $col ), [$hb], undef, $line, $col );
+        }
+        $builder->build_store( $h, $alloca, $line, $col );
+        return;
+    }
+
+    method _hash_heap_base($line, $col) {
+        return $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col )
+            if $symbols->{'__heap_base'};
+        return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+    }
+
+    # The key of an element access as a NUL-terminated string pointer.
+    method _lower_hash_key( $expr, $line, $col ) {
+        my $key  = $self->lower_expression($expr);
+        my $kind = $key->type->kind;
+        return $key if $kind eq 'ptr';
+        return $self->maybe_convert_type( $key, Brocken::Lindsay::IR::Type::ptr(), $line, $col, 1 ) if $kind eq 'dynamic';
+        if ( $kind eq 'int' ) {
+            return $builder->build_call( $self->_reflect_runtime( 'i64_to_str', $expr, $line, $col ),
+                [ $self->_hash_heap_base( $line, $col ), $key ], undef, $line, $col );
+        }
+        Carp::croak( "A hash key must be a string or integer at line $line, col $col" );
+    }
+
+    # Reinterpret a raw pointer-sized IR value as a dynamic (box pointer) without boxing it: storing into a slot and
+    # reading it back as `dynamic` is the same bits.
+    method _reinterpret_dynamic( $val, $line, $col ) {
+        my $slot = $builder->build_alloca( Brocken::Lindsay::IR::Type::ptr(), undef, undef, $line, $col );
+        $builder->build_store( $val, $slot, $line, $col );
+        return $builder->build_load( Brocken::Lindsay::IR::Type::dynamic(), $slot, undef, $line, $col );
+    }
+
+    # `%h{key}` read: the stored box pointer, reinterpreted as a dynamic value.
+    method lower_hash_index($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $h   = $self->lower_expression( $ast->hash );
+        my $key = $self->_lower_hash_key( $ast->key, $line, $col );
+        my $val = $builder->build_call( $self->_reflect_runtime( 'hash_get', $ast, $line, $col ), [ $h, $key ], undef, $line, $col );
+        return $self->_reinterpret_dynamic( $val, $line, $col );
+    }
+
+    # `%h{key} = value`: box the value, take an owned reference for the table, store through hash_set, and write the
+    # table pointer back into the slot -- a grow may have moved it.
+    method _lower_hash_store( $target, $rhs, $line, $col ) {
+        my $h   = $self->lower_expression( $target->hash );
+        my $key = $self->_lower_hash_key( $target->key, $line, $col );
+        my $raw = $self->lower_expression($rhs);
+        my $val = $self->maybe_convert_type( $raw, Brocken::Lindsay::IR::Type::dynamic(), $line, $col );
+        $builder->build_incref( $val, $line, $col ) unless $self->_owned_call_result($raw);
+        my $hb      = $self->_hash_heap_base( $line, $col );
+        my $new     = $builder->build_call( $self->_reflect_runtime( 'hash_set', $target, $line, $col ), [ $hb, $h, $key, $val ], undef, $line, $col );
+        my $slot    = $symbols->{ '%' . $target->hash->name } // $symbols->{ $target->hash->name };
+        Carp::croak( "Unknown hash variable '%" . $target->hash->name . "' at " . $self->_loc($target) ) unless $slot;
+        $builder->build_store( $new, $slot, $line, $col );
+        return;
     }
 
     method lower_array_decl($ast) {
@@ -2918,7 +3042,21 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $op      = $ast->op;
         my ( $line, $col ) = ( $ast->line, $ast->col );
 
-        # Unbox dynamic operands to i64 before unary ops
+        # Logical negation is a truthiness test, so a dynamic operand goes through the runtime helper rather than a
+        # blind unbox: `!$box` is true exactly when the box holds `0`, `0.0`, `""`, `"0"`, or undef (a null box).
+        if ( $op eq '!' ) {
+            if ( $operand->type->kind eq 'dynamic' ) {
+                my $fn = $functions->{'Brocken::Runtime::is_truthy'}
+                    or Carp::croak("Runtime function is_truthy not found at line $line, col $col");
+                my $t    = $builder->build_call( $fn, [$operand], undef, $line, $col );
+                my $zero = Brocken::Lindsay::IR::Constant->new( type => $t->type, value => 0 );
+                return $builder->build_icmp( 'eq', $t, $zero, undef, $line, $col );
+            }
+            my $zero = Brocken::Lindsay::IR::Constant->new( type => $operand->type, value => 0 );
+            return $builder->build_icmp( 'eq', $operand, $zero, undef, $line, $col );
+        }
+
+        # Unbox dynamic operands to i64 before the remaining unary ops
         if ( $operand->type->kind eq 'dynamic' ) {
             $operand = $self->maybe_convert_type( $operand, Brocken::Lindsay::IR::Type::i64() );
         }
@@ -2938,10 +3076,6 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return Brocken::Lindsay::IR::Constant->new( type => $operand->type, value => -( $operand->value ) );
         }
         return $builder->build_neg( $operand, undef, $line, $col ) if $op eq '-';
-        if ( $op eq '!' ) {
-            my $zero = Brocken::Lindsay::IR::Constant->new( type => $operand->type, value => 0 );
-            return $builder->build_icmp( 'eq', $operand, $zero, undef, $line, $col );
-        }
         Carp::croak( "Unknown unary operator '$op' at " . $self->_loc($ast) );
     }
 
@@ -3611,15 +3745,31 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     # Condition conversion
+    # Reduce a value to a 1-bit truth value: Perl truthiness for a boxed value (`is_truthy`, so `"0"`, `""`, `0.0`, and
+    # a null box are false), or a `!= 0`/`!= 0.0` comparison for a native int/float/bool. Shared by `&&`/`||` and, in
+    # spirit, by `as_condition`.
+    method _truthy_i1( $side, $line, $col ) {
+        if ( $side->type->kind eq 'dynamic' ) {
+            my $fn = $functions->{'Brocken::Runtime::is_truthy'}
+                or Carp::croak("Runtime function is_truthy not found at line $line, col $col");
+            my $t    = $builder->build_call( $fn, [$side], undef, $line, $col );
+            my $zero = Brocken::Lindsay::IR::Constant->new( type => $t->type, value => 0 );
+            return $builder->build_icmp( 'ne', $t, $zero, undef, $line, $col );
+        }
+        my $zero = Brocken::Lindsay::IR::Constant->new(
+            type  => $side->type,
+            value => $side->type->kind eq 'float' ? 0.0 : 0,
+        );
+        return $builder->build_icmp( 'ne', $side, $zero, undef, $line, $col );
+    }
+
     method as_condition( $val, $line = 0, $col = 0 ) {
         return $val if $val->type->bits == 1;
 
-        # Unbox dynamic to i64 before comparing against zero
-        if ( $val->type->kind eq 'dynamic' ) {
-            $val = $self->maybe_convert_type( $val, Brocken::Lindsay::IR::Type::i64(), $line, $col );
-        }
-        my $zero = Brocken::Lindsay::IR::Constant->new( type => $val->type, value => 0 );
-        return $builder->build_icmp( 'ne', $val, $zero, undef, $line, $col );
+        # A dynamic value is tested with the runtime's Perl-truthiness helper rather than a blind unbox: `0`, `0.0`, "",
+        # "0", and a null box are false, while "00", "0.0", 0.5, and any reference are true. Unboxing first would also
+        # fault on a null box (`if (undef)`), because the payload readers dereference the box pointer.
+        return $self->_truthy_i1( $val, $line, $col );
     }
 
     # Type conversion helper
@@ -4185,34 +4335,21 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     method lower_hash_expr($ast) {
         my ( $line, $col ) = ( $ast->line, $ast->col );
-        my $i64_type   = Brocken::Lindsay::IR::Type::i64();
-        my $ptr_type   = Brocken::Lindsay::IR::Type::ptr();
-        my @pairs      = $ast->pairs->@*;
-        my $pair_count = scalar @pairs;
-        my @keys;
-        my @vals;
-        for my $pair (@pairs) {
-            push @keys, $self->lower_expression( $pair->{key} );
-            push @vals, $self->lower_expression( $pair->{value} );
-        }
-        my $hb            = $builder->build_load( $ptr_type, $symbols->{'__heap_base'}, undef, $line, $col );
-        my $total_size    = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $pair_count * 16 );
-        my $bump_alloc_fn = $functions->{'Brocken::Runtime::bump_alloc'};
-        Carp::croak( "Runtime function bump_alloc not found at " . $self->_loc($ast) ) unless $bump_alloc_fn;
-        my $hash_ptr   = $builder->build_call( $bump_alloc_fn, [ $hb, $total_size ], undef, $line, $col );
-        my $header_val = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 8 << 24 );
-        $builder->build_store( $header_val, $hash_ptr, $line, $col );
-        my $count_val  = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => $pair_count );
-        my $count_addr = $builder->build_add( $hash_ptr, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 8 ), undef, $line, $col );
-        $builder->build_store( $count_val, $count_addr, $line, $col );
+        my $hb        = $self->_hash_heap_base( $line, $col );
+        my $hash_new  = $self->_reflect_runtime( 'hash_new', $ast, $line, $col );
+        my $hash_set  = $self->_reflect_runtime( 'hash_set', $ast, $line, $col );
+        my $hash_ptr  = $builder->build_call( $hash_new, [ $hb ], undef, $line, $col );
+        my $dyn_type  = Brocken::Lindsay::IR::Type::dynamic();
+        for my $pair ( $ast->pairs->@* ) {
+            my $key = $self->_lower_hash_key( $pair->{key}, $line, $col );
+            my $raw = $self->lower_expression( $pair->{value} );
+            my $val = $self->maybe_convert_type( $raw, $dyn_type, $line, $col );
 
-        for my $i ( 0 .. $#pairs ) {
-            my $key_offset = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $i * 16 );
-            my $val_offset = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $i * 16 + 8 );
-            my $key_addr   = $builder->build_add( $hash_ptr, $key_offset, undef, $line, $col );
-            my $val_addr   = $builder->build_add( $hash_ptr, $val_offset, undef, $line, $col );
-            $builder->build_store( $keys[$i], $key_addr, $line, $col );
-            $builder->build_store( $vals[$i], $val_addr, $line, $col );
+            # The table takes ownership of one reference to each value. A borrowed box needs a fresh reference; an
+            # owned call result already carries one and is consumed. A freshly boxed native has refcount 0, so it
+            # needs the reference too.
+            $builder->build_incref( $val, $line, $col ) unless $self->_owned_call_result($raw);
+            $hash_ptr = $builder->build_call( $hash_set, [ $hb, $hash_ptr, $key, $val ], undef, $line, $col );
         }
         return $hash_ptr;
     }
@@ -4234,6 +4371,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned   = {};
         $class_escaped = {};
         $weak_var      = {};
+        $hash_var        = {};
+        $hash_value_type = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -4304,6 +4443,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned   = {};
         $class_escaped = {};
         $weak_var      = {};
+        $hash_var        = {};
+        $hash_value_type = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -4358,6 +4499,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned   = {};
         $class_escaped = {};
         $weak_var      = {};
+        $hash_var        = {};
+        $hash_value_type = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -4423,6 +4566,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned   = {};
         $class_escaped = {};
         $weak_var      = {};
+        $hash_var        = {};
+        $hash_value_type = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);

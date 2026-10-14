@@ -47,11 +47,16 @@ subtest '||= replaces a false value' => sub {
     answers( 'my Any $a = 2; $a ||= 8; return $a;',     2, 'a boxed two is kept' );
 };
 
-# An `Any` box holding a false payload is not inspected yet: `||=` tests the box pointer, so only a null box counts
-# as false. Testing the payload would mean unboxing, and the unbox helpers fault on a null box (the same guard that
-# `if (null_any)` and binary `||` are missing). Pinned so that a later fix has to be deliberate.
-subtest '||= on an Any box sees only a null box as false' => sub {
-    answers( 'my Any $a = 0; $a ||= 4; return $a;', 0, 'a boxed zero is kept for now' );
+# An `Any` box holding a false payload is inspected: `||=` tests Perl truthiness of the payload through the runtime
+# `is_truthy`, so a box holding `0` or `"0"` is replaced just like a null box. The same helper backs `if`/`while`
+# conditions and unary `!`, and it short-circuits on a null box, so `if (null_any)` no longer faults.
+subtest '||= on an Any box uses payload truthiness' => sub {
+    answers( 'my Any $a = 0; $a ||= 4; return $a;', 4, 'a boxed zero is false, so the RHS wins' );
+    answers( 'my Any $a = 2; $a ||= 4; return $a;', 2, 'a boxed true value is kept' );
+    answers(
+        'my Any $a = "0"; $a ||= 4; if ($a) { return 1; } return 0;',
+        1, 'a boxed string "0" is false too', targets => [@native_targets]
+    );
 };
 
 # A declaration has no previous value, so the conditional form always takes its initializer, exactly as `=` would.

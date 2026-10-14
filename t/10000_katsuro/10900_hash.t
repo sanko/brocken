@@ -154,4 +154,23 @@ BROCKEN
         unlink $file;
     }
 };
+subtest 'hash element access parses as Expr::HashIndex' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse('sub foo() :returns(i64) { my %h; %h{"a"} = 1; return %h{"a"}; }');
+    my $body = $prog->statements->[0]->body->statements;
+
+    # `%h{"a"} = 1;` lowers to a Stmt::Assign whose target is an Expr::HashIndex.
+    my $store = $body->[1];
+    isa_ok( $store, ['Brocken::Katsuro::AST::Stmt::Assign'] );
+    isa_ok( $store->target, ['Brocken::Katsuro::AST::Expr::HashIndex'] );
+    isa_ok( $store->target->hash, ['Brocken::Katsuro::AST::Expr::Var'] );
+    is( $store->target->hash->sigil, '%', 'subscript base keeps the % sigil' );
+    isa_ok( $store->target->key, ['Brocken::Katsuro::AST::Expr::Const'] );
+    is( $store->target->key->value, 'a', 'key is the string "a"' );
+
+    # `return %h{"a"};` reads back through the same node kind.
+    my $ret = $body->[2];
+    isa_ok( $ret, ['Brocken::Katsuro::AST::Stmt::Return'] );
+    isa_ok( $ret->expr, ['Brocken::Katsuro::AST::Expr::HashIndex'] );
+};
 done_testing;
