@@ -145,6 +145,9 @@ class Brocken::Katsuro::AST::Expr::HashIndex v0.0.1 : isa(Brocken::Katsuro::AST:
     field $hash : param : reader;                   # expression yielding the hash pointer (usually a % Var)
     field $key  : param : reader;                   # key expression (stringified at the call site)
 };
+class Brocken::Katsuro::AST::Expr::Exists v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $expr : param : reader;                   # the hash element to test (an Expr::HashIndex)
+};
 class Brocken::Katsuro::AST::Expr::MethodCall v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $obj    : param : reader;                 # expression evaluating to an object pointer
     field $method : param : reader;                 # method name

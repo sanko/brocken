@@ -173,4 +173,16 @@ subtest 'hash element access parses as Expr::HashIndex' => sub {
     isa_ok( $ret, ['Brocken::Katsuro::AST::Stmt::Return'] );
     isa_ok( $ret->expr, ['Brocken::Katsuro::AST::Expr::HashIndex'] );
 };
+subtest 'exists %h{key} parses as Expr::Exists over an Expr::HashIndex' => sub {
+    my $c    = Brocken->new;
+    my $prog = $c->parse('sub foo() :returns(i64) { my %h; if (exists %h{"a"}) { return 1; } return 0; }');
+    my $body = $prog->statements->[0]->body->statements;
+    my $if   = $body->[1];
+    isa_ok( $if, ['Brocken::Katsuro::AST::Stmt::If'] );
+    my $cond = $if->cond;
+    isa_ok( $cond, ['Brocken::Katsuro::AST::Expr::Exists'] );
+    isa_ok( $cond->expr, ['Brocken::Katsuro::AST::Expr::HashIndex'], 'the argument is a hash element' );
+    isa_ok( $cond->expr->hash, ['Brocken::Katsuro::AST::Expr::Var'] );
+    is( $cond->expr->hash->sigil, '%', 'subscript base keeps the % sigil' );
+};
 done_testing;

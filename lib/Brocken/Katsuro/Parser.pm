@@ -821,6 +821,10 @@ class Brocken::Katsuro::Parser v0.0.1 {
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 0, type => 'Bool' ) if $token->{value} =~ /^false$/i;
             return Brocken::Katsuro::AST::Expr::ClassConst->new( $self->_pos_token($token) ) if $token->{value} eq '__CLASS__';
             return $self->parse_want($token)                                                 if $token->{value} eq 'want';
+            if ( $token->{value} eq 'exists' ) {
+                my $arg = $self->parse_expression(PREC_UNARY);
+                return Brocken::Katsuro::AST::Expr::Exists->new( $self->_pos_token($token), expr => $arg );
+            }
             if ( $token->{value} eq 'length' ) {
                 $self->consume( '(', undef, "Expected '(' after 'length'" );
                 my $arg = $self->parse_expression(0);

@@ -545,6 +545,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->_scan_receiver_escapes( $expr->hash );
             $self->_scan_value_escapes( $expr->key );
         }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Exists') ) {
+            $self->_scan_value_escapes( $expr->expr );
+        }
 
         # A method call borrows its receiver and consumes its arguments.
         elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
@@ -1424,6 +1427,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $stmt->isa('Brocken::Katsuro::AST::Expr::FieldAccess') ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::ArrayIndex')  ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::HashIndex')   ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::Exists')      ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::MethodCall')  ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::List')        ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Hash')        ||
@@ -2435,6 +2439,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::HashIndex') ) {
             return $self->lower_hash_index($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Exists') ) {
+            return $self->lower_exists($expr);
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
             return $self->lower_method_call($expr);
         }
@@ -2576,6 +2583,21 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $slot = $builder->build_alloca( Brocken::Lindsay::IR::Type::ptr(), undef, undef, $line, $col );
         $builder->build_store( $val, $slot, $line, $col );
         return $builder->build_load( Brocken::Lindsay::IR::Type::dynamic(), $slot, undef, $line, $col );
+    }
+
+    # `exists %h{key}`: a boolean membership test. It returns i1 directly, so it drops into a condition without the
+    # truthiness round-trip a boxed value would need, and it touches no reference counts -- the key is borrowed and
+    # nothing is read out of the value slot.
+    method lower_exists($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $arg = $ast->expr;
+        Carp::croak( "exists expects a hash element like %h{key} at " . $self->_loc($ast) )
+            unless $arg->isa('Brocken::Katsuro::AST::Expr::HashIndex');
+        my $h   = $self->lower_expression( $arg->hash );
+        my $key = $self->_lower_hash_key( $arg->key, $line, $col );
+        my $has = $builder->build_call( $self->_reflect_runtime( 'hash_has', $ast, $line, $col ), [ $h, $key ], undef, $line, $col );
+        my $zero = Brocken::Lindsay::IR::Constant->new( type => $has->type, value => 0 );
+        return $builder->build_icmp( 'ne', $has, $zero, undef, $line, $col );
     }
 
     # `%h{key}` read: the stored box pointer, reinterpreted as a dynamic value.

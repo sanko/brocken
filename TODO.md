@@ -79,7 +79,8 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
   - `warn(@msgs)`: Formats and writes to `stderr`.
   - `die(@msgs)`: Formats error and emits `throw` (caught by `catch ($err)` or exits 255).
 - [ ] **Container Builtins:**
-  - Implement keywords: `keys %hash`, `values %hash`, `exists %hash{"k"}`, `delete %hash{"k"}` (returns deleted value).
+  - `exists %hash{"k"}` is shipped: it parses as `Expr::Exists` and lowers to the runtime `hash_has`, giving a 1-bit membership test, so a key holding a false value (`0`, `""`) still exists. Pinned by `t/10000_katsuro/10900_hash.t` and `t/40000_runtime/40230_hash_runtime.t`.
+  - Still open: `keys %hash`, `values %hash`, and `delete %hash{"k"}` (which returns the deleted value; transferring ownership of that value to the caller still needs a decision). The spec (§16.1 and the "Hash tables" expansion note) says iteration preserves insertion order, but the open-addressing table does not track it, so `keys`/`values` will need order bookkeeping when they land.
   - Implement array keywords: `push @arr, $val`, `pop @arr`, `shift @arr`, `unshift @arr, $val`; with no argument inside a `sub`/`method` they default to `@_` (see §3, automatic `shift @_`).
 - [ ] **Auto-Increment (`++`) and Decrement (`--`):**
   - Implement numeric pre- and post-increment/decrement.

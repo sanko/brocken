@@ -76,4 +76,18 @@ subtest 'reading a key whose value was overwritten releases the old box' => sub 
         123, 'the last replaced value reads back' );
 };
 
+subtest 'exists reports membership, not truthiness' => sub {
+    check( 'my %h; %h{"a"} = 1; if (exists %h{"a"}) { return 1; } return 0;', 1, 'a present key exists' );
+    check( 'my %h; %h{"a"} = 1; if (exists %h{"b"}) { return 1; } return 0;', 0, 'an absent key does not exist' );
+    check( 'my %h; %h{"a"} = 0; if (exists %h{"a"}) { return 1; } return 0;', 1, 'a key holding a false value still exists' );
+    check( 'my %h; if (exists %h{"x"}) { return 1; } return 0;',             0, 'an empty hash has no keys' );
+    check( 'my %h; %h{1} = 5; if (exists %h{1}) { return 1; } return 0;',     1, 'an integer key is found' );
+};
+
+subtest 'exists survives a rehash' => sub {
+    my $src = 'my %h;' . join( '', map {qq{ %h{"k$_"} = $_;}} 0 .. 15 );
+    check( $src . ' if (exists %h{"k0"}) { return 1; } return 0;',   1, 'the first key still exists after growing' );
+    check( $src . ' if (exists %h{"nope"}) { return 1; } return 0;', 0, 'an absent key is still absent after growing' );
+};
+
 done_testing;
