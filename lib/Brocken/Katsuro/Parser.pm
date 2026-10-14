@@ -167,11 +167,32 @@ class Brocken::Katsuro::Parser v0.0.1 {
         if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) || $self->check( 'OP', '||=' ) ) {
             my $op_tok = $self->advance();
             my $rhs    = $self->parse_expression(0);
-            $self->consume( ';', undef, "Expected ';' after assignment" );
-            return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($op_tok), target => $expr, expr => $rhs, op => $op_tok->{value} );
+            my $assign = Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($op_tok), target => $expr, expr => $rhs, op => $op_tok->{value} );
+            return $self->_end_statement( $assign, "Expected ';' after assignment" );
         }
-        $self->consume( ';', undef, "Expected ';' after expression" );
-        return $expr;
+        return $self->_end_statement( $expr, "Expected ';' after expression" );
+    }
+
+    # Finish a simple statement. Normally that is just consuming the `;`; but when a postfix `if`/`unless` modifier
+    # follows (`return 0 if $cond;`, `next unless $skip;`) the statement becomes the body of a one-statement `if`.
+    # `unless COND { BODY }` runs the body when COND is false, which is an `if` whose then-branch is empty and whose
+    # else-branch is the statement. Only simple statements take a modifier -- a compound statement needs no `;`, so an
+    # `if` after one is a new statement, not a modifier.
+    method _end_statement( $stmt, $what ) {
+        if ( $self->check( 'KEYWORD', 'if' ) || $self->check( 'KEYWORD', 'unless' ) ) {
+            my $modifier = $self->advance();
+            $stmt->set_package($current_package);
+            my $cond     = $self->parse_expression(0);
+            $self->consume( ';', undef, "Expected ';' after postfix $modifier->{value}" );
+            my $body = Brocken::Katsuro::AST::Stmt::Block->new( $self->_pos_token($modifier), statements => [$stmt] );
+            if ( $modifier->{value} eq 'unless' ) {
+                my $empty = Brocken::Katsuro::AST::Stmt::Block->new( $self->_pos_token($modifier), statements => [] );
+                return Brocken::Katsuro::AST::Stmt::If->new( $self->_pos_token($modifier), cond => $cond, then => $empty, elsif => [], else => $body );
+            }
+            return Brocken::Katsuro::AST::Stmt::If->new( $self->_pos_token($modifier), cond => $cond, then => $body, elsif => [], else => undef );
+        }
+        $self->consume( ';', undef, $what );
+        return $stmt;
     }
 
     method parse_var_decl() {
@@ -374,15 +395,17 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 $expr = Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($ret_token), elements => [ $expr->expr ] );
             }
         }
-        $self->consume( ';', undef, "Expected ';' after return" );
-        return Brocken::Katsuro::AST::Stmt::Return->new( $self->_pos_token($ret_token), expr => $expr );
+        return $self->_end_statement(
+            Brocken::Katsuro::AST::Stmt::Return->new( $self->_pos_token($ret_token), expr => $expr ),
+            "Expected ';' after return" );
     }
 
     method parse_throw() {
         my $throw_token = $self->advance();
         my $expr        = $self->parse_expression(0);
-        $self->consume( ';', undef, "Expected ';' after throw" );
-        return Brocken::Katsuro::AST::Stmt::Throw->new( $self->_pos_token($throw_token), expr => $expr );
+        return $self->_end_statement(
+            Brocken::Katsuro::AST::Stmt::Throw->new( $self->_pos_token($throw_token), expr => $expr ),
+            "Expected ';' after throw" );
     }
 
     method parse_trycatch() {
@@ -453,8 +476,9 @@ class Brocken::Katsuro::Parser v0.0.1 {
         my $name = $tok->{value};
         $self->consume('(');
         my $args = $self->parse_call_args_after_paren();
-        $self->consume( ';', undef, "Expected ';' after $name()" );
-        return Brocken::Katsuro::AST::Expr::Call->new( $self->_pos_token($tok), func_name => $name, args => $args );
+        return $self->_end_statement(
+            Brocken::Katsuro::AST::Expr::Call->new( $self->_pos_token($tok), func_name => $name, args => $args ),
+            "Expected ';' after $name()" );
     }
 
     method parse_block() {
@@ -733,11 +757,10 @@ class Brocken::Katsuro::Parser v0.0.1 {
 
     method parse_loop_control() {
         my $tok = $self->advance();
-        $self->consume( ';', undef, "Expected ';' after '$tok->{value}'" );
-        if ( $tok->{value} eq 'last' ) {
-            return Brocken::Katsuro::AST::Stmt::Break->new( $self->_pos_token($tok) );
-        }
-        return Brocken::Katsuro::AST::Stmt::Continue->new( $self->_pos_token($tok) );
+        my $stmt = $tok->{value} eq 'last'
+            ? Brocken::Katsuro::AST::Stmt::Break->new( $self->_pos_token($tok) )
+            : Brocken::Katsuro::AST::Stmt::Continue->new( $self->_pos_token($tok) );
+        return $self->_end_statement( $stmt, "Expected ';' after '$tok->{value}'" );
     }
 
     # === Expressions (Pratt Parser) ===
