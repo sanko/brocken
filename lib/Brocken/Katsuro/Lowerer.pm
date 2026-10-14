@@ -1432,7 +1432,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $fresh_class = $owned_class if $ir_type->kind eq 'ptr';
             }
             my $val = $self->lower_expression( $ast->init );
-            $val = $self->maybe_convert_type( $val, $ir_type );
+            $val = $self->maybe_convert_type( $val, $ir_type, $line, $col, 1 );
 
             # A fresh instance already carries the reference the slot needs -- the constructor wrote a refcount of 1.
             # Track the local for release at scope exit only when nothing can reach it another way (the escape scan
@@ -1582,7 +1582,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         else {
             Carp::croak( "Assignment target must be a variable, field access, or array index at " . $self->_loc($target) );
         }
-        $val = $self->maybe_convert_type( $val, $stored_type );
+        $val = $self->maybe_convert_type( $val, $stored_type, $line, $col, 1 );
         my $is_rc        = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
         my $is_borrowed  = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $target->name };
         my $is_dyn_field = $is_field_target && $stored_type->kind eq 'dynamic' && !$is_weak_field;
@@ -1698,7 +1698,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( defined $ast->expr ) {
             my $val      = $self->lower_expression( $ast->expr );
             my $ret_type = $current_func->return_type;
-            $val = $self->maybe_convert_type( $val, $ret_type );
+            $val = $self->maybe_convert_type( $val, $ret_type, $line, $col, 1 );
             my @rc_names = sort keys %$needs_rc;
 
             # Hand the caller an owned reference for a dynamic return. An owned-returning function (+1) increfs the
@@ -2488,13 +2488,28 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $symbols->{$key} = $alloca;
     }
 
+    # The RHS of `my (TYPE $x) = EXPR` must lower to a tag-7 list pointer. A single parenthesized operand parses as an
+    # `Expr::Paren`, not a one-element `Expr::List`, so it is read back here as a one-element list; a bare local array
+    # inside the parentheses is unrolled, so `my (String $s) = (@a)` takes the first element the way Perl does.
+    # Anything else -- an `Expr::List`, or a bare array/scalar that lowers to a list pointer -- is left untouched.
+    method _list_rhs_expr( $expr, $line, $col ) {
+        return $expr unless defined $expr && $expr->isa('Brocken::Katsuro::AST::Expr::Paren');
+        my $inner = $expr->expr;
+        my @elements
+            = $self->_is_local_array($inner)
+            ? $self->_array_element_exprs( $inner, $line, $col )
+            : ($inner);
+        return Brocken::Katsuro::AST::Expr::List->new(
+            file => $inner->file, line => $inner->line, col => $inner->col, elements => \@elements );
+    }
+
     method lower_list_var_decl($ast) {
         my ( $line, $col ) = ( $ast->line, $ast->col );
         my $i64_type     = Brocken::Lindsay::IR::Type::i64();
         my $ptr_type     = Brocken::Lindsay::IR::Type::ptr();
         my $dynamic_type = Brocken::Lindsay::IR::Type::dynamic();
         my @targets      = $ast->targets->@*;
-        my $list_ptr     = $self->lower_expression( $ast->expr );
+        my $list_ptr     = $self->lower_expression( $self->_list_rhs_expr( $ast->expr, $line, $col ) );
         for my $i ( 0 .. $#targets ) {
             my $t       = $targets[$i];
             my $ir_type = $self->type_from_name( $t->{type} );
@@ -2510,7 +2525,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # again. Reading it as an i64 and converting to `Any` put a second box around the first, so every unbox
             # downstream read a pointer where it expected a payload.
             my $elem_dyn = $builder->build_load( $dynamic_type, $elem_addr, undef, $line, $col );
-            my $elem_val = $t->{type} eq 'Any' ? $elem_dyn : $self->maybe_convert_type( $elem_dyn, $ir_type, $line, $col );
+            my $elem_val = $t->{type} eq 'Any' ? $elem_dyn : $self->maybe_convert_type( $elem_dyn, $ir_type, $line, $col, 1 );
             if ( $t->{type} eq 'Any' ) {
                 $builder->build_incref( $elem_val, $line, $col );
             }
@@ -3061,8 +3076,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $arg ( $ast->args->@* ) {
             push @args, $self->lower_expression($arg);
         }
-        return $builder->build_add( $args[0], $args[1], undef, $line, $col )                           if $name eq 'ptr_add';
-        return $builder->build_sub( $args[0], $args[1], undef, $line, $col )                           if $name eq 'ptr_sub';
+        # Pointer arithmetic is typed `ptr` regardless of its operands: the result is an address, not the untagged fat
+        # scalar the left operand's `dynamic` type would otherwise make it. Without the explicit result type,
+        # `my ptr $p = Brocken::ptr_add($any, 0)` reads the sum as a box and pulls out its payload, turning the box
+        # pointer into the value it wraps (a `gc_drain` suspect has to stay a pointer).
+        return $builder->build_add( $args[0], $args[1], undef, $line, $col, Brocken::Lindsay::IR::Type::ptr() ) if $name eq 'ptr_add';
+        return $builder->build_sub( $args[0], $args[1], undef, $line, $col, Brocken::Lindsay::IR::Type::ptr() ) if $name eq 'ptr_sub';
         return $builder->build_icmp( 'sgt', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_gt';
         return $builder->build_icmp( 'slt', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_lt';
         return $builder->build_icmp( 'sge', $args[0], $args[1], undef, $line, $col )                   if $name eq 'ptr_cmp_ge';
@@ -3564,7 +3583,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     # Type conversion helper
-    method maybe_convert_type( $val, $target_type, $line = 0, $col = 0 ) {
+    method maybe_convert_type( $val, $target_type, $line = 0, $col = 0, $unbox_ptr = 0 ) {
         return $val if $val->type->kind eq $target_type->kind && $val->type->bits == $target_type->bits;
 
         # Box: native -> dynamic
@@ -3584,10 +3603,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # Unbox: dynamic -> native
         if ( $val->type->kind eq 'dynamic' && $target_type->kind ne 'dynamic' ) {
 
-            # Reinterpret: dynamic -> ptr is a no-op; Any vars ARE pointers to fat scalars. The `ptr`-taking runtime
-            # helpers (`box_tag`, `unbox_i64`, `unbox_f64`) read the box header through this pointer, so the payload
-            # has to be pulled out explicitly with `build_unbox` where a `String`/class payload is wanted.
-            return $val if $target_type->kind eq 'ptr';
+            # Reinterpret: dynamic -> ptr is a no-op by default; a dynamic value IS the box pointer that the
+            # `ptr`-taking runtime helpers (`box_tag`, `unbox_i64`, `unbox_f64`) read the header through, so unboxing
+            # here would hand them the payload. Where the box's *payload* is wanted instead -- storing an `Any` into a
+            # typed `String`/class/`ptr` slot, or returning one from a `String`/`ptr` function -- the caller passes
+            # `$unbox_ptr`, which falls through to the blind `build_unbox` below and reads the eight bytes at offset 8.
+            return $val if $target_type->kind eq 'ptr' && !$unbox_ptr;
 
             # A direct unbox is a blind payload load: it reads the eight bytes at offset 8 at whatever width the context
             # asked for, without looking at the tag. So a float payload read into an i64 came back as its bit pattern,
