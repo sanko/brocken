@@ -34,6 +34,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $returns_owned         = {};        # func_name -> 1 (a dynamic return hands the caller an owned +1 reference)
     field $class_returns_owned   = {};        # func_name -> 1 (a class-returning call hands the caller an owned instance)
     field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
+    field $array_counts          = {};        # '@name' -> compile-time element count, when it is a constant
     field $rodata : reader       = {};        # label -> bytes for string constants
     field $_rodata_label_counter = 0;
     field $writer_map            = {};        # "Class::name" -> class name (auto-generated writers return their receiver)
@@ -1366,6 +1367,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::TryCatch') )      { return $self->lower_trycatch($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') )            { return $self->lower_if($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') )         { return $self->lower_while($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::For') )           { return $self->lower_for($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Break') )         { return $self->lower_break($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Continue') )      { return $self->lower_continue($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Block') )         { return $self->lower_block($stmt); }
@@ -1868,6 +1870,180 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $current_block = $exit;
     }
 
+    # `for`/`foreach my (TARGETS) (LIST) { ... }`. The list is evaluated once; the loop walks it a stride at a time,
+    # where the stride is the number of loop variables, and binds each variable from the matching list slot before
+    # running the body. It reuses the block shape of `lower_while` (header -> fuel check -> body -> back edge) so
+    # `last`/`next` and the per-iteration RC cleanup behave the same.
+    method lower_for($ast) {
+        my $func = $current_func;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $i64_type     = Brocken::Lindsay::IR::Type::i64();
+        my $dynamic_type = Brocken::Lindsay::IR::Type::dynamic();
+        my @targets      = $ast->targets->@*;
+        Carp::croak( "for requires at least one loop variable at " . $self->_loc($ast) ) unless @targets;
+        my $stride = scalar @targets;
+
+        # The iterable is a tag-7 list: count at +8, one boxed element per eight-byte slot from +16.
+        my $list_ptr = $self->_lower_iterable( $ast->expr, $line, $col );
+
+        # Loop variables get their slots before the loop, so the body reads them across iterations and they are bound,
+        # not re-declared, each pass. A slot borrows the box the list holds: it is deliberately *not* RC-tracked, since
+        # releasing it here would free a box the list still points at (the same reason `lower_list_var_decl` is the only
+        # place a list slot is increfed). The conservative result is that a box reachable only through a loop variable
+        # stays alive to the end of the arena rather than risk a dangling free.
+        my @slots;
+        for my $t (@targets) {
+            my $ir_type = $self->type_from_name( $t->{type} );
+            my $alloca  = $builder->build_alloca( $ir_type, $self->unique_value_name( '%' . $t->{name} . '.addr' ), undef, $line, $col, $t->{name}, $t->{type} );
+            $symbols->{ $t->{name} } = $alloca;
+            push @slots, $alloca;
+        }
+
+        my $cond = $func->append_block( $self->unique_block_name('for_cond') );
+        my $check = $func->append_block( $self->unique_block_name('for_check') );
+        my $body  = $func->append_block( $self->unique_block_name('for_body') );
+        my $incr  = $func->append_block( $self->unique_block_name('for_incr') );
+        my $exit  = $func->append_block( $self->unique_block_name('for_end') );
+
+        # `next` has to run the stride advance before the next test, so the increment block -- not the condition block --
+        # is what the loop-control lowering treats as the loop header and jumps to. `last` still targets the exit.
+        push $_loop_header_blocks->@*, $incr;
+        push $_loop_check_blocks->@*,  $check;
+        push $_loop_exit_blocks->@*,   $exit;
+
+        my $k_slot = $builder->build_alloca( $i64_type, $self->unique_value_name('%for.k'), undef, $line, $col );
+        my $zero   = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 0 );
+        $builder->build_store( $zero, $k_slot, $line, $col );
+        $builder->build_br( $cond, $line, $col );
+
+        # Condition: stop when fewer than a stride of elements remain (k + stride > count). The signed `sle` against
+        # `count - stride` also skips the loop when the list is shorter than the stride, since the limit goes negative.
+        $builder->position_at_end($cond);
+        $current_block = $cond;
+        my $count_addr = $builder->build_add( $list_ptr, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 8 ), undef, $line, $col );
+        my $count      = $builder->build_load( $i64_type, $count_addr, undef, $line, $col );
+        my $k          = $builder->build_load( $i64_type, $k_slot, undef, $line, $col );
+        my $limit      = $builder->build_sub( $count, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => $stride ), undef, $line, $col );
+        my $more       = $builder->build_icmp( 'sle', $k, $limit, undef, $line, $col );
+        $builder->build_cond_br( $more, $check, $exit, $line, $col );
+
+        # Fuel check, exactly as `while`: bail to the exit when the decrement drops to zero.
+        $builder->position_at_end($check);
+        $current_block = $check;
+        if ( $symbols->{'__heap_base'} ) {
+            my $hb_for_fuel = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
+            my $fuel_off    = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => Brocken::ICB::FUEL );
+            my $fuel_addr   = $builder->build_add( $hb_for_fuel, $fuel_off, undef, $line, $col );
+            my $fuel_val    = $builder->build_load( $i64_type, $fuel_addr, undef, $line, $col );
+            my $one         = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 1 );
+            my $fuel_after  = $builder->build_sub( $fuel_val, $one, undef, $line, $col );
+            $builder->build_store( $fuel_after, $fuel_addr, $line, $col );
+            my $exhausted = $builder->build_icmp( 'sle', $fuel_after, $zero, undef, $line, $col );
+            $builder->build_cond_br( $exhausted, $exit, $body, $line, $col );
+        }
+        else {
+            $builder->build_br( $body, $line, $col );
+        }
+
+        $builder->position_at_end($body);
+        $current_block = $body;
+
+        # Bind the stride's worth of slots for this pass. The boxes are read as dynamics, exactly as `lower_list_var_decl`
+        # reads them, and converted to the declared target type. `k` is the element index of the stride's first slot, so
+        # the row starts at byte `k * 8` and slot `j` sits `j * 8` further in.
+        my $k_now   = $builder->build_load( $i64_type, $k_slot, undef, $line, $col );
+        my $row_off = $builder->build_mul( $k_now, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 8 ), undef, $line, $col );
+        for my $j ( 0 .. $stride - 1 ) {
+            my $slot_off  = $builder->build_add( $row_off, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 16 + $j * 8 ), undef, $line, $col );
+            my $elem_addr = $builder->build_gep( Brocken::Lindsay::IR::Type::i8(), $list_ptr, [$slot_off], undef, $line, $col );
+            my $elem_dyn  = $builder->build_load( $dynamic_type, $elem_addr, undef, $line, $col );
+            my $t         = $targets[$j];
+            my $ir_type   = $self->type_from_name( $t->{type} );
+
+            # A `String`/class target wants the *payload* pointer, which lives at box + 8. A `dynamic -> ptr` conversion
+            # is deliberately left alone by `maybe_convert_type` -- it is the box pointer the `ptr`-taking runtime
+            # helpers read the header through -- so the payload is unboxed explicitly here, the same way `stringify`,
+            # `trim`, and method dispatch already read a pointer out of a box.
+            my $elem_val
+                = $t->{type} eq 'Any'     ? $elem_dyn
+                : $ir_type->kind eq 'ptr' ? $builder->build_unbox( $elem_dyn, $ir_type, undef, $line, $col )
+                :                           $self->maybe_convert_type( $elem_dyn, $ir_type, $line, $col );
+            $builder->build_store( $elem_val, $slots[$j], $line, $col );
+        }
+
+        my $loop_scope = { rc_pre => {%$needs_rc} };
+        push $_dyn_scope_stack->@*,  $loop_scope;
+        push $_loop_body_scopes->@*, $loop_scope;
+        $self->lower_block_statements( $ast->body );
+        pop $_loop_body_scopes->@*;
+        pop $_dyn_scope_stack->@*;
+
+        $self->_emit_loop_back_edge_rc_cleanup($loop_scope) unless $current_block->terminator;
+        $builder->build_br( $incr, $line, $col ) unless $current_block->terminator;
+
+        # Advance the stride and re-test. `next` jumps straight here.
+        $builder->position_at_end($incr);
+        $current_block = $incr;
+        my $k_cur  = $builder->build_load( $i64_type, $k_slot, undef, $line, $col );
+        my $k_next = $builder->build_add( $k_cur, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => $stride ), undef, $line, $col );
+        $builder->build_store( $k_next, $k_slot, $line, $col );
+        $builder->build_br( $cond, $line, $col );
+
+        pop $_loop_header_blocks->@*;
+        pop $_loop_check_blocks->@*;
+        pop $_loop_exit_blocks->@*;
+        $self->_forget_rc($_) for grep { defined $rc_owner->{$_} && $rc_owner->{$_} == $loop_scope } keys %$needs_rc;
+        $builder->position_at_end($exit);
+        $current_block = $exit;
+    }
+
+    # The iterable of a `for`, as a tag-7 list pointer. An omitted list is the empty list; a bare local array is
+    # unrolled into its elements when its length folded to a constant; anything else must already lower to a list
+    # pointer (an `Expr::List`, `builtin::indexed`, ...). A boxed iterable is unboxed to its pointer payload.
+    method _lower_iterable( $expr, $line, $col ) {
+        my $list_ast = Brocken::Katsuro::AST::Expr::List->new(
+            file => ( defined $expr ? $expr->file : '' ), line => ( defined $expr ? $expr->line : $line ), col => ( defined $expr ? $expr->col : $col ),
+            elements => [],
+        );
+        return $self->lower_list_expr($list_ast) unless defined $expr;
+        if ( $self->_is_local_array($expr) ) {
+            my @elements = $self->_array_element_exprs( $expr, $line, $col );
+            return $self->lower_list_expr(
+                Brocken::Katsuro::AST::Expr::List->new( file => $expr->file, line => $expr->line, col => $expr->col, elements => \@elements ) );
+        }
+        my $val  = $self->lower_expression($expr);
+        my $kind = $val->type->kind;
+        return $builder->build_unbox( $val, Brocken::Lindsay::IR::Type::ptr(), undef, $line, $col ) if $kind eq 'dynamic';
+        Carp::croak( "for expects a list, but the expression has type $kind at " . $self->_loc($expr) ) unless $kind eq 'ptr';
+        return $val;
+    }
+
+    # Whether an expression names a local array variable (as opposed to a field array, whose elements this front end
+    # does not unroll). A local array's symbol is its alloca or pointer slot; a field array's is a struct GEP.
+    method _is_local_array($expr) {
+        return 0 unless $expr->isa('Brocken::Katsuro::AST::Expr::Var') && $expr->sigil eq '@';
+        my $sym = $symbols->{ '@' . $expr->name };
+        return 0 unless $sym;
+        return 0 if $sym->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $sym->base_type && $sym->base_type->kind eq 'struct';
+        return 1;
+    }
+
+    # Unroll a compile-time-sized local array into one `@a[i]` expression per element. The index form is what the
+    # array lowerer already knows how to address for both a stack array and a heap array.
+    method _array_element_exprs( $array_expr, $line, $col ) {
+        my $key   = '@' . $array_expr->name;
+        my $count = $array_counts->{$key};
+        Carp::croak( "Cannot iterate '\@" . $array_expr->name . "' at compile time: its length is not a constant at " . $self->_loc($array_expr) )
+            unless defined $count;
+        my @elements;
+        for my $i ( 0 .. $count - 1 ) {
+            my $index = Brocken::Katsuro::AST::Expr::Const->new( file => $array_expr->file, line => $array_expr->line, col => $array_expr->col, value => $i, type => 'Int' );
+            push @elements, Brocken::Katsuro::AST::Expr::ArrayIndex->new(
+                file => $array_expr->file, line => $array_expr->line, col => $array_expr->col, array => $array_expr, index => $index );
+        }
+        return @elements;
+    }
+
     # Exception handling: setjmp/longjmp intrinsics
     method _ensure_sjlj_intrinsics() {
         return if $functions->{'setjmp'};
@@ -2278,6 +2454,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $key        = '@' . $ast->name;
         my $elem_bytes = $ir_type->byte_size;
         $array_elem_types->{$key} = $ir_type;
+
+        # Remember the element count when it folded to a constant, so `builtin::indexed(@a)` (and a `for` over a bare
+        # array) can unroll the array at compile time. A runtime count is left undefined and those forms report that
+        # they cannot seek into it.
+        $array_counts->{$key} = ( defined $size_val && $size_val->isa('Brocken::Lindsay::IR::Constant') ) ? $size_val->value : undef;
 
         # Heap promotion: dynamic-sized arrays (and static arrays whose element count would exceed 4 KiB of stack) are
         # allocated on the Immix heap via Brocken::Runtime::alloc_array instead of the stack.  The declaration becomes a
@@ -2999,6 +3180,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $name eq 'trim' ) {
             return $self->lower_trim_builtin( $ast, $line, $col );
         }
+        if ( $name eq 'indexed' ) {
+            return $self->lower_indexed_builtin( $ast, $line, $col );
+        }
         Carp::croak( "Unknown builtin 'builtin::$name' at " . $self->_loc($ast) );
     }
 
@@ -3300,6 +3484,32 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         Carp::croak( "builtin::trim cannot trim a " . ( $kind eq 'ptr' ? 'class instance' : $kind ) . " at " . $self->_loc($ast) );
     }
 
+    # == builtin:: indexed ==
+    # `builtin::indexed LIST` returns a flat list of `(index, value)` pairs: 0, e0, 1, e1, ... A `for my ($i, $v)`
+    # loop then walks it two slots at a time. `LIST` is the argument list, so `builtin::indexed(10, 20)` is two pairs;
+    # a single parenthesized list is flattened, and a single array variable is unrolled into its elements (which needs
+    # a compile-time length, since the pair list is built as straight-line stores and cannot grow at runtime).
+    method lower_indexed_builtin( $ast, $line, $col ) {
+        my @args     = $ast->args->@*;
+        my @elements;
+        if ( @args == 1 && $self->_is_local_array( $args[0] ) ) {
+            @elements = $self->_array_element_exprs( $args[0], $line, $col );
+        }
+        elsif ( @args == 1 && $args[0]->isa('Brocken::Katsuro::AST::Expr::List') ) {
+            @elements = $args[0]->elements->@*;
+        }
+        else {
+            @elements = @args;
+        }
+        my @flat;
+        for my $i ( 0 .. $#elements ) {
+            push @flat, Brocken::Katsuro::AST::Expr::Const->new( file => $ast->file, line => $line, col => $col, value => $i, type => 'Int' );
+            push @flat, $elements[$i];
+        }
+        return $self->lower_list_expr(
+            Brocken::Katsuro::AST::Expr::List->new( file => $ast->file, line => $line, col => $col, elements => \@flat ) );
+    }
+
     # A `builtin::` reflection helper that inspects a runtime box reads its header tag. `box_tag` is a runtime
     # function because the header layout is the runtime's business, not the front end's.
     method _reflect_box_tag( $val, $line, $col ) {
@@ -3374,7 +3584,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # Unbox: dynamic -> native
         if ( $val->type->kind eq 'dynamic' && $target_type->kind ne 'dynamic' ) {
 
-            # Reinterpret: dynamic -> ptr is a no-op; Any vars ARE pointers to fat scalars
+            # Reinterpret: dynamic -> ptr is a no-op; Any vars ARE pointers to fat scalars. The `ptr`-taking runtime
+            # helpers (`box_tag`, `unbox_i64`, `unbox_f64`) read the box header through this pointer, so the payload
+            # has to be pulled out explicitly with `build_unbox` where a `String`/class payload is wanted.
             return $val if $target_type->kind eq 'ptr';
 
             # A direct unbox is a blind payload load: it reads the eight bytes at offset 8 at whatever width the context

@@ -276,6 +276,7 @@ operate on a variable's ownership rather than its value. The implemented set is:
 | `builtin::inf(SIGN)` | The `f64` positive infinity, or negative infinity when the sign argument is negative. |
 | `builtin::nan(SIGN)` | The `f64` quiet NaN. The sign argument is evaluated but ignored, since every NaN compares unequal to itself. |
 | `builtin::trim($v)` | A fresh `String` with leading and trailing whitespace removed. The original is left untouched. |
+| `builtin::indexed(EXPR, ...)` | The flat `(index, value, ...)` list Perl's `indexed` returns: each argument, or each element of a single list/array argument, is paired with its zero-based position. `for my ($i, $v) (builtin::indexed(@a))` iterates a list by index. The pair list is unrolled at compile time, so a runtime-sized array argument is rejected. |
 
 Reflection answers a static value at compile time from its IR type (a pointer with a statically-known class is `OBJECT`)
 and reads an `Any` box's header tag at runtime. A box sheds the fine-grained Perl provenance: a bool box and a
@@ -285,7 +286,7 @@ as `SCALAR`. `builtin::blessed` of a boxed instance is undef because the runtime
 and `builtin::refaddr` uses the one pointer-to-integer conversion the front end has (a store and a re-load, there
 being no `ptrtoint`), so it reports identity rather than a number to compute with.
 
-The rest of Perl's `builtin` set — `indexed`, `export_lexically`, `load_module` — is **not yet implemented** (see
+The rest of Perl's `builtin` set — `export_lexically` and `load_module` — is **not yet implemented** (see
 [`class_roadmap.md`](class_roadmap.md) and `TODO.md`); an unknown `builtin::` name is a compile error.
 
 `ceil`/`floor` answer an `i64`, so a magnitude beyond the `i64` range is undefined, exactly as for any integer
@@ -420,6 +421,23 @@ die "File not found" unless defined $fh;
 next if $item == 0;
 last if $done;
 ```
+
+#### `for` / `foreach`
+
+`for` and `foreach` are the same statement. The loop variable is declared with `my`; Brocken has no `$_`:
+
+```perl
+for my $x (1, 2, 3) { ... }                       # one variable walks every element
+for my ($i, $v) (builtin::indexed(@a)) { ... }    # two variables consume the list a pair at a time
+```
+
+The list is evaluated once, before the first pass. With one loop variable the body runs for every element. With
+several, the body consumes that many elements per pass, and the loop stops once fewer than a full group remain, so a
+trailing partial group is ignored. `last` leaves the loop and `next` advances to the next group and runs the body
+again. A bare local array may be iterated directly (`for my $x (@a)`), unrolled from its compile-time length; a
+runtime-sized array or an opaque field array is not unrolled yet. A `String` (or class) loop variable receives the
+pointer payload stored in the slot, while an untyped (`Any`) variable receives the box itself. The loop variables
+borrow from the list rather than owning their values, so the boxes they see are not released per pass.
 
 ### 9.2 Exceptions & The Landing Dispatcher (`try / catch / finally`)
 
@@ -1766,7 +1784,7 @@ Target          ::= Var | FieldAccess | DerefExpr | IndexExpr ;
 
 IfStmt          ::= 'if' '(' Expr ')' Block ( 'elsif' '(' Expr ')' Block )* ( 'else' Block )? ;
 WhileStmt       ::= 'while' '(' Expr ')' Block ;
-ForStmt         ::= 'for' ( 'my' ( Type )? Sigil Ident )? '(' Expr ')' Block ;
+ForStmt         ::= ( 'for' | 'foreach' ) 'my' ( '(' ( Type )? Sigil Ident ( ',' ( Type )? Sigil Ident )* ')' | ( Type )? Sigil Ident ) '(' Expr ')' Block ;
 ReturnStmt      ::= 'return' ( ExprList )? ';' ;
 ThrowStmt       ::= ( 'throw' | 'die' ) Expr ';' ;
 TryCatchStmt    ::= 'try' Block ( 'catch' '(' Sigil Ident ')' Block )? ( 'finally' Block )? ;
@@ -3503,7 +3521,7 @@ Target          ::= Var | FieldAccess | DerefExpr | IndexExpr ;
 
 IfStmt          ::= 'if' '(' Expr ')' Block ( 'elsif' '(' Expr ')' Block )* ( 'else' Block )? ;
 WhileStmt       ::= 'while' '(' Expr ')' Block ;
-ForStmt         ::= 'for' ( 'my' ( Type )? Sigil Ident )? '(' Expr ')' Block ;
+ForStmt         ::= ( 'for' | 'foreach' ) 'my' ( '(' ( Type )? Sigil Ident ( ',' ( Type )? Sigil Ident )* ')' | ( Type )? Sigil Ident ) '(' Expr ')' Block ;
 ReturnStmt      ::= 'return' ( ExprList )? ';' ;
 ThrowStmt       ::= ( 'throw' | 'die' ) Expr ';' ;
 TryCatchStmt    ::= 'try' Block ( 'catch' '(' Sigil Ident ')' Block )? ( 'finally' Block )? ;
@@ -5490,8 +5508,7 @@ Target          ::= Var | FieldAccess | DerefExpr | IndexExpr ;
 IfStmt          ::= 'if' '(' Expr ')' Block ( 'elsif' '(' Expr ')' Block )* ( 'else' Block )?
                   | Statement 'if' Expr ';' ;
 WhileStmt       ::= 'while' '(' Expr ')' Block ;
-ForStmt         ::= 'for' ( 'my' ( Type )? Sigil Ident )? '(' Expr ')' Block
-                  | 'foreach' ( 'my' ( Type )? Sigil Ident )? '(' Expr ')' Block ;
+ForStmt         ::= ( 'for' | 'foreach' ) 'my' ( '(' ( Type )? Sigil Ident ( ',' ( Type )? Sigil Ident )* ')' | ( Type )? Sigil Ident ) '(' Expr ')' Block ;
 ReturnStmt      ::= 'return' ( ExprList )? ';' ;
 ThrowStmt       ::= ( 'throw' | 'die' ) Expr ';' ;
 TryCatchStmt    ::= 'try' Block ( 'catch' '(' Sigil Ident ')' Block )? ( 'finally' Block )? ;

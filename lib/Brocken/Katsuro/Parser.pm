@@ -146,6 +146,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return $self->parse_var_decl()     if $self->check( 'KEYWORD', 'my' );
         return $self->parse_if()           if $self->check( 'KEYWORD', 'if' );
         return $self->parse_while()        if $self->check( 'KEYWORD', 'while' );
+        return $self->parse_for()          if $self->check( 'KEYWORD', 'for' ) || $self->check( 'KEYWORD', 'foreach' );
         return $self->parse_return()       if $self->check( 'KEYWORD', 'return' );
         return $self->parse_throw()        if $self->check( 'KEYWORD', 'throw' );
         return $self->parse_trycatch()     if $self->check( 'KEYWORD', 'try' );
@@ -294,6 +295,74 @@ class Brocken::Katsuro::Parser v0.0.1 {
         $self->consume(')');
         my $body = $self->parse_block();
         return Brocken::Katsuro::AST::Stmt::While->new( $self->_pos_token($while_token), cond => $cond, body => $body );
+    }
+
+    # Perl-style list iteration:
+    #
+    #   for my $x (LIST) { ... }         one element per pass
+    #   for my ($k, $v) (LIST) { ... }   one *stride* of elements per pass, bound left to right
+    #
+    # `LIST` is a parenthesized comma-separated expression list, evaluated once to a tag-7 list. A single element is
+    # kept as the list-producing expression itself (so `(@a)` and `(builtin::indexed(@a))` pass through unchanged);
+    # several make an `Expr::List`. The `my` is required: Brocken has no `$_` for the implicit form.
+    method parse_for() {
+        my $for_token = $self->advance();    # 'for' or 'foreach'
+        $self->consume( 'KEYWORD', 'my', "Expected 'my' after '$for_token->{value}'" );
+        my @targets;
+        if ( $self->check('(') ) {
+            $self->consume('(');
+            until ( $self->check(')') || $self->check('EOF') ) {
+                if (@targets) {
+                    last if $self->check(')');
+                    $self->consume(',');
+                }
+                push @targets, $self->parse_for_target();
+            }
+            $self->consume(')');
+        }
+        else {
+            push @targets, $self->parse_for_target();
+        }
+
+        $self->consume( '(', undef, "Expected '(' before the '$for_token->{value}' list" );
+        my @elements;
+        until ( $self->check(')') || $self->check('EOF') ) {
+            if (@elements) {
+                last if $self->check(')');
+                $self->consume(',');
+            }
+            push @elements, $self->parse_expression(0);
+        }
+        $self->consume(')');
+        my $expr;
+        if ( @elements == 0 )    { $expr = undef; }
+        elsif ( @elements == 1 ) { $expr = $elements[0]; }
+        else {
+            $expr = Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($for_token), elements => \@elements );
+        }
+
+        my $body = $self->parse_block();
+        return Brocken::Katsuro::AST::Stmt::For->new(
+            $self->_pos_token($for_token),
+            targets => \@targets,
+            expr    => $expr,
+            body    => $body,
+        );
+    }
+
+    # One `for`/`foreach` loop variable: an optional type then a variable. Shares the target shape `parse_list_var_decl`
+    # produces so the lowerer can bind them with the same code.
+    method parse_for_target() {
+        my $type = 'Any';
+        if ( $self->is_type( $self->peek() ) ) {
+            $type = $self->advance()->{value};
+        }
+        my $var_token = $self->consume( 'VAR', undef, 'Expected a loop variable' );
+        return {
+            sigil => substr( $var_token->{value}, 0, 1 ),
+            name  => substr( $var_token->{value}, 1 ),
+            type  => $type,
+        };
     }
 
     method parse_return() {

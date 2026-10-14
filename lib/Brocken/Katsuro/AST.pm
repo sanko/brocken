@@ -44,6 +44,11 @@ class Brocken::Katsuro::AST::Stmt::While v0.0.1 : isa(Brocken::Katsuro::AST::Nod
     field $cond : param : reader;
     field $body : param : reader;                 # AST::Stmt::Block
 };
+class Brocken::Katsuro::AST::Stmt::For v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $targets : param : reader = [];         # [{sigil, name, type}, ...] one per element bound each pass
+    field $expr    : param : reader = undef;      # iterable list expression; undef is the empty list
+    field $body    : param : reader;              # AST::Stmt::Block
+};
 class Brocken::Katsuro::AST::Stmt::Break v0.0.1    : isa(Brocken::Katsuro::AST::Node) {};
 class Brocken::Katsuro::AST::Stmt::Continue v0.0.1 : isa(Brocken::Katsuro::AST::Node) {};
 class Brocken::Katsuro::AST::Stmt::Return v0.0.1   : isa(Brocken::Katsuro::AST::Node) {
