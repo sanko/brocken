@@ -2908,6 +2908,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $self->lower_defined_or( $lhs, $rhs, $line, $col );
         }
 
+        # `.` is not arithmetic either: both operands are stringified, so a dynamic (`Any`) operand must be shown as
+        # its string payload. It is handled here, before the numeric unification below, which would otherwise unbox the
+        # box to f64 and concatenate `0.000000` for a string-valued box.
+        if ( $op eq '.' ) {
+            return $self->_lower_concat( $lhs, $rhs, $line, $col, $ast );
+        }
+
+        # The string comparisons stringify both operands the same way `.` does, so they take the same early dispatch: a
+        # dynamic operand is read as its string payload rather than unboxed to f64 by the numeric unification below.
+        if ( $op eq 'eq' || $op eq 'ne' || $op eq 'lt' || $op eq 'gt' || $op eq 'le' || $op eq 'ge' || $op eq 'cmp' ) {
+            return $self->_lower_strcmp( $lhs, $rhs, $op, $line, $col, $ast );
+        }
+
         # A float has no bits to shift and no bit pattern to mask, so these operators have no float form. `%` is an
         # integer modulus here for the same reason it is one in Perl.
         #
@@ -3087,68 +3100,79 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $builder->build_icmp( $lhs->type->is_signed ? 'sge' : 'uge', $lhs, $rhs, undef, $line, $col );
         }
         if ( $op eq 'eq' || $op eq 'ne' || $op eq 'lt' || $op eq 'gt' || $op eq 'le' || $op eq 'ge' || $op eq 'cmp' ) {
-            $lhs = $self->_stringify( $lhs, $line, $col );
-            $rhs = $self->_stringify( $rhs, $line, $col );
-            my $strcmp_fn = Brocken::Lindsay::IR::Function->new(
-                name        => $self->_crt_name('strcmp'),
-                return_type => Brocken::Lindsay::IR::Type::i32(),
-                params      => [
-                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                    Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                ],
-            );
-            my $cmp_result = $builder->build_call( $strcmp_fn, [ $lhs, $rhs ], undef, $line, $col );
-            my $cmp_i64    = $builder->build_sext( $cmp_result, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
-            my $zero       = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
-            if ( $op eq 'cmp' ) {
-                my $gt   = $builder->build_icmp( 'sgt', $cmp_i64, $zero, undef, $line, $col );
-                my $lt   = $builder->build_icmp( 'slt', $cmp_i64, $zero, undef, $line, $col );
-                my $gt64 = $builder->build_zext( $gt, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
-                my $lt64 = $builder->build_zext( $lt, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
-                my $neg  = $builder->build_sub( $zero, $lt64, undef, $line, $col );
-                return $builder->build_add( $gt64, $neg, undef, $line, $col );
-            }
-            if ( $op eq 'eq' ) {
-                return $builder->build_icmp( 'eq', $cmp_i64, $zero, undef, $line, $col );
-            }
-            if ( $op eq 'ne' ) {
-                return $builder->build_icmp( 'ne', $cmp_i64, $zero, undef, $line, $col );
-            }
-            if ( $op eq 'lt' ) {
-                return $builder->build_icmp( 'slt', $cmp_i64, $zero, undef, $line, $col );
-            }
-            if ( $op eq 'gt' ) {
-                return $builder->build_icmp( 'sgt', $cmp_i64, $zero, undef, $line, $col );
-            }
-            if ( $op eq 'le' ) {
-                return $builder->build_icmp( 'sle', $cmp_i64, $zero, undef, $line, $col );
-            }
-            if ( $op eq 'ge' ) {
-                return $builder->build_icmp( 'sge', $cmp_i64, $zero, undef, $line, $col );
-            }
-        }
-        if ( $op eq '.' ) {
-            $lhs = $self->_stringify( $lhs, $line, $col );
-            $rhs = $self->_stringify( $rhs, $line, $col );
-            if ( $lhs->isa('Brocken::Lindsay::IR::RodataRef') && $rhs->isa('Brocken::Lindsay::IR::RodataRef') ) {
-                my $combined = substr( $lhs->bytes, 0, -1 ) . $rhs->bytes;
-                my ( $label, $bytes ) = $self->_intern_rodata($combined);
-                return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
-            }
-
-            # Route dynamic concat through the managed allocator: Brocken::Runtime::str_concat copies both byte strings
-            # and NUL-terminates them. The old strlen + malloc + strcpy + strcat sequence depended on libc, which a Wasm
-            # module has no way to import, so the linker died on the undefined 'malloc' symbol.
-            my $hb
-                = $symbols->{'__heap_base'} ?
-                $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col ) :
-                undef;
-            Carp::croak( "String concat requires __heap_base at " . $self->_loc($ast) ) unless $hb;
-            my $concat_fn = $functions->{'Brocken::Runtime::str_concat'};
-            Carp::croak( "Runtime function str_concat not found at " . $self->_loc($ast) ) unless $concat_fn;
-            return $builder->build_call( $concat_fn, [ $hb, $lhs, $rhs ], undef, $line, $col );
+            return $self->_lower_strcmp( $lhs, $rhs, $op, $line, $col, $ast );
         }
         Carp::croak( "Unknown binary operator '$op' at " . $self->_loc($ast) );
+    }
+
+    # The string comparisons. Both operands are stringified through `_stringify_value`, so a dynamic box is rendered
+    # from its tag (a String payload, an integer, a float) instead of being unboxed as a number, then compared with
+    # libc `strcmp`. Called before the numeric unification in `lower_binop` for the same reason `.` is.
+    method _lower_strcmp( $lhs, $rhs, $op, $line, $col, $node ) {
+        $lhs = $self->_stringify_value( $lhs, $node, $line, $col );
+        $rhs = $self->_stringify_value( $rhs, $node, $line, $col );
+        my $strcmp_fn = Brocken::Lindsay::IR::Function->new(
+            name        => $self->_crt_name('strcmp'),
+            return_type => Brocken::Lindsay::IR::Type::i32(),
+            params      => [
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
+            ],
+        );
+        my $cmp_result = $builder->build_call( $strcmp_fn, [ $lhs, $rhs ], undef, $line, $col );
+        my $cmp_i64    = $builder->build_sext( $cmp_result, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
+        my $zero       = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+        if ( $op eq 'cmp' ) {
+            my $gt   = $builder->build_icmp( 'sgt', $cmp_i64, $zero, undef, $line, $col );
+            my $lt   = $builder->build_icmp( 'slt', $cmp_i64, $zero, undef, $line, $col );
+            my $gt64 = $builder->build_zext( $gt, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
+            my $lt64 = $builder->build_zext( $lt, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
+            my $neg  = $builder->build_sub( $zero, $lt64, undef, $line, $col );
+            return $builder->build_add( $gt64, $neg, undef, $line, $col );
+        }
+        if ( $op eq 'eq' ) {
+            return $builder->build_icmp( 'eq', $cmp_i64, $zero, undef, $line, $col );
+        }
+        if ( $op eq 'ne' ) {
+            return $builder->build_icmp( 'ne', $cmp_i64, $zero, undef, $line, $col );
+        }
+        if ( $op eq 'lt' ) {
+            return $builder->build_icmp( 'slt', $cmp_i64, $zero, undef, $line, $col );
+        }
+        if ( $op eq 'gt' ) {
+            return $builder->build_icmp( 'sgt', $cmp_i64, $zero, undef, $line, $col );
+        }
+        if ( $op eq 'le' ) {
+            return $builder->build_icmp( 'sle', $cmp_i64, $zero, undef, $line, $col );
+        }
+        if ( $op eq 'ge' ) {
+            return $builder->build_icmp( 'sge', $cmp_i64, $zero, undef, $line, $col );
+        }
+        Carp::croak( "Unknown string comparison '$op' at " . $self->_loc($node) );
+    }
+
+    # Concatenate two operands as strings. `_stringify_value` reads a dynamic box's tag at runtime, so a box holding a
+    # string shows its payload rather than being unboxed as a number. Two rodata
+    # constants fold to one; anything else goes through the managed `str_concat`, which copies both byte strings and
+    # NUL-terminates the result (the old strlen+malloc+strcpy+strcat depended on libc, which a Wasm module cannot
+    # import). Called before the numeric unification in `lower_binop`, so a dynamic operand is not unboxed to f64.
+    method _lower_concat( $lhs, $rhs, $line, $col, $node ) {
+        $lhs = $self->_stringify_value( $lhs, $node, $line, $col );
+        $rhs = $self->_stringify_value( $rhs, $node, $line, $col );
+        if ( $lhs->isa('Brocken::Lindsay::IR::RodataRef') && $rhs->isa('Brocken::Lindsay::IR::RodataRef') ) {
+            my $combined = substr( $lhs->bytes, 0, -1 ) . $rhs->bytes;
+            my ( $label, $bytes ) = $self->_intern_rodata($combined);
+            return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
+        }
+
+        my $hb
+            = $symbols->{'__heap_base'} ?
+            $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col ) :
+            undef;
+        Carp::croak( "String concat requires __heap_base at " . $self->_loc($node) ) unless $hb;
+        my $concat_fn = $functions->{'Brocken::Runtime::str_concat'};
+        Carp::croak( "Runtime function str_concat not found at " . $self->_loc($node) ) unless $concat_fn;
+        return $builder->build_call( $concat_fn, [ $hb, $lhs, $rhs ], undef, $line, $col );
     }
 
     method lower_unop($ast) {
