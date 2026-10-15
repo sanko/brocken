@@ -934,6 +934,9 @@ class Brocken::Katsuro::Parser v0.0.1 {
         if ( $token->{type} eq 'KEYWORD' ) {
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 1, type => 'Bool' ) if $token->{value} =~ /^true$/i;
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 0, type => 'Bool' ) if $token->{value} =~ /^false$/i;
+            # `__PACKAGE__` folds to the in-effect package name as a string. The parser already stamps `$current_package`
+            # onto the nodes it builds, and the top level (where no `package` is declared) is `main`, the module's name.
+            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => ( defined $current_package && length $current_package ? $current_package : 'main' ), type => 'String' ) if $token->{value} eq '__PACKAGE__';
             return Brocken::Katsuro::AST::Expr::ClassConst->new( $self->_pos_token($token) ) if $token->{value} eq '__CLASS__';
             return $self->parse_want($token)                                                 if $token->{value} eq 'want';
             if ( $token->{value} eq 'exists' ) {
