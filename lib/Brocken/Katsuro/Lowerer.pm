@@ -1129,7 +1129,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $p ( $ast->params->@* ) {
             push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
         }
-        $param_defaults->{$name} = [ map { { name => $_->{name}, default => $_->{default} } } $ast->params->@* ];
+        # Only a callable with at least one default needs its parameter names bound while its arguments are lowered, so
+        # that a later default can read an earlier argument. Seeding the list for a default-less callable made the
+        # binding loop shadow a caller variable that happened to share a parameter's name (`f($x, $x)` crashed).
+        $param_defaults->{$name} = [ map { { name => $_->{name}, default => $_->{default} } } $ast->params->@* ]
+            if grep { defined $_->{default} } $ast->params->@*;
         my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params, );
         $module->add_function($fn);
         $functions->{$name} = $fn;
@@ -1152,7 +1156,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $p ( $params_ast->@* ) {
             push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
         }
-        $param_defaults->{$name} = [ map { { name => $_->{name}, default => $_->{default} } } $params_ast->@* ];
+        $param_defaults->{$name} = [ map { { name => $_->{name}, default => $_->{default} } } $params_ast->@* ]
+            if grep { defined $_->{default} } $params_ast->@*;
         my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params, );
         $module->add_function($fn);
         $functions->{$name} = $fn;
