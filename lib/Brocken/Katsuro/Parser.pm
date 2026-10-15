@@ -156,6 +156,8 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return $self->parse_return()       if $self->check( 'KEYWORD', 'return' );
         return $self->parse_throw()        if $self->check( 'KEYWORD', 'throw' );
         return $self->parse_exit()         if $self->check( 'KEYWORD', 'exit' );
+        return $self->parse_warn()         if $self->check( 'KEYWORD', 'warn' );
+        return $self->parse_die()          if $self->check( 'KEYWORD', 'die' );
         return $self->parse_trycatch()     if $self->check( 'KEYWORD', 'try' );
         return $self->parse_loop_control() if $self->check( 'KEYWORD', 'last' ) || $self->check( 'KEYWORD', 'next' );
 
@@ -430,6 +432,49 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return $self->_end_statement(
             Brocken::Katsuro::AST::Stmt::Exit->new( $self->_pos_token($exit_token), code => $code ),
             "Expected ';' after exit" );
+    }
+
+    # `warn`/`die` take an optional message list: `warn;`, `warn "x";`, `warn "a", "b";`, `warn("a", "b");`. A postfix
+    # `if`/`unless` modifier (`die "no" unless $ok;`) is applied by `_end_statement`, so a bare `if`/`unless` also ends
+    # the list. The comma is not an operator (precedence 0), so `parse_expression` stops at one.
+    method _parse_diagnostic_args() {
+        my @args;
+        if ( $self->check('(') ) {
+            $self->advance();
+            unless ( $self->check(')') ) {
+                push @args, $self->parse_expression(0);
+                while ( $self->check(',') ) {
+                    $self->advance();
+                    last if $self->check(')');
+                    push @args, $self->parse_expression(0);
+                }
+            }
+            $self->consume(')');
+            return @args;
+        }
+        return @args if $self->check(';') || $self->check( 'KEYWORD', 'if' ) || $self->check( 'KEYWORD', 'unless' );
+        push @args, $self->parse_expression(0);
+        while ( $self->check(',') ) {
+            $self->advance();
+            push @args, $self->parse_expression(0);
+        }
+        return @args;
+    }
+
+    method parse_warn() {
+        my $tok  = $self->advance();
+        my @args = $self->_parse_diagnostic_args();
+        return $self->_end_statement(
+            Brocken::Katsuro::AST::Stmt::Warn->new( $self->_pos_token($tok), args => \@args ),
+            "Expected ';' after warn" );
+    }
+
+    method parse_die() {
+        my $tok  = $self->advance();
+        my @args = $self->_parse_diagnostic_args();
+        return $self->_end_statement(
+            Brocken::Katsuro::AST::Stmt::Die->new( $self->_pos_token($tok), args => \@args ),
+            "Expected ';' after die" );
     }
 
     method parse_trycatch() {

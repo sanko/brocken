@@ -204,4 +204,10 @@ class Brocken::Katsuro::AST::Stmt::Exit v0.0.1 : isa(Brocken::Katsuro::AST::Node
 };
 class Brocken::Katsuro::AST::Stmt::Throw v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $expr : param : reader;                    # AST::Node expression to throw
+};
+class Brocken::Katsuro::AST::Stmt::Warn v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $args : param : reader = [];               # Array of AST::Node messages (empty for the bare form)
+};
+class Brocken::Katsuro::AST::Stmt::Die v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $args : param : reader = [];               # Array of AST::Node messages (empty for the bare form)
 } 1;

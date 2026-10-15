@@ -1448,6 +1448,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') )        { return $self->lower_return($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Throw') )         { return $self->lower_throw($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Exit') )          { return $self->lower_exit($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Warn') )          { return $self->lower_warn($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Die') )           { return $self->lower_die($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::TryCatch') )      { return $self->lower_trycatch($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') )            { return $self->lower_if($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') )         { return $self->lower_while($stmt); }
@@ -2346,23 +2348,28 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # If no handler: set err_code = ERR_THROW, continue.
     method lower_throw($ast) {
         my ( $line, $col ) = ( $ast->line, $ast->col );
-        my $hb_alloca = $symbols->{'__heap_base'} or Carp::croak( "throw requires __heap_base at " . $self->_loc($ast) );
-        my $hb        = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb_alloca, undef, $line, $col );
         $self->_ensure_sjlj_intrinsics();
-
-        # Evaluate the expression
         my $val = $self->lower_expression( $ast->expr );
+        $self->_emit_throw_dispatch( $val, $line, $col, 0 );
+    }
+
+    # Shared `throw`/`die` codegen. The value is parked in ICB.thrown_value and control leaves through the innermost
+    # handler's `longjmp`. With no handler in scope, `throw` keeps its shipped behaviour -- set ERR_THROW and fall
+    # through (it only ever unwinds a `try`) -- while `die` ($die_unhandled) writes the message to stderr and exits
+    # 255, Perl's status for an uncaught `die`. `$val` is a string pointer when it comes from `die`.
+    method _emit_throw_dispatch ( $val, $line, $col, $die_unhandled ) {
+        my $hb_alloca = $symbols->{'__heap_base'}
+            or Carp::croak( "throw requires __heap_base at line $line, col $col" );
+        my $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb_alloca, undef, $line, $col );
 
         # Store thrown value in ICB.thrown_value
-        my $thrown_addr
-            = $builder->build_add( $hb,
+        my $thrown_addr = $builder->build_add( $hb,
             Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::THROWN_VALUE ),
             undef, $line, $col, );
         $builder->build_store( $val, $thrown_addr, $line, $col );
 
         # Load handler from ICB.exception_handler_stack
-        my $eh_stack_addr
-            = $builder->build_add( $hb,
+        my $eh_stack_addr = $builder->build_add( $hb,
             Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::EXCEPTION_HANDLER_STACK ),
             undef, $line, $col, );
         my $handler = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $eh_stack_addr, undef, $line, $col );
@@ -2389,20 +2396,105 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # longjmp never returns; add unreachable branch for CFG validity
         $builder->build_br( $cont_block, $line, $col );
 
-        # --- unhandled: set err_code = ERR_THROW, continue ---
+        # --- unhandled ---
         $builder->position_at_end($unhandled_block);
         $current_block = $unhandled_block;
-        my $err_addr
-            = $builder->build_add( $hb,
-            Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_CODE ),
-            undef, $line, $col, );
-        my $err_throw = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_THROW );
-        $builder->build_store( $err_throw, $err_addr, $line, $col );
+        if ($die_unhandled) {
+
+            # An uncaught `die` reports the message and ends the process with 255, the status Perl gives it.
+            $self->_emit_stderr_write( $val, $line, $col );
+            my $exit_fn = $self->_ensure_extern( 'exit', Brocken::Lindsay::IR::Type::void(), [ Brocken::Lindsay::IR::Type::i64() ] );
+            my $status  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 255 );
+            $builder->build_call( $exit_fn, [$status], undef, $line, $col );
+        }
+        else {
+
+            # --- unhandled throw: set err_code = ERR_THROW, continue ---
+            my $err_addr = $builder->build_add( $hb,
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_CODE ),
+                undef, $line, $col, );
+            my $err_throw = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_THROW );
+            $builder->build_store( $err_throw, $err_addr, $line, $col );
+        }
         $builder->build_br( $cont_block, $line, $col );
 
         # --- continue block ---
         $builder->position_at_end($cont_block);
         $current_block = $cont_block;
+    }
+
+    # `warn(@msgs)` formats its messages and writes them to stderr, followed by a newline. `()` warns Perl's default
+    # text. stdout is flushed first so a buffered `say` cannot appear after the diagnostic.
+    method lower_warn($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $msg = $self->_build_message( $ast->args, $ast, $line, $col, "Warning: something's wrong" );
+        $self->_emit_stderr_write( $msg, $line, $col );
+    }
+
+    # `die(@msgs)` formats its messages and raises them as an exception. With a handler in scope it unwinds exactly as
+    # `throw` does; with none it writes the message to stderr and exits 255 (Perl's uncaught-die status). `()` dies
+    # with the text "Died".
+    method lower_die($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        $self->_ensure_sjlj_intrinsics();
+        my $msg = $self->_build_message( $ast->args, $ast, $line, $col, 'Died' );
+        $self->_emit_throw_dispatch( $msg, $line, $col, 1 );
+    }
+
+    # Render a `warn`/`die` message list as one string. Each argument is stringified exactly as `say` would (a dynamic
+    # box by header tag), then the pieces are concatenated through the managed `str_concat`. An empty list uses the
+    # caller's default text. Brocken has no runtime source location, so Perl's " at FILE line N." suffix is absent.
+    method _build_message ( $args, $node, $line, $col, $default ) {
+        return $self->_reflect_rodata($default) unless $args->@*;
+        my @pieces = map { $self->_stringify_value( $self->lower_expression($_), $node, $line, $col ) } $args->@*;
+        my $msg = shift @pieces;
+        return $msg unless @pieces;
+        my $hb_alloca = $symbols->{'__heap_base'}
+            or Carp::croak( "warn/die requires __heap_base at " . $self->_loc($node) );
+        my $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb_alloca, undef, $line, $col );
+        my $concat = $functions->{'Brocken::Runtime::str_concat'}
+            or Carp::croak( "Runtime function str_concat not found at " . $self->_loc($node) );
+        for my $piece (@pieces) {
+            $msg = $builder->build_call( $concat, [ $hb, $msg, $piece ], undef, $line, $col );
+        }
+        return $msg;
+    }
+
+    # Write a NUL-terminated string plus a newline to stderr. libc `write(2, ...)` is used rather than `fputs(stderr,
+    # ...)`: stderr is a macro, not an importable symbol, on Windows. stdout is flushed first (`fflush(NULL)`) so a
+    # buffered `say` does not appear after the diagnostic; `strlen` supplies the byte count.
+    method _emit_stderr_write ( $msg, $line, $col ) {
+        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        my $i64 = Brocken::Lindsay::IR::Type::i64();
+        my $fflush = $self->_ensure_extern( 'fflush', $i64, [$ptr] );
+        my $null   = Brocken::Lindsay::IR::Constant->new( type => $ptr, value => 0 );
+        $builder->build_call( $fflush, [$null], undef, $line, $col );
+        my $strlen = $self->_ensure_extern( $self->_crt_name('strlen'), $i64, [$ptr] );
+        my $len    = $builder->build_call( $strlen, [$msg], undef, $line, $col );
+        my $write  = $self->_ensure_extern( $self->_crt_name('write'), $i64, [ $i64, $ptr, $i64 ] );
+        my $two    = Brocken::Lindsay::IR::Constant->new( type => $i64, value => 2 );
+        $builder->build_call( $write, [ $two, $msg, $len ], undef, $line, $col );
+        my $nl  = $self->_reflect_rodata("\n");
+        my $one = Brocken::Lindsay::IR::Constant->new( type => $i64, value => 1 );
+        $builder->build_call( $write, [ $two, $nl, $one ], undef, $line, $col );
+    }
+
+    # Declare (once) an external C function the generated code calls directly -- `exit`, `longjmp`, and the
+    # `warn`/`die` helpers. The linker resolves the symbol like any other import; an existing declaration with the
+    # same name (e.g. `strlen`, shared with `length`) is reused so the module never declares it twice.
+    method _ensure_extern ( $name, $ret, $param_types ) {
+        for my $fn ( values %$functions ) {
+            next unless ref($fn) eq 'Brocken::Lindsay::IR::Function';
+            return $fn if $fn->name eq $name;
+        }
+        my $fn = Brocken::Lindsay::IR::Function->new(
+            name        => $name,
+            return_type => $ret,
+            params      => [ map { Brocken::Lindsay::IR::Value->new( type => $_ ) } $param_types->@* ],
+        );
+        $module->add_function($fn);
+        $functions->{$name} = $fn;
+        return $fn;
     }
 
     # `exit(CODE)` terminates the process through libc `exit`, which flushes stdio before returning to the OS -- the
@@ -2417,16 +2509,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             = $ast->code
             ? $self->maybe_convert_type( $self->lower_expression( $ast->code ), Brocken::Lindsay::IR::Type::i64(), $line, $col, 0 )
             : Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
-        my $exit_fn = $functions->{'exit'};
-        if ( !$exit_fn ) {
-            $exit_fn = Brocken::Lindsay::IR::Function->new(
-                name        => 'exit',
-                return_type => Brocken::Lindsay::IR::Type::void(),
-                params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64() ) ],
-            );
-            $module->add_function($exit_fn);
-            $functions->{'exit'} = $exit_fn;
-        }
+        my $exit_fn = $self->_ensure_extern( 'exit', Brocken::Lindsay::IR::Type::void(), [ Brocken::Lindsay::IR::Type::i64() ] );
         $builder->build_call( $exit_fn, [$code], undef, $line, $col );
         my $cont = $current_func->append_block( $self->unique_block_name('exit_cont') );
         $builder->build_br( $cont, $line, $col );
@@ -3339,12 +3422,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $functions->{$name} = $callee;
             }
             elsif ( $name eq 'length' ) {
-                $callee = Brocken::Lindsay::IR::Function->new(
-                    name        => $self->_crt_name('strlen'),
-                    return_type => Brocken::Lindsay::IR::Type::i64(),
-                    params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
-                );
-                $module->add_function($callee);
+                $callee = $self->_ensure_extern( $self->_crt_name('strlen'), Brocken::Lindsay::IR::Type::i64(), [ Brocken::Lindsay::IR::Type::ptr() ] );
                 $functions->{$name} = $callee;
             }
             else {
