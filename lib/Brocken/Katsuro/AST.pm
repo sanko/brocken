@@ -65,6 +65,11 @@ class Brocken::Katsuro::AST::Expr::UnOp v0.0.1 : isa(Brocken::Katsuro::AST::Node
     field $op   : param : reader;                 # '-', '!', 'not'
     field $expr : param : reader;                 # AST::Node
 };
+class Brocken::Katsuro::AST::Expr::IncDec v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $op      : param : reader;              # '++' or '--'
+    field $prefix  : param : reader;              # 1 for `++$x`, 0 for `$x++`
+    field $operand : param : reader;              # an lvalue AST::Node
+};
 class Brocken::Katsuro::AST::Expr::Const v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $value : param : reader;
     field $type  : param : reader;                # 'Int', 'Float', 'String', 'Bool'

@@ -114,4 +114,12 @@ subtest 'Lexer recognizes // and //= as single operators' => sub {
     ok( ( grep { $_ eq '//' } @ops ),  '// is lexed as one operator' );
     is( scalar( grep { $_ eq '/' } @ops ), 0, 'no bare / token produced for // or //=' );
 };
+subtest 'Lexer recognizes ++ and -- as single operators' => sub {
+    my $lexer  = Brocken::Katsuro::Lexer->new( source => 'my i64 $x = 0; $x++; --$x;' );
+    my $tokens = $lexer->lex();
+    my @ops    = map { $_->{value} } grep { $_->{type} eq 'OP' } @$tokens;
+    ok( ( grep { $_ eq '++' } @ops ), '++ is lexed as one operator' );
+    ok( ( grep { $_ eq '--' } @ops ), '-- is lexed as one operator' );
+    is( scalar( grep { $_ eq '-' } @ops ), 0, 'no bare - token produced for --' );
+};
 done_testing;

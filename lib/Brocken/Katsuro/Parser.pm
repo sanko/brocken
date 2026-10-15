@@ -26,6 +26,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         PREC_SUM     => 35,
         PREC_PRODUCT => 45,
         PREC_UNARY   => 55,
+        PREC_POSTFIX => 56,
         PREC_CALL    => 60,
         PREC_DEREF   => 65
     };
@@ -956,6 +957,14 @@ class Brocken::Katsuro::Parser v0.0.1 {
             Carp::croak( "Unexpected keyword '$token->{value}' in expression at " . $self->_loc($token) );
         }
         if ( $token->{type} eq 'OP' ) {
+            if ( $token->{value} eq '++' || $token->{value} eq '--' ) {
+                return Brocken::Katsuro::AST::Expr::IncDec->new(
+                    $self->_pos_token($token),
+                    op      => $token->{value},
+                    prefix  => 1,
+                    operand => $self->parse_expression(PREC_UNARY)
+                );
+            }
             if ( $token->{value} eq '-' ) {
                 return Brocken::Katsuro::AST::Expr::UnOp->new( $self->_pos_token($token), op => '-', expr => $self->parse_expression(PREC_UNARY) );
             }
@@ -984,6 +993,14 @@ class Brocken::Katsuro::Parser v0.0.1 {
                     return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $read, op => '=' );
                 }
                 return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $right, op => $op );
+            }
+            if ( $op eq '++' || $op eq '--' ) {
+                return Brocken::Katsuro::AST::Expr::IncDec->new(
+                    $self->_pos_token($token),
+                    op      => $op,
+                    prefix  => 0,
+                    operand => $left
+                );
             }
             if ( $op eq '->' ) {
                 my $ident;
@@ -1187,6 +1204,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             my $op = $token->{value};
             return PREC_ASSIGN  if $ASSIGN_OPS{$op};
             return PREC_DEREF   if $op eq '->';
+            return PREC_POSTFIX if $op eq '++' || $op eq '--';
             return PREC_TERNARY if $op eq '?';
             return PREC_OR      if $op eq '||' || $op eq '//';
             return PREC_AND     if $op eq '&&';

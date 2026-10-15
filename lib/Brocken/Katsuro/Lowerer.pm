@@ -1492,6 +1492,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         if ( $stmt->isa('Brocken::Katsuro::AST::Expr::IntrinsicCall') ) { $self->lower_intrinsic($stmt); return; }
 
+        # A bare `$x++` statement keeps no result, so an `Any` target steps its slot in place rather than materialising a
+        # box that nobody would keep.
+        if ( $stmt->isa('Brocken::Katsuro::AST::Expr::IncDec') ) {
+            $self->lower_incdec( $stmt, 1 );
+            return;
+        }
+
         if ( $stmt->isa('Brocken::Katsuro::AST::Expr::Assign') ) {
             Carp::croak( "Assignment as expression not supported at " . $self->_loc($stmt) );
         }
@@ -2619,6 +2626,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::UnOp') ) {
             return $self->lower_unop($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::IncDec') ) {
+            return $self->lower_incdec($expr);
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
             return $self->lower_expression( $expr->expr );
         }
@@ -3438,6 +3448,146 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         return $builder->build_neg( $operand, undef, $line, $col ) if $op eq '-';
         Carp::croak( "Unknown unary operator '$op' at " . $self->_loc($ast) );
+    }
+
+    # `++`/`--` (spec 4.4). The operand must be an lvalue -- a variable, a field access, or an array element. A numeric
+    # slot is read, stepped in place, and written back with a plain store; a prefix form yields the post-value, a
+    # postfix form the pre-value, and neither result owns a reference.
+    #
+    # An owned dynamic (`Any`) slot -- an `Any` local, a dynamic field, or an owned `Any` array element -- is stepped by
+    # the runtime, which carries the owning-store contract (take a reference to the box it stores, release the one it
+    # displaces) and returns an owned reference to the pre- or post-value. That call result is marked owned, so a store
+    # consumes the reference and a discard releases it. A borrowed `Any` parameter is promoted to an owned slot first,
+    # so the caller's box is never released.
+    #
+    # A `String` (ptr) slot takes the magical ASCII increment for `++`, or a numeric decrement for `--`; the fresh bytes
+    # are stored plainly, since a string carries no reference count. A hash element is not supported yet.
+    method lower_incdec( $ast, $discard = 0 ) {
+        my $op     = $ast->op;
+        my $prefix = $ast->prefix;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $operand = $ast->operand;
+
+        my ( $addr, $stored_type, $is_field_target, $is_weak_field );
+        my $target_name = undef;
+        if ( $operand->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            $target_name = $operand->name;
+            my $key = $operand->sigil eq '@' ? '@' . $operand->name : $operand->name;
+            $addr = $symbols->{$key};
+            Carp::croak( "Undefined variable '" . $operand->name . "' at " . $self->_loc($operand) ) unless $addr;
+            if ( $addr->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $current_class ) {
+                my $cd      = $classes->{$current_class};
+                my ($field) = $cd ? grep { $_->{name} eq $operand->name } $cd->{own_fields}->@* : ();
+                $stored_type     = $field ? $field->{ir_type} : Brocken::Lindsay::IR::Type::i64();
+                $is_field_target = 1;
+                $is_weak_field   = 1 if $field && $field->{weak};
+            }
+            else {
+                $stored_type = $addr->allocated_type;
+            }
+        }
+        elsif ( $operand->isa('Brocken::Katsuro::AST::Expr::FieldAccess') ) {
+            $addr = $self->lower_field_addr($operand);
+            my $cls = $self->resolve_class_name($operand);
+            my $cd  = $classes->{$cls};
+            my ($field) = grep { $_->{name} eq $operand->field } $cd->{own_fields}->@*;
+            Carp::croak( "Unknown field '" . $operand->field . "' in class '$cls' at " . $self->_loc($operand) ) unless $field;
+            $stored_type     = $field->{ir_type};
+            $is_field_target = 1;
+            $is_weak_field   = 1 if $field->{weak};
+        }
+        elsif ( $operand->isa('Brocken::Katsuro::AST::Expr::ArrayIndex') ) {
+            $addr        = $self->lower_array_addr($operand);
+            $stored_type = $addr->base_type;
+        }
+        elsif ( $operand->isa('Brocken::Katsuro::AST::Expr::HashIndex') ) {
+            Carp::croak( "++/-- on a hash element is not supported yet at " . $self->_loc($ast) );
+        }
+        else {
+            Carp::croak( "++/-- target must be a variable, field access, or array index at " . $self->_loc($ast) );
+        }
+
+        my $hb = $self->_hash_heap_base( $line, $col );
+
+        my $is_rc        = defined $target_name && $needs_rc->{$target_name};
+        my $is_borrowed  = defined $target_name && $borrowed_params->{$target_name};
+        my $is_dyn_field = $is_field_target && $stored_type->kind eq 'dynamic' && !$is_weak_field;
+        my $is_owned_elem = $operand->isa('Brocken::Katsuro::AST::Expr::ArrayIndex')
+            && $operand->array->isa('Brocken::Katsuro::AST::Expr::Var')
+            && $operand->array->sigil eq '@'
+            && $array_owned_elem->{ '@' . $operand->array->name };
+        my $is_dyn_rc = $is_dyn_field || ( $stored_type->kind eq 'dynamic' && ( $is_rc || $is_borrowed || $is_owned_elem ) );
+
+        my $postfix_const
+            = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $prefix ? 0 : 1 );
+
+        if ( $stored_type->kind eq 'dynamic' ) {
+            if ($is_dyn_rc) {
+                if ($is_borrowed) {
+                    my $old = $builder->build_load( $stored_type, $addr, undef, $line, $col );
+                    $builder->build_incref( $old, $line, $col );
+                    delete $borrowed_params->{$target_name};
+                    $self->_note_rc($target_name);
+                }
+                if ($discard) {
+
+                    # Nobody keeps the pre-value, so step the slot in place instead of materialising a box that would be
+                    # released on the very next instruction (and briefly buffered as a cycle suspect).
+                    my $rt_name = $op eq '++' ? 'inc_slot_discard' : 'dec_slot_discard';
+                    $builder->build_call( $self->_reflect_runtime( $rt_name, $ast, $line, $col ), [ $hb, $addr ], undef, $line, $col );
+                    return;
+                }
+                my $rt_name = $op eq '++' ? 'inc_slot' : 'dec_slot';
+                return $self->_owned_dynamic_runtime_call( $rt_name, [ $hb, $addr, $postfix_const ], $line, $col );
+            }
+            Carp::croak( "++/-- on a weak or borrowed dynamic slot is not supported at " . $self->_loc($ast) );
+        }
+
+        if ( $stored_type->kind eq 'float' ) {
+            my $old = $builder->build_load( $stored_type, $addr, undef, $line, $col );
+            my $one = Brocken::Lindsay::IR::Constant->new( type => $stored_type, value => 1.0 );
+            my $new = $op eq '++'
+                ? $builder->build_add( $old, $one, undef, $line, $col )
+                : $builder->build_sub( $old, $one, undef, $line, $col );
+            $builder->build_store( $new, $addr, $line, $col );
+            return $prefix ? $new : $old;
+        }
+
+        if ( $stored_type->kind eq 'int' ) {
+            my $old = $builder->build_load( $stored_type, $addr, undef, $line, $col );
+            my $one = Brocken::Lindsay::IR::Constant->new( type => $stored_type, value => 1 );
+            my $new = $op eq '++'
+                ? $builder->build_add( $old, $one, undef, $line, $col )
+                : $builder->build_sub( $old, $one, undef, $line, $col );
+            $builder->build_store( $new, $addr, $line, $col );
+            return $prefix ? $new : $old;
+        }
+
+        if ( $stored_type->kind eq 'ptr' ) {
+            if ( defined $target_name && $var_class->{$target_name} ) {
+                Carp::croak( "++/-- on a class instance is not supported at " . $self->_loc($ast) );
+            }
+            my $old     = $builder->build_load( $stored_type, $addr, undef, $line, $col );
+            my $rt_name = $op eq '++' ? 'str_inc_bytes' : 'str_dec_bytes';
+            my $new     = $builder->build_call( $self->_reflect_runtime( $rt_name, $ast, $line, $col ), [ $hb, $old ], undef, $line, $col );
+            $builder->build_store( $new, $addr, $line, $col );
+            return $prefix ? $new : $old;
+        }
+
+        Carp::croak( "++/-- needs a numeric, String, or Any target at " . $self->_loc($ast) );
+    }
+
+    # Call a runtime helper that hands back a freshly owned dynamic (`Any`) reference, marking it owned so the store and
+    # discard sites release it exactly once (the same wrapper `lower_delete` uses for `hash_delete`).
+    method _owned_dynamic_runtime_call( $name, $args, $line, $col ) {
+        my $rt = $self->_reflect_runtime( $name, undef, $line, $col );
+        my $fn = Brocken::Lindsay::IR::Function->new(
+            name        => $rt->name,
+            return_type => Brocken::Lindsay::IR::Type::dynamic(),
+            params      => $rt->params,
+        );
+        $returns_owned->{ $fn->name } = 1;
+        return $builder->build_call( $fn, $args, undef, $line, $col );
     }
 
     method _emit_fuel_check( $line, $col ) {
