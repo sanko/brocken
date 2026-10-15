@@ -12,7 +12,7 @@ class Brocken::Katsuro::Lexer v0.0.1 {
         my our state const type sub method class role has field ADJUST DESTROY package
         return exit fiber yield transfer try catch finally throw defer die warn
         if elsif else unless while until for foreach next last redo map say print
-        true false True False __CLASS__ __PACKAGE__ want Int String Any Bool ptr int bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64
+        true false True False __CLASS__ __PACKAGE__ __LINE__ __FILE__ want Int String Any Bool ptr int bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64
         eq ne lt gt le ge cmp
         length
         exists

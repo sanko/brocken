@@ -937,6 +937,10 @@ class Brocken::Katsuro::Parser v0.0.1 {
             # `__PACKAGE__` folds to the in-effect package name as a string. The parser already stamps `$current_package`
             # onto the nodes it builds, and the top level (where no `package` is declared) is `main`, the module's name.
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => ( defined $current_package && length $current_package ? $current_package : 'main' ), type => 'String' ) if $token->{value} eq '__PACKAGE__';
+            # `__LINE__`/`__FILE__` fold to the line and filename of this token. The lexer already stamps `line`/`col`
+            # on every token and carries the `filename` the unit was compiled under, so both are ordinary constants.
+            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => ( $token->{line} // 0 ), type => 'Int' )    if $token->{value} eq '__LINE__';
+            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => $filename, type => 'String' )             if $token->{value} eq '__FILE__';
             return Brocken::Katsuro::AST::Expr::ClassConst->new( $self->_pos_token($token) ) if $token->{value} eq '__CLASS__';
             return $self->parse_want($token)                                                 if $token->{value} eq 'want';
             if ( $token->{value} eq 'exists' ) {
