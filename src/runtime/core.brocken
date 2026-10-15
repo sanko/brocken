@@ -1247,6 +1247,37 @@ sub alloc_array( ptr $hb, i64 $count, i64 $elem_size ) : returns(ptr) {
     return $obj;
 }
 
+# Zero the element body of a freshly allocated array. A managed (`Any`) element holds a box pointer and the owning
+# store releases whatever it displaces, so the body has to read as null boxes before the first write. Only managed-
+# element arrays are zeroed; an i64 array keeps its elements uninitialised (elements start at +24, after the header).
+sub array_zero( ptr $arr, i64 $count, i64 $elem_size ) {
+    my i64 $bytes = $count * $elem_size;
+    my i64 $i     = 0;
+    while ( Brocken::ptr_cmp_gt( $bytes, $i ) ) {
+        Brocken::store_i64( Brocken::ptr_add( Brocken::ptr_add( $arr, 24 ), $i ), 0 );
+        $i = $i + 8;
+    }
+    return;
+}
+
+# Release a heap array whose elements are owned boxes: drop one reference to each element, then to the array block.
+# Every managed-element array is zeroed at allocation, so an unwritten element is a null box and its decref is a
+# no-op. The owning store balanced each element's reference, so this is the matching release (see _emit_owned_store).
+sub array_release( ptr $hb, ptr $arr ) {
+    if ( Brocken::ptr_cmp_eq( $arr, 0 ) ) {
+        return;
+    }
+    my i64 $count = Brocken::load_i64( Brocken::ptr_add( $arr, 8 ) );
+    my i64 $i     = 0;
+    while ( Brocken::ptr_cmp_gt( $count, $i ) ) {
+        my ptr $elem = Brocken::load_i64( Brocken::ptr_add( Brocken::ptr_add( $arr, 24 ), $i * 8 ) );
+        decref( $elem, $hb );
+        $i = $i + 1;
+    }
+    decref( $arr, $hb );
+    return;
+}
+
 # Array element accessors for i64 elements (elements start at +24, after header/count/bytes)
 sub array_get_i64( ptr $arr, i64 $idx ) : returns(i64) {
     my ptr $base = Brocken::ptr_add( $arr,  24 );

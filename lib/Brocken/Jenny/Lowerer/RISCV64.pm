@@ -2605,7 +2605,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                         );
                     }
                     else {
-                        my $scale = $inst->base_type->bits / 8;
+                        my $scale = $inst->base_type->byte_size;
                         my $idx   = $indices[0];
                         if ( $idx->isa('Brocken::Lindsay::IR::Constant') ) {
                             my $offset = $idx->value * $scale;

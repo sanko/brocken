@@ -3066,7 +3066,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         );
                     }
                     elsif ( $indices[0]->isa('Brocken::Lindsay::IR::Constant') ) {
-                        my $scale  = $inst->base_type->bits / 8;
+                        my $scale  = $inst->base_type->byte_size;
                         my $offset = $indices[0]->value * $scale;
                         $mbb->add_instruction(
                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -3077,7 +3077,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         );
                     }
                     else {
-                        my $scale = $inst->base_type->bits / 8;
+                        my $scale = $inst->base_type->byte_size;
                         if ( $scale == 1 ) {
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(

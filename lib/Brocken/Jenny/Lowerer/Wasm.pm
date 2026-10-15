@@ -2395,7 +2395,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                         $offset = $inst->base_type->field_offset($field_idx);
                     }
                     else {
-                        my $scale = $inst->base_type->bits / 8;
+                        my $scale = $inst->base_type->byte_size;
                         my $idx   = $indices[0];
                         if ( $idx->isa('Brocken::Lindsay::IR::Constant') ) {
                             $offset = $idx->value * $scale;

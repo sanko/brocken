@@ -36,6 +36,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
     field $array_counts          = {};        # '@name' -> compile-time element count, when it is a constant
     field $growable_arrays       = {};        # '@name' -> element-type name for a runtime-sized (growable) local array
+    field $array_owned_elem      = {};        # '@name' -> 1 (heap array whose `Any` elements are owned; released by array_release)
     field $hash_var              = {};        # var_name -> 1 (a local %hash; its slot holds a tag-8 table released by hash_release)
     field $hash_value_type       = {};        # var_name -> IR type of the hash's stored values (defaults to dynamic)
     field $rodata : reader       = {};        # label -> bytes for string constants
@@ -1178,6 +1179,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_escaped   = {};
         $weak_var        = {};
         $growable_arrays = {};
+        $array_owned_elem = {};
         $hash_var        = {};
         $hash_value_type = {};
         $self->_scan_escapes( $ast->body );
@@ -1365,6 +1367,20 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # instance goes through its destructor; everything else (an `Any` box) is a plain decref.
     method _emit_rc_release( $name, $heap_base ) {
         my $addr = $symbols->{$name} or return;
+
+        # A heap array of owned (`Any`) boxes releases each element before the block: array_release walks the count and
+        # decrefs every element, then the array itself. A plain decref would recycle the block and leak the boxes.
+        if ( $array_owned_elem->{$name} ) {
+            my $loaded = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $addr );
+            my $hb     = $heap_base;
+            if ( !defined $hb && $symbols->{'__heap_base'} ) {
+                $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+            }
+            $hb = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) unless defined $hb;
+            my $release = $functions->{'Brocken::Runtime::array_release'};
+            $builder->build_call( $release, [ $hb, $loaded ] ) if $release;
+            return;
+        }
 
         # A local hash holds a table rather than a plain box: hash_release drops its stored values and then the
         # table itself, which a plain decref would skip.
@@ -1718,10 +1734,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $is_borrowed  = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $target->name };
         my $is_dyn_field = $is_field_target && $stored_type->kind eq 'dynamic' && !$is_weak_field;
 
-        # Only an RC-tracked dynamic slot owns its referent: an `Any` local, a dynamic field, or a borrowed `Any`
-        # parameter. A dynamic array element is not tracked (a plain store), and a `:weak` field deliberately keeps no
-        # reference, so both keep the branchless form below.
-        my $is_dyn_rc = $is_dyn_field || ( $stored_type->kind eq 'dynamic' && ( $is_rc || $is_borrowed ) );
+        # An element of a local managed (`Any`) array is itself an owning slot: `array_release` at scope exit drops one
+        # reference per element, so a store into one takes a reference and releases what it displaces, exactly like an
+        # `Any` local. A field/inline array element stays a plain store (its array has no element-release path).
+        my $is_owned_elem = $target->isa('Brocken::Katsuro::AST::Expr::ArrayIndex')
+            && $target->array->isa('Brocken::Katsuro::AST::Expr::Var')
+            && $target->array->sigil eq '@'
+            && $array_owned_elem->{ '@' . $target->array->name };
+
+        # Only an RC-tracked dynamic slot owns its referent: an `Any` local, a dynamic field, a borrowed `Any`
+        # parameter, or an owned `Any` array element. A `:weak` field deliberately keeps no reference, so it keeps the
+        # branchless form below.
+        my $is_dyn_rc = $is_dyn_field
+            || ( $stored_type->kind eq 'dynamic' && ( $is_rc || $is_borrowed || $is_owned_elem ) );
 
         # Reassigning a plain local that owns a class instance takes the same ownership contract as an `Any` slot,
         # but the displaced instance is released through its destructor. Two RHS shapes hand over an owned reference:
@@ -1804,7 +1829,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
         }
         else {
-            if ( $is_rc || $is_dyn_field ) {
+            if ( $is_rc || $is_dyn_field || $is_owned_elem ) {
                 $self->_emit_owned_store( $val, $addr, $stored_type, $line, $col );
             }
             elsif ($is_borrowed) {
@@ -2909,6 +2934,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $elem_bytes = $ir_type->byte_size;
         $array_elem_types->{$key} = $ir_type;
 
+        # A managed (`Any`) element is a box pointer the array owns: an owning store takes a reference for it and
+        # `array_release` drops one per element at scope exit. Only such an array is heap-promoted below regardless of
+        # size, because a stack array has no scope-exit release and its elements would leak.
+        my $managed = $ir_type->kind eq 'dynamic';
+        $array_owned_elem->{$key} = $managed ? 1 : 0;
+
         # Remember the element count when it folded to a constant, so `builtin::indexed(@a)` (and a `for` over a bare
         # array) can unroll the array at compile time. A runtime count is left undefined and those forms report that
         # they cannot seek into it.
@@ -2920,7 +2951,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # the scope-exit delta (block, loop iteration, function end) frees it back to the segregated free_big list,
         # which next iteration's alloc_array reuses.
         my $static_bytes = defined $size_val && $size_val->isa('Brocken::Lindsay::IR::Constant') ? $size_val->value * $elem_bytes : undef;
-        my $promote      = !defined $static_bytes || $static_bytes > 4096;
+        my $promote      = !defined $static_bytes || $static_bytes > 4096 || $managed;
         if ($promote) {
             my $ptr_type  = Brocken::Lindsay::IR::Type::ptr();
             my $slot      = $builder->build_alloca( $ptr_type, $self->unique_value_name( '%' . $key . '.heap' ), undef, $ast->line, $ast->col, $ast->name, $ast->elem_type );
@@ -2932,6 +2963,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $elem_size_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $elem_bytes );
             my $arr             = $builder->build_call( $alloc_fn, [ $hb, $count_val, $elem_size_const ], undef, $ast->line, $ast->col );
             $builder->build_store( $arr, $slot, $ast->line, $ast->col );
+
+            # A managed array's elements must read as null boxes before the first owning store (which releases the
+            # element it displaces). A recycled slab holds stale pointers, so zero the whole body here.
+            if ($managed) {
+                my $zero_fn = $functions->{'Brocken::Runtime::array_zero'} or
+                    Carp::croak( "Runtime function array_zero not found at " . $self->_loc($ast) );
+                $builder->build_call( $zero_fn, [ $arr, $count_val, $elem_size_const ], undef, $ast->line, $ast->col );
+            }
+
             $symbols->{$key} = $slot;
             $self->_note_rc($key);
 
@@ -4689,6 +4729,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned   = {};
         $class_escaped = {};
         $weak_var      = {};
+        $array_owned_elem = {};
         $hash_var        = {};
         $hash_value_type = {};
         $current_func->set_blocks( [] );
@@ -4761,6 +4802,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned   = {};
         $class_escaped = {};
         $weak_var      = {};
+        $array_owned_elem = {};
         $hash_var        = {};
         $hash_value_type = {};
         $current_func->set_blocks( [] );
@@ -4817,6 +4859,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned   = {};
         $class_escaped = {};
         $weak_var      = {};
+        $array_owned_elem = {};
         $hash_var        = {};
         $hash_value_type = {};
         $current_func->set_blocks( [] );
@@ -4884,6 +4927,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned   = {};
         $class_escaped = {};
         $weak_var      = {};
+        $array_owned_elem = {};
         $hash_var        = {};
         $hash_value_type = {};
         $current_func->set_blocks( [] );
