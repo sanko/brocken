@@ -1633,21 +1633,26 @@ sub array_shift_i64( ptr $arr ) : returns(i64) {
 # O(1) open addressing with linear probing and tombstones, per spec 6.2. Layout:
 #   [0]  header (refcount | tag 8 << 24)
 #   [8]  live entry count
-#   [16] bucket area bytes (capacity * 16), the size key the free_big list matches on
+#   [16] bucket area bytes (capacity * 32), the size key the free_big list matches on
 #   [24] tombstone count
-#   [32] buckets: capacity * { key (ptr), value (i64) }
-# A bucket key of 0 is empty and ends a probe; 1 is a tombstone and a probe skips it. Capacity is always a power of
-# two, kept at or below half full (live + tombstones) by growing to twice the size. Keys are borrowed NUL-terminated
-# strings -- a rodata literal or a managed buffer the caller keeps alive -- so only the values are owned. hash_set
-# takes ownership of the value it is given and releases whatever it displaces; hash_release releases the values before
-# the table itself.
+#   [32] insertion-order head bucket index (-1 when the table is empty)
+#   [40] insertion-order tail bucket index (-1 when the table is empty)
+#   [48] buckets: capacity * { key (ptr), value (i64), prev (i64), next (i64) }
+# A bucket key of 0 is empty and ends a probe; 1 is a tombstone and a probe skips it. The prev/next slots thread the
+# live entries into one insertion-ordered doubly-linked list of bucket indices (-1 terminates it), so `keys`/`values`
+# can walk the table in the order each key was first inserted -- the order spec 6.2 promises -- in O(entries) rather
+# than scanning the bucket area. A rehash rebuilds the list by walking the old one, so the order survives growth.
+# Capacity is always a power of two, kept at or below half full (live + tombstones) by growing to twice the size. Keys
+# are borrowed NUL-terminated strings -- a rodata literal or a managed buffer the caller keeps alive -- so only the
+# values are owned. hash_set takes ownership of the value it is given and releases whatever it displaces; hash_release
+# releases the values before the table itself.
 
 sub hash_capacity( ptr $h ) : returns(i64) {
-    return Brocken::shr( Brocken::load_i64( Brocken::ptr_add( $h, 16 ) ), 4 );
+    return Brocken::shr( Brocken::load_i64( Brocken::ptr_add( $h, 16 ) ), 5 );
 }
 
 sub hash_bucket( ptr $h, i64 $idx ) : returns(ptr) {
-    return Brocken::ptr_add( $h, Brocken::i64_add( 32, $idx * 16 ) );
+    return Brocken::ptr_add( $h, 48 + $idx * 32 );
 }
 
 # djb2 over the NUL-terminated bytes of $s. The caller masks the result into the bucket range.
@@ -1682,6 +1687,8 @@ sub hash_init( ptr $obj, i64 $cap, i64 $body ) : returns(ptr) {
     Brocken::store_i64( Brocken::ptr_add( $obj, 8 ),  0 );
     Brocken::store_i64( Brocken::ptr_add( $obj, 16 ), $body );
     Brocken::store_i64( Brocken::ptr_add( $obj, 24 ), 0 );
+    Brocken::store_i64( Brocken::ptr_add( $obj, 32 ), -1 );
+    Brocken::store_i64( Brocken::ptr_add( $obj, 40 ), -1 );
     my i64 $i = 0;
     while ( Brocken::ptr_cmp_gt( $cap, $i ) ) {
         Brocken::store_i64( hash_bucket( $obj, $i ), 0 );
@@ -1693,8 +1700,8 @@ sub hash_init( ptr $obj, i64 $cap, i64 $body ) : returns(ptr) {
 # Allocate a table with $cap buckets (0 for a fresh empty one). Recycles a freed big block like alloc_array, using the
 # bytes field at [obj+16] (the bucket area is always capacity * 16 wide) as the size key.
 sub hash_alloc( ptr $hb, i64 $cap ) : returns(ptr) {
-    my i64 $body = $cap * 16;
-    my i64 $size = Brocken::i64_add( $body, 32 );
+    my i64 $body = $cap * 32;
+    my i64 $size = Brocken::i64_add( $body, 48 );
     my ptr $prev = 0;
     my ptr $slab = get_free_big_head($hb);
     while ( Brocken::ptr_cmp_eq( $slab, 0 ) == 0 ) {
@@ -1753,20 +1760,22 @@ sub hash_find( ptr $h, ptr $key ) : returns(i64) {
 
 # Move every live entry of $h into a table twice its size (8 buckets when it was empty) and release the old table. The
 # values are moved as-is -- their ownership passes to the new buckets -- so the old table is dropped with a plain
-# decref, which does not touch them.
+# decref, which does not touch them. The walk follows the old insertion-order list (not the bucket area) so hash_set
+# appends each moved entry to the new table's list in the same order, preserving insertion order across a rehash.
 sub hash_grow( ptr $hb, ptr $h ) : returns(ptr) {
     my i64 $cap     = hash_capacity($h);
     my i64 $new_cap = 8;
     if ( $cap > 0 ) { $new_cap = $cap * 2; }
     my ptr $new = hash_alloc( $hb, $new_cap );
-    my i64 $i = 0;
-    while ( Brocken::ptr_cmp_gt( $cap, $i ) ) {
-        my ptr $slot = hash_bucket( $h, $i );
+    my i64 $idx = Brocken::load_i64( Brocken::ptr_add( $h, 32 ) );
+    while ( $idx != -1 ) {
+        my ptr $slot = hash_bucket( $h, $idx );
         my ptr $k    = Brocken::load_i64($slot);
+        my i64 $next = Brocken::load_i64( Brocken::ptr_add( $slot, 24 ) );
         if ( Brocken::ptr_cmp_eq( $k, 0 ) == 0 && Brocken::ptr_cmp_eq( $k, 1 ) == 0 ) {
             $new = hash_set( $hb, $new, $k, Brocken::load_i64( Brocken::ptr_add( $slot, 8 ) ) );
         }
-        $i = Brocken::i64_add( $i, 1 );
+        $idx = $next;
     }
     decref( $h, $hb );
     return $new;
@@ -1793,6 +1802,20 @@ sub hash_set( ptr $hb, ptr $h, ptr $key, ptr $val ) : returns(ptr) {
             my ptr $dst = hash_bucket( $h, $where );
             Brocken::store_i64( $dst, $key );
             Brocken::store_i64( Brocken::ptr_add( $dst, 8 ), $val );
+
+            # Append the new bucket to the tail of the insertion-order list. `prev` is the current tail; the old tail's
+            # `next` becomes this bucket; this bucket becomes the new tail; an empty list makes it the head too. A
+            # replaced key never reaches here, so re-assigning a key does not disturb the order.
+            my i64 $tail = Brocken::load_i64( Brocken::ptr_add( $h, 40 ) );
+            Brocken::store_i64( Brocken::ptr_add( $dst, 16 ), $tail );
+            Brocken::store_i64( Brocken::ptr_add( $dst, 24 ), -1 );
+            if ( $tail == -1 ) {
+                Brocken::store_i64( Brocken::ptr_add( $h, 32 ), $where );
+            }
+            else {
+                Brocken::store_i64( Brocken::ptr_add( hash_bucket( $h, $tail ), 24 ), $where );
+            }
+            Brocken::store_i64( Brocken::ptr_add( $h, 40 ), $where );
             Brocken::store_i64( Brocken::ptr_add( $h, 8 ), Brocken::i64_add( Brocken::load_i64( Brocken::ptr_add( $h, 8 ) ), 1 ) );
             if ( $first_tomb >= 0 ) {
                 Brocken::store_i64( Brocken::ptr_add( $h, 24 ), Brocken::i64_sub( Brocken::load_i64( Brocken::ptr_add( $h, 24 ) ), 1 ) );
@@ -1830,6 +1853,23 @@ sub hash_delete( ptr $hb, ptr $h, ptr $key ) : returns(ptr) {
     if ( $idx < 0 ) { return 0; }
     my ptr $slot = hash_bucket( $h, $idx );
     my i64 $old  = Brocken::load_i64( Brocken::ptr_add( $slot, 8 ) );
+
+    # Unlink from the insertion-order list before the bucket becomes a tombstone: a probe still treats 1 as occupied,
+    # but `keys`/`values` walk the list and must never see a removed key. Unlink in O(1) through the neighbours.
+    my i64 $prev = Brocken::load_i64( Brocken::ptr_add( $slot, 16 ) );
+    my i64 $next = Brocken::load_i64( Brocken::ptr_add( $slot, 24 ) );
+    if ( $prev == -1 ) {
+        Brocken::store_i64( Brocken::ptr_add( $h, 32 ), $next );
+    }
+    else {
+        Brocken::store_i64( Brocken::ptr_add( hash_bucket( $h, $prev ), 24 ), $next );
+    }
+    if ( $next == -1 ) {
+        Brocken::store_i64( Brocken::ptr_add( $h, 40 ), $prev );
+    }
+    else {
+        Brocken::store_i64( Brocken::ptr_add( hash_bucket( $h, $next ), 16 ), $prev );
+    }
     Brocken::store_i64( $slot, 1 );
     Brocken::store_i64( Brocken::ptr_add( $slot, 8 ), 0 );
     Brocken::store_i64( Brocken::ptr_add( $h, 8 ), Brocken::i64_sub( Brocken::load_i64( Brocken::ptr_add( $h, 8 ) ), 1 ) );
@@ -1855,4 +1895,52 @@ sub hash_release( ptr $hb, ptr $h ) {
         }
     }
     decref( $h, $hb );
+}
+
+# Allocate a tag-7 list of $n boxed slots: the tag at +0, the count at +8, and one eight-byte box pointer per slot from
+# +16. This is exactly the shape `Expr::List` builds in the lowerer, so a `for` loop or a list declaration can walk the
+# result. Lists are bump-allocated and never freed, like every other list the compiler emits.
+sub list_alloc( ptr $hb, i64 $n ) : returns(ptr) {
+    my ptr $list = bump_alloc( $hb, 16 + $n * 8 );
+    Brocken::store_i64( $list, Brocken::shl( 7, 24 ) );
+    Brocken::store_i64( Brocken::ptr_add( $list, 8 ), $n );
+    return $list;
+}
+
+# `keys %h`: a fresh tag-7 list of the table's keys as String boxes, in insertion order. The key bytes are borrowed
+# from the table -- a rodata literal or an immortal bump-allocated buffer -- so the box holds that pointer directly.
+sub hash_keys( ptr $hb, ptr $h ) : returns(ptr) {
+    my i64 $n    = hash_len($h);
+    my ptr $list = list_alloc( $hb, $n );
+    my i64 $idx  = Brocken::load_i64( Brocken::ptr_add( $h, 32 ) );
+    my i64 $i    = 0;
+    while ( $idx != -1 ) {
+        my ptr $slot = hash_bucket( $h, $idx );
+        my ptr $key  = Brocken::load_i64($slot);
+        if ( Brocken::ptr_cmp_eq( $key, 0 ) == 0 ) {
+            Brocken::store_i64( Brocken::ptr_add( $list, 16 + $i * 8 ), make_box_str( $hb, $key ) );
+            $i = $i + 1;
+        }
+        $idx = Brocken::load_i64( Brocken::ptr_add( $slot, 24 ) );
+    }
+    return $list;
+}
+
+# `values %h`: a fresh tag-7 list of the stored value boxes in insertion order. Each value gets one extra reference for
+# the list, exactly as `Expr::List` does for a dynamic element, so a value box outlives a hash that is released after
+# the call. (The list itself, like every tag-7 list, is never released.)
+sub hash_values( ptr $hb, ptr $h ) : returns(ptr) {
+    my i64 $n    = hash_len($h);
+    my ptr $list = list_alloc( $hb, $n );
+    my i64 $idx  = Brocken::load_i64( Brocken::ptr_add( $h, 32 ) );
+    my i64 $i    = 0;
+    while ( $idx != -1 ) {
+        my ptr $slot = hash_bucket( $h, $idx );
+        my ptr $val  = Brocken::load_i64( Brocken::ptr_add( $slot, 8 ) );
+        incref($val);
+        Brocken::store_i64( Brocken::ptr_add( $list, 16 + $i * 8 ), $val );
+        $i   = $i + 1;
+        $idx = Brocken::load_i64( Brocken::ptr_add( $slot, 24 ) );
+    }
+    return $list;
 }

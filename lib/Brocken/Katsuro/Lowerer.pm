@@ -1513,6 +1513,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $stmt->isa('Brocken::Katsuro::AST::Expr::Exists')      ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Defined')     ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Delete')      ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::HashKeys')    ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::ArrayOp')     ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::MethodCall')  ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::List')        ||
@@ -2656,6 +2657,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Delete') ) {
             return $self->lower_delete($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::HashKeys') ) {
+            return $self->lower_hash_keys($expr);
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::ArrayOp') ) {
             return $self->lower_array_op($expr);
         }
@@ -2853,6 +2857,21 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         );
         $returns_owned->{ $fn->name } = 1;
         return $builder->build_call( $fn, [ $hb, $h, $key ], undef, $line, $col );
+    }
+
+    # `keys %h` / `values %h` (spec 6.2): a tag-7 list, in insertion order, of the table's keys (as String boxes) or
+    # its stored value boxes. The result is a plain list pointer -- the same `ptr` a `for my $k (...)` loop or a list
+    # declaration walks -- so there is nothing to box or unbox. The operand must be a local hash variable.
+    method lower_hash_keys($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $op  = $ast->op;
+        my $arg = $ast->expr;
+        Carp::croak( "$op expects a hash variable like %h at " . $self->_loc($ast) )
+            unless $arg->isa('Brocken::Katsuro::AST::Expr::Var') && $arg->sigil eq '%';
+        my $h  = $self->lower_expression($arg);
+        my $hb = $self->_hash_heap_base( $line, $col );
+        my $fn = $self->_reflect_runtime( $op eq 'keys' ? 'hash_keys' : 'hash_values', $ast, $line, $col );
+        return $builder->build_call( $fn, [ $hb, $h ], undef, $line, $col );
     }
 
     # `%h{key}` read: the stored box pointer, reinterpreted as a dynamic value.
