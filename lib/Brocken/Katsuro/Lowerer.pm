@@ -2743,15 +2743,24 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $sym;
         }
 
-        # Instruction that represents an address -- load from it
+        # Instruction that represents an address -- load from it. Only an alloca carries an allocated type and a field
+        # GEP carries its field's type; anything else bound to the name is already a *value*, which happens when a
+        # call binds an earlier parameter to its lowered argument so a later default can reference it (the argument
+        # for an `Any` parameter is a Box instruction, not a slot).
         my $loaded_type;
         if ( $sym->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') && $current_class ) {
             my $cd      = $classes->{$current_class};
             my ($field) = $cd ? grep { $_->{name} eq $ast->name } $cd->{own_fields}->@* : ();
             $loaded_type = $field ? $field->{ir_type} : Brocken::Lindsay::IR::Type::i64();
         }
+        elsif ( $sym->isa('Brocken::Lindsay::IR::Instruction::Alloca') ) {
+            $loaded_type = $sym->allocated_type;
+        }
+        elsif ( $sym->isa('Brocken::Lindsay::IR::Instruction::GetElementPtr') ) {
+            $loaded_type = Brocken::Lindsay::IR::Type::ptr();
+        }
         else {
-            $loaded_type = $sym->allocated_type // Brocken::Lindsay::IR::Type::i64();
+            return $sym;
         }
         return $builder->build_load( $loaded_type, $sym, undef, $line, $col );
     }
@@ -3813,6 +3822,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $param_idx = ( $callee_has_heap_base ? 1 : 0 ) + ( $callee_has_want ? 1 : 0 );
         my $defaults  = $param_defaults->{$resolved};
 
+        # Arity: an excess argument is a compile error rather than a silently ignored value. `say`/`print` are variadic
+        # (they stringify and concatenate every argument), so they are exempt; every other named call is matched
+        # one-to-one against the callee's user parameters (the hidden `%__heap_base`/`%__want` are not user arguments
+        # and are excluded).
+        my $hidden_count = ( $callee_has_heap_base ? 1 : 0 ) + ( $callee_has_want ? 1 : 0 );
+        my $user_params  = $callee->params->@* - $hidden_count;
+        if ( !$stringify_args && $ast->args->@* > $user_params ) {
+            Carp::croak( "Too many arguments to '$name': $user_params expected, got " . $ast->args->@* . " at " . $self->_loc($ast) );
+        }
+
         # A default for one omitted trailing argument may reference an earlier one, so each value that lands in a
         # parameter is bound to that parameter's name while the rest of the call is lowered. The bindings are
         # restored afterwards so they never leak into the caller's scope.
@@ -3856,6 +3875,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $symbols->{ $rec->{name} } = $val;
                 $param_idx++;
             }
+        }
+
+        # ... and a required parameter left unfilled is the other half of the same check: the call site must supply every
+        # argument that has no default, rather than leaving the callee to read an uninitialised slot. The arguments are
+        # still lowered before this runs, so a bad argument is reported first and an arity error never hides one.
+        if ( !$stringify_args && $param_idx < $callee->params->@* ) {
+            my $missing = $param_idx - $hidden_count + 1;    # 1-based index of the first unfilled user parameter
+            Carp::croak("Missing required argument $missing of '$name' (its parameter has no default) at "
+                    . $self->_loc($ast) );
         }
         $symbols->{ $_->[0] } = $_->[1] for @saved;
         $self->_emit_fuel_check( $line, $col );
@@ -4837,6 +4865,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $param_idx = 3;
         my $defaults  = $param_defaults->{$full_name};
 
+        # Arity, as for plain calls: a method's hidden `%__heap_base`, `%__want`, and `$self` are not user arguments, so
+        # the user parameters are everything past the first three.
+        my $method_user_params = $callee->params->@* - 3;
+        if ( $ast->args->@* > $method_user_params ) {
+            Carp::croak( "Too many arguments to '$method': $method_user_params expected, got " . $ast->args->@* . " at "
+                    . $self->_loc($ast) );
+        }
+
         # Same omitted-argument handling as plain calls: defaults fill the trailing parameters in order, and a default
         # may reference an earlier one because each landed value is bound to its parameter name until the call is done.
         my @saved;
@@ -4866,6 +4902,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $symbols->{ $rec->{name} } = $val;
                 $param_idx++;
             }
+        }
+        if ( $param_idx < $callee->params->@* ) {
+            my $missing = $param_idx - 3 + 1;    # 1-based index of the first unfilled user parameter
+            Carp::croak("Missing required argument $missing of '$method' (its parameter has no default) at "
+                    . $self->_loc($ast) );
         }
         $symbols->{ $_->[0] } = $_->[1] for @saved;
         $self->_emit_fuel_check( $line, $col );
