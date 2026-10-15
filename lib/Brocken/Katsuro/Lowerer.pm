@@ -2356,7 +2356,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $catch_name = $ast->catch_var;
             $catch_name =~ s/^[\$@%]//;
             my $alloca = $builder->build_alloca(
-                Brocken::Lindsay::IR::Type::i64(), $self->unique_block_name('%' . $catch_name . '.addr'), undef, $line,
+                Brocken::Lindsay::IR::Type::i64(), $self->unique_value_name('%' . $catch_name . '.addr'), undef, $line,
                 $col, $catch_name, 'i64',
             );
             $saved_catch_sym       = $symbols->{$catch_name};
