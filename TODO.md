@@ -95,7 +95,7 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
 
 - [ ] **Implement Landing Dispatcher:** Lower `try/catch/finally` so that normal exits, `return`, `last`/`next`, and `throw`/`die` all route through a unified dispatch block.
 - [ ] **Fix F4 (`try/catch` Memory Leak):** Ensure the ICB exception handler stack is cleanly popped in the Landing Dispatcher on every single exit path.
-- [ ] **Fix F18 (Catch-var Aliasing):** Prevent nested catch blocks from aliasing to the exact same static frame slot.
+- [x] **Fix F18 (Catch-var Aliasing):** The catch variable was stored in the symbol table under its sigil -- `catch ($e)` bound `$e`, but a read looked up the bare `e` -- so *any* use of the catch variable was an "Undefined variable" error, a latent bug the old tests missed by never reading it. The binding is now keyed by the bare name, and its alloca is given a unique name (`%<var>.addr_<n>`, where it was previously a fixed `%<var>.addr` that made two nested catches share one static frame slot). The previous binding is saved and restored rather than deleted, so a nested try/catch that reuses a name neither aliases the outer slot nor leaves the outer name unbound after the inner block. Covered by `t/10000_katsuro/11010_catch_var.t`.
 
 ---
 

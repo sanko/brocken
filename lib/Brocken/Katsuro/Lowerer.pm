@@ -2347,11 +2347,20 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             undef, $line, $col, );
         my $thrown_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $thrown_addr, undef, $line, $col );
 
-        # Store thrown value to catch_var if present
+        # Store thrown value to catch_var if present. The parser records the binding with its sigil (`$e`), but the
+        # symbol table is keyed by the bare name, so strip it. The alloca gets a unique name and the previous binding
+        # is saved (not just deleted), so a nested try/catch that reuses the same variable name does not alias the
+        # outer catch's slot or leave the outer binding unbound after the inner block.
+        my ( $catch_name, $saved_catch_sym );
         if ( $catch_block && defined $ast->catch_var ) {
-            my $var_name = $ast->catch_var;
-            my $alloca = $builder->build_alloca( Brocken::Lindsay::IR::Type::i64(), '%' . $var_name . '.addr', undef, $line, $col, $var_name, 'i64' );
-            $symbols->{$var_name} = $alloca;
+            $catch_name = $ast->catch_var;
+            $catch_name =~ s/^[\$@%]//;
+            my $alloca = $builder->build_alloca(
+                Brocken::Lindsay::IR::Type::i64(), $self->unique_block_name('%' . $catch_name . '.addr'), undef, $line,
+                $col, $catch_name, 'i64',
+            );
+            $saved_catch_sym       = $symbols->{$catch_name};
+            $symbols->{$catch_name} = $alloca;
             $builder->build_store( $thrown_val, $alloca, $line, $col );
         }
 
@@ -2369,9 +2378,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $current_block = $catch_block;
             $self->lower_block_body( $ast->catch_body );
 
-            # Clean up catch_var from symbols
-            if ( defined $ast->catch_var ) {
-                delete $symbols->{ $ast->catch_var };
+            # Restore (or clear) the catch variable binding, so a nested same-named catch does not clobber an outer
+            # one and an outer binding survives the inner block.
+            if ( defined $catch_name ) {
+                if ( defined $saved_catch_sym ) { $symbols->{$catch_name} = $saved_catch_sym }
+                else                            { delete $symbols->{$catch_name} }
             }
             unless ( $current_block->terminator ) {
                 $builder->build_br( $finally_block // $merge_block, $line, $col );
