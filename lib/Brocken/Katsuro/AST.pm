@@ -199,6 +199,9 @@ class Brocken::Katsuro::AST::Stmt::TryCatch v0.0.1 : isa(Brocken::Katsuro::AST::
     field $catch_body   : param : reader = undef;    # AST::Stmt::Block or undef
     field $finally_body : param : reader = undef;    # AST::Stmt::Block or undef
 };
+class Brocken::Katsuro::AST::Stmt::Exit v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $code : param : reader = undef;            # AST::Node exit status expression, or undef for 0
+};
 class Brocken::Katsuro::AST::Stmt::Throw v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $expr : param : reader;                    # AST::Node expression to throw
 } 1;

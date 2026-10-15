@@ -155,6 +155,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return $self->parse_for()          if $self->check( 'KEYWORD', 'for' ) || $self->check( 'KEYWORD', 'foreach' );
         return $self->parse_return()       if $self->check( 'KEYWORD', 'return' );
         return $self->parse_throw()        if $self->check( 'KEYWORD', 'throw' );
+        return $self->parse_exit()         if $self->check( 'KEYWORD', 'exit' );
         return $self->parse_trycatch()     if $self->check( 'KEYWORD', 'try' );
         return $self->parse_loop_control() if $self->check( 'KEYWORD', 'last' ) || $self->check( 'KEYWORD', 'next' );
 
@@ -413,6 +414,22 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return $self->_end_statement(
             Brocken::Katsuro::AST::Stmt::Throw->new( $self->_pos_token($throw_token), expr => $expr ),
             "Expected ';' after throw" );
+    }
+
+    # `exit;` or `exit(EXPR);` -- terminate the process with the given status (0 when omitted). The status is optional
+    # so both the bare form and the Perl-style parenthesized form parse; a postfix modifier (`exit(1) if $bad;`) is
+    # handled by `_end_statement`.
+    method parse_exit() {
+        my $exit_token = $self->advance();
+        my $code       = undef;
+        if ( $self->check('(') ) {
+            $self->advance();
+            $code = $self->parse_expression(0) unless $self->check(')');
+            $self->consume(')');
+        }
+        return $self->_end_statement(
+            Brocken::Katsuro::AST::Stmt::Exit->new( $self->_pos_token($exit_token), code => $code ),
+            "Expected ';' after exit" );
     }
 
     method parse_trycatch() {

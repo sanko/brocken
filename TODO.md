@@ -75,7 +75,7 @@ Implement the **Caller-Borrows** contract: passing arguments does not touch refc
 ## 5. Built-in Functions & Container Operations
 
 - [ ] **Process & Error Builtins:**
-  - `exit($code)`: Emits kernel `exit` syscall.
+  - `exit($code)` is shipped: `exit;` / `exit(EXPR);` parses as `Stmt::Exit` and lowers to a call to libc `exit`, so stdio is flushed before the process ends (a raw kernel syscall would drop output still buffered in `puts`, which is why this is a call). The call is noreturn, so the block is closed with a branch to a dead continuation block and nothing after the `exit` runs -- including a `return` in the same function or the rest of an enclosing loop. The status is an `i64` (0 when omitted), unboxing an `Any` operand, and a postfix modifier applies (`exit(1) if $bad;`). Native-only: a Wasm module has no `exit` import (its runner would need `proc_exit`). Pinned by `t/10000_katsuro/11120_exit.t` on host, aarch64, and riscv64.
   - `warn(@msgs)`: Formats and writes to `stderr`.
   - `die(@msgs)`: Formats error and emits `throw` (caught by `catch ($err)` or exits 255).
 - [ ] **Container Builtins:**

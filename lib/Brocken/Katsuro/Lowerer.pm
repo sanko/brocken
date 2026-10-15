@@ -1447,6 +1447,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ListVarDecl') )   { return $self->lower_list_var_decl($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') )        { return $self->lower_return($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Throw') )         { return $self->lower_throw($stmt); }
+        if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Exit') )          { return $self->lower_exit($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::TryCatch') )      { return $self->lower_trycatch($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') )            { return $self->lower_if($stmt); }
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') )         { return $self->lower_while($stmt); }
@@ -2402,6 +2403,35 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # --- continue block ---
         $builder->position_at_end($cont_block);
         $current_block = $cont_block;
+    }
+
+    # `exit(CODE)` terminates the process through libc `exit`, which flushes stdio before returning to the OS -- the
+    # reason it is a call and not a raw syscall: `say`/`print` write through buffered `puts`, so a raw syscall would
+    # drop output written but not yet flushed. The call never returns, so the block is closed with a branch to a
+    # continuation block that the code after `exit` unwinds into (as `lower_throw` does for `longjmp`), keeping the
+    # CFG well-formed. Native-only for now: a Wasm module has no `exit` import (its runner, WASI, would need
+    # `proc_exit`), and the Wasm backend is already excluded from the exit tests.
+    method lower_exit($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $code
+            = $ast->code
+            ? $self->maybe_convert_type( $self->lower_expression( $ast->code ), Brocken::Lindsay::IR::Type::i64(), $line, $col, 0 )
+            : Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+        my $exit_fn = $functions->{'exit'};
+        if ( !$exit_fn ) {
+            $exit_fn = Brocken::Lindsay::IR::Function->new(
+                name        => 'exit',
+                return_type => Brocken::Lindsay::IR::Type::void(),
+                params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64() ) ],
+            );
+            $module->add_function($exit_fn);
+            $functions->{'exit'} = $exit_fn;
+        }
+        $builder->build_call( $exit_fn, [$code], undef, $line, $col );
+        my $cont = $current_func->append_block( $self->unique_block_name('exit_cont') );
+        $builder->build_br( $cont, $line, $col );
+        $builder->position_at_end($cont);
+        $current_block = $cont;
     }
 
     method lower_break($ast) {
