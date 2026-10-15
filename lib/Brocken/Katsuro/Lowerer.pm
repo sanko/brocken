@@ -3543,7 +3543,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $builder->build_icmp( 'eq', $operand, $zero, undef, $line, $col );
         }
 
-        # Unbox dynamic operands to i64 before the remaining unary ops
+        # Negation of an untyped (dynamic) operand reads it at f64, not i64. A box may hold a float, and `unbox_i64`
+        # truncates a float payload toward zero, so `my $x = -3.5; -$x` came out -3. Reading it as f64 follows the same
+        # Perl scalar rule the binary untyped arithmetic uses (`lower_binop`): `unbox_f64` widens an integer payload, so
+        # one f64 neg serves either kind of box and preserves the fraction a float box carries. The neg of an f64 is an
+        # `fneg`; a constant operand is never dynamic, so the float-literal fold below is untouched.
+        if ( $op eq '-' && $operand->type->kind eq 'dynamic' ) {
+            $operand = $self->maybe_convert_type( $operand, Brocken::Lindsay::IR::Type::f64() );
+        }
+
+        # Unbox remaining dynamic operands to i64 before the remaining unary ops
         if ( $operand->type->kind eq 'dynamic' ) {
             $operand = $self->maybe_convert_type( $operand, Brocken::Lindsay::IR::Type::i64() );
         }
