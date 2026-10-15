@@ -183,7 +183,8 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                     $type_sec .= pack( 'C', 0x60 ) . $self->_uleb( scalar $fd->{param_valtypes}->@* ) . $params . "\x01" . pack( 'C', $rt );
                 }
             }
-            $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + 1 ) . $self->_uleb( scalar @type_table ) . $type_sec;
+            my $type_count = $self->_uleb( scalar @type_table );
+            $type_sec = pack( 'C', 1 ) . $self->_uleb( length($type_sec) + length($type_count) ) . $type_count . $type_sec;
 
             # Memory Section (ID 5)
             my $mem_sec = $self->_memory_section;
@@ -199,7 +200,8 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                 my $key    = "$params|$ret";
                 $func_sec .= $self->_uleb( $type_map{$key} );
             }
-            $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $func_sec;
+            my $func_count = $self->_uleb( scalar @func_data );
+            $func_sec = pack( 'C', 3 ) . $self->_uleb( length($func_sec) + length($func_count) ) . $func_count . $func_sec;
 
             # Export Section (ID 7) -- export all named functions
             my $export_sec = '';
@@ -207,14 +209,16 @@ class Brocken::Jenny::Linker::Wasm v0.0.1 : isa(Brocken::Jenny::Linker) {
                 my $name = $func_data[$i]{name};
                 $export_sec .= $self->_uleb( length($name) ) . $name . pack( 'C', 0x00 ) . $self->_uleb($i);
             }
-            $export_sec = pack( 'C', 7 ) . $self->_uleb( length($export_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $export_sec;
+            my $export_count = $self->_uleb( scalar @func_data );
+            $export_sec = pack( 'C', 7 ) . $self->_uleb( length($export_sec) + length($export_count) ) . $export_count . $export_sec;
 
             # Code Section (ID 10)
             my $code_sec = '';
             for my $fd (@func_data) {
                 $code_sec .= $self->_uleb( length( $fd->{bytes} ) ) . $fd->{bytes};
             }
-            $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_sec) + 1 ) . $self->_uleb( scalar @func_data ) . $code_sec;
+            my $code_count = $self->_uleb( scalar @func_data );
+            $code_sec = pack( 'C', 10 ) . $self->_uleb( length($code_sec) + length($code_count) ) . $code_count . $code_sec;
             die 'Wasm code section too large' if length($code_sec) > 268435456;
             sysopen my $fh, $output_file, O_WRONLY | O_CREAT | O_TRUNC or die $!;
             binmode $fh;
