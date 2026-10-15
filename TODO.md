@@ -210,3 +210,76 @@ features. The feature-by-feature plan, decisions, and open questions live in
   a hardware-assisted fast path analogous to x86's `div128_64` and the ARM64 partial fast path, so
   both the code size and the allocator pressure drop. The result must stay bit-identical to today's
   sequence; `t/30000_jenny/32000_codegen/32650_i128_arithmetic_native.t` is the regression guard.
+
+---
+
+## 14. Long-Distance Milestone: Freestanding (No-libc) Builds
+
+**Status: not started, deliberately deferred.** `docs/spec.md` §1.1 already claims Brocken "relies on no external C
+runtime (libc)". That is aspirational, not true today: every native binary is a *dynamic* ELF (`DT_NEEDED libc.so.6`
+and `libpthread.so.0`, `PT_INTERP` = `ld-linux-*.so`), and generated code calls libc for I/O, formatting, string
+comparison, exceptions, and process exit. Until this milestone lands, the spec claim should be read as a goal (or
+softened), not a description of the shipped compiler.
+
+### Goal
+
+Support **both** build modes, selected per `Brocken` instance by a flag, exactly like `platform`:
+
+```perl
+Brocken->new( platform => ..., libc => 1 );   # default: linker-resolved libc imports (shipped)
+Brocken->new( platform => ..., libc => 0 );   # freestanding: raw syscalls, static image (planned)
+```
+
+The flag must be threaded to **both** the lowerer (chooses libc calls vs. inline/syscall code) and the linker
+(emits a dynamic vs. a static image), the same way `platform` is.
+
+### Why `exit` is a libc call today (and why a bare syscall is not a one-line swap)
+
+The entry stub ends by calling libc `exit` through the GOT. A raw `exit` *syscall* needs the target's syscall
+number at lowering time, but symbol resolution (`exit`, `puts`, ...) is deferred to the linker and so is
+target-agnostic. Concretely: `Brocken::compile($src)` deliberately does **not** default the lowerer's `platform`
+from `$self->platform` (it keeps portable C symbol spellings), so a raw-syscall `exit` silently used x86_64's
+number 60 on every target and returned instead of exiting on aarch64/riscv64. A freestanding build must therefore
+thread the target platform into lowering (or resolve numbers some other way) before it can emit syscalls.
+
+### Inventory of libc touchpoints (native codegen)
+
+| Layer | libc use | Freestanding replacement |
+| --- | --- | --- |
+| Linker entry stub | `exit` via GOT (ELF64 `_build_entry_stub`) | raw `exit` syscall (linker already computes `$platform->syscall('exit')`) |
+| Linker image | `.interp`, `.dynamic`, `.rela.dyn`, `.dynsym`/`.dynstr`, `.gnu.hash`, GOT, `DT_NEEDED` | static `ET_EXEC`: skip all dynamic sections, no `PT_INTERP`/`PT_DYNAMIC`, no imports |
+| `say`/`print` | `puts`/`_puts` | raw `write(2)` to fd 1 |
+| number -> string, interpolation | `sprintf` (`_stringify`) | inline itoa/ftoa |
+| string -> float | `strtod` | inline parser |
+| string compare | `strcmp` (`_lower_strcmp`) | inline byte loop |
+| string length | `strlen` | inline loop / length field |
+| exceptions | `setjmp`/`longjmp` | custom landing unwinder (hardest) |
+| isolates | `pthread_create`/`pthread_join` | raw `clone` (Linux/BSD only) |
+| FFI | `dlopen`/`dlsym` | none, or a hand-rolled ELF loader |
+| csprng seeds | `getrandom`/`BCryptGenRandom`/`getentropy` | raw `getrandom(2)` |
+
+`src/runtime/core.brocken` (allocator, GC, fibers) is already pure Brocken and needs nothing -- **fibers are
+libc-free by construction**: `ctx_swap` is a userspace register/SP save-restore emitted as machine code, so it
+needs neither libc nor an OS thread.
+
+### Platform constraints
+
+- **Linux / BSD:** a fully static, libc-free image is realistic; `clone`/`rfork` give threads without libc.
+- **macOS:** a *truly* libc-free process is not attainable. There is no BSD syscall for thread creation --
+  threads come from Mach traps (`thread_create`/`thread_set_state`/`thread_resume`) and entail reimplementing
+  per-thread TLS/TSD and much of libpthread, all inside **libSystem**, which macOS does not support statically
+  linking. So on macOS a freestanding build is realistically **single-threaded** (fibers fine, `Isolate` not),
+  and freestanding mode should *gate `Isolate` at compile time per platform* rather than fail at link.
+- **Windows:** threads via `CreateThread` (kernel32), not libc, but still a system DLL.
+
+### Suggested phasing (when picked up)
+
+1. **Plumbing:** `libc => 1|0` on `Brocken`, threaded to lowerer + linker; thread the target platform into the
+   lowerer when `libc => 0`.
+2. **Core static link (Linux/ELF64):** static `ET_EXEC` (no interp/dynamic/imports) + raw-`exit` entry stub.
+3. **Core freestanding I/O:** `exit` syscall, `write` for `say`/`print`, inline `strcmp`/`strlen`, inline
+   itoa/ftoa, inline `strtod`.
+4. **Exceptions without libc:** replace `setjmp`/`longjmp` with a custom unwinder.
+5. **Threads / FFI:** `clone`-based isolates (Linux/BSD); FFI stays libc/dyld-only, so freestanding + FFI is a
+   compile-time conflict.
+6. **Spec:** once modes coexist, state both (default libc, opt-in freestanding) instead of the blanket claim.
