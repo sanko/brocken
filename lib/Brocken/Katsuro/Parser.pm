@@ -945,6 +945,21 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 my $arg = $self->parse_expression(PREC_UNARY);
                 return Brocken::Katsuro::AST::Expr::Delete->new( $self->_pos_token($token), expr => $arg );
             }
+            if ( $token->{value} eq 'undef' ) {
+
+                # `undef($x)` / `undef $x` resets a target to the undefined state; a bare `undef` is the null value.
+                if ( $self->check('(') ) {
+                    $self->advance();
+                    my $arg = $self->parse_expression(0);
+                    $self->consume( ')', undef, "Expected ')' after undef argument" );
+                    return Brocken::Katsuro::AST::Expr::UndefOp->new( $self->_pos_token($token), expr => $arg );
+                }
+                if ( $self->check('VAR') ) {
+                    return Brocken::Katsuro::AST::Expr::UndefOp->new( $self->_pos_token($token),
+                        expr => $self->parse_expression(PREC_UNARY) );
+                }
+                return Brocken::Katsuro::AST::Expr::Undef->new( $self->_pos_token($token) );
+            }
             if ( $token->{value} eq 'keys' || $token->{value} eq 'values' ) {
                 my $arg = $self->parse_expression(PREC_UNARY);
                 return Brocken::Katsuro::AST::Expr::HashKeys->new( $self->_pos_token($token), op => $token->{value}, expr => $arg );

@@ -18,6 +18,7 @@ class Brocken::Katsuro::Lexer v0.0.1 {
         exists
         defined
         delete
+        undef
         keys values
         push pop shift unshift
         use require

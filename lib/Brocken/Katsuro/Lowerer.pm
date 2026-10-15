@@ -1514,6 +1514,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $stmt->isa('Brocken::Katsuro::AST::Expr::Defined')     ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Delete')      ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::HashKeys')    ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::Undef')       ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::UndefOp')     ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::ArrayOp')     ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::MethodCall')  ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::List')        ||
@@ -2660,6 +2662,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::HashKeys') ) {
             return $self->lower_hash_keys($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Undef') ) {
+            return $self->lower_undef($expr);
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::UndefOp') ) {
+            return $self->lower_undef_op($expr);
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::ArrayOp') ) {
             return $self->lower_array_op($expr);
         }
@@ -2872,6 +2880,82 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $hb = $self->_hash_heap_base( $line, $col );
         my $fn = $self->_reflect_runtime( $op eq 'keys' ? 'hash_keys' : 'hash_values', $ast, $line, $col );
         return $builder->build_call( $fn, [ $hb, $h ], undef, $line, $col );
+    }
+
+    # `undef` as a value: the null box (Type Tag 0). `defined` sees it as undefined, truthiness as false, and
+    # `maybe_convert_type` turns it into a native zero or a null pointer at whatever slot consumes it.
+    method lower_undef($ast) {
+        return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::dynamic(), value => 0 );
+    }
+
+    # `undef($x)` / `undef $x` / `undef(@a)` / `undef(%h)` (spec 3.3): reset a target to the undefined state. A
+    # scalar -- a variable, field, or array element -- is exactly `$x = undef`, so the assignment lowering, and its
+    # reference counting, is reused. A whole array or hash is emptied in place: the container keeps its identity and
+    # only its contents are dropped.
+    method lower_undef_op($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $target = $ast->expr;
+        if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') && $target->sigil eq '%' ) {
+            return $self->lower_undef_hash( $ast, $target, $line, $col );
+        }
+        if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') && $target->sigil eq '@' ) {
+            return $self->lower_undef_array( $ast, $target, $line, $col );
+        }
+        my $null = Brocken::Katsuro::AST::Expr::Undef->new( file => $ast->file, line => $line, col => $col );
+        my $assign = Brocken::Katsuro::AST::Stmt::Assign->new(
+            file => $ast->file, line => $line, col => $col, target => $target, expr => $null, op => '=' );
+        $self->lower_assign($assign);
+        return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::dynamic(), value => 0 );
+    }
+
+    # `undef %h`: release the table's stored values (`hash_release` cascades them and drops the slot's reference) and
+    # install a fresh empty table. The hash keeps its identity; only its contents change.
+    method lower_undef_hash( $ast, $target, $line, $col ) {
+        my $key  = '%' . $target->name;
+        my $slot = $symbols->{$key} // $symbols->{ $target->name };
+        Carp::croak( "Unknown hash variable '$key' at " . $self->_loc($ast) ) unless $slot;
+        my $hb  = $self->_hash_heap_base( $line, $col );
+        my $old = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $slot, undef, $line, $col );
+        $builder->build_call( $self->_reflect_runtime( 'hash_release', $ast, $line, $col ), [ $hb, $old ], undef, $line, $col );
+        my $new = $builder->build_call( $self->_reflect_runtime( 'hash_new', $ast, $line, $col ), [$hb], undef, $line, $col );
+        $builder->build_store( $new, $slot, $line, $col );
+        return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::dynamic(), value => 0 );
+    }
+
+    # `undef @a`: empty the array in place. A managed (`Any`) heap array drops one reference per element; a plain
+    # element array owns nothing, so only its length falls to zero. A small fixed array lives on the stack and has its
+    # elements zeroed directly (a native slot has no undefined state).
+    method lower_undef_array( $ast, $target, $line, $col ) {
+        my $key = '@' . $target->name;
+        my $sym = $symbols->{$key} // $symbols->{ $target->name };
+        Carp::croak( "Unknown array variable '$key' at " . $self->_loc($ast) ) unless $sym;
+        my $i64 = Brocken::Lindsay::IR::Type::i64();
+        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        if ( $needs_rc->{$key} ) {
+            my $arr = $builder->build_load( $ptr, $sym, undef, $line, $col );
+            if ( $array_owned_elem->{$key} ) {
+                my $hb = $self->_hash_heap_base( $line, $col );
+                $builder->build_call( $self->_reflect_runtime( 'array_clear', $ast, $line, $col ), [ $hb, $arr ], undef, $line, $col );
+            }
+            else {
+                my $count_addr = $builder->build_gep( Brocken::Lindsay::IR::Type::i8(), $arr,
+                    [ Brocken::Lindsay::IR::Constant->new( type => $i64, value => 8 ) ], undef, $line, $col );
+                $builder->build_store( Brocken::Lindsay::IR::Constant->new( type => $i64, value => 0 ), $count_addr, $line, $col );
+            }
+        }
+        else {
+            my $count = $array_counts->{$key};
+            Carp::croak( "undef of a stack array of unknown length at " . $self->_loc($ast) ) unless defined $count;
+            my $elem_type = $array_elem_types->{$key} // $i64;
+            my $zero = Brocken::Lindsay::IR::Constant->new( type => $elem_type, value => $elem_type->kind eq 'float' ? 0.0 : 0 );
+            for my $i ( 0 .. $count - 1 ) {
+                my $idx = Brocken::Katsuro::AST::Expr::Const->new( file => $ast->file, line => $line, col => $col, value => $i, type => 'Int' );
+                my $addr = $self->lower_array_addr( Brocken::Katsuro::AST::Expr::ArrayIndex->new(
+                    file => $ast->file, line => $line, col => $col, array => $target, index => $idx ) );
+                $builder->build_store( $zero, $addr, $line, $col );
+            }
+        }
+        return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::dynamic(), value => 0 );
     }
 
     # `%h{key}` read: the stored box pointer, reinterpreted as a dynamic value.
@@ -4301,6 +4385,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     # Type conversion helper
     method maybe_convert_type( $val, $target_type, $line = 0, $col = 0, $unbox_ptr = 0 ) {
+
+        # `undef` is the null box -- the only dynamic constant the lowerer builds. Converting it to a native type is
+        # that type's zero, and to a `ptr`/`String`/class slot it is null; reading the payload out of a null box would
+        # dereference address 8. (A real box always arrives as an instruction, never as a dynamic constant.)
+        if ( $val->isa('Brocken::Lindsay::IR::Constant') && $val->type->kind eq 'dynamic' && $val->value == 0 ) {
+            my $zero = $target_type->kind eq 'float' ? 0.0 : 0;
+            return Brocken::Lindsay::IR::Constant->new( type => $target_type, value => $zero );
+        }
         return $val if $val->type->kind eq $target_type->kind && $val->type->bits == $target_type->bits;
 
         # Box: native -> dynamic

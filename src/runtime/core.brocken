@@ -1551,6 +1551,24 @@ sub array_release( ptr $hb, ptr $arr ) {
     return;
 }
 
+# Empty a managed-element array in place: drop one reference to each stored box and zero every element slot, leaving a
+# length of zero. The block stays allocated so the array remains usable; array_release is its matching scope-exit free.
+sub array_clear( ptr $hb, ptr $arr ) {
+    if ( Brocken::ptr_cmp_eq( $arr, 0 ) ) {
+        return;
+    }
+    my i64 $count = Brocken::load_i64( Brocken::ptr_add( $arr, 8 ) );
+    my i64 $i     = 0;
+    while ( Brocken::ptr_cmp_gt( $count, $i ) ) {
+        my ptr $addr = Brocken::ptr_add( Brocken::ptr_add( $arr, 24 ), $i * 8 );
+        decref( Brocken::load_i64($addr), $hb );
+        Brocken::store_i64( $addr, 0 );
+        $i = $i + 1;
+    }
+    Brocken::store_i64( Brocken::ptr_add( $arr, 8 ), 0 );
+    return;
+}
+
 # Array element accessors for i64 elements (elements start at +24, after header/count/bytes)
 sub array_get_i64( ptr $arr, i64 $idx ) : returns(i64) {
     my ptr $base = Brocken::ptr_add( $arr,  24 );

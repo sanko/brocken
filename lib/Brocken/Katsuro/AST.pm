@@ -163,6 +163,13 @@ class Brocken::Katsuro::AST::Expr::HashKeys v0.0.1 : isa(Brocken::Katsuro::AST::
     field $op   : param : reader;                   # 'keys' or 'values'
     field $expr : param : reader;                   # the hash variable (an Expr::Var with sigil '%')
 };
+class Brocken::Katsuro::AST::Expr::Undef v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+
+    # the bare `undef` value -- a null box (Type Tag 0)
+};
+class Brocken::Katsuro::AST::Expr::UndefOp v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $expr : param : reader;                   # the variable/array/hash to reset to undef
+};
 class Brocken::Katsuro::AST::Expr::ArrayOp v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $op    : param : reader;                  # 'push' | 'pop' | 'shift' | 'unshift'
     field $array : param : reader;                  # the array operand (an Expr::Var with sigil '@')
