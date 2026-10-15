@@ -647,7 +647,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # same pass classifies class-returning functions, whose returned instance may be an owned fresh construction or
         # a borrow of `$self`, a parameter, or a field (see `_classify_class_return_ownership`).
         for my $stmt (@decls) {
-            if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl') ) {
+            if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl') && !$stmt->prototype ) {
                 my $name = $self->_qualify( $stmt->name, $stmt->package );
                 my $ret  = $stmt->return_type // $self->_infer_return_type($stmt);
                 $self->_classify_return_ownership( $name, $ret, $stmt->params, $stmt->body );
@@ -1167,7 +1167,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # Pass 2: Lower function bodies
     method lower_function($ast) {
         $fuel_exit_block = undef;
-        return if $ast->body->statements->@* == 0;
+
+        # A prototype (`sub f();`) has no body to lower -- the definition that follows supplies it. An empty *body*
+        # (`sub f() {}`) is a real function and must still get a definition, or every call to it fails at link time
+        # with an undefined symbol (F16); it falls through and emits the default return below.
+        return if $ast->prototype;
         my $name = $self->_qualify( $ast->name, $ast->package );
         $current_package = $ast->package;
         $current_func    = $functions->{$name};

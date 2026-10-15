@@ -85,6 +85,7 @@ class Brocken::Katsuro::AST::Stmt::SubDecl v0.0.1 : isa(Brocken::Katsuro::AST::N
     field $params      : param : reader = [];       # Array of {type, sigil, name}
     field $return_type : param : reader = undef;    # undef -> infer from body
     field $body        : param : reader;            # AST::Stmt::Block
+    field $prototype   : param : reader = 0;        # `sub f();` -- signature only; a definition must follow
 };
 class Brocken::Katsuro::AST::Stmt::ClassDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $name    : param : reader;

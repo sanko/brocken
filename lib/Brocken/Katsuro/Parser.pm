@@ -612,6 +612,8 @@ class Brocken::Katsuro::Parser v0.0.1 {
         }
         $self->consume(')');
         my $return_type = $self->parse_return_annotation();
+        # `sub f();` is a prototype: the signature is declared but no body exists, so the SubDecl is flagged and the
+        # definition that follows supplies it. A flagged prototype is never lowered to a definition of its own.
         if ( $self->check(';') ) {
             $self->advance();
             return Brocken::Katsuro::AST::Stmt::SubDecl->new(
@@ -621,6 +623,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 return_type => $return_type,
                 body        => Brocken::Katsuro::AST::Stmt::Block->new( statements => [] ),
                 package     => $current_package,
+                prototype   => 1,
             );
         }
         my $body = $self->parse_block();
