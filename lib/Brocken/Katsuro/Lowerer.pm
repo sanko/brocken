@@ -5027,9 +5027,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $hash_ptr;
     }
 
+    # `__CLASS__` evaluates to the current class's name as a string. It used to lower to a `ptr` *constant* whose value
+    # was the class name, but a constant's value is numified by the encoder, so the string `Point` became the address 0
+    # -- a null pointer rather than a usable class name. Lower it exactly like a string literal instead: a
+    # NUL-terminated rodata blob holding the qualified class name, which is the value `perlclass` gives and what
+    # `say(__CLASS__)` prints.
     method lower_class_const($ast) {
         Carp::croak( '__CLASS__ used outside of a class at ' . $self->_loc($ast) ) unless $current_class;
-        return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => $current_class, );
+        my ( $label, $bytes ) = $self->_intern_rodata( $current_class . "\0" );
+        return Brocken::Lindsay::IR::RodataRef->new(
+            label => $label,
+            bytes => $bytes,
+            type  => Brocken::Lindsay::IR::Type::ptr(),
+        );
     }
 
     # Method body lowering with field GEP pre-population
