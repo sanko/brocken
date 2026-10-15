@@ -1261,8 +1261,17 @@ sub array_set_i64( ptr $arr, i64 $idx, i64 $val ) {
     return;
 }
 
-# Push/pop for i64 arrays (pass 1 minimal)
-sub array_push_i64( ptr $hb, ptr $arr, i64 $val ) : returns(i64) {
+# Container mutations for i64 arrays (pass 1 minimal). Every grow/shrink re-allocates the tag-9 block and copies, so a
+# call has O(n) cost; the element count is the logical length and the block is sized to fit it exactly.
+#
+# Grow (`push`/`unshift`) returns the fresh array -- its refcount is the one alloc_array hands back -- after releasing
+# the old block, so the caller must store the result back into the array's slot. Shrink (`pop`/`shift`) mutates the
+# count in place and returns the removed element (0 when the array is empty, since an i64 element has no undef).
+sub array_len( ptr $arr ) : returns(i64) {
+    return Brocken::load_i64( Brocken::ptr_add( $arr, 8 ) );
+}
+
+sub array_push_i64( ptr $hb, ptr $arr, i64 $val ) : returns(ptr) {
     my i64 $count = Brocken::load_i64( Brocken::ptr_add( $arr, 8 ) );
     my ptr $new   = alloc_array( $hb, $count + 1, 8 );
     my i64 $i     = 0;
@@ -1276,14 +1285,44 @@ sub array_push_i64( ptr $hb, ptr $arr, i64 $val ) : returns(i64) {
     return $new;
 }
 
+sub array_unshift_i64( ptr $hb, ptr $arr, i64 $val ) : returns(ptr) {
+    my i64 $count = Brocken::load_i64( Brocken::ptr_add( $arr, 8 ) );
+    my ptr $new   = alloc_array( $hb, $count + 1, 8 );
+    array_set_i64( $new, 0, $val );
+    my i64 $i = 0;
+    while ( Brocken::ptr_cmp_gt( $count, $i ) ) {
+        my i64 $v = array_get_i64( $arr, $i );
+        array_set_i64( $new, $i + 1, $v );
+        $i = $i + 1;
+    }
+    decref( $arr, $hb );
+    return $new;
+}
+
 sub array_pop_i64( ptr $arr ) : returns(i64) {
     my i64 $count = Brocken::load_i64( Brocken::ptr_add( $arr, 8 ) );
     if ( Brocken::ptr_cmp_eq( $count, 0 ) ) {
-        return 0;    # or error; keep simple for pass 1
+        return 0;
     }
     my i64 $last = array_get_i64( $arr, $count - 1 );
     Brocken::store_i64( Brocken::ptr_add( $arr, 8 ), $count - 1 );
     return $last;
+}
+
+sub array_shift_i64( ptr $arr ) : returns(i64) {
+    my i64 $count = Brocken::load_i64( Brocken::ptr_add( $arr, 8 ) );
+    if ( Brocken::ptr_cmp_eq( $count, 0 ) ) {
+        return 0;
+    }
+    my i64 $first = array_get_i64( $arr, 0 );
+    my i64 $i     = 0;
+    while ( Brocken::ptr_cmp_gt( $count - 1, $i ) ) {
+        my i64 $next = array_get_i64( $arr, $i + 1 );
+        array_set_i64( $arr, $i, $next );
+        $i = $i + 1;
+    }
+    Brocken::store_i64( Brocken::ptr_add( $arr, 8 ), $count - 1 );
+    return $first;
 }
 
 # == Hash tables (tag 8) ==

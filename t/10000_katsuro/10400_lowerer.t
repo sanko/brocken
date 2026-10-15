@@ -470,8 +470,8 @@ sub helper() :returns(i64) {
 }
 return helper();
 BROCKEN
-    is( $mod->functions->@*, 117,
-        '117 functions (96 runtime incl. gate_table/host_icb + eh_stack/thrown_val + free_big + stack_limit accessors + 5 array helpers + 5 block-geometry helpers + decref_obj/free_obj + gc_scan_class/gc_restore_class + str_trim/str_is_space + 16 hash helpers incl. mark_span + is_truthy + unbox_ptr + helper + entry)'
+    is( $mod->functions->@*, 120,
+        '120 functions (96 runtime incl. gate_table/host_icb + eh_stack/thrown_val + free_big + stack_limit accessors + 8 array helpers + 5 block-geometry helpers + decref_obj/free_obj + gc_scan_class/gc_restore_class + str_trim/str_is_space + 16 hash helpers incl. mark_span + is_truthy + unbox_ptr + helper + entry)'
     );
     my $text = $mod->as_string();
     like( $text, qr/call\s+i64\s+\@helper/, 'call to helper' );

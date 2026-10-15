@@ -154,6 +154,11 @@ class Brocken::Katsuro::AST::Expr::Defined v0.0.1 : isa(Brocken::Katsuro::AST::N
 class Brocken::Katsuro::AST::Expr::Delete v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $expr : param : reader;                   # the hash element to remove (an Expr::HashIndex)
 };
+class Brocken::Katsuro::AST::Expr::ArrayOp v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $op    : param : reader;                  # 'push' | 'pop' | 'shift' | 'unshift'
+    field $array : param : reader;                  # the array operand (an Expr::Var with sigil '@')
+    field $args  : param : reader = [];             # values pushed/unshifted (empty for pop/shift)
+};
 class Brocken::Katsuro::AST::Expr::MethodCall v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $obj    : param : reader;                 # expression evaluating to an object pointer
     field $method : param : reader;                 # method name

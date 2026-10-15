@@ -832,6 +832,25 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return $self->_end_statement( $stmt, "Expected ';' after '$tok->{value}'" );
     }
 
+    # `push @a, LIST` / `pop @a` / `shift @a` / `unshift @a, LIST`, in both the bare and the parenthesised Perl
+    # spelling (`push(@a, 1)`). The array operand is parsed as an ordinary expression, so a field array (`$o->xs`)
+    # parses as well; the lowerer decides which operand shapes it can actually mutate. Only push/unshift take values.
+    method parse_array_op($token) {
+        my $op    = $token->{value};
+        my $paren = $self->check('(');
+        $self->advance() if $paren;
+        my $array = $self->parse_expression(PREC_UNARY);
+        my @args;
+        if ( $op eq 'push' || $op eq 'unshift' ) {
+            while ( $self->check(',') ) {
+                $self->advance();
+                push @args, $self->parse_expression(0);
+            }
+        }
+        $self->consume(')') if $paren;
+        return Brocken::Katsuro::AST::Expr::ArrayOp->new( $self->_pos_token($token), op => $op, array => $array, args => \@args );
+    }
+
     # === Expressions (Pratt Parser) ===
     method parse_expression($precedence) {
         my $token = $self->advance();
@@ -930,6 +949,9 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 my $arg = $self->parse_expression(0);
                 $self->consume( ')', undef, "Expected ')' after length argument" );
                 return Brocken::Katsuro::AST::Expr::Call->new( $self->_pos_token($token), func_name => 'length', args => [$arg] );
+            }
+            if ( $token->{value} eq 'push' || $token->{value} eq 'pop' || $token->{value} eq 'shift' || $token->{value} eq 'unshift' ) {
+                return $self->parse_array_op($token);
             }
             Carp::croak( "Unexpected keyword '$token->{value}' in expression at " . $self->_loc($token) );
         }

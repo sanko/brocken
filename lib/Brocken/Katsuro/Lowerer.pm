@@ -35,6 +35,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $class_returns_owned   = {};        # func_name -> 1 (a class-returning call hands the caller an owned instance)
     field $array_elem_types      = {};        # '@name' -> element IR type (for heap-array GEP scaling)
     field $array_counts          = {};        # '@name' -> compile-time element count, when it is a constant
+    field $growable_arrays       = {};        # '@name' -> element-type name for a runtime-sized (growable) local array
     field $hash_var              = {};        # var_name -> 1 (a local %hash; its slot holds a tag-8 table released by hash_release)
     field $hash_value_type       = {};        # var_name -> IR type of the hash's stored values (defaults to dynamic)
     field $rodata : reader       = {};        # label -> bytes for string constants
@@ -553,6 +554,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::Delete') ) {
             $self->_scan_value_escapes( $expr->expr );
+        }
+        elsif ( $expr->isa('Brocken::Katsuro::AST::Expr::ArrayOp') ) {
+            $self->_scan_receiver_escapes( $expr->array );
+            $self->_scan_value_escapes($_) for $expr->args->@*;
         }
 
         # A method call borrows its receiver and consumes its arguments.
@@ -1167,6 +1172,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $class_owned     = {};
         $class_escaped   = {};
         $weak_var        = {};
+        $growable_arrays = {};
         $hash_var        = {};
         $hash_value_type = {};
         $self->_scan_escapes( $ast->body );
@@ -1479,6 +1485,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $stmt->isa('Brocken::Katsuro::AST::Expr::Exists')      ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Defined')     ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Delete')      ||
+            $stmt->isa('Brocken::Katsuro::AST::Expr::ArrayOp')     ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::MethodCall')  ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::List')        ||
             $stmt->isa('Brocken::Katsuro::AST::Expr::Hash')        ||
@@ -2609,6 +2616,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Delete') ) {
             return $self->lower_delete($expr);
         }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::ArrayOp') ) {
+            return $self->lower_array_op($expr);
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
             return $self->lower_method_call($expr);
         }
@@ -2830,9 +2840,59 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return;
     }
 
+    # `push @a, v...`, `pop @a`, `shift @a`, `unshift @a, v...` (spec 6.1). These mutate a *growable* local array --
+    # one declared without a compile-time element count (`my [i64] @a;` or `my [i64; $n] @a;`), which is therefore
+    # heap-backed with the tag-9 header the runtime helpers need. Growth re-allocates the block, so push/unshift store
+    # the fresh base back into the array's slot and answer the new element count; pop/shift mutate the count in place
+    # and answer the removed element (0 when the array is empty). Only i64 element arrays are wired up for now.
+    method lower_array_op($ast) {
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $op    = $ast->op;
+        my $array = $ast->array;
+        Carp::croak( "$op expects a local array variable at " . $self->_loc($ast) )
+            unless $array->isa('Brocken::Katsuro::AST::Expr::Var') && $array->sigil eq '@';
+        my $key  = '@' . $array->name;
+        my $slot = $symbols->{$key};
+        Carp::croak( "Unknown array variable '$key' at " . $self->_loc($ast) ) unless $slot;
+        my $elem_type = $growable_arrays->{$key};
+        Carp::croak( "$op needs a growable array; declare $key without a compile-time element count (e.g. `my [i64] $key;`) at "
+                . $self->_loc($ast) )
+            unless defined $elem_type;
+        Carp::croak( "$op currently supports only i64 element arrays, but $key holds $elem_type at " . $self->_loc($ast) )
+            unless $elem_type eq 'i64';
+
+        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+        my $i64 = Brocken::Lindsay::IR::Type::i64();
+        my $hb  = $self->_hash_heap_base( $line, $col );
+
+        if ( $op eq 'push' || $op eq 'unshift' ) {
+            my $grow = $self->_reflect_runtime( $op eq 'push' ? 'array_push_i64' : 'array_unshift_i64', $ast, $line, $col );
+            my @vals = map { $self->maybe_convert_type( $self->lower_expression($_), $i64, $line, $col, 1 ) } $ast->args->@*;
+
+            # `unshift @a, 1, 2` yields (1, 2, @a): insert from the last value back so each one lands ahead of the
+            # previous, matching Perl's argument order.
+            @vals = reverse @vals if $op eq 'unshift';
+            my $base = $builder->build_load( $ptr, $slot, undef, $line, $col );
+            for my $v (@vals) {
+                $base = $builder->build_call( $grow, [ $hb, $base, $v ], undef, $line, $col );
+
+                # The grow returned a fresh block (refcount 1); point the array's slot at it before the next step.
+                $builder->build_store( $base, $slot, $line, $col );
+            }
+            return $builder->build_call( $self->_reflect_runtime( 'array_len', $ast, $line, $col ), [$base], undef, $line, $col );
+        }
+
+        my $shrink = $self->_reflect_runtime( $op eq 'pop' ? 'array_pop_i64' : 'array_shift_i64', $ast, $line, $col );
+        my $base   = $builder->build_load( $ptr, $slot, undef, $line, $col );
+        return $builder->build_call( $shrink, [$base], undef, $line, $col );
+    }
+
     method lower_array_decl($ast) {
         my $ir_type  = $self->type_from_name( $ast->elem_type );
-        my $size_val = $self->lower_expression( $ast->size_expr );
+
+        # An omitted element count (`my [i64] @a;`) is a runtime-sized array with zero elements: it is heap-promoted
+        # below and grown with push/unshift. Guarding here keeps `lower_expression` from being handed an undef node.
+        my $size_val = defined $ast->size_expr ? $self->lower_expression( $ast->size_expr ) : undef;
         if ( defined $size_val ) {
 
             # The alloca carries the element count as an i64.  A constant folds to a constant i64 so the backends can
@@ -2869,6 +2929,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $builder->build_store( $arr, $slot, $ast->line, $ast->col );
             $symbols->{$key} = $slot;
             $self->_note_rc($key);
+
+            # A runtime or omitted element count is a *growable* array: it has no compile-time length, so the
+            # push/pop/shift/unshift builtins may mutate it (see lower_array_op). A constant count is fixed and rejects
+            # them, which keeps the 4 KiB stack/heap threshold from leaking into the language's behaviour.
+            $growable_arrays->{$key} = $ast->elem_type if !defined $static_bytes;
             return;
         }
 
