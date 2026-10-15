@@ -3276,19 +3276,19 @@ Brocken translates source code to executable machine bytes through a strictly de
                                   ▼
        ┌────────────────────────────────────────────────────────┐
        │               Katsuro (Compiler Frontend)              │
-       │       Regex Lexer ──▶ Pratt Parser ──▶ AST Lowering    │
+       │       Regex Lexer ──▶ Pratt Parser ──▶ AST Lowering   │
        └──────────────────────────┬─────────────────────────────┘
                                   │ Lowered to Architecture-Agnostic SSA
                                   ▼
        ┌────────────────────────────────────────────────────────┐
        │               Lindsay (Middle-End Optimizer)           │
-       │   SSA Form ──▶ Perceus RC Elision ──▶ Inlining & DCE   │
+       │   SSA Form ──▶ Perceus RC Elision ──▶ Inlining & DCE  │
        └──────────────────────────┬─────────────────────────────┘
                                   │ Lowered to Architecture MIR
                                   ▼
        ┌────────────────────────────────────────────────────────┐
        │                 Jenny (Backend & Linker)               │
-       │     Linear-Scan RegAlloc ──▶ Machine-Code Encoders     │
+       │     Linear-Scan RegAlloc ──▶ Machine-Code Encoders    │
        │       ELF64 / PE32+ / Mach-O / Wasm Writers            │
        └──────────────────────────┬─────────────────────────────┘
                                   │ Emits
