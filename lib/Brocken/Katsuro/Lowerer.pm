@@ -2052,6 +2052,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # running the body. It reuses the block shape of `lower_while` (header -> fuel check -> body -> back edge) so
     # `last`/`next` and the per-iteration RC cleanup behave the same.
     method lower_for($ast) {
+        # `for my $i (0 .. N)` is a range, not a list: lower it to an induction loop (spec 4.5) rather than building
+        # and walking a tag-7 list.
+        if ( $ast->expr && $ast->expr->isa('Brocken::Katsuro::AST::Expr::Range') ) {
+            return $self->lower_for_range($ast);
+        }
         my $func = $current_func;
         my ( $line, $col ) = ( $ast->line, $ast->col );
         my $i64_type     = Brocken::Lindsay::IR::Type::i64();
@@ -2169,6 +2174,98 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $k_cur  = $builder->build_load( $i64_type, $k_slot, undef, $line, $col );
         my $k_next = $builder->build_add( $k_cur, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => $stride ), undef, $line, $col );
         $builder->build_store( $k_next, $k_slot, $line, $col );
+        $builder->build_br( $cond, $line, $col );
+
+        pop $_loop_header_blocks->@*;
+        pop $_loop_check_blocks->@*;
+        pop $_loop_exit_blocks->@*;
+        $self->_forget_rc($_) for grep { defined $rc_owner->{$_} && $rc_owner->{$_} == $loop_scope } keys %$needs_rc;
+        $builder->position_at_end($exit);
+        $current_block = $exit;
+    }
+
+    # `for my $i (LO .. HI)` as a zero-allocation induction loop (spec 4.5): `$i = LO; while ($i <= HI) { ...; $i++ }`.
+    # Both bounds are evaluated once, and the loop variable is a native integer -- untyped (`Any`) means `i64`, and any
+    # other declared type must be an integer, so nothing is boxed or allocated per pass. The range is inclusive at both
+    # ends, so the test is `<=` (unsigned types use `ule`). Empty and descending ranges run zero times, because a
+    # `[LO, HI]` with `LO > HI` fails the first test; like every other loop the induction is also fuel-guarded.
+    method lower_for_range($ast) {
+        my $func = $current_func;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $i64_type = Brocken::Lindsay::IR::Type::i64();
+        my @targets  = $ast->targets->@*;
+        Carp::croak( "a range loop takes exactly one variable at " . $self->_loc($ast) ) unless @targets == 1;
+        my $t = $targets[0];
+
+        my $declared = $t->{type};
+        my $ir_type  = $declared eq 'Any' ? $i64_type : $self->type_from_name($declared);
+        Carp::croak( "a range loop variable must be an integer, not $declared at " . $self->_loc($ast) )
+            unless $ir_type->kind eq 'int';
+
+        # Bounds first, so their values are live in the entry block and evaluated only once, then converted to the
+        # induction type (a dynamic bound is unboxed to an integer here).
+        my $from_val = $self->maybe_convert_type( $self->lower_expression( $ast->expr->from ), $ir_type, $line, $col );
+        my $to_val   = $self->maybe_convert_type( $self->lower_expression( $ast->expr->to ),   $ir_type, $line, $col );
+
+        my $slot = $builder->build_alloca( $ir_type, $self->unique_value_name( '%' . $t->{name} . '.addr' ), undef, $line, $col, $t->{name}, $t->{type} );
+        $symbols->{ $t->{name} } = $slot;
+        $builder->build_store( $from_val, $slot, $line, $col );
+
+        my $cond = $func->append_block( $self->unique_block_name('range_cond') );
+        my $check = $func->append_block( $self->unique_block_name('range_check') );
+        my $body  = $func->append_block( $self->unique_block_name('range_body') );
+        my $incr  = $func->append_block( $self->unique_block_name('range_incr') );
+        my $exit  = $func->append_block( $self->unique_block_name('range_end') );
+
+        # As in `lower_for`, `next` runs the increment before re-testing, so the header it jumps to is the increment.
+        push $_loop_header_blocks->@*, $incr;
+        push $_loop_check_blocks->@*,  $check;
+        push $_loop_exit_blocks->@*,   $exit;
+
+        $builder->build_br( $cond, $line, $col );
+
+        $builder->position_at_end($cond);
+        $current_block = $cond;
+        my $pred  = $ir_type->is_unsigned ? 'ule' : 'sle';
+        my $i     = $builder->build_load( $ir_type, $slot, undef, $line, $col );
+        my $more  = $builder->build_icmp( $pred, $i, $to_val, undef, $line, $col );
+        $builder->build_cond_br( $more, $check, $exit, $line, $col );
+
+        # Fuel check, exactly as `while`/`for`: bail to the exit when the decrement reaches zero.
+        $builder->position_at_end($check);
+        $current_block = $check;
+        if ( $symbols->{'__heap_base'} ) {
+            my $zero       = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 0 );
+            my $hb         = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
+            my $fuel_addr  = $builder->build_add( $hb, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => Brocken::ICB::FUEL ), undef, $line, $col );
+            my $fuel       = $builder->build_load( $i64_type, $fuel_addr, undef, $line, $col );
+            my $fuel_after = $builder->build_sub( $fuel, Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 1 ), undef, $line, $col );
+            $builder->build_store( $fuel_after, $fuel_addr, $line, $col );
+            my $exhausted = $builder->build_icmp( 'sle', $fuel_after, $zero, undef, $line, $col );
+            $builder->build_cond_br( $exhausted, $exit, $body, $line, $col );
+        }
+        else {
+            $builder->build_br( $body, $line, $col );
+        }
+
+        $builder->position_at_end($body);
+        $current_block = $body;
+        my $loop_scope = { rc_pre => {%$needs_rc} };
+        push $_dyn_scope_stack->@*,  $loop_scope;
+        push $_loop_body_scopes->@*, $loop_scope;
+        $self->lower_block_statements( $ast->body );
+        pop $_loop_body_scopes->@*;
+        pop $_dyn_scope_stack->@*;
+
+        $self->_emit_loop_back_edge_rc_cleanup($loop_scope) unless $current_block->terminator;
+        $builder->build_br( $incr, $line, $col ) unless $current_block->terminator;
+
+        $builder->position_at_end($incr);
+        $current_block = $incr;
+        my $i_cur  = $builder->build_load( $ir_type, $slot, undef, $line, $col );
+        my $one    = Brocken::Lindsay::IR::Constant->new( type => $ir_type, value => 1 );
+        my $i_next = $builder->build_add( $i_cur, $one, undef, $line, $col );
+        $builder->build_store( $i_next, $slot, $line, $col );
         $builder->build_br( $cond, $line, $col );
 
         pop $_loop_header_blocks->@*;

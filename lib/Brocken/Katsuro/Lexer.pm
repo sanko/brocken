@@ -71,7 +71,9 @@ class Brocken::Katsuro::Lexer v0.0.1 {
                 $self->_advance_pos( length($1) );
                 next;
             }
-            if ( $remaining =~ /^((?:\d+\.\d*|\.\d+)(?:[eE][+-]?\d+)?|\d+[eE][+-]?\d+)/ ) {
+            # `\d+\.(?!\.)\d*` keeps `1.` a float but lets the range operator win in `0..3`: without the lookahead the
+            # leading `\d+\.\d*` would eat `0.` as a float and leave `.3` as a second one.
+            if ( $remaining =~ /^((?:\d+\.(?!\.)\d*|\.\d+)(?:[eE][+-]?\d+)?|\d+[eE][+-]?\d+)/ ) {
                 my $val = 0 + $1;
                 push @tokens, $self->_token( 'FLOAT', $val );
                 $self->_advance_pos( length($1) );

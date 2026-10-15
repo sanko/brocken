@@ -211,6 +211,10 @@ class Brocken::Katsuro::AST::Expr::List v0.0.1 : isa(Brocken::Katsuro::AST::Node
 class Brocken::Katsuro::AST::Expr::Hash v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $pairs : param : reader;                  # Array of { key => AST::Node, value => AST::Node }
 };
+class Brocken::Katsuro::AST::Expr::Range v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
+    field $from : param : reader;                   # AST::Node lower bound (inclusive)
+    field $to   : param : reader;                   # AST::Node upper bound (inclusive)
+};
 class Brocken::Katsuro::AST::Stmt::ListVarDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
     field $targets : param : reader;                # Array of { sigil, name, type } (type optional, inferred)
     field $expr    : param : reader;                # AST::Node (RHS expression)

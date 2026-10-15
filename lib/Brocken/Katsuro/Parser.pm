@@ -363,9 +363,23 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 last if $self->check(')');
                 $self->consume(',');
             }
-            push @elements, $self->parse_expression(0);
+            my $element = $self->parse_expression(0);
+            # `0 .. N` in the loop list is the induction-loop form (spec 4.5). `..` carries no binding power, so
+            # parse_expression stops in front of it; consume it here rather than give the operator precedence, which
+            # would let it appear anywhere. A range is only meaningful as the whole list, so a comma-separated mix is
+            # rejected below instead of becoming an Expr::Range the lowerer would meet outside a `for` header.
+            if ( $self->check( 'OP', '..' ) ) {
+                my $range_token = $self->advance();
+                my $to          = $self->parse_expression(0);
+                Carp::croak( "a range must be the whole '$for_token->{value}' list at " . $self->_loc($range_token) ) if @elements;
+                $element = Brocken::Katsuro::AST::Expr::Range->new( $self->_pos_token($range_token), from => $element, to => $to );
+            }
+            push @elements, $element;
         }
         $self->consume(')');
+        if ( @elements > 1 && grep { $_->isa('Brocken::Katsuro::AST::Expr::Range') } @elements ) {
+            Carp::croak( "a range must be the whole '$for_token->{value}' list at " . $self->_loc($for_token) );
+        }
         my $expr;
         if ( @elements == 0 )    { $expr = undef; }
         elsif ( @elements == 1 ) { $expr = $elements[0]; }
