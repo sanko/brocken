@@ -56,7 +56,7 @@ BROCKEN
     unlike( $nscan, qr/load i64/,                              'scan does not touch the i64 field' );
 
     my $nrestore = find_function( $mod, 'Node::__restore' )->as_string;
-    like( $nrestore, qr/\@Brocken::Runtime::incref/, 'restore takes the reference back' );
+    like( $nrestore, qr/\@Brocken::Runtime::gc_restore_black/, 'restore takes the reference back and repaints the child Black' );
 
     # A class with no owned dynamic field has empty hooks.
     like( find_function( $mod, 'Plain::__scan' )->as_string,    qr/entry:\s+ret void/, 'Plain::__scan is empty (Leaf)' );

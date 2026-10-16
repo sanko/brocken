@@ -131,7 +131,7 @@ subtest 'desc not present when omitted' => sub {
 # ICB field list produces expected layout
 subtest 'ICB layout matches committed offsets' => sub {
     require Brocken::ICB;
-    is Brocken::ICB::SIZE(), 160, 'ICB size=160';
+    is Brocken::ICB::SIZE(), 168, 'ICB size=168';
     my @expected = (
         [ 'HEAP_CURSOR',             0 ],
         [ 'CURRENT_FCB',             8 ],
@@ -152,7 +152,8 @@ subtest 'ICB layout matches committed offsets' => sub {
         [ 'EXCEPTION_HANDLER_STACK', 128 ],
         [ 'THROWN_VALUE',            136 ],
         [ 'FREE_BIG_HEAD',           144 ],
-        [ 'STACK_LIMIT',             152 ]
+        [ 'STACK_LIMIT',             152 ],
+        [ 'SUSPECT_COUNT',           160 ]
     );
     for my $e (@expected) {
         my ( $name, $offset ) = @$e;

@@ -96,6 +96,32 @@ sub set_suspect_buffer_head( ptr $hb, ptr $val ) {
     Brocken::store_i64( Brocken::ptr_add( $hb, 56 ), $val );
 }
 
+# Number of objects currently queued on the suspect buffer. The runtime keeps this incrementally so the R3 push site
+# can decide whether the buffer is "full" without walking the list. A value of -1 is the sentinel that a drain is in
+# progress: it suppresses both the re-entry trigger and any new buffering, so a DESTROY run in Phase 3 cannot mutate
+# the list the sweep is iterating.
+sub get_suspect_count( ptr $hb ) : returns(i64) {
+    return Brocken::load_i64( Brocken::ptr_add( $hb, 160 ) );
+}
+
+sub set_suspect_count( ptr $hb, i64 $val ) {
+    Brocken::store_i64( Brocken::ptr_add( $hb, 160 ), $val );
+}
+
+# Push a suspect once the queue reaches this many entries.
+sub gc_suspect_threshold() : returns(i64) {
+    return 256;
+}
+
+# Run a drain once enough suspects have accumulated to make a full sweep worthwhile. Guarded by the -1 sentinel (see
+# get_suspect_count) so a sweep's own DESTROY cannot re-enter it.
+sub maybe_gc_drain( ptr $hb ) {
+    if ( Brocken::ptr_cmp_ge( get_suspect_count($hb), gc_suspect_threshold() ) ) {
+        gc_drain($hb);
+    }
+    return;
+}
+
 sub get_fuel( ptr $hb ) : returns(i64) {
     return Brocken::load_i64( Brocken::ptr_add( $hb, 64 ) );
 }
@@ -189,7 +215,7 @@ sub set_stack_limit( ptr $hb, ptr $val ) {
 # immediately after the ICB. Deriving the metadata offsets and the address->block mapping from these helpers keeps the
 # geometry in one place so the two cannot drift apart.
 sub icb_size() : returns(i64) {
-    return 160;
+    return 168;
 }
 
 sub block_size() : returns(i64) {
@@ -236,6 +262,7 @@ sub _init( ptr $heap_base, i64 $heap_size ) {
     set_free16_head( $heap_base, 0 );
     set_free_big_head( $heap_base, 0 );
     set_suspect_buffer_head( $heap_base, 0 );
+    set_suspect_count( $heap_base, 0 );
     set_fuel( $heap_base, 0 );
     set_err_code( $heap_base, 0 );
     set_current_block( $heap_base, $block_base );
@@ -440,6 +467,7 @@ sub decref( ptr $obj, ptr $heap_base ) {
         my i64 $flags = get_gc_flags($obj);
         if ( Brocken::ptr_cmp_eq( Brocken::band( $flags, 4 ), 0 ) && Brocken::ptr_cmp_eq( Brocken::band( $flags, 2 ), 0 ) ) {
             push_suspect_buffer( $obj, $heap_base );
+            maybe_gc_drain( $heap_base );
         }
     }
     return;
@@ -462,6 +490,7 @@ sub decref_obj( ptr $obj, ptr $heap_base ) : returns(i64) {
         my i64 $flags = get_gc_flags($obj);
         if ( Brocken::ptr_cmp_eq( Brocken::band( $flags, 4 ), 0 ) && Brocken::ptr_cmp_eq( Brocken::band( $flags, 2 ), 0 ) ) {
             push_suspect_buffer( $obj, $heap_base );
+            maybe_gc_drain( $heap_base );
         }
     }
     return $new_rc;
@@ -704,6 +733,12 @@ sub set_gc_flags( ptr $obj, i64 $flags ) {
 }
 
 sub push_suspect_buffer( ptr $obj, ptr $hb ) {
+    # A drain in progress (count == -1) must not be handed new nodes: it is walking the very list this would extend,
+    # and Phase 3 runs user DESTROY, which may decref and try to enqueue. Dropping the push only defers that suspect
+    # to a later decref, never loses live memory.
+    if ( Brocken::ptr_cmp_eq( get_suspect_count($hb), -1 ) ) {
+        return;
+    }
     my i64 $flags = get_gc_flags($obj);
     if ( Brocken::band( $flags, 2 ) ) {
         return;
@@ -717,6 +752,7 @@ sub push_suspect_buffer( ptr $obj, ptr $hb ) {
     Brocken::store_i64( Brocken::ptr_add( $node, 8 ), $head );
     set_suspect_buffer_head( $hb, $node );
     set_gc_flags( $obj, Brocken::bor( $flags, 3 ) );
+    set_suspect_count( $hb, Brocken::i64_add( get_suspect_count($hb), 1 ) );
     return;
 }
 
@@ -730,6 +766,9 @@ sub pop_suspect_buffer( ptr $hb ) : returns(ptr) {
     set_suspect_buffer_head( $hb, $next );
     my i64 $flags = get_gc_flags($obj);
     set_gc_flags( $obj, Brocken::band( $flags, 253 ) );
+    if ( Brocken::ptr_cmp_gt( get_suspect_count($hb), 0 ) ) {
+        set_suspect_count( $hb, Brocken::i64_sub( get_suspect_count($hb), 1 ) );
+    }
 
     # Return node to free16
     my ptr $fhead = get_free16_head($hb);
@@ -738,30 +777,37 @@ sub pop_suspect_buffer( ptr $hb ) : returns(ptr) {
     return $obj;
 }
 
+# Trial-delete one reference to $obj during MarkGray (Bacon & Rajan). Unlike `decref`, this never frees: an object whose
+# count reaches zero mid-sweep is only a *candidate*, and freeing it now would strand the recursion that still has to
+# walk its children. The count is left one lower and the object is painted Gray so Phase 2 can either restore it
+# (ScanBlack) or Phase 3 can reclaim it. Called once per edge out of a Gray object -- from the runtime's list/hash
+# scanners and from every generated Class::__scan.
 sub gc_decref( ptr $obj, ptr $hb ) {
     if ( Brocken::ptr_cmp_eq( $obj, 0 ) ) {
         return;
     }
     my i64 $header = Brocken::load_i64($obj);
     my i64 $old_rc = Brocken::band( $header, 65535 );
-    my i64 $new_rc = Brocken::i64_sub( $old_rc, 1 );
-    Brocken::store_i64( $obj, Brocken::i64_add( Brocken::i64_sub( $header, $old_rc ), $new_rc ) );
-    if ( Brocken::ptr_cmp_eq( $new_rc, 0 ) && Brocken::ptr_cmp_eq( $hb, 0 ) == 0 ) {
-        my ptr $head = get_free16_head($hb);
-        Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $head );
-        set_free16_head( $hb, $obj );
-        my ptr $block_base = block_of( $hb, $obj );
-        my ptr $lc_ptr     = Brocken::ptr_add( $block_base, block_live_count_offset() );
-        my i64 $lc         = Brocken::load_i64($lc_ptr);
-        $lc = Brocken::i64_sub( $lc, 1 );
-        Brocken::store_i64( $lc_ptr, $lc );
-
-        if ( Brocken::ptr_cmp_eq( $lc, 0 ) ) {
-            my ptr $fb_head = get_free_blocks($hb);
-            Brocken::store_i64( $block_base, $fb_head );
-            set_free_blocks( $hb, $block_base );
-        }
+    if ( Brocken::ptr_cmp_eq( $old_rc, 0 ) ) {
+        return;
     }
+    Brocken::store_i64( $obj, Brocken::i64_add( Brocken::i64_sub( $header, $old_rc ), Brocken::i64_sub( $old_rc, 1 ) ) );
+    gc_mark_gray( $obj, $hb );
+    return;
+}
+
+# Enter $obj into the trial sweep: paint it Gray (unless already Gray) and trial-delete its children. A Purple root and
+# a Black object first reached as a child both land here; the `push_suspect_buffer` dedup also keeps the buffer holding
+# every swept object exactly once, so phases 2 and 3 can just walk it.
+sub gc_mark_gray( ptr $obj, ptr $hb ) {
+    my i64 $flags = get_gc_flags($obj);
+    my i64 $color = Brocken::band( Brocken::shr( $flags, 3 ), 3 );
+    if ( Brocken::ptr_cmp_eq( $color, 1 ) ) {
+        return;
+    }
+    set_gc_flags( $obj, Brocken::bor( Brocken::band( $flags, 231 ), 8 ) );
+    push_suspect_buffer( $obj, $hb );
+    gc_scan_obj( $obj, $hb );
     return;
 }
 
@@ -820,6 +866,9 @@ sub gc_scan_obj( ptr $obj, ptr $hb ) {
     return;
 }
 
+# Restore the references of a confirmed-live (Black) object: for every out-edge, give the target back the reference
+# MarkGray took and recurse so its reachable subgraph is repainted Black too. Entered from `gc_scan_black`; for a class
+# instance the generated `Class::__restore` does the same per owned field.
 sub gc_restore_refs( ptr $obj ) {
     my i64 $header = Brocken::load_i64($obj);
     my i64 $tag    = Brocken::band( Brocken::shr( $header, 24 ), 255 );
@@ -830,7 +879,7 @@ sub gc_restore_refs( ptr $obj ) {
             my ptr $elem_addr = Brocken::ptr_add( $obj, Brocken::i64_add( 16, Brocken::shl( $i, 3 ) ) );
             my i64 $elem      = Brocken::load_i64($elem_addr);
             if ( Brocken::ptr_cmp_gt( $elem, 65536 ) && Brocken::ptr_cmp_eq( Brocken::band( $elem, 7 ), 0 ) ) {
-                incref($elem);
+                gc_restore_black($elem);
             }
             $i = Brocken::i64_add( $i, 1 );
         }
@@ -844,7 +893,7 @@ sub gc_restore_refs( ptr $obj ) {
             if ( Brocken::ptr_cmp_eq( $key, 0 ) == 0 && Brocken::ptr_cmp_eq( $key, 1 ) == 0 ) {
                 my i64 $val = Brocken::load_i64( Brocken::ptr_add( $slot, 8 ) );
                 if ( Brocken::ptr_cmp_gt( $val, 65536 ) && Brocken::ptr_cmp_eq( Brocken::band( $val, 7 ), 0 ) ) {
-                    incref($val);
+                    gc_restore_black($val);
                 }
             }
             $i = Brocken::i64_add( $i, 1 );
@@ -859,75 +908,155 @@ sub gc_restore_refs( ptr $obj ) {
     return;
 }
 
-# Drain the suspect buffer using Bacon/Rajan trial Deletion.
-sub gc_drain( ptr $hb ) {
+# Undo one trial-deletion edge: restore the reference and, if the target is still Gray, confirm and recurse. A target
+# that is not Gray (already Black, or never entered the sweep) is only increfed -- it has no grayed children of its own
+# to restore.
+sub gc_restore_black( ptr $obj ) {
+    if ( Brocken::ptr_cmp_eq( $obj, 0 ) ) {
+        return;
+    }
+    incref($obj);
+    gc_scan_black($obj);
+    return;
+}
 
-    # Phase 1: Tentative scan
+# Phase 2 core: a Gray object that still has an external reference is live. Paint it Black and undo the trial deletions
+# on its out-edges. Guarding on the Gray color makes the recursion idempotent, so a child reached by two live parents
+# is restored once but increfed once per edge.
+sub gc_scan_black( ptr $obj ) {
+    if ( Brocken::ptr_cmp_eq( $obj, 0 ) ) {
+        return;
+    }
+    my i64 $flags = get_gc_flags($obj);
+    my i64 $color = Brocken::band( Brocken::shr( $flags, 3 ), 3 );
+    if ( Brocken::ptr_cmp_eq( $color, 1 ) == 0 ) {
+        return;
+    }
+    set_gc_flags( $obj, Brocken::bor( Brocken::band( $flags, 231 ), 24 ) );
+    gc_restore_refs($obj);
+    return;
+}
+
+# Run the user DESTROY of a reclaimed class instance, dispatched by the class id in the header (the runtime cannot see
+# static class types). Hashes, arrays, and boxed scalars have no destructor.
+sub gc_destroy_obj( ptr $obj, ptr $hb ) {
+    my i64 $header = Brocken::load_i64($obj);
+    my i64 $tag    = Brocken::band( Brocken::shr( $header, 24 ), 255 );
+    if ( Brocken::ptr_cmp_eq( $tag, 4 ) ) {
+        my i64 $class_id = Brocken::shr( $header, 32 );
+        if ( Brocken::ptr_cmp_gt( $class_id, 0 ) ) {
+            gc_destroy_class( $obj, $hb );
+        }
+    }
+    return;
+}
+
+# Return a reclaimed cycle member to the correct free list, mirroring the tag split in `decref`: tag 8 hashes and tag 9
+# arrays go to the size-segregated free_big list (their bytes field at [obj+16] must survive for a future size match),
+# everything else to free16 with the owning block's live_count dropped. The object's out-edges already lost their
+# references during MarkGray, so nothing is decref'd here.
+sub gc_free_collected( ptr $obj, ptr $hb ) {
+    my i64 $header = Brocken::load_i64($obj);
+    my i64 $tag    = Brocken::band( Brocken::shr( $header, 24 ), 255 );
+    my i64 $old_rc = Brocken::band( $header, 65535 );
+    Brocken::store_i64( $obj, Brocken::i64_sub( $header, $old_rc ) );
+    if ( Brocken::ptr_cmp_eq( $tag, 9 ) || Brocken::ptr_cmp_eq( $tag, 8 ) ) {
+        my ptr $big_head = get_free_big_head($hb);
+        Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $big_head );
+        set_free_big_head( $hb, $obj );
+    }
+    else {
+        my ptr $fhead = get_free16_head($hb);
+        Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $fhead );
+        set_free16_head( $hb, $obj );
+        my ptr $block_base = block_of( $hb, $obj );
+        my ptr $lc_ptr     = Brocken::ptr_add( $block_base, block_live_count_offset() );
+        my i64 $lc         = Brocken::i64_sub( Brocken::load_i64($lc_ptr), 1 );
+        Brocken::store_i64( $lc_ptr, $lc );
+        if ( Brocken::ptr_cmp_eq( $lc, 0 ) ) {
+            my ptr $fb_head = get_free_blocks($hb);
+            Brocken::store_i64( $block_base, $fb_head );
+            set_free_blocks( $hb, $block_base );
+        }
+    }
+    return;
+}
+
+# Drain the suspect buffer using Bacon & Rajan trial deletion (spec 17.3).
+#
+# Phase 1 (MarkGray) trial-deletes the whole candidate set reachable from the queued Purples; because the buffer keeps
+# every swept object exactly once (push_suspect_buffer dedups) the loop can follow the chain it started on while
+# MarkGray prepends newly discovered children. Phase 2 (ScanBlack) restores every Gray object that still has an
+# external reference and repaints its reachable subgraph Black; whatever is still Gray is cyclic garbage. Phase 3 runs
+# each reclaimed instance's DESTROY while the rest of the candidate set is still allocated, then frees the lot.
+#
+# The count is parked at -1 for the duration so a decref from Phase 3's DESTROY cannot re-enter the sweep or extend the
+# list phases 2 and 3 are walking.
+sub gc_drain( ptr $hb ) {
+    if ( Brocken::ptr_cmp_eq( $hb, 0 ) ) {
+        return;
+    }
+    if ( Brocken::ptr_cmp_eq( get_suspect_count($hb), -1 ) ) {
+        return;
+    }
+    set_suspect_count( $hb, -1 );
+
+    # Phase 1: MarkGray over the nodes present on entry.
     my ptr $node = get_suspect_buffer_head($hb);
     while ( Brocken::ptr_cmp_eq( $node, 0 ) == 0 ) {
-        my ptr $obj       = Brocken::load_i64($node);
-        my ptr $next_node = Brocken::load_i64( Brocken::ptr_add( $node, 8 ) );
-        gc_scan_obj( $obj, $hb );
-        my i64 $rc = Brocken::band( Brocken::load_i64($obj), 65535 );
-        if ( Brocken::ptr_cmp_eq( $rc, 0 ) ) {
-            my i64 $flags = get_gc_flags($obj);
-            set_gc_flags( $obj, Brocken::band( $flags, 231 ) );
-        }
-        else {
-            my i64 $flags = get_gc_flags($obj);
-            set_gc_flags( $obj, Brocken::bor( Brocken::band( $flags, 231 ), 24 ) );
-        }
-        $node = $next_node;
+        my ptr $obj  = Brocken::load_i64($node);
+        my ptr $next = Brocken::load_i64( Brocken::ptr_add( $node, 8 ) );
+        gc_mark_gray( $obj, $hb );
+        $node = $next;
     }
 
-    # Phase 2: Restore refs for Black (reachable) suspects
+    # Phase 2: ScanBlack -- a Gray object whose count survived the sweep is reachable.
     my ptr $node2 = get_suspect_buffer_head($hb);
     while ( Brocken::ptr_cmp_eq( $node2, 0 ) == 0 ) {
-        my ptr $obj       = Brocken::load_i64($node2);
-        my ptr $next_node = Brocken::load_i64( Brocken::ptr_add( $node2, 8 ) );
-        my i64 $flags     = get_gc_flags($obj);
-        my i64 $color     = Brocken::band( Brocken::shr( $flags, 3 ), 3 );
-        if ( Brocken::ptr_cmp_eq( $color, 3 ) ) {
-            gc_restore_refs($obj);
-            set_gc_flags( $obj, Brocken::bor( Brocken::band( $flags, 231 ), 24 ) );
-        }
-        $node2 = $next_node;
-    }
-
-    # Phase 3: Collect White/Gray objects and free all nodes back to free16
-    my ptr $node3 = get_suspect_buffer_head($hb);
-    while ( Brocken::ptr_cmp_eq( $node3, 0 ) == 0 ) {
-        my ptr $obj       = Brocken::load_i64($node3);
-        my ptr $next_node = Brocken::load_i64( Brocken::ptr_add( $node3, 8 ) );
-        my i64 $flags     = get_gc_flags($obj);
-        my i64 $color     = Brocken::band( Brocken::shr( $flags, 3 ), 3 );
-        if ( Brocken::ptr_cmp_eq( $color, 3 ) == 0 ) {
-            my i64 $header = Brocken::load_i64($obj);
-            my i64 $old_rc = Brocken::band( $header, 65535 );
-            Brocken::store_i64( $obj, Brocken::i64_sub( $header, $old_rc ) );
-            my ptr $fhead = get_free16_head($hb);
-            Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $fhead );
-            set_free16_head( $hb, $obj );
-            my ptr $block_base = block_of( $hb, $obj );
-            my ptr $lc_ptr     = Brocken::ptr_add( $block_base, block_live_count_offset() );
-            my i64 $lc         = Brocken::load_i64($lc_ptr);
-            $lc = Brocken::i64_sub( $lc, 1 );
-            Brocken::store_i64( $lc_ptr, $lc );
-
-            if ( Brocken::ptr_cmp_eq( $lc, 0 ) ) {
-                my ptr $fb_head = get_free_blocks($hb);
-                Brocken::store_i64( $block_base, $fb_head );
-                set_free_blocks( $hb, $block_base );
+        my ptr $obj   = Brocken::load_i64($node2);
+        my ptr $next  = Brocken::load_i64( Brocken::ptr_add( $node2, 8 ) );
+        my i64 $color = Brocken::band( Brocken::shr( get_gc_flags($obj), 3 ), 3 );
+        if ( Brocken::ptr_cmp_eq( $color, 1 ) ) {
+            my i64 $rc = Brocken::band( Brocken::load_i64($obj), 65535 );
+            if ( Brocken::ptr_cmp_gt( $rc, 0 ) ) {
+                gc_scan_black($obj);
             }
         }
+        $node2 = $next;
+    }
 
-        # Free the node back to free16
-        my ptr $fhead2 = get_free16_head($hb);
-        Brocken::store_i64( Brocken::ptr_add( $node3, 8 ), $fhead2 );
-        set_free16_head( $hb, $node3 );
-        $node3 = $next_node;
+    # Phase 3a: DESTROY every still-Gray (garbage) instance, with the whole candidate set still allocated.
+    my ptr $node3 = get_suspect_buffer_head($hb);
+    while ( Brocken::ptr_cmp_eq( $node3, 0 ) == 0 ) {
+        my ptr $obj   = Brocken::load_i64($node3);
+        my ptr $next  = Brocken::load_i64( Brocken::ptr_add( $node3, 8 ) );
+        my i64 $color = Brocken::band( Brocken::shr( get_gc_flags($obj), 3 ), 3 );
+        if ( Brocken::ptr_cmp_eq( $color, 1 ) ) {
+            gc_destroy_obj( $obj, $hb );
+        }
+        $node3 = $next;
+    }
+
+    # Phase 3b: free the garbage and recycle the buffer nodes. A surviving (Black) object keeps its color but must drop
+    # the Suspect|Buffered bits so a later drop can re-queue it.
+    my ptr $node4 = get_suspect_buffer_head($hb);
+    while ( Brocken::ptr_cmp_eq( $node4, 0 ) == 0 ) {
+        my ptr $obj   = Brocken::load_i64($node4);
+        my ptr $next  = Brocken::load_i64( Brocken::ptr_add( $node4, 8 ) );
+        my i64 $color = Brocken::band( Brocken::shr( get_gc_flags($obj), 3 ), 3 );
+        if ( Brocken::ptr_cmp_eq( $color, 1 ) ) {
+            gc_free_collected( $obj, $hb );
+        }
+        else {
+            set_gc_flags( $obj, Brocken::band( get_gc_flags($obj), 252 ) );
+        }
+        my ptr $fhead = get_free16_head($hb);
+        Brocken::store_i64( Brocken::ptr_add( $node4, 8 ), $fhead );
+        set_free16_head( $hb, $node4 );
+        $node4 = $next;
     }
     set_suspect_buffer_head( $hb, 0 );
+    set_suspect_count( $hb, 0 );
     return;
 }
 

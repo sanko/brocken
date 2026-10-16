@@ -5498,18 +5498,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method generate_class_gc($class_name) {
         my $cd = $classes->{$class_name};
         return unless $cd;
-        my $gc_decref = $functions->{'Brocken::Runtime::gc_decref'};
-        my $incref    = $functions->{'Brocken::Runtime::incref'};
-        return unless $gc_decref && $incref;
+        my $gc_decref       = $functions->{'Brocken::Runtime::gc_decref'};
+        my $gc_restore_black = $functions->{'Brocken::Runtime::gc_restore_black'};
+        return unless $gc_decref && $gc_restore_black;
 
         my $scan    = $self->_register_plain_function( $class_name . '::__scan',    'void', [ 'self', 'hb' ] );
         my $restore = $self->_register_plain_function( $class_name . '::__restore', 'void', ['self'] );
-        $self->_lower_gc_method( $class_name, $scan,    $gc_decref, 'scan' );
-        $self->_lower_gc_method( $class_name, $restore, $incref,    'restore' );
+        $self->_lower_gc_method( $class_name, $scan,    $gc_decref,        'scan' );
+        $self->_lower_gc_method( $class_name, $restore, $gc_restore_black, 'restore' );
     }
 
     # Walk the whole ancestor chain's fields and call `$callee` on each owned dynamic one. `scan` passes the heap
-    # base so a field whose count drops to zero is reclaimed; `restore` calls incref, which needs only the box.
+    # base and calls gc_decref (MarkGray: drop one reference and recurse); `restore` calls gc_restore_black, which
+    # takes the reference back and repaints the child's reachable subgraph Black.
     method _lower_gc_method( $class_name, $fn, $callee, $kind ) {
         $current_func  = $fn;
         $symbols       = {};
@@ -5537,6 +5538,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method generate_gc_dispatch() {
         $self->_lower_gc_dispatch( 'Brocken::Runtime::gc_scan_class',    'scan' );
         $self->_lower_gc_dispatch( 'Brocken::Runtime::gc_restore_class', 'restore' );
+        $self->_lower_gc_destroy_dispatch;
     }
 
     method _lower_gc_dispatch( $name, $kind ) {
@@ -5570,6 +5572,53 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $builder->position_at_end($match);
                 my @args = $restore ? ($obj) : ( $obj, $hb );
                 $builder->build_call( $target, \@args, undef );
+                $builder->build_br($ret_block);
+                $test_block = $next;
+            }
+            $builder->position_at_end($test_block);
+            $builder->build_br($ret_block);
+        }
+        $builder->position_at_end($ret_block);
+        $builder->build_ret();
+        return;
+    }
+
+    # Emit `Brocken::Runtime::gc_destroy_class`: a direct-call switch over the class id that runs the instance's
+    # resolved DESTROY (hidden args `hb`, `want`, `self`). The collector cannot know an instance's static class, so
+    # this is how a reclaimed cycle runs destructors. A class with no DESTROY anywhere on its chain contributes no
+    # call; the stub is still emitted (even with no classes) so the runtime always resolves it.
+    method _lower_gc_destroy_dispatch() {
+        my $fn = $self->_register_plain_function( 'Brocken::Runtime::gc_destroy_class', 'void', [ 'obj', 'hb' ] );
+        $current_func  = $fn;
+        $symbols       = {};
+        $current_block = undef;
+        $fn->set_blocks( [] );
+        my $entry = $fn->append_block('entry');
+        $builder->position_at_end($entry);
+        $current_block = $entry;
+        my $ret_block = $fn->append_block('ret');
+
+        my @classes = sort { $classes->{$a}{id} <=> $classes->{$b}{id} } grep { $classes->{$_}{id} } keys %$classes;
+        if (@classes) {
+            my $obj    = $fn->params->[0];
+            my $hb     = $fn->params->[1];
+            my $header = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $obj );
+            my $id     = $builder->build_lshr( $header, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 32 ) );
+            my $test_block = $entry;
+            for my $class_name (@classes) {
+                my $cid          = $classes->{$class_name}{id};
+                my $destroy_name = $self->_resolve_method( $class_name, 'DESTROY' );
+                my $target       = $destroy_name ? $functions->{$destroy_name} : undef;
+                my $match        = $fn->append_block( 'destroy_match_' . $cid );
+                my $next         = $fn->append_block( 'destroy_next_' . $cid );
+                $builder->position_at_end($test_block);
+                my $cond = $builder->build_icmp( 'eq', $id, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $cid ) );
+                $builder->build_cond_br( $cond, $match, $next );
+                $builder->position_at_end($match);
+                if ($target) {
+                    my $zero = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 );
+                    $builder->build_call( $target, [ $hb, $zero, $obj ], undef );
+                }
                 $builder->build_br($ret_block);
                 $test_block = $next;
             }
