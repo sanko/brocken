@@ -4002,7 +4002,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $val = $self->_stringify_value( $val, $ast, $line, $col );
             }
             elsif ( $param_idx < $callee->params->@* ) {
-                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
+                # A user parameter whose Brocken type maps to `ptr` (`String`, a class, a raw `ptr`) wants the box's
+                # payload, so a dynamic argument is unboxed here; an `Any` parameter stays `dynamic` and keeps the box.
+                # `$callee_has_heap_base` is what separates a user function from a runtime helper (`length`'s `strlen`),
+                # which still receives the box it reads the header through.
+                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type, $line, $col,
+                    $callee_has_heap_base ? 1 : 0 );
             }
             push @args, $val;
             if ($defaults) {
@@ -4029,7 +4034,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $rec = $di < $defaults->@* ? $defaults->[$di] : undef;
                 last unless $rec && defined $rec->{default};
                 my $val = $self->lower_expression( $rec->{default} );
-                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
+                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type, $line, $col,
+                    $callee_has_heap_base ? 1 : 0 );
                 push @args,  $val;
                 push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
                 $symbols->{ $rec->{name} } = $val;
@@ -5051,7 +5057,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $arg ( $ast->args->@* ) {
             my $val = $self->lower_expression($arg);
             if ( $param_idx < $callee->params->@* ) {
-                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
+                # As at a plain call: a `ptr`-shaped user parameter (`String`/class/`ptr`) takes the box's payload.
+                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type, $line, $col, 1 );
             }
             push @args, $val;
             if ($defaults) {
@@ -5068,7 +5075,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 my $rec = $param_idx - 3 < $defaults->@* ? $defaults->[ $param_idx - 3 ] : undef;
                 last unless $rec && defined $rec->{default};
                 my $val = $self->lower_expression( $rec->{default} );
-                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type );
+                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type, $line, $col, 1 );
                 push @args,  $val;
                 push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
                 $symbols->{ $rec->{name} } = $val;
