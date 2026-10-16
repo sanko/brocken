@@ -46,6 +46,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $_loop_check_blocks    = [];        # stack of iteration-check block labels (counter guard)
     field $_loop_exit_blocks     = [];        # stack of exit block labels for break (last)
     field $_loop_body_scopes     = [];        # stack of dynamic-stack scopes opened for each in-progress loop body
+    field $_loop_handler_depths  = [];        # stack of $_try_handler_depth at each loop's entry, so `last`/`next` pop what a `try` inside the loop body pushed
+    field $_try_handler_depth    = 0;         # number of try-body exception handlers pushed and not yet popped, so `return` can pop them
     field $_dyn_scope_stack      = [];        # stack of scope records for each in-progress block/loop (RC ownership)
     field $fuel_exit_block;                   # set in lower_function, used by call-site fuel checks
     field $_want_override = undef;            # i64 mask forced on a call while lowering a context that consumes a list (e.g. a `for` iterable)
@@ -1870,6 +1872,26 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
     }
 
+    # Pop `$count` exception handlers off the ICB stack. `return`/`last`/`next` reach for this so a non-local jump out
+    # of a `try` body does not leave the stack pointing at a handler whose jmp_buf belongs to a frame that is about to
+    # go away (F4). Each pop is `head = *head` in ICB.exception_handler_stack -- the same sequence `lower_trycatch`
+    # emits on its normal and exceptional exits. `__heap_base` is in scope whenever a handler is on the stack, because
+    # only `try/catch` increments `$_try_handler_depth` and it requires `__heap_base`.
+    method _emit_handler_pops( $count, $line, $col ) {
+        return unless $count && $count > 0;
+        my $hb_alloca = $symbols->{'__heap_base'} or return;
+        my $i64_type  = Brocken::Lindsay::IR::Type::i64();
+        for ( 1 .. $count ) {
+            my $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb_alloca, undef, $line, $col );
+            my $eh = $builder->build_add( $hb,
+                Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => Brocken::ICB::EXCEPTION_HANDLER_STACK ),
+                undef, $line, $col );
+            my $head = $builder->build_load( $i64_type, $eh,   undef, $line, $col );
+            my $next = $builder->build_load( $i64_type, $head, undef, $line, $col );
+            $builder->build_store( $next, $eh, $line, $col );
+        }
+    }
+
     method lower_return($ast) {
         my ( $line, $col ) = ( $ast->line, $ast->col );
         if ( defined $ast->expr ) {
@@ -1895,6 +1917,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     $self->_emit_rc_release( $name, $hb );
                 }
             }
+            $self->_emit_handler_pops( $_try_handler_depth, $line, $col );
             $builder->build_ret( $val, $line, $col );
         }
         else {
@@ -1906,6 +1929,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     $self->_emit_rc_release( $name, $decref_hb );
                 }
             }
+            $self->_emit_handler_pops( $_try_handler_depth, $line, $col );
             $builder->build_ret( undef, $line, $col );
         }
     }
@@ -1996,6 +2020,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         push $_loop_header_blocks->@*, $header;
         push $_loop_check_blocks->@*,  $check;
         push $_loop_exit_blocks->@*,   $exit;
+        push $_loop_handler_depths->@*, $_try_handler_depth;    # `last`/`next` pop only what a `try` inside this body pushed
         $builder->build_br( $header, $line, $col );
         $builder->position_at_end($header);
         $current_block = $header;
@@ -2039,6 +2064,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         pop $_loop_header_blocks->@*;
         pop $_loop_check_blocks->@*;
         pop $_loop_exit_blocks->@*;
+        pop $_loop_handler_depths->@*;
 
         # The loop body's RC vars are scoped to the loop: every iteration path freed them (back edge, break, next).
         # Drop any still tracked for this loop so a later block/function exit does not decref a dead slot again.
@@ -2097,6 +2123,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         push $_loop_header_blocks->@*, $incr;
         push $_loop_check_blocks->@*,  $check;
         push $_loop_exit_blocks->@*,   $exit;
+        push $_loop_handler_depths->@*, $_try_handler_depth;    # `last`/`next` pop only what a `try` inside this body pushed
 
         my $k_slot = $builder->build_alloca( $i64_type, $self->unique_value_name('%for.k'), undef, $line, $col );
         my $zero   = Brocken::Lindsay::IR::Constant->new( type => $i64_type, value => 0 );
@@ -2179,6 +2206,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         pop $_loop_header_blocks->@*;
         pop $_loop_check_blocks->@*;
         pop $_loop_exit_blocks->@*;
+        pop $_loop_handler_depths->@*;
         $self->_forget_rc($_) for grep { defined $rc_owner->{$_} && $rc_owner->{$_} == $loop_scope } keys %$needs_rc;
         $builder->position_at_end($exit);
         $current_block = $exit;
@@ -2221,6 +2249,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         push $_loop_header_blocks->@*, $incr;
         push $_loop_check_blocks->@*,  $check;
         push $_loop_exit_blocks->@*,   $exit;
+        push $_loop_handler_depths->@*, $_try_handler_depth;    # `last`/`next` pop only what a `try` inside this body pushed
 
         $builder->build_br( $cond, $line, $col );
 
@@ -2271,6 +2300,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         pop $_loop_header_blocks->@*;
         pop $_loop_check_blocks->@*;
         pop $_loop_exit_blocks->@*;
+        pop $_loop_handler_depths->@*;
         $self->_forget_rc($_) for grep { defined $rc_owner->{$_} && $rc_owner->{$_} == $loop_scope } keys %$needs_rc;
         $builder->position_at_end($exit);
         $current_block = $exit;
@@ -2413,7 +2443,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # --- try body block ---
         $builder->position_at_end($try_body_block);
         $current_block = $try_body_block;
+
+        # The handler is on the ICB stack for the whole body, so a `return`/`last`/`next` that leaves the body must pop
+        # it (F4). The body's normal exit and the landing pad pop it themselves, so the depth is only raised here.
+        $_try_handler_depth++;
         $self->lower_block_body( $ast->try_body );
+        $_try_handler_depth--;
 
         # Normal exit: pop handler from ICB
         unless ( $current_block->terminator ) {
@@ -2679,6 +2714,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_break($ast) {
         my $exit = $_loop_exit_blocks->[-1] or Carp::croak( "'last' outside loop at " . $self->_loc($ast) );
         my ( $line, $col ) = ( $ast->line, $ast->col );
+        # A `try` between this loop's entry and here is left behind by the branch, so pop the handlers it pushed (F4).
+        $self->_emit_handler_pops( $_try_handler_depth - ( $_loop_handler_depths->[-1] // 0 ), $line, $col );
         $self->_emit_loop_cleanup();
         $builder->build_br( $exit, $line, $col );
     }
@@ -2686,6 +2723,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_continue($ast) {
         my $header = $_loop_header_blocks->[-1] or Carp::croak( "'next' outside loop at " . $self->_loc($ast) );
         my ( $line, $col ) = ( $ast->line, $ast->col );
+        # As with `last`, pop any handler a `try` opened inside this loop body before jumping to the header (F4).
+        $self->_emit_handler_pops( $_try_handler_depth - ( $_loop_handler_depths->[-1] // 0 ), $line, $col );
         $self->_emit_loop_cleanup();
         $builder->build_br( $header, $line, $col );
     }
