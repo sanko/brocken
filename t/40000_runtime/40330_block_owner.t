@@ -17,7 +17,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 160);
+my ptr $block0 = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 # Raw 16-byte cell in block 0 with RC=1, tag=0.
 my ptr $a = Brocken::Runtime::bump_alloc($hb, 16);
 Brocken::store_i64($a, 1);
@@ -58,7 +58,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 160);
+my ptr $block0 = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 my ptr $a = Brocken::Runtime::bump_alloc($hb, 16);
 Brocken::store_i64($a, 1);
 # Force a second block so that block 1, not block 0, is current.
@@ -102,7 +102,7 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-my ptr $block0 = Brocken::ptr_add($hb, 160);
+my ptr $block0 = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 my ptr $a = Brocken::Runtime::bump_alloc($hb, 16);
 Brocken::store_i64($a, 2);
 my ptr $block_end = Brocken::ptr_add($block0, 32752);
@@ -118,13 +118,15 @@ my ptr $b = Brocken::Runtime::bump_alloc($hb, 16);
 Brocken::store_i64($b, 2);
 my ptr $block1 = Brocken::load_i64(Brocken::ptr_add($hb, 80));
 if (Brocken::ptr_cmp_eq($block1, $block0)) { return 1; }
-my i64 $lc1_before = Brocken::load_i64(Brocken::ptr_add($block1, 32752));
-# RC 2 -> 1: node survives and stays out of block bookkeeping only in the RC==0 path.
+# RC 2 -> 1: the object survives, so block 0 is untouched. This first decrement also pushes $a onto the
+# suspect buffer, whose node is allocated from the current block 1 -- measure block 1 after that push.
 Brocken::Runtime::gc_decref($a, $hb);
 if (Brocken::load_i64(Brocken::ptr_add($block0, 32752)) != 1) { return 2; }
-if (Brocken::load_i64(Brocken::ptr_add($block1, 32752)) != $lc1_before) { return 3; }
-# RC 1 -> 0: now block 0 must be charged, not the current block 1.
+my i64 $lc1_before = Brocken::load_i64(Brocken::ptr_add($block1, 32752));
+# RC 1 -> 0: reclamation is deferred to the collector's sweep, which must charge the owning block 0,
+# not the current block 1.
 Brocken::Runtime::gc_decref($a, $hb);
+Brocken::Runtime::gc_drain($hb);
 if (Brocken::load_i64(Brocken::ptr_add($block0, 32752)) != 0) { return 4; }
 if (Brocken::load_i64(Brocken::ptr_add($block1, 32752)) != $lc1_before) { return 5; }
 return 0;
