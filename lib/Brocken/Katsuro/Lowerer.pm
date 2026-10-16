@@ -19,6 +19,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $symbols   = {};                    # "name" -> ptr (alloca or GEP result)
     field $functions = {};                    # "name" -> Brocken::Lindsay::IR::Function
     field $classes          : reader = {};    # "ClassName" -> { fields => [...], total_size => N, methods => [...], struct_type => T }
+    field $known_class_names     = {};        # "ClassName" -> 1 (every class name in the program, scanned before registration)
     field $package_versions : reader = {};    # "Package::Name" -> declared version, from `package NAME VERSION`
     field $block_id              = 0;
     field $value_id              = 0;         # monotonic counter making local SSA storage names unique
@@ -144,7 +145,24 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     method type_from_name($name) {
-        return $TYPE_MAP{$name} // Carp::croak("Unknown type '$name'");
+        return $TYPE_MAP{$name} if exists $TYPE_MAP{$name};
+
+        # A class name used as a type is a bare instance pointer. The name may be qualified (`Pkg::Node`) or bare, so
+        # consult the pre-scanned set and the current package's spelling.
+        return Brocken::Lindsay::IR::Type::ptr() if $self->is_class_type_name($name);
+        Carp::croak("Unknown type '$name'");
+    }
+
+    # Is `$name` a declared (or forward-declared) class name? Used to treat a class name as a `ptr` type annotation
+    # and, in `register_class`, to record the class a field refers to.
+    method is_class_type_name($name) {
+        return 0 unless defined $name && length $name;
+        return 1 if $known_class_names->{$name} || $classes->{$name};
+        if ( defined $current_package && length $current_package && index( $name, '::' ) < 0 ) {
+            my $qualified = $current_package . '::' . $name;
+            return 1 if $known_class_names->{$qualified} || $classes->{$qualified};
+        }
+        return 0;
     }
 
     # Prefix a bare declaration name with its package. A name that already contains `::` is absolute, so
@@ -197,6 +215,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method _align_up( $value, $align ) {
         return $value if $align <= 1;
         return ( $value + $align - 1 ) & ~( $align - 1 );
+    }
+
+    # A field that stores an owned reference the object must release: a dynamic (`Any`) box, or a class-typed
+    # instance pointer. A `:weak` field owns nothing; a native or plain-pointer (String/ptr) field is not RC-tracked.
+    method _field_is_owned_ref($fd) {
+        return 0 unless $fd->{ir_type} && !$fd->{weak};
+        return 1 if $fd->{ir_type}->kind eq 'dynamic';
+        return 1 if $fd->{field_class};
+        return 0;
     }
 
     # Decide whether a dynamic-returning function hands the caller an owned reference (+1) or a borrowed one (+0).
@@ -460,21 +487,97 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # value use.
     method _scan_escapes($block) {
         return unless defined $block;
+        my $saved_var_class = { %$var_class };
         $self->_scan_stmt_escapes($_) for $block->statements->@*;
+        $var_class = $saved_var_class;
+        return;
+    }
+
+    # Record the class a variable is bound to as the scan walks, so a later `$a->field = $b` can tell which class's
+    # field it stores into. Lowering repeats this binding in `lower_var_decl`; here it exists only to classify the
+    # store as owning, and `_scan_escapes` restores `$var_class` when it returns.
+    method _scan_record_var_class( $name, $decl_type, $init ) {
+        my $class;
+        if ( defined $decl_type && $decl_type ne 'Any' && $self->is_class_type_name($decl_type) ) {
+            $class = $self->_resolve_class_ident($decl_type);
+        }
+        if ( !$class && $self->_is_fresh_construction($init) ) {
+            $class = $self->_resolve_class_ident( $init->obj->name );
+        }
+        if ( !$class ) {
+            my $owned = eval { $self->_owned_class_call($init) };
+            $class = $owned if $owned;
+        }
+        $var_class->{$name} = $class if $class && $classes->{$class};
+        return;
+    }
+
+    # Whether `$target` names a non-weak dynamic/class-typed field, whose store takes an owning reference. Only such
+    # a store lets the RHS local go un-escaped (see `_scan_owned_rhs`); anything we cannot pin is not owning.
+    method _scan_owned_field_target($target) {
+        return 0 unless defined $target && ref $target;
+        my $field;
+        if ( $target->isa('Brocken::Katsuro::AST::Expr::FieldAccess') ) {
+            my $cls = eval { $self->_expr_class( $target->obj ) };
+            if ( !defined $cls && $target->obj->isa('Brocken::Katsuro::AST::Expr::Var') && $target->obj->name eq 'self' ) {
+                $cls = $current_class;
+            }
+            return 0 unless defined $cls && $classes->{$cls};
+            ($field) = grep { $_->{name} eq $target->field } $classes->{$cls}{fields}->@*;
+        }
+        elsif ( $target->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            return 0 unless defined $current_class && $classes->{$current_class};
+            ($field) = grep { $_->{name} eq $target->name } $classes->{$current_class}{fields}->@*;
+        }
+        return 0 unless $field;
+        return $self->_field_is_owned_ref($field) ? 1 : 0;
+    }
+
+    # The RHS of a store into an owning field is consumed by that field: the field takes its own reference, so a local
+    # on the right keeps no obligation to hold one and may still be released at scope exit. Marking it escaped would
+    # strand that reference and keep a natural cycle reachable. Deeper sub-expressions are classified normally, and a
+    # value handed to a call or any other sink still escapes through `_scan_value_escapes`.
+    method _scan_owned_rhs($expr) {
+        return unless defined $expr && ref $expr;
+        return if $expr->isa('Brocken::Katsuro::AST::Expr::Var');
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
+            return $self->_scan_owned_rhs( $expr->expr );
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Ternary') ) {
+            $self->_scan_value_escapes( $expr->cond );
+            $self->_scan_owned_rhs( $expr->then );
+            $self->_scan_owned_rhs( $expr->else );
+            return;
+        }
+        return $self->_scan_value_escapes($expr);
+    }
+
+    method _scan_store_escapes( $target, $expr ) {
+        $self->_scan_receiver_escapes($target);
+        if ( $self->_scan_owned_field_target($target) ) {
+            $self->_scan_owned_rhs($expr);
+        }
+        else {
+            $self->_scan_value_escapes($expr);
+        }
+        return;
     }
 
     method _scan_stmt_escapes($stmt) {
         return unless defined $stmt;
         if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') ) {
             $self->_scan_value_escapes( $stmt->init );
+            $self->_scan_record_var_class( $stmt->name, $stmt->type, $stmt->init );
         }
         elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ArrayDecl') ) {
             $self->_scan_value_escapes( $stmt->size_expr );
             $self->_scan_value_escapes( $stmt->init );
         }
         elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Assign') ) {
-            $self->_scan_receiver_escapes( $stmt->target );
-            $self->_scan_value_escapes( $stmt->expr );
+            if ( $stmt->target->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+                $self->_scan_record_var_class( $stmt->target->name, undef, $stmt->expr );
+            }
+            $self->_scan_store_escapes( $stmt->target, $stmt->expr );
         }
         elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ListVarDecl') ) {
             $self->_scan_value_escapes( $stmt->expr );
@@ -617,6 +720,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             unshift @decls, $main_sub;
         }
 
+        # Pass 0: collect every class name before any declaration is registered, so a class-typed field or parameter
+        # may name a class declared later in the file. `type_from_name` consults this set to treat the name as `ptr`.
+        $known_class_names->{ $self->_qualify( $_->name, $_->package ) } = 1
+            for grep { $_->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') } @decls;
+
         # Pass 1: Register all declarations
         for my $stmt (@decls) {
             if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') ) {
@@ -678,6 +786,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->_class_depth( $self->_qualify( $a->name, $a->package ) )
                 <=> $self->_class_depth( $self->_qualify( $b->name, $b->package ) )
         } @class_decls;
+
+        # Pre-register every class's reclaim thunk (`__destroy`) so a class-typed field whose class is declared
+        # later still has a resolvable child destructor when the referring class's own cascade is lowered below.
+        for my $stmt (@class_decls) {
+            my $cn = $self->_qualify( $stmt->name, $stmt->package );
+            $self->register_method( $cn, '__destroy', 'void', [] ) unless $functions->{ $cn . '::__destroy' };
+        }
+
         for my $stmt (@class_decls) {
             $self->generate_class_runtime($stmt);
         }
@@ -735,8 +851,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
         # The reclaim thunk the compiled release sites call: it runs the (chained) DESTROY, tears down the managed
         # fields, and frees the instance. It is separate from DESTROY because DESTROY is an ordinary method a user may
-        # call more than once, while the reclaim must run exactly once, when the refcount reaches zero.
-        $self->register_method( $class_name, '__destroy', 'void', [] );
+        # call more than once, while the reclaim must run exactly once, when the refcount reaches zero. It is usually
+        # pre-registered in `lower_program` so a forward-referenced class can resolve it; only register if absent.
+        $self->register_method( $class_name, '__destroy', 'void', [] ) unless $functions->{ $class_name . '::__destroy' };
 
         # Lower explicit methods
         for my $m ( $ast->methods->@* ) {
@@ -951,6 +1068,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $ir_type = $self->type_from_name( $f->type );
                 ( $span, $size ) = ( 1, $self->type_size($ir_type) );
             }
+
+            # A scalar field whose declared type names a class holds an owned instance pointer. The class is resolved
+            # here (allowing a forward reference through the pre-scanned set) so the field store, the scan/restore
+            # hooks, and the reclaim cascade all know which instance they move.
+            my $field_class;
+            if ( $kind eq 'scalar' && $self->is_class_type_name( $f->type ) ) {
+                $field_class = $f->type;
+                if ( !$classes->{$field_class} && !$known_class_names->{$field_class}
+                    && defined $ast->package && length $ast->package && index( $field_class, '::' ) < 0 ) {
+                    my $qualified = $ast->package . '::' . $field_class;
+                    $field_class = $qualified if $classes->{$qualified} || $known_class_names->{$qualified};
+                }
+            }
             if ( $inline && $self->has_attr( $f->attrs, 'param' ) ) {
                 Carp::croak(
                     "Inline array field '" . $f->name . "' cannot be :param; use a pointer array (field " . $f->elem_type . " \@" . $f->name . ")" );
@@ -963,6 +1093,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 inline       => $inline,
                 ir_type      => $ir_type,
                 elem_ir_type => $elem_ir_type,
+                field_class  => $field_class,
                 span         => $span,
                 size         => $size,
                 align        => $self->type_align( $inline ? $elem_ir_type : $ir_type ),
@@ -1559,6 +1690,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         if ( defined $ast->init ) {
             my $fresh_class;
+
+            # A local declared with a class type names that class (a non-owning raw pointer unless the initialiser
+            # is a fresh construction), so later field/method access on it resolves.
+            if ( defined $ast->type && $ast->type ne 'Any' && $self->is_class_type_name( $ast->type ) ) {
+                $var_class->{ $ast->name } = $self->_resolve_class_ident( $ast->type );
+            }
             if ( $ast->init->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
                 $ast->init->method eq 'new' &&
                 $ast->init->obj->isa('Brocken::Katsuro::AST::Expr::Ident') ) {
@@ -1572,6 +1709,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 # field/method access on the local resolves, and let the scope-exit release finalize it.
                 $var_class->{ $ast->name } = $owned_class;
                 $fresh_class = $owned_class if $ir_type->kind eq 'ptr';
+            }
+            elsif ( $ast->init->isa('Brocken::Katsuro::AST::Expr::FieldAccess') ) {
+
+                # Reading a class-typed field borrows the instance the field owns; record the class so a chained
+                # method call or a further field access resolves, but take no ownership of the borrow.
+                my $field_class = eval { $self->_expr_class( $ast->init ) };
+                $var_class->{ $ast->name } = $field_class if defined $field_class;
             }
             my $raw_val = $self->lower_expression( $ast->init );
             my $val = $self->maybe_convert_type( $raw_val, $ir_type, $line, $col, 1 );
@@ -1620,6 +1764,51 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
         }
         $builder->build_decref( $old, $line, $col, $hb );
+    }
+
+    # Store an instance pointer into an owned class-typed field/slot: take a reference to the new instance (unless the
+    # value already carries one, F13), store it, and release whatever the slot held before through the old instance's
+    # own destructor. Mirrors `_emit_owned_store`, but the release is an obj release rather than a plain decref.
+    # `$consumes` is set when the RHS already hands over an owned instance (a fresh `Class->new` or a call classified
+    # as class-return-owned): the slot consumes that reference rather than taking a second one.
+    method _emit_class_owned_store( $val, $addr, $old_class, $line, $col, $heap_base = undef, $consumes = 0 ) {
+        my $old = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $addr, undef, $line, $col );
+        $builder->build_incref( $val, $line, $col ) unless $consumes;
+        $builder->build_store( $val, $addr, $line, $col );
+        my $hb = $heap_base;
+        if ( !defined $hb && $symbols->{'__heap_base'} ) {
+            $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} );
+        }
+        $self->_emit_obj_release( $old, $old_class, $hb ) if $old_class;
+    }
+
+    # Whether `$expr` hands over an owned class instance that an owned slot may consume: a fresh `Class->new`, or a
+    # call the callee classified as class-return-owned. Everything else is a borrow the slot must incref.
+    method _rhs_is_owned_instance($expr) {
+        return 1 if $self->_is_fresh_construction($expr);
+        return 1 if $self->_owned_class_call($expr);
+        return 0;
+    }
+
+    # Store a constructor-supplied or default value into a field slot, honouring the field's ownership kind: a
+    # dynamic (`Any`) field is a boxed owned store, a class-typed field is an instance owned store, and anything else
+    # (native or plain pointer) is a plain store. The conversion unboxes an `Any` value bound for a class/ptr field.
+    method _emit_field_value_store( $val, $field_ptr, $fd, $line, $col, $expr = undef ) {
+        my $ir_type = $fd->{ir_type};
+        if ( $fd->{field_class} && !$fd->{weak} ) {
+            my $v = $self->maybe_convert_type( $val, $ir_type, $line, $col, 1 );
+            my $consumes = $expr ? $self->_rhs_is_owned_instance($expr) : 0;
+            $self->_emit_class_owned_store( $v, $field_ptr, $fd->{field_class}, $line, $col, undef, $consumes );
+        }
+        elsif ( $ir_type->kind eq 'dynamic' && !$fd->{weak} ) {
+            my $v = $self->maybe_convert_type( $val, $ir_type, $line, $col, 1 );
+            $self->_emit_owned_store( $v, $field_ptr, $ir_type, $line, $col );
+        }
+        else {
+            my $v = $self->maybe_convert_type( $val, $ir_type, $line, $col );
+            $builder->build_store( $v, $field_ptr, $line, $col );
+        }
+        return;
     }
 
     # `//=`/`||=` on a dynamic (`Any`) slot is an owned store, but only when the slot is absent: a `select` cannot
@@ -1713,6 +1902,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $stored_type;
         my $is_field_target = 0;
         my $is_weak_field   = 0;
+        my $field_rec;
         if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') ) {
             my $key = $target->sigil eq '@' ? '@' . $target->name : $target->name;
             $addr = $symbols->{$key};
@@ -1723,6 +1913,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $stored_type    = $field ? $field->{ir_type} : Brocken::Lindsay::IR::Type::i64();
                 $is_field_target = 1;    # a bare field name in a method body is a Var bound to its struct GEP
                 $is_weak_field   = 1 if $field && $field->{weak};
+                $field_rec       = $field;
             }
             else {
                 $stored_type = $addr->allocated_type // $val->type;
@@ -1737,6 +1928,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $stored_type     = $field->{ir_type};
             $is_field_target = 1;
             $is_weak_field   = 1 if $field->{weak};
+            $field_rec       = $field;
         }
         elsif ( $target->isa('Brocken::Katsuro::AST::Expr::ArrayIndex') ) {
             $addr        = $self->lower_array_addr($target);
@@ -1749,6 +1941,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $is_rc        = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
         my $is_borrowed  = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $target->name };
         my $is_dyn_field = $is_field_target && $stored_type->kind eq 'dynamic' && !$is_weak_field;
+
+        # A class-typed field is an owned instance slot: the store takes a reference to the new instance and releases
+        # the old one through its destructor.
+        my $is_class_field = $is_field_target && $field_rec && $field_rec->{field_class} && !$is_weak_field;
 
         # An element of a local managed (`Any`) array is itself an owning slot: `array_release` at scope exit drops one
         # reference per element, so a store into one takes a reference and releases what it displaces, exactly like an
@@ -1820,7 +2016,28 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # that needs a branch (F2). Pointer and native slots are not RC-tracked: they keep the branchless select
             # (a pointer's null test, a native's zero test).
             my $is_nullable = $stored_type->kind eq 'ptr' || $stored_type->kind eq 'dynamic';
-            if ($is_dyn_rc) {
+            if ($is_class_field) {
+
+                # A class-typed slot: take the default only when the slot is null, else keep the instance it holds.
+                # The replacement takes an owned reference (or consumes one from a fresh construction), so it needs
+                # a branch rather than a select.
+                my $existing = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $addr, undef, $line, $col );
+                my $null     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+                my $is_absent = $builder->build_icmp( 'eq', $existing, $null, undef, $line, $col );
+                my $func     = $current_func;
+                my $store_b  = $func->append_block( $self->unique_block_name('rc_class_orassign') );
+                my $merge_b  = $func->append_block( $self->unique_block_name('rc_class_orassign_end') );
+                $builder->position_at_end($current_block);
+                $builder->build_cond_br( $is_absent, $store_b, $merge_b, $line, $col );
+                $builder->position_at_end($store_b);
+                $current_block = $store_b;
+                $self->_emit_class_owned_store( $val, $addr, $field_rec->{field_class}, $line, $col, undef,
+                    $self->_rhs_is_owned_instance( $ast->expr ) );
+                $builder->build_br($merge_b, $line, $col);
+                $builder->position_at_end($merge_b);
+                $current_block = $merge_b;
+            }
+            elsif ($is_dyn_rc) {
                 if ($is_borrowed) {
 
                     # The slot may keep the caller's borrowed box, so the exit cleanup can only own it if that box's
@@ -1845,7 +2062,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
         }
         else {
-            if ( $is_rc || $is_dyn_field || $is_owned_elem ) {
+            if ($is_class_field) {
+                $self->_emit_class_owned_store( $val, $addr, $field_rec->{field_class}, $line, $col, undef,
+                    $self->_rhs_is_owned_instance( $ast->expr ) );
+            }
+            elsif ( $is_rc || $is_dyn_field || $is_owned_elem ) {
                 $self->_emit_owned_store( $val, $addr, $stored_type, $line, $col );
             }
             elsif ($is_borrowed) {
@@ -4762,6 +4983,18 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::Call') && exists $function_return_class->{ $obj->func_name } ) {
             return $function_return_class->{ $obj->func_name };
         }
+        if ( $obj->isa('Brocken::Katsuro::AST::Expr::FieldAccess') ) {
+
+            # A class-typed field read yields an instance pointer, so a method call chained on it resolves against
+            # the field's class. Any other field type carries no static class.
+            my $recv = eval { $self->_expr_class( $obj->obj ) };
+            if ( !defined $recv && $obj->obj->isa('Brocken::Katsuro::AST::Expr::Var') && $obj->obj->name eq 'self' ) {
+                $recv = $current_class;
+            }
+            return undef unless defined $recv && $classes->{$recv};
+            my ($field) = grep { $_->{name} eq $obj->field } $classes->{$recv}{fields}->@*;
+            return ( $field && $field->{field_class} ) ? $field->{field_class} : undef;
+        }
         if ( $obj->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
             my $recv = $self->_expr_class( $obj->obj );
             if ( defined $recv ) {
@@ -4872,26 +5105,29 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $self_ptr     = $builder->build_call( $bump_alloc_fn, [ $hb, $size_const ], undef, $line, $col );
 
             # The header packs refcount 1, the GC flags, the class-instance tag (4), and the class id in the
-            # auxiliary bits. A class with no owned dynamic field against its whole chain is marked Leaf (flag bit
-            # 2) so the runtime never buffers it as a cycle suspect. The tag-4 + nonzero-id pair is also what tells
-            # `gc_scan_obj` that this is a class instance rather than a boxed `ptr`, whose aux id is 0.
+            # auxiliary bits. A class with no owned reference field against its whole chain -- a dynamic (`Any`) box
+            # or a class-typed instance pointer -- is marked Leaf (flag bit 2) so the runtime never buffers it as a
+            # cycle suspect. The tag-4 + nonzero-id pair is also what tells `gc_scan_obj` that this is a class instance
+            # rather than a boxed `ptr`, whose aux id is 0.
             my $class_id    = $cd->{id} // 0;
-            my $has_dynamic = scalar grep { $_->{ir_type} && $_->{ir_type}->kind eq 'dynamic' && !$_->{weak} } $cd->{fields}->@*;
+            my $has_dynamic = scalar grep { $self->_field_is_owned_ref($_) } $cd->{fields}->@*;
             my $gc_flags    = $has_dynamic ? 0 : 4;
             my $header_val  = 1 | ( $gc_flags << 16 ) | ( 4 << 24 ) | ( $class_id << 32 );
             my $header_const = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $header_val );
             $builder->build_store( $header_const, $self_ptr, $line, $col );
 
-            # bump_alloc does not zero its memory, so every pointer-shaped array/hash field and every dynamic (`Any`)
-            # field is nulled up front. A :param or default below overwrites its slot; one that is left out stays a null
-            # pointer rather than a dangling word the object header happened to leave behind. Nulling the dynamic fields
-            # is also what makes the owned-store decref (F9) safe: the store always loads the value it displaces, and a
-            # fresh slot must read back as null rather than as uninitialised allocator garbage.
+            # bump_alloc does not zero its memory, so every pointer-shaped array/hash field, every dynamic (`Any`)
+            # field, and every class-typed instance field is nulled up front. A :param or default below overwrites its
+            # slot; one that is left out stays a null pointer rather than a dangling word the object header happened
+            # to leave behind. Nulling the owned fields is also what makes the owned-store decref (F9) safe: the store
+            # always loads the value it displaces, and a fresh slot must read back as null rather than as uninitialised
+            # allocator garbage.
             my $null_ptr = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
             for my $f ( $cd->{fields}->@* ) {
                 next unless $f->{kind} eq 'hash'
                     || ( $f->{kind} eq 'array' && !$f->{inline} )
-                    || $f->{ir_type}->kind eq 'dynamic';
+                    || $f->{ir_type}->kind eq 'dynamic'
+                    || $f->{field_class};
                 my $slot = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $f->{slot_idx}, '%' . $f->{name} . '.null', $line, $col );
                 $builder->build_store( $null_ptr, $slot, $line, $col );
             }
@@ -4920,15 +5156,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             for my $i ( 0 .. $#positional ) {
                 my $fd  = $param_fields[$i];
                 my $val = $self->lower_expression( $positional[$i] );
-                $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
                 my $field_ptr
                     = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line, $col );
-                if ( $fd->{ir_type}->kind eq 'dynamic' && !$fd->{weak} ) {
-                    $self->_emit_owned_store( $val, $field_ptr, $fd->{ir_type}, $line, $col );
-                }
-                else {
-                    $builder->build_store( $val, $field_ptr, $line, $col );
-                }
+                $self->_emit_field_value_store( $val, $field_ptr, $fd, $line, $col, $positional[$i] );
                 $seen{ $fd->{name} } = 1;
                 if ( !$ctor_bound{ $fd->{name} } ) {
                     push @ctor_bindings, [ $fd->{name}, $symbols->{ $fd->{name} } ];
@@ -4952,15 +5182,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 Carp::croak( "Unknown field '$key' in class '$class_name' at " . $self->_loc($ast) ) unless defined $fi;
                 my $fd  = $cd->{fields}[$fi];
                 my $val = $self->lower_expression( $pair->{value} );
-                $val = $self->maybe_convert_type( $val, $fd->{ir_type} );
                 my $field_ptr
                     = $builder->build_struct_gep( $cd->{struct_type}, $self_ptr, $fd->{slot_idx}, '%' . $fd->{name} . '.init', $line, $col );
-                if ( $fd->{ir_type}->kind eq 'dynamic' && !$fd->{weak} ) {
-                    $self->_emit_owned_store( $val, $field_ptr, $fd->{ir_type}, $line, $col );
-                }
-                else {
-                    $builder->build_store( $val, $field_ptr, $line, $col );
-                }
+                $self->_emit_field_value_store( $val, $field_ptr, $fd, $line, $col, $pair->{value} );
                 $seen{ $fd->{name} } = 1;
 
                 if ( !$ctor_bound{ $fd->{name} } ) {
@@ -4997,11 +5221,30 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     # RC-tracked, so replacing it is a conditional owned store (F2); a native field
                     # has no references to move and keeps the branchless select.
                     my $default_val = $self->lower_expression( $f->{default} );
-                    $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
                     if ( $f->{ir_type}->kind eq 'dynamic' && !$f->{weak} ) {
+                        $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
                         $self->_emit_conditional_owned_store( $default_val, $field_ptr, $f->{ir_type}, $line, $col );
                     }
+                    elsif ( $f->{field_class} && !$f->{weak} ) {
+                        $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type}, $line, $col, 1 );
+                        my $existing = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $field_ptr, undef, $line, $col );
+                        my $null     = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+                        my $is_false = $builder->build_icmp( 'eq', $existing, $null, undef, $line, $col );
+                        my $func     = $current_func;
+                        my $store_b  = $func->append_block( $self->unique_block_name('rc_field_orassign') );
+                        my $merge_b  = $func->append_block( $self->unique_block_name('rc_field_orassign_end') );
+                        $builder->position_at_end($current_block);
+                        $builder->build_cond_br( $is_false, $store_b, $merge_b, $line, $col );
+                        $builder->position_at_end($store_b);
+                        $current_block = $store_b;
+                        $self->_emit_class_owned_store( $default_val, $field_ptr, $f->{field_class}, $line, $col, undef,
+                            $self->_rhs_is_owned_instance( $f->{default} ) );
+                        $builder->build_br($merge_b, $line, $col);
+                        $builder->position_at_end($merge_b);
+                        $current_block = $merge_b;
+                    }
                     else {
+                        $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
                         my $existing = $builder->build_load( $f->{ir_type}, $field_ptr, undef, $line, $col );
                         my $zero     = Brocken::Lindsay::IR::Constant->new( type => $f->{ir_type}, value => 0 );
                         my $is_false = $builder->build_icmp( 'eq', $existing, $zero, undef, $line, $col );
@@ -5011,13 +5254,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     next;
                 }
                 my $default_val = $self->lower_expression( $f->{default} );
-                $default_val = $self->maybe_convert_type( $default_val, $f->{ir_type} );
-                if ( $f->{ir_type}->kind eq 'dynamic' && !$f->{weak} ) {
-                    $self->_emit_owned_store( $default_val, $field_ptr, $f->{ir_type}, $line, $col );
-                }
-                else {
-                    $builder->build_store( $default_val, $field_ptr, $line, $col );
-                }
+                $self->_emit_field_value_store( $default_val, $field_ptr, $f, $line, $col, $f->{default} );
                 if ( !$ctor_bound{ $f->{name} } ) {
                     push @ctor_bindings, [ $f->{name}, $symbols->{ $f->{name} } ];
                     $symbols->{ $f->{name} } = $field_ptr;
@@ -5455,16 +5692,22 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $builder->build_call( $functions->{$destroy}, [ $hb, $want, $self_val ], undef );
         }
 
-        # Cascade: each owned dynamic field loses the reference it holds. A pointer-typed field (String, array, hash,
-        # or a raw ptr) is not RC-tracked, so it has nothing to release here.
+        # Cascade: each owned dynamic field loses the reference it holds, and each class-typed instance field is
+        # released through the referenced class's own destructor so the child reclaim runs too (spec 8.1). A
+        # pointer-typed field (String, array, hash, or a raw ptr) is not RC-tracked, so it has nothing to release.
         my $cd = $classes->{$class_name};
         if ($cd) {
             my $struct_type = $cd->{struct_type};
             for my $fd ( $cd->{fields}->@* ) {
-                next unless $fd->{ir_type} && $fd->{ir_type}->kind eq 'dynamic' && !$fd->{weak};
+                next unless $self->_field_is_owned_ref($fd);
                 my $fptr = $builder->build_struct_gep( $struct_type, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.daddr' );
                 my $fval = $builder->build_load( $fd->{ir_type}, $fptr );
-                $builder->build_decref( $fval, 0, 0, $hb );
+                if ( $fd->{field_class} ) {
+                    $self->_emit_obj_release( $fval, $fd->{field_class}, $hb );
+                }
+                else {
+                    $builder->build_decref( $fval, 0, 0, $hb );
+                }
             }
         }
 
@@ -5490,9 +5733,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $fn;
     }
 
-    # Generate `Class::__scan` (MarkGray: drop one reference to each owned dynamic field) and `Class::__restore`
+    # Generate `Class::__scan` (MarkGray: drop one reference to each owned field) and `Class::__restore`
     # (Undo: take it back). These mirror the field cascade in `Class::__destroy`, but are entered from the runtime's
-    # id dispatch rather than from a compiled release site. A class with no owned dynamic field against its whole
+    # id dispatch rather than from a compiled release site. A class with no owned reference field against its whole
     # ancestor chain still gets both methods; they are empty, and the constructor marks such an instance Leaf so
     # the collector never buffers it.
     method generate_class_gc($class_name) {
@@ -5508,9 +5751,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $self->_lower_gc_method( $class_name, $restore, $gc_restore_black, 'restore' );
     }
 
-    # Walk the whole ancestor chain's fields and call `$callee` on each owned dynamic one. `scan` passes the heap
-    # base and calls gc_decref (MarkGray: drop one reference and recurse); `restore` calls gc_restore_black, which
-    # takes the reference back and repaints the child's reachable subgraph Black.
+    # Walk the whole ancestor chain's fields and call `$callee` on each owned reference field (a dynamic `Any` box
+    # or a class-typed instance pointer). `scan` passes the heap base and calls gc_decref (MarkGray: drop one
+    # reference and recurse); `restore` calls gc_restore_black, which takes the reference back and repaints the
+    # child's reachable subgraph Black.
     method _lower_gc_method( $class_name, $fn, $callee, $kind ) {
         $current_func  = $fn;
         $symbols       = {};
@@ -5523,7 +5767,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $hb       = $kind eq 'scan' ? $fn->params->[1] : undef;
         my $cd       = $classes->{$class_name};
         for my $fd ( $cd->{fields}->@* ) {
-            next unless $fd->{ir_type} && $fd->{ir_type}->kind eq 'dynamic' && !$fd->{weak};
+            next unless $self->_field_is_owned_ref($fd);
             my $fptr = $builder->build_struct_gep( $cd->{struct_type}, $self_val, $fd->{slot_idx}, '%' . $fd->{name} . '.' . $kind );
             my $fval = $builder->build_load( $fd->{ir_type}, $fptr );
             my @args = $kind eq 'scan' ? ( $fval, $hb ) : ($fval);
@@ -5698,6 +5942,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $full_name = $class_name . '::' . $mname;
         $current_func = $functions->{$full_name};
         return unless $current_func;
+
+        # Isolate the symbol table: the reclaim cascade below may consult `__want`, and a stale entry from the
+        # previously lowered function would name an alloca belonging to a different function.
+        $symbols = {};
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -5714,6 +5962,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # accessor has no `__heap_base` symbol, so hand it its own hidden parameter for the decref. A `:weak`
             # field stores the pointer without taking ownership, so it uses the plain store below.
             $self->_emit_owned_store( $value_val, $field_ptr, $fd->{ir_type}, 0, 0, $current_func->params->[0] );
+        }
+        elsif ( $fd->{field_class} && !$fd->{weak} ) {
+
+            # A class-typed field: the writer owns a reference to the borrowed argument and releases whatever the
+            # field held before through the child's destructor.
+            $self->_emit_class_owned_store( $value_val, $field_ptr, $fd->{field_class}, 0, 0, $current_func->params->[0] );
         }
         else {
             $builder->build_store( $value_val, $field_ptr );

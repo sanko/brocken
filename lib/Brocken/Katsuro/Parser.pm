@@ -10,6 +10,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
     field $pos      : param = 0;
     field $features        = {};
     field $current_package = undef;    # namespace from a `package NAME` declaration; stamped onto following nodes
+    field $class_type_names;           # cache: { ClassName => 1 } for every `class NAME` in the token stream
 
     # Precedence constants
     use constant {
@@ -73,9 +74,37 @@ class Brocken::Katsuro::Parser v0.0.1 {
     }
 
     method is_type($token) {
-        return 0 unless $token && $token->{type} eq 'KEYWORD' && exists $TYPE_KEYWORDS{ $token->{value} };
-        my $needs_feature = $FEATURE_TYPES{ $token->{value} };
-        return $needs_feature ? ( $features->{$needs_feature} || 0 ) : 1;
+        return 0 unless $token;
+
+        # A native/keyword type. A feature-gated one (`i128`) is only a type when its feature is on.
+        if ( $token->{type} eq 'KEYWORD' && exists $TYPE_KEYWORDS{ $token->{value} } ) {
+            my $needs_feature = $FEATURE_TYPES{ $token->{value} };
+            return $needs_feature ? ( $features->{$needs_feature} || 0 ) : 1;
+        }
+
+        # A class name is also a type: a bare instance pointer (`ptr`-shaped). The set is collected up front so a
+        # field or parameter may name a class declared later in the file.
+        return 1 if $token->{type} eq 'IDENT' && $self->_class_type_names->{ $token->{value} };
+        return 0;
+    }
+
+    # Every `class NAME` in the token stream, whether or not the declaration has been reached yet. A string or a
+    # comment can never masquerade as the `class` keyword, so a flat scan of the (already lexed) tokens is enough.
+    method _class_type_names() {
+        $class_type_names //= do {
+            my %names;
+            my $i = 0;
+            while ( $i < $tokens->@* ) {
+                my $t = $tokens->[$i];
+                if ( $t && $t->{type} eq 'KEYWORD' && $t->{value} eq 'class' ) {
+                    my $n = $tokens->[ $i + 1 ];
+                    $names{ $n->{value} } = 1 if $n && $n->{type} eq 'IDENT';
+                }
+                $i++;
+            }
+            \%names;
+        };
+        return $class_type_names;
     }
 
     # === Top level ===
