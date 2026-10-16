@@ -4776,13 +4776,25 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return undef;
     }
 
+    # Lower a receiver expression to the object pointer a class method call or field access dereferences. An untyped
+    # receiver (`my $p = P->new();`) is a box whose payload is the object pointer, but the callee/field address treats
+    # `$self` as the object itself, so the box is unboxed here; a pointer-shaped receiver (`my ptr $p`, `my P $p`,
+    # `$self`, a class name) is passed as it stands.
+    method _lower_object_ptr( $obj, $line, $col ) {
+        my $val = $self->lower_expression($obj);
+        if ( $val->type->kind eq 'dynamic' ) {
+            $val = $self->maybe_convert_type( $val, Brocken::Lindsay::IR::Type::ptr(), $line, $col, 1 );
+        }
+        return $val;
+    }
+
     method lower_field_addr($ast) {
-        my $obj_ptr     = $self->lower_expression( $ast->obj );
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $obj_ptr     = $self->_lower_object_ptr( $ast->obj, $line, $col );
         my $class_name  = $self->resolve_class_name($ast);
         my $cd          = $classes->{$class_name};
         my $struct_type = $cd->{struct_type};
         my $field_idx;
-        my ( $line, $col ) = ( $ast->line, $ast->col );
 
         # Fields are lexical to the class that declares them, so an outside field access (`$obj->f`) sees only this
         # class's own fields; an inherited field is reached through an inherited accessor.
@@ -5020,7 +5032,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $callee = $functions->{$full_name};
         Carp::croak( "Undefined method '" . $method . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $callee;
         my $obj_ptr = $obj_is_class ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) :
-            $self->lower_expression( $ast->obj );
+            $self->_lower_object_ptr( $ast->obj, $line, $col );
         my @args      = ( $hb, $want_val, $obj_ptr );
         my $param_idx = 3;
         my $defaults  = $param_defaults->{$full_name};

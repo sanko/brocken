@@ -189,10 +189,13 @@ features. The feature-by-feature plan, decisions, and open questions live in
   `__scan`/`__restore`, selected by the class id in the header. `:weak` stores a dynamic field without taking a
   reference and is skipped by the destructor and the scan hooks [done]. Still open: class-typed fields (need
   parseable class annotations).
-- [ ] **Untyped Receiver Method Call (pre-existing):** A method call on an `Any`-typed receiver (the spelling
-  `my $p = P->new(); $p->m();`) reads the field area at the wrong offsets and returns garbage; it works only when
-  the receiver carries a pointer-shaped static type (`my ptr $p`, `my P $p`). The call does not unbox the receiver's
-  box pointer to the object address before the callee dereferences it. Use a typed receiver until this is fixed.
+- [x] **Untyped Receiver Method Call (pre-existing):** A method call on an `Any`-typed receiver (the spelling
+  `my $p = P->new(); $p->m();`) read the field area at the wrong offsets and returned garbage; it worked only when
+  the receiver carried a pointer-shaped static type (`my ptr $p`, `my P $p`). The call did not unbox the receiver's
+  box pointer to the object address before the callee dereferenced it. `_lower_object_ptr` now unboxes a `dynamic`
+  receiver (reading the payload at offset 8) and both `lower_method_call` and `lower_field_addr` go through it, so a
+  bare field access (`$p->x`) on an `Any` receiver is fixed too; a pointer-shaped receiver is passed as it stands.
+  Covered by `t/10000_katsuro/10991_untyped_receiver.t` (host, aarch64, riscv64).
 - [ ] **v0.0.2:** `role`/`apply`/`:does`/`requires` compile-time flattening, `:abstract`, ADJUST
   `:params`, `:strict(params)`, `:lexical_new`, `my class`, `inherit`, `:override`/`:common`, and
   lexical/anonymous methods.
