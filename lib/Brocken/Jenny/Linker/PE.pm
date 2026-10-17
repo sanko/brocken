@@ -282,6 +282,12 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
             AcquireSRWLockExclusive ReleaseSRWLockExclusive InitializeConditionVariable
             SleepConditionVariableSRW WakeConditionVariable WakeAllConditionVariable);
         my %kernel32_imports = map { $_ => 1 } @kernel32_imports;
+
+        # The IR names a CRT call the way a POSIX linker sees it, and this table spells the few that msvcrt exposes
+        # under a leading underscore. The standard C names Brocken also emits -- puts, strlen, sprintf, strcmp,
+        # strtod, fflush, exit -- are exported unprefixed and so are absent here. The English name stays the fixup
+        # target; only the hint/name entry the loader resolves is rewritten.
+        my %msvcrt_import_alias = ( write => '_write', read => '_read' );
         my %import_names;
         my ( %kernel32_names, %msvcrt_names );
         for my $name (@extern_funcs) {
@@ -338,8 +344,9 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 my ( $ilt_bytes, $hnt_bytes, $iat_bytes ) = ( '', '', '' );
 
                 for my $fn ( $list->@* ) {
-                    my $entry = pack( 'v', 0 ) . $fn . "\0";
-                    $entry     .= "\0" if length($entry) % 2;
+                    my $imported = $tag eq 'msvcrt' ? ( $msvcrt_import_alias{$fn} // $fn ) : $fn;
+                    my $entry    = pack( 'v', 0 ) . $imported . "\0";
+                    $entry      .= "\0" if length($entry) % 2;
                     $ilt_bytes .= pack( 'Q<', $current_hnt_rva );
                     $iat_bytes .= pack( 'Q<', $current_hnt_rva );
                     $hnt_bytes .= $entry;

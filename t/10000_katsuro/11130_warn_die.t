@@ -47,6 +47,12 @@ sub host_run ($src) {
     waitpid $pid, 0;
     my $status = $? >> 8;
     unlink $file if -e $file;
+
+    # The CRT writes a pipe in text mode, so a "\n" the program emits arrives as "\r\n" on Windows. These tests state
+    # the newline the program intended, so fold the platform line ending back to "\n".
+    if ( $^O eq 'MSWin32' ) {
+        for ( $stdout, $stderr ) { s/\r\n/\n/g }
+    }
     return ( $stdout, $stderr, $status );
 }
 

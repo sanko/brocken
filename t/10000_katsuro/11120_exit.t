@@ -23,7 +23,7 @@ subtest 'exit with an explicit status' => sub {
 };
 
 subtest 'bare exit is status 0' => sub {
-    answers( 'exit;', 0, 'exit with no status exits 0' );
+    native_case( 'exit;', 0, 'exit with no status exits 0' );
 };
 
 subtest 'exit does not fall through' => sub {
