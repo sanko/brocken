@@ -725,12 +725,25 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $known_class_names->{ $self->_qualify( $_->name, $_->package ) } = 1
             for grep { $_->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') } @decls;
 
+        # A prototype and the definition it stands for share one name, and only one function may own it. Minting an
+        # IR function for each produced two entries under the same name: the later registration replaced the symbol,
+        # so a `sub f();` written after its definition captured that body and left the definition empty, and a Wasm
+        # link then exported the name twice and rejected the module. A prototype whose name has a definition anywhere
+        # in the program is therefore left out; a lone prototype still registers and becomes a declare.
+        my %has_definition;
+        for my $stmt (@decls) {
+            next unless $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl');
+            next if $stmt->prototype;
+            $has_definition{ $self->_qualify( $stmt->name, $stmt->package ) } = 1;
+        }
+
         # Pass 1: Register all declarations
         for my $stmt (@decls) {
             if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ClassDecl') ) {
                 $self->register_class($stmt);
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl') ) {
+                next if $stmt->prototype && $has_definition{ $self->_qualify( $stmt->name, $stmt->package ) };
                 $self->register_function($stmt);
             }
         }

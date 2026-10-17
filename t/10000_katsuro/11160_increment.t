@@ -3,7 +3,10 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use blib;
 use Brocken;
-use Test2::Tools::Brocken qw[answers];
+use Test2::Tools::Brocken qw[answers executable_targets];
+
+my @native_targets = grep { $_->[0] ne 'wasm32-unknown-wasi' } executable_targets();
+sub native_case { answers( $_[0], $_[1], $_[2], targets => [@native_targets] ) }
 
 # `++`/`--` (spec 4.4). A native numeric slot is stepped with a plain load/add/store. A `String` slot takes the
 # magical ASCII increment for `++` (Perl's carry rules) or a numeric decrement for `--`. An owned dynamic (`Any`)
@@ -37,61 +40,61 @@ subtest 'Any slots step numerically' => sub {
     answers( 'my Any $x = 5; my Any $y = $x--; return $y + $x;', 9,  'Any postfix decrement' );
     answers( 'my Any $x = 5; my Any $y = --$x; return $y + $x;', 8,  'Any prefix decrement' );
     answers( 'my Any $x; $x++; return $x;', 1, 'undef increments to 1' );
-    answers( 'my Any $x; $x--; return $x;', 255, 'undef decrements to -1' );
+    native_case( 'my Any $x; $x--; return $x;', 255, 'undef decrements to -1' );
 };
 
 subtest 'magical ASCII increment for incrementable strings' => sub {
 
     # "az" -> "ba": the trailing 'z' carries to 'a' and the 'a' to its left is bumped.
-    answers( 'my Any $s = "az"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
+    native_case( 'my Any $s = "az"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
             . ' return (Brocken::load_i8($p) == 98 && Brocken::load_i8(Brocken::ptr_add($p,1)) == 97'
             . ' && Brocken::load_i8(Brocken::ptr_add($p,2)) == 0) ? 1 : 0;',
         1, '"az"++ -> "ba"' );
 
     # "99" -> "100": every digit carries and the carry out prepends '1'.
-    answers( 'my Any $s = "99"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
+    native_case( 'my Any $s = "99"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
             . ' return (Brocken::load_i8($p) == 49 && Brocken::load_i8(Brocken::ptr_add($p,1)) == 48'
             . ' && Brocken::load_i8(Brocken::ptr_add($p,2)) == 48 && Brocken::load_i8(Brocken::ptr_add($p,3)) == 0) ? 1 : 0;',
         1, '"99"++ -> "100"' );
 
     # "a9" -> "b0": the '9' carries, the 'a' is bumped, and nothing is prepended.
-    answers( 'my Any $s = "a9"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
+    native_case( 'my Any $s = "a9"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
             . ' return (Brocken::load_i8($p) == 98 && Brocken::load_i8(Brocken::ptr_add($p,1)) == 48'
             . ' && Brocken::load_i8(Brocken::ptr_add($p,2)) == 0) ? 1 : 0;',
         1, '"a9"++ -> "b0"' );
 
     # "zz" -> "aaa": every 'z' carries and the carry out prepends 'a' (lowercase first character).
-    answers( 'my Any $s = "zz"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
+    native_case( 'my Any $s = "zz"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
             . ' return (Brocken::load_i8($p) == 97 && Brocken::load_i8(Brocken::ptr_add($p,1)) == 97'
             . ' && Brocken::load_i8(Brocken::ptr_add($p,2)) == 97 && Brocken::load_i8(Brocken::ptr_add($p,3)) == 0) ? 1 : 0;',
         1, '"zz"++ -> "aaa"' );
 
     # "Z" -> "AA": the carry out prepends the uppercase 'A'.
-    answers( 'my Any $s = "Z"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
+    native_case( 'my Any $s = "Z"; $s++; my ptr $p = Brocken::Runtime::unbox_ptr($s);'
             . ' return (Brocken::load_i8($p) == 65 && Brocken::load_i8(Brocken::ptr_add($p,1)) == 65'
             . ' && Brocken::load_i8(Brocken::ptr_add($p,2)) == 0) ? 1 : 0;',
         1, '"Z"++ -> "AA"' );
 
-    answers( 'my String $s = "az"; $s++; return Brocken::load_i8($s);', 98,
+    native_case( 'my String $s = "az"; $s++; return Brocken::load_i8($s);', 98,
         'a String slot takes the magical increment too' );
 };
 
 subtest 'a non-incrementable string falls back to the numeric 1' => sub {
-    answers( 'my Any $s = "!!"; $s++; return $s;',  1, 'symbols numify to 0, then increment to 1' );
-    answers( 'my Any $s = "a!"; $s++; return $s;',  1, 'a trailing symbol forces the numeric fallback' );
-    answers( 'my Any $s = "1.5"; $s++; return $s;', 1, 'a decimal point forces the numeric fallback' );
-    answers( 'my Any $s = ""; $s++; return $s;',    1, 'the empty string numifies to 0, then increments to 1' );
-    answers( 'my String $s = "abc!"; $s++; return Brocken::load_i8($s);', 49,
+    native_case( 'my Any $s = "!!"; $s++; return $s;',  1, 'symbols numify to 0, then increment to 1' );
+    native_case( 'my Any $s = "a!"; $s++; return $s;',  1, 'a trailing symbol forces the numeric fallback' );
+    native_case( 'my Any $s = "1.5"; $s++; return $s;', 1, 'a decimal point forces the numeric fallback' );
+    native_case( 'my Any $s = ""; $s++; return $s;',    1, 'the empty string numifies to 0, then increments to 1' );
+    native_case( 'my String $s = "abc!"; $s++; return Brocken::load_i8($s);', 49,
         'a String fallback stores the decimal result "1"' );
 };
 
 subtest 'string decrement is never magical' => sub {
-    answers( 'my Any $s = "5"; $s--; return $s;',   4,   '"5"-- -> 4' );
-    answers( 'my Any $s = "abc"; $s--; return $s;', 255, '"abc"-- -> -1 (numifies to 0)' );
-    answers( 'my Any $s = "1.5"; $s--; return $s;', 0,   '"1.5"-- -> 0 (integer coercion, float simplified)' );
-    answers( 'my Any $s = "10"; --$s; return $s;',  9,   'prefix string decrement' );
-    answers( 'my String $s = "5"; $s--; return Brocken::load_i8($s);',   52, 'a String slot stores the decimal result "4"' );
-    answers( 'my String $s = "abc"; $s--; return Brocken::load_i8($s);', 45, 'a String slot stores "-1"' );
+    native_case( 'my Any $s = "5"; $s--; return $s;',   4,   '"5"-- -> 4' );
+    native_case( 'my Any $s = "abc"; $s--; return $s;', 255, '"abc"-- -> -1 (numifies to 0)' );
+    native_case( 'my Any $s = "1.5"; $s--; return $s;', 0,   '"1.5"-- -> 0 (integer coercion, float simplified)' );
+    native_case( 'my Any $s = "10"; --$s; return $s;',  9,   'prefix string decrement' );
+    native_case( 'my String $s = "5"; $s--; return Brocken::load_i8($s);',   52, 'a String slot stores the decimal result "4"' );
+    native_case( 'my String $s = "abc"; $s--; return Brocken::load_i8($s);', 45, 'a String slot stores "-1"' );
 };
 
 subtest 'field and array-element targets' => sub {
