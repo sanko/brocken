@@ -194,6 +194,12 @@ package Test2::Tools::Brocken v0.0.1 {
             # seeds it here, so a snippet that mentions a string would otherwise be linked with the constants missing
             # and read a dangling address.
             $brocken->linker->set_rodata( $module->rodata ) if $module->rodata && keys %{ $module->rodata };
+
+            # The IR graph is cyclic (blocks back to their function, branch/call/phi edges across blocks), so a module
+            # that is simply dropped leaks its whole graph. `answers` builds one per target per call, so without this
+            # release a file with a few hundred snippets holds hundreds of megabytes. The module is done after codegen
+            # produced `$funcs` and rodata is read, so the graph can be dropped now.
+            $module->release;
             if ( $platform && $platform->arch =~ /^wasm/ ) {
                 my $file = temp_path($basename) . '.wasm';
                 Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $funcs, $platform );
@@ -227,6 +233,7 @@ package Test2::Tools::Brocken v0.0.1 {
         if ($@) { fail("$name: compile died: $@"); return }
         my $file = temp_path($basename) . '.wasm';
         Brocken::Jenny::Linker::Wasm->new->write_executable( $file, $brocken->codegen->emit_functions( $module->functions ), $platform );
+        $module->release;    # see `answers`: the IR graph must be broken or it leaks
     SKIP: {
             skip 'no Wasm runner is available', 1 unless wasm_runner();
             my $status = wasm_validates($file);

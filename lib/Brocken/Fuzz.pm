@@ -1402,13 +1402,7 @@ class Brocken::Fuzz v0.0.1 {
     # Break reference cycles in an IR Module to allow Perl GC to free it.
     method _release_module($module) {
         return unless $module;
-        for my $func ( $module->functions->@* ) {
-            for my $block ( $func->blocks->@* ) {
-                my $insts = $block->instructions;
-                @$insts = ();
-            }
-            $func->set_blocks( [] );
-        }
+        $module->release;
     }
 
     # Break reference cycles in codegen output.

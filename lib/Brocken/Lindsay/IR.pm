@@ -1,6 +1,7 @@
 use v5.42;
 use feature qw[class];
 no warnings qw[experimental::class];
+use Scalar::Util qw[weaken];
 
 # Types
 class Brocken::Lindsay::IR::Type v0.0.1 {
@@ -96,6 +97,12 @@ class Brocken::Lindsay::IR::Instruction v0.0.1: isa(Brocken::Lindsay::IR::Value)
     field $parent   : reader : param = undef;    # The Basic Block
     field $line     : reader : param = 0;
     field $col      : reader : param = 0;
+
+    # `parent` points back at the block that owns this instruction, but the block already keeps the instruction alive
+    # through its instruction list. A strong reference here would close a cycle and keep the whole IR graph alive
+    # after the module is dropped, so every compile would leak the runtime it built. Weaken it to keep ownership
+    # one-way: the block owns the instruction.
+    ADJUST { weaken($parent) if defined $parent }
 
     method render() {
         my $res = $self->type->kind eq 'void' ? '' : ( $self->name // '%<anon>' ) . ' = ';
@@ -427,6 +434,11 @@ class Brocken::Lindsay::IR::Block v0.0.1 {
     field $parent       : reader : param = undef;    # The function
     field $instructions : reader = [];
 
+    # `parent` points back at the function that owns this block, but the function already keeps the block alive
+    # through its block list. Weaken it for the same reason as an instruction's parent: a strong back-reference would
+    # leak the whole IR graph when the module is dropped.
+    ADJUST { weaken($parent) if defined $parent }
+
     method append_inst($inst) {
         push $instructions->@*, $inst;
         return $inst;
@@ -522,6 +534,37 @@ class Brocken::Lindsay::IR::Module v0.0.1 {
     method add_function($func) {
         push $functions->@*, $func;
         return $func;
+    }
+
+    # Release the IR graph so Perl can reclaim it. Blocks point back at their function and instructions at their
+    # block, and a branch, call or phi instruction references other blocks and functions, so a finished module is a
+    # web of reference cycles that refcounting alone cannot collect. Every caller that builds a module in a loop (the
+    # test harness, the fuzzer) drops it through here once the module has been consumed, or each compiled program
+    # leaks its whole graph. The module itself stays usable for its class info, rodata and package versions.
+    method release() {
+        for my $func ( $functions->@* ) {
+            next unless $func;
+            for my $block ( $func->blocks->@* ) {
+                next unless $block;
+                my $insts = $block->instructions;
+                @$insts = ();
+            }
+            $func->set_blocks( [] );
+        }
+        return;
+    }
+
+    # A caller that keeps the module alive is unaffected, but one that only holds it for the duration of a compile --
+    # a test that inspects a single subtest and drops it, or any other short-lived use -- frees the graph here instead
+    # of leaking it. `release` is idempotent, so an explicit `release` before the drop is harmless.
+    #
+    # A module still referenced at program exit is torn down during global destruction, where the objects it points at
+    # may already be gone; traversing the graph then only warns, and the memory is about to be reclaimed regardless, so
+    # leave it alone there and only clean up on an ordinary scope exit.
+    method DESTROY() {
+        return if ${^GLOBAL_PHASE} eq 'DESTRUCT';
+        $self->release;
+        return;
     }
 
     method as_string() {
