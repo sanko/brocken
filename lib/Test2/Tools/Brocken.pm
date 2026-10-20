@@ -130,6 +130,8 @@ package Test2::Tools::Brocken v0.0.1 {
     # present, and Wasm only when a runner for it is. A target that cannot be executed is left out rather than reported
     # as a failure, since its absence says nothing about the compiler.
     sub executable_targets () {
+        state $cached;
+        return @$cached if $cached;
         require Brocken::Katsuro::Platform;
         my @targets = ( [ 'host', undef ] );
         for my $triple ( 'aarch64-unknown-linux-gnu', 'riscv64-unknown-linux-gnu' ) {
@@ -137,6 +139,7 @@ package Test2::Tools::Brocken v0.0.1 {
             push @targets, [ $triple, $platform ] if $platform && cross_available($platform);
         }
         push @targets, [ 'wasm32-unknown-wasi', wasm_platform() ] if wasm_runner();
+        $cached = \@targets;
         return @targets;
     }
 

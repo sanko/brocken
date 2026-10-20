@@ -39,6 +39,8 @@ class Brocken v0.0.1 {
     # there, the runtime reads as empty, and every compiled program loses it. lib, blib/lib and an installed copy all
     # resolve this way.
     sub DEFAULT_RUNTIME {
+        state $cached;
+        return $cached if defined $cached;
         my $dir   = dirname( File::Spec->rel2abs(__FILE__) );
         my $found = File::Spec->catfile( $dir, 'src', 'runtime', 'core.brocken' );
         while ( !-f $found ) {
@@ -47,7 +49,7 @@ class Brocken v0.0.1 {
             $dir   = $up;
             $found = File::Spec->catfile( $dir, 'src', 'runtime', 'core.brocken' );
         }
-        $found;
+        $cached = $found;
     }
     #
     field $platform     : reader : param = Brocken::Katsuro::Platform::parse();
@@ -100,10 +102,12 @@ class Brocken v0.0.1 {
     # resolve syscall_by_name.  Leaving it unset keeps the portable spelling and makes syscall_by_name report that it
     # needs a platform.
     method compile( $source, $filename = '(eval)', $platform = undef ) {
+        state %_core_ast_cache;
         my @all_stmts;
         my $core_source = $self->_read_core_brocken();
         if ( length $core_source ) {
-            my $core_ast = $self->parse( $core_source, $runtime );
+            my $key      = $self->runtime;
+            my $core_ast = $_core_ast_cache{$key} //= $self->parse( $core_source, $runtime );
             push @all_stmts, $core_ast->statements->@*;
         }
         my $user_ast = $self->parse( $source, $filename );

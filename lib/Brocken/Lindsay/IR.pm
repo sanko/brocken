@@ -128,6 +128,8 @@ class Brocken::Lindsay::IR::Instruction::ICmp v0.0.1: isa(Brocken::Lindsay::IR::
 class Brocken::Lindsay::IR::Instruction::Br v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $dest_block : reader : param;
 
+    ADJUST { weaken($dest_block) if defined $dest_block }
+
     method render() {
         return '  br label %' . $dest_block->name;
     }
@@ -136,6 +138,11 @@ class Brocken::Lindsay::IR::Instruction::Br v0.0.1: isa(Brocken::Lindsay::IR::In
 class Brocken::Lindsay::IR::Instruction::CondBr v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $true_block  : reader : param;
     field $false_block : reader : param;
+
+    ADJUST {
+        weaken($true_block)  if defined $true_block;
+        weaken($false_block) if defined $false_block;
+    }
 
     method render() {
         my $cond = $self->operands->[0];
@@ -154,6 +161,8 @@ class Brocken::Lindsay::IR::Instruction::Ret v0.0.1: isa(Brocken::Lindsay::IR::I
 
 class Brocken::Lindsay::IR::Instruction::Call v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $callee : reader : param;    # Brocken::Lindsay::IR::Function
+
+    ADJUST { weaken($callee) if defined $callee }
 
     method render() {
         my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
@@ -245,6 +254,8 @@ class Brocken::Lindsay::IR::Instruction::Decref v0.0.1: isa(Brocken::Lindsay::IR
 class Brocken::Lindsay::IR::Instruction::FiberCreate v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $callee : reader : param;    # Brocken::Lindsay::IR::Function
 
+    ADJUST { weaken($callee) if defined $callee }
+
     method render() {
         my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
         return sprintf '  %s = fiber_create @%s(%s)', ( $self->name // '%<anon>' ), $callee->name, $args;
@@ -253,6 +264,8 @@ class Brocken::Lindsay::IR::Instruction::FiberCreate v0.0.1: isa(Brocken::Lindsa
 
 class Brocken::Lindsay::IR::Instruction::IsolateCreate v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $callee : reader : param;    # Brocken::Lindsay::IR::Function
+
+    ADJUST { weaken($callee) if defined $callee }
 
     method render() {
         my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
@@ -359,12 +372,21 @@ class Brocken::Lindsay::IR::Instruction::FrameAddr v0.0.1: isa(Brocken::Lindsay:
 class Brocken::Lindsay::IR::Instruction::Phi v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $incoming : reader : param = [];    # Array of [Value, Block]
 
+    ADJUST {
+        if ($incoming) {
+            for my $i ( 0 .. $#{$incoming} ) {
+                weaken($incoming->[$i][1]) if defined $incoming->[$i][1];
+            }
+        }
+    }
+
     method render() {
         my $incoming_str = join ', ', map { sprintf '[ %s, %%%s ]', $_->[0]->as_string, $_->[1]->name } $incoming->@*;
         return sprintf '  %s = phi %s %s', ( $self->name // '%<anon>' ), $self->type->as_string, $incoming_str;
     }
 
     method add_incoming( $val, $block ) {
+        weaken($block) if defined $block;
         push $incoming->@*, [ $val, $block ];
     }
 };

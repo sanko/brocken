@@ -286,3 +286,73 @@ needs neither libc nor an OS thread.
 5. **Threads / FFI:** `clone`-based isolates (Linux/BSD); FFI stays libc/dyld-only, so freestanding + FFI is a
    compile-time conflict.
 6. **Spec:** once modes coexist, state both (default libc, opt-in freestanding) instead of the blanket claim.
+
+---
+
+## 15. Compilation Performance, Memory & Incremental Compilation
+
+`Brocken::compile` rebuilds and re-lowers the **entire** runtime on every call, and the resulting cyclic IR graph
+was only reclaimed by an explicit `release`. Commit `b5f81f1` stopped the per-compile leak (peak RSS on
+`t/10000_katsuro/10870_float_integer_only_ops.t` fell 243 MB -> 89 MB), but the design is unchanged: parse the core
+runtime, lower core + user together, collect, then codegen every core function. Across the thousands of compiles a
+suite like `answers` performs that costs both memory and time. The work below turns it into "compile the runtime
+once, reuse", and makes the release automatic rather than a caller responsibility.
+
+### 15.1 Make the IR graph acyclic by construction
+
+Today every repeated-compile caller must remember `$module->release`; only `answers`, `validates`, and `Fuzz` do, so
+a direct `compile` in a loop still leaks. Ownership in the IR is one-way -- the module owns functions, a function
+owns its blocks -- so the forward *referenced-object* edges can be weakened and the graph becomes collectable with
+no explicit release, leaving the referenced objects alive for codegen because the owner still holds them.
+
+- [ ] **Weaken the container -> container edges.** `Call`/`IsolateCreate`/`IsolateJoin` `callee`, the `Br`/`CondBr`
+  branch targets, and the `Phi` incoming-block edges. `lib/Brocken/Lindsay/IR.pm`. Verify construction order (a
+  target/callee must be owned before or while it is referenced) before flipping the last one.
+- [ ] **Regression test.** Build a module, `release` it, `weaken` it, drop the last strong reference, and assert it
+  is freed. Deterministic and cross-platform.
+
+### 15.2 Cache the runtime (the big win)
+
+Keyed on `($runtime, platform, policy)`.
+
+- [ ] **Parsed core AST.** Stop re-reading and re-lexing `src/runtime/core.brocken` per compile. Confirm lowering
+  does not mutate AST nodes. Saves ~0.1 s/call plus transient token/AST memory. `lib/Brocken.pm`
+  `parse`/`_read_core_brocken`.
+- [ ] **Lowered core module.** Snapshot the lowerer's cross-function state after lowering the core -- `$functions`,
+  `$classes`, `$known_class_names`, `$function_return_class`, `$returns_owned`, `$class_returns_owned`,
+  `$package_versions`, and rodata -- seed a fresh lowerer with it, then lower only the user decls. This shares the
+  ~3.4 MB of core IR across compiles instead of rebuilding it, and is the prerequisite for real incrementality.
+  `lib/Brocken/Katsuro/Lowerer.pm` (`lower_program`, 712-827). *Risk:* class ids are assigned by sorted name over
+  **all** classes (760-765), so adding a user class shifts the core ids -- reserve core ids (fixed) and assign user
+  ids from `max+1`, or recompute over the union. The cross-boundary ownership classification (user calls core, core
+  never calls user) must stay sound.
+- [ ] **Codegen blobs for the runtime.** `emit_functions` lowers, register-allocates, and encodes every core
+  function on every compile, but the output is plain data with name-based fixups the linkers already resolve. Cache
+  the core `$funcs` and codegen only the user delta. `lib/Brocken/Jenny/Codegen/X86_64.pm` and the other backends.
+  *Risk:* the fiber/isolate/init-wrapper detection spans core + user and `_BROCKEN_ENTRY` is user-side, so the
+  wrapper decision must be made after merging.
+
+### 15.3 Allocation and lookup micro-wins
+
+- [ ] **Cache `Brocken` instances per `(platform, policy)`** instead of building one (plus a `File::Temp` dir, a
+  codegen, and a linker) per target per `answers` call. `lib/Test2/Tools/Brocken.pm`.
+- [ ] **`state`-cache `executable_targets()`.** It re-parses the cross triples and re-runs `cross_available` (PATH
+  scans) on every call. `lib/Test2/Tools/Brocken.pm:132-139`.
+- [ ] **`state`-cache `DEFAULT_RUNTIME`.** It walks the filesystem per instance. `lib/Brocken.pm:41-51`.
+- [ ] **Gate the debug-info maps.** `emit_functions` always builds `alloca_map`/`source_map` per function though
+  they are only consumed by `build_debug_data`; build them only when debug info is requested.
+  `lib/Brocken/Jenny/Codegen/X86_64.pm:149-153`.
+
+### 15.4 Guardrail
+
+- [ ] **A bounded-growth / liveness test.** The weaken-after-release check of 15.1 is deterministic; add a
+  `Test::LeakTrace`-based sweep over the lowering path so a regression like the one `b5f81f1` fixed fails CI
+  instead of surfacing only as RSS growth.
+
+### Suggested order
+
+1. 15.1 acyclic IR + regression test
+2. 15.2 parsed-core cache
+3. 15.3 harness caching
+4. 15.2 lowered-core cache
+5. 15.2 codegen cache
