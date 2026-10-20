@@ -162,8 +162,6 @@ class Brocken::Lindsay::IR::Instruction::Ret v0.0.1: isa(Brocken::Lindsay::IR::I
 class Brocken::Lindsay::IR::Instruction::Call v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $callee : reader : param;    # Brocken::Lindsay::IR::Function
 
-    ADJUST { weaken($callee) if defined $callee }
-
     method render() {
         my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
         my $res  = $self->type->kind eq 'void' ? '' : ( $self->name // '%<anon>' ) . ' = ';
@@ -254,8 +252,6 @@ class Brocken::Lindsay::IR::Instruction::Decref v0.0.1: isa(Brocken::Lindsay::IR
 class Brocken::Lindsay::IR::Instruction::FiberCreate v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $callee : reader : param;    # Brocken::Lindsay::IR::Function
 
-    ADJUST { weaken($callee) if defined $callee }
-
     method render() {
         my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
         return sprintf '  %s = fiber_create @%s(%s)', ( $self->name // '%<anon>' ), $callee->name, $args;
@@ -264,8 +260,6 @@ class Brocken::Lindsay::IR::Instruction::FiberCreate v0.0.1: isa(Brocken::Lindsa
 
 class Brocken::Lindsay::IR::Instruction::IsolateCreate v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $callee : reader : param;    # Brocken::Lindsay::IR::Function
-
-    ADJUST { weaken($callee) if defined $callee }
 
     method render() {
         my $args = join ', ', map { $_->type->as_string . ' ' . $_->as_string } $self->operands->@*;
