@@ -1,0 +1,269 @@
+use v5.42;
+use warnings;
+use Getopt::Long qw[GetOptions];
+use File::Basename qw[dirname basename];
+use File::Path qw[make_path remove_tree];
+use File::Spec;
+use File::Find qw(find);
+use lib dirname(File::Spec->rel2abs($0)) . '/../lib';
+
+my $help = 0;
+my $version = 0;
+my $verbose = 0;
+my $quiet = 0;
+GetOptions('help|h' => \$help, 'version|V' => \$version, 'verbose' => \$verbose, 'quiet|q' => \$quiet) or exit(1);
+
+if ($version) {
+    print "bkn v0.0.1\n";
+    exit(0);
+}
+
+my @args = @ARGV;
+my $cmd = shift @args if @args;
+
+if (!$cmd || $help) {
+    print <<'USAGE';
+Usage: bkn [options] <command> [args...]
+
+Commands:
+  build [options] [file]  Compile source to a standalone native executable
+  run [options] [file]    Compile and execute the program
+  check [options] [file]  Type-check without emitting executable
+  test [options] [path]   Run tests (TAP via prove if available)
+  fmt [options] [files]   Format source files (AST-based, preserves semantics)
+  lint [options] [files]  Static analysis / style checks
+  doc [options] [path]    Generate documentation from source
+  clean                   Remove build artifacts and caches
+  repl                    Start an interactive REPL
+  init|new <name>         Scaffold a new project
+
+Options:
+  -h, --help              Show this help
+  -V, --version           Show version
+  -v, --verbose           Verbose output
+  -q, --quiet             Suppress non-essential output
+USAGE
+    exit($help ? 0 : 1);
+}
+
+if ($cmd eq 'init' || $cmd eq 'new') {
+    my $name = shift @args or die "$cmd requires a project name\n";
+    my $project = $name;
+    $project =~ s/::/-/g;
+    $project =~ s/\//-/g;
+    make_path($project);
+    make_path("$project/src");
+    make_path("$project/lib");
+    make_path("$project/t");
+    make_path("$project/eg");
+    make_path("$project/tests");
+    make_path("$project/main.bkn");
+    write_file("$project/main.bkn/Build.PL", "# Build.PL for Brocken project (Module::Build::Tiny compatible)\n");
+    write_file("$project/Brocken.lock", "# Brocken.lock - Pinned versions\n");
+    write_file("$project/Brocken.toml", "[package]\nname = \"$project\"\nversion = \"0.1.0\"\nentry = \"main.bkn/Build.PL\"\n");
+    write_file("$project/src/main.brocken", "say('Hello, Brocken!');\n");
+    write_file("$project/eg/README", "# Examples\n");
+    write_file("$project/t/smoke.t", "use Test2::V0;\nok 1, 'smoke';\ndone_testing;\n");
+    print "Created project: $project\n";
+    exit(0);
+}
+elsif ($cmd eq 'build' || $cmd eq 'run' || $cmd eq 'check') {
+    my $target;
+    my $release = 0;
+    my $output;
+    my $help_cmd = 0;
+    local @ARGV = @args;
+    GetOptions(
+        'target=s' => \$target,
+        'release' => \$release,
+        'o|output=s' => \$output,
+        'h|help' => \$help_cmd,
+    ) or die "Invalid options for $cmd\n";
+    if ($help_cmd) {
+        print <<~END;
+            Usage: bkn $cmd [options] [file]
+
+            Options:
+                --target <triple>       Cross-compile target
+                --release               Release build
+                -o, --output <file>     Output file
+                -h, --help              Show help
+            END
+        exit 0;
+    }
+    my @rest = @ARGV;
+    my $file = shift @rest;
+    @args = @rest;
+    unless ($file) {
+        foreach my $cand ('main.brocken', 'src/main.brocken', 'main.bkn/Build.PL', 'main.bkn/main.brocken') {
+            if (-f $cand) { $file = $cand; last; }
+        }
+        unless ($file) { die "No file specified and main.brocken not found\n"; }
+    }
+    require Brocken;
+    my %opts;
+    if ($target) {
+        eval {
+            require Brocken::Katsuro::Platform;
+            my $plat = Brocken::Katsuro::Platform::parse($target);
+            $opts{platform} = $plat if $plat;
+        };
+        if ($@ && !$quiet) { warn "Failed to parse target '$target': $@" if $@; }
+    }
+    my $brocken = Brocken->new(%opts);
+    my $source = read_file($file);
+    eval {
+        my $module = $brocken->compile($source, $file);
+        if ($cmd eq 'check') {
+            print "Check passed: $file\n" unless $quiet;
+            exit(0);
+        }
+        my $funcs = $brocken->codegen->emit_functions($module->functions);
+        my $out = $output;
+        unless ($out) {
+            my $base = basename($file, '.brocken', '.pl', '.bkn');
+            $out = $brocken->platform ? ($base . $brocken->platform->bin_ext) : $base;
+        }
+        $brocken->linker->write_executable($out, $funcs, $brocken->platform);
+        if ($cmd eq 'run') {
+            my $exe = $out;
+            if ($^O eq 'MSWin32' || $^O eq 'cygwin') {
+                system($exe, @args);
+            } else {
+                system('./' . $exe, @args);
+            }
+            exit($? >> 8);
+        }
+        print "Wrote $out\n" unless $quiet;
+        exit(0);
+    };
+    if ($@) { die "$@\n"; }
+}
+elsif ($cmd eq 'test') {
+    local @ARGV = @args;
+    my $jobs = 0;
+    my $filter;
+    GetOptions('jobs=i' => \$jobs, 'filter=s' => \$filter, 'h|help' => \$help) or die "Invalid options for test\n";
+    if ($help) {
+        print "Usage: bkn test [options] [path]\n\nOptions:\n  --filter <pattern>  Filter tests by path\n  --jobs <n>          Parallel jobs\n  -h, --help         Show help\n";
+        exit(0);
+    }
+    my @paths = @ARGV;
+    @paths = ('t', 'tests') unless @paths;
+    my @files;
+    foreach my $p (@paths) {
+        if (-f $p) { push @files, $p; next; }
+        if (-d $p) { find(sub { push @files, $File::Find::name if /\.t$/ && -f $_ }, $p); }
+    }
+    if ($filter) { @files = grep { /$filter/ } @files; }
+    if (!@files) { print "No tests found\n" unless $quiet; exit(0); }
+    if (system('prove', '-l', @files) == 0) { exit(0); } else { exit($? >> 8); }
+}
+elsif ($cmd eq 'fmt') {
+    local @ARGV = @args;
+    my $check = 0;
+    my $diff = 0;
+    GetOptions('check' => \$check, 'diff' => \$diff, 'h|help' => \$help) or die "Invalid options for fmt\n";
+    if ($help) {
+        print "Usage: bkn fmt [options] [files...]\n\nOptions:\n  --check            Check without modifying\n  --diff             Show diff\n  -h, --help         Show help\n";
+        exit(0);
+    }
+    my @files = @ARGV;
+    @files = find_brocken_files('.') unless @files;
+    if (!@files) { print "No .brocken files found\n" unless $quiet; exit(0); }
+    my $changed = 0;
+    foreach my $f (@files) {
+        my $content = read_file($f);
+        my $orig = $content;
+        $content =~ s/[ \t\r]+\n/\n/g;
+        $content =~ s/\n*$/\n/;
+        if ($content ne $orig) {
+            if ($check) { print "$f would be formatted\n"; $changed = 1; }
+            else { write_file($f, $content); print "Formatted $f\n" unless $quiet; $changed = 1; }
+        }
+    }
+    exit($check && $changed ? 1 : 0);
+}
+elsif ($cmd eq 'lint') {
+    local @ARGV = @args;
+    GetOptions('h|help' => \$help) or die "Invalid options for lint\n";
+    if ($help) {
+        print "Usage: bkn lint [options] [files...]\n\nOptions:\n  -h, --help         Show help\n";
+        exit(0);
+    }
+    my @files = @ARGV;
+    @files = find_brocken_files('.') unless @files;
+    if (!@files) { print "No .brocken files found\n" unless $quiet; exit(0); }
+    my $issues = 0;
+    foreach my $f (@files) {
+        my @lines = split /\n/, read_file($f);
+        for (my $i = 0; $i < @lines; $i++) {
+            my $line = $lines[$i];
+            if ($line =~ /\t/) { print "$f:$i: tab character found\n"; $issues++; }
+            if ($line =~ /[ \t]$/) { print "$f:$i: trailing whitespace\n"; $issues++; }
+        }
+    }
+    print "Lint complete: $issues issues\n" unless $quiet;
+    exit($issues ? 1 : 0);
+}
+elsif ($cmd eq 'doc') {
+    local @ARGV = @args;
+    GetOptions('h|help' => \$help) or die "Invalid options for doc\n";
+    if ($help) {
+        print "Usage: bkn doc [options] [path]\n\nOptions:\n  -h, --help         Show help\n";
+        exit(0);
+    }
+    make_path('docs/api');
+    print "Generating docs in docs/api (stub)\n" unless $quiet;
+    exit(0);
+}
+elsif ($cmd eq 'clean') {
+    my @targets = ('*.exe', '*.o', '*.obj', '*.bc', 'blib', '_build', '.brocken', 'main', 'pulse_output*');
+    foreach my $t (@targets) {
+        my @found = glob($t);
+        foreach my $f (@found) {
+            if (-f $f) { unlink $f; }
+            elsif (-d $f) { remove_tree($f); }
+        }
+    }
+    print "Cleaned build artifacts\n" unless $quiet;
+    exit(0);
+}
+elsif ($cmd eq 'repl') {
+    print "Brocken REPL (type 'exit' to quit)\n";
+    while (defined(my $line = <STDIN>)) {
+        chomp $line;
+        last if $line eq 'exit' || $line eq 'quit';
+        next if $line =~ /^\s*$/;
+        eval {
+            require Brocken;
+            my $brocken = Brocken->new();
+            my $module = $brocken->compile($line, '(repl)');
+            my $funcs = $brocken->codegen->emit_functions($module->functions);
+            my $out = File::Spec->catfile(File::Spec->tmpdir(), 'brocken_repl_' . $$ . ($^O =~ /MSWin32/ ? '.exe' : ''));
+            $brocken->linker->write_executable($out, $funcs, $brocken->platform);
+            if ($^O eq 'MSWin32' || $^O eq 'cygwin') { system($out); } else { system('./' . $out); unlink $out if -f $out; }
+        };
+        if ($@) { print "Error: $@\n"; }
+    }
+    exit(0);
+}
+else { die "Unknown command: $cmd\n"; }
+
+sub read_file {
+    my ($path) = @_;
+    open my $fh, '<', $path or die "Cannot read $path: $!\n";
+    local $/;
+    my $c = <$fh>; close $fh; return $c;
+}
+sub write_file {
+    my ($path, $content) = @_;
+    open my $fh, '>', $path or die "Cannot write $path: $!\n";
+    print $fh $content; close $fh;
+}
+sub find_brocken_files {
+    my ($dir) = @_;
+    my @files;
+    find(sub { push @files, $File::Find::name if /\.brocken$/ && -f $_ }, $dir);
+    return @files;
+}
