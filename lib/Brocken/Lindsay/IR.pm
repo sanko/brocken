@@ -505,7 +505,13 @@ class Brocken::Lindsay::IR::Function v0.0.1{
     field $name        : reader : param;
     field $return_type : reader : param;
     field $params      : reader : param = [];    # Array of Brocken::Lindsay::IR::Value
-    field $blocks      : reader = [];
+
+    # A variadic CRT entry such as `sprintf`. The System V AMD64 ABI requires the caller to load `al` with the number
+    # of vector registers it used before a call to a variadic function; a callee that reads its register save area
+    # (glibc's printf) otherwise sees no floating-point arguments at all. Only the declared, fixed parameters are in
+    # `params`, so the flag is what tells the x86-64 lowering to set `al`.
+    field $variadic : reader : param = 0;
+    field $blocks   : reader = [];
     method set_return_type($t) { $return_type = $t }
     method set_blocks($b)      { $blocks      = $b }
 

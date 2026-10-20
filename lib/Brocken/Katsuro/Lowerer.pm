@@ -984,6 +984,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $sprintf_fn = Brocken::Lindsay::IR::Function->new(
             name        => $self->_crt_name('sprintf'),
             return_type => Brocken::Lindsay::IR::Type::i32(),
+            variadic    => 1,
             params      => [
                 Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
 
@@ -1002,6 +1003,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # need. `_stringify` already covers a String (identity), an int, and a float; a boxed `Any` is read through its
     # header tag: tag 3 is a float, tag 4 is a String pointer (the payload is the characters themselves, so stringify
     # is the identity on the unboxed pointer), and anything else renders through the integer payload.
+    #
+    # `select` evaluates both arms, so the float route -- `unbox_f64` widened through `sprintf("%f")` -- is built for a
+    # String or integer box too. That arm's value is discarded, but the `sprintf` call itself still runs, so any value
+    # it can carry has to be safe to format. The fix for the `%f` result living there is in the x86-64 call lowering
+    # (`al` for a variadic call); this method is deliberately left as a flat `select` so no extra block is introduced.
     method _stringify_value( $val, $ast, $line, $col ) {
         return $self->_stringify( $val, $line, $col ) unless $val->type->kind eq 'dynamic';
         my $tag      = $self->_reflect_box_tag( $val, $line, $col );

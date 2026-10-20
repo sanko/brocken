@@ -3791,6 +3791,34 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             }
                         }
                     }
+                    # System V AMD64: a call to a variadic function must load `al` with the number of vector registers
+                    # it used. glibc's printf reads the register save area for its `%f` argument only when `al` says a
+                    # vector register was passed; with `al` left holding whatever the last call returned, `%f` formats
+                    # 0.0 -- and a garbage `al` can make it read past the save area. Count the float arguments that
+                    # landed in registers (`al` counts vector registers, so a float spilled to the stack is not one).
+                    if ( $callee->can('variadic') && $callee->variadic ) {
+                        my $fp_used = 0;
+                        for my $i ( 0 .. $#args ) {
+                            my $reg = $arg_regs[$i];
+                            next if !$classes[$i] || $classes[$i] ne 'float';
+                            next if ref $reg && $reg->[0] eq 'stack';
+                            $fp_used++;
+                        }
+                        $mbb->add_instruction(
+                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                opcode   => 'mov',
+                                operands => [
+                                    Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => 'rax' ),
+                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'imm',
+                                        value => $fp_used,
+                                        type  => Brocken::Lindsay::IR::Type::i32()
+                                    )
+                                ],
+                                comment => 'variadic: al = number of vector registers used'
+                            )
+                        );
+                    }
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => 'call_func',

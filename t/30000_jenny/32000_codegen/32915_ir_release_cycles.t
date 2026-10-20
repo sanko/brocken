@@ -7,7 +7,10 @@ BEGIN {
         # ok
     } else {
         no warnings 'redefine';
-        *no_leaks_ok = sub {
+
+        # Mirror Test::LeakTrace's `&;$` prototype. A prototype-less stand-in makes `no_leaks_ok { ... } 'msg'`
+        # unparseable (`syntax error ... near "my "`), because the bare block is then read as a hash constructor.
+        *no_leaks_ok = sub :prototype(&;$) {
             my ($cb, $msg) = @_;
             $cb->();
             pass($msg // 'leak test skipped (Test::LeakTrace missing)');
