@@ -53,3 +53,10 @@ test_*.c
 tmp_*.c
 
 /docs/spec_old.md
+
+*.json
+test.brocken
+docs/spec\.*
+docs/spec_*
+extract*
+*history.pl
