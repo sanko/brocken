@@ -102,12 +102,10 @@ class Brocken v0.0.1 {
     # resolve syscall_by_name.  Leaving it unset keeps the portable spelling and makes syscall_by_name report that it
     # needs a platform.
     method compile( $source, $filename = '(eval)', $platform = undef ) {
-        state %_core_ast_cache;
         my @all_stmts;
         my $core_source = $self->_read_core_brocken();
         if ( length $core_source ) {
-            my $key      = $self->runtime;
-            my $core_ast = $_core_ast_cache{$key} //= $self->parse( $core_source, $runtime );
+            my $core_ast = $self->parse( $core_source, $runtime );
             push @all_stmts, $core_ast->statements->@*;
         }
         my $user_ast = $self->parse( $source, $filename );
