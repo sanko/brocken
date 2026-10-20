@@ -301,6 +301,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method _owned_call_result($val) {
         return 0 unless ref $val && $val->isa('Brocken::Lindsay::IR::Instruction::Call');
         return 0 unless $val->type && $val->type->kind eq 'dynamic';
+        return 0 unless $val->callee;
         return $returns_owned->{ $val->callee->name } ? 1 : 0;
     }
 
