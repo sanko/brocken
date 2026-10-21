@@ -26,6 +26,7 @@ sub walk_stack {
         elsif ( ord($here) == 0xFF && ord( substr( $here, 1, 1 ) ) == 0x15 ) { push @checks, $mod; $i += 6 }    # call [rip+disp32]
         elsif ( ord($here) == 0xE8 )                                         { push @checks, $mod; $i += 5 }    # call rel32
         elsif ( substr( $here, 0, 2 ) eq "\x0F\x0B" )                        { $i += 2 }                        # ud2
+        elsif ( substr( $here, 0, 3 ) eq "\x89\x04\x24" )                    { $i += 3 }                        # mov [rsp], eax (probe/commit)
         elsif ( substr( $here, 0, 3 ) eq "\x85\x04\x24" )                    { $i += 3 }                        # test [rsp], eax (probe)
         elsif ( substr( $here, 0, 3 ) eq "\x83\xE8\x01" )                    { $i += 3 }                        # sub eax, 1
         elsif ( ord($here) == 0xB8 )                                         { $i += 5 }                        # mov eax, imm32
