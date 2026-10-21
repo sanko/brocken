@@ -101,7 +101,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             $stub .= pack( 'CV', 0xB8, $pages );                        # mov eax, pages
             my $loop_start = length $stub;
             $stub .= pack( 'CCCV', 0x48, 0x81, 0xEC, 4096 );            # sub rsp, 4096
-            $stub .= pack( 'CCC',  0x89, 0x04, 0x24 );                  # mov [rsp], eax  (probe/commit)
+            $stub .= pack( 'CCC',  0x85, 0x04, 0x24 );                  # test [rsp], eax  (probe)
             $stub .= pack( 'CCC',  0x83, 0xE8, 0x01 );                  # sub eax, 1
             my $disp = $loop_start - length($stub) - 2;
             $stub .= pack( 'Cc', 0x75, $disp );                         # jne loop
