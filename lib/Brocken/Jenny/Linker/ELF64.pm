@@ -90,26 +90,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
         my $HEAP_SIZE = 1048576;
         my $stub      = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );     # and rsp, -16
-
-        # See the x86-64 comment below: the BSDs grow the stack through a bounded gap, so a carved heap a
-        # megabyte below the entry `rsp` must be touched one page at a time to stay inside that window.
-        # Windows x64 does the same for large frames; touch each page (store) to commit it on all platforms
-        # with lazy commit/grow semantics.
-        if ( $platform->is_bsd ) {
-            my $pages = int( $HEAP_SIZE / 4096 );
-            my $rem   = $HEAP_SIZE % 4096;
-            $stub .= pack( 'CV', 0xB8, $pages );                        # mov eax, pages
-            my $loop_start = length $stub;
-            $stub .= pack( 'CCCV', 0x48, 0x81, 0xEC, 4096 );            # sub rsp, 4096
-            $stub .= pack( 'CCC',  0x85, 0x04, 0x24 );                  # test [rsp], eax  (probe)
-            $stub .= pack( 'CCC',  0x83, 0xE8, 0x01 );                  # sub eax, 1
-            my $disp = $loop_start - length($stub) - 2;
-            $stub .= pack( 'Cc', 0x75, $disp );                         # jne loop
-            $stub .= pack( 'CCCV', 0x48, 0x81, 0xEC, $rem ) if $rem > 0;
-        }
-        else {
-            $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );     # sub rsp, HEAP_SIZE
-        }
+        $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );    # sub rsp, HEAP_SIZE
         $stub .= pack( 'C3', 0x48, 0x89, 0xE7 );                  # mov rdi, rsp
 
         # DragonFly: call _init_tls and _rtld_call_init before main for TLS setup
