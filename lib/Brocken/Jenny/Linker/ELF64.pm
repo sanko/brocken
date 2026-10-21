@@ -90,7 +90,28 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
         my $HEAP_SIZE = 1048576;
         my $stub      = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );     # and rsp, -16
-        $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );    # sub rsp, HEAP_SIZE
+
+        # The heap is carved straight out of the stack below the current frame pointer, so the first write into it
+        # lands a full megabyte under the entry `rsp`. Linux reserves an 8 MiB stack VMA and grows it on any fault
+        # inside that range, so a single far write is fine there. The BSDs only map the top few pages at startup and
+        # grow the stack through a bounded gap; a fault a megabyte below the tip falls outside that gap and is
+        # delivered as SIGSEGV (SIGBUS on MidnightBSD) instead of growing. Walk the carve one page at a time and
+        # touch each page so every fault stays inside the grow window -- the same probe Windows x64 frames use.
+        if ( $platform->is_bsd ) {
+            my $pages = int( $HEAP_SIZE / 4096 );
+            my $rem   = $HEAP_SIZE % 4096;
+            $stub .= pack( 'CV', 0xB8, $pages );                        # mov eax, pages
+            my $loop_start = length $stub;
+            $stub .= pack( 'CCCV', 0x48, 0x81, 0xEC, 4096 );            # sub rsp, 4096
+            $stub .= pack( 'CCC',  0x85, 0x04, 0x24 );                  # test [rsp], eax  (probe)
+            $stub .= pack( 'CCC',  0x83, 0xE8, 0x01 );                  # sub eax, 1
+            my $disp = $loop_start - length($stub) - 2;
+            $stub .= pack( 'Cc', 0x75, $disp );                         # jne loop
+            $stub .= pack( 'CCCV', 0x48, 0x81, 0xEC, $rem ) if $rem > 0;
+        }
+        else {
+            $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );     # sub rsp, HEAP_SIZE
+        }
         $stub .= pack( 'C3', 0x48, 0x89, 0xE7 );                  # mov rdi, rsp
 
         # DragonFly: call _init_tls and _rtld_call_init before main for TLS setup

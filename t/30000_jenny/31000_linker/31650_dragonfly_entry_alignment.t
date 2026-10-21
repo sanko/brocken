@@ -26,6 +26,10 @@ sub walk_stack {
         elsif ( ord($here) == 0xFF && ord( substr( $here, 1, 1 ) ) == 0x15 ) { push @checks, $mod; $i += 6 }    # call [rip+disp32]
         elsif ( ord($here) == 0xE8 )                                         { push @checks, $mod; $i += 5 }    # call rel32
         elsif ( substr( $here, 0, 2 ) eq "\x0F\x0B" )                        { $i += 2 }                        # ud2
+        elsif ( substr( $here, 0, 3 ) eq "\x85\x04\x24" )                    { $i += 3 }                        # test [rsp], eax (probe)
+        elsif ( substr( $here, 0, 3 ) eq "\x83\xE8\x01" )                    { $i += 3 }                        # sub eax, 1
+        elsif ( ord($here) == 0xB8 )                                         { $i += 5 }                        # mov eax, imm32
+        elsif ( ord($here) == 0x75 )                                         { $i += 2 }                        # jne rel8
         else                                          { die "unhandled opcode at stub offset $i" }
     }
     return @checks;
@@ -34,8 +38,8 @@ subtest 'every call in the DragonFly entry stub runs 16-byte aligned' => sub {
     my $platform = Brocken::Katsuro::Platform::parse('x86_64-unknown-dragonfly');
     my $linker   = Brocken::Jenny::Linker::ELF64->new();
     my $stub     = $linker->_build_entry_stub( $platform, {}, 0x1000, 0x4000, 0x4000, 0x4008 );
-    is length($stub),                      52, 'the stub is 52 bytes with the alignment shuffling';
-    is $linker->entry_stub_len($platform), 52, 'entry_stub_len matches';
+    is length($stub),                      65, 'the stub is 65 bytes with the probing loop and alignment shuffling';
+    is $linker->entry_stub_len($platform), 65, 'entry_stub_len matches';
     my @mods = walk_stack($stub);
     is scalar(@mods), 4,              'init_tls, rtld_call_init, main and exit call sites';
     is \@mods,        [ 0, 0, 0, 0 ], 'every call executes with rsp%16 == 0';
