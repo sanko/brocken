@@ -39,8 +39,8 @@ subtest 'every call in the DragonFly entry stub runs 16-byte aligned' => sub {
     my $platform = Brocken::Katsuro::Platform::parse('x86_64-unknown-dragonfly');
     my $linker   = Brocken::Jenny::Linker::ELF64->new();
     my $stub     = $linker->_build_entry_stub( $platform, {}, 0x1000, 0x4000, 0x4000, 0x4008 );
-    is length($stub),                      65, 'the stub is 65 bytes with the probing loop and alignment shuffling';
-    is $linker->entry_stub_len($platform), 65, 'entry_stub_len matches';
+    is length($stub),                      52, 'the stub is 52 bytes with the alignment shuffling';
+    is $linker->entry_stub_len($platform), 52, 'entry_stub_len matches';
     my @mods = walk_stack($stub);
     is scalar(@mods), 4,              'init_tls, rtld_call_init, main and exit call sites';
     is \@mods,        [ 0, 0, 0, 0 ], 'every call executes with rsp%16 == 0';
