@@ -845,6 +845,13 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $dynsym  = pack( 'L< C C S< Q< Q<', 0, 0, 0, 0, 0, 0 );
         my $sym_idx = 1;
 
+        # Data symbols whose value depends on the `.data` RVA are emitted with a provisional RVA and patched once the
+        # layout has settled (see the patch after the final calculate()). `.text` still grows after this point (the
+        # inline setjmp/longjmp stubs and the import stubs extend it) and `.dynsym` crosses a page boundary as it grows,
+        # so both move every later section -- including `.data` -- by whole pages. A symbol left at its provisional RVA
+        # points into the `.hash` table instead of `.data`, and the libc reads of `environ`/`__progname` then fault.
+        my %dynsym_value_fixups;
+
         # Add function symbols to .symtab (STB_GLOBAL | STT_FUNC = 0x12)
         for my $name ( sort keys %func_offsets ) {
             $sym_idx++;
@@ -882,6 +889,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 }
                 my $data_sec = $self->layout->get('.data');
                 $dynsym .= pack( 'L< C C S< Q< Q<', $progname_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 16, 8 );
+                $dynsym_value_fixups{'__progname'} = { off => length($dynsym) - 16, delta => 16 };
             }
         }
         if ( $platform->is_bsd && $self->type eq 'exe' ) {
@@ -899,6 +907,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 }
                 my $data_sec = $self->layout->get('.data');
                 $dynsym .= pack( 'L< C C S< Q< Q<', $environ_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 8, 8 );
+                $dynsym_value_fixups{'environ'} = { off => length($dynsym) - 16, delta => 8 };
             }
         }
         if ( $platform->is_haiku ) {
@@ -916,7 +925,9 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             my $data_sec = $self->layout->get('.data');
             $dynsym .= pack( 'L< C C S< Q< Q<', $abi_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva}, 4 );
             $sym_indices{'_gSharedObjectHaikuABI'} = $sym_idx++;
+            $dynsym_value_fixups{'_gSharedObjectHaikuABI'} = { off => length($dynsym) - 16, delta => 0 };
             $dynsym .= pack( 'L< C C S< Q< Q<', $ver_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 4, 4 );
+            $dynsym_value_fixups{'_gSharedObjectHaikuVersion'} = { off => length($dynsym) - 16, delta => 4 };
         }
         $self->layout->get('.dynsym')->{size} = length($dynsym);
 
@@ -1147,6 +1158,17 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         $dynamic .= pack( 'Q< Q<', 0, 0 );
         $self->layout->get('.dynamic')->{size} = length($dynamic);
         $self->layout->calculate($page_align);
+
+        # The layout is final now, so the data symbols that carry a `.data` address can be given their real values. The
+        # `.data` payload itself is written from the same final RVA further down, so the symbol and the pointer it holds
+        # agree.
+        if (%dynsym_value_fixups) {
+            my $data_rva = $self->layout->get('.data')->{rva};
+            for my $name ( sort keys %dynsym_value_fixups ) {
+                my $fix = $dynsym_value_fixups{$name};
+                substr( $dynsym, $fix->{off}, 8, pack( 'Q<', $base + $data_rva + $fix->{delta} ) );
+            }
+        }
         my $shstrtab = "\0";
         my %sh_name_off;
         for my $s ( $self->layout->sections ) {
