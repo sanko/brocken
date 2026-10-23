@@ -13,6 +13,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
 
         # Flags: 1=alloc, 2=write, 4=execute
         $layout->add_section( '.text', $text_size, 5 );    # RX (Alloc + Execute)
+        $layout->add_section( '.init', 16,         5 ) if $os eq 'dragonflybsd';
+        $layout->add_section( '.fini', 16,         5 ) if $os eq 'dragonflybsd';
         my $rodata_size = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
         $layout->add_section( '.rodata', $rodata_size || 1, 2 );
         my $brk_sym_size = $self->brk_sym_size();
@@ -25,8 +27,6 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         $layout->add_section( '.rela.dyn', 4096, 2 );
         $layout->add_section( '.hash',     4096, 2 );
         $layout->add_section( '.gnu.hash', 4096, 2 ) if $os eq 'dragonflybsd';
-        $layout->add_section( '.init',     16,   5 ) if $os eq 'dragonflybsd';
-        $layout->add_section( '.fini',     16,   5 ) if $os eq 'dragonflybsd';
 
         # Writable data and dynamic linking tables (mapped to RW segment)
         $layout->add_section( '.dynamic', 4096,       3 );    # RW (Alloc + Write)
@@ -89,9 +89,10 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             return pack 'V8', $lui, $sub, $mv, $jal, $auipc, $ld, $jalr, $ebrk;
         }
         my $HEAP_SIZE = 1048576;
-        my $stub      = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );     # and rsp, -16
-        $stub .= pack( 'C3 V', 0x48, 0x81, 0xEC, $HEAP_SIZE );    # sub rsp, HEAP_SIZE
-        $stub .= pack( 'C3', 0x48, 0x89, 0xE7 );                  # mov rdi, rsp
+        my $stub      = pack 'C4 C3 V C3',    #
+            0x48, 0x83, 0xE4, 0xF0,           # and rsp, -16
+            0x48, 0x81, 0xEC, $HEAP_SIZE,     # sub rsp, HEAP_SIZE
+            0x48, 0x89, 0xE7;                 # mov rdi, rsp
 
         # DragonFly: call _init_tls and _rtld_call_init before main for TLS setup
         my $pre_main = '';
@@ -99,14 +100,14 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
 
             # SysV requires rsp%16 == 0 at a call site (callees expect rsp%16 == 8 at entry). `push rdi` alone leaves
             # rsp%16 == 8, so dip the stack 8 bytes before the push and raise it again after the pop.
-            $pre_main .= pack( 'C4', 0x48, 0x83, 0xEC, 0x08 );                        # sub rsp, 8
-            $pre_main .= pack( 'C', 0x57 );                                           # push rdi (save heap_base)
+            $pre_main .= pack 'C4', 0x48, 0x83, 0xEC, 0x08;                        # sub rsp, 8
+            $pre_main .= pack 'C', 0x57;                                           # push rdi (save heap_base)
             my $rir1 = $text_rva + length($stub) + length($pre_main) + 6;
-            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_init_tls - $rir1 );          # call [rip + init_tls]
+            $pre_main .= pack 'C2 l<', 0xFF, 0x15, $got_init_tls - $rir1;          # call [rip + init_tls]
             my $rir2 = $text_rva + length($stub) + length($pre_main) + 6;
-            $pre_main .= pack( 'C2 l<', 0xFF, 0x15, $got_rtld_call_init - $rir2 );    # call [rip + rtld_call_init]
-            $pre_main .= pack( 'C',     0x5F );                                       # pop rdi (restore heap_base)
-            $pre_main .= pack( 'C4',    0x48, 0x83, 0xC4, 0x08 );                     # add rsp, 8
+            $pre_main .= pack 'C2 l<', 0xFF, 0x15, $got_rtld_call_init - $rir2;    # call [rip + rtld_call_init]
+            $pre_main .= pack 'C',     0x5F;                                       # pop rdi (restore heap_base)
+            $pre_main .= pack 'C4',    0x48, 0x83, 0xC4, 0x08;                     # add rsp, 8
         }
         $stub .= $pre_main;
 
@@ -116,14 +117,14 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $main_target    = $text_rva + $final_len + ( $func_offsets->{_BROCKEN_ENTRY} // 0 );
         my $rip_after_call = $text_rva + length($stub) + 5;
         my $main_rel       = $main_target - $rip_after_call;
-        $stub .= pack( 'C l<', 0xE8, $main_rel );                                                # call main
-        $stub .= pack( 'C3', 0x48, 0x89, 0xC7 );                                                 # mov rdi, rax
+        $stub .= pack 'C l<', 0xE8, $main_rel;                                                   # call main
+        $stub .= pack 'C3', 0x48, 0x89, 0xC7;                                                    # mov rdi, rax
 
         # Calculate dynamic exit call offset
         my $exit_rip = $text_rva + length($stub) + 6;
         my $exit_rel = $got_exit - $exit_rip;
-        $stub .= pack( 'C2 l<', 0xFF, 0x15, $exit_rel );                                         # call [rip + exit]
-        $stub .= pack( 'C2', 0x0F, 0x0B );                                                       # ud2
+        $stub .= pack 'C2 l<', 0xFF, 0x15, $exit_rel;                                            # call [rip + exit]
+        $stub .= pack 'C2', 0x0F, 0x0B;                                                          # ud2
         return $stub;
     }
 
@@ -169,7 +170,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             pthread_cond_signal    => 96,
             pthread_cond_broadcast => 104,
             _init_tls              => 112,
-            _rtld_call_init        => 120,
+            _rtld_call_init        => 120
         };
         my $got_base = $self->layout->get('.got')->{rva};
         return $got_base + $fixed_imports->{$name}       if exists $fixed_imports->{$name};
@@ -472,26 +473,28 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                     # setjmp(buf): a0=buf, save s0-s11, ra, sp, return 0
                     my @callee_saved = ( 8, 9, 18 .. 27 );    # s0-s11
                     for my $i ( 0 .. $#callee_saved ) {
-                        $text .= pack( 'V', $rv_sd->( $callee_saved[$i], 10, $i * 8 ) );
+                        $text .= pack 'V', $rv_sd->( $callee_saved[$i], 10, $i * 8 );
                     }
-                    $text .= pack( 'V', $rv_sd->( 1, 10, 12 * 8 ) );    # sd ra, 96(a0)
-                    $text .= pack( 'V', $rv_sd->( 2, 10, 13 * 8 ) );    # sd sp, 104(a0)
-                    $text .= pack( 'V', $rv_addi->( 10, 0, 0 ) );       # li a0, 0
-                    $text .= pack( 'V', $rv_jalr->( 0, 1, 0 ) );        # ret
+                    $text .= pack 'V4',                       #
+                        $rv_sd->( 1, 10, 12 * 8 ),            # sd ra, 96(a0)
+                        $rv_sd->( 2, 10, 13 * 8 ),            # sd sp, 104(a0)
+                        $rv_addi->( 10, 0, 0 ),               # li a0, 0
+                        $rv_jalr->( 0, 1, 0 );                # ret
                     $sjlj_stubs{setjmp} = $stub_base;
                     $stub_base = length($text);
                 }
                 if ( grep { $_ eq 'longjmp' } keys %extern_seen ) {
 
                     # longjmp(buf, val): a0=buf, a1=val, restore s0-s11, ra, sp
-                    my @callee_saved = ( 8, 9, 18 .. 27 );              # s0-s11
+                    my @callee_saved = ( 8, 9, 18 .. 27 );    # s0-s11
                     for my $i ( 0 .. $#callee_saved ) {
                         $text .= pack( 'V', $rv_ld->( $callee_saved[$i], 10, $i * 8 ) );
                     }
-                    $text .= pack( 'V', $rv_ld->( 1, 10, 12 * 8 ) );    # ld ra, 96(a0)
-                    $text .= pack( 'V', $rv_ld->( 2, 10, 13 * 8 ) );    # ld sp, 104(a0)
-                    $text .= pack( 'V', $rv_addi->( 10, 11, 0 ) );      # mv a0, a1
-                    $text .= pack( 'V', $rv_jalr->( 0, 1, 0 ) );        # jr ra
+                    $text .= pack 'V4',                       #
+                        $rv_ld->( 1, 10, 12 * 8 ),            # ld ra, 96(a0)
+                        $rv_ld->( 2, 10, 13 * 8 ),            # ld sp, 104(a0)
+                        $rv_addi->( 10, 11, 0 ),              # mv a0, a1
+                        $rv_jalr->( 0, 1, 0 );                # jr ra
                     $sjlj_stubs{longjmp} = $stub_base;
                 }
             }
@@ -547,7 +550,9 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         if ( my $rodata_sec = $self->layout->get('.rodata') ) {
             my $text_sec      = $self->layout->get('.text');
             my $section_align = $self->layout->section_align;
-            $rodata_sec->{rva} = $text_sec->{rva} + ( ( $text_sec->{size} + $section_align - 1 ) & ~( $section_align - 1 ) );
+            my $rva           = $text_sec->{rva} + ( ( $text_sec->{size} + $section_align - 1 ) & ~( $section_align - 1 ) );
+            $rva += 2 * $section_align if $platform->is_dragonflybsd;
+            $rodata_sec->{rva} = $rva;
         }
 
         # Resolve cross-function call fixups at link time
@@ -661,26 +666,28 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $has_pintable = 0;
         if ( $platform->is_freebsd ) {
             $osabi     = 9;
-            $note_data = pack( 'L<3 a8 L<', 8, 4, 1, "FreeBSD\0", 1400097 );
+            $note_data = pack 'L<3 a8 L<', 8, 4, 1, "FreeBSD\0", 1400097;
         }
         elsif ( $platform->is_midnightbsd ) {
             $osabi     = 9;
-            $note_data = pack( 'L<3 a12 L<', 12, 4, 1, "MidnightBSD\0", 300000 );
+            $note_data = pack 'L<3 a12 L<', 12, 4, 1, "MidnightBSD\0", 300000;
         }
         elsif ( $platform->is_netbsd ) {
             $osabi     = 2;
-            $note_data = pack( 'L<3 a8 L<', 7, 4, 1, "NetBSD\0\0", 1099000000 );
-            $note_data .= pack( 'L<3 a4 L<', 4, 4, 3, "PaX\0", 0x0a );
+            $note_data = pack 'L<3 a8 L< L<3 a4 L<',    #
+                7, 4, 1, "NetBSD\0\0", 1099000000,      #
+                4, 4, 3, "PaX\0",      0x0a;
         }
         elsif ( $platform->is_openbsd ) {
             $osabi        = 0;
-            $note_data    = pack( 'L<3 a8 L<', 8, 4, 1, "OpenBSD\0", 0 );
+            $note_data    = pack 'L<3 a8 L<', 8, 4, 1, "OpenBSD\0", 0;
             $has_pintable = 1;
         }
         elsif ( $platform->is_dragonflybsd ) {
             $osabi     = 0;
-            $note_data = pack( 'L<3 a12 L<', 10, 4, 1, "DragonFly\0\0\0", 600401 );
-            $note_data .= pack( 'L<3 a12 L<', 10, 4, 32, "DragonFly\0\0\0", 1 );    # DF_FEATURE_PTHREAD
+            $note_data = pack 'L<3 a12 L< L<3 a12 L<',    #
+                10, 4, 1,  "DragonFly\0\0\0", 600401,     #
+                10, 4, 32, "DragonFly\0\0\0", 1;          # DF_FEATURE_PTHREAD
         }
         my $pintable_data = '';
         if ( $has_pintable && $platform->is_openbsd ) {
@@ -718,12 +725,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             $platform->exit_name,  'pthread_mutex_lock', 'pthread_mutex_unlock', 'pthread_cond_wait',
             'pthread_cond_signal', 'pthread_cond_broadcast'
         );
-        if ( $platform->needs_sched_setaffinity ) {
-            push @imports, 'sched_setaffinity';
-        }
-        if ( $platform->is_dragonflybsd ) {
-            push @imports, '_init_tls', '_rtld_call_init';
-        }
+        push @imports, 'sched_setaffinity' if $platform->needs_sched_setaffinity;
+        push @imports, '_init_tls', '_rtld_call_init' if $platform->is_dragonflybsd;
 
         # Merge dynamically discovered extern functions into @imports
         for my $name ( sort keys %$_extern_got_offsets ) {
@@ -791,7 +794,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             # cannot find the path specified." lines. Now a host with no compiler for the target just falls through to
             # the platform default.
             my $fallback = $libpthread;
-            for my $cc (qw(clang gcc cc)) {
+            for my $cc (qw[clang gcc cc]) {
                 my @libs_to_ask = 'libpthread.so';
                 push @libs_to_ask, 'libthread_xu.so' if $platform->is_dragonflybsd;
                 for my $ask (@libs_to_ask) {
@@ -842,7 +845,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             $dynstr .= $name . "\0";
         }
         $self->layout->get('.dynstr')->{size} = length($dynstr);
-        my $dynsym  = pack( 'L< C C S< Q< Q<', 0, 0, 0, 0, 0, 0 );
+        my $dynsym  = pack 'L< C C S< Q< Q<', 0, 0, 0, 0, 0, 0;
         my $sym_idx = 1;
 
         # Data symbols whose value depends on the `.data` RVA are emitted with a provisional RVA and patched once the
@@ -856,7 +859,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         for my $name ( sort keys %func_offsets ) {
             $sym_idx++;
             my $rva = $self->layout->get('.text')->{rva} + $entry_size + $func_offsets{$name};
-            $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 1, $base + $rva, 0 );
+            $dynsym .= pack 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 1, $base + $rva, 0;
         }
         my %sym_indices;
         for my $name (@imports) {
@@ -865,13 +868,13 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             # STB_GLOBAL|STT_FUNC = 0x12; STB_WEAK|STT_FUNC = 0x22 sched_setaffinity is absent on DragonFly BSD (it uses
             # pthread_setaffinity_np); emit it as a weak symbol so RTLD doesn't abort if the symbol is missing.
             my $st_info = ( $name eq 'sched_setaffinity' && $platform->is_dragonflybsd ) ? 0x22 : 0x12;
-            $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, $st_info, 0, 0, 0, 0 );
+            $dynsym .= pack 'L< C C S< Q< Q<', $str_off{$name}, $st_info, 0, 0, 0, 0;
         }
         if ( $self->type eq 'shared' ) {
             for my $name (@exports) {
                 my $rva = $self->layout->get('.text')->{rva} + ( $self->labels->{"E_$name"} // 0 );
                 $sym_indices{$name} = $sym_idx++;
-                $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 1, $base + $rva, 0 );
+                $dynsym .= pack 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 1, $base + $rva, 0;
             }
         }
         if ( $platform->is_bsd && $self->type eq 'exe' ) {
@@ -888,7 +891,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                     $sec_i++;
                 }
                 my $data_sec = $self->layout->get('.data');
-                $dynsym .= pack( 'L< C C S< Q< Q<', $progname_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 16, 8 );
+                $dynsym .= pack 'L< C C S< Q< Q<', $progname_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 16, 8;
                 $dynsym_value_fixups{'__progname'} = { off => length($dynsym) - 16, delta => 16 };
             }
         }
@@ -906,7 +909,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                     $sec_i++;
                 }
                 my $data_sec = $self->layout->get('.data');
-                $dynsym .= pack( 'L< C C S< Q< Q<', $environ_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 8, 8 );
+                $dynsym .= pack 'L< C C S< Q< Q<', $environ_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 8, 8;
                 $dynsym_value_fixups{'environ'} = { off => length($dynsym) - 16, delta => 8 };
             }
         }
@@ -926,7 +929,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             $dynsym .= pack( 'L< C C S< Q< Q<', $abi_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva}, 4 );
             $sym_indices{'_gSharedObjectHaikuABI'}         = $sym_idx++;
             $dynsym_value_fixups{'_gSharedObjectHaikuABI'} = { off => length($dynsym) - 16, delta => 0 };
-            $dynsym .= pack( 'L< C C S< Q< Q<', $ver_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 4, 4 );
+            $dynsym .= pack 'L< C C S< Q< Q<', $ver_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 4, 4;
             $dynsym_value_fixups{'_gSharedObjectHaikuVersion'} = { off => length($dynsym) - 16, delta => 4 };
         }
         $self->layout->get('.dynsym')->{size} = length($dynsym);
@@ -966,7 +969,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             next if $relocated_slot{ $self->import_rva($name) }++;
             if ( !exists $sym_indices{$name} ) {
                 $sym_indices{$name} = $sym_idx++;
-                $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 0, 0, 0 );
+                $dynsym .= pack 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 0, 0, 0;
             }
             push @rela_entries, [ $name, $sym_indices{$name} ];
         }
@@ -979,7 +982,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             my $out = '';
             for my $entry (@rela_entries) {
                 my ( $name, $sym_idx ) = @$entry;
-                $out .= pack( 'Q< Q< q<', $base + $self->import_rva($name), ( $sym_idx << 32 ) | $rel_type, 0 );
+                $out .= pack 'Q< Q< q<', $base + $self->import_rva($name), ( $sym_idx << 32 ) | $rel_type, 0;
             }
             return $out;
         };
@@ -1022,7 +1025,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             $chains[$idx] = $buckets[$b];
             $buckets[$b]  = $idx;
         }
-        my $hash = pack( 'L<*', $nbucket, $nchain, @buckets, @chains );
+        my $hash = pack 'L<*', $nbucket, $nchain, @buckets, @chains;
         $self->layout->get('.hash')->{size} = length($hash);
         my $gnu_hash_rva = 0;
         my $gnu_hash     = '';
@@ -1066,9 +1069,9 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                     }
                 }
             }
-            my $gnu_hash = pack( 'L< L< L< L<', $gnu_nbucket, $gnu_symndx, $gnu_maskwords, $gnu_shift2 );
-            $gnu_hash .= pack( 'Q<', $bloom );
-            $gnu_hash .= pack( 'L<*', @gnu_buckets, @gnu_chains );
+            my $gnu_hash = pack 'L< L< L< L<', $gnu_nbucket, $gnu_symndx, $gnu_maskwords, $gnu_shift2;
+            $gnu_hash .= pack 'Q<', $bloom;
+            $gnu_hash .= pack 'L<*', @gnu_buckets, @gnu_chains;
             $self->layout->get('.gnu.hash')->{size} = length($gnu_hash);
             $gnu_hash_rva = $self->layout->get('.gnu.hash')->{rva};
         }
@@ -1358,7 +1361,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         push @shdrs, pack( 'L< L< Q< Q< Q< Q< L< L< Q< Q<', $sh_name_off{'.note.GNU-stack'}, 1, 0, 0, 0, 0, 0, 1, 0 );
         seek( $fh, $shoff, 0 );
         print $fh $_ for @shdrs;
-        my $num_ph = 5;
+        my $separate_rodata = $platform->is_openbsd;
+        my $num_ph          = $separate_rodata ? 6 : 5;
         $num_ph++ if $has_interp;
         $num_ph++ if $note_data;
         $num_ph++ if $pintable_data;
@@ -1366,31 +1370,41 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $eh_frame_hdr_sec = $self->layout->get('.eh_frame_hdr');
         $num_ph++ if $eh_frame_hdr_sec;
         $num_ph++ if $platform->is_freebsd;
-        my @phdrs     = ();
+        my @phdrs;
         my $extra_off = 64 + ( $num_ph * 56 );
 
         # PT_PHDR=6: program header table self-reference
-        push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 6, 4, 64, $base + 64, $base + 64, $num_ph * 56, $num_ph * 56, 8 );
+        push @phdrs, pack 'L< L< Q< Q< Q< Q< Q< Q<', 6, 4, 64, $base + 64, $base + 64, $num_ph * 56, $num_ph * 56, 8;
         if ($has_interp) {
             my $interp_sec = $self->layout->get('.interp');
 
             # PT_INTERP=3
-            push @phdrs,
-                pack(
-                'L< L< Q< Q< Q< Q< Q< Q<',
-                3, 4, $interp_sec->{off},
-                $base + $interp_sec->{rva},
-                $base + $interp_sec->{rva},
-                $interp_sec->{size}, $interp_sec->{size}, 1
-                );
+            push @phdrs, pack 'L< L< Q< Q< Q< Q< Q< Q<', 3, 4, $interp_sec->{off}, $base + $interp_sec->{rva}, $base + $interp_sec->{rva},
+                $interp_sec->{size}, $interp_sec->{size}, 1;
         }
-        my $dyn_sec   = $self->layout->get('.dynamic');
-        my $got_sec   = $self->layout->get('.got');
-        my $rx_p_off  = 0;
-        my $rx_p_size = $dyn_sec->{off};
+        my $dyn_sec = $self->layout->get('.dynamic');
+        my $got_sec = $self->layout->get('.got');
+        if ($separate_rodata) {
+            my $rodata_sec = $self->layout->get('.rodata');
 
-        # PT_LOAD=1, flags=RX(5): maps .text through .gnu.hash (all before .dynamic)
-        push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 1, 5, $rx_p_off, $base, $base, $rx_p_size, $rx_p_size, $page_align );
+            # OpenBSD: separate R segment so .rodata is not mapped with PF_X
+            my $text_p_off  = 0;
+            my $text_p_size = $rodata_sec->{off};
+            push @phdrs, pack 'L< L< Q< Q< Q< Q< Q< Q<', 1, 5, $text_p_off, $base, $base, $text_p_size, $text_p_size, $page_align;
+
+            # PT_LOAD=1, flags=R(4): maps .rodata through .hash (read-only data)
+            my $ro_p_off  = $rodata_sec->{off};
+            my $ro_p_size = $dyn_sec->{off} - $ro_p_off;
+            push @phdrs, pack 'L< L< Q< Q< Q< Q< Q< Q<', 1, 4, $ro_p_off, $base + $rodata_sec->{rva}, $base + $rodata_sec->{rva}, $ro_p_size,
+                $ro_p_size, $page_align;
+        }
+        else {
+            # Traditional 2 PT_LOAD segments (RX and RW) required by NetBSD ld.elf_so (nsegs == 2)
+            my $rx_p_off  = 0;
+            my $rx_p_size = $dyn_sec->{off};
+            push @phdrs, pack 'L< L< Q< Q< Q< Q< Q< Q<', 1, 5, $rx_p_off, $base, $base, $rx_p_size, $rx_p_size, $page_align;
+        }
+        #
         my $rw_p_off = $dyn_sec->{off};
         my $rw_size  = ( $got_sec->{off} + $got_sec->{size} ) - $rw_p_off;
 
@@ -1432,29 +1446,15 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         if ($pintable_data) {
 
             # PT_OPENBSD_PINTABLE=0x65a3dbe9: system call pinning table
-            push @phdrs,
-                pack(
-                'L< L< Q< Q< Q< Q< Q< Q<',
-                0x65a3dbe9, 4, $extra_off,
-                $base + $extra_off,
-                $base + $extra_off,
-                length($pintable_data), length($pintable_data), 4
-                );
+            push @phdrs, pack 'L< L< Q< Q< Q< Q< Q< Q<', 0x65a3dbe9, 4, $extra_off, $base + $extra_off, $base + $extra_off, length($pintable_data),
+                length($pintable_data), 4;
             $extra_off += length($pintable_data);
         }
         if ($eh_frame_hdr_sec) {
 
             # PT_GNU_EH_FRAME=0x6474e550: points to .eh_frame_hdr index for binary FDE lookup
-            push @phdrs,
-                pack(
-                'L< L< Q< Q< Q< Q< Q< Q<',
-                0x6474e550, 4,
-                $eh_frame_hdr_sec->{off},
-                $base + $eh_frame_hdr_sec->{rva},
-                $base + $eh_frame_hdr_sec->{rva},
-                $eh_frame_hdr_sec->{size},
-                $eh_frame_hdr_sec->{size}, 4
-                );
+            push @phdrs, pack 'L< L< Q< Q< Q< Q< Q< Q<', 0x6474e550, 4, $eh_frame_hdr_sec->{off}, $base + $eh_frame_hdr_sec->{rva},
+                $base + $eh_frame_hdr_sec->{rva}, $eh_frame_hdr_sec->{size}, $eh_frame_hdr_sec->{size}, 4;
         }
         if ( $platform->is_freebsd ) {
 
@@ -1466,7 +1466,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             my $data_sec  = $self->layout->get('.data');
             my $tls_vaddr = $data_sec ? $base + $data_sec->{rva} : $base;
             my $tls_off   = $data_sec ? $data_sec->{off}         : 0;
-            push @phdrs, pack( 'L< L< Q< Q< Q< Q< Q< Q<', 7, 6, $tls_off, $tls_vaddr, $tls_vaddr, 0, 8, 8 );
+            push @phdrs, pack 'L< L< Q< Q< Q< Q< Q< Q<', 7, 6, $tls_off, $tls_vaddr, $tls_vaddr, 0, 8, 8;
         }
 
         # PT_GNU_STACK=0x6474e551: flags=6 (RW, no exec) for non-executable stack
@@ -1477,16 +1477,15 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         # e_ehsize/e_phentsize/e_phnum/e_shentsize/e_shnum/e_shstrndx)
         # e_machine: EM_AARCH64=183, EM_RISCV=243, EM_X86_64=62
         # e_flags: RISC-V EF_RISCV_RVC=0x0004 (compressed insns), else 0
-        my $ehdr = pack(
-            'A4 C C C C C x7 S< S< L< Q< Q< Q< L< S< S< S< S< S< S<',
-            "\x7fELF", 2, 1, 1, $osabi, 0, $elf_type, ( $platform->is_arm64 ? 183 : ( $platform->is_riscv64 ? 243 : 62 ) ),
-            1,         $entry_point, 64, $shoff, ( $platform->is_riscv64 ? 0x0004 : 0 ),
-            64,        56, $num_ph, 64, scalar(@shdrs), $shstrtab_idx
-        );
-        seek( $fh, 0, 0 );
+        my $ehdr = pack 'A4 C C C C C x7 S< S< L< Q< Q< Q< L< S< S< S< S< S< S<', "\x7fELF", 2, 1, 1, $osabi, 0, $elf_type,
+            ( $platform->is_arm64 ? 183 : ( $platform->is_riscv64 ? 243 : 62 ) ), 1, $entry_point, 64, $shoff,
+            ( $platform->is_riscv64 ? 0x0004 : 0 ), 64, 56, $num_ph, 64, scalar(@shdrs), $shstrtab_idx;
+        seek $fh, 0, 0;
         print $fh $ehdr, @phdrs, $note_data, $pintable_data;
         close $fh;
         chmod 0755, $output_file;
         return $output_file;
     }
-} 1;
+};
+#
+1;
