@@ -425,10 +425,19 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 }
                 elsif ( $platform->is_arm64 ) {
                     builtin::load_module 'Brocken::Jenny::Codegen::ARM64::Inst';
-                    $text .= pack( 'V3',
-                        adrp( Brocken::Jenny::Codegen::ARM64::Inst::X16(), $iat_entry_rva, $text_rva + $stub_ofs ),
-                        ldr_64( Brocken::Jenny::Codegen::ARM64::Inst::X16(), Brocken::Jenny::Codegen::ARM64::Inst::X16(), $iat_entry_rva & 0xFFF ),
-                        br( Brocken::Jenny::Codegen::ARM64::Inst::X16() ) );
+                    $text .= pack(
+                        'V3',
+                        Brocken::Jenny::Codegen::ARM64::Inst::adrp(
+                            Brocken::Jenny::Codegen::ARM64::Inst::X16(),
+                            $iat_entry_rva, $text_rva + $stub_ofs
+                        ),
+                        Brocken::Jenny::Codegen::ARM64::Inst::ldr_64(
+                            Brocken::Jenny::Codegen::ARM64::Inst::X16(),
+                            Brocken::Jenny::Codegen::ARM64::Inst::X16(),
+                            $iat_entry_rva & 0xFFF
+                        ),
+                        Brocken::Jenny::Codegen::ARM64::Inst::br( Brocken::Jenny::Codegen::ARM64::Inst::X16() )
+                    );
                 }
                 $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size;
                 $target_off = $stub_ofs - $entry_size;
