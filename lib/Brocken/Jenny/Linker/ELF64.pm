@@ -956,8 +956,14 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             push @rela_entries, [ '_rtld_call_init', $sym_indices{'_rtld_call_init'} ];
         }
 
-        # Relocation entries for dynamically discovered extern functions
+        # Relocation entries for dynamically discovered extern functions.  A name above shares a slot with one of the
+        # fixed imports when it is that import (exit and _exit both use slot 6), so it must not get a second entry:
+        # illumos ld.so.1 applies R_AMD64_GLOB_DAT by adding to the slot rather than storing, so a duplicate doubles
+        # the resolved address and the first call through the slot jumps into unmapped memory.
+        my %relocated_slot;
+        $relocated_slot{ $self->import_rva( $_->[0] ) } = 1 for @rela_entries;
         for my $name ( sort keys %$_extern_got_offsets ) {
+            next if $relocated_slot{ $self->import_rva($name) }++;
             if ( !exists $sym_indices{$name} ) {
                 $sym_indices{$name} = $sym_idx++;
                 $dynsym .= pack( 'L< C C S< Q< Q<', $str_off{$name}, 0x12, 0, 0, 0, 0 );
