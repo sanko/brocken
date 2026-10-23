@@ -313,7 +313,7 @@ operate on a variable's ownership rather than its value. The implemented set is:
 | `builtin::created_as_number($v)` | Whether `$v` was created as a number: a static `int`/`float`, or an `Any` box with a numeric tag. |
 | `builtin::stringify($v)` | Renders `$v` to a `String`. A String (static or boxed) is already a string; numbers use the same integer/`%f` conversions as interpolation. |
 | `builtin::numify($v)` | Converts `$v` to an `f64`. An `int`/`float` converts directly, and a `String` parses its leading number through the C library's `strtod`. |
-| `builtin::refaddr($v)` | The address of a boxed value or pointer as an `i64` (`0` for a non-reference). |
+| `builtin::refaddr($v)` | The address of a boxed value or pointer as a `u64` (`0` for a non-reference). |
 | `builtin::reftype($v)` | The reference class name — `SCALAR`, `ARRAY`, `HASH`, or `OBJECT`. |
 | `builtin::blessed($v)` | The class name of a statically-known instance, or a null pointer (undef) otherwise. |
 | `builtin::ceil($v)` / `builtin::floor($v)` | Rounds a number to an `i64` toward `+∞` / `-∞`. An integer passes through unchanged; a float is truncated with `fptosi` and corrected by one only when the truncation landed on the wrong side. |
