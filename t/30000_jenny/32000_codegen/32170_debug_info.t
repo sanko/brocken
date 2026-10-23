@@ -5,12 +5,12 @@ use blib;
 use Brocken;
 use Brocken::Katsuro::Platform;
 use Config;
-use Fcntl    qw(O_RDONLY);
-use IPC::Cmd qw(can_run);
+use Fcntl    qw[O_RDONLY];
+use IPC::Cmd qw[can_run];
 use File::Spec;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-
+#
 sub _dump_elf_debug ($path) {
     sysopen my $fh, $path, O_RDONLY or return;
     binmode $fh;
@@ -40,7 +40,7 @@ sub _dump_elf_debug ($path) {
         next unless $ssz > 0 && $so > 0;
         seek $fh, $so, 0;
         read $fh, my $dat, ( $ssz < 16 ? $ssz : 16 );
-        push @out, sprintf "  %-20s type=%-3d off=0x%05x size=%-5d first16=%s", $nm, $st, $so, $ssz, unpack( 'H*', $dat );
+        push @out, sprintf "  %-20s type=%-3d off=0x%05x size=%-5d first16=%s", $nm, $st, $so, $ssz, unpack 'H*', $dat;
     }
     close $fh;
     return join "\n", @out;
@@ -153,7 +153,7 @@ BROCKEN
         $brocken->linker->set_debug_level(5);
         my $file = File::Spec->catfile( $brocken->tmpdir, 'gdb_backtrace_test' . $brocken->ext );
         $brocken->linker->write_executable( $file, $funcs, $host );
-        ok( -e $file, 'binary with debug info written' );
+        ok -e $file, 'binary with debug info written';
         ( my $gdb_file = $file ) =~ s{\\}{/}g;
         my $gdb_ok = _gdb_works($gdb_file);
 
@@ -190,30 +190,27 @@ BROCKEN
         }
         if ($gdb_ok) {
             my $output = `gdb -readnow -batch -ex "file $gdb_file" -ex "info functions" -ex quit 2>&1`;
-            ok( $output =~ /_BROCKEN_ENTRY/, 'GDB finds _BROCKEN_ENTRY via DWARF' );
+            like $output, qr/_BROCKEN_ENTRY/, 'GDB finds _BROCKEN_ENTRY via DWARF';
             my $brk_output = `gdb -readnow -batch -ex "file $gdb_file" -ex "break _BROCKEN_ENTRY" -ex quit 2>&1`;
-            ok( $brk_output =~ /Breakpoint\s+\d+/, 'GDB set breakpoint via COFF symbols' );
+            ok $brk_output =~ /Breakpoint\s+\d+/, 'GDB set breakpoint via COFF symbols';
         }
         else {
             diag "gdb cannot load $gdb_file";
-            ok( 1, 'GDB info functions test skipped (gdb cannot load binary)' );
-            ok( 1, 'GDB breakpoint test skipped (gdb cannot load binary)' );
+            skip 'GDB info functions and breakpoint tests skipped (gdb cannot load binary)', 2;
         }
         if ( !$host->is_windows ) {
             if ($gdb_ok) {
                 my $bt_output = `gdb -readnow -batch -ex "file $gdb_file" -ex "break _BROCKEN_ENTRY" -ex run -ex backtrace -ex quit 2>&1`;
-                ok( $bt_output =~ /_BROCKEN_ENTRY/, 'backtrace shows _BROCKEN_ENTRY' );
-                ok( $bt_output =~ /#0\s+/,          'backtrace has at least frame 0' );
+                like $bt_output, qr/_BROCKEN_ENTRY/, 'backtrace shows _BROCKEN_ENTRY';
+                like $bt_output, qr/#0\s+/,          'backtrace has at least frame 0';
                 diag "gdb backtrace output:\n$bt_output" if $bt_output !~ /Breakpoint/;
             }
             else {
-                ok( 1, 'backtrace test skipped (gdb cannot load binary)' );
-                ok( 1, 'backtrace frame test skipped (gdb cannot load binary)' );
+                skip 'backtrace tests skipped (gdb cannot load binary)', 2;
             }
         }
         else {
-            ok( 1, 'backtrace test skipped on Windows (ASLR exec limitation)' );
-            ok( 1, 'backtrace test skipped on Windows' );
+            skip 'backtrace test skipped on Windows (ASLR exec limitation)', 2;
         }
         unlink $file;
     }
@@ -250,23 +247,23 @@ BROCKEN
             my $info       = $debug_data->{'.debug_info'} // '';
             my $has_struct = $info =~ /\x06Point\x00/;
             my $has_field  = $info =~ /\x07x\x00/ && $info =~ /\x07y\x00/;
-            ok( $has_struct == ( $lv >= 4 ? 1 : 0 ), "level $lv: struct name Point " . ( $lv >= 4 ? 'present' : 'absent' ) );
-            ok( $has_field == ( $lv >= 4  ? 1 : 0 ), "level $lv: struct fields x,y " . ( $lv >= 4 ? 'present' : 'absent' ) );
+            ok $has_struct == ( $lv >= 4 ? 1 : 0 ), "level $lv: struct name Point " . ( $lv >= 4 ? 'present' : 'absent' );
+            ok $has_field ==  ( $lv >= 4 ? 1 : 0 ), "level $lv: struct fields x,y " . ( $lv >= 4 ? 'present' : 'absent' );
             my $l = Brocken->new;
             $l->linker->set_debug_data($debug_data);
             $l->linker->set_debug_level($lv);
             my $file = File::Spec->catfile( $l->tmpdir, "struct_die_lv$lv" . $l->ext );
             $l->linker->write_executable( $file, $funcs, $host );
-            ok( -e $file, "level $lv: binary written" );
+            ok -e $file, "level $lv: binary written";
             system $file;
 
             if ( $? >> 8 == 255 ) {
                 my $info = _binary_info($file);
                 diag "Spawn failed for '$file': \$!=$! \$^E=$^E $info";
-                ok( 1, "level $lv: binary valid but spawn blocked (environment)" );
+                skip "level $lv: binary valid but spawn blocked (environment)", 1;
             }
             else {
-                is( $? >> 8, 10, "level $lv: result 10" );
+                is $? >> 8, 10, "level $lv: result 10";
             }
             unlink $file;
         }
@@ -293,15 +290,15 @@ BROCKEN
             $brocken->linker->set_debug_level($lv);
             my $file = File::Spec->catfile( $brocken->tmpdir, "coff_lv$lv" . $brocken->ext );
             $brocken->linker->write_executable( $file, $funcs, $host );
-            ok( -e $file, "level $lv: binary written" );
+            ok -e $file, "level $lv: binary written";
             system $file;
             if ( $? >> 8 == 255 ) {
                 my $info = _binary_info($file);
                 diag "Spawn failed for '$file': \$!=$! \$^E=$^E $info";
-                ok( 1, "level $lv: binary valid but spawn blocked (environment)" );
+                skip "level $lv: binary valid but spawn blocked (environment)", 1;
             }
             else {
-                is( $? >> 8, 42, "level $lv: result 42" );
+                is $? >> 8, 42, "level $lv: result 42";
             }
             ( my $gf = $file ) =~ s{\\}{/}g;
             my $has_gdb = can_run('gdb');
@@ -309,23 +306,25 @@ BROCKEN
                 my $gdb_ok = _gdb_works($gf);
                 if ($gdb_ok) {
                     my $funcs_out = `gdb -readnow -batch -ex "file $gf" -ex "info functions" -ex quit 2>&1`;
+                    warn $funcs_out;
                     if ( $lv >= 5 ) {
-                        ok( $funcs_out =~ /_BROCKEN_ENTRY/, "level $lv: GDB finds _BROCKEN_ENTRY via COFF" );
+                        like $funcs_out, qr[_BROCKEN_ENTRY], "level $lv: GDB finds _BROCKEN_ENTRY via COFF";
                     }
                     else {
-                        ok( $funcs_out !~ /_BROCKEN_ENTRY/, "level $lv: GDB does not find _BROCKEN_ENTRY (no COFF)" );
+                        unlike $funcs_out, qr[_BROCKEN_ENTRY], "level $lv: GDB does not find _BROCKEN_ENTRY (no COFF)";
                     }
                 }
                 else {
                     diag "gdb cannot load $gf";
-                    ok( 1, "level $lv: GDB test skipped (gdb cannot load binary)" );
+                    skip "level $lv: GDB test skipped (gdb cannot load binary)", 1;
                 }
             }
             else {
-                ok( 1, "level $lv: no gdb available" );
+                pass "level $lv: no gdb available";
             }
             unlink $file;
         }
     }
 };
+#
 done_testing;

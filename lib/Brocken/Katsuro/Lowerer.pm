@@ -1,6 +1,6 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[experimental::class];
+no warnings qw[experimental::class experimental::builtin];
 class Brocken::Katsuro::Lowerer v0.0.1 {
     use Brocken::Lindsay::IR;
     use Brocken::Lindsay::IR::Builder;

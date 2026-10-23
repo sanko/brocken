@@ -8,7 +8,8 @@ use Brocken::Jenny::Codegen::ARM64::Inst;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 use Config;
-use Cwd qw(getcwd);
+use Cwd qw[getcwd];
+#
 my $brocken    = Brocken->new();
 my $platform   = $brocken->platform;
 my $is_arm64   = $platform->is_arm64;
@@ -82,37 +83,37 @@ my $make_x64_wrapper = sub ( $ext_str, $dlopen_rva, $dlsym_rva, $text, $macho, $
     my $disp_dlopen      = $dlopen_rva - ( $main_rva + 23 );
     my $disp_funcname    = $func_name_offset - 41;
     my $disp_dlsym       = $dlsym_rva - ( $main_rva + 47 );
-    my $code             = pack( 'C', 0x53 );
-    $code .= pack( 'C4',    0x48, 0x83, 0xEC, 0x10 );
-    $code .= pack( 'C3 l<', 0x48, 0x8D, 0x3D, $disp_libpath );
-    $code .= pack( 'C5',    0xBE, 0x02, 0x00, 0x00, 0x00 );
-    $code .= pack( 'C2 l<', 0xFF, 0x15, $disp_dlopen );
-    $code .= pack( 'C3',    0x48, 0x85, 0xC0 );
-    $code .= pack( 'C2',    0x74, 0x1C );
-    $code .= pack( 'C3',    0x48, 0x89, 0xC3 );
-    $code .= pack( 'C3',    0x48, 0x89, 0xDF );
-    $code .= pack( 'C3 l<', 0x48, 0x8D, 0x35, $disp_funcname );
-    $code .= pack( 'C2 l<', 0xFF, 0x15, $disp_dlsym );
-    $code .= pack( 'C3',    0x48, 0x85, 0xC0 );
-    $code .= pack( 'C2',    0x74, 0x0F );
-    $code .= pack( 'C2',    0xFF, 0xD0 );
-    $code .= pack( 'C4',    0x48, 0x83, 0xC4, 0x10 );
-    $code .= pack( 'C',     0x5B );
-    $code .= pack( 'C',     0xC3 );
-    $code .= pack( 'C5',    0xBF, 0x01, 0x00, 0x00, 0x00 );
-    $code .= pack( 'C2',    0xEB, 0x05 );
-    $code .= pack( 'C5',    0xBF, 0x02, 0x00, 0x00, 0x00 );
-    $code .= pack( 'C5', 0xB8, $exit_syscall & 0xFF, ( $exit_syscall >> 8 ) & 0xFF, ( $exit_syscall >> 16 ) & 0xFF, ( $exit_syscall >> 24 ) & 0xFF );
-    $code .= pack( 'C2', 0x0F, 0x05 );
-    $code .= pack( 'C2', 0x0F, 0x0B );
+    my $code             = pack 'C', 0x53;
+    $code .= pack 'C4',    0x48, 0x83, 0xEC, 0x10;
+    $code .= pack 'C3 l<', 0x48, 0x8D, 0x3D, $disp_libpath;
+    $code .= pack 'C5',    0xBE, 0x02, 0x00, 0x00, 0x00;
+    $code .= pack 'C2 l<', 0xFF, 0x15, $disp_dlopen;
+    $code .= pack 'C3',    0x48, 0x85, 0xC0;
+    $code .= pack 'C2',    0x74, 0x1C;
+    $code .= pack 'C3',    0x48, 0x89, 0xC3;
+    $code .= pack 'C3',    0x48, 0x89, 0xDF;
+    $code .= pack 'C3 l<', 0x48, 0x8D, 0x35, $disp_funcname;
+    $code .= pack 'C2 l<', 0xFF, 0x15, $disp_dlsym;
+    $code .= pack 'C3',    0x48, 0x85, 0xC0;
+    $code .= pack 'C2',    0x74, 0x0F;
+    $code .= pack 'C2',    0xFF, 0xD0;
+    $code .= pack 'C4',    0x48, 0x83, 0xC4, 0x10;
+    $code .= pack 'C',     0x5B;
+    $code .= pack 'C',     0xC3;
+    $code .= pack 'C5',    0xBF, 0x01, 0x00, 0x00, 0x00;
+    $code .= pack 'C2',    0xEB, 0x05;
+    $code .= pack 'C5',    0xBF, 0x02, 0x00, 0x00, 0x00;
+    $code .= pack 'C5',    0xB8, $exit_syscall & 0xFF, ( $exit_syscall >> 8 ) & 0xFF, ( $exit_syscall >> 16 ) & 0xFF, ( $exit_syscall >> 24 ) & 0xFF;
+    $code .= pack 'C2',    0x0F, 0x05;
+    $code .= pack 'C2',    0x0F, 0x0B;
     $code .= "\x00" while length($code) < $lib_path_offset;
     $code .= $lib_path . $func_name;
     return $code;
 };
 
 # ARM64 wrapper generator
-my $make_arm64_wrapper = sub {
-    my ( $ext_str, $dlopen_rva, $dlsym_rva, $text, $macho, $entry_stub_len ) = @_;
+my $make_arm64_wrapper = sub ( $ext_str, $dlopen_rva, $dlsym_rva, $text, $macho, $entry_stub_len ) {
+    use Brocken::Jenny::Codegen::ARM64::Inst;
     my $lib_path         = "./libtest_prog$ext_str\0";
     my $func_name        = "my_func\0";
     my $lib_path_offset  = 64;
@@ -125,21 +126,34 @@ my $make_arm64_wrapper = sub {
     my $imm19_dlopen     = ( $offset_dlopen / 4 ) & 0x7FFFF;
     my $imm19_dlsym      = ( $offset_dlsym / 4 ) & 0x7FFFF;
     my $code             = pack(
-        'V*', stp_pre( X29, X30, SP, -16 ),    # save FP, LR
-        str_64( X3, SP, 16 ),                  # save X3
-        adr( X0, $disp_libpath ),              # X0 = lib path addr
-        movz_64( X1, 2 ),                      # X1 = RTLD_LAZY
-        ldr_lit_64( X8, $offset_dlopen ),      # X8 = dlopen function
-        blr(X8),                               # call dlopen
-        mov_64( X19, X0 ),                     # save handle in X19
-        mov_64( X0,  X19 ),                    # restore handle for dlsym
-        adr( X1, $disp_funcname ),             # X1 = func name addr
-        ldr_lit_64( X8, $offset_dlsym ),       # X8 = dlsym function
-        blr(X8),                               # call dlsym
-        blr(X0),                               # call resolved function
-        ldr_64( X3, SP, 16 ),                  # restore X3
-        ldp_post( X29, X30, SP, 16 ),          # restore FP, LR
-        ret(),                                 # return
+        'V*',
+        Brocken::Jenny::Codegen::ARM64::Inst::stp_pre(
+            Brocken::Jenny::Codegen::ARM64::Inst::X29,
+            Brocken::Jenny::Codegen::ARM64::Inst::X30,
+            Brocken::Jenny::Codegen::ARM64::Inst::SP, -16
+        ),    # save FP, LR
+        Brocken::Jenny::Codegen::ARM64::Inst::str_64( Brocken::Jenny::Codegen::ARM64::Inst::X3, Brocken::Jenny::Codegen::ARM64::Inst::SP, 16 )
+        ,                                                                                                                # save X3
+        Brocken::Jenny::Codegen::ARM64::Inst::adr( Brocken::Jenny::Codegen::ARM64::Inst::X0, $disp_libpath ),            # X0 = lib path addr
+        Brocken::Jenny::Codegen::ARM64::Inst::movz_64( Brocken::Jenny::Codegen::ARM64::Inst::X1, 2 ),                    # X1 = RTLD_LAZY
+        Brocken::Jenny::Codegen::ARM64::Inst::ldr_lit_64( Brocken::Jenny::Codegen::ARM64::Inst::X8, $offset_dlopen ),    # X8 = dlopen function
+        Brocken::Jenny::Codegen::ARM64::Inst::blr(Brocken::Jenny::Codegen::ARM64::Inst::X8),                             # call dlopen
+        Brocken::Jenny::Codegen::ARM64::Inst::mov_64( Brocken::Jenny::Codegen::ARM64::Inst::X19, Brocken::Jenny::Codegen::ARM64::Inst::X0 )
+        ,                                                                                                                # save handle in X19
+        Brocken::Jenny::Codegen::ARM64::Inst::mov_64( Brocken::Jenny::Codegen::ARM64::Inst::X0, Brocken::Jenny::Codegen::ARM64::Inst::X19 )
+        ,                                                                                                                # restore handle for dlsym
+        Brocken::Jenny::Codegen::ARM64::Inst::adr( Brocken::Jenny::Codegen::ARM64::Inst::X1, $disp_funcname ),           # X1 = func name addr
+        Brocken::Jenny::Codegen::ARM64::Inst::ldr_lit_64( Brocken::Jenny::Codegen::ARM64::Inst::X8, $offset_dlsym ),     # X8 = dlsym function
+        Brocken::Jenny::Codegen::ARM64::Inst::blr(Brocken::Jenny::Codegen::ARM64::Inst::X8),                             # call dlsym
+        Brocken::Jenny::Codegen::ARM64::Inst::blr(Brocken::Jenny::Codegen::ARM64::Inst::X0),                             # call resolved function
+        Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( Brocken::Jenny::Codegen::ARM64::Inst::X3, Brocken::Jenny::Codegen::ARM64::Inst::SP, 16 )
+        ,                                                                                                                # restore X3
+        Brocken::Jenny::Codegen::ARM64::Inst::ldp_post(
+            Brocken::Jenny::Codegen::ARM64::Inst::X29,
+            Brocken::Jenny::Codegen::ARM64::Inst::X30,
+            Brocken::Jenny::Codegen::ARM64::Inst::SP, 16
+        ),                                                                                                               # restore FP, LR
+        Brocken::Jenny::Codegen::ARM64::Inst::ret()                                                                      # return
     );
     $code .= "\x00" while length($code) < 64;
     $code .= $lib_path . $func_name;
@@ -243,4 +257,5 @@ SKIP: {
     }
 }
 unlink $lib_file;
+#
 done_testing;

@@ -1,6 +1,6 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[portable experimental::class];
+no warnings qw[portable experimental::class experimental::builtin];
 class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
     use Brocken::Katsuro::Platform;
     use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
@@ -42,6 +42,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $entry_stub   = '';
         if ( $self->type eq 'exe' ) {
             if ( $platform->is_arm64 ) {
+                builtin::load_module 'Brocken::Jenny::Codegen::ARM64::Inst';
 
                 # Windows ARM64 Entry Stub with heap:
                 # Layout (36 bytes total):
@@ -54,15 +55,15 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 #  24:  add sp, sp, #0x100000    (deallocate heap)
                 #  28:  uxtb w0, w0              (truncate exit code to 8 bits)
                 #  32:  ret
-                my $bl = bl( 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
-                $entry_stub = pack( 'V', 0xD14403FF )             # sub sp, sp, #0x100000
-                    . pack( 'V', 0x910003E0 )                     # mov x0, sp
-                    . pack( 'V', stp_pre( 29, 30, 31, -16 ) ) .
-                    pack( 'V', add_imm( 29, 31, 0 ) ) .
+                my $bl = Brocken::Jenny::Codegen::ARM64::Inst::bl( 20 + ( $func_offsets{_BROCKEN_ENTRY} // 0 ) );
+                $entry_stub = pack( 'V', 0xD14403FF )                                                   # sub sp, sp, #0x100000
+                    . pack( 'V', 0x910003E0 )                                                           # mov x0, sp
+                    . pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::stp_pre( 29, 30, 31, -16 ) ) .
+                    pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::add_imm( 29, 31, 0 ) ) .
                     pack( 'V', $bl ) .
-                    pack( 'V', ldp_post( 29, 30, 31, 16 ) ) .
-                    pack( 'V', 0x914403FF )                       # add sp, sp, #0x100000
-                    . pack( 'V', uxtb( 0, 0 ) ) . pack( 'V', ret() );
+                    pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldp_post( 29, 30, 31, 16 ) ) .
+                    pack( 'V', 0x914403FF )                                                             # add sp, sp, #0x100000
+                    . pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::uxtb( 0, 0 ) ) . pack 'V', Brocken::Jenny::Codegen::ARM64::Inst::ret();
             }
             else {
                 # Windows x86_64 Entry Stub with heap:
@@ -237,6 +238,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
             @extern_funcs = grep { $_ ne 'setjmp' && $_ ne 'longjmp' } @extern_funcs;
         }
         elsif ( $platform->is_arm64 && grep { $_ eq 'setjmp' || $_ eq 'longjmp' } @extern_funcs ) {
+            builtin::load_module 'Brocken::Jenny::Codegen::ARM64::Inst';
             my $stub_base = length($text);
             if ( grep { $_ eq 'setjmp' } @extern_funcs ) {
 
@@ -244,12 +246,12 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 # x0 = jmp_buf pointer (Windows ARM64 ABI: x0 = first arg)
                 for my $i ( 0 .. 11 ) {
                     my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
-                    $text .= pack( 'V', str_64( $reg, 0, $i * 8 ) );
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::str_64( $reg, 0, $i * 8 ) );
                 }
-                $text .= pack( 'V', add_imm( 1, 31, 0 ) );    # mov x1, sp
-                $text .= pack( 'V', str_64( 1, 0, 96 ) );     # str x1, [x0, #96]
-                $text .= pack( 'V', movz_64( 0, 0 ) );        # mov x0, #0
-                $text .= pack( 'V', ret() );                  # ret
+                $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::add_imm( 1, 31, 0 ) );    # mov x1, sp
+                $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::str_64( 1, 0, 96 ) );     # str x1, [x0, #96]
+                $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::movz_64( 0, 0 ) );        # mov x0, #0
+                $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ret() );                  # ret
                 $sjlj_stubs{setjmp} = $stub_base;
                 $stub_base = length($text);
             }
@@ -257,14 +259,14 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
 
                 # longjmp(buf, val): restore x19-x30 + SP, jump to saved LR
                 # x0 = buf, x1 = return value
-                $text .= pack( 'V', ldr_64( 2, 0, 96 ) );     # ldr x2, [x0, #96]  (saved SP)
-                $text .= pack( 'V', add_imm( 31, 2, 0 ) );    # mov sp, x2
+                $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 2, 0, 96 ) );     # ldr x2, [x0, #96]  (saved SP)
+                $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::add_imm( 31, 2, 0 ) );    # mov sp, x2
                 for my $i ( reverse( 0 .. 11 ) ) {
                     my $reg = $i < 10 ? 19 + $i : ( $i == 10 ? 29 : 30 );
-                    $text .= pack( 'V', ldr_64( $reg, 0, $i * 8 ) );
+                    $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( $reg, 0, $i * 8 ) );
                 }
-                $text .= pack( 'V', mov_64( 0, 1 ) );         # mov x0, x1  (return val)
-                $text .= pack( 'V', ret() );                  # ret (jumps to saved LR)
+                $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::mov_64( 0, 1 ) );         # mov x0, x1  (return val)
+                $text .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ret() );                  # ret (jumps to saved LR)
                 $sjlj_stubs{longjmp} = $stub_base;
             }
 
@@ -422,7 +424,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                     $text .= pack( 'CC l<', 0xFF, 0x25, $disp32 );
                 }
                 elsif ( $platform->is_arm64 ) {
-                    require Brocken::Jenny::Codegen::ARM64::Inst;
+                    builtin::load_module 'Brocken::Jenny::Codegen::ARM64::Inst';
                     $text .= pack( 'V3',
                         adrp( Brocken::Jenny::Codegen::ARM64::Inst::X16(), $iat_entry_rva, $text_rva + $stub_ofs ),
                         ldr_64( Brocken::Jenny::Codegen::ARM64::Inst::X16(), Brocken::Jenny::Codegen::ARM64::Inst::X16(), $iat_entry_rva & 0xFFF ),
@@ -853,4 +855,6 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         print $fh pack( 'v', 0x2022 );    # EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE | IMAGE_FILE_DLL
         close $fh;
     }
-} 1;
+    }
+    #
+    1;
