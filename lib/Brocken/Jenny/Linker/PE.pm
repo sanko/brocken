@@ -3,8 +3,7 @@ use feature qw[class];
 no warnings qw[portable experimental::class];
 class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
     use Brocken::Katsuro::Platform;
-    use Brocken::Jenny::Codegen::ARM64::Inst;
-    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
+    use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
 
     method write_executable ( $output_file, $code_data, $platform, $passed_argument = undef, $debug_bytes = undef ) {
 
@@ -238,7 +237,6 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
             @extern_funcs = grep { $_ ne 'setjmp' && $_ ne 'longjmp' } @extern_funcs;
         }
         elsif ( $platform->is_arm64 && grep { $_ eq 'setjmp' || $_ eq 'longjmp' } @extern_funcs ) {
-            use Brocken::Jenny::Codegen::ARM64::Inst;
             my $stub_base = length($text);
             if ( grep { $_ eq 'setjmp' } @extern_funcs ) {
 
@@ -424,7 +422,11 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                     $text .= pack( 'CC l<', 0xFF, 0x25, $disp32 );
                 }
                 elsif ( $platform->is_arm64 ) {
-                    $text .= pack( 'V3', adrp( X16, $iat_entry_rva, $text_rva + $stub_ofs ), ldr_64( X16, X16, $iat_entry_rva & 0xFFF ), br(X16), );
+                    require Brocken::Jenny::Codegen::ARM64::Inst;
+                    $text .= pack( 'V3',
+                        adrp( Brocken::Jenny::Codegen::ARM64::Inst::X16(), $iat_entry_rva, $text_rva + $stub_ofs ),
+                        ldr_64( Brocken::Jenny::Codegen::ARM64::Inst::X16(), Brocken::Jenny::Codegen::ARM64::Inst::X16(), $iat_entry_rva & 0xFFF ),
+                        br( Brocken::Jenny::Codegen::ARM64::Inst::X16() ) );
                 }
                 $func_offsets{ $ff->{target} } = $stub_ofs - $entry_size;
                 $target_off = $stub_ofs - $entry_size;

@@ -10,6 +10,28 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
     use Brocken::Jenny::Codegen::Wasm::Encodings qw[:all];
     field $platform : param;
 
+    sub _is_core_runtime_func($func) {
+        my $name = ref($func) ? $func->name : $func;
+        return 0 unless $name =~ /^Brocken::Runtime::/;
+        return 0 if $name     =~ /^Brocken::Runtime::gc_(?:scan|restore|destroy)_class$/;
+        return 1;
+    }
+
+    sub _clone_wasm_blob($fd) {
+        return {
+            name   => $fd->{name},
+            bytes  => $fd->{bytes},
+            fixups => [
+                map {
+                    {%$_}
+                } $fd->{fixups}->@*
+            ],
+            source_map     => { $fd->{source_map}->%* },
+            return_valtype => $fd->{return_valtype},
+            param_valtypes => [ $fd->{param_valtypes}->@* ],
+        };
+    }
+
     method emit_function($ir_func) {
         my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
         my $mf      = $lowerer->lower($ir_func);
@@ -75,36 +97,34 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
     }
 
     method emit_functions($ir_funcs) {
-        state $cached_core_funcs;
+        state %CORE_CACHE;
+        my $cache_key = $platform->os . '-' . $platform->arch;
         my @funcs;
         my @core_ir;
         my @user_ir;
-
         for my $ir_func ( $ir_funcs->@* ) {
-            if ( $ir_func->name =~ /^Brocken::Runtime::/ ) {
+            if ( _is_core_runtime_func($ir_func) ) {
                 push @core_ir, $ir_func;
             }
             else {
                 push @user_ir, $ir_func;
             }
         }
-
-        if (defined $cached_core_funcs) {
-            push @funcs, @$cached_core_funcs;
-        }
-        else {
+        my $cached_core = $CORE_CACHE{$cache_key};
+        if ( !$cached_core && @core_ir ) {
             my @new_core;
             for my $ir_func (@core_ir) {
                 push @new_core, $self->_emit_single_func($ir_func);
             }
-            $cached_core_funcs = \@new_core;
-            push @funcs, @new_core;
+            $cached_core = \@new_core;
+            $CORE_CACHE{$cache_key} = \@new_core;
         }
-
+        if ($cached_core) {
+            push @funcs, map { _clone_wasm_blob($_) } @$cached_core;
+        }
         for my $ir_func (@user_ir) {
             push @funcs, $self->_emit_single_func($ir_func);
         }
-
         return \@funcs;
     }
 

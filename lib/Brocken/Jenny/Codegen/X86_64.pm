@@ -14,6 +14,27 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     use Brocken::Jenny::Codegen::X86_64::Encodings qw[:all];
     field $platform : param;
 
+    sub _is_core_runtime_func($func) {
+        my $name = ref($func) ? $func->name : $func;
+        return 0 unless $name =~ /^Brocken::Runtime::/;
+        return 0 if $name     =~ /^Brocken::Runtime::gc_(?:scan|restore|destroy)_class$/;
+        return 1;
+    }
+
+    sub _clone_x86_blob($blob) {
+        return {
+            name   => $blob->{name},
+            bytes  => $blob->{bytes},
+            fixups => [
+                map {
+                    {%$_}
+                } $blob->{fixups}->@*
+            ],
+            alloca_map => { $blob->{alloca_map}->%* },
+            source_map => { $blob->{source_map}->%* },
+        };
+    }
+
     # Lower Lindsay IR to MIR, allocate registers, then encode to x86_64 machine code
     method emit_function($ir_func) {
         my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
@@ -67,105 +88,67 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
 
     # Emit multiple functions with cross-function call fixups
     method emit_functions($ir_funcs) {
-        state %core_cache;
-        my $plat_key = $platform->arch . '-' . ( $platform->os // '' ) . '-' . ( $platform->env // '' );
-        my @result;
-        my @mfs_to_process;
+        state %CORE_CACHE;
+        my $cache_key = $platform->os . '-' . $platform->arch;
+        my @core_ir;
+        my @user_ir;
+        my $entry_index = -1;
         my $has_fiber   = 0;
         my $has_isolate = 0;
         my $has_gate    = 0;
-        my $entry_index = -1;
 
         for my $i ( 0 .. $#$ir_funcs ) {
-            my $func  = $ir_funcs->[$i];
-            my $fname = $func->name;
-            $entry_index = $i if $fname eq '_BROCKEN_ENTRY';
-            next unless $func->blocks->@*;    # skip external declarations
-            $has_isolate ||= $self->_has_isolate_ops_ir($func);
-            $has_gate    ||= $self->_has_gate_ops_ir($func);
-            my $is_core = ( $fname =~ /^Brocken::Runtime::/ || $fname eq 'say' || $fname eq 'print' );
-            if ( $is_core && exists $core_cache{$plat_key}{$fname} ) {
-                my $cached = $core_cache{$plat_key}{$fname};
-                push @result, $cached->{blob};
-                $has_fiber ||= $cached->{has_fiber};
-                next;
+            my $func = $ir_funcs->[$i];
+            next unless $func->blocks->@*;
+            if ( _is_core_runtime_func($func) ) {
+                push @core_ir, $func;
             }
-            my $lowerer        = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
-            my $mf             = $lowerer->lower($func);
-            my $func_has_fiber = $self->_has_fiber_ops_mf($mf);
-            $has_fiber ||= $func_has_fiber;
-            push @mfs_to_process,
-                { mf => $mf, fname => $fname, is_core => $is_core, has_fiber => $func_has_fiber, is_entry => ( $i == $entry_index ), };
+            else {
+                push @user_ir, [ $i, $func ];
+                $entry_index = $i if $func->name eq '_BROCKEN_ENTRY';
+                $has_isolate ||= $self->_has_isolate_ops_ir($func);
+                $has_gate    ||= $self->_has_gate_ops_ir($func);
+            }
+        }
+
+        # 1. Obtain core runtime functions (cached per platform)
+        my $cached_core = $CORE_CACHE{$cache_key};
+        if ( !$cached_core && @core_ir ) {
+            my @built_core;
+            for my $func (@core_ir) {
+                my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
+                my $mf      = $lowerer->lower($func);
+                push @built_core, $self->_emit_single_mf( $mf, $func->name );
+            }
+            $cached_core = \@built_core;
+            $CORE_CACHE{$cache_key} = \@built_core;
+        }
+
+        # 2. Lower and emit user functions (and dynamic dispatchers)
+        my @user_blobs;
+        my @user_mfs;
+        for my $pair (@user_ir) {
+            my ( $fn_i, $func ) = @$pair;
+            my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
+            my $mf      = $lowerer->lower($func);
+            $has_fiber ||= $self->_has_fiber_ops_mf($mf);
+            push @user_mfs, [ $mf, $fn_i, $func->name ];
         }
         my $emit_init = $has_fiber && $entry_index >= 0;
-        for my $item (@mfs_to_process) {
-            my $mf    = $item->{mf};
-            my $fname = $item->{fname};
-            if ( $emit_init && $item->{is_entry} ) {
+        for my $entry (@user_mfs) {
+            my ( $mf, $fn_i, $fname ) = @$entry;
+            if ( $emit_init && $fn_i == $entry_index ) {
                 $fname = '_real_main';
             }
-            my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
-            my $int_res = $alloc->allocate( $mf, $platform, 0 );
-            $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0, $int_res->{spill_addr_temp} );
-            my $fp_res = $alloc->allocate( $mf, $platform, 1, $int_res->{spill_slots} );
-            $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1, $fp_res->{spill_addr_temp} );
-            my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
-            my %skip;
-            @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
-
-            # i128 return: exclude rdx from caller-save (same pattern as above)
-            for my $bb ( $mf->blocks->@* ) {
-                my @insts = $bb->instructions->@*;
-                for my $i ( 0 .. $#insts ) {
-                    my $inst = $insts[$i];
-                    next unless $inst->opcode eq 'call_func';
-
-                    # Scan subsequent instructions for mov %vreg, rdx (i128 hi return)
-                    for my $j ( $i + 1 .. $#insts ) {
-                        last if $insts[$j]->opcode eq 'call_func';
-                        my $n = $insts[$j];
-                        if ( $n->opcode eq 'mov' &&
-                            scalar( $n->operands->@* ) >= 2 &&
-                            $n->operands->[1]->kind eq 'phys_reg' &&
-                            $n->operands->[1]->value eq 'rdx' ) {
-                            $skip{rdx} = 1;
-                            last;
-                        }
-                    }
-                    last if $skip{rdx};
-                }
-                last if $skip{rdx};
-            }
-            my @gp_caller   = grep { !$skip{$_} } $platform->registers('caller')->@*;
-            my @fp_caller   = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
-            my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
-            $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
-            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
-            $alloc->remove_redundant_moves( $mf, \%assignment );
-            $alloc->remove_redundant_caller_restores($mf);
-            $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
-            $alloc->fix_call_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $fp_res->{spill_temp} );
-            my %callee_seen;
-            @callee_seen{ $int_res->{used_callee}->@* } = ();
-            @callee_seen{ $fp_res->{used_callee}->@* }  = ();
-
-            if ( $item->{has_fiber} ) {
-                $callee_seen{ $platform->fiber_reg } = 1;
-            }
-            my @used_callee = sort keys %callee_seen;
-            my %alloca_map;
-            my %source_map;
-            my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
-            $mf->release;
-            my $blob = { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
-            push @result, $blob;
-
-            if ( $item->{is_core} ) {
-                $core_cache{$plat_key}{$fname} = { blob => $blob, has_fiber => $item->{has_fiber}, };
-            }
+            push @user_blobs, $self->_emit_single_mf( $mf, $fname );
         }
+        my @result;
+        if ($cached_core) {
+            push @result, map { _clone_x86_blob($_) } @$cached_core;
+        }
+        push @result, @user_blobs;
 
-        # Prepend the init wrapper
+        # Prepend the init wrapper if needed
         if ($emit_init) {
             my $init_mf = $self->_build_fiber_init_mf;
             unshift @result, $self->_emit_single_mf($init_mf);
@@ -191,7 +174,8 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     }
 
     # Encode a single MachineFunction through allocation and encoding
-    method _emit_single_mf($mf) {
+    method _emit_single_mf( $mf, $fname = undef ) {
+        $fname //= $mf->name;
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
         $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0, $int_res->{spill_addr_temp} );
@@ -231,9 +215,11 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             $callee_seen{ $platform->fiber_reg } = 1;
         }
         my @used_callee = sort keys %callee_seen;
-        my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        my %alloca_map;
+        my %source_map;
+        my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
         $mf->release;
-        return { name => $mf->name, bytes => $bytes, fixups => $func_fixups };
+        return { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
     }
 
     # Check if a MachineFunction contains ctx_save or ctx_restore instructions

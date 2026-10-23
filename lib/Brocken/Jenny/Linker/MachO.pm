@@ -5,8 +5,7 @@ use Brocken::Jenny::Linker;
 use Brocken::Katsuro::Platform;
 use Symbol 'gensym';
 class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
-    use Brocken::Jenny::Codegen::ARM64::Inst;
-    use Fcntl qw(O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR);
+    use Fcntl qw[O_WRONLY O_CREAT O_EXCL O_TRUNC O_RDWR];
     field $has_ffi : reader = false;
     method set_has_ffi($v) { $has_ffi = $v; }
     field $got_offsets : reader : writer;
@@ -130,9 +129,9 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
             $self->set_has_ffi(1);
         }
         if ($has_ffi) {
-            my %known = map { $_ => 1 } qw(dlopen dlsym pthread_create pthread_join
+            my %known = map { $_ => 1 } qw[dlopen dlsym pthread_create pthread_join
                 pthread_mutex_lock pthread_mutex_unlock pthread_cond_wait
-                pthread_cond_signal pthread_cond_broadcast);
+                pthread_cond_signal pthread_cond_broadcast];
             for my $k ( keys %known ) { $extern_names{$k} = 1; }
             @extern_names = sort keys %extern_names;
         }
@@ -707,4 +706,6 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
         return $output_file;
     }
-} 1;
+};
+#
+1;

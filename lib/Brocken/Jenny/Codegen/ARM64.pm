@@ -11,10 +11,11 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
     use Brocken::Jenny::StackGuard;
     use Brocken::Jenny::FCB qw[fcb_layout];
     use Brocken::ICB;
-    use Brocken::Jenny::Codegen::ARM64::Encodings qw[:all];
     use Brocken::Jenny::Codegen::ARM64::Inst      qw[:all];
+    use Brocken::Jenny::Codegen::ARM64::Encodings qw[:all];
+    #
     field $platform : param;
-
+    #
     method emit_function($ir_func) {
         my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
         my $mf      = $lowerer->lower($ir_func);
