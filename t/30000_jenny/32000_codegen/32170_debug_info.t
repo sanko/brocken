@@ -63,8 +63,8 @@ BROCKEN
         if ( $host->is_windows ) {
             $text_base = 0x140001000;
         }
-        elsif ( $host->is_linux ) {
-            $text_base = 0x400000 + $brocken->linker->rva_for('.text') + $brocken->linker->entry_stub_len($host);
+        elsif ( $host->format eq 'elf' ) {
+            $text_base = ( $host->is_haiku ? 0 : 0x400000 ) + $brocken->linker->rva_for('.text') + $brocken->linker->entry_stub_len($host);
         }
         elsif ( $host->is_macos ) {
             $text_base = 0;
@@ -142,8 +142,8 @@ BROCKEN
         if ( $host->is_windows ) {
             $text_base = 0x140001000;
         }
-        elsif ( $host->is_linux ) {
-            $text_base = 0x400000 + $brocken->linker->rva_for('.text') + $brocken->linker->entry_stub_len($host);
+        elsif ( $host->format eq 'elf' ) {
+            $text_base = ( $host->is_haiku ? 0 : 0x400000 ) + $brocken->linker->rva_for('.text') + $brocken->linker->entry_stub_len($host);
         }
         elsif ( $host->is_macos ) {
             $text_base = 0;
@@ -157,7 +157,7 @@ BROCKEN
         ( my $gdb_file = $file ) =~ s{\\}{/}g;
         my $gdb_ok = _gdb_works($gdb_file);
 
-        if ( $host->is_linux ) {
+        if ( $host->format eq 'elf' ) {
             my $dump = _dump_elf_debug($file);
             diag "ELF section dump:\n$dump";
 
@@ -236,8 +236,8 @@ BROCKEN
         if ( $host->is_windows ) {
             $text_base = 0x140001000;
         }
-        elsif ( $host->is_linux ) {
-            $text_base = 0x400000 + $brocken->linker->rva_for('.text') + $brocken->linker->entry_stub_len($host);
+        elsif ( $host->format eq 'elf' ) {
+            $text_base = ( $host->is_haiku ? 0 : 0x400000 ) + $brocken->linker->rva_for('.text') + $brocken->linker->entry_stub_len($host);
         }
         elsif ( $host->is_macos ) {
             $text_base = 0;
