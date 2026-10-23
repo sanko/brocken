@@ -49,31 +49,41 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
     }
 
     method emit_functions($ir_funcs) {
-        my @mfs;
-        my @func_idx;    # maps @mfs index to $ir_funcs index
+        state %core_cache;
+        my $plat_key = $platform->arch . '-' . ( $platform->os // '' ) . '-' . ( $platform->env // '' );
+        my @result;
+        my @mfs_to_process;
         my $has_fiber   = 0;
         my $has_isolate = 0;
         my $has_gate    = 0;
         my $entry_index = -1;
+
         for my $i ( 0 .. $#$ir_funcs ) {
-            my $func = $ir_funcs->[$i];
-            $entry_index = $i if $func->name eq '_BROCKEN_ENTRY';
+            my $func  = $ir_funcs->[$i];
+            my $fname = $func->name;
+            $entry_index = $i if $fname eq '_BROCKEN_ENTRY';
             next unless $func->blocks->@*;    # skip external declarations
-            my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
-            my $mf      = $lowerer->lower($func);
-            $has_fiber   ||= $self->_has_fiber_ops_mf($mf);
             $has_isolate ||= $self->_has_isolate_ops_ir($func);
             $has_gate    ||= $self->_has_gate_ops_ir($func);
-            push @mfs,      $mf;
-            push @func_idx, $i;
+            my $is_core = ( $fname =~ /^Brocken::Runtime::/ || $fname eq 'say' || $fname eq 'print' );
+            if ( $is_core && exists $core_cache{$plat_key}{$fname} ) {
+                my $cached = $core_cache{$plat_key}{$fname};
+                push @result, $cached->{blob};
+                $has_fiber ||= $cached->{has_fiber};
+                next;
+            }
+            my $lowerer        = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
+            my $mf             = $lowerer->lower($func);
+            my $func_has_fiber = $self->_has_fiber_ops_mf($mf);
+            $has_fiber ||= $func_has_fiber;
+            push @mfs_to_process,
+                { mf => $mf, fname => $fname, is_core => $is_core, has_fiber => $func_has_fiber, is_entry => ( $i == $entry_index ), };
         }
         my $emit_init = $has_fiber && $entry_index >= 0;
-        my @result;
-        for my $i ( 0 .. $#mfs ) {
-            my $mf    = $mfs[$i];
-            my $fn_i  = $func_idx[$i];              # original index in $ir_funcs
-            my $fname = $ir_funcs->[$fn_i]->name;
-            if ( $emit_init && $fn_i == $entry_index ) {
+        for my $item (@mfs_to_process) {
+            my $mf    = $item->{mf};
+            my $fname = $item->{fname};
+            if ( $emit_init && $item->{is_entry} ) {
                 $fname = '_real_main';
             }
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
@@ -97,7 +107,7 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
 
-            if ( $self->_has_fiber_ops_mf($mf) ) {
+            if ( $item->{has_fiber} ) {
                 $callee_seen{ $platform->fiber_reg } = 1;
             }
             my @used_callee = sort keys %callee_seen;
@@ -105,15 +115,19 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             my %source_map;
             my ( $bytes, $func_fixups, $unwind_info ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
             $mf->release;
-            push @result,
-                {
+            my $blob = {
                 name       => $fname,
                 bytes      => $bytes,
                 fixups     => $func_fixups,
                 alloca_map => \%alloca_map,
                 source_map => \%source_map,
                 unwind     => $unwind_info
-                };
+            };
+            push @result, $blob;
+
+            if ( $item->{is_core} ) {
+                $core_cache{$plat_key}{$fname} = { blob => $blob, has_fiber => $item->{has_fiber}, };
+            }
         }
         if ($emit_init) {
             my $init_mf = $self->_build_fiber_init_mf;
@@ -1035,7 +1049,7 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                         = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => $base_kind->( $addr->{base} ), value => $addr->{base} ) );
                     my $bid    = $reg_id->($base_r);
                     my $bits   = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->bits   : 64;
-                    my $signed = ( $src->type && $src->type->kind eq 'int' ) ? $src->type->signed : 1;
+                    my $signed = $src->type && $src->type->kind eq 'int'     ? $src->type->signed : 1;
                     if ( defined $addr->{index} ) {
                         my $index_r = $resolve->( Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $addr->{index} ) );
                         my $iid     = $reg_id->($index_r);
@@ -1286,27 +1300,23 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                 }
                 elsif ( $opcode eq 'scvtf' ) {
                     my $dst_r = $resolve->($dst);
-                    my $src_r = $resolve->($src);
                     my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
-                    my $fbits = $dst->type ? $dst->type->bits : 64;
-                    my $ibits = $src->type ? $src->type->bits : 64;
-                    my $base  = 0x1E220000;
-                    $base |= 0x400000   if $fbits == 64;
-                    $base |= 0x80000000 if $ibits == 64;
-                    $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
+                    my $fbits = $dst->type  ? $dst->type->bits                      : 64;
+                    my $ibits = $src->type  ? $src->type->bits                      : 64;
+                    my $base  = $fbits > 32 ? ( $ibits > 32 ? FCVT_D_L : FCVT_D_W ) : ( $ibits > 32 ? FCVT_S_L : FCVT_S_W );
+                    $bytes .= pack( 'V', $base | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                 }
                 elsif ( $opcode eq 'fcvtzs' ) {
                     my $dst_r = $resolve->($dst);
-                    my $src_r = $resolve->($src);
                     my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
                     my $sid   = $reg_id->($src_r);
-                    my $fbits = $src->type ? $src->type->bits : 64;
-                    my $ibits = $dst->type ? $dst->type->bits : 64;
-                    my $base  = 0x1E380000;
-                    $base |= 0x400000   if $fbits == 64;
-                    $base |= 0x80000000 if $ibits == 64;
-                    $bytes .= pack( 'V', $base | ( $sid << 5 ) | $did );
+                    my $fbits = $src->type  ? $src->type->bits                      : 64;
+                    my $ibits = $dst->type  ? $dst->type->bits                      : 64;
+                    my $base  = $fbits > 32 ? ( $ibits > 32 ? FCVT_L_D : FCVT_W_D ) : ( $ibits > 32 ? FCVT_L_S : FCVT_W_S );
+                    $bytes .= pack( 'V', $base | ( $sid << 15 ) | ( $did << 7 ) | FP_OP );
                 }
                 elsif ( $opcode eq 'fcmp' ) {
                     my $lhs_r = $resolve->($dst);

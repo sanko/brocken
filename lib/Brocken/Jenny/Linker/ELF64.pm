@@ -924,7 +924,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             }
             my $data_sec = $self->layout->get('.data');
             $dynsym .= pack( 'L< C C S< Q< Q<', $abi_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva}, 4 );
-            $sym_indices{'_gSharedObjectHaikuABI'} = $sym_idx++;
+            $sym_indices{'_gSharedObjectHaikuABI'}         = $sym_idx++;
             $dynsym_value_fixups{'_gSharedObjectHaikuABI'} = { off => length($dynsym) - 16, delta => 0 };
             $dynsym .= pack( 'L< C C S< Q< Q<', $ver_off, 0x11, 0, $data_sec_idx // 0, $base + $data_sec->{rva} + 4, 4 );
             $dynsym_value_fixups{'_gSharedObjectHaikuVersion'} = { off => length($dynsym) - 16, delta => 4 };

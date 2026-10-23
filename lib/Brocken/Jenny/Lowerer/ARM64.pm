@@ -2983,8 +2983,8 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
 
                     # A float payload goes out through the FP store. `store_imm` cannot express one, so a float constant
                     # reached the box as its integer value and the float was lost here.
-                    my $is_float    = $val->type && $val->type->kind eq 'float';
-                    my $store_op    = $is_float ? 'fstore' : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store';
+                    my $is_float = $val->type && $val->type->kind eq 'float';
+                    my $store_op = $is_float ? 'fstore' : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store';
 
                     # A string literal arrives as a RodataRef, which carries a label but no register name; `_lower_opnd`
                     # would hand the store an unnamed virt_reg and the boxed pointer would be garbage. `_materialize`

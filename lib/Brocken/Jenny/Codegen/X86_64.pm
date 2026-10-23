@@ -67,34 +67,41 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
 
     # Emit multiple functions with cross-function call fixups
     method emit_functions($ir_funcs) {
-        my @mfs;
-        my @func_idx;    # maps @mfs index to $ir_funcs index
+        state %core_cache;
+        my $plat_key = $platform->arch . '-' . ( $platform->os // '' ) . '-' . ( $platform->env // '' );
+        my @result;
+        my @mfs_to_process;
         my $has_fiber   = 0;
         my $has_isolate = 0;
         my $has_gate    = 0;
         my $entry_index = -1;
+
         for my $i ( 0 .. $#$ir_funcs ) {
-            my $func = $ir_funcs->[$i];
-            $entry_index = $i if $func->name eq '_BROCKEN_ENTRY';
+            my $func  = $ir_funcs->[$i];
+            my $fname = $func->name;
+            $entry_index = $i if $fname eq '_BROCKEN_ENTRY';
             next unless $func->blocks->@*;    # skip external declarations
-            my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
-            my $mf      = $lowerer->lower($func);
-            $has_fiber   ||= $self->_has_fiber_ops_mf($mf);
             $has_isolate ||= $self->_has_isolate_ops_ir($func);
             $has_gate    ||= $self->_has_gate_ops_ir($func);
-            push @mfs,      $mf;
-            push @func_idx, $i;
+            my $is_core = ( $fname =~ /^Brocken::Runtime::/ || $fname eq 'say' || $fname eq 'print' );
+            if ( $is_core && exists $core_cache{$plat_key}{$fname} ) {
+                my $cached = $core_cache{$plat_key}{$fname};
+                push @result, $cached->{blob};
+                $has_fiber ||= $cached->{has_fiber};
+                next;
+            }
+            my $lowerer        = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
+            my $mf             = $lowerer->lower($func);
+            my $func_has_fiber = $self->_has_fiber_ops_mf($mf);
+            $has_fiber ||= $func_has_fiber;
+            push @mfs_to_process,
+                { mf => $mf, fname => $fname, is_core => $is_core, has_fiber => $func_has_fiber, is_entry => ( $i == $entry_index ), };
         }
-
-        # If fiber ops exist and there's a main function, emit an init wrapper that allocates the main FCB, initializes
-        # r12, and calls the original main (emitted as _real_main).
         my $emit_init = $has_fiber && $entry_index >= 0;
-        my @result;
-        for my $i ( 0 .. $#mfs ) {
-            my $mf    = $mfs[$i];
-            my $fn_i  = $func_idx[$i];              # original index in $ir_funcs
-            my $fname = $ir_funcs->[$fn_i]->name;
-            if ( $emit_init && $fn_i == $entry_index ) {
+        for my $item (@mfs_to_process) {
+            my $mf    = $item->{mf};
+            my $fname = $item->{fname};
+            if ( $emit_init && $item->{is_entry} ) {
                 $fname = '_real_main';
             }
             my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
@@ -142,7 +149,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             @callee_seen{ $int_res->{used_callee}->@* } = ();
             @callee_seen{ $fp_res->{used_callee}->@* }  = ();
 
-            if ( $self->_has_fiber_ops_mf($mf) ) {
+            if ( $item->{has_fiber} ) {
                 $callee_seen{ $platform->fiber_reg } = 1;
             }
             my @used_callee = sort keys %callee_seen;
@@ -150,7 +157,12 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             my %source_map;
             my ( $bytes, $func_fixups ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
             $mf->release;
-            push @result, { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
+            my $blob = { name => $fname, bytes => $bytes, fixups => $func_fixups, alloca_map => \%alloca_map, source_map => \%source_map };
+            push @result, $blob;
+
+            if ( $item->{is_core} ) {
+                $core_cache{$plat_key}{$fname} = { blob => $blob, has_fiber => $item->{has_fiber}, };
+            }
         }
 
         # Prepend the init wrapper
@@ -1718,9 +1730,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
     }
 
     # Size of the outgoing argument area at the bottom of the frame, holding the arguments the register set could not
-    # carry.  A callee reads those at fixed offsets off the caller's stack pointer, so the area has to be reserved
-    # before the call rather than pushed at the call site: that keeps the register allocator's stack-relative spill
-    # slots valid across the call and leaves rsp 16-byte aligned at every public interface.
+    # carry.  A callee reads those at fixed offsets off the caller's stack pointer and `call` does not move it.
     method _compute_call_arg_frame( $mf, $stack_reg ) {
         my $max_disp = -1;
         for my $mbb ( $mf->blocks->@* ) {

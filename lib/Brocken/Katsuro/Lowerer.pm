@@ -4403,8 +4403,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $name eq 'stringify'         ||
             $name eq 'numify'            ||
             $name eq 'reftype'           ||
-            $name eq 'blessed'
-            || $name eq 'refaddr';
+            $name eq 'blessed'           ||
+            $name eq 'refaddr';
         return $self->lower_round_builtin( $name, $ast, $line, $col )         if $name eq 'ceil' || $name eq 'floor';
         return $self->lower_special_float_builtin( $name, $ast, $line, $col ) if $name eq 'inf'  || $name eq 'nan';
         return $self->lower_trim_builtin( $ast, $line, $col )                 if $name eq 'trim';

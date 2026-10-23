@@ -24,10 +24,12 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
         );
         return $insert_block->append_inst($inst);
     }
-    method build_add( $lhs, $rhs, $name  = undef, $line = 0, $col = 0, $result_type = undef ) {
+
+    method build_add( $lhs, $rhs, $name = undef, $line = 0, $col = 0, $result_type = undef ) {
         $self->build_binop( 'add', $lhs, $rhs, $name, $line, $col, $result_type );
     }
-    method build_sub( $lhs, $rhs, $name  = undef, $line = 0, $col = 0, $result_type = undef ) {
+
+    method build_sub( $lhs, $rhs, $name = undef, $line = 0, $col = 0, $result_type = undef ) {
         $self->build_binop( 'sub', $lhs, $rhs, $name, $line, $col, $result_type );
     }
     method build_mul( $lhs, $rhs, $name  = undef, $line = 0, $col = 0 ) { $self->build_binop( 'mul',  $lhs, $rhs, $name, $line, $col ) }

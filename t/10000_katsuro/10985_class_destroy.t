@@ -9,7 +9,6 @@ use Test2::Tools::Brocken qw[answers executable_targets];
 # class's user code and then chains to the nearest ancestor's DESTROY, so teardown runs derived-to-root. It is a
 # method, so it is inherited and callable on a receiver.
 my @native = grep { $_->[0] ne 'wasm32-unknown-wasi' } executable_targets();
-
 subtest 'DESTROY is callable and chains derived-to-root' => sub {
     answers(
         'class Base {' .
@@ -21,10 +20,11 @@ subtest 'DESTROY is callable and chains derived-to-root' => sub {
             ' my ptr $d = Derived->new(trace => 0, seed => 7);' .
             ' $d->DESTROY();' .
             ' return $d->trace();',
-        12, 'the derived body runs before the base body', targets => [@native]
+        12,
+        'the derived body runs before the base body',
+        targets => [@native]
     );
 };
-
 subtest 'a three-level chain unwinds derived-to-root' => sub {
     answers(
         'class A {' .
@@ -35,10 +35,11 @@ subtest 'a three-level chain unwinds derived-to-root' => sub {
             ' my ptr $c = C->new(t => 0);' .
             ' $c->DESTROY();' .
             ' return $c->t();',
-        34, 'C runs, then B, then A', targets => [@native]
+        34,
+        'C runs, then B, then A',
+        targets => [@native]
     );
 };
-
 subtest 'a class without its own DESTROY inherits the ancestor body' => sub {
     answers(
         'class Base {' .
@@ -48,10 +49,11 @@ subtest 'a class without its own DESTROY inherits the ancestor body' => sub {
             ' my ptr $p = Plain->new(t => 1, x => 2);' .
             ' $p->DESTROY();' .
             ' return $p->t();',
-        6, 'the inherited DESTROY runs on the derived object', targets => [@native]
+        6,
+        'the inherited DESTROY runs on the derived object',
+        targets => [@native]
     );
 };
-
 subtest 'DESTROY sees the declaring class fields bare' => sub {
     answers(
         'class Counter {' .
@@ -61,10 +63,11 @@ subtest 'DESTROY sees the declaring class fields bare' => sub {
             ' my ptr $c = Counter->new(n => 9);' .
             ' $c->DESTROY();' .
             ' return $c->hits();',
-        9, 'the bare field access resolves in the destructor', targets => [@native]
+        9,
+        'the bare field access resolves in the destructor',
+        targets => [@native]
     );
 };
-
 subtest 'DESTROY can call the class own methods and accessors' => sub {
     answers(
         'class Thing {' .
@@ -74,19 +77,17 @@ subtest 'DESTROY can call the class own methods and accessors' => sub {
             ' my ptr $t = Thing->new(v => 40);' .
             ' $t->DESTROY();' .
             ' return $t->v();',
-        41, 'the destructor body resolved the class own method and writer', targets => [@native]
+        41,
+        'the destructor body resolved the class own method and writer',
+        targets => [@native]
     );
 };
-
 subtest 'a DESTROY-only class body is a definition, not a forward declaration' => sub {
     answers(
-        'class Only;' .
-            ' class Only { DESTROY { } }' .
-            ' my ptr $o = Only->new();' .
-            ' $o->DESTROY();' .
-            ' return 42;',
-        42, 'the DESTROY-only body still registers a callable destructor', targets => [@native]
+        'class Only;' . ' class Only { DESTROY { } }' . ' my ptr $o = Only->new();' . ' $o->DESTROY();' . ' return 42;',
+        42,
+        'the DESTROY-only body still registers a callable destructor',
+        targets => [@native]
     );
 };
-
 done_testing;

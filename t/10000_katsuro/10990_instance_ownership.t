@@ -21,7 +21,6 @@ class Victim {
     }
 }
 BROCKEN
-
 subtest 'an owned instance is finalized and reclaimed at scope exit' => sub {
 
     # `$v` is declared and never handed anywhere, so the local owns the sole reference: leaving the block drops it,
@@ -42,7 +41,6 @@ BROCKEN
         0, 'DESTROY ran exactly once and the instance was reclaimed', %native
     );
 };
-
 subtest 'an escaped instance keeps its reference' => sub {
 
     # `peek($v)` hands the pointer to a callee that may retain it -- and a `ptr` store does not incref -- so the
@@ -61,7 +59,6 @@ BROCKEN
         0, 'the escaped instance was not finalized while still reachable', %native
     );
 };
-
 subtest 'destructor releases the managed fields the instance owns' => sub {
 
     # The `Any` field takes ownership of its box on store (F9). Reclaiming the instance must release that box too,
@@ -81,7 +78,6 @@ BROCKEN
         0, 'the owned dynamic field is released with the instance', %native
     );
 };
-
 subtest 'a class with no DESTROY still reclaims its fields' => sub {
 
     # A class that never says `DESTROY` still gets a reclaim thunk; it skips the (absent) user hook and releases
@@ -101,5 +97,4 @@ BROCKEN
         0, 'plain class teardown releases its dynamic fields', %native
     );
 };
-
 done_testing;

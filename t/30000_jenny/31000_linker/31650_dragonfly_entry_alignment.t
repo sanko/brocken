@@ -31,7 +31,7 @@ sub walk_stack {
         elsif ( substr( $here, 0, 3 ) eq "\x83\xE8\x01" )                    { $i += 3 }                        # sub eax, 1
         elsif ( ord($here) == 0xB8 )                                         { $i += 5 }                        # mov eax, imm32
         elsif ( ord($here) == 0x75 )                                         { $i += 2 }                        # jne rel8
-        else                                          { die "unhandled opcode at stub offset $i" }
+        else                                                                 { die "unhandled opcode at stub offset $i" }
     }
     return @checks;
 }

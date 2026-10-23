@@ -17,7 +17,6 @@ sub check {
     my ( $source, $want, $label ) = @_;
     answers( $source, $want, $label, targets => [@native_targets] );
 }
-
 subtest '__CLASS__ is the class name string' => sub {
     check( <<'BROCKEN', 1, 'the name compares equal to its spelling' );
 class C {
@@ -44,7 +43,6 @@ my ptr $c = C->new();
 return $c->is_named() ? 1 : 0;
 BROCKEN
 };
-
 subtest '__CLASS__ is qualified by the enclosing package' => sub {
     check( <<'BROCKEN', 1, 'the name carries the package prefix' );
 package P;
@@ -63,7 +61,6 @@ my ptr $c = C->new();
 return $c->is_named() ? 1 : 0;
 BROCKEN
 };
-
 subtest '__CLASS__ is usable from a field initializer' => sub {
     check( <<'BROCKEN', 1, 'a field default captures the class name' );
 class C {
@@ -73,11 +70,9 @@ my ptr $c = C->new();
 return $c->tag() eq "C" ? 1 : 0;
 BROCKEN
 };
-
 subtest '__CLASS__ used outside a class is still a compile error' => sub {
     my $ok = eval { Brocken->new->compile('return __CLASS__ eq "x" ? 1 : 0;'); 1 };
     ok( !$ok, 'a bare __CLASS__ does not compile' );
     like( $@, qr/__CLASS__ used outside of a class/, 'the error names __CLASS__' );
 };
-
 done_testing;

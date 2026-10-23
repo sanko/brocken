@@ -24,7 +24,6 @@ sub find_struct_type {
     }
     return undef;
 }
-
 subtest 'the derived struct lays the parent field block first' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -46,7 +45,6 @@ BROCKEN
     is( $der->field_offset(1),  16, 'Derived.b follows the parent block' );
     is( $der->struct_size,      24, 'Derived object is the whole chain' );
 };
-
 subtest 'a derived class may be declared before its parent' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -63,7 +61,6 @@ BROCKEN
     is( $der->field_offset(0), 8,  'inherited a lands first' );
     is( $der->field_offset(1), 16, 'own b follows' );
 };
-
 subtest 'an inherited method is callable on the derived object' => sub {
     answers(
         'class Animal { field i64 $legs :param :reader;' .
@@ -71,20 +68,22 @@ subtest 'an inherited method is callable on the derived object' => sub {
             ' class Dog :isa(Animal) { field i64 $tail :param :reader; }' .
             ' my ptr $d = Dog->new(legs => 4, tail => 1);' .
             ' return $d->describe() + $d->tail();',
-        6, 'inherited describe() reads the inherited field', targets => [@native]
+        6,
+        'inherited describe() reads the inherited field',
+        targets => [@native]
     );
 };
-
 subtest 'constructor chaining takes parent params first' => sub {
     answers(
         'class Animal { field i64 $legs :param :reader; }' .
             ' class Dog :isa(Animal) { field i64 $tail :param :reader; }' .
             ' my ptr $d = Dog->new(4, 3);' .
             ' return $d->legs() * 10 + $d->tail();',
-        43, 'positional order is root then derived', targets => [@native]
+        43,
+        'positional order is root then derived',
+        targets => [@native]
     );
 };
-
 subtest 'SUPER:: reaches the overridden parent method' => sub {
     answers(
         'class Base { field i64 $n :param :reader;' .
@@ -93,79 +92,76 @@ subtest 'SUPER:: reaches the overridden parent method' => sub {
             ' method value() :returns(i64) { return $self->SUPER::value() * 2; } }' .
             ' my ptr $d = Doubler->new(n => 21);' .
             ' return $d->value();',
-        42, 'Doubler::value calls Base::value through SUPER::', targets => [@native]
+        42,
+        'Doubler::value calls Base::value through SUPER::',
+        targets => [@native]
     );
 };
-
 subtest 'a parent field default runs for the derived constructor' => sub {
     answers(
         'class Base { field i64 $a :reader = 40; }' .
             ' class Derived :isa(Base) { field i64 $b :reader = 2; }' .
             ' my ptr $d = Derived->new();' .
             ' return $d->a() + $d->b();',
-        42, 'the inherited field default is applied', targets => [@native]
+        42,
+        'the inherited field default is applied',
+        targets => [@native]
     );
 };
-
 subtest 'ADJUST runs root-first' => sub {
     answers(
         'class Base { field i64 $x :reader = 0; ADJUST { $x = $x + 1; } }' .
             ' class Derived :isa(Base) { field i64 $y :reader = 0; ADJUST { $y = $y + 10; } }' .
             ' my ptr $d = Derived->new();' .
             ' return $d->x() * 100 + $d->y();',
-        110, 'the base ADJUST runs before the derived ADJUST', targets => [@native]
+        110,
+        'the base ADJUST runs before the derived ADJUST',
+        targets => [@native]
     );
 };
-
 subtest 'an inherited :reader still answers for the derived object' => sub {
     answers(
         'class Base { field i64 $secret :param :reader; }' .
             ' class Derived :isa(Base) { field i64 $own :param :reader; }' .
             ' my ptr $d = Derived->new(secret => 7, own => 3);' .
             ' return $d->secret() * 10 + $d->own();',
-        73, 'the inherited accessor reads the inherited field', targets => [@native]
+        73,
+        'the inherited accessor reads the inherited field',
+        targets => [@native]
     );
 };
 
 # Fields are lexical to the class that declares them, so neither an outside field access nor a subclass body can
 # name an inherited field directly; an inherited accessor is the way in.
 subtest 'fields are not inherited' => sub {
-    my $c   = Brocken->new;
-    my $ok  = eval {
-        $c->compile('class Base { field i64 $a; } class Derived :isa(Base) { }'
-                . ' my ptr $d = Derived->new(); return $d->a;' );
+    my $c  = Brocken->new;
+    my $ok = eval {
+        $c->compile( 'class Base { field i64 $a; } class Derived :isa(Base) { }' . ' my ptr $d = Derived->new(); return $d->a;' );
         1;
     };
     ok( !$ok, 'an outside access to an inherited field is rejected' );
     like( $@, qr/Unknown field 'a' in class 'Derived'/, 'the error names the class' );
-
-    my $c2 = Brocken->new;
+    my $c2  = Brocken->new;
     my $ok2 = eval {
-        $c2->compile('class Base { field i64 $a; }'
-                . ' class Derived :isa(Base) { method peek() :returns(i64) { return $a; } }'
-                . ' my ptr $d = Derived->new(); return $d->peek();' );
+        $c2->compile( 'class Base { field i64 $a; }' .
+                ' class Derived :isa(Base) { method peek() :returns(i64) { return $a; } }' . ' my ptr $d = Derived->new(); return $d->peek();' );
         1;
     };
     ok( !$ok2, 'a subclass method cannot name an inherited field' );
     like( $@, qr/Undefined variable 'a'/, 'the error names the missing binding' );
 };
-
 subtest ':isa diagnostics' => sub {
     my $unknown = eval { Brocken->new->compile('class D :isa(Nope) { }'); 1 };
     ok( !$unknown, 'an unknown superclass is rejected' );
     like( $@, qr/Unknown superclass 'Nope'/, 'the error names the superclass' );
-
     my $cycle = eval { Brocken->new->compile('class A :isa(B) { } class B :isa(A) { }'); 1 };
     ok( !$cycle, 'an inheritance cycle is rejected' );
     like( $@, qr/cycle/i, 'the error mentions the cycle' );
-
     my $twice = eval { Brocken->new->compile('class A { } class B { } class D :isa(A) :isa(B) { }'); 1 };
     ok( !$twice, 'more than one :isa is rejected' );
     like( $@, qr/more than one :isa/, 'the error explains the limit' );
-
     my $self = eval { Brocken->new->compile('class A :isa(A) { }'); 1 };
     ok( !$self, 'a class cannot inherit from itself' );
     like( $@, qr/cannot inherit from itself/, 'the error says why' );
 };
-
 done_testing;

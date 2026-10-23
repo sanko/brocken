@@ -25,7 +25,6 @@ sub compile_error {
     ok( !$ok, $label );
     like( $@, $pattern, '... with the expected diagnostic' ) if !$ok;
 }
-
 subtest 'an excess argument is a compile error' => sub {
     compile_error(
         'sub f($x) { return $x; } sub m() :returns(i64) { return f(1, 2); } return m();',
@@ -38,7 +37,6 @@ subtest 'an excess argument is a compile error' => sub {
         'the count is the declared parameter count even when defaults exist'
     );
 };
-
 subtest 'an unfilled required parameter is a compile error' => sub {
     compile_error(
         'sub f($x, $y) { return $x; } sub m() :returns(i64) { return f(1); } return m();',
@@ -51,37 +49,34 @@ subtest 'an unfilled required parameter is a compile error' => sub {
         'a default on a later parameter does not excuse the first'
     );
 };
-
 subtest 'method arity is checked the same way' => sub {
     compile_error(
-        'class P { method get(i64 $i) :returns(i64) { return $i; } }'
-            . ' sub m() :returns(i64) { my $p = P->new(); return $p->get(); } return m();',
+        'class P { method get(i64 $i) :returns(i64) { return $i; } }' . ' sub m() :returns(i64) { my $p = P->new(); return $p->get(); } return m();',
         qr/Missing required argument 1 of 'get'/,
         'a method call with no argument for a required parameter is rejected'
     );
     compile_error(
-        'class P { method get(i64 $i) :returns(i64) { return $i; } }'
-            . ' sub m() :returns(i64) { my $p = P->new(); return $p->get(1, 2); } return m();',
+        'class P { method get(i64 $i) :returns(i64) { return $i; } }' .
+            ' sub m() :returns(i64) { my $p = P->new(); return $p->get(1, 2); } return m();',
         qr/Too many arguments to 'get': 1 expected, got 2/,
         'a method call with an excess argument is rejected'
     );
 };
-
 subtest 'calls with the right arity still work' => sub {
-    check( 'sub f($x) :returns(i64) { return $x * 2; } return f(21);',                     42, 'a plain function call' );
-    check( 'sub f($x, $y = 3) :returns(i64) { return $x + $y; } return f(1);',              4, 'an omitted trailing parameter takes its default' );
-    check( 'sub f($x, $y = 3) :returns(i64) { return $x + $y; } return f(1, 2);',           3, 'an explicitly supplied parameter overrides the default' );
-    check( 'sub f($x, $y) :returns(i64) { return $x * 10 + $y; } return f(1, 2);',         12, 'every required parameter supplied' );
-    check( 'class P { method get(i64 $i, i64 $j = 2) :returns(i64) { return $i + $j; } }'
-            . ' sub m() :returns(i64) { my $p = P->new(); return $p->get(5); } return m();',
-        7, 'a method call fills its default' );
-    check( 'sub main2() :returns(i64) { say("a", "b"); return 9; } return main2();',
-        9, 'say stays variadic (any number of arguments)' );
+    check( 'sub f($x) :returns(i64) { return $x * 2; } return f(21);',             42, 'a plain function call' );
+    check( 'sub f($x, $y = 3) :returns(i64) { return $x + $y; } return f(1);',     4,  'an omitted trailing parameter takes its default' );
+    check( 'sub f($x, $y = 3) :returns(i64) { return $x + $y; } return f(1, 2);',  3,  'an explicitly supplied parameter overrides the default' );
+    check( 'sub f($x, $y) :returns(i64) { return $x * 10 + $y; } return f(1, 2);', 12, 'every required parameter supplied' );
+    check(
+        'class P { method get(i64 $i, i64 $j = 2) :returns(i64) { return $i + $j; } }' .
+            ' sub m() :returns(i64) { my $p = P->new(); return $p->get(5); } return m();',
+        7,
+        'a method call fills its default'
+    );
+    check( 'sub main2() :returns(i64) { say("a", "b"); return 9; } return main2();', 9, 'say stays variadic (any number of arguments)' );
 };
-
 subtest 'a default may reference an earlier parameter' => sub {
-    check( 'sub f($a, $b = $a + 1) :returns(i64) { return $a * 10 + $b; } return f(1);',
-        12, 'the default is computed with the first argument bound' );
+    check( 'sub f($a, $b = $a + 1) :returns(i64) { return $a * 10 + $b; } return f(1);', 12,
+        'the default is computed with the first argument bound' );
 };
-
 done_testing;

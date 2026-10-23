@@ -344,10 +344,10 @@ BROCKEN
     my $text = $f->as_string();
 
     # A box needs a conditional incref, which a select cannot express: the store is guarded by a branch instead.
-    like( $text,   qr/br\s+i1\s+%[^,]+,\s+label/,       'branches on whether the slot is absent' );
-    unlike( $text, qr/select\s+i1\s+%[^,]+, dynamic/,   'never selects a dynamic replacement into the slot' );
-    like( $text,   qr/incref\s+dynamic/,                'takes a reference to the replacement' );
-    like( $text,   qr/decref\s+dynamic/,                'releases the displaced value' );
+    like( $text, qr/br\s+i1\s+%[^,]+,\s+label/, 'branches on whether the slot is absent' );
+    unlike( $text, qr/select\s+i1\s+%[^,]+, dynamic/, 'never selects a dynamic replacement into the slot' );
+    like( $text, qr/incref\s+dynamic/, 'takes a reference to the replacement' );
+    like( $text, qr/decref\s+dynamic/, 'releases the displaced value' );
 };
 subtest '||= on a dynamic slot also lowers to a conditional owned store' => sub {
     my $c   = Brocken->new;
@@ -359,7 +359,7 @@ return 0;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
-    like( $text,   qr/br\s+i1\s+%[^,]+,\s+label/,     'a dynamic ||= also branches' );
+    like( $text, qr/br\s+i1\s+%[^,]+,\s+label/, 'a dynamic ||= also branches' );
     unlike( $text, qr/select\s+i1\s+%[^,]+, dynamic/, 'a dynamic ||= never selects a box' );
 };
 subtest '// in expression position lowers to a defined-check select' => sub {
@@ -970,7 +970,6 @@ my ptr $p = P->new(7);
 return $p->x();
 BROCKEN
     ok( find_function( $mod, 'P::x' ), 'the definition after the forward declaration registers its reader' );
-
     my $c2   = Brocken->new;
     my $mod2 = $c2->compile(<<'BROCKEN');
 class Q { field i64 $y :param :reader; }

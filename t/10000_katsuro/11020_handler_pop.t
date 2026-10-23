@@ -65,7 +65,6 @@ sub g() :returns(i64) {
 return g();
 BROCKEN
 };
-
 subtest 'last out of a try inside a loop pops the handler' => sub {
     check( <<'BROCKEN', 7, 'a later throw reaches the outer catch, not the abandoned inner one' );
 sub g() :returns(i64) {
@@ -88,5 +87,4 @@ sub g() :returns(i64) {
 return g();
 BROCKEN
 };
-
 done_testing;

@@ -33,49 +33,78 @@ class Brocken::Jenny::Codegen::Wasm v0.0.1 {
         return $result;
     }
 
-    method emit_functions($ir_funcs) {
-        my @funcs;
-        for my $ir_func ( $ir_funcs->@* ) {
-            my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
-            my $mf      = $lowerer->lower($ir_func);
-            my %ir_types;
-            for my $block ( $ir_func->blocks->@* ) {
-                for my $inst ( $block->instructions->@* ) {
-                    $ir_types{ $inst->name } = $inst->type if $inst->name;
-                }
+    method _emit_single_func($ir_func) {
+        my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
+        my $mf      = $lowerer->lower($ir_func);
+        my %ir_types;
+        for my $block ( $ir_func->blocks->@* ) {
+            for my $inst ( $block->instructions->@* ) {
+                $ir_types{ $inst->name } = $inst->type if $inst->name;
             }
-            for my $mbb ( $mf->blocks->@* ) {
-                for my $mi ( $mbb->instructions->@* ) {
-                    for my $mo ( $mi->operands->@* ) {
-                        $ir_types{ $mo->value } = $mo->type if $mo->kind eq 'virt_reg' && $mo->value && $mo->type;
-                    }
-                }
-            }
-            my %source_map;
-            my ( $result, $fixups ) = $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type, \%source_map );
-            $mf->release;
-            my @param_valtypes;
-            for my $p ( $ir_func->params->@* ) {
-                push @param_valtypes, $self->_wasm_valtype( $p->type );
-            }
-            my $locals_size = length( $result->{locals} );
-            for my $idx ( sort keys %source_map ) {
-                $source_map{$idx} += $locals_size;
-            }
-            my @adjusted_fixups;
-            for my $fx ( $fixups->@* ) {
-                push @adjusted_fixups, { %$fx, offset => $fx->{offset} + $locals_size };
-            }
-            push @funcs,
-                {
-                name           => $ir_func->name,
-                bytes          => $result->{locals} . $result->{body},
-                fixups         => \@adjusted_fixups,
-                source_map     => \%source_map,
-                return_valtype => $result->{return_valtype},
-                param_valtypes => \@param_valtypes,
-                };
         }
+        for my $mbb ( $mf->blocks->@* ) {
+            for my $mi ( $mbb->instructions->@* ) {
+                for my $mo ( $mi->operands->@* ) {
+                    $ir_types{ $mo->value } = $mo->type if $mo->kind eq 'virt_reg' && $mo->value && $mo->type;
+                }
+            }
+        }
+        my %source_map;
+        my ( $result, $fixups ) = $self->_encode( $mf, $ir_func->params, \%ir_types, $ir_func->return_type, \%source_map );
+        $mf->release;
+        my @param_valtypes;
+        for my $p ( $ir_func->params->@* ) {
+            push @param_valtypes, $self->_wasm_valtype( $p->type );
+        }
+        my $locals_size = length( $result->{locals} );
+        for my $idx ( sort keys %source_map ) {
+            $source_map{$idx} += $locals_size;
+        }
+        my @adjusted_fixups;
+        for my $fx ( $fixups->@* ) {
+            push @adjusted_fixups, { %$fx, offset => $fx->{offset} + $locals_size };
+        }
+        return {
+            name           => $ir_func->name,
+            bytes          => $result->{locals} . $result->{body},
+            fixups         => \@adjusted_fixups,
+            source_map     => \%source_map,
+            return_valtype => $result->{return_valtype},
+            param_valtypes => \@param_valtypes,
+        };
+    }
+
+    method emit_functions($ir_funcs) {
+        state $cached_core_funcs;
+        my @funcs;
+        my @core_ir;
+        my @user_ir;
+
+        for my $ir_func ( $ir_funcs->@* ) {
+            if ( $ir_func->name =~ /^Brocken::Runtime::/ ) {
+                push @core_ir, $ir_func;
+            }
+            else {
+                push @user_ir, $ir_func;
+            }
+        }
+
+        if (defined $cached_core_funcs) {
+            push @funcs, @$cached_core_funcs;
+        }
+        else {
+            my @new_core;
+            for my $ir_func (@core_ir) {
+                push @new_core, $self->_emit_single_func($ir_func);
+            }
+            $cached_core_funcs = \@new_core;
+            push @funcs, @new_core;
+        }
+
+        for my $ir_func (@user_ir) {
+            push @funcs, $self->_emit_single_func($ir_func);
+        }
+
         return \@funcs;
     }
 

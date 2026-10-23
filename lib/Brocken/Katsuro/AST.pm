@@ -88,12 +88,12 @@ class Brocken::Katsuro::AST::Stmt::SubDecl v0.0.1 : isa(Brocken::Katsuro::AST::N
     field $prototype   : param : reader = 0;        # `sub f();` -- signature only; a definition must follow
 };
 class Brocken::Katsuro::AST::Stmt::ClassDecl v0.0.1 : isa(Brocken::Katsuro::AST::Node) {
-    field $name    : param : reader;
-    field $version : param : reader = undef;        # from `class NAME VERSION`
-    field $attrs   : param : reader = [];           # Class attributes: [{name, arg}], e.g. :isa(Base)
-    field $fields  : param : reader = [];           # Array of AST::Stmt::FieldDecl
-    field $methods : param : reader = [];           # Array of AST::Stmt::MethodDecl
-    field $adjusts : param : reader = [];           # Array of AST::Stmt::Adjust (run in declaration order)
+    field $name     : param : reader;
+    field $version  : param : reader = undef;       # from `class NAME VERSION`
+    field $attrs    : param : reader = [];          # Class attributes: [{name, arg}], e.g. :isa(Base)
+    field $fields   : param : reader = [];          # Array of AST::Stmt::FieldDecl
+    field $methods  : param : reader = [];          # Array of AST::Stmt::MethodDecl
+    field $adjusts  : param : reader = [];          # Array of AST::Stmt::Adjust (run in declaration order)
     field $destroys : param : reader = [];          # Array of AST::Stmt::Adjust wrapping DESTROY blocks
 };
 

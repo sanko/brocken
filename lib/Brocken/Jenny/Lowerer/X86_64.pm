@@ -3552,8 +3552,9 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     # A float payload goes out through the SSE store. Both `store` and `store_imm` pick a 64-bit GP move
                     # for a memory operand that is not an int, so `my $x = 1.5;` stored the integer 1 into the box and
                     # the float was gone before anything could read it back.
-                    my $is_float  = $val->type && $val->type->kind eq 'float';
-                    my $store_op  = $is_float ? 'fstore' : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store';
+                    my $is_float = $val->type && $val->type->kind eq 'float';
+                    my $store_op = $is_float ? 'fstore' : $val->isa('Brocken::Lindsay::IR::Constant') ? 'store_imm' : 'store';
+
                     # A string literal arrives as a RodataRef, which carries a label but no register name; `_lower_opnd`
                     # would hand the store an unnamed virt_reg and the boxed pointer would be garbage.  `_materialize`
                     # emits the `lea_rodata` first.  Constants and ordinary values pass through unchanged.
@@ -3791,6 +3792,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                             }
                         }
                     }
+
                     # System V AMD64: a call to a variadic function must load `al` with the number of vector registers
                     # it used. glibc's printf reads the register save area for its `%f` argument only when `al` says a
                     # vector register was passed; with `al` left holding whatever the last call returned, `%f` formats

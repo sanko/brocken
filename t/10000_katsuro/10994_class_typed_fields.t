@@ -34,7 +34,6 @@ class Node {
     }
 }
 BROCKEN
-
 subtest 'a class-typed field is a scanned, owned pointer' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -54,18 +53,17 @@ BROCKEN
     # The field slot is an instance pointer, so scan/restore walk it with the object collector's hooks rather than the
     # boxed-value ones.
     my $nscan = find_function( $mod, 'Node::__scan' )->as_string;
-    like( $nscan,   qr/succ\.scan/,                       'scan addresses the class-typed field' );
-    like( $nscan,   qr/load ptr/,                         'the field is loaded as an instance pointer' );
-    like( $nscan,   qr/\@Brocken::Runtime::gc_decref/,     'scan drops a reference to the field' );
-
+    like( $nscan, qr/succ\.scan/,                    'scan addresses the class-typed field' );
+    like( $nscan, qr/load ptr/,                      'the field is loaded as an instance pointer' );
+    like( $nscan, qr/\@Brocken::Runtime::gc_decref/, 'scan drops a reference to the field' );
     my $nrestore = find_function( $mod, 'Node::__restore' )->as_string;
-    like( $nrestore, qr/succ\.restore/,                   'restore addresses the class-typed field' );
+    like( $nrestore, qr/succ\.restore/,                        'restore addresses the class-typed field' );
     like( $nrestore, qr/\@Brocken::Runtime::gc_restore_black/, 'restore takes the reference back' );
 
     # The reclaim thunk releases the field through the child's own destructor, not a bare decref.
     my $destroy = find_function( $mod, 'Node::__destroy' )->as_string;
-    like( $destroy, qr/succ\.daddr/,                      'destructor addresses the class-typed field' );
-    like( $destroy, qr/\@Brocken::Runtime::decref_obj/,   'destructor releases the child through its destructor' );
+    like( $destroy, qr/succ\.daddr/,                    'destructor addresses the class-typed field' );
+    like( $destroy, qr/\@Brocken::Runtime::decref_obj/, 'destructor releases the child through its destructor' );
 
     # A class-typed field keeps both classes out of the Leaf state: it is an owned reference the collector must walk.
     my $entry        = find_function( $mod, '_BROCKEN_ENTRY' )->as_string;
@@ -74,7 +72,6 @@ BROCKEN
     like( $entry, qr/store\s+i64\s+\Q$node_header\E/,  'Node header: has an owned field, not Leaf' );
     like( $entry, qr/store\s+i64\s+\Q$plain_header\E/, 'Plain header: no owned field, Leaf' );
 };
-
 subtest 'the writer takes an owning reference to the stored instance' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -87,10 +84,9 @@ return $a->id;
 BROCKEN
     ok( !$@, 'compiled class program' ) or diag $@;
     my $writer = find_function( $mod, 'Node::set_succ' )->as_string;
-    like( $writer, qr/incref ptr/,            'writer takes a reference to the new instance' );
+    like( $writer, qr/incref ptr/,                     'writer takes a reference to the new instance' );
     like( $writer, qr/\@Brocken::Runtime::decref_obj/, 'writer releases the displaced instance' );
 };
-
 subtest 'a self-cycle is reclaimed and finalized once' => sub {
     answers(
         $probe_and_node . <<'BROCKEN',
@@ -106,7 +102,6 @@ BROCKEN
         1, 'the self-cycle was collected and DESTROY ran exactly once', %native
     );
 };
-
 subtest 'a two-node cycle is reclaimed and both are finalized' => sub {
     answers(
         $probe_and_node . <<'BROCKEN',
@@ -124,7 +119,6 @@ BROCKEN
         2, 'both cycle members were collected and finalized', %native
     );
 };
-
 subtest 'a still-reachable cycle survives gc_drain' => sub {
     answers(
         $probe_and_node . <<'BROCKEN',
@@ -139,8 +133,8 @@ BROCKEN
         0, 'the live reference kept the cycle alive through the sweep', %native
     );
 };
-
 subtest 'an escaped instance keeps its reference' => sub {
+
     # `keep($a)` hands the pointer to a callee that may retain it, so the escape scan keeps the local's reference
     # instead of reclaiming it. `keep` returns the raw pointer without dereferencing, so it needs no static class.
     answers(
@@ -159,7 +153,6 @@ BROCKEN
         0, 'the escaped instance was not finalized while still reachable', %native
     );
 };
-
 subtest 'a class-typed field reads back and dispatches to its class' => sub {
     answers(
         <<'BROCKEN',
@@ -180,5 +173,4 @@ BROCKEN
         0, 'field read, chained method call, and borrowed local all resolve the class', %native
     );
 };
-
 done_testing;

@@ -346,7 +346,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 for my $fn ( $list->@* ) {
                     my $imported = $tag eq 'msvcrt' ? ( $msvcrt_import_alias{$fn} // $fn ) : $fn;
                     my $entry    = pack( 'v', 0 ) . $imported . "\0";
-                    $entry      .= "\0" if length($entry) % 2;
+                    $entry     .= "\0" if length($entry) % 2;
                     $ilt_bytes .= pack( 'Q<', $current_hnt_rva );
                     $iat_bytes .= pack( 'Q<', $current_hnt_rva );
                     $hnt_bytes .= $entry;

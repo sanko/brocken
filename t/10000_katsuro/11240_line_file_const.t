@@ -24,30 +24,25 @@ sub return_expr {
     my $prog = Brocken->new->parse( $source, @_[ 1 .. $#_ ] );
     return $prog->statements->[0]->expr;
 }
-
 subtest '__LINE__ folds to the token line' => sub {
-    is( return_expr('return __LINE__;')->value,    1, 'the first line is line 1' );
-    is( return_expr("\nreturn __LINE__;")->value,  2, 'a leading newline shifts the count' );
+    is( return_expr('return __LINE__;')->value,     1, 'the first line is line 1' );
+    is( return_expr("\nreturn __LINE__;")->value,   2, 'a leading newline shifts the count' );
     is( return_expr("\n\nreturn __LINE__;")->value, 3, 'two leading newlines' );
     my $prog = Brocken->new->parse("return 0;\nreturn __LINE__;");
     is( $prog->statements->[1]->expr->value, 2, 'the second statement is on line 2' );
 };
-
 subtest '__FILE__ folds to the compilation unit name' => sub {
-    is( return_expr( 'return __FILE__;' )->value,                '(eval)',      'the default filename' );
+    is( return_expr('return __FILE__;')->value,                   '(eval)',       'the default filename' );
     is( return_expr( 'return __FILE__;', 'src/thing.bk' )->value, 'src/thing.bk', 'a caller-supplied filename' );
 };
-
 subtest '__PACKAGE__ also parses to a string constant' => sub {
     my $prog = Brocken->new->parse('package P; return __PACKAGE__;');
     is( $prog->statements->[1]->expr->value, 'P', 'the enclosing package' );
 };
-
 subtest '__LINE__ and __FILE__ run' => sub {
-    check( 'return __LINE__;',                        1, 'a line number is returned as an integer' );
-    check( "\nreturn __LINE__;",                      2, 'the shifted line number' );
-    check( 'return __FILE__ eq "(eval)" ? 1 : 0;',    1, 'the filename is the compilation unit name' );
+    check( 'return __LINE__;',                                          1, 'a line number is returned as an integer' );
+    check( "\nreturn __LINE__;",                                        2, 'the shifted line number' );
+    check( 'return __FILE__ eq "(eval)" ? 1 : 0;',                      1, 'the filename is the compilation unit name' );
     check( 'return (__FILE__ . ":" . __LINE__) eq "(eval):1" ? 1 : 0;', 1, 'both in one expression' );
 };
-
 done_testing;

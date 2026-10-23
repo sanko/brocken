@@ -23,7 +23,6 @@ sub find_struct_type {
     }
     return undef;
 }
-
 subtest 'a narrow field pads the wider field that follows' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -40,7 +39,6 @@ BROCKEN
     is( $st->field_offset(1), 16, 'i64 is padded up to its 8-byte alignment' );
     is( $st->struct_size,     24, 'total size includes the padding' );
 };
-
 subtest 'a trailing narrow field is tail-padded' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -57,7 +55,6 @@ BROCKEN
     is( $st->field_offset(1), 16, 'i8 starts after the i64' );
     is( $st->struct_size,     24, 'the object is padded out to its 8-byte alignment' );
 };
-
 subtest 'an all-i64 class keeps the packed layout' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -85,7 +82,9 @@ subtest 'mixed-width fields read back correctly' => sub {
             ' field i32 $c :param :reader; }' .
             ' my ptr $m = M->new(a => 3, b => 40, c => -1);' .
             ' return $m->a() + $m->b() + $m->c();',
-        42, 'i8/i64/i32 fields round-trip through the aligned layout', targets => [@native]
+        42,
+        'i8/i64/i32 fields round-trip through the aligned layout',
+        targets => [@native]
     );
 };
 done_testing;

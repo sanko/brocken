@@ -53,10 +53,7 @@ subtest '||= replaces a false value' => sub {
 subtest '||= on an Any box uses payload truthiness' => sub {
     answers( 'my Any $a = 0; $a ||= 4; return $a;', 4, 'a boxed zero is false, so the RHS wins' );
     answers( 'my Any $a = 2; $a ||= 4; return $a;', 2, 'a boxed true value is kept' );
-    answers(
-        'my Any $a = "0"; $a ||= 4; if ($a) { return 1; } return 0;',
-        1, 'a boxed string "0" is false too', targets => [@native_targets]
-    );
+    answers( 'my Any $a = "0"; $a ||= 4; if ($a) { return 1; } return 0;', 1, 'a boxed string "0" is false too', targets => [@native_targets] );
 };
 
 # A declaration has no previous value, so the conditional form always takes its initializer, exactly as `=` would.

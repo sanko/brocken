@@ -16,22 +16,18 @@ sub check {
     my ( $source, $want, $label ) = @_;
     answers( $source, $want, $label, targets => [@native_targets] );
 }
-
 subtest '__PACKAGE__ is the in-effect package' => sub {
-    check( 'return __PACKAGE__ eq "main" ? 1 : 0;',                          1, 'the top level is main' );
-    check( 'package P; return __PACKAGE__ eq "P" ? 1 : 0;',                  1, 'a package declaration' );
-    check( 'package A::B; return __PACKAGE__ eq "A::B" ? 1 : 0;',            1, 'a nested package name' );
-    check( 'package P; return __PACKAGE__ ne "main" ? 1 : 0;',               1, 'a package is not main' );
+    check( 'return __PACKAGE__ eq "main" ? 1 : 0;',               1, 'the top level is main' );
+    check( 'package P; return __PACKAGE__ eq "P" ? 1 : 0;',       1, 'a package declaration' );
+    check( 'package A::B; return __PACKAGE__ eq "A::B" ? 1 : 0;', 1, 'a nested package name' );
+    check( 'package P; return __PACKAGE__ ne "main" ? 1 : 0;',    1, 'a package is not main' );
 };
-
 subtest '__PACKAGE__ follows a package block scope' => sub {
-    check( 'package Scoped { return __PACKAGE__ eq "Scoped" ? 1 : 0; }',     1, 'inside the block' );
-    check( 'package Scoped { } return __PACKAGE__ eq "main" ? 1 : 0;',       1, 'the block package does not leak' );
+    check( 'package Scoped { return __PACKAGE__ eq "Scoped" ? 1 : 0; }', 1, 'inside the block' );
+    check( 'package Scoped { } return __PACKAGE__ eq "main" ? 1 : 0;',   1, 'the block package does not leak' );
 };
-
 subtest '__PACKAGE__ is a usable string value' => sub {
-    check( 'my String $p = __PACKAGE__; return $p eq "main" ? 1 : 0;',       1, 'bound to a String local' );
-    check( 'return (__PACKAGE__ . "!") eq "main!" ? 1 : 0;',                 1, 'used in a concatenation' );
+    check( 'my String $p = __PACKAGE__; return $p eq "main" ? 1 : 0;', 1, 'bound to a String local' );
+    check( 'return (__PACKAGE__ . "!") eq "main!" ? 1 : 0;',           1, 'used in a concatenation' );
 };
-
 done_testing;

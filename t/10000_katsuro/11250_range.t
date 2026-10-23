@@ -11,7 +11,6 @@ sub check {
     my ( $source, $want, $label ) = @_;
     answers( $source, $want, $label );
 }
-
 subtest 'an ascending range visits both ends' => sub {
     check( <<'BROCKEN', 10, 'the sum of 0..4 is 10' );
 my i64 $s = 0;
@@ -34,7 +33,6 @@ for my $i (3 .. 3) { $s = $s + $i; }
 return $s;
 BROCKEN
 };
-
 subtest 'an empty or descending range never runs' => sub {
     check( <<'BROCKEN', 0, 'LO > HI is empty' );
 my i64 $s = 0;
@@ -47,7 +45,6 @@ for my $i (100 .. 99) { $s = 99; }
 return $s;
 BROCKEN
 };
-
 subtest 'the bound expressions are evaluated once' => sub {
     check( <<'BROCKEN', 9, 'a bound may be a variable' );
 my i64 $a = 2;
@@ -62,7 +59,6 @@ for my $i (1 + 1 .. 3 + 2) { $s = $s + $i; }
 return $s;
 BROCKEN
 };
-
 subtest 'last and next' => sub {
     check( <<'BROCKEN', 5, 'next skips a pass, last ends the loop' );
 my i64 $n = 0;
@@ -74,7 +70,6 @@ for my $i (0 .. 10) {
 return $n;
 BROCKEN
 };
-
 subtest 'the loop variable is a native integer' => sub {
     check( <<'BROCKEN', 6, 'an i64 loop variable' );
 my i64 $s = 0;
@@ -92,8 +87,8 @@ for my u64 $i (1 .. 3) { $s = $s + $i; }
 return $s;
 BROCKEN
 };
-
 subtest 'the body sees and may reassign the loop variable' => sub {
+
     # The lowering is `$i = LO; while ($i <= HI) { ...; $i++ }`, so a write to `$i` in the body changes where the
     # induction resumes -- the loop runs once here because the body jumps it past the top.
     check( <<'BROCKEN', 1, 'a body write drives the induction' );
@@ -107,7 +102,6 @@ for my $i (0 .. 2) { if ($i >= 0) { $n = $n + 1; } }
 return $n;
 BROCKEN
 };
-
 subtest 'ranges nest' => sub {
     check( <<'BROCKEN', 18, 'an inner range runs fully for each outer value' );
 my i64 $s = 0;
@@ -115,11 +109,9 @@ for my $i (1 .. 2) { for my $j (1 .. 3) { $s = $s + $i * $j; } }
 return $s;
 BROCKEN
 };
-
 subtest 'a range is only valid as the whole for list' => sub {
     my $range = eval { Brocken->new->parse('for my $i (0 .. 3) { }')->statements->[0]->expr };
     isa_ok( $range, ['Brocken::Katsuro::AST::Expr::Range'], 'the loop header parses to a range' );
-
     like(
         dies { Brocken->new->compile('for my $i (1, 2 .. 3) { } return 0;') },
         qr/a range must be the whole 'for' list/,
@@ -135,11 +127,6 @@ subtest 'a range is only valid as the whole for list' => sub {
         qr/a range loop variable must be an integer/,
         'a non-integer loop variable is rejected',
     );
-    like(
-        dies { Brocken->new->compile('my i64 $x = 0 .. 3; return $x;') },
-        qr/Expected ';'/,
-        'a range outside a for header is a parse error',
-    );
+    like( dies { Brocken->new->compile('my i64 $x = 0 .. 3; return $x;') }, qr/Expected ';'/, 'a range outside a for header is a parse error', );
 };
-
 done_testing;

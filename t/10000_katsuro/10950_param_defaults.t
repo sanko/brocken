@@ -70,11 +70,9 @@ subtest 'method parameter defaults' => sub {
 # variable that happened to share a parameter's name, so `f($x, $x)` resolved the second `$x` to the first argument's
 # loaded value and died in the lowerer (`.allocated_type` on a Load).
 subtest 'a default-less callable does not shadow caller variables' => sub {
-    answers( 'sub f(i64 $x, i64 $y) :returns(i64) { return $x + $y; } my i64 $x = 3; return f($x, $x);',
-        6, 'the same variable passed twice' );
+    answers( 'sub f(i64 $x, i64 $y) :returns(i64) { return $x + $y; } my i64 $x = 3; return f($x, $x);', 6, 'the same variable passed twice' );
     answers( 'sub g(i64 $a, i64 $b) :returns(i64) { return $a * 10 + $b; } my i64 $a = 2; return g($a, $a + 1);',
         23, 'a later argument may reference a variable named like an earlier parameter' );
-    answers( 'sub h(i64 $x) :returns(i64) { return $x; } my i64 $x = 7; return h($x) + $x;',
-        14, 'the caller variable survives the call' );
+    answers( 'sub h(i64 $x) :returns(i64) { return $x; } my i64 $x = 7; return h($x) + $x;', 14, 'the caller variable survives the call' );
 };
 done_testing;

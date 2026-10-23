@@ -4443,8 +4443,7 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
         my $src = $self->_lower_opnd($ir_val);
         return $src unless $src->kind eq 'imm';
         my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $name, type => $ir_val->type );
-        $mbb->add_instruction(
-            Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $tmp, $src ], comment => 'ext src imm' ) );
+        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $tmp, $src ], comment => 'ext src imm' ) );
         return $tmp;
     }
 

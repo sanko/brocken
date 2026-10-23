@@ -161,8 +161,8 @@ subtest 'hash element access parses as Expr::HashIndex' => sub {
 
     # `%h{"a"} = 1;` lowers to a Stmt::Assign whose target is an Expr::HashIndex.
     my $store = $body->[1];
-    isa_ok( $store, ['Brocken::Katsuro::AST::Stmt::Assign'] );
-    isa_ok( $store->target, ['Brocken::Katsuro::AST::Expr::HashIndex'] );
+    isa_ok( $store,               ['Brocken::Katsuro::AST::Stmt::Assign'] );
+    isa_ok( $store->target,       ['Brocken::Katsuro::AST::Expr::HashIndex'] );
     isa_ok( $store->target->hash, ['Brocken::Katsuro::AST::Expr::Var'] );
     is( $store->target->hash->sigil, '%', 'subscript base keeps the % sigil' );
     isa_ok( $store->target->key, ['Brocken::Katsuro::AST::Expr::Const'] );
@@ -170,7 +170,7 @@ subtest 'hash element access parses as Expr::HashIndex' => sub {
 
     # `return %h{"a"};` reads back through the same node kind.
     my $ret = $body->[2];
-    isa_ok( $ret, ['Brocken::Katsuro::AST::Stmt::Return'] );
+    isa_ok( $ret,       ['Brocken::Katsuro::AST::Stmt::Return'] );
     isa_ok( $ret->expr, ['Brocken::Katsuro::AST::Expr::HashIndex'] );
 };
 subtest 'exists %h{key} parses as Expr::Exists over an Expr::HashIndex' => sub {
@@ -180,8 +180,8 @@ subtest 'exists %h{key} parses as Expr::Exists over an Expr::HashIndex' => sub {
     my $if   = $body->[1];
     isa_ok( $if, ['Brocken::Katsuro::AST::Stmt::If'] );
     my $cond = $if->cond;
-    isa_ok( $cond, ['Brocken::Katsuro::AST::Expr::Exists'] );
-    isa_ok( $cond->expr, ['Brocken::Katsuro::AST::Expr::HashIndex'], 'the argument is a hash element' );
+    isa_ok( $cond,             ['Brocken::Katsuro::AST::Expr::Exists'] );
+    isa_ok( $cond->expr,       ['Brocken::Katsuro::AST::Expr::HashIndex'], 'the argument is a hash element' );
     isa_ok( $cond->expr->hash, ['Brocken::Katsuro::AST::Expr::Var'] );
     is( $cond->expr->hash->sigil, '%', 'subscript base keeps the % sigil' );
 };

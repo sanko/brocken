@@ -11,6 +11,25 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
     use Carp ();
 
     method allocate( $mf, $platform, $is_float = 0, $prior_spill_slots = undef ) {
+
+        # Quick Optimization: 99% of core runtime functions use zero floating point registers.
+        # Short-circuit the expensive float allocation pass if no float vregs exist.
+        if ($is_float) {
+            my $has_float = 0;
+        CHECK: for my $bb ( $mf->blocks->@* ) {
+                for my $inst ( $bb->instructions->@* ) {
+                    for my $op ( $inst->operands->@* ) {
+                        if ( $op->kind eq 'virt_reg' && $op->type && $op->type->kind eq 'float' ) {
+                            $has_float = 1;
+                            last CHECK;
+                        }
+                    }
+                }
+            }
+            unless ($has_float) {
+                return { assignment => {}, used_callee => [], spill_slots => {}, spill_temp => undef, spill_addr_temp => undef, };
+            }
+        }
         $mf->compute_cfg unless $mf->entry_block->successors->@*;
         my @intervals = $self->_compute_live_intervals( $mf, $platform, $is_float );
 
@@ -192,6 +211,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
     method _compute_live_intervals( $mf, $platform, $is_float ) {
         my @blocks = $mf->blocks->@*;
         my @bi_range;    # block_idx => [first_inst_idx, last_inst_idx]
+        my %block_idx = map { $blocks[$_] => $_ } 0 .. $#blocks;
         my $total_idx = 0;
         for my $bb (@blocks) {
             my $first = $total_idx;
@@ -277,8 +297,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 my $bb = $blocks[$bi];
                 my %new_out;
                 for my $succ ( $bb->successors->@* ) {
-                    my $si = 0;
-                    for my $b (@blocks) { last if $b == $succ; $si++ }
+                    my $si = $block_idx{$succ};
                     for my $v ( sort keys %{ $live_in{$si} // {} } ) {
                         $new_out{$v} = 1;
                     }
@@ -357,17 +376,48 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         # assigned to the same physical register.
         my %defined_phys;
         my $has_ctx_swap = 0;
+        my $has_setjmp   = 0;
         if ( $mf && $mf->blocks->@* ) {
             for my $mbb ( $mf->blocks->@* ) {
                 for my $inst ( $mbb->instructions->@* ) {
-                    $has_ctx_swap = 1 if $inst->opcode eq 'ctx_swap';
+                    my $opcode = $inst->opcode;
+                    $has_ctx_swap = 1 if $opcode eq 'ctx_swap';
+                    if ( !$is_float ) {
+
+                        # Exclude rax/rdx when the function contains udiv, sdiv, umulh, div128_64, or rem128_64.
+                        # Their codegen emits inline assembly that clobbers rax and rdx without exposing those
+                        # registers in the MIR operand list.
+                        if ( $opcode =~ /^(?:udiv|sdiv|umulh|div128_64|rem128_64)$/ ) {
+                            $defined_phys{rax} = 1;
+                            $defined_phys{rdx} = 1;
+                        }
+
+                        # The AMD Zen 4 erratum workaround in X86_64 codegen (fmov_gp2f with source in R8-R15)
+                        # moves the GP source through RAX via inline assembly.
+                        if ( $opcode eq 'fmov_gp2f' ) {
+                            $defined_phys{rax} = 1;
+                        }
+
+                        # Variable-count shift codegen emits MOV src -> ecx then SHL/SHR/SAR dst, %cl.
+                        if ( $opcode =~ /^(?:shl|lshr|ashr)$/ ) {
+                            $defined_phys{rcx} = 1;
+                        }
+
+                        # Caller-saved registers are clobbered by setjmp because longjmp skips their restore.
+                        if ( $opcode eq 'call_func' ) {
+                            my ($callee) = $inst->operands->@*;
+                            if ( $callee && defined $callee->value && $callee->value eq 'setjmp' ) {
+                                $has_setjmp = 1;
+                            }
+                        }
+                    }
                     my @ops = $inst->operands->@*;
                     next unless @ops >= 1;
                     my $dst = $ops[0];
                     next unless $dst->kind eq 'phys_reg';
                     my $is_dst_float = $dst->type ? ( $dst->type->kind eq 'float' ? 1 : 0 ) : 0;
                     next if $is_float != $is_dst_float;
-                    next if $inst->opcode eq 'store' || $inst->opcode eq 'store_imm';
+                    next if $opcode eq 'store' || $opcode eq 'store_imm';
                     next unless defined $dst->value;
                     $defined_phys{ $dst->value } = 1;
                 }
@@ -375,76 +425,15 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         }
 
         # Exclude the registers the ctx_swap encoding body uses as internal temporaries (its resume PC and saved SP).
-        # They are clobbered invisibly -- nothing in the MIR operand list names them -- so the per-function phys_reg
-        # destination scan above never sees them.  Any virtual register allocated to one of them would have its value
-        # silently corrupted within ctx_swap.  The set is ABI-specific: r10/r11 on x86-64, t3 on RISC-V, x16/x17 on
-        # AArch64 (which already keeps them out of its pool).
+        # They are clobbered invisibly -- nothing in the MIR operand list names them. The set is ABI-specific:
+        # r10/r11 on x86-64, t3 on RISC-V, x16/x17 on AArch64.
         if ( $has_ctx_swap && !$is_float && $platform->can('abi') ) {
             $defined_phys{$_} = 1 for $platform->ctx_swap_scratch->@*;
         }
 
-        # Exclude rax/rdx when the function contains udiv, sdiv, umulh, div128_64, or rem128_64. Their codegen emits
-        # inline assembly that clobbers rax and rdx (e.g. MOV RAX,dst; XOR RDX,RDX; DIV src; MOV dst,RAX) without
-        # exposing those registers in the MIR operand list. Any virtual register assigned to rax or rdx would be
-        # silently corrupted at the inline asm boundary.
-        if ( !$is_float && $mf && $mf->blocks->@* ) {
-            for my $mbb ( $mf->blocks->@* ) {
-                for my $inst ( $mbb->instructions->@* ) {
-                    if ( $inst->opcode =~ /^(?:udiv|sdiv|umulh|div128_64|rem128_64)$/ ) {
-                        $defined_phys{rax} = 1;
-                        $defined_phys{rdx} = 1;
-                    }
-                }
-            }
-        }
-
-        # Exclude rax when the function contains fmov_gp2f.
-        # The AMD Zen 4 erratum workaround in X86_64 codegen (fmov_gp2f with source in R8-R15) moves the GP source
-        # through RAX via inline assembly bytes not visible in the MIR operand list. Any virtual register assigned to
-        # rax would be silently corrupted.
-        if ( !$is_float && $mf && $mf->blocks->@* ) {
-            for my $mbb ( $mf->blocks->@* ) {
-                for my $inst ( $mbb->instructions->@* ) {
-                    if ( $inst->opcode eq 'fmov_gp2f' ) {
-                        $defined_phys{rax} = 1;
-                    }
-                }
-            }
-        }
-
-        # Exclude rcx when the function contains shl, lshr, or ashr.
-        # Variable-count shift codegen (D3 /ext rm) emits MOV src -> ecx then SHL/ SHR /SAR dst, %cl. The MOV to ecx
-        # silently clobbers whatever was in rcx, but the MIR operands (dst, src) do not expose this fixed-register
-        # usage. Any virtual register assigned to rcx would be silently corrupted.
-        if ( !$is_float && $mf && $mf->blocks->@* ) {
-            for my $mbb ( $mf->blocks->@* ) {
-                for my $inst ( $mbb->instructions->@* ) {
-                    if ( $inst->opcode =~ /^(?:shl|lshr|ashr)$/ ) {
-                        $defined_phys{rcx} = 1;
-                    }
-                }
-            }
-        }
-
         # Exclude every caller-saved register when the function calls setjmp.
-        #
-        # A value parked in a caller-saved register is kept across a call by insert_caller_save_code, which spills it to a
-        # per-call slot shared by every call in the function.  That works for a normal call, where the save and the
-        # restore are adjacent.  setjmp returns twice: the exceptional return runs the restore after longjmp, by which
-        # time the throw path's own calls have overwritten the shared slots, so the restore reloads garbage.  longjmp
-        # restores the callee-saved registers from the jmp_buf itself, and a spilled value lives in a dedicated slot, so
-        # both of those survive the throw; caller-saved registers do not.  Keeping them out of the pool for any function
-        # that calls setjmp leaves the allocator the callee-saved registers and spills, both of which cross the throw.
-        if ( !$is_float && $mf && $mf->blocks->@* ) {
-        CALLER_SAVE_UNSAFE: for my $mbb ( $mf->blocks->@* ) {
-                for my $inst ( $mbb->instructions->@* ) {
-                    next unless $inst->opcode eq 'call_func';
-                    my ($callee) = $inst->operands->@*;
-                    next unless $callee && defined $callee->value && $callee->value eq 'setjmp';
-                    $defined_phys{$_} = 1 for @caller_regs;
-                    last CALLER_SAVE_UNSAFE;
-                }
-            }
+        if ( $has_setjmp && !$is_float ) {
+            $defined_phys{$_} = 1 for @caller_regs;
         }
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         @callee_regs = grep { !$defined_phys{$_} } @callee_regs;

@@ -1,26 +1,35 @@
 use v5.42;
 use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
-use blib;
+use lib '../../lib';
+
+#~ use blib;
 use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
+#
+my $brocken //= Brocken->new();
+my $host = $brocken->platform;
+skip_all 'not native' unless $host->is_native;
 
 # Ordering a float has no signed/unsigned split, and each backend spells the ordered predicates plainly. The frontend
 # used to pick the integer s/u forms off is_signed, which no backend has in its float table, so every ordered float
 # comparison -- `<`, `>`, `<=`, `>=` on any float width -- evaluated false. Equality happened to survive because
 # `eq`/`ne` are spelled the same for both, which is why this went unnoticed next to the working `==`.
 sub answers ( $src, $want, $name ) {
-    my $brocken = Brocken->new();
-    my $host    = $brocken->platform;
-    return diag("not native") unless $host->is_native;
+    diag 'compile...';
+    note $src;
     my $module = eval { Brocken->new->compile($src) };
     if ($@) { fail("$name: compile died: $@"); return }
+    diag 'emit_functions...';
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
     my $file  = $brocken->tmpdir . '/fo' . $brocken->ext;
+    diag 'link...';
     $brocken->linker->write_executable( $file, $funcs, $host );
+    diag 'go...';
     system $file;
     is( $? >> 8, $want, $name );
+    diag 'cleanup...';
     unlink $file;
     return;
 }
@@ -72,4 +81,5 @@ subtest 'a ternary that yields a float selects through a float register' => sub 
         answers( "my $ty \$a = 4.5; my $ty \$b = 2.5; return (\$a > \$b) ? \$a : \$b;", 4, "$ty select true arm when the test is >" );
     }
 };
+#
 done_testing;

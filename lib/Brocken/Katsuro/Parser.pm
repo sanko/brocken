@@ -37,7 +37,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
     # Assignment operators. `=` and the short-circuit forms keep their own lowering; the arithmetic/bitwise/string
     # compound forms (`$x += 1`) parse as `$x = $x OP 1`, so they reuse the ordinary `=` lowering and its reference
     # counting. The target sub-expressions are re-evaluated once (a `%map{key}` key is computed twice).
-    my %ASSIGN_OPS = map { $_ => 1 } qw[= += -= *= /= %= &= |= ^= <<= >>= .= //= ||=];
+    my %ASSIGN_OPS      = map { $_ => 1 } qw[= += -= *= /= %= &= |= ^= <<= >>= .= //= ||=];
     my %COMPOUND_ASSIGN = map { $_ => 1 } qw[+= -= *= /= %= &= |= ^= <<= >>= .=];
     method peek()    { $tokens->[$pos] }
     method prev()    { $tokens->[ $pos - 1 ] }
@@ -207,7 +207,8 @@ class Brocken::Katsuro::Parser v0.0.1 {
         if ( $assign_tok && $assign_tok->{type} eq 'OP' && $ASSIGN_OPS{ $assign_tok->{value} } ) {
             my $op_tok = $self->advance();
             my $rhs    = $self->parse_expression(0);
-            my $assign = Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($op_tok), target => $expr, expr => $rhs, op => $op_tok->{value} );
+            my $assign
+                = Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($op_tok), target => $expr, expr => $rhs, op => $op_tok->{value} );
             return $self->_end_statement( $assign, "Expected ';' after assignment" );
         }
         return $self->_end_statement( $expr, "Expected ';' after expression" );
@@ -222,12 +223,13 @@ class Brocken::Katsuro::Parser v0.0.1 {
         if ( $self->check( 'KEYWORD', 'if' ) || $self->check( 'KEYWORD', 'unless' ) ) {
             my $modifier = $self->advance();
             $stmt->set_package($current_package);
-            my $cond     = $self->parse_expression(0);
+            my $cond = $self->parse_expression(0);
             $self->consume( ';', undef, "Expected ';' after postfix $modifier->{value}" );
             my $body = Brocken::Katsuro::AST::Stmt::Block->new( $self->_pos_token($modifier), statements => [$stmt] );
             if ( $modifier->{value} eq 'unless' ) {
                 my $empty = Brocken::Katsuro::AST::Stmt::Block->new( $self->_pos_token($modifier), statements => [] );
-                return Brocken::Katsuro::AST::Stmt::If->new( $self->_pos_token($modifier), cond => $cond, then => $empty, elsif => [], else => $body );
+                return Brocken::Katsuro::AST::Stmt::If->new( $self->_pos_token($modifier), cond => $cond, then => $empty, elsif => [],
+                    else => $body );
             }
             return Brocken::Katsuro::AST::Stmt::If->new( $self->_pos_token($modifier), cond => $cond, then => $body, elsif => [], else => undef );
         }
@@ -264,8 +266,14 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $init = $self->parse_expression(0);
         }
         $self->consume( ';', undef, "Expected ';' after variable declaration" );
-        return Brocken::Katsuro::AST::Stmt::VarDecl->new( $self->_pos_token($var_token), sigil => $sigil, name => $name, type => $type,
-            attrs => $attrs, init => $init );
+        return Brocken::Katsuro::AST::Stmt::VarDecl->new(
+            $self->_pos_token($var_token),
+            sigil => $sigil,
+            name  => $name,
+            type  => $type,
+            attrs => $attrs,
+            init  => $init
+        );
     }
 
     # my ($a, $b) = expr
@@ -384,7 +392,6 @@ class Brocken::Katsuro::Parser v0.0.1 {
         else {
             push @targets, $self->parse_for_target();
         }
-
         $self->consume( '(', undef, "Expected '(' before the '$for_token->{value}' list" );
         my @elements;
         until ( $self->check(')') || $self->check('EOF') ) {
@@ -393,6 +400,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 $self->consume(',');
             }
             my $element = $self->parse_expression(0);
+
             # `0 .. N` in the loop list is the induction-loop form (spec 4.5). `..` carries no binding power, so
             # parse_expression stops in front of it; consume it here rather than give the operator precedence, which
             # would let it appear anywhere. A range is only meaningful as the whole list, so a comma-separated mix is
@@ -410,19 +418,13 @@ class Brocken::Katsuro::Parser v0.0.1 {
             Carp::croak( "a range must be the whole '$for_token->{value}' list at " . $self->_loc($for_token) );
         }
         my $expr;
-        if ( @elements == 0 )    { $expr = undef; }
+        if    ( @elements == 0 ) { $expr = undef; }
         elsif ( @elements == 1 ) { $expr = $elements[0]; }
         else {
             $expr = Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($for_token), elements => \@elements );
         }
-
         my $body = $self->parse_block();
-        return Brocken::Katsuro::AST::Stmt::For->new(
-            $self->_pos_token($for_token),
-            targets => \@targets,
-            expr    => $expr,
-            body    => $body,
-        );
+        return Brocken::Katsuro::AST::Stmt::For->new( $self->_pos_token($for_token), targets => \@targets, expr => $expr, body => $body, );
     }
 
     # One `for`/`foreach` loop variable: an optional type then a variable. Shares the target shape `parse_list_var_decl`
@@ -433,11 +435,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $type = $self->advance()->{value};
         }
         my $var_token = $self->consume( 'VAR', undef, 'Expected a loop variable' );
-        return {
-            sigil => substr( $var_token->{value}, 0, 1 ),
-            name  => substr( $var_token->{value}, 1 ),
-            type  => $type,
-        };
+        return { sigil => substr( $var_token->{value}, 0, 1 ), name => substr( $var_token->{value}, 1 ), type => $type, };
     }
 
     method parse_return() {
@@ -449,16 +447,14 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 $expr = Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($ret_token), elements => [ $expr->expr ] );
             }
         }
-        return $self->_end_statement(
-            Brocken::Katsuro::AST::Stmt::Return->new( $self->_pos_token($ret_token), expr => $expr ),
+        return $self->_end_statement( Brocken::Katsuro::AST::Stmt::Return->new( $self->_pos_token($ret_token), expr => $expr ),
             "Expected ';' after return" );
     }
 
     method parse_throw() {
         my $throw_token = $self->advance();
         my $expr        = $self->parse_expression(0);
-        return $self->_end_statement(
-            Brocken::Katsuro::AST::Stmt::Throw->new( $self->_pos_token($throw_token), expr => $expr ),
+        return $self->_end_statement( Brocken::Katsuro::AST::Stmt::Throw->new( $self->_pos_token($throw_token), expr => $expr ),
             "Expected ';' after throw" );
     }
 
@@ -473,8 +469,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $code = $self->parse_expression(0) unless $self->check(')');
             $self->consume(')');
         }
-        return $self->_end_statement(
-            Brocken::Katsuro::AST::Stmt::Exit->new( $self->_pos_token($exit_token), code => $code ),
+        return $self->_end_statement( Brocken::Katsuro::AST::Stmt::Exit->new( $self->_pos_token($exit_token), code => $code ),
             "Expected ';' after exit" );
     }
 
@@ -508,17 +503,13 @@ class Brocken::Katsuro::Parser v0.0.1 {
     method parse_warn() {
         my $tok  = $self->advance();
         my @args = $self->_parse_diagnostic_args();
-        return $self->_end_statement(
-            Brocken::Katsuro::AST::Stmt::Warn->new( $self->_pos_token($tok), args => \@args ),
-            "Expected ';' after warn" );
+        return $self->_end_statement( Brocken::Katsuro::AST::Stmt::Warn->new( $self->_pos_token($tok), args => \@args ), "Expected ';' after warn" );
     }
 
     method parse_die() {
         my $tok  = $self->advance();
         my @args = $self->_parse_diagnostic_args();
-        return $self->_end_statement(
-            Brocken::Katsuro::AST::Stmt::Die->new( $self->_pos_token($tok), args => \@args ),
-            "Expected ';' after die" );
+        return $self->_end_statement( Brocken::Katsuro::AST::Stmt::Die->new( $self->_pos_token($tok), args => \@args ), "Expected ';' after die" );
     }
 
     method parse_trycatch() {
@@ -589,8 +580,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         my $name = $tok->{value};
         $self->consume('(');
         my $args = $self->parse_call_args_after_paren();
-        return $self->_end_statement(
-            Brocken::Katsuro::AST::Expr::Call->new( $self->_pos_token($tok), func_name => $name, args => $args ),
+        return $self->_end_statement( Brocken::Katsuro::AST::Expr::Call->new( $self->_pos_token($tok), func_name => $name, args => $args ),
             "Expected ';' after $name()" );
     }
 
@@ -655,6 +645,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         }
         $self->consume(')');
         my $return_type = $self->parse_return_annotation();
+
         # `sub f();` is a prototype: the signature is declared but no body exists, so the SubDecl is flagged and the
         # definition that follows supplies it. A flagged prototype is never lowered to a definition of its own.
         if ( $self->check(';') ) {
@@ -723,7 +714,6 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 package => $current_package,
             );
         }
-
         $self->consume('{');
         my @fields;
         my @methods;
@@ -746,7 +736,9 @@ class Brocken::Katsuro::Parser v0.0.1 {
             }
             else {
                 my $t = $self->peek();
-                Carp::croak("Expected 'field', 'method', 'ADJUST', or 'DESTROY' in class body, got $t->{type} '$t->{value}' at line $t->{line}, col $t->{col}");
+                Carp::croak(
+                    "Expected 'field', 'method', 'ADJUST', or 'DESTROY' in class body, got $t->{type} '$t->{value}' at line $t->{line}, col $t->{col}"
+                );
             }
         }
         $self->consume('}');
@@ -812,7 +804,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
     }
 
     method _finish_field_decl( $field_tok, %args ) {
-        my $attrs = $self->parse_attrs();
+        my $attrs      = $self->parse_attrs();
         my $default    = undef;
         my $default_op = undef;
         if ( $self->check( 'OP', '=' ) || $self->check( 'OP', '//=' ) || $self->check( 'OP', '||=' ) ) {
@@ -872,10 +864,9 @@ class Brocken::Katsuro::Parser v0.0.1 {
     }
 
     method parse_loop_control() {
-        my $tok = $self->advance();
-        my $stmt = $tok->{value} eq 'last'
-            ? Brocken::Katsuro::AST::Stmt::Break->new( $self->_pos_token($tok) )
-            : Brocken::Katsuro::AST::Stmt::Continue->new( $self->_pos_token($tok) );
+        my $tok  = $self->advance();
+        my $stmt = $tok->{value} eq 'last' ? Brocken::Katsuro::AST::Stmt::Break->new( $self->_pos_token($tok) ) :
+            Brocken::Katsuro::AST::Stmt::Continue->new( $self->_pos_token($tok) );
         return $self->_end_statement( $stmt, "Expected ';' after '$tok->{value}'" );
     }
 
@@ -977,13 +968,21 @@ class Brocken::Katsuro::Parser v0.0.1 {
         if ( $token->{type} eq 'KEYWORD' ) {
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 1, type => 'Bool' ) if $token->{value} =~ /^true$/i;
             return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => 0, type => 'Bool' ) if $token->{value} =~ /^false$/i;
+
             # `__PACKAGE__` folds to the in-effect package name as a string. The parser already stamps `$current_package`
             # onto the nodes it builds, and the top level (where no `package` is declared) is `main`, the module's name.
-            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => ( defined $current_package && length $current_package ? $current_package : 'main' ), type => 'String' ) if $token->{value} eq '__PACKAGE__';
+            return Brocken::Katsuro::AST::Expr::Const->new(
+                $self->_pos_token($token),
+                value => ( defined $current_package && length $current_package ? $current_package : 'main' ),
+                type  => 'String'
+            ) if $token->{value} eq '__PACKAGE__';
+
             # `__LINE__`/`__FILE__` fold to the line and filename of this token. The lexer already stamps `line`/`col`
             # on every token and carries the `filename` the unit was compiled under, so both are ordinary constants.
-            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => ( $token->{line} // 0 ), type => 'Int' )    if $token->{value} eq '__LINE__';
-            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => $filename, type => 'String' )             if $token->{value} eq '__FILE__';
+            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => ( $token->{line} // 0 ), type => 'Int' )
+                if $token->{value} eq '__LINE__';
+            return Brocken::Katsuro::AST::Expr::Const->new( $self->_pos_token($token), value => $filename, type => 'String' )
+                if $token->{value} eq '__FILE__';
             return Brocken::Katsuro::AST::Expr::ClassConst->new( $self->_pos_token($token) ) if $token->{value} eq '__CLASS__';
             return $self->parse_want($token)                                                 if $token->{value} eq 'want';
             if ( $token->{value} eq 'exists' ) {
@@ -1008,8 +1007,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                     return Brocken::Katsuro::AST::Expr::UndefOp->new( $self->_pos_token($token), expr => $arg );
                 }
                 if ( $self->check('VAR') ) {
-                    return Brocken::Katsuro::AST::Expr::UndefOp->new( $self->_pos_token($token),
-                        expr => $self->parse_expression(PREC_UNARY) );
+                    return Brocken::Katsuro::AST::Expr::UndefOp->new( $self->_pos_token($token), expr => $self->parse_expression(PREC_UNARY) );
                 }
                 return Brocken::Katsuro::AST::Expr::Undef->new( $self->_pos_token($token) );
             }
@@ -1060,19 +1058,13 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 # one place this differs from a dedicated single-evaluation lowering.
                 if ( $COMPOUND_ASSIGN{$op} ) {
                     my $base = substr( $op, 0, -1 );
-                    my $read = Brocken::Katsuro::AST::Expr::BinOp->new(
-                        $self->_pos_token($token), op => $base, lhs => $left, rhs => $right );
+                    my $read = Brocken::Katsuro::AST::Expr::BinOp->new( $self->_pos_token($token), op => $base, lhs => $left, rhs => $right );
                     return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $read, op => '=' );
                 }
                 return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $right, op => $op );
             }
             if ( $op eq '++' || $op eq '--' ) {
-                return Brocken::Katsuro::AST::Expr::IncDec->new(
-                    $self->_pos_token($token),
-                    op      => $op,
-                    prefix  => 0,
-                    operand => $left
-                );
+                return Brocken::Katsuro::AST::Expr::IncDec->new( $self->_pos_token($token), op => $op, prefix => 0, operand => $left );
             }
             if ( $op eq '->' ) {
                 my $ident;

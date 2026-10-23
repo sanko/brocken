@@ -45,8 +45,8 @@ subtest 'a boxed string is false only when empty or "0"' => sub {
 
 # A missing key yields a null box, which must read as false rather than dereferencing address zero.
 subtest 'a null box is false, not a fault' => sub {
-    run_case( 'my %h; if (%h{"missing"}) { return 1; } return 0;', 0, 'a missing key (null box) is false' );
-    run_case( 'my Any $a; if ($a) { return 1; } return 0;',       0, 'if (null_any) is false' );
+    run_case( 'my %h; if (%h{"missing"}) { return 1; } return 0;',                               0, 'a missing key (null box) is false' );
+    run_case( 'my Any $a; if ($a) { return 1; } return 0;',                                      0, 'if (null_any) is false' );
     run_case( 'my Any $a; my Any $b = 5; if ($a) { return 1; } if ($b) { return 2; } return 0;', 2, 'a later true box is still reached' );
 };
 
@@ -54,21 +54,17 @@ subtest 'a null box is false, not a fault' => sub {
 subtest 'unary ! follows the same truthiness' => sub {
     run_case( 'my %h; %h{"k"} = "0"; if (!%h{"k"}) { return 1; } return 0;',  1, '!("0") is true' );
     run_case( 'my %h; %h{"k"} = "00"; if (!%h{"k"}) { return 1; } return 0;', 0, '!("00") is false' );
-    run_case( 'my Any $a; if (!$a) { return 1; } return 0;',                 1, '!(null box) is true' );
-    run_case( 'my %h; %h{"k"} = 0; if (!%h{"k"}) { return 1; } return 0;',   1, 'boxed zero negates to true' );
-    run_case( 'my %h; %h{"k"} = 5; if (!%h{"k"}) { return 1; } return 0;',   0, 'boxed five negates to false' );
+    run_case( 'my Any $a; if (!$a) { return 1; } return 0;',                  1, '!(null box) is true' );
+    run_case( 'my %h; %h{"k"} = 0; if (!%h{"k"}) { return 1; } return 0;',    1, 'boxed zero negates to true' );
+    run_case( 'my %h; %h{"k"} = 5; if (!%h{"k"}) { return 1; } return 0;',    0, 'boxed five negates to false' );
 };
 
 # A boxed condition drives a while loop, and a false box never enters the body.
 subtest 'a boxed condition drives a while loop' => sub {
-    run_case(
-        'my %h; %h{"s"} = "x"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; if ($n == 3) { %h{"s"} = ""; } } return $n;',
-        3, 'the loop runs while the box is true'
-    );
-    run_case(
-        'my %h; %h{"s"} = "0"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; %h{"s"} = ""; } return $n;',
-        0, 'a false box never enters the body'
-    );
+    run_case( 'my %h; %h{"s"} = "x"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; if ($n == 3) { %h{"s"} = ""; } } return $n;',
+        3, 'the loop runs while the box is true' );
+    run_case( 'my %h; %h{"s"} = "0"; my i64 $n = 0; while (%h{"s"}) { $n = $n + 1; %h{"s"} = ""; } return $n;',
+        0, 'a false box never enters the body' );
 };
 
 # A boolean expression stored into the hash is a box too, and reads back by the same rule.
@@ -76,5 +72,4 @@ subtest 'a boxed comparison reads back by its value' => sub {
     run_case( 'my %h; %h{"k"} = (5 > 3); if (%h{"k"}) { return 1; } return 0;', 1, 'a true comparison is true' );
     run_case( 'my %h; %h{"k"} = (5 < 3); if (%h{"k"}) { return 1; } return 0;', 0, 'a false comparison is false' );
 };
-
 done_testing;

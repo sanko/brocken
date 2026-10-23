@@ -37,6 +37,9 @@ package Brocken::Jenny::Codegen::ARM64::Encodings v0.0.1 {
                 SF UXTX_OPT UXTB
                 BRK SVC
                 FCB_RESUME_OFF
+                FCVT_S_W FCVT_S_L FCVT_D_W FCVT_D_L
+                FCVT_W_S FCVT_W_D FCVT_L_S FCVT_L_D
+                FP_OP
             ]
         ]
     );
@@ -206,6 +209,7 @@ package Brocken::Jenny::Codegen::ARM64::Encodings v0.0.1 {
         FDIV         => 0x1E201800,    # FDIV:  000 11110 00 (10) (01) Rm 10000 Rn Rd
         FMIN         => 0x1E205800,    # FMIN:  000 11110 00 (10) (10) Rm 10000 Rn Rd
         FMAX         => 0x1E204800,    # FMAX:  000 11110 00 (10) (10) Rm 10000 Rn Rd
+        FP_OP        => 0x53,          # FP_OP: base for FADD.S/FADD.D/FSUB/FMUL/FDIV etc. (1010011)
 
         # Float - Int conversion (type-aware, these are 64-bit variants)
         SCVTF_D_X   => 0x9E244000,     # unused (type-aware now)
@@ -221,7 +225,22 @@ package Brocken::Jenny::Codegen::ARM64::Encodings v0.0.1 {
         # Exception generation
         BRK  => 0xD4200000,                                                            # BRK #imm16: 11010100 001 imm16 00000 00000
         SVC  => 0xD4000001,                                                            # SVC #imm16: 11010100 000 imm16 00000 00001
-        UXTB => 0x53001C00                                                             # UXTB Wd, Wn: 01 011010 110 000 000 000 Rn Rd
+        UXTB => 0x53001C00,                                                            # UXTB Wd, Wn: 01 011010 110 000 000 000 Rn Rd
+
+        # Conversions
+        # FCVT.<fmt>.<int>: funct7=1101000 (fmt=00 S), rs2 selects the integer width (00000 W, 00010 L); the format bit
+        # (bit 25) is set for D.
+        FCVT_S_W => 0xD0001000,    # FCVT.S.W: int32 -> float32
+        FCVT_S_L => 0xD0201000,    # FCVT.S.L: int64 -> float32
+        FCVT_D_W => 0xD2001000,    # FCVT.D.W: int32 -> float64
+        FCVT_D_L => 0xD2201000,    # FCVT.D.L: int64 -> float64
+
+        # FCVT.<int>.<fmt>: funct7=1100000 (fmt=00 S), rs2 selects the integer width (00000 W, 00010 L); the format bit
+        # (bit 25) is set for D.
+        FCVT_W_S => 0xC0001000,    # FCVT.W.S: float32 -> int32
+        FCVT_W_D => 0xC2001000,    # FCVT.W.D: float64 -> int32
+        FCVT_L_S => 0xC0201000,    # FCVT.L.S: float32 -> int64
+        FCVT_L_D => 0xC2201000,    # FCVT.L.D: float64 -> int64
     };
 };
 1;

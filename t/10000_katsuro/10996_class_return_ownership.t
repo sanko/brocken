@@ -43,7 +43,6 @@ BROCKEN
 
 # Count how many DESTROY bodies ran by the time the entry point returns. Every program below ends in `return $p->hit();`
 # so the exit status *is* the count.
-
 subtest 'a fresh construction returned by value is owned by the caller' => sub {
     answers(
         $setup . <<'BROCKEN',
@@ -59,7 +58,6 @@ BROCKEN
         0, 'DESTROY ran once and the instance was reclaimed', %native
     );
 };
-
 subtest 'a returned local is not released by the callee' => sub {
 
     # The exit cleanup must not free `$n` before handing it over: the caller still releases it exactly once, so a
@@ -74,7 +72,6 @@ BROCKEN
         0, 'returning a local transfers it without a premature release', %native
     );
 };
-
 subtest 'ownership forwards through a returned owned call' => sub {
     answers(
         $setup . <<'BROCKEN',
@@ -86,7 +83,6 @@ BROCKEN
         0, 'a call chain that ends in a fresh construction is owned end to end', %native
     );
 };
-
 subtest 'a null return fallback does not disqualify ownership' => sub {
     answers(
         $setup . <<'BROCKEN',
@@ -98,7 +94,6 @@ BROCKEN
         0, 'a conditional fresh return beside `return 0` is still owned', %native
     );
 };
-
 subtest 'a borrowed `$self` return is not released by the caller' => sub {
     answers(
         $setup . <<'BROCKEN',
@@ -110,7 +105,6 @@ BROCKEN
         0, 'the borrowed receiver is released once, when its owner leaves scope', %native
     );
 };
-
 subtest 'a borrowed pointer parameter return is not released by the caller' => sub {
 
     # `$n` escapes into `ident`, so the caller keeps its reference (a leak, never a dangling free). Nothing releases
@@ -125,7 +119,6 @@ BROCKEN
         0, 'a borrowed parameter return triggers no release on either side', %native
     );
 };
-
 subtest 'assignment takes ownership of an owned call result' => sub {
     answers(
         $setup . <<'BROCKEN',
@@ -137,7 +130,6 @@ BROCKEN
         0, 'a null slot that receives an owned instance releases it at scope exit', %native
     );
 };
-
 subtest 'reassignment releases the displaced instance' => sub {
     answers(
         $setup . <<'BROCKEN',
@@ -149,7 +141,6 @@ BROCKEN
         0, 'the old and the new instance are each released once', %native
     );
 };
-
 subtest 'assignment to an escaped local stays borrowed' => sub {
     answers(
         $setup . <<'BROCKEN',
@@ -161,7 +152,6 @@ BROCKEN
         0, 'an escaped slot never takes ownership, so nothing is released', %native
     );
 };
-
 subtest 'the callee transfers and the caller finalizes' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
@@ -180,5 +170,4 @@ BROCKEN
     my $caller = find_function( $mod, 'drive' )->as_string;
     like( $caller, qr/\@Node::__destroy/, 'the caller finalizes the owned instance' );
 };
-
 done_testing;

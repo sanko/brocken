@@ -467,7 +467,7 @@ sub decref( ptr $obj, ptr $heap_base ) {
         my i64 $flags = get_gc_flags($obj);
         if ( Brocken::ptr_cmp_eq( Brocken::band( $flags, 4 ), 0 ) && Brocken::ptr_cmp_eq( Brocken::band( $flags, 2 ), 0 ) ) {
             push_suspect_buffer( $obj, $heap_base );
-            maybe_gc_drain( $heap_base );
+            maybe_gc_drain($heap_base);
         }
     }
     return;
@@ -490,7 +490,7 @@ sub decref_obj( ptr $obj, ptr $heap_base ) : returns(i64) {
         my i64 $flags = get_gc_flags($obj);
         if ( Brocken::ptr_cmp_eq( Brocken::band( $flags, 4 ), 0 ) && Brocken::ptr_cmp_eq( Brocken::band( $flags, 2 ), 0 ) ) {
             push_suspect_buffer( $obj, $heap_base );
-            maybe_gc_drain( $heap_base );
+            maybe_gc_drain($heap_base);
         }
     }
     return $new_rc;
@@ -515,6 +515,7 @@ sub free_obj( ptr $obj, ptr $heap_base ) {
     my i64 $lc         = Brocken::load_i64($lc_ptr);
     $lc = Brocken::i64_sub( $lc, 1 );
     Brocken::store_i64( $lc_ptr, $lc );
+
     if ( Brocken::ptr_cmp_eq( $lc, 0 ) ) {
         my ptr $fb_head = get_free_blocks($heap_base);
         Brocken::store_i64( $block_base, $fb_head );
@@ -733,6 +734,7 @@ sub set_gc_flags( ptr $obj, i64 $flags ) {
 }
 
 sub push_suspect_buffer( ptr $obj, ptr $hb ) {
+
     # A drain in progress (count == -1) must not be handed new nodes: it is walking the very list this would extend,
     # and Phase 3 runs user DESTROY, which may decref and try to enqueue. Dropping the push only defers that suspect
     # to a later decref, never loses live memory.
@@ -958,7 +960,7 @@ sub gc_destroy_obj( ptr $obj, ptr $hb ) {
 sub gc_free_collected( ptr $obj, ptr $hb ) {
     my i64 $header = Brocken::load_i64($obj);
     my i64 $tag    = Brocken::band( Brocken::shr( $header, 24 ), 255 );
-    my i64 $old_rc = Brocken::band( $header, 65535 );
+    my i64 $old_rc = Brocken::band( $header,                     65535 );
     Brocken::store_i64( $obj, Brocken::i64_sub( $header, $old_rc ) );
     if ( Brocken::ptr_cmp_eq( $tag, 9 ) || Brocken::ptr_cmp_eq( $tag, 8 ) ) {
         my ptr $big_head = get_free_big_head($hb);
@@ -1136,6 +1138,7 @@ sub suspect_count( ptr $hb ) : returns(i64) {
 # shifted down by 24, and the payload starts 8 bytes in. These three are the whole of "what is this dynamic value, and
 # what is in it".
 sub box_tag( ptr $dyn ) : returns(i64) {
+
     # A null box is undef and has no header to read a tag from; tag 0 stands for that. Without this the dereference
     # faults, which `builtin::stringify(undef)` and `say` of an undefined value would otherwise hit.
     if ( Brocken::ptr_cmp_eq( $dyn, 0 ) ) {
@@ -1230,8 +1233,8 @@ sub is_truthy( ptr $dyn ) : returns(i64) {
         # boxed String whose payload is the NUL-terminated bytes.
         my i64 $class_id = Brocken::shr( $header, 32 );
         if ( Brocken::ptr_cmp_gt( $class_id, 0 ) ) { return 1; }
-        my ptr $s  = Brocken::load_i64( Brocken::ptr_add( $dyn, 8 ) );
-        my i8  $c0 = Brocken::load_i8($s);
+        my ptr $s = Brocken::load_i64( Brocken::ptr_add( $dyn, 8 ) );
+        my i8 $c0 = Brocken::load_i8($s);
         if ( $c0 == 0 ) { return 0; }
         if ( $c0 == 48 ) {
             my i8 $c1 = Brocken::load_i8( Brocken::ptr_add( $s, 1 ) );
@@ -1338,7 +1341,7 @@ sub str_trim( ptr $hb, ptr $s ) : returns(ptr) {
 # constructors cover the payload shapes `++`/`--` can produce: an i64, an f64, and a String's bytes pointer.
 sub make_box_i64( ptr $hb, i64 $val ) : returns(ptr) {
     my ptr $box = bump_alloc( $hb, 16 );
-    Brocken::store_i64( $box, Brocken::shl( 2, 24 ) );
+    Brocken::store_i64( $box,                        Brocken::shl( 2, 24 ) );
     Brocken::store_i64( Brocken::ptr_add( $box, 8 ), $val );
     return $box;
 }
@@ -1352,7 +1355,7 @@ sub make_box_f64( ptr $hb, f64 $val ) : returns(ptr) {
 
 sub make_box_str( ptr $hb, ptr $bytes ) : returns(ptr) {
     my ptr $box = bump_alloc( $hb, 16 );
-    Brocken::store_i64( $box, Brocken::shl( 4, 24 ) );
+    Brocken::store_i64( $box,                        Brocken::shl( 4, 24 ) );
     Brocken::store_i64( Brocken::ptr_add( $box, 8 ), $bytes );
     return $box;
 }
@@ -1384,7 +1387,7 @@ sub str_is_incrementable( ptr $s ) : returns(i64) {
             last;
         }
     }
-    if ( $n == 0 ) { return 0; }
+    if ( $n == 0 )                   { return 0; }
     if ( Brocken::load_i8($p) == 0 ) { return 1; }
     return 0;
 }
@@ -1451,7 +1454,6 @@ sub str_increment( ptr $hb, ptr $s ) : returns(ptr) {
             last;
         }
     }
-
     my i64 $newlen = $len;
     my i64 $offset = 0;
     if ( $stop < 0 ) {
@@ -1467,18 +1469,18 @@ sub str_increment( ptr $hb, ptr $s ) : returns(ptr) {
             $nc = $c + 1;
         }
         elsif ( $k > $stop ) {
-            if ( $c == 57 ) { $nc = 48; }
+            if    ( $c == 57 )  { $nc = 48; }
             elsif ( $c == 122 ) { $nc = 97; }
-            elsif ( $c == 90 ) { $nc = 65; }
+            elsif ( $c == 90 )  { $nc = 65; }
         }
         Brocken::store_i8( Brocken::ptr_add( $buf, $k + $offset ), $nc );
         $k = $k + 1;
     }
     if ( $stop < 0 ) {
         my i8 $c0  = Brocken::load_i8($s);
-        my i8 $pre = 49;                             # '1'
-        if ( $c0 >= 97 && $c0 <= 122 ) { $pre = 97; }    # 'a'
-        elsif ( $c0 >= 65 && $c0 <= 90 ) { $pre = 65; }  # 'A'
+        my i8 $pre = 49;                                    # '1'
+        if    ( $c0 >= 97 && $c0 <= 122 ) { $pre = 97; }    # 'a'
+        elsif ( $c0 >= 65 && $c0 <= 90 )  { $pre = 65; }    # 'A'
         Brocken::store_i8( $buf, $pre );
     }
     Brocken::store_i8( Brocken::ptr_add( $buf, $newlen ), 0 );
@@ -1488,7 +1490,7 @@ sub str_increment( ptr $hb, ptr $s ) : returns(ptr) {
 # Fresh bytes for `++` on a String slot: the magical increment when it applies, otherwise the numeric fallback the spec
 # gives for a non-matching string -- it coerces to 0, so the result is "1". A null slot (undef) is 0, also "1".
 sub str_inc_bytes( ptr $hb, ptr $s ) : returns(ptr) {
-    if ( Brocken::ptr_cmp_eq( $s, 0 ) ) { return i64_to_str( $hb, 1 ); }
+    if ( Brocken::ptr_cmp_eq( $s, 0 ) )  { return i64_to_str( $hb, 1 ); }
     if ( str_is_incrementable($s) != 0 ) { return str_increment( $hb, $s ); }
     return i64_to_str( $hb, 1 );
 }
@@ -1793,7 +1795,6 @@ sub array_shift_i64( ptr $arr ) : returns(i64) {
 # are borrowed NUL-terminated strings -- a rodata literal or a managed buffer the caller keeps alive -- so only the
 # values are owned. hash_set takes ownership of the value it is given and releases whatever it displaces; hash_release
 # releases the values before the table itself.
-
 sub hash_capacity( ptr $h ) : returns(i64) {
     return Brocken::shr( Brocken::load_i64( Brocken::ptr_add( $h, 16 ) ), 5 );
 }
@@ -1822,7 +1823,7 @@ sub str_eq( ptr $a, ptr $b ) : returns(i64) {
         my i64 $ca = Brocken::load_i8($pa);
         my i64 $cb = Brocken::load_i8($pb);
         if ( $ca != $cb ) { return 0; }
-        if ( $ca == 0 ) { return 1; }
+        if ( $ca == 0 )   { return 1; }
         $pa = Brocken::ptr_add( $pa, 1 );
         $pb = Brocken::ptr_add( $pb, 1 );
     }
@@ -1833,7 +1834,7 @@ sub hash_init( ptr $obj, i64 $cap, i64 $body ) : returns(ptr) {
     Brocken::store_i64( $obj, Brocken::i64_add( 1, Brocken::shl( 8, 24 ) ) );
     Brocken::store_i64( Brocken::ptr_add( $obj, 8 ),  0 );
     Brocken::store_i64( Brocken::ptr_add( $obj, 16 ), $body );
-    Brocken::store_i64( Brocken::ptr_add( $obj, 24 ), 0 );
+    Brocken::store_i64( Brocken::ptr_add( $obj, 24 ),  0 );
     Brocken::store_i64( Brocken::ptr_add( $obj, 32 ), -1 );
     Brocken::store_i64( Brocken::ptr_add( $obj, 40 ), -1 );
     my i64 $i = 0;
@@ -1892,6 +1893,7 @@ sub hash_find( ptr $h, ptr $key ) : returns(i64) {
         my ptr $slot = hash_bucket( $h, $idx );
         my ptr $k    = Brocken::load_i64($slot);
         if ( Brocken::ptr_cmp_eq( $k, 0 ) ) { return -1; }
+
         # `&&` is bitwise in Brocken, so both operands are always evaluated: `str_eq(1, $key)` would dereference the
         # tombstone sentinel. Test the sentinel first with a nested `if` so `str_eq` only sees a real key pointer.
         if ( Brocken::ptr_cmp_eq( $k, 1 ) == 0 ) {
@@ -1947,7 +1949,7 @@ sub hash_set( ptr $hb, ptr $h, ptr $key, ptr $val ) : returns(ptr) {
             my i64 $where = $idx;
             if ( $first_tomb >= 0 ) { $where = $first_tomb; }
             my ptr $dst = hash_bucket( $h, $where );
-            Brocken::store_i64( $dst, $key );
+            Brocken::store_i64( $dst,                        $key );
             Brocken::store_i64( Brocken::ptr_add( $dst, 8 ), $val );
 
             # Append the new bucket to the tail of the insertion-order list. `prev` is the current tail; the old tail's
@@ -1963,7 +1965,7 @@ sub hash_set( ptr $hb, ptr $h, ptr $key, ptr $val ) : returns(ptr) {
                 Brocken::store_i64( Brocken::ptr_add( hash_bucket( $h, $tail ), 24 ), $where );
             }
             Brocken::store_i64( Brocken::ptr_add( $h, 40 ), $where );
-            Brocken::store_i64( Brocken::ptr_add( $h, 8 ), Brocken::i64_add( Brocken::load_i64( Brocken::ptr_add( $h, 8 ) ), 1 ) );
+            Brocken::store_i64( Brocken::ptr_add( $h, 8 ),  Brocken::i64_add( Brocken::load_i64( Brocken::ptr_add( $h, 8 ) ), 1 ) );
             if ( $first_tomb >= 0 ) {
                 Brocken::store_i64( Brocken::ptr_add( $h, 24 ), Brocken::i64_sub( Brocken::load_i64( Brocken::ptr_add( $h, 24 ) ), 1 ) );
             }
@@ -2018,9 +2020,9 @@ sub hash_delete( ptr $hb, ptr $h, ptr $key ) : returns(ptr) {
         Brocken::store_i64( Brocken::ptr_add( hash_bucket( $h, $next ), 16 ), $prev );
     }
     Brocken::store_i64( $slot, 1 );
-    Brocken::store_i64( Brocken::ptr_add( $slot, 8 ), 0 );
-    Brocken::store_i64( Brocken::ptr_add( $h, 8 ), Brocken::i64_sub( Brocken::load_i64( Brocken::ptr_add( $h, 8 ) ), 1 ) );
-    Brocken::store_i64( Brocken::ptr_add( $h, 24 ), Brocken::i64_add( Brocken::load_i64( Brocken::ptr_add( $h, 24 ) ), 1 ) );
+    Brocken::store_i64( Brocken::ptr_add( $slot, 8 ),  0 );
+    Brocken::store_i64( Brocken::ptr_add( $h,    8 ),  Brocken::i64_sub( Brocken::load_i64( Brocken::ptr_add( $h, 8 ) ), 1 ) );
+    Brocken::store_i64( Brocken::ptr_add( $h,    24 ), Brocken::i64_add( Brocken::load_i64( Brocken::ptr_add( $h, 24 ) ), 1 ) );
     return $old;
 }
 
@@ -2049,7 +2051,7 @@ sub hash_release( ptr $hb, ptr $h ) {
 # result. Lists are bump-allocated and never freed, like every other list the compiler emits.
 sub list_alloc( ptr $hb, i64 $n ) : returns(ptr) {
     my ptr $list = bump_alloc( $hb, 16 + $n * 8 );
-    Brocken::store_i64( $list, Brocken::shl( 7, 24 ) );
+    Brocken::store_i64( $list,                        Brocken::shl( 7, 24 ) );
     Brocken::store_i64( Brocken::ptr_add( $list, 8 ), $n );
     return $list;
 }

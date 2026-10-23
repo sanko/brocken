@@ -1,6 +1,6 @@
 use v5.42;
 use feature qw[class];
-no warnings qw[experimental::class];
+no warnings qw[experimental::class experimental::builtin];
 #
 class Brocken v0.0.1 {
     use File::Basename qw[dirname];
@@ -73,6 +73,7 @@ class Brocken v0.0.1 {
         # table to keep in step here.
         my $codegen_class = $platform->codegen_class or die 'Unsupported platform for Brocken: ' . $platform->friendly;
         my $linker_class  = $platform->linker_class  or die 'No linker for the ' . $platform->format . ' format: ' . $platform->friendly;
+        builtin::load_module($linker_class);
         $codegen = $codegen_class->new( platform => $platform );
         $linker  = $linker_class->new( stack_reserve => $stack_reserve, stack_commit => $stack_commit );
         $ext     = $platform->bin_ext;

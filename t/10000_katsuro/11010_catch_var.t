@@ -31,7 +31,6 @@ try { throw 40; } catch ($e) { $r = $e + 2; }
 return $r;
 BROCKEN
 };
-
 subtest 'a nested catch reusing the name does not clobber the outer binding' => sub {
     check( <<'BROCKEN', 51, 'the outer catch variable survives the inner block' );
 my i64 $r = 0;
@@ -48,7 +47,6 @@ try {
 return $r;
 BROCKEN
 };
-
 subtest 'distinct catch variables are independent' => sub {
     check( <<'BROCKEN', 51, 'inner and outer names differ' );
 my i64 $r = 0;
@@ -61,11 +59,9 @@ try {
 return $r;
 BROCKEN
 };
-
 subtest 'the catch variable is scoped to the catch block' => sub {
     my $ok = eval { Brocken->new->compile('try { throw 1; } catch ($e) { } return $e;'); 1 };
     ok( !$ok, 'using the catch variable after the block is an error' );
     like( $@, qr/Undefined variable 'e'/, 'the error names the variable' );
 };
-
 done_testing;
