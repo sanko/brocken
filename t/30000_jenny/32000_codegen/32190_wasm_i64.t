@@ -7,7 +7,10 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
-use Test2::Tools::Brocken qw(temp_path);
+use Test2::Tools::Brocken qw[temp_path];
+use Brocken::Jenny::Codegen::Wasm;
+use Brocken::Jenny::Linker::Wasm;
+#
 my $host          = Brocken::Katsuro::Platform::parse();
 my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
@@ -30,11 +33,11 @@ chomp $node_path if $node_path;
     $builder->build_ret($v2);
     my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
     my $res     = $codegen->emit_function($func);
-    ok( length( $res->{body} ) > 0, 'Generated Wasm i64 math bytes' );
+    ok length( $res->{body} ) > 0, 'Generated Wasm i64 math bytes';
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
     my $output_file = temp_path('i64_math_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
-    ok( -e $output_file, 'Wasm i64 math file exists' );
+    ok -e $output_file, 'Wasm i64 math file exists';
 SKIP: {
         if ( $wasmtime_path && -x $wasmtime_path ) {
             my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -73,11 +76,11 @@ SKIP: {
     $builder->build_ret($val);
     my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
     my $res     = $codegen->emit_function($func);
-    ok( length( $res->{body} ) > 0, 'Generated Wasm i64 memory bytes' );
+    ok length( $res->{body} ) > 0, 'Generated Wasm i64 memory bytes';
     my $linker      = Brocken::Jenny::Linker::Wasm->new();
     my $output_file = temp_path('i64_mem_test') . '.wasm';
     $linker->write_executable( $output_file, $res, $platform );
-    ok( -e $output_file, 'Wasm i64 memory file exists' );
+    ok -e $output_file, 'Wasm i64 memory file exists';
 SKIP: {
         if ( $wasmtime_path && -x $wasmtime_path ) {
             my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
@@ -104,4 +107,5 @@ SKIP: {
     }
     unlink $output_file if -e $output_file;
 }
+#
 done_testing;

@@ -9,8 +9,7 @@ no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
 # Read a PE section table and return {name, vaddr, vsize, raw_ptr, raw_size}
-sub _pe_sections {
-    my ($file) = @_;
+sub _pe_sections($file) {
     open my $fh, '<:raw', $file or die "Cannot open $file: $!";
     my $bytes = do { local $/; <$fh> };
     close $fh;
@@ -31,8 +30,7 @@ sub _pe_sections {
 }
 
 # Read an ELF section table and return {name, addr, offset, size}
-sub _elf_sections {
-    my ($file) = @_;
+sub _elf_sections($file) {
     open my $fh, '<:raw', $file or die "Cannot open $file: $!";
     my $bytes = do { local $/; <$fh> };
     close $fh;
@@ -157,6 +155,7 @@ SKIP: {
 
 # Test 3: MachO linker emits __const section when set_rodata is called
 {
+    require Brocken::Jenny::Linker::MachO;
     my $output_file = temp_path('test_macho_rodata');
     my $linker      = Brocken::Jenny::Linker::MachO->new();
     $linker->set_labels( { E__BROCKEN_ENTRY => 0 } );
@@ -199,4 +198,5 @@ SKIP: {
     ok $const_found, '__const section present in MachO binary';
     unlink $output_file;
 }
+#
 done_testing;

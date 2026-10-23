@@ -8,7 +8,10 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
-use Test2::Tools::Brocken qw(temp_path);
+use Test2::Tools::Brocken qw[temp_path];
+use Brocken::Jenny::Codegen::Wasm;
+use Brocken::Jenny::Linker::Wasm;
+#
 my $host          = Brocken::Katsuro::Platform::parse();
 my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
@@ -62,7 +65,7 @@ SKIP: {
         [ sle => -1,  0, 1, '-1 sle 0 (true)' ],
         [ sle =>  0, -1, 0, '0 sle -1 (false)' ],
         [ sge => -1,  0, 0, '-1 sge 0 (false)' ],
-        [ sge =>  0, -1, 1, '0 sge -1 (true)' ],
+        [ sge =>  0, -1, 1, '0 sge -1 (true)' ]
     ) {
         my ( $pred, $a, $b, $expected, $desc ) = @$tc;
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
@@ -83,16 +86,16 @@ SKIP: {
         $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 0 ) );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, "Generated Wasm i128 icmp $desc bytes" );
+        ok length( $res->{body} ) > 0, "Generated Wasm i128 icmp $desc bytes";
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path("i128_icmp_$pred") . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, "Wasm i128 icmp $desc file exists" );
+        ok -e $output_file, "Wasm i128 icmp $desc file exists";
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], $expected ? 42 : 0, "Wasm i128 icmp $desc: lo = " . ( $expected ? 42 : 0 ) );
-        is( $vals[1], 0,                  "Wasm i128 icmp $desc: hi = 0" );
+        is $vals[0], $expected ? 42 : 0, "Wasm i128 icmp $desc: lo = " . ( $expected ? 42 : 0 );
+        is $vals[1], 0,                  "Wasm i128 icmp $desc: hi = 0";
         unlink $output_file if -e $output_file;
     }
     for my $tc (
@@ -137,7 +140,7 @@ SKIP: {
         [ slt => $BIG_ZERO, $BIG_A,    1, 'zero slt large (true)' ],
         [ sgt => $BIG_A,    $BIG_ZERO, 1, 'large sgt zero (true)' ],
         [ eq  => $BIG_HUGE, $BIG_HUGE, 1, 'max i128 eq (true)' ],
-        [ ult => $BIG_A,    $BIG_HUGE, 1, 'large ult max (true)' ],
+        [ ult => $BIG_A,    $BIG_HUGE, 1, 'large ult max (true)' ]
     ) {
         my ( $pred, $a, $b, $expected, $desc ) = @$tc;
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
@@ -154,17 +157,18 @@ SKIP: {
         $builder->build_ret( $big_const->(0) );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, "Generated Wasm i128 icmp $desc bytes" );
+        ok length( $res->{body} ) > 0, "Generated Wasm i128 icmp $desc bytes";
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path("i128_icmp_large_$pred") . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, "Wasm i128 icmp $desc file exists" );
+        ok -e $output_file, "Wasm i128 icmp $desc file exists";
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], $expected ? 42 : 0, "Wasm i128 icmp $desc: lo = " . ( $expected ? 42 : 0 ) );
-        is( $vals[1], 0,                  "Wasm i128 icmp $desc: hi = 0" );
+        is $vals[0], $expected ? 42 : 0, "Wasm i128 icmp $desc: lo = " . ( $expected ? 42 : 0 );
+        is $vals[1], 0,                  "Wasm i128 icmp $desc: hi = 0";
         unlink $output_file if -e $output_file;
     }
 }
+#
 done_testing;

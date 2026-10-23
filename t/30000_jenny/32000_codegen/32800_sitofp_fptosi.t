@@ -3,7 +3,6 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use blib;
 use Brocken::Katsuro;
-use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
 use Brocken::Jenny::Linker::Wasm;
@@ -13,6 +12,7 @@ use feature qw[class];
 
 # x86_64: SIToFP -> cvtsi2sd, FPToSI -> cvttsd2si
 subtest 'x86_64 SIToFP and FPToSI lowering' => sub {
+    require Brocken::Jenny::Lowerer::X86_64;
     my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => Brocken::Katsuro::Platform::parse('x86_64-unknown-linux-gnu') );
 
     # SIToFP: i64 -> f64
@@ -26,12 +26,12 @@ subtest 'x86_64 SIToFP and FPToSI lowering' => sub {
         my $mf         = $lowerer->lower($func);
         my $ops        = $mf->blocks->[0]->instructions;
         my ($cvtsi2sd) = grep { $_->opcode eq 'cvtsi2sd' } $ops->@*;
-        ok( defined $cvtsi2sd, 'x86_64 SIToFP: cvtsi2sd produced' );
+        is $cvtsi2sd, D(), 'x86_64 SIToFP: cvtsi2sd produced';
 
         if ($cvtsi2sd) {
             my ( $dst, $src ) = $cvtsi2sd->operands->@*;
-            is( $dst->kind, 'virt_reg', 'x86_64 SIToFP: dst is virt_reg' );
-            ok( $dst->type->kind eq 'float' && $dst->type->bits == 64, 'x86_64 SIToFP: dst type is f64' );
+            is $dst->kind, 'virt_reg', 'x86_64 SIToFP: dst is virt_reg';
+            ok $dst->type->kind eq 'float' && $dst->type->bits == 64, 'x86_64 SIToFP: dst type is f64';
         }
     }
 
@@ -47,8 +47,8 @@ subtest 'x86_64 SIToFP and FPToSI lowering' => sub {
         my $ops        = $mf->blocks->[0]->instructions;
         my ($mov)      = grep { $_->opcode eq 'mov' && $_->operands->[1]->kind eq 'imm' } $ops->@*;
         my ($cvtsi2sd) = grep { $_->opcode eq 'cvtsi2sd' } $ops->@*;
-        ok( defined $mov,      'x86_64 SIToFP imm: mov imm to tmp GP reg' );
-        ok( defined $cvtsi2sd, 'x86_64 SIToFP imm: cvtsi2sd produced' );
+        is $mov,      D(), 'x86_64 SIToFP imm: mov imm to tmp GP reg';
+        is $cvtsi2sd, D(), 'x86_64 SIToFP imm: cvtsi2sd produced';
     }
 
     # FPToSI: f64 -> i64
@@ -64,18 +64,19 @@ subtest 'x86_64 SIToFP and FPToSI lowering' => sub {
         my $mf          = $lowerer->lower($func);
         my $ops         = $mf->blocks->[0]->instructions;
         my ($cvttsd2si) = grep { $_->opcode eq 'cvttsd2si' } $ops->@*;
-        ok( defined $cvttsd2si, 'x86_64 FPToSI: cvttsd2si produced' );
+        is $cvttsd2si, D(), 'x86_64 FPToSI: cvttsd2si produced';
 
         if ($cvttsd2si) {
             my ( $dst, $src ) = $cvttsd2si->operands->@*;
-            is( $dst->kind, 'virt_reg', 'x86_64 FPToSI: dst is virt_reg' );
-            ok( $dst->type->kind eq 'int' && $dst->type->bits == 64, 'x86_64 FPToSI: dst type is i64' );
+            is $dst->kind, 'virt_reg', 'x86_64 FPToSI: dst is virt_reg';
+            ok $dst->type->kind eq 'int' && $dst->type->bits == 64, 'x86_64 FPToSI: dst type is i64';
         }
     }
 };
 
 # ARM64: SIToFP -> scvtf, FPToSI -> fcvtzs
 subtest 'ARM64 SIToFP and FPToSI lowering' => sub {
+    use Brocken::Jenny::Lowerer::ARM64;
     my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => Brocken::Katsuro::Platform::parse('aarch64-unknown-linux-gnu') );
 
     # SIToFP: i64 -> f64
@@ -89,11 +90,11 @@ subtest 'ARM64 SIToFP and FPToSI lowering' => sub {
         my $mf      = $lowerer->lower($func);
         my $ops     = $mf->blocks->[0]->instructions;
         my ($scvtf) = grep { $_->opcode eq 'scvtf' } $ops->@*;
-        ok( defined $scvtf, 'ARM64 SIToFP: scvtf produced' );
+        is $scvtf, D(), 'ARM64 SIToFP: scvtf produced';
 
         if ($scvtf) {
             my ( $dst, $src ) = $scvtf->operands->@*;
-            ok( $dst->type->kind eq 'float' && $dst->type->bits == 64, 'ARM64 SIToFP: dst type is f64' );
+            ok $dst->type->kind eq 'float' && $dst->type->bits == 64, 'ARM64 SIToFP: dst type is f64';
         }
     }
 
@@ -109,8 +110,8 @@ subtest 'ARM64 SIToFP and FPToSI lowering' => sub {
         my $ops     = $mf->blocks->[0]->instructions;
         my ($mov)   = grep { $_->opcode eq 'mov' && $_->operands->[1]->kind eq 'imm' } $ops->@*;
         my ($scvtf) = grep { $_->opcode eq 'scvtf' } $ops->@*;
-        ok( defined $mov,   'ARM64 SIToFP imm: mov imm to tmp GP reg' );
-        ok( defined $scvtf, 'ARM64 SIToFP imm: scvtf produced' );
+        ok defined $mov,   'ARM64 SIToFP imm: mov imm to tmp GP reg';
+        ok defined $scvtf, 'ARM64 SIToFP imm: scvtf produced';
     }
 
     # FPToSI: f64 -> i64
@@ -126,17 +127,18 @@ subtest 'ARM64 SIToFP and FPToSI lowering' => sub {
         my $mf       = $lowerer->lower($func);
         my $ops      = $mf->blocks->[0]->instructions;
         my ($fcvtzs) = grep { $_->opcode eq 'fcvtzs' } $ops->@*;
-        ok( defined $fcvtzs, 'ARM64 FPToSI: fcvtzs produced' );
+        ok defined $fcvtzs, 'ARM64 FPToSI: fcvtzs produced';
 
         if ($fcvtzs) {
             my ( $dst, $src ) = $fcvtzs->operands->@*;
-            ok( $dst->type->kind eq 'int' && $dst->type->bits == 64, 'ARM64 FPToSI: dst type is i64' );
+            ok $dst->type->kind eq 'int' && $dst->type->bits == 64, 'ARM64 FPToSI: dst type is i64';
         }
     }
 };
 
 # RISCV64: SIToFP -> scvtf (FCVT.D.L), FPToSI -> fcvtzs (FCVT.L.D)
 subtest 'RISCV64 SIToFP and FPToSI lowering' => sub {
+    require Brocken::Jenny::Lowerer::RISCV64;
     my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new( platform => Brocken::Katsuro::Platform::parse('riscv64-unknown-linux-gnu') );
 
     # SIToFP: i64 -> f64
@@ -150,11 +152,11 @@ subtest 'RISCV64 SIToFP and FPToSI lowering' => sub {
         my $mf      = $lowerer->lower($func);
         my $ops     = $mf->blocks->[0]->instructions;
         my ($scvtf) = grep { $_->opcode eq 'scvtf' } $ops->@*;
-        ok( defined $scvtf, 'RISCV64 SIToFP: scvtf produced' );
+        is $scvtf, D(), 'RISCV64 SIToFP: scvtf produced';
 
         if ($scvtf) {
             my ( $dst, $src ) = $scvtf->operands->@*;
-            ok( $dst->type->kind eq 'float' && $dst->type->bits == 64, 'RISCV64 SIToFP: dst type is f64' );
+            ok $dst->type->kind eq 'float' && $dst->type->bits == 64, 'RISCV64 SIToFP: dst type is f64';
         }
     }
 
@@ -170,8 +172,8 @@ subtest 'RISCV64 SIToFP and FPToSI lowering' => sub {
         my $ops     = $mf->blocks->[0]->instructions;
         my ($mov)   = grep { $_->opcode eq 'mov' && $_->operands->[1]->kind eq 'imm' } $ops->@*;
         my ($scvtf) = grep { $_->opcode eq 'scvtf' } $ops->@*;
-        ok( defined $mov,   'RISCV64 SIToFP imm: mov imm to tmp GP reg' );
-        ok( defined $scvtf, 'RISCV64 SIToFP imm: scvtf produced' );
+        is $mov,   D(), 'RISCV64 SIToFP imm: mov imm to tmp GP reg';
+        is $scvtf, D(), 'RISCV64 SIToFP imm: scvtf produced';
     }
 
     # FPToSI: f64 -> i64
@@ -187,17 +189,18 @@ subtest 'RISCV64 SIToFP and FPToSI lowering' => sub {
         my $mf       = $lowerer->lower($func);
         my $ops      = $mf->blocks->[0]->instructions;
         my ($fcvtzs) = grep { $_->opcode eq 'fcvtzs' } $ops->@*;
-        ok( defined $fcvtzs, 'RISCV64 FPToSI: fcvtzs produced' );
+        is $fcvtzs, D(), 'RISCV64 FPToSI: fcvtzs produced';
 
         if ($fcvtzs) {
             my ( $dst, $src ) = $fcvtzs->operands->@*;
-            ok( $dst->type->kind eq 'int' && $dst->type->bits == 64, 'RISCV64 FPToSI: dst type is i64' );
+            ok $dst->type->kind eq 'int' && $dst->type->bits == 64, 'RISCV64 FPToSI: dst type is i64';
         }
     }
 };
 
 # Wasm: SIToFP -> f64_convert_i64_s, FPToSI -> i64_trunc_f64_s
 subtest 'Wasm SIToFP and FPToSI lowering' => sub {
+    require Brocken::Jenny::Lowerer::Wasm;
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
 
     # SIToFP: i64 -> f64
@@ -212,8 +215,8 @@ subtest 'Wasm SIToFP and FPToSI lowering' => sub {
         my $ops       = $mf->blocks->[0]->instructions;
         my ($conv_op) = grep { $_->opcode eq 'f64_convert_i64_s' } $ops->@*;
         my @sets      = grep { $_->opcode eq 'local_set' } $ops->@*;
-        ok( defined $conv_op,  'Wasm SIToFP: f64_convert_i64_s produced' );
-        ok( scalar @sets >= 1, 'Wasm SIToFP: local_set produced' );
+        ok defined $conv_op,  'Wasm SIToFP: f64_convert_i64_s produced';
+        ok scalar @sets >= 1, 'Wasm SIToFP: local_set produced';
     }
 
     # FPToSI: f64 -> i64
@@ -230,8 +233,8 @@ subtest 'Wasm SIToFP and FPToSI lowering' => sub {
         my $ops        = $mf->blocks->[0]->instructions;
         my ($trunc_op) = grep { $_->opcode eq 'i64_trunc_f64_s' } $ops->@*;
         my @sets       = grep { $_->opcode eq 'local_set' } $ops->@*;
-        ok( defined $trunc_op, 'Wasm FPToSI: i64_trunc_f64_s produced' );
-        ok( scalar @sets >= 1, 'Wasm FPToSI: local_set produced' );
+        ok defined $trunc_op, 'Wasm FPToSI: i64_trunc_f64_s produced';
+        ok scalar @sets >= 1, 'Wasm FPToSI: local_set produced';
     }
 };
 
@@ -246,7 +249,7 @@ my @CONV = (
     { dir => 'fptosi', src => 'f64', dst => 'i64', op => 'i64_trunc_f64_s' },
     { dir => 'fptosi', src => 'f64', dst => 'i32', op => 'i32_trunc_f64_s' },
     { dir => 'fptosi', src => 'f32', dst => 'i64', op => 'i64_trunc_f32_s' },
-    { dir => 'fptosi', src => 'f32', dst => 'i32', op => 'i32_trunc_f32_s' },
+    { dir => 'fptosi', src => 'f32', dst => 'i32', op => 'i32_trunc_f32_s' }
 );
 sub ty { my $m = shift; return Brocken::Lindsay::IR::Type->$m() }
 
@@ -258,7 +261,7 @@ sub conversion_function {
     my $func = Brocken::Lindsay::IR::Function->new(
         name        => ( $entry ? '_BROCKEN_ENTRY' : 'conv' ),
         return_type => ty( $c->{dst} ),
-        params      => ( $entry ? [ Brocken::Lindsay::IR::Value->new( type => ty('i64'), name => 'heap_base' ) ] : [] ),
+        params      => ( $entry ? [ Brocken::Lindsay::IR::Value->new( type => ty('i64'), name => 'heap_base' ) ] : [] )
     );
     my $b = Brocken::Lindsay::IR::Builder->new();
     $b->position_at_end( $func->append_block('entry') );
@@ -280,13 +283,15 @@ subtest 'Wasm picks the conversion opcode for both widths' => sub {
     }
 };
 subtest 'every int/float width pair compiles to a module that runs' => sub {
+    require Brocken::Jenny::Codegen::Wasm;
     my $host = Brocken::Katsuro::Platform::parse();
     my $null = $host->is_windows ? 'NUL'                  : '/dev/null';
     my $wt   = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
     chomp $wt if $wt;
-    skip_all('wasmtime not available') unless $wt && -f $wt;
+    skip_all 'wasmtime not available' unless $wt && -f $wt;
     my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
     my $codegen  = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
+
     for my $c (@CONV) {
         my $module = temp_path( 'conv_' . $c->{src} . '_' . $c->{dst} ) . '.wasm';
         Brocken::Jenny::Linker::Wasm->new->write_executable( $module, $codegen->emit_functions( [ conversion_function( $c, 1 ) ] ), $platform );
@@ -297,8 +302,9 @@ subtest 'every int/float width pair compiles to a module that runs' => sub {
         is( system($compile), 0, "$c->{src} -> $c->{dst} validates" ) or diag qx[$compile];
         my $got = qx["$wt" run --invoke _BROCKEN_ENTRY "$module" 1024 2>$null];
         chomp $got;
-        is( $got, 42, "$c->{src} -> $c->{dst} round-trips 42" );
+        is $got, 42, "$c->{src} -> $c->{dst} round-trips 42";
         unlink $module if -e $module;
     }
 };
+#
 done_testing;

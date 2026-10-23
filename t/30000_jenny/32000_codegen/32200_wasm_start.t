@@ -9,7 +9,9 @@ use Brocken::Jenny::Linker::Wasm;
 use Brocken::ICB ();
 no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
-use Test2::Tools::Brocken qw(temp_path);
+use Test2::Tools::Brocken qw[temp_path];
+use Brocken::Jenny::Codegen::Wasm;
+#
 my $host          = Brocken::Katsuro::Platform::parse();
 my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
 my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;
@@ -99,4 +101,5 @@ subtest 'Wasm memory covers the base, its state, the heap and the frames' => sub
     like $bytes, qr/\x05\x03\x01\x00\Q$page_byte\E/, 'the emitted memory section declares the whole heap';
     unlink $module if -e $module;
 };
+#
 done_testing;

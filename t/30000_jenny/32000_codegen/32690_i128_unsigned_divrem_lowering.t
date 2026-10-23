@@ -48,6 +48,7 @@ for my $backend (@backends) {
                 $op eq 'rem'   ? $build->build_rem( $lhs, $rhs, '%r' ) :
                 $build->build_urem( $lhs, $rhs, '%r' );
             $build->build_ret($result);
+            builtin::load_module($class);
             my $lowerer = $platform ? $class->new( platform => $platform ) : $class->new();
             my @insts   = $lowerer->lower($func)->blocks->[0]->instructions->@*;
             my $signed  = grep {
@@ -55,18 +56,18 @@ for my $backend (@backends) {
                     $_->operands->@*
             } @insts;
             my $is_signed = $op eq 'div' || $op eq 'rem';
-            is( $signed ? 1 : 0, $is_signed ? 1 : 0, "$label i128 $op ($operand_desc): signed handling " . ( $is_signed ? 'present' : 'absent' ) );
+            is $signed ? 1 : 0, $is_signed ? 1 : 0, "$label i128 $op ($operand_desc): signed handling " . ( $is_signed ? 'present' : 'absent' );
             my ($idx) = grep { ( $insts[$_]->comment // '' ) eq 'i128 div store lo' } 0 .. $#insts;
-            ok( defined $idx, "$label i128 $op ($operand_desc): result stored" );
+            is $idx, D(), "$label i128 $op ($operand_desc): result stored";
             next unless defined $idx;
             my $store = $insts[$idx];
 
             # The other three backends name the source in the store itself. Wasm pushes it onto the stack first and
             # stores with the destination alone, so the source is the operand of the instruction before.
             my $src = $store->operands->[1] // $insts[ $idx - 1 ]->operands->[-1];
-            ok( defined $src, "$label i128 $op ($operand_desc): source operand found" );
+            is $src, D(), "$label i128 $op ($operand_desc): source operand found";
             next unless defined $src;
-            like( $src->value // '', qr/_(?:q|r)_lo$/, "$label i128 $op ($operand_desc): takes the " . ( $op =~ /div/ ? 'quotient' : 'remainder' ) );
+            like $src->value // '', qr/_(?:q|r)_lo$/, "$label i128 $op ($operand_desc): takes the " . ( $op =~ /div/ ? 'quotient' : 'remainder' );
         }
     }
 }

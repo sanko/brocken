@@ -43,10 +43,11 @@ my @TARGETS = (
     [ 'aarch64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::ARM64',   0,  0 ],
     [ 'riscv64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::RISCV64', 0,  0 ],
     [ 'x86_64-unknown-linux-gnu',  'Brocken::Jenny::Lowerer::X86_64',  0,  16 ],
-    [ 'x86_64-pc-windows-msvc',    'Brocken::Jenny::Lowerer::X86_64',  32, 48 ],
+    [ 'x86_64-pc-windows-msvc',    'Brocken::Jenny::Lowerer::X86_64',  32, 48 ]
 );
 
 sub lowered( $triple, $class, $src ) {
+    builtin::load_module($class);
     my $platform = Brocken::Katsuro::Platform::parse($triple);
     my $module   = Brocken->new->compile($src);
     my %mf;

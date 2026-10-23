@@ -7,7 +7,10 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
-use Test2::Tools::Brocken qw(temp_path);
+use Test2::Tools::Brocken qw[temp_path];
+use Brocken::Jenny::Codegen::Wasm;
+use Brocken::Jenny::Linker::Wasm;
+#
 my $host          = Brocken::Katsuro::Platform::parse();
 my $platform      = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $null          = $host->is_windows ? 'NUL'                  : '/dev/null';
@@ -15,31 +18,27 @@ my $wasmtime_path = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime
 chomp $wasmtime_path if $wasmtime_path;
 SKIP: {
     skip 'wasmtime not available', 40 unless $wasmtime_path && -f $wasmtime_path;
-
-    # Test 1: constant i128 return (42)
-    {
+    subtest 'constant i128 return (42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
         $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i128(), value => 42 ) );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 constant bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 constant bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_const') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 constant file exists' );
+        ok -e $output_file, 'Wasm i128 constant file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( scalar @vals, 2,  'Wasm i128 constant returns two i64 values' );
-        is( $vals[0],     42, 'Wasm i128 constant lo = 42' );
-        is( $vals[1],     0,  'Wasm i128 constant hi = 0' );
+        is scalar @vals, 2,  'Wasm i128 constant returns two i64 values';
+        is $vals[0],     42, 'Wasm i128 constant lo = 42';
+        is $vals[1],     0,  'Wasm i128 constant hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 2: i128 add (40 + 2 = 42)
-    {
+    };
+    subtest 'i128 add (40 + 2 = 42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -52,21 +51,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 add bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 add bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_add') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 add file exists' );
+        ok -e $output_file, 'Wasm i128 add file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], 42, 'Wasm i128 add (40+2): lo = 42' );
-        is( $vals[1], 0,  'Wasm i128 add (40+2): hi = 0' );
+        is $vals[0], 42, 'Wasm i128 add (40+2): lo = 42';
+        is $vals[1], 0,  'Wasm i128 add (40+2): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 3: i128 sub (100 - 58 = 42)
-    {
+    };
+    subtest 'i128 sub (100 - 58 = 42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -79,21 +76,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 sub bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 sub bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_sub') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 sub file exists' );
+        ok -e $output_file, 'Wasm i128 sub file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], 42, 'Wasm i128 sub (100-58): lo = 42' );
-        is( $vals[1], 0,  'Wasm i128 sub (100-58): hi = 0' );
+        is $vals[0], 42, 'Wasm i128 sub (100-58): lo = 42';
+        is $vals[1], 0,  'Wasm i128 sub (100-58): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 4: i128 and (63 & 42 = 42)
-    {
+    };
+    subtest 'i128 and (63 & 42 = 42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -106,21 +101,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 and bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 and bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_and') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 and file exists' );
+        ok -e $output_file, 'Wasm i128 and file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], 42, 'Wasm i128 and (63&42): lo = 42' );
-        is( $vals[1], 0,  'Wasm i128 and (63&42): hi = 0' );
+        is $vals[0], 42, 'Wasm i128 and (63&42): lo = 42';
+        is $vals[1], 0,  'Wasm i128 and (63&42): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 5: i128 or (40 | 2 = 42)
-    {
+    };
+    subtest 'i128 or (40 | 2 = 42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -133,21 +126,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 or bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 or bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_or') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 or file exists' );
+        ok -e $output_file, 'Wasm i128 or file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], 42, 'Wasm i128 or (40|2): lo = 42' );
-        is( $vals[1], 0,  'Wasm i128 or (40|2): hi = 0' );
+        is $vals[0], 42, 'Wasm i128 or (40|2): lo = 42';
+        is $vals[1], 0,  'Wasm i128 or (40|2): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 6: i128 xor (40 ^ 2 = 42)
-    {
+    };
+    subtest 'i128 xor (40 ^ 2 = 42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -160,21 +151,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 xor bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 xor bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_xor') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 xor file exists' );
+        ok -e $output_file, 'Wasm i128 xor file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], 42, 'Wasm i128 xor (40^2): lo = 42' );
-        is( $vals[1], 0,  'Wasm i128 xor (40^2): hi = 0' );
+        is $vals[0], 42, 'Wasm i128 xor (40^2): lo = 42';
+        is $vals[1], 0,  'Wasm i128 xor (40^2): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 7: i128 shl (21 << 1 = 42)
-    {
+    };
+    subtest 'i128 shl (21 << 1 = 42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -187,21 +176,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 shl bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 shl bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_shl') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 shl file exists' );
+        ok -e $output_file, 'Wasm i128 shl file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], 42, 'Wasm i128 shl (21<<1): lo = 42' );
-        is( $vals[1], 0,  'Wasm i128 shl (21<<1): hi = 0' );
+        is $vals[0], 42, 'Wasm i128 shl (21<<1): lo = 42';
+        is $vals[1], 0,  'Wasm i128 shl (21<<1): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 8: i128 lshr (84 >> 1 = 42)
-    {
+    };
+    subtest 'i128 lshr (84 >> 1 = 42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -214,21 +201,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 lshr bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 lshr bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_lshr') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 lshr file exists' );
+        ok -e $output_file, 'Wasm i128 lshr file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], 42, 'Wasm i128 lshr (84>>1): lo = 42' );
-        is( $vals[1], 0,  'Wasm i128 lshr (84>>1): hi = 0' );
+        is $vals[0], 42, 'Wasm i128 lshr (84>>1): lo = 42';
+        is $vals[1], 0,  'Wasm i128 lshr (84>>1): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 9: i128 ashr (84 >> 1 = 42)
-    {
+    };
+    subtest 'i128 ashr (84 >> 1 = 42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -241,21 +226,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 ashr bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 ashr bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_ashr') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 ashr file exists' );
+        ok -e $output_file, 'Wasm i128 ashr file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], 42, 'Wasm i128 ashr (84>>1): lo = 42' );
-        is( $vals[1], 0,  'Wasm i128 ashr (84>>1): hi = 0' );
+        is $vals[0], 42, 'Wasm i128 ashr (84>>1): lo = 42';
+        is $vals[1], 0,  'Wasm i128 ashr (84>>1): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 10: i128 mul (21 * 2 = 42)
-    {
+    };
+    subtest 'i128 mul (21 * 2 = 42)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -268,21 +251,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 mul bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 mul bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_mul') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 mul file exists' );
+        ok -e $output_file, 'Wasm i128 mul file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0], 42, 'Wasm i128 mul (21*2): lo = 42' );
-        is( $vals[1], 0,  'Wasm i128 mul (21*2): hi = 0' );
+        is $vals[0], 42, 'Wasm i128 mul (21*2): lo = 42';
+        is $vals[1], 0,  'Wasm i128 mul (21*2): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 11: i128 div (42 / 2 = 21)
-    {
+    };
+    subtest 'i128 div (42 / 2 = 21)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -295,21 +276,19 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 div bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 div bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_div') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 div file exists' );
+        ok -e $output_file, 'Wasm i128 div file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0] + 0, 21, 'Wasm i128 div (42/2): lo = 21' );
-        is( $vals[1] + 0, 0,  'Wasm i128 div (42/2): hi = 0' );
+        is $vals[0] + 0, 21, 'Wasm i128 div (42/2): lo = 21';
+        is $vals[1] + 0, 0,  'Wasm i128 div (42/2): hi = 0';
         unlink $output_file if -e $output_file;
-    }
-
-    # Test 12: i128 rem (21 % 10 = 1)
-    {
+    };
+    subtest 'i128 rem (21 % 10 = 1)' => sub {
         my $func    = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i128() );
         my $builder = Brocken::Lindsay::IR::Builder->new();
         $builder->position_at_end( $func->append_block('entry') );
@@ -322,17 +301,18 @@ SKIP: {
         );
         my $codegen = Brocken::Jenny::Codegen::Wasm->new( platform => $platform );
         my $res     = $codegen->emit_function($func);
-        ok( length( $res->{body} ) > 0, 'Generated Wasm i128 rem bytes' );
+        ok length( $res->{body} ) > 0, 'Generated Wasm i128 rem bytes';
         my $linker      = Brocken::Jenny::Linker::Wasm->new();
         my $output_file = temp_path('i128_rem') . '.wasm';
         $linker->write_executable( $output_file, $res, $platform );
-        ok( -e $output_file, 'Wasm i128 rem file exists' );
+        ok -e $output_file, 'Wasm i128 rem file exists';
         my $output = qx["$wasmtime_path" run --invoke main $output_file 2>$null];
         chomp $output;
         my @vals = split /\n/, $output;
-        is( $vals[0] + 0, 1, 'Wasm i128 rem (21%10): lo = 1' );
-        is( $vals[1] + 0, 0, 'Wasm i128 rem (21%10): hi = 0' );
+        is $vals[0] + 0, 1, 'Wasm i128 rem (21%10): lo = 1';
+        is $vals[1] + 0, 0, 'Wasm i128 rem (21%10): hi = 0';
         unlink $output_file if -e $output_file;
     }
 }
+#
 done_testing;

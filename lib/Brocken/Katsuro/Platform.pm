@@ -366,4 +366,6 @@ class Brocken::Katsuro::Platform v0.0.1 {
     method fp_return_register()                    { $self->abi->fp_return_register }
     method fiber_reg()                             { $self->abi->fiber_reg }
     method ctx_swap_scratch()                      { $self->abi->ctx_swap_scratch }
-} 1;
+    }
+    #
+    1;

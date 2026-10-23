@@ -7,7 +7,10 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
-use Test2::Tools::Brocken qw(temp_path);
+use Test2::Tools::Brocken qw[temp_path];
+use Brocken::Jenny::Codegen::Wasm;
+use Brocken::Jenny::Linker::Wasm;
+#
 my $host     = Brocken::Katsuro::Platform::parse();
 my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 my $func     = Brocken::Lindsay::IR::Function->new( name => 'main', return_type => Brocken::Lindsay::IR::Type::i32() );
@@ -53,4 +56,5 @@ SKIP: {
     }
 }
 unlink $output_file if -e $output_file;
+#
 done_testing;

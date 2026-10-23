@@ -7,6 +7,8 @@ use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
 use Test2::Tools::Brocken qw[temp_path];
+use Brocken::Jenny::Codegen::Wasm;
+use Brocken::Jenny::Linker::Wasm;
 
 # i64.const immediates are signed LEB128. The encoder used to reach for
 # POSIX::floor($v / 128), which divides through a double: a double carries 53 bits of mantissa, so every value past

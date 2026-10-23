@@ -5,6 +5,7 @@ use blib;
 use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
+use Brocken::Jenny::RegAlloc;
 
 sub mk_mf {
     my $mf   = Brocken::Jenny::MIR::MachineFunction->new( name => 'restores', frame_size => 0 );

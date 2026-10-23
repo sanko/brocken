@@ -7,10 +7,11 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
+#
 my %class_to_triple = (
     'Brocken::Jenny::Lowerer::X86_64'  => 'x86_64-unknown-linux-gnu',
     'Brocken::Jenny::Lowerer::ARM64'   => 'aarch64-unknown-linux-gnu',
-    'Brocken::Jenny::Lowerer::RISCV64' => 'riscv64-unknown-linux-gnu',
+    'Brocken::Jenny::Lowerer::RISCV64' => 'riscv64-unknown-linux-gnu'
 );
 my $check = sub {
     my ( $lowerer_class, $ir_name, $ir_body, %checks ) = @_;
@@ -19,9 +20,10 @@ my $check = sub {
     $builder->position_at_end( $func->append_block('entry') );
     $ir_body->($builder);
     my $platform = $class_to_triple{$lowerer_class} ? Brocken::Katsuro::Platform::parse( $class_to_triple{$lowerer_class} ) : undef;
-    my $lowerer  = $platform                        ? $lowerer_class->new( platform => $platform )                          : $lowerer_class->new();
-    my $mf       = $lowerer->lower($func);
-    my @insts    = $mf->blocks->[0]->instructions->@*;
+    builtin::load_module($lowerer_class);
+    my $lowerer = $platform ? $lowerer_class->new( platform => $platform ) : $lowerer_class->new();
+    my $mf      = $lowerer->lower($func);
+    my @insts   = $mf->blocks->[0]->instructions->@*;
 
     for my ( $opcode, $label )(%checks) {
         ok( grep( { $_->opcode eq $opcode } @insts ), $label );
@@ -227,9 +229,9 @@ $check->(
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @stores  = grep { $_->opcode =~ /^store/ && $_->comment =~ /i128/ } @insts;
-    ok( scalar @stores == 2, 'x86_64 i128 store: two stores (lo+hi)' );
+    ok scalar @stores == 2, 'x86_64 i128 store: two stores (lo+hi)';
     my @loads = grep { $_->opcode eq 'load' && $_->comment =~ /i128/ } @insts;
-    ok( scalar @loads == 2, 'x86_64 i128 load: two loads (lo+hi)' );
+    ok scalar @loads == 2, 'x86_64 i128 load: two loads (lo+hi)';
 }
 
 # x86_64 i128 ret
@@ -242,9 +244,9 @@ $check->(
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @rax     = grep { $_->opcode eq 'mov' && $_->comment =~ /rax/ } @insts;
-    ok( scalar @rax == 1, 'x86_64 i128 ret: mov to rax' );
+    ok scalar @rax == 1, 'x86_64 i128 ret: mov to rax';
     my @rdx = grep { $_->opcode eq 'mov' && $_->comment =~ /rdx/ } @insts;
-    ok( scalar @rdx == 1, 'x86_64 i128 ret: mov to rdx' );
+    ok scalar @rdx == 1, 'x86_64 i128 ret: mov to rdx';
 }
 
 # ARM64 i128 store/load
@@ -261,9 +263,9 @@ $check->(
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @stores  = grep { $_->opcode =~ /^store/ && $_->comment =~ /i128/ } @insts;
-    ok( scalar @stores == 2, 'ARM64 i128 store: two stores (lo+hi)' );
+    ok scalar @stores == 2, 'ARM64 i128 store: two stores (lo+hi)';
     my @loads = grep { $_->opcode eq 'load' && $_->comment =~ /i128/ } @insts;
-    ok( scalar @loads == 2, 'ARM64 i128 load: two loads (lo+hi)' );
+    ok scalar @loads == 2, 'ARM64 i128 load: two loads (lo+hi)';
 }
 
 # ARM64 i128 ret
@@ -276,9 +278,9 @@ $check->(
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @x0      = grep { $_->opcode eq 'mov' && $_->comment =~ /x0/ } @insts;
-    ok( scalar @x0 == 1, 'ARM64 i128 ret: mov to x0' );
+    ok scalar @x0 == 1, 'ARM64 i128 ret: mov to x0';
     my @x1 = grep { $_->opcode eq 'mov' && $_->comment =~ /x1/ } @insts;
-    ok( scalar @x1 == 1, 'ARM64 i128 ret: mov to x1' );
+    ok scalar @x1 == 1, 'ARM64 i128 ret: mov to x1';
 }
 
 # RISCV64 i128 store/load
@@ -295,9 +297,9 @@ $check->(
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @stores  = grep { $_->opcode =~ /^store/ && $_->comment =~ /i128 store/ } @insts;
-    ok( scalar @stores == 2, 'RISCV64 i128 store: two stores (lo+hi)' );
+    ok scalar @stores == 2, 'RISCV64 i128 store: two stores (lo+hi)';
     my @loads = grep { $_->opcode eq 'load' && $_->comment =~ /i128 load/ } @insts;
-    ok( scalar @loads == 2, 'RISCV64 i128 load: two loads (lo+hi)' );
+    ok scalar @loads == 2, 'RISCV64 i128 load: two loads (lo+hi)';
 }
 
 # RISCV64 i128 ret
@@ -310,9 +312,9 @@ $check->(
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @a0      = grep { $_->comment =~ /i128 lo/ } @insts;
-    ok( scalar @a0 == 1, 'RISCV64 i128 ret: mv to a0' );
+    ok scalar @a0 == 1, 'RISCV64 i128 ret: mv to a0';
     my @a1 = grep { $_->comment =~ /i128 hi/ } @insts;
-    ok( scalar @a1 == 1, 'RISCV64 i128 ret: mv to a1' );
+    ok scalar @a1 == 1, 'RISCV64 i128 ret: mv to a1';
 }
 
 # Wasm i128 store
@@ -327,9 +329,9 @@ $check->(
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @stores  = grep { $_->opcode eq 'i64_store' && $_->comment =~ /store lo/ } @insts;
-    ok( scalar @stores == 1, 'Wasm i128 store: i64_store lo' );
+    ok scalar @stores == 1, 'Wasm i128 store: i64_store lo';
     my @stores_hi = grep { $_->opcode eq 'i64_store' && $_->comment =~ /store hi/ } @insts;
-    ok( scalar @stores_hi == 1, 'Wasm i128 store: i64_store hi' );
+    ok scalar @stores_hi == 1, 'Wasm i128 store: i64_store hi';
 }
 
 # Wasm i128 load
@@ -343,9 +345,9 @@ $check->(
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @loads   = grep { $_->opcode eq 'i64_load' && $_->comment =~ /load lo/ } @insts;
-    ok( scalar @loads == 1, 'Wasm i128 load: i64_load lo' );
+    ok scalar @loads == 1, 'Wasm i128 load: i64_load lo';
     my @loads_hi = grep { $_->opcode eq 'i64_load' && $_->comment =~ /load hi/ } @insts;
-    ok( scalar @loads_hi == 1, 'Wasm i128 load: i64_load hi' );
+    ok scalar @loads_hi == 1, 'Wasm i128 load: i64_load hi';
 }
 
 # Wasm i128 ret
@@ -358,9 +360,9 @@ $check->(
     my $mf      = $lowerer->lower($func);
     my @insts   = $mf->blocks->[0]->instructions->@*;
     my @ret_lo  = grep { $_->comment =~ /retval lo/ } @insts;
-    ok( scalar @ret_lo == 1, 'Wasm i128 ret: push retval lo' );
+    ok scalar @ret_lo == 1, 'Wasm i128 ret: push retval lo';
     my @ret_hi = grep { $_->comment =~ /retval hi/ } @insts;
-    ok( scalar @ret_hi == 1, 'Wasm i128 ret: push retval hi' );
+    ok scalar @ret_hi == 1, 'Wasm i128 ret: push retval hi';
 }
 
 # x86_64 i128 shl/1
@@ -756,4 +758,5 @@ $check->(
     },
     i64_sub => 'Wasm i128 rem: i64_sub produced'
 );
+#
 done_testing;

@@ -35,12 +35,22 @@ use feature qw[class];
 # two sit in different registers.
 # Enough arguments to overrun the register file on each backend, low enough that the ones that spill to the stack still
 # land in a sane frame.
-my %COUNT   = ( x86_64 => 16, aarch64 => 40, riscv64 => 32 );
+my %COUNT    = ( x86_64 => 16, aarch64 => 40, riscv64 => 32 );
+my $platform = Brocken::Katsuro::Platform::parse();
+my $blah     = sub {
+    return 'Brocken::Jenny::Lowerer::Wasm'    if $platform->is_wasm;
+    return 'Brocken::Jenny::Lowerer::ARM64'   if $platform->is_arm64;
+    return 'Brocken::Jenny::Lowerer::RISCV64' if $platform->is_riscv64;
+    return 'Brocken::Jenny::Lowerer::X86_64'  if $platform->is_x64;
+    return undef;
+    }
+    ->();
 my @TARGETS = (
-    [ 'x86_64-pc-windows-msvc',    'Brocken::Jenny::Lowerer::X86_64' ],
-    [ 'x86_64-unknown-linux-gnu',  'Brocken::Jenny::Lowerer::X86_64' ],
-    [ 'aarch64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::ARM64' ],
-    [ 'riscv64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::RISCV64' ],
+    [ Brocken::Katsuro::Platform::gen_triple(), $blah ],
+    [ 'x86_64-pc-windows-msvc',                 'Brocken::Jenny::Lowerer::X86_64' ],
+    [ 'x86_64-unknown-linux-gnu',               'Brocken::Jenny::Lowerer::X86_64' ],
+    [ 'aarch64-unknown-linux-gnu',              'Brocken::Jenny::Lowerer::ARM64' ],
+    [ 'riscv64-unknown-linux-gnu',              'Brocken::Jenny::Lowerer::RISCV64' ]
 );
 
 # Each argument is a distinct odd multiple of 7, so the sums for the counts above stay distinct once the process exit
@@ -80,9 +90,10 @@ sub allocated( $triple, $class, $n ) {
     my $platform = Brocken::Katsuro::Platform::parse($triple);
     my $module   = Brocken->new->compile( sum_src($n) );
     my ($func)   = grep { $_->name eq 'f' } $module->functions->@*;
-    my $mf       = $class->new( platform => $platform )->lower($func);
-    my $alloc    = Brocken::Jenny::RegAlloc::LinearScan->new;
-    my $int      = $alloc->allocate( $mf, $platform, 0 );
+    builtin::load_module($class);
+    my $mf    = $class->new( platform => $platform )->lower($func);
+    my $alloc = Brocken::Jenny::RegAlloc::LinearScan->new;
+    my $int   = $alloc->allocate( $mf, $platform, 0 );
     $alloc->insert_spill_code( $mf, $int->{spill_slots}, $int->{spill_temp}, $platform->stack_reg, 0, $int->{spill_addr_temp} );
     my $fp = $alloc->allocate( $mf, $platform, 1 );
     $alloc->insert_spill_code( $mf, $fp->{spill_slots}, $fp->{spill_temp}, $platform->stack_reg, 1, $fp->{spill_addr_temp} );
@@ -97,7 +108,7 @@ subtest 'A reloaded address and a reloaded value do not share a scratch' => sub 
         # Without a spill there is nothing to check here, and a check that
         # passes because it never ran is worse than no check at all.
         ok( keys %{ $int->{spill_slots} }, "$triple: $n arguments make the allocator spill" ) or next;
-        is( [ reload_reg_conflict($mf) ], [], "$triple: no instruction reuses one scratch for a reloaded address and a reloaded value" );
+        is [ reload_reg_conflict($mf) ], [], "$triple: no instruction reuses one scratch for a reloaded address and a reloaded value";
     }
 };
 subtest 'A sum of many spilled arguments comes back intact' => sub {
@@ -137,4 +148,5 @@ subtest 'Foreign targets execute the same sum' => sub {
         }
     }
 };
+#
 done_testing;

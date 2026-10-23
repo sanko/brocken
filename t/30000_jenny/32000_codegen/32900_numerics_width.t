@@ -314,6 +314,7 @@ SKIP: {
 # narrowing was fine and the comparison promoting the i8 back to i64 was what broke. Wasm has no 8- or 16-bit locals, so
 # every narrow signed value goes through that path.
 subtest 'Wasm Sext shifts back down after moving the sign bit up' => sub {
+    require Brocken::Jenny::Lowerer::Wasm;
     my $lowerer = Brocken::Jenny::Lowerer::Wasm->new();
 
     # ( source, destination ) widths whose sign extension is not a single opcode.
@@ -339,6 +340,7 @@ subtest 'Wasm Sext shifts back down after moving the sign bit up' => sub {
     }
 };
 subtest 'a narrow signed value survives a round trip on Wasm' => sub {
+    require Brocken::Jenny::Codegen::Wasm;
     my $host = Brocken::Katsuro::Platform::parse();
     my $null = $host->is_windows ? 'NUL'                  : '/dev/null';
     my $wt   = $host->is_windows ? `where wasmtime 2>NUL` : `which wasmtime 2>/dev/null`;

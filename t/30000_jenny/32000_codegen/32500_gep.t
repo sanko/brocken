@@ -8,6 +8,10 @@ use Brocken::Lindsay;
 use Brocken::Jenny;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
+use Brocken::Jenny::Lowerer::X86_64;
+use Brocken::Jenny::Lowerer::ARM64;
+use Brocken::Jenny::Lowerer::RISCV64;
+use Brocken::Jenny::Lowerer::Wasm;
 
 # x86_64 GEP: constant index -> lea with disp
 {
@@ -26,10 +30,10 @@ use feature qw[class];
 
     if ($lea) {
         my $mem = $lea->operands->[1];
-        is( $mem->kind,          'mem',  'x86_64 const GEP: second operand is mem' );
-        is( $mem->value->{base}, '%arr', 'x86_64 const GEP: base = %arr' );
-        is( $mem->value->{disp}, 168,    'x86_64 const GEP: disp = 42*4' );
-        ok( !defined $mem->value->{index}, 'x86_64 const GEP: no index for const' );
+        is $mem->kind,           'mem',  'x86_64 const GEP: second operand is mem';
+        is $mem->value->{base},  '%arr', 'x86_64 const GEP: base = %arr';
+        is $mem->value->{disp},  168,    'x86_64 const GEP: disp = 42*4';
+        is $mem->value->{index}, U(),    'x86_64 const GEP: no index for const';
     }
 }
 
@@ -217,9 +221,9 @@ use feature qw[class];
     my @muls    = grep { $_->opcode eq 'i64_mul' } $ops->@*;
     my @adds    = grep { $_->opcode eq 'i64_add' } $ops->@*;
     my @sets    = grep { $_->opcode eq 'local_set' } $ops->@*;
-    ok( scalar @consts >= 1, 'Wasm var GEP: i64_const produced (scale)' );
-    ok( scalar @muls >= 1,   'Wasm var GEP: i64_mul produced (scale=4)' );
-    ok( scalar @adds >= 1,   'Wasm var GEP: i64_add produced' );
-    ok( scalar @sets >= 1,   'Wasm var GEP: local_set produced' );
+    ok scalar @consts >= 1, 'Wasm var GEP: i64_const produced (scale)';
+    ok scalar @muls >= 1,   'Wasm var GEP: i64_mul produced (scale=4)';
+    ok scalar @adds >= 1,   'Wasm var GEP: i64_add produced';
+    ok scalar @sets >= 1,   'Wasm var GEP: local_set produced';
 }
 done_testing;
