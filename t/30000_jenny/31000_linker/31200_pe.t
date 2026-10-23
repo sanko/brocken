@@ -7,9 +7,9 @@ use Brocken;
 use Brocken::Lindsay;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-
-# PE executable
-{
+use Brocken::Jenny::Linker::PE;
+#
+subtest executable => sub {
     my $brocken   = Brocken->new();
     my $platform  = $brocken->platform;
     my $module    = Brocken::Lindsay::IR::Module->new( name => 'standalone_win' );
@@ -34,10 +34,8 @@ SKIP: {
         );
     }
     unlink $output_file;
-}
-
-# PE shared library
-{
+};
+subtest dll => sub {
     my $brocken  = Brocken->new();
     my $platform = $brocken->platform;
     my $module   = Brocken::Lindsay::IR::Module->new( name => 'shared_pe' );
@@ -70,5 +68,6 @@ SKIP: {
         }
     }
     unlink $output_file;
-}
+};
+#
 done_testing;

@@ -106,9 +106,8 @@ sub build_test_func {
     return $brocken->codegen->emit_function($func);
 }
 my $machine_bytes = build_test_func();
-
-# Test 1: PE linker emits .rdata section when set_rodata is called
-{
+subtest 'PE linker emits .rdata section when set_rodata is called' => sub {
+    builtin::load_module 'Brocken::Jenny::Linker::PE';
     my $output_file = temp_path('test_pe_rodata.exe');
     my $linker      = Brocken::Jenny::Linker::PE->new();
     $linker->set_labels( { E__BROCKEN_ENTRY => 0 } );
@@ -128,11 +127,9 @@ my $machine_bytes = build_test_func();
         like $data, qr/World/, '.rdata contains "World"';
     }
     unlink $output_file;
-}
-
-# Test 2: ELF64 linker emits .rodata section when set_rodata is called
-SKIP: {
-    skip 'ELF64 rodata test: Brocken::Jenny::Linker::ELF64 not available', 3 unless eval { require Brocken::Jenny::Linker::ELF64; 1 };
+};
+subtest 'ELF64 linker emits .rodata section when set_rodata is called' => sub {
+    builtin::load_module 'Brocken::Jenny::Linker::ELF64';
     my $output_file = temp_path('test_elf_rodata');
     my $linker      = Brocken::Jenny::Linker::ELF64->new();
     $linker->set_labels( { E__BROCKEN_ENTRY => 0 } );
@@ -151,10 +148,8 @@ SKIP: {
         like $data, qr/Hello/, '.rodata contains "Hello"';
     }
     unlink $output_file;
-}
-
-# Test 3: MachO linker emits __const section when set_rodata is called
-{
+};
+subtest 'MachO linker emits __const section when set_rodata is called' => sub {
     require Brocken::Jenny::Linker::MachO;
     my $output_file = temp_path('test_macho_rodata');
     my $linker      = Brocken::Jenny::Linker::MachO->new();
@@ -197,6 +192,6 @@ SKIP: {
     }
     ok $const_found, '__const section present in MachO binary';
     unlink $output_file;
-}
+};
 #
 done_testing;

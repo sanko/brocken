@@ -17,19 +17,13 @@ skip_all 'not native' unless $host->is_native;
 # comparison -- `<`, `>`, `<=`, `>=` on any float width -- evaluated false. Equality happened to survive because
 # `eq`/`ne` are spelled the same for both, which is why this went unnoticed next to the working `==`.
 sub answers ( $src, $want, $name ) {
-    diag 'compile...';
-    note $src;
     my $module = eval { Brocken->new->compile($src) };
     if ($@) { fail("$name: compile died: $@"); return }
-    diag 'emit_functions...';
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
     my $file  = $brocken->tmpdir . '/fo' . $brocken->ext;
-    diag 'link...';
     $brocken->linker->write_executable( $file, $funcs, $host );
-    diag 'go...';
     system $file;
-    is( $? >> 8, $want, $name );
-    diag 'cleanup...';
+    is $? >> 8, $want, $name;
     unlink $file;
     return;
 }

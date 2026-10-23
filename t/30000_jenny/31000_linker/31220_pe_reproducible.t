@@ -5,19 +5,20 @@ use Brocken;
 use Brocken::Lindsay;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
+use Brocken::Jenny::Linker::PE;
 
 # PE reproducibility.
 #
-# The COFF File Header carries a build timestamp, and the PE linker fills it with the wall clock.  A PE image is
-# therefore time-varying from one link to the next; ELF, Mach-O, and Wasm write no timestamp at all.  Pinning
+# The COFF File Header carries a build timestamp, and the PE linker fills it with the wall clock. A PE image is
+# therefore time-varying from one link to the next; ELF, Mach-O, and Wasm write no timestamp at all. Pinning
 # SOURCE_DATE_EPOCH (or calling set_timestamp) is what makes a link reproducible, on PE and, for a uniform recipe,
 # on every target.
+#
 # COFF File Header TimeDateStamp: e_lfanew lives at 0x3C; then the "PE\0\0" signature (4 bytes); then the COFF header,
 # whose first three fields are Machine (2), NumberOfSections (2), and TimeDateStamp (4).
-sub coff_timestamp {
-    my ($bin) = @_;
-    my $e_lfanew = unpack( 'V', substr( $bin, 0x3C, 4 ) );
-    return unpack( 'V', substr( $bin, $e_lfanew + 8, 4 ) );
+sub coff_timestamp ($bin) {
+    my $e_lfanew = unpack 'V', substr( $bin, 0x3C, 4 );
+    return unpack 'V', substr( $bin, $e_lfanew + 8, 4 );
 }
 my $brocken  = Brocken->new();
 my $platform = $brocken->platform;
@@ -28,8 +29,7 @@ $builder->build_ret( Brocken::Lindsay::IR::Constant->new( type => Brocken::Linds
 my $bytes = $brocken->codegen->emit_function($func);
 my @files;
 
-sub link_pe {
-    my ($name) = @_;
+sub link_pe ($name) {
     my $out = $brocken->tmpdir . '/' . $name;
     push @files, $out;
     my $linker = Brocken::Jenny::Linker::PE->new();
@@ -75,4 +75,5 @@ sub link_pe {
     is( $linker->effective_timestamp, 4242, 'set_timestamp overrides SOURCE_DATE_EPOCH' );
 }
 unlink grep {-e} @files;
+#
 done_testing;
