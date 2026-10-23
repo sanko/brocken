@@ -7,7 +7,8 @@ package Brocken::Jenny v0.0.1 {
     #~ use Brocken::Jenny::Codegen::ARM64;
     #~ use Brocken::Jenny::Codegen::RISCV64;
     #~ use Brocken::Jenny::Codegen::Wasm;
-    #~ use Brocken::Jenny::MIR;
+    use Brocken::Jenny::MIR;
+
     #~ use Brocken::Jenny::RegAlloc;
     #~ use Brocken::Jenny::Lowerer::X86_64;
     #~ use Brocken::Jenny::Lowerer::ARM64;

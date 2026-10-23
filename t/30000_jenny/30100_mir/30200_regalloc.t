@@ -3,9 +3,11 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use blib;
 use Brocken;
+use Brocken::Jenny::RegAlloc;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
-subtest 'LiveInterval' => sub {
+#
+subtest LiveInterval => sub {
     my $li = Brocken::Jenny::RegAlloc::LiveInterval->new( name => '%x', start => 0, end => 5 );
     isa_ok $li, ['Brocken::Jenny::RegAlloc::LiveInterval'], 'live interval construction';
     is $li->name,  '%x', 'interval name';
@@ -25,14 +27,18 @@ subtest 'LinearScan basic allocation' => sub {
     $bb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'add', operands => [ $vreg_b, $vreg_a ] ) );
     $bb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [] ) );
     my $alloc = Brocken::Jenny::RegAlloc::LinearScan->new()->allocate( $mf, $platform );
-    ok ref($alloc) eq 'HASH',              'allocation result is a hashref';
-    ok exists $alloc->{assignment},        'has assignment';
-    ok exists $alloc->{used_callee},       'has used_callee';
-    ok exists $alloc->{spill_slots},       'has spill_slots';
-    ok exists $alloc->{spill_temp},        'has spill_temp';
-    ok exists $alloc->{spill_addr_temp},   'has spill_addr_temp';
-    ok defined $alloc->{assignment}{'%a'}, '%a assigned to a register';
-    ok defined $alloc->{assignment}{'%b'}, '%b assigned to a register';
+    is $alloc, hash {
+        field assignment => hash {
+            field '%a' => D();
+            field '%b' => D();
+            end
+        };
+        field used_callee     => E();
+        field spill_slots     => E();
+        field spill_temp      => E();
+        field spill_addr_temp => E();
+        end
+    }, 'allocation result';
 };
 subtest 'LinearScan with many virtual registers' => sub {
     my $brocken  = Brocken->new();
@@ -48,7 +54,8 @@ subtest 'LinearScan with many virtual registers' => sub {
         $bb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'add', operands => [ $vr, $imm ] ) );
     }
     $bb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', operands => [] ) );
-    my $alloc = Brocken::Jenny::RegAlloc::LinearScan->new()->allocate( $mf, $platform );
+    my $alloc = Brocken::Jenny::RegAlloc::LinearScan->new->allocate( $mf, $platform );
     is scalar( keys %{ $alloc->{assignment} } ), 20, 'all 20 vregs have assignments';
 };
+#
 done_testing;

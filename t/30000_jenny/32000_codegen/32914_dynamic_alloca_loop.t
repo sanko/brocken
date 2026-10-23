@@ -16,11 +16,9 @@ my @TARGETS = (
     [ 'x86_64-pc-windows-msvc',    'Brocken::Jenny::Lowerer::X86_64' ],
     [ 'x86_64-unknown-linux-gnu',  'Brocken::Jenny::Lowerer::X86_64' ],
     [ 'aarch64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::ARM64' ],
-    [ 'riscv64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::RISCV64' ],
+    [ 'riscv64-unknown-linux-gnu', 'Brocken::Jenny::Lowerer::RISCV64' ]
 );
-
-sub src_loop( $N, $ITERS ) {
-    return <<"BROCKEN";
+sub src_loop( $N, $ITERS ) { return <<"BROCKEN" }
 my i64 \$n = $N;
 my i64 \$i = 0;
 my i64 \$sum = 0;
@@ -33,14 +31,14 @@ while (\$i < $ITERS) {
 }
 return \$sum % 251;
 BROCKEN
-}
 
 # Reads the lowering of `_BROCKEN_ENTRY` and returns [entry_body_ops, all_block_op_lists] as opcode arrays.
 sub lower_entry_ops( $triple, $lower_class, $src ) {
     my $platform = Brocken::Katsuro::Platform::parse($triple);
     my $module   = Brocken->new->compile($src);
     my ($func)   = grep { $_->name eq '_BROCKEN_ENTRY' } $module->functions->@*;
-    my $mf       = $lower_class->new( platform => $platform )->lower($func);
+    builtin::load_module($lower_class);
+    my $mf = $lower_class->new( platform => $platform )->lower($func);
     my @block_ops;
     for my $bb ( $mf->blocks->@* ) {
         push @block_ops, [ map { $_->opcode } $bb->instructions->@* ];
@@ -90,8 +88,8 @@ BROCKEN
             $alloca_dyn += count_op( $ops, 'alloca_dyn' );
             $stack_save += count_op( $ops, 'stack_save' );
         }
-        is( $alloca_dyn, 0, "$triple: function-scope and loop-scope arrays are both heap-promoted" );
-        is( $stack_save, 0, "$triple: no stack_save is emitted for either" );
+        is $alloca_dyn, 0, "$triple: function-scope and loop-scope arrays are both heap-promoted";
+        is $stack_save, 0, "$triple: no stack_save is emitted for either";
     }
 };
 
@@ -186,4 +184,5 @@ BROCKEN
     # First %3==0 seed is 3 (loop-carried, i stays 0), mark = 4, sink = 3 + 0 + 4 = 7.
     run_exec( $out, expected_exit => 7, platform => $host, name => 'function-scope array lives across the loop' );
 };
+#
 done_testing;

@@ -4,6 +4,7 @@ use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as
 use blib;
 use Brocken;
 use Brocken::Lindsay;
+use Brocken::Jenny::Linker::MachO;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
@@ -148,4 +149,5 @@ subtest 'Mach-O entry-stub exit() GOT reference survives a .got shift' => sub {
     }
     unlink glob "$tmp/entry_got_*";
 };
+#
 done_testing;

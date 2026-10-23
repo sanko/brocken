@@ -36,13 +36,14 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
 
     method _build_entry_stub( $platform, $func_offsets, $got_exit, $text_rva ) {
         if ( $platform->is_arm64 ) {
+            require Brocken::Jenny::Codegen::ARM64::Inst;
             my $sub  = 0xD1000000 | ( 1 << 22 ) | ( 0x100 << 10 ) | ( 31 << 5 ) | 31;
-            my $add  = add_imm( 0, 31, 0 );
-            my $bl   = bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
-            my $adrp = adrp( 8, $got_exit, $text_rva + 12 );
-            my $ldr  = ldr_64( 8, 8, $got_exit & 0xFFF );
-            my $blr  = blr(8);
-            my $brk  = brk(0);
+            my $add  = Brocken::Jenny::Codegen::ARM64::Inst::add_imm( 0, 31, 0 );
+            my $bl   = Brocken::Jenny::Codegen::ARM64::Inst::bl( 20 + ( $func_offsets->{_BROCKEN_ENTRY} // 0 ) );
+            my $adrp = Brocken::Jenny::Codegen::ARM64::Inst::adrp( 8, $got_exit, $text_rva + 12 );
+            my $ldr  = Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 8, 8, $got_exit & 0xFFF );
+            my $blr  = Brocken::Jenny::Codegen::ARM64::Inst::blr(8);
+            my $brk  = Brocken::Jenny::Codegen::ARM64::Inst::brk(0);
             return pack( 'V7', $sub, $add, $bl, $adrp, $ldr, $blr, $brk );
         }
         my $stub = pack( 'C4', 0x48, 0x83, 0xE4, 0xF0 );
@@ -205,8 +206,9 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
                 push @stubs, { offset => $stub_ofs, got_offset => $got_rva - $got_base };
             }
             elsif ( $platform->is_arm64 ) {
-                $stub_bytes = pack( 'V', adrp( 16, $got_rva, $text_rva + $stub_ofs ) );
-                $stub_bytes .= pack( 'V', ldr_64( 16, 16, $got_rva & 0xFFF ) );
+                require Brocken::Jenny::Codegen::ARM64::Inst;
+                $stub_bytes = pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::adrp( 16, $got_rva, $text_rva + $stub_ofs ) );
+                $stub_bytes .= pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 16, 16, $got_rva & 0xFFF ) );
                 $stub_bytes .= pack( 'V', 0xD61F0000 | ( 16 << 5 ) );
                 push @stubs, { offset => $stub_ofs, got_offset => $got_rva - $got_base };
             }
@@ -502,8 +504,8 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
                     for my $s (@stubs) {
                         my $got_rva  = $got_rva2 + $s->{got_offset};
                         my $stub_rva = $txt_rva2 + $s->{offset};
-                        substr( $text, $s->{offset},     4, pack( 'V', adrp( 16, $got_rva, $stub_rva ) ) );
-                        substr( $text, $s->{offset} + 4, 4, pack( 'V', ldr_64( 16, 16, $got_rva & 0xFFF ) ) );
+                        substr( $text, $s->{offset},     4, pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::adrp( 16, $got_rva, $stub_rva ) ) );
+                        substr( $text, $s->{offset} + 4, 4, pack( 'V', Brocken::Jenny::Codegen::ARM64::Inst::ldr_64( 16, 16, $got_rva & 0xFFF ) ) );
                     }
                 }
             }
@@ -701,8 +703,9 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
                 close $cs_fh;
             }
             chomp $cs_out;
-            warn 'codesign output: ' . $cs_out if length $cs_out;
-            warn 'codesign exit: ' . ( $? >> 8 ) . "\n";
+
+            #warn 'codesign output: ' . $cs_out if length $cs_out;
+            #warn 'codesign exit: ' . ( $? >> 8 ) . "\n";
         }
         return $output_file;
     }

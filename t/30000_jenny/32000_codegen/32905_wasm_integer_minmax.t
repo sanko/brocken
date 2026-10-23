@@ -5,9 +5,11 @@ use blib;
 use Brocken::Katsuro;
 use Brocken::Lindsay;
 use Brocken::Jenny;
+use Brocken::Jenny::Codegen::Wasm;
+use Brocken::Jenny::Linker::Wasm;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature               qw[class];
-use Test2::Tools::Brocken qw(temp_path);
+use Test2::Tools::Brocken qw[temp_path];
 my $host     = Brocken::Katsuro::Platform::parse();
 my $platform = Brocken::Katsuro::Platform::parse('wasm32-unknown-wasi');
 

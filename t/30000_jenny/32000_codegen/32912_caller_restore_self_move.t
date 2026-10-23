@@ -38,4 +38,5 @@ is scalar(@insts),     3,                    'the self-move case keeps its calle
 is $insts[0]->opcode,  'load',               'first survivor is the r10 caller-restore reload';
 is $insts[0]->comment, 'caller-restore r10', 'the reload before a self-move survives';
 is $insts[1]->opcode,  'mov',                'the self-move is left in place';
+#
 done_testing;

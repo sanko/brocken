@@ -3,6 +3,7 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use blib;
 use Brocken;
+use Brocken::Jenny::RegAlloc;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 
