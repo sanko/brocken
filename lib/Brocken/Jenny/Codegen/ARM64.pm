@@ -63,13 +63,13 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             my $func  = $ir_funcs->[$i];
             my $fname = $func->name;
             $entry_index = $i if $fname eq '_BROCKEN_ENTRY';
-            next unless $func->blocks->@*;    # skip external declarations
+            next unless $func->blocks->@*;
             $has_isolate ||= $self->_has_isolate_ops_ir($func);
             $has_gate    ||= $self->_has_gate_ops_ir($func);
-            my $is_core = ( $fname =~ /^Brocken::Runtime::/ || $fname eq 'say' || $fname eq 'print' );
+            my $is_core = _is_core_runtime_func($fname);
             if ( $is_core && exists $core_cache{$plat_key}{$fname} ) {
                 my $cached = $core_cache{$plat_key}{$fname};
-                push @result, $cached->{blob};
+                push @result, _clone_arm64_blob( $cached->{blob} );
                 $has_fiber ||= $cached->{has_fiber};
                 next;
             }
@@ -1610,6 +1610,28 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             debug        => $debug_level
         );
         return $dwarf->build_all;
+    }
+
+    sub _is_core_runtime_func($func) {
+        my $name = ref($func) ? $func->name : $func;
+        return 0 unless $name =~ /^Brocken::Runtime::/;
+        return 0 if $name     =~ /^Brocken::Runtime::gc_(?:scan|restore|destroy)_class$/;
+        return 1;
+    }
+
+    sub _clone_arm64_blob($blob) {
+        return {
+            name   => $blob->{name},
+            bytes  => $blob->{bytes},
+            fixups => [
+                map {
+                    {%$_}
+                } $blob->{fixups}->@*
+            ],
+            alloca_map => { $blob->{alloca_map}->%* },
+            source_map => { $blob->{source_map}->%* },
+            unwind     => $blob->{unwind} ? { $blob->{unwind}->%* } : undef
+        };
     }
 };
 #
