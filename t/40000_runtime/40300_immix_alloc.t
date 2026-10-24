@@ -26,7 +26,7 @@ BROCKEN
         my $file  = $brocken->tmpdir . '/i_multi_class' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 42, 'two class instances: sum of fields' );
+        is $? >> 8, 42, 'two class instances: sum of fields';
         unlink $file;
     }
 };
@@ -47,7 +47,7 @@ BROCKEN
         my $file  = $brocken->tmpdir . '/i_writer' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 42, 'class with writer method: set and read' );
+        is $? >> 8, 42, 'class with writer method: set and read';
         unlink $file;
     }
 };
@@ -73,7 +73,7 @@ BROCKEN
         my $file  = $brocken->tmpdir . '/i_many_class' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 45, '10 class allocations in a loop (0+1+...+9 = 45)' );
+        is $? >> 8, 45, '10 class allocations in a loop (0+1+...+9 = 45)';
         unlink $file;
     }
 };
@@ -94,8 +94,9 @@ BROCKEN
         my $file  = $brocken->tmpdir . '/i_multi_field' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 42, 'class with two fields: sum' );
+        is $? >> 8, 42, 'class with two fields: sum';
         unlink $file;
     }
 };
+#
 done_testing;

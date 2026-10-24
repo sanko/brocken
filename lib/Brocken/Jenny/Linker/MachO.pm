@@ -11,6 +11,7 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
     field $got_offsets : reader : writer;
 
     method _setup_layout( $layout, $text_size, $data_size, $arch, $os, $dbg = 0 ) {
+        my $page_align = ( $arch =~ /aarch64|arm64/i && $os =~ /darwin|macos/i ) ? 0x4000 : 0x1000;
         $layout->add_section( '.text', $text_size, 5 );                                 # Read + Execute
         my $brk_sym_size = $self->brk_sym_size();
         $layout->add_section( '.brk_sym', $brk_sym_size, 5 ) if $brk_sym_size > 0;
@@ -317,7 +318,39 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
         # Automatically calculate layout if it wasn't called beforehand.
         # Update section size so reused linker objects work with different-sized binaries.
         if ( !defined $self->layout ) {
-            $self->pre_layout( length($text), length($data_bytes), $platform );
+            $self->pre_layout( length($text) + ( $self->type eq 'exe' ? $self->entry_stub_len($platform) : 0 ), length($data_bytes), $platform );
+            if (@extern_names) {
+                my $got_sec = $self->layout->get('.got');
+                if ($got_sec) {
+                    $got_sec->{size} = $got_size;
+                }
+                else {
+                    $self->layout->add_section( '.got', $got_size, 3 );
+                }
+                $self->layout->calculate( $platform->page_size );
+            }
+        }
+        else {
+            $self->layout->get('.text')->{size} = length($text) + ( $self->type eq 'exe' ? $self->entry_stub_len($platform) : 0 );
+            my $const_sec = $self->layout->get('.__const');
+            if ($const_sec) {
+                my $_rodata_size = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
+                $_rodata_size = 1 if $_rodata_size == 0;
+                $const_sec->{size} = $_rodata_size;
+            }
+            my $data_sec = $self->layout->get('.data');
+            if ($data_sec) {
+                $data_sec->{size} = length($data_bytes);
+            }
+            if (@extern_names) {
+                if ( $self->layout->get('.got') ) {
+                    $self->layout->get('.got')->{size} = $got_size;
+                }
+                else {
+                    $self->layout->add_section( '.got', $got_size, 3 );
+                }
+            }
+            $self->layout->calculate( $platform->page_size );
         }
         $self->layout->get('.text')->{size} = length($text);
         my $base      = $self->image_base;
@@ -486,7 +519,8 @@ class Brocken::Jenny::Linker::MachO v0.0.1 : isa(Brocken::Jenny::Linker) {
         # Enforce Minimum Linkedit size to prevent sparse file truncation issues
         my $le_payload_size = length($bind_info) + $trie_size + $symtab_size + $strtab_size;
         $self->layout->get('.linkedit')->{size} = $le_payload_size > 64 ? $le_payload_size : 64;
-        $self->layout->calculate($page_size);
+        my $page_align = $platform->page_size;
+        $self->layout->calculate($page_align);
         $le_off = $self->layout->get('.linkedit')->{off};
         if (@stubs) {
             my $got_sec  = $self->layout->get('.got');
