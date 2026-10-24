@@ -145,7 +145,8 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         return \@result;
     }
 
-    method _emit_single_mf($mf) {
+    method _emit_single_mf( $mf, $fname = undef ) {
+        $fname //= $mf->name;
         my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
         my $int_res = $alloc->allocate( $mf, $platform, 0 );
         $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0, $int_res->{spill_addr_temp} );
@@ -171,9 +172,18 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             $callee_seen{ $platform->fiber_reg } = 1;
         }
         my @used_callee = sort keys %callee_seen;
-        my ( $bytes, $func_fixups, $unwind_info ) = $self->_encode( $mf, \%assignment, \@used_callee );
+        my %alloca_map;
+        my %source_map;
+        my ( $bytes, $func_fixups, $unwind_info ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
         $mf->release;
-        return { name => $mf->name, bytes => $bytes, fixups => $func_fixups, unwind => $unwind_info };
+        return {
+            name       => $fname,
+            bytes      => $bytes,
+            fixups     => $func_fixups,
+            alloca_map => \%alloca_map,
+            source_map => \%source_map,
+            unwind     => $unwind_info
+        };
     }
 
     method _has_fiber_ops_mf($mf) {
@@ -1626,11 +1636,11 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             fixups => [
                 map {
                     {%$_}
-                } $blob->{fixups}->@*
+                } ( $blob->{fixups} // [] )->@*
             ],
-            alloca_map => { $blob->{alloca_map}->%* },
-            source_map => { $blob->{source_map}->%* },
-            unwind     => $blob->{unwind} ? { $blob->{unwind}->%* } : undef
+            alloca_map => $blob->{alloca_map} ? { $blob->{alloca_map}->%* } : {},
+            source_map => $blob->{source_map} ? { $blob->{source_map}->%* } : {},
+            unwind     => $blob->{unwind}     ? { $blob->{unwind}->%* }     : undef
         };
     }
 };
