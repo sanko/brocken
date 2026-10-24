@@ -3002,10 +3002,11 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                     my $dyn = $inst->operands->[0];
                     my $mem
                         = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $dyn->name, disp => 8 }, type => $inst->type );
-                    my $dst = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $dst      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $is_float = $inst->type && $inst->type->kind eq 'float';
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new(
-                            opcode   => 'load',
+                            opcode   => $is_float ? 'fload' : 'load',
                             operands => [ $dst, $mem ],
                             comment  => 'unbox: load payload'
                         )
