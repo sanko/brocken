@@ -167,10 +167,7 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
         my %callee_seen;
         @callee_seen{ $int_res->{used_callee}->@* } = ();
         @callee_seen{ $fp_res->{used_callee}->@* }  = ();
-
-        if ( $self->_has_fiber_ops_mf($mf) ) {
-            $callee_seen{ $platform->fiber_reg } = 1;
-        }
+        $callee_seen{ $platform->fiber_reg }        = 1 if $self->_has_fiber_ops_mf($mf);
         my @used_callee = sort keys %callee_seen;
         my %alloca_map;
         my %source_map;

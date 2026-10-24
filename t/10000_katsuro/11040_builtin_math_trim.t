@@ -11,8 +11,7 @@ use Test2::Tools::Brocken qw[answers executable_targets];
 # reported as an exit code mod 256, so the numeric checks answer a boolean rather than the raw value.
 my @native_targets = grep { $_->[0] ne 'wasm32-unknown-wasi' } executable_targets();
 
-sub check {
-    my ( $source, $want, $label ) = @_;
+sub check  ( $source, $want, $label ) {
     answers( $source, $want, $label, targets => [@native_targets] );
 }
 subtest 'ceil rounds toward positive infinity' => sub {
@@ -60,4 +59,5 @@ subtest 'trim reads a boxed string' => sub {
     check( 'sub f() :returns(i64) { my Any $d = "  yo  "; my String $s = builtin::trim($d); return length($s); } return f();',
         2, 'a boxed string trims' );
 };
+#
 done_testing;

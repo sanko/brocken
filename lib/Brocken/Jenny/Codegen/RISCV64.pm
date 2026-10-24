@@ -65,7 +65,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $is_core = _is_core_runtime_func($fname);
             if ( $is_core && exists $core_cache{$plat_key}{$fname} ) {
                 my $cached = $core_cache{$plat_key}{$fname};
-                push @result, _clone_arm64_blob( $cached->{blob} );
+                push @result, _clone_riscv_blob( $cached->{blob} );
                 $has_fiber ||= $cached->{has_fiber};
                 next;
             }
