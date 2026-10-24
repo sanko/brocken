@@ -81,11 +81,16 @@ class Brocken v0.0.1 {
     }
     #
     method _read_core_brocken() {
-        open my $fh, '<', $runtime or return '';
-        local $/;
-        my $src = <$fh>;
-        close $fh;
-        return $src;
+        state %src_cache;
+        my $mtime = ( stat($runtime) )[9] // 0;
+        my $key   = "$runtime:$mtime";
+        unless ( exists $src_cache{$key} ) {
+            open my $fh, '<', $runtime or return '';
+            local $/;
+            $src_cache{$key} = <$fh>;
+            close $fh;
+        }
+        $src_cache{$key};
     }
 
     method parse( $source, $filename = '(eval)' ) {
@@ -105,11 +110,15 @@ class Brocken v0.0.1 {
     # needs a platform.
     method compile( $source, $filename = '(eval)', $platform = undef ) {
         my @all_stmts;
-        my $core_source = $self->_read_core_brocken();
-        if ( length $core_source ) {
-            my $core_ast = $self->parse( $core_source, $runtime );
-            push @all_stmts, $core_ast->statements->@*;
+        state %core_ast_cache;
+        my $mtime = ( stat($runtime) )[9] // 0;
+        my $key   = "$runtime:$mtime";
+        if ( !exists $core_ast_cache{$key} ) {
+            my $core_source = $self->_read_core_brocken();
+            $core_ast_cache{$key} = $self->parse( $core_source, $runtime ) if length $core_source;
         }
+        my $cached_ast = $core_ast_cache{$key};
+        push @all_stmts, $cached_ast->statements->@* if $cached_ast;
         my $user_ast = $self->parse( $source, $filename );
         push @all_stmts, $user_ast->statements->@*;
         my $merged_ast = Brocken::Katsuro::AST::Program->new( statements => \@all_stmts );
