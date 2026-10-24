@@ -712,20 +712,156 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                     }
                                 }
                                 else {
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $lo_dst, $lo_lhs ],
-                                            comment  => 'i128 var-shl lo'
-                                        )
+                                    my $rhs_opnd  = $self->_lower_opnd($rhs);
+                                    my $carry_amt = Brocken::Jenny::MIR::MachineOperand->new(
+                                        kind  => 'virt_reg',
+                                        value => $inst->name . '_ca',
+                                        type  => Brocken::Lindsay::IR::Type::i64()
                                     );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new(
-                                            opcode   => 'mv',
-                                            operands => [ $hi_dst, $hi_lhs ],
-                                            comment  => 'i128 var-shl hi'
-                                        )
-                                    );
+                                    if ( $opcode eq 'shl' ) {
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $lo_dst, $lo_lhs ],
+                                                comment  => 'i128 var-shl lo'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'shl',
+                                                operands => [ $lo_dst, $rhs_opnd ],
+                                                comment  => 'i128 var-shl lo by count'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $lo_tmp, $lo_lhs ],
+                                                comment  => 'i128 var-shl carry tmp'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [
+                                                    $carry_amt,
+                                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                                        kind  => 'imm',
+                                                        value => 64,
+                                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                                    )
+                                                ],
+                                                comment => 'i128 var-shl carry amt = 64'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'sub',
+                                                operands => [ $carry_amt, $rhs_opnd ],
+                                                comment  => 'i128 var-shl carry amt = 64 - count'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'lshr',
+                                                operands => [ $lo_tmp, $carry_amt ],
+                                                comment  => 'i128 var-shl carry >> (64-count)'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $hi_dst, $hi_lhs ],
+                                                comment  => 'i128 var-shl hi'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'shl',
+                                                operands => [ $hi_dst, $rhs_opnd ],
+                                                comment  => 'i128 var-shl hi by count'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'or',
+                                                operands => [ $hi_dst, $lo_tmp ],
+                                                comment  => 'i128 var-shl hi |= carry'
+                                            )
+                                        );
+                                    }
+                                    else {
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $hi_dst, $hi_lhs ],
+                                                comment  => 'i128 var-' . $opcode . ' hi'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => $opcode,
+                                                operands => [ $hi_dst, $rhs_opnd ],
+                                                comment  => 'i128 var-' . $opcode . ' hi by count'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $lo_tmp, $hi_lhs ],
+                                                comment  => 'i128 var-' . $opcode . ' carry tmp'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [
+                                                    $carry_amt,
+                                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                                        kind  => 'imm',
+                                                        value => 64,
+                                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                                    )
+                                                ],
+                                                comment => 'i128 var-' . $opcode . ' carry amt = 64'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'sub',
+                                                operands => [ $carry_amt, $rhs_opnd ],
+                                                comment  => 'i128 var-' . $opcode . ' carry amt = 64 - count'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'shl',
+                                                operands => [ $lo_tmp, $carry_amt ],
+                                                comment  => 'i128 var-' . $opcode . ' carry << (64-count)'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [ $lo_dst, $lo_lhs ],
+                                                comment  => 'i128 var-' . $opcode . ' lo'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => $opcode,
+                                                operands => [ $lo_dst, $rhs_opnd ],
+                                                comment  => 'i128 var-' . $opcode . ' lo by count'
+                                            )
+                                        );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'or',
+                                                operands => [ $lo_dst, $lo_tmp ],
+                                                comment  => 'i128 var-' . $opcode . ' lo |= carry'
+                                            )
+                                        );
+                                    }
                                 }
                             }
                             elsif ( $opcode eq 'mul' ) {

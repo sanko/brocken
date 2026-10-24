@@ -52,84 +52,59 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
     method emit_functions($ir_funcs) {
         state %core_cache;
         my $plat_key = $platform->arch . '-' . ( $platform->os // '' ) . '-' . ( $platform->env // '' );
-        my @result;
-        my @mfs_to_process;
+        my @core_ir;
+        my @user_ir;
         my $has_fiber   = 0;
         my $has_isolate = 0;
         my $has_gate    = 0;
         my $entry_index = -1;
 
         for my $i ( 0 .. $#$ir_funcs ) {
-            my $func  = $ir_funcs->[$i];
-            my $fname = $func->name;
-            $entry_index = $i if $fname eq '_BROCKEN_ENTRY';
+            my $func = $ir_funcs->[$i];
             next unless $func->blocks->@*;
-            $has_isolate ||= $self->_has_isolate_ops_ir($func);
-            $has_gate    ||= $self->_has_gate_ops_ir($func);
-            my $is_core = _is_core_runtime_func($fname);
-            if ( $is_core && exists $core_cache{$plat_key}{$fname} ) {
-                my $cached = $core_cache{$plat_key}{$fname};
-                push @result, _clone_arm64_blob( $cached->{blob} );
-                $has_fiber ||= $cached->{has_fiber};
-                next;
+            if ( _is_core_runtime_func($func) ) {
+                push @core_ir, $func;
             }
-            my $lowerer        = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
-            my $mf             = $lowerer->lower($func);
-            my $func_has_fiber = $self->_has_fiber_ops_mf($mf);
-            $has_fiber ||= $func_has_fiber;
-            push @mfs_to_process,
-                { mf => $mf, fname => $fname, is_core => $is_core, has_fiber => $func_has_fiber, is_entry => ( $i == $entry_index ), };
+            else {
+                push @user_ir, [ $i, $func ];
+                $entry_index = $i if $func->name eq '_BROCKEN_ENTRY';
+                $has_isolate ||= $self->_has_isolate_ops_ir($func);
+                $has_gate    ||= $self->_has_gate_ops_ir($func);
+            }
+        }
+        my $cached_core = $core_cache{$plat_key};
+        if ( !$cached_core && @core_ir ) {
+            my @built_core;
+            for my $func (@core_ir) {
+                my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
+                my $mf      = $lowerer->lower($func);
+                push @built_core, $self->_emit_single_mf( $mf, $func->name );
+            }
+            $cached_core = \@built_core;
+            $core_cache{$plat_key} = \@built_core;
+        }
+        my @user_blobs;
+        my @user_mfs;
+        for my $pair (@user_ir) {
+            my ( $fn_i, $func ) = @$pair;
+            my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
+            my $mf      = $lowerer->lower($func);
+            $has_fiber ||= $self->_has_fiber_ops_mf($mf);
+            push @user_mfs, [ $mf, $fn_i, $func->name ];
         }
         my $emit_init = $has_fiber && $entry_index >= 0;
-        for my $item (@mfs_to_process) {
-            my $mf    = $item->{mf};
-            my $fname = $item->{fname};
-            if ( $emit_init && $item->{is_entry} ) {
+        for my $entry (@user_mfs) {
+            my ( $mf, $fn_i, $fname ) = @$entry;
+            if ( $emit_init && $fn_i == $entry_index ) {
                 $fname = '_real_main';
             }
-            my $alloc   = Brocken::Jenny::RegAlloc::LinearScan->new();
-            my $int_res = $alloc->allocate( $mf, $platform, 0 );
-            $alloc->insert_spill_code( $mf, $int_res->{spill_slots}, $int_res->{spill_temp}, $platform->stack_reg, 0, $int_res->{spill_addr_temp} );
-            my $fp_res = $alloc->allocate( $mf, $platform, 1, $int_res->{spill_slots} );
-            $alloc->insert_spill_code( $mf, $fp_res->{spill_slots}, $fp_res->{spill_temp}, $platform->stack_reg, 1, $fp_res->{spill_addr_temp} );
-            my %assignment = ( $int_res->{assignment}->%*, $fp_res->{assignment}->%* );
-            my %skip;
-            @skip{ $platform->return_register, $platform->fp_return_register } = ( 1, 1 );
-            my @gp_caller   = grep { !$skip{$_} } $platform->registers('caller')->@*;
-            my @fp_caller   = grep { !$skip{$_} } $platform->fp_registers('caller')->@*;
-            my $caller_base = $self->_caller_save_base( $int_res->{spill_slots}, $fp_res->{spill_slots} );
-            $alloc->insert_caller_save_code( $mf, \@gp_caller, $platform->stack_reg, 0, $caller_base );
-            $alloc->insert_caller_save_code( $mf, \@fp_caller, $platform->stack_reg, 1, $caller_base + scalar(@gp_caller) );
-            $alloc->remove_redundant_moves( $mf, \%assignment );
-            $alloc->remove_redundant_caller_restores($mf);
-            $alloc->fix_entry_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $platform->abi->fp_entry_shuffle_temp );
-            $alloc->fix_call_shuffle( $mf, \%assignment, $int_res->{spill_temp}, $platform->abi->fp_entry_shuffle_temp );
-            my %callee_seen;
-            @callee_seen{ $int_res->{used_callee}->@* } = ();
-            @callee_seen{ $fp_res->{used_callee}->@* }  = ();
-
-            if ( $item->{has_fiber} ) {
-                $callee_seen{ $platform->fiber_reg } = 1;
-            }
-            my @used_callee = sort keys %callee_seen;
-            my %alloca_map;
-            my %source_map;
-            my ( $bytes, $func_fixups, $unwind_info ) = $self->_encode( $mf, \%assignment, \@used_callee, \%alloca_map, \%source_map );
-            $mf->release;
-            my $blob = {
-                name       => $fname,
-                bytes      => $bytes,
-                fixups     => $func_fixups,
-                alloca_map => \%alloca_map,
-                source_map => \%source_map,
-                unwind     => $unwind_info
-            };
-            push @result, $blob;
-
-            if ( $item->{is_core} ) {
-                $core_cache{$plat_key}{$fname} = { blob => $blob, has_fiber => $item->{has_fiber}, };
-            }
+            push @user_blobs, $self->_emit_single_mf( $mf, $fname );
         }
+        my @result;
+        if ($cached_core) {
+            push @result, map { _clone_arm64_blob($_) } @$cached_core;
+        }
+        push @result, @user_blobs;
         if ($emit_init) {
             my $init_mf = $self->_build_fiber_init_mf;
             unshift @result, $self->_emit_single_mf($init_mf);
