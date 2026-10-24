@@ -500,54 +500,55 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
             my @pdata_entries;
 
             # Entry stub at RVA 0x1000 (stp x29,x30,[sp,#-16]! / mov x29,sp / bl / ldp / uxtb / ret)
-            if ( $self->type eq 'exe' && length($entry_stub) > 0 ) {
-                push @pdata_entries, { rva => 0x1000, size => length($entry_stub) };
-            }
+            push @pdata_entries, { rva => 0x1000, size => length($entry_stub), frame_size => 16, num_saved_int => 0, is_entry => 1 }
+                if $self->type eq 'exe' && length($entry_stub) > 0;
             if ( ref $code_data eq 'ARRAY' ) {
                 for my $fd ( $code_data->@* ) {
+                    next unless length( $fd->{bytes} ) > 0;
                     my $rva = 0x1000 + $entry_size + ( $func_offsets{ $fd->{name} } // 0 );
                     my $uw  = $fd->{unwind} // {};
                     push @pdata_entries,
-                        { rva => $rva, size => length( $fd->{bytes} ), frame_size => $uw->{frame_size}, num_saved_int => $uw->{num_saved_int} };
+                        {
+                        rva           => $rva,
+                        size          => length( $fd->{bytes} ),
+                        frame_size    => $uw->{frame_size}    // 0,
+                        num_saved_int => $uw->{num_saved_int} // 0,
+                        is_entry      => 0
+                        };
                 }
             }
             elsif ( length($text_raw) > 0 ) {
-                push @pdata_entries, { rva => 0x1000 + $entry_size, size => length($text_raw) };
+                push @pdata_entries, { rva => 0x1000 + $entry_size, size => length($text_raw), frame_size => 0, num_saved_int => 0, is_entry => 0 };
             }
             if ( defined $stubs_rva_start ) {
                 my $stubs_size = length($text_bytes) - ( $stubs_rva_start - 0x1000 );
-                push @pdata_entries, { rva => $stubs_rva_start, size => $stubs_size };
+                push @pdata_entries, { rva => $stubs_rva_start, size => $stubs_size, frame_size => 0, num_saved_int => 0, is_entry => 0 }
+                    if $stubs_size > 0;
             }
-            for my $e (@pdata_entries) {
-                my $func_len = int( $e->{size} / 4 ) - 1;
-                my $is_entry = $e->{rva} == 0x1000;
-                my ( $cr, $frame_sz, $regi );
-                if ($is_entry) {
-                    $cr       = 2;
-                    $frame_sz = 1;
-                    $regi     = 0;
-                }
-                else {
-                    $cr       = 1;
-                    $frame_sz = ( $e->{frame_size} // 0 ) / 16;
-                    $regi     = $e->{num_saved_int} // 0;
-                }
 
-                # ARM64 packed unwind data format (Microsoft PE spec):
-                #   Bits  0-17: FunctionLength  (size/4 - 1, 18 bits)
-                #   Bit      18: Version (1 for packed format)
-                #   Bit      19: Frag (0 for non-frag)
-                #   Bits 20-21: CR (0=None, 1=LR, 2=LR+FP)
-                #   Bits 22-26: FrameSize (in 16-byte units, 5 bits)
-                #   Bits 27-29: RegI (number of x19-x28 saved, 3 bits)
-                #   Bits 30-31: RegF (number of v8-v15 saved, 2 bits)
-                my $packed = ( $func_len & 0x3FFFF )    # Bits 0-17
-                    | ( 1 << 18 )                       # Bit 18: Version
-                    | ( 0 << 19 )                       # Bit 19: Frag
-                    | ( ( $cr & 3 ) << 20 )             # Bits 20-21: CR
-                    | ( ( $frame_sz & 0x1F ) << 22 )    # Bits 22-26: FrameSize
-                    | ( ( $regi & 7 ) << 27 )           # Bits 27-29: RegI
-                    | ( 0 << 30 );                      # Bits 30-31: RegF = 0
+            # Windows ARM64 PE requires .pdata to be strictly sorted by function start RVA
+            @pdata_entries = sort { $a->{rva} <=> $b->{rva} } grep { $_->{size} > 0 } @pdata_entries;
+            for my $e (@pdata_entries) {
+                my $func_len = int( $e->{size} / 4 );      # Function length in 4-byte instructions
+                $func_len = 0x7FF if $func_len > 0x7FF;    # 11-bit cap (8KB)
+                my $frame_sz = int( ( $e->{frame_size} // 0 ) / 16 );
+                $frame_sz = 0x1FF if $frame_sz > 0x1FF;    # 9-bit cap
+                my $regi = $e->{num_saved_int} // 0;       # Non-volatile x19-x28 saved
+                $regi = 0xF if $regi > 0xF;
+
+                # CR: 3 = Chained frame (<x29, lr> saved), 0 = leaf unchained
+                my $cr = ( $e->{is_entry} || ( $e->{frame_size} // 0 ) > 0 ) ? 3 : 0;
+
+                # Official Microsoft ARM64 Packed Unwind Data Layout:
+                #   Bits  0-1:  Flag = 1 (Packed Unwind Data)
+                #   Bits  2-12: FunctionLength (11 bits)
+                #   Bits 13-15: RegF = 0 (3 bits, d8-d15 saved)
+                #   Bits 16-19: RegI (4 bits, x19-x28 saved)
+                #   Bit     20: H = 0 (1 bit, homed parameters)
+                #   Bits 21-22: CR (2 bits: 3=chained frame)
+                #   Bits 23-31: FrameSize (9 bits, frame / 16)
+                my $packed = ( 1 & 0x3 ) | ( ( $func_len & 0x7FF ) << 2 ) | ( ( 0 & 0x7 ) << 13 ) | ( ( $regi & 0xF ) << 16 ) | ( ( 0 & 0x1 ) << 20 )
+                    | ( ( $cr & 0x3 ) << 21 ) | ( ( $frame_sz & 0x1FF ) << 23 );
                 $pdata_bytes .= pack( 'V V', $e->{rva}, $packed );
             }
             $has_pdata = length($pdata_bytes) > 0;

@@ -1536,7 +1536,8 @@ class Brocken::Fuzz v0.0.1 {
         }
         my $file;
         eval {
-            $file = $self->tmpdir . '/fuzz_output' . $self->ext;
+            my $case_tag = $program->{case_num} // $$;
+            $file = $self->tmpdir . "/fuzz_output_${case_tag}" . $self->ext;
 
             # Always reset: a case with no string literals must not reuse the previous case's table.
             $self->linker->set_rodata( $rodata // {} );
