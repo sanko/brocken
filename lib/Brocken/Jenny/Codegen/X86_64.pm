@@ -870,7 +870,14 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                 }
                 elsif ( $opcode eq 'movzx' || $opcode eq 'movsx' ) {
                     my $src_bits = $src->type ? $src->type->bits : 64;
-                    if ( $opcode eq 'movzx' && $src_bits == 32 ) {
+                    my $dst_bits = $dst->type ? $dst->type->bits : 64;
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $src_r = $resolve->($src);
+                    my $sid   = $reg_id->($src_r);
+                    my $rex_w = ( $dst_bits >= 64 ) ? REX_W : 0;
+                    my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                    my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
 
                         # 32-bit zero-extend: just mov (writes to 32-bit reg, zeros upper 32)
                         my $dst_r = $resolve->($dst);
@@ -881,30 +888,32 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                         my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
                         $bytes .= pack( 'CCC', $rex, MOV_R_RM, $modrm );
                     }
-                    else {
-                        my $dst_r = $resolve->($dst);
-                        my $did   = $reg_id->($dst_r);
-                        my $src_r = $resolve->($src);
-                        my $sid   = $reg_id->($src_r);
-                        my $rex_w = ( $dst->type && $dst->type->bits >= 64 ) ? REX_W : 0;
-                        my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
-                        my $modrm = 0xC0 | ( ( $did & 7 ) << 3 ) | ( $sid & 7 );
-                        if ( $opcode eq 'movzx' && $src_bits <= 8 ) {
-                            $bytes .= pack( 'CCCC', $rex, 0x0F, 0xB6, $modrm );
-                        }
-                        elsif ( $opcode eq 'movzx' && $src_bits <= 16 ) {
-                            $bytes .= pack( 'CCCC', $rex, 0x0F, 0xB7, $modrm );
-                        }
-                        elsif ( $opcode eq 'movsx' && $src_bits <= 8 ) {
-                            $bytes .= pack( 'CCCC', $rex, 0x0F, 0xBE, $modrm );
-                        }
-                        elsif ( $opcode eq 'movsx' && $src_bits <= 16 ) {
-                            $bytes .= pack( 'CCCC', $rex, 0x0F, 0xBF, $modrm );
+                    elsif ( $src_bits == 32 ) {
+                        if ( $opcode eq 'movzx' ) {
+
+                            # 32 -> 64 zero-extend: a plain 32-bit mov already
+                            # zeroes the upper half, whereas MOVSXD would
+                            # sign-extend.
+                            my $rex32 = 0x40 | ( $did >= 8 ? 4 : 0 ) | ( $sid >= 8 ? 1 : 0 );
+                            $bytes .= pack( 'CCC', $rex32, MOV_RM_R, $modrm );
                         }
                         else {
-                            # movsx 32->64: MOVSXD (0x63)
+
+                            # 32 -> 64 sign-extend: MOVSXD (0x63)
                             $bytes .= pack( 'CCC', $rex, 0x63, $modrm );
                         }
+                    }
+                    elsif ( $opcode eq 'movzx' && $src_bits <= 8 ) {
+                        $bytes .= pack( 'CCCC', $rex, 0x0F, 0xB6, $modrm );
+                    }
+                    elsif ( $opcode eq 'movzx' && $src_bits <= 16 ) {
+                        $bytes .= pack( 'CCCC', $rex, 0x0F, 0xB7, $modrm );
+                    }
+                    elsif ( $opcode eq 'movsx' && $src_bits <= 8 ) {
+                        $bytes .= pack( 'CCCC', $rex, 0x0F, 0xBE, $modrm );
+                    }
+                    else {
+                        $bytes .= pack( 'CCCC', $rex, 0x0F, 0xBF, $modrm );
                     }
                 }
                 elsif ( $opcode eq 'add' ||
@@ -1057,7 +1066,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
 
                     # MOV dst, RAX/EAX  (dst = quotient)
                     my $mov_rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
-                    my $mov_modrm = 0xC0 | ( 0 << 3 ) | ( $did & 7 );
+                    my $mov_modrm = 0xC0 | ( ( $want_rem ? 2 : 0 ) << 3 ) | ( $did & 7 );
                     $bytes .= pack( 'CCC', $mov_rex, 0x89, $mov_modrm );
                 }
                 elsif ( $opcode eq 'div128_64' || $opcode eq 'rem128_64' ) {
@@ -1140,6 +1149,19 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
                         my $smodrm = 0xC0 | ( $extval << 3 ) | ( $did & 7 );
                         $bytes .= pack( 'CCC', $rex, 0xD3, $smodrm );
                     }
+                }
+                elsif ( $opcode eq 'neg' ) {
+                    my $dst_r = $resolve->($dst);
+                    my $did   = $reg_id->($dst_r);
+                    my $bits  = $dst->type ? $dst->type->bits : 64;
+                    my $rex_w = ( $bits >= 64 ) ? REX_W : 0;
+
+                    # RMW: the target is the r/m operand, so a high register needs REX.B, not REX.R.
+                    my $rex   = 0x40 | $rex_w | ( $did >= 8 ? 1 : 0 );
+                    my $modrm = 0xC0 | ( 3 << 3 ) | ( $did & 7 );
+
+                    # NEG r/m64 => REX.W F7 /3
+                    $bytes .= pack( 'CCC', $rex, GRP3_RM, $modrm );
                 }
                 elsif ( $opcode eq 'alloca' ) {
                     my $asan_off = ( $alloca_top + 15 ) & ~15;
