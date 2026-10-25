@@ -435,6 +435,57 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         if ( $has_setjmp && !$is_float ) {
             $defined_phys{$_} = 1 for @caller_regs;
         }
+
+        # The umulh/udiv/idiv/irem/div128_64 encodings use rax and rdx as
+        # internal temporaries, which is invisible to the per-function phys_reg
+        # destination scan above. A virtual register allocated to either would
+        # have its value silently destroyed by the sequence, so keep both out
+        # of the pool whenever one of those opcodes is present.
+        my $has_div_scratch = 0;
+        if ( $mf && $mf->blocks->@* && !$is_float ) {
+            DIV_SCAN: for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    next unless $inst->opcode eq 'umulh'
+                        || $inst->opcode eq 'udiv'
+                        || $inst->opcode eq 'idiv'
+                        || $inst->opcode eq 'irem'
+                        || $inst->opcode eq 'div128_64'
+                        || $inst->opcode eq 'rem128_64';
+                    $has_div_scratch = 1;
+                    last DIV_SCAN;
+                }
+            }
+        }
+        if ($has_div_scratch) {
+            $defined_phys{rax} = 1;
+            $defined_phys{rdx} = 1;
+        }
+
+        # The register-source shift encodings (shl/lshr/ashr with a non-immediate
+        # count) use the D3 /ext form, which requires the count in CL, so the
+        # count is moved into rcx immediately before the shift. That move is
+        # invisible to the per-function phys_reg destination scan above, so a
+        # value or shift destination allocated to rcx would be silently
+        # destroyed by it. Keep rcx out of the pool for such functions.
+        my $has_shift_scratch = 0;
+        if ( $mf && $mf->blocks->@* && !$is_float ) {
+            SHIFT_SCAN: for my $mbb ( $mf->blocks->@* ) {
+                for my $inst ( $mbb->instructions->@* ) {
+                    next unless $inst->opcode eq 'shl'
+                        || $inst->opcode eq 'lshr'
+                        || $inst->opcode eq 'ashr';
+                    my @ops = $inst->operands->@*;
+                    next if @ops < 2;
+                    next if $ops[1]->kind eq 'imm';
+                    $has_shift_scratch = 1;
+                    last SHIFT_SCAN;
+                }
+            }
+        }
+        if ($has_shift_scratch) {
+            $defined_phys{rcx} = 1;
+        }
+
         @caller_regs = grep { !$defined_phys{$_} } @caller_regs;
         @callee_regs = grep { !$defined_phys{$_} } @callee_regs;
 
