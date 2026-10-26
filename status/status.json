@@ -1,35 +1,23 @@
 {
-"Linux:Intel": "success"
-,
-"Linux:ARM": "success"
-,
-"Linux:RISC-V": "success"
-,
-"macOS:Intel": "success"
-,
-"macOS:Apple Silicon": "success"
-,
-"Windows:Intel": "success"
-,
-"Windows:ARM": "success"
-,
-"DragonFly_BSD:Intel": "failure"
-,
-"FreeBSD:Intel": "success"
-,
-"FreeBSD:ARM": "success"
-,
-"Haiku:Intel": "failure"
-,
-"MidnightBSD:Intel": "success"
-,
-"NetBSD:Intel": "success"
-,
-"NetBSD:ARM": "success"
-,
-"OmniOS:Intel": "success"
-,
-"OpenBSD:Intel": "success"
-,
-"OpenBSD:ARM": "success"
-}
+"97bcf39e": {"name": "ARM [Ubuntu 22.04] (default)", "status": "👍🏽 passing"},
+"4915894f": {"name": "ARM [Ubuntu 24.04] (default)", "status": "👍🏽 passing"},
+"0e9c4268": {"name": "ARM [Ubuntu 26.04] (default)", "status": "👍🏽 passing"},
+"dd413904": {"name": "RISC-V [Ubuntu 24.04] (default)", "status": "👍🏽 passing"},
+"41907fe9": {"name": "Intel [Ubuntu 22.04] (default)", "status": "👍🏽 passing"},
+"b30e2d0b": {"name": "Intel [Ubuntu 24.04] (default)", "status": "👍🏽 passing"},
+"1079a571": {"name": "Intel [Ubuntu 26.04] (default)", "status": "👍🏽 passing"},
+"40baf86d": {"name": "Intel [Ubuntu 26.04] (default)", "status": "👍🏽 passing"},
+"af13c8dd": {"name": "Apple Silicon (default)", "status": "👍🏽 passing"},
+"ad7b11eb": {"name": "Intel (default)", "status": "👍🏽 passing"},
+"b7e7f478": {"name": "ARM (5.42.3.1)", "status": "👍🏽 passing"},
+"bb8b705f": {"name": "Intel (5.42.3.1)", "status": "👍🏽 passing"},
+"c008f1e8": {"name": "ARM", "status": "👍🏽 passing"},
+"0d0736d7": {"name": "Intel", "status": "👍🏽 passing"},
+"ec6802e6": {"name": "ARM", "status": "👍🏽 passing"},
+"d3d995b0": {"name": "Intel", "status": "👍🏽 passing"},
+"a3d576dc": {"name": "ARM", "status": "👍🏽 passing"},
+"799ef8a0": {"name": "Intel", "status": "👍🏽 passing"},
+"057bbada": {"name": "Intel", "status": "👍🏽 passing"},
+"af9fb9bc": {"name": "Intel", "status": "👍🏽 passing"},
+"6b9419f3": {"name": "Intel", "status": "👍🏽 passing"},
+"5dd34b2c": {"name": "Intel", "status": "👍🏽 passing"}}
