@@ -284,120 +284,119 @@ sub _init( ptr $heap_base, i64 $heap_size ) {
 # Cold path: line-aware bump allocation within current Immix block.
 sub bump_alloc( ptr $heap_base, i64 $size ) : returns(ptr) {
 
-    # Memory limit check
-    my i64 $mem_limit = get_memory_limit($heap_base);
+    # Hot path 1: free16_head. A free16 slot is exactly 16 usable bytes, so it only satisfies requests that fit in one;
+    # anything larger must not be handed a 16-byte slot or the tail of the object would overwrite the next free slot.
+    # Reusing a freed slot consumes 0 net memory, so this hot path bypasses memory limit checks entirely.
+    my ptr $head   = Brocken::load_i64( Brocken::ptr_add( $heap_base, 48 ) );
+    my i64 $fits16 = Brocken::ptr_cmp_ge( 16, $size );
+    if ( Brocken::ptr_cmp_eq( $head, 0 ) == 0 && Brocken::ptr_cmp_eq( $fits16, 0 ) == 0 ) {
+        my ptr $next = Brocken::load_i64( Brocken::ptr_add( $head, 8 ) );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 48 ), $next );
+        return $head;
+    }
+
+    # Memory limit check for allocations requiring fresh memory (inlined ICB accessors)
+    my i64 $mem_limit = Brocken::load_i64( Brocken::ptr_add( $heap_base, 88 ) );
     if ( Brocken::ptr_cmp_gt( $mem_limit, 0 ) ) {
-        my i64 $mem_used = get_memory_used($heap_base);
+        my i64 $mem_used = Brocken::load_i64( Brocken::ptr_add( $heap_base, 96 ) );
         my i64 $new_used = Brocken::i64_add( $mem_used, $size );
         if ( Brocken::ptr_cmp_gt( $new_used, $mem_limit ) ) {
-            set_err_code( $heap_base, 1 );
+            Brocken::store_i64( Brocken::ptr_add( $heap_base, 72 ), 1 );
             return 0;
         }
     }
 
-    # Hot path: free16_head. A free16 slot is exactly 16 usable bytes, so it only satisfies requests that fit in one;
-    # anything larger must not be handed a 16-byte slot or the tail of the object would overwrite the next free slot.
-    my ptr $head   = get_free16_head($heap_base);
-    my i64 $fits16 = Brocken::ptr_cmp_ge( 16, $size );
-    if ( Brocken::ptr_cmp_eq( $head, 0 ) == 0 && Brocken::ptr_cmp_eq( $fits16, 0 ) == 0 ) {
-        my ptr $next = Brocken::load_i64( Brocken::ptr_add( $head, 8 ) );
-        set_free16_head( $heap_base, $next );
-        return $head;
-    }
-
     # Immix line-aware bump: load immix_cursor and immix_limit
-    my ptr $cursor     = get_immix_cursor($heap_base);
-    my ptr $limit      = get_immix_limit($heap_base);
+    my ptr $cursor     = Brocken::load_i64( Brocken::ptr_add( $heap_base, 24 ) );
+    my ptr $limit      = Brocken::load_i64( Brocken::ptr_add( $heap_base, 32 ) );
     my ptr $new_cursor = Brocken::ptr_add( $cursor, $size );
 
-    # Does the allocation fit within the current line?
-    if ( Brocken::ptr_cmp_gt( $new_cursor, $limit ) ) {
-
-        # Current line exhausted. Find next free line via bitmap.
-        my ptr $block_base      = get_current_block($heap_base);
-        my i64 $offset_in_block = Brocken::ptr_sub( $cursor, $block_base );
-        my i64 $cur_line_idx    = Brocken::shr( $offset_in_block, 8 );
-        my i64 $next_scan       = $cur_line_idx;
-        my i64 $nf              = Brocken::load_i64( Brocken::ptr_add( $block_base, block_next_free_offset() ) );
-        if ( Brocken::ptr_cmp_gt( $nf, $next_scan ) ) {
-            $next_scan = $nf;
-        }
-        my i64 $found = find_free_line( $block_base, $next_scan );
-        if ( Brocken::ptr_cmp_eq( $found, -1 ) == 0 ) {
-            my i64 $line_byte_off = Brocken::shl( $found, 8 );
-            my ptr $line_start    = Brocken::ptr_add( $block_base, $line_byte_off );
-            my ptr $after_alloc   = Brocken::ptr_add( $line_start, $size );
-            my ptr $block_end     = Brocken::ptr_add( $block_base, block_live_count_offset() );
-            if ( Brocken::ptr_cmp_gt( $after_alloc, $block_end ) == 0 ) {
-                set_immix_cursor( $heap_base, $after_alloc );
-                my ptr $new_limit = Brocken::ptr_add( $line_start, 256 );
-                if ( Brocken::ptr_cmp_gt( $new_limit, $block_end ) ) {
-                    $new_limit = $block_end;
-                }
-                set_immix_limit( $heap_base, $new_limit );
-                mark_span( $block_base, Brocken::shl( $found, 8 ), $size );
-                my i64 $next_nf = Brocken::i64_add( $found, 1 );
-                Brocken::store_i64( Brocken::ptr_add( $block_base, block_next_free_offset() ), $next_nf );
-                my i64 $lc = Brocken::load_i64( Brocken::ptr_add( $block_base, block_live_count_offset() ) );
-                Brocken::store_i64( Brocken::ptr_add( $block_base, block_live_count_offset() ), Brocken::i64_add( $lc, 1 ) );
-                my i64 $mu1 = get_memory_used($heap_base);
-                set_memory_used( $heap_base, Brocken::i64_add( $mu1, $size ) );
-                return $line_start;
-            }
-        }
-
-        # No free line found in current block. Try free_blocks.
-        my ptr $fb = get_free_blocks($heap_base);
-        if ( Brocken::ptr_cmp_eq( $fb, 0 ) == 0 ) {
-            my ptr $fb_next = Brocken::load_i64($fb);
-            set_free_blocks( $heap_base, $fb_next );
-            clear_block_bitmap($fb);
-            my ptr $fb_line0 = Brocken::ptr_add( $fb, 16 );
-            set_immix_cursor( $heap_base, $fb_line0 );
-            set_immix_limit( $heap_base, Brocken::ptr_add( $fb, 256 ) );
-            Brocken::store_i64( Brocken::ptr_add( $fb, block_live_count_offset() ), 1 );
-            Brocken::store_i64( Brocken::ptr_add( $fb, block_next_free_offset() ),  1 );
-            mark_span( $fb, 16, $size );
-            set_current_block( $heap_base, $fb );
-            set_immix_cursor( $heap_base, Brocken::ptr_add( $fb_line0, $size ) );
-            my i64 $mu2 = get_memory_used($heap_base);
-            set_memory_used( $heap_base, Brocken::i64_add( $mu2, $size ) );
-            return $fb_line0;
-        }
-
-        # No free block available. Carve a fresh block from the legacy heap. Blocks sit on a block_size() grid anchored at
-        # the arena base (the first block, right after the ICB), not at $heap_base: anchoring on $heap_base would place
-        # block N+1 160 bytes inside block N's trailer and corrupt its live_count/next_free.
-        my ptr $arena_base    = Brocken::ptr_add( $heap_base, icb_size() );
-        my ptr $legacy_cursor = get_heap_cursor($heap_base);
-        my i64 $cursor_off    = Brocken::ptr_sub( $legacy_cursor, $arena_base );
-        my i64 $aligned_off
-            = Brocken::band( Brocken::i64_add( $cursor_off, Brocken::i64_sub( block_size(), 1 ) ), Brocken::i64_sub( 0, block_size() ) );
-        my ptr $new_block = Brocken::ptr_add( $arena_base, $aligned_off );
-        Brocken::store_i64( $new_block, 0 );
-        Brocken::store_i64( Brocken::ptr_add( $new_block, 8 ),                         0 );
-        Brocken::store_i64( Brocken::ptr_add( $new_block, block_live_count_offset() ), 0 );
-        Brocken::store_i64( Brocken::ptr_add( $new_block, block_next_free_offset() ),  1 );
-        mark_span( $new_block, 16, $size );
-        set_heap_cursor( $heap_base, Brocken::ptr_add( $new_block, block_size() ) );
-        set_current_block( $heap_base, $new_block );
-        my ptr $nb_line0 = Brocken::ptr_add( $new_block, 16 );
-        set_immix_cursor( $heap_base, $nb_line0 );
-        set_immix_limit( $heap_base, Brocken::ptr_add( $new_block, 256 ) );
-        Brocken::store_i64( Brocken::ptr_add( $new_block, block_live_count_offset() ), 1 );
-        my i64 $mu3 = get_memory_used($heap_base);
-        set_memory_used( $heap_base, Brocken::i64_add( $mu3, $size ) );
-        return $nb_line0;
+    # Hot path 2: Does the allocation fit within the current line?
+    if ( Brocken::ptr_cmp_gt( $new_cursor, $limit ) == 0 ) {
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ), $new_cursor );
+        my ptr $block_base2 = Brocken::load_i64( Brocken::ptr_add( $heap_base, 80 ) );
+        my i64 $lc2         = Brocken::load_i64( Brocken::ptr_add( $block_base2, block_live_count_offset() ) );
+        Brocken::store_i64( Brocken::ptr_add( $block_base2, block_live_count_offset() ), Brocken::i64_add( $lc2, 1 ) );
+        my i64 $mu4 = Brocken::load_i64( Brocken::ptr_add( $heap_base, 96 ) );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 96 ), Brocken::i64_add( $mu4, $size ) );
+        return $cursor;
     }
 
-    # Allocation fits in current line: bump cursor
-    set_immix_cursor( $heap_base, $new_cursor );
-    my ptr $block_base2 = get_current_block($heap_base);
-    my i64 $lc2         = Brocken::load_i64( Brocken::ptr_add( $block_base2, block_live_count_offset() ) );
-    Brocken::store_i64( Brocken::ptr_add( $block_base2, block_live_count_offset() ), Brocken::i64_add( $lc2, 1 ) );
-    my i64 $mu4 = get_memory_used($heap_base);
-    set_memory_used( $heap_base, Brocken::i64_add( $mu4, $size ) );
-    return $cursor;
+    # COLD PATH: Current line exhausted. Find next free line via bitmap.
+    my ptr $block_base      = Brocken::load_i64( Brocken::ptr_add( $heap_base, 80 ) );
+    my i64 $offset_in_block = Brocken::ptr_sub( $cursor, $block_base );
+    my i64 $cur_line_idx    = Brocken::shr( $offset_in_block, 8 );
+    my i64 $next_scan       = $cur_line_idx;
+    my i64 $nf              = Brocken::load_i64( Brocken::ptr_add( $block_base, block_next_free_offset() ) );
+    if ( Brocken::ptr_cmp_gt( $nf, $next_scan ) ) {
+        $next_scan = $nf;
+    }
+    my i64 $found = find_free_line( $block_base, $next_scan );
+    if ( Brocken::ptr_cmp_eq( $found, -1 ) == 0 ) {
+        my i64 $line_byte_off = Brocken::shl( $found, 8 );
+        my ptr $line_start    = Brocken::ptr_add( $block_base, $line_byte_off );
+        my ptr $after_alloc   = Brocken::ptr_add( $line_start, $size );
+        my ptr $block_end     = Brocken::ptr_add( $block_base, block_live_count_offset() );
+        if ( Brocken::ptr_cmp_gt( $after_alloc, $block_end ) == 0 ) {
+            Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ), $after_alloc );
+            my ptr $new_limit = Brocken::ptr_add( $line_start, 256 );
+            if ( Brocken::ptr_cmp_gt( $new_limit, $block_end ) ) {
+                $new_limit = $block_end;
+            }
+            Brocken::store_i64( Brocken::ptr_add( $heap_base, 32 ), $new_limit );
+            mark_span( $block_base, Brocken::shl( $found, 8 ), $size );
+            my i64 $next_nf = Brocken::i64_add( $found, 1 );
+            Brocken::store_i64( Brocken::ptr_add( $block_base, block_next_free_offset() ), $next_nf );
+            my i64 $lc = Brocken::load_i64( Brocken::ptr_add( $block_base, block_live_count_offset() ) );
+            Brocken::store_i64( Brocken::ptr_add( $block_base, block_live_count_offset() ), Brocken::i64_add( $lc, 1 ) );
+            my i64 $mu1 = Brocken::load_i64( Brocken::ptr_add( $heap_base, 96 ) );
+            Brocken::store_i64( Brocken::ptr_add( $heap_base, 96 ), Brocken::i64_add( $mu1, $size ) );
+            return $line_start;
+        }
+    }
+
+    # No free line found in current block. Try free_blocks.
+    my ptr $fb = Brocken::load_i64( Brocken::ptr_add( $heap_base, 40 ) );
+    if ( Brocken::ptr_cmp_eq( $fb, 0 ) == 0 ) {
+        my ptr $fb_next = Brocken::load_i64($fb);
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 40 ), $fb_next );
+        clear_block_bitmap($fb);
+        my ptr $fb_line0 = Brocken::ptr_add( $fb, 16 );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ), $fb_line0 );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 32 ), Brocken::ptr_add( $fb, 256 ) );
+        Brocken::store_i64( Brocken::ptr_add( $fb, block_live_count_offset() ), 1 );
+        Brocken::store_i64( Brocken::ptr_add( $fb, block_next_free_offset() ),  1 );
+        mark_span( $fb, 16, $size );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 80 ), $fb );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ), Brocken::ptr_add( $fb_line0, $size ) );
+        my i64 $mu2 = Brocken::load_i64( Brocken::ptr_add( $heap_base, 96 ) );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 96 ), Brocken::i64_add( $mu2, $size ) );
+        return $fb_line0;
+    }
+
+    # No free block available. Carve a fresh block from the legacy heap. Blocks sit on a block_size() grid anchored at
+    # the arena base (the first block, right after the ICB), not at $heap_base: anchoring on $heap_base would place
+    # block N+1 160 bytes inside block N's trailer and corrupt its live_count/next_free.
+    my ptr $arena_base    = Brocken::ptr_add( $heap_base, icb_size() );
+    my ptr $legacy_cursor = Brocken::load_i64($heap_base);
+    my i64 $cursor_off    = Brocken::ptr_sub( $legacy_cursor, $arena_base );
+    my i64 $aligned_off
+        = Brocken::band( Brocken::i64_add( $cursor_off, Brocken::i64_sub( block_size(), 1 ) ), Brocken::i64_sub( 0, block_size() ) );
+    my ptr $new_block = Brocken::ptr_add( $arena_base, $aligned_off );
+    Brocken::store_i64( $new_block, 0 );
+    Brocken::store_i64( Brocken::ptr_add( $new_block, 8 ),                         0 );
+    Brocken::store_i64( Brocken::ptr_add( $new_block, block_live_count_offset() ), 0 );
+    Brocken::store_i64( Brocken::ptr_add( $new_block, block_next_free_offset() ),  1 );
+    mark_span( $new_block, 16, $size );
+    Brocken::store_i64( $heap_base, Brocken::ptr_add( $new_block, block_size() ) );
+    Brocken::store_i64( Brocken::ptr_add( $heap_base, 80 ), $new_block );
+    my ptr $nb_line0 = Brocken::ptr_add( $new_block, 16 );
+    Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ), $nb_line0 );
+    Brocken::store_i64( Brocken::ptr_add( $heap_base, 32 ), Brocken::ptr_add( $new_block, 256 ) );
+    Brocken::store_i64( Brocken::ptr_add( $new_block, block_live_count_offset() ), 1 );
+    my i64 $mu3 = Brocken::load_i64( Brocken::ptr_add( $heap_base, 96 ) );
+    Brocken::store_i64( Brocken::ptr_add( $heap_base, 96 ), Brocken::i64_add( $mu3, $size ) );
+    return $nb_line0;
 }
 
 # Increment the reference count of a fat scalar at $obj.
