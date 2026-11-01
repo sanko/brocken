@@ -3022,9 +3022,8 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                         my $result  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
                         my $cmp_lhs = $lhs_op;
                         if ( $lhs_op->kind eq 'imm' ) {
-                            my $tmp
-                                = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_lhs', type => $lhs_op->type,
-                                );
+                            my $tmp = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name . '_lhs',
+                                type => $lhs_op->type );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new(
                                     opcode   => 'mov',
@@ -3254,8 +3253,9 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                         );
                     }
                     else {
-                        my $store_type = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $val->type;
-                        my $mem        = Brocken::Jenny::MIR::MachineOperand->new(
+                        my $store_type = ( $inst->type && $inst->type->kind ne 'void' ) ? $inst->type :
+                            ( $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $val->type );
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'mem',
                             value => { base => $ptr->name, disp => 0 },
                             type  => $store_type
@@ -3305,7 +3305,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                         my $tmp = Brocken::Jenny::MIR::MachineOperand->new(
                                             kind  => 'virt_reg',
                                             value => '%store_imm_' . $ic++,
-                                            type  => $val->type,
+                                            type  => $val->type
                                         );
                                         $mbb->add_instruction(
                                             Brocken::Jenny::MIR::MachineInstruction->new(
@@ -4974,12 +4974,12 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
             $lo = -( ~$lo & 0xFFFFFFFFFFFFFFFF ) - 1 if $lo >= 0x8000000000000000;
             return (
                 Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $lo, type => Brocken::Lindsay::IR::Type::i64() ),
-                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() )
             );
         }
         return (
             Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
-            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() )
         );
     }
 

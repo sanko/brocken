@@ -1443,7 +1443,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mv',
-                                            operands => [ $fone, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ],
+                                            operands => [ $fone, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 1 ) ]
                                         )
                                     );
                                     $mbb->add_instruction(
@@ -1454,7 +1454,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                         )
                                     );
                                     my $flbl = Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->name . '_flp' );
-                                    $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$flbl], ) );
+                                    $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'label', operands => [$flbl] ) );
 
                                     # cnt--
                                     $mbb->add_instruction(
@@ -1472,11 +1472,11 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                         type  => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fbit, $lo_lhs ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fbit, $lo_lhs ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'lshr', operands => [ $fbit, $fcnt ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'lshr', operands => [ $fbit, $fcnt ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $fbit, $fone ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $fbit, $fone ] ) );
 
                                     # carry = r_lo >> 63
                                     my $fcarry = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1485,29 +1485,29 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                         type  => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fcarry, $r_lo ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fcarry, $r_lo ] ) );
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'lshr',
-                                            operands => [ $fcarry, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ],
+                                            operands => [ $fcarry, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 63 ) ]
                                         )
                                     );
 
                                     # r_lo = (r_lo << 1) | bit
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_lo, $r_lo ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_lo, $r_lo ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'shl', operands => [ $r_lo, $fone ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'shl', operands => [ $r_lo, $fone ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $r_lo, $fbit ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $r_lo, $fbit ] ) );
 
                                     # r_hi = (r_hi << 1) | carry
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_hi, $r_hi ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_hi, $r_hi ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'shl', operands => [ $r_hi, $fone ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'shl', operands => [ $r_hi, $fone ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $r_hi, $fcarry ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $r_hi, $fcarry ] ) );
 
                                     # cond = (r_hi != 0) || (r_lo >= lo_rhs)  [d_hi = 0]
                                     my $flge = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1516,11 +1516,10 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                         type  => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $flge, $r_lo ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $flge, $r_lo ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cmp', operands => [ $flge, $lo_rhs ], ) );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_cs', operands => [$flge], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cmp', operands => [ $flge, $lo_rhs ] ) );
+                                    $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_cs', operands => [$flge] ) );
                                     my $fcond = Brocken::Jenny::MIR::MachineOperand->new(
                                         kind  => 'virt_reg',
                                         value => $inst->name . '_fcd',
@@ -1529,13 +1528,13 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'cmp',
-                                            operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                            operands => [ $r_hi, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ]
                                         )
                                     );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_ne', operands => [$fcond], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_ne', operands => [$fcond] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $fcond, $flge ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $fcond, $flge ] ) );
 
                                     # neg_cond = -cond
                                     my $fneg = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1546,11 +1545,11 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                     $mbb->add_instruction(
                                         Brocken::Jenny::MIR::MachineInstruction->new(
                                             opcode   => 'mv',
-                                            operands => [ $fneg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ],
+                                            operands => [ $fneg, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 0 ) ]
                                         )
                                     );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $fneg, $fcond ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $fneg, $fcond ] ) );
 
                                     # masked_lo = lo_rhs & neg_cond
                                     my $fmdl = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1559,9 +1558,9 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                         type  => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fmdl, $lo_rhs ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fmdl, $lo_rhs ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $fmdl, $fneg ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $fmdl, $fneg ] ) );
 
                                     # borrow = r_lo < masked_lo
                                     my $fbor = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1570,23 +1569,22 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                         type  => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fbor, $r_lo ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fbor, $r_lo ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cmp', operands => [ $fbor, $fmdl ], ) );
-                                    $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_cc', operands => [$fbor], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cmp', operands => [ $fbor, $fmdl ] ) );
+                                    $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'cset_cc', operands => [$fbor] ) );
 
                                     # r_lo -= masked_lo
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_lo, $r_lo ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_lo, $r_lo ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $r_lo, $fmdl ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $r_lo, $fmdl ] ) );
 
                                     # r_hi -= borrow  (masked_hi = 0 since d_hi = 0)
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_hi, $r_hi ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $r_hi, $r_hi ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $r_hi, $fbor ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'sub', operands => [ $r_hi, $fbor ] ) );
 
                                     # qbit = (1 << cnt) & neg_cond
                                     my $fqb = Brocken::Jenny::MIR::MachineOperand->new(
@@ -1595,17 +1593,17 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                                         type  => Brocken::Lindsay::IR::Type::i64()
                                     );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fqb, $fone ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $fqb, $fone ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'shl', operands => [ $fqb, $fcnt ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'shl', operands => [ $fqb, $fcnt ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $fqb, $fneg ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'and', operands => [ $fqb, $fneg ] ) );
 
                                     # q_lo |= qbit
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $q_lo, $q_lo ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mv', operands => [ $q_lo, $q_lo ] ) );
                                     $mbb->add_instruction(
-                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $q_lo, $fqb ], ) );
+                                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'or', operands => [ $q_lo, $fqb ] ) );
 
                                     # Branch back if counter != 0
                                     $mbb->add_instruction(
@@ -2962,7 +2960,8 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
                     my ( $val, $ptr ) = $inst->operands->@*;
-                    my $store_type = $self->_find_alloca_stored_type( $ir_func, $ptr->name );
+                    my $store_type
+                        = ( $inst->type && $inst->type->kind ne 'void' ) ? $inst->type : $self->_find_alloca_stored_type( $ir_func, $ptr->name );
                     my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128 && ( !$store_type || $store_type->bits >= 128 );
                     if ($is_i128) {
                         my ( $lo, $hi ) = $self->_split_i128($val);
@@ -5371,12 +5370,12 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
             $lo = -( ~$lo & 0xFFFFFFFFFFFFFFFF ) - 1 if $lo >= 0x8000000000000000;
             return (
                 Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $lo, type => Brocken::Lindsay::IR::Type::i64() ),
-                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() )
             );
         }
         return (
             Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
-            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() )
         );
     }
 

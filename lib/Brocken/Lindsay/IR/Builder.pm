@@ -20,7 +20,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [ $lhs, $rhs ],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -55,7 +55,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$operand],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -72,7 +72,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands    => [$val],
             parent      => $insert_block,
             line        => $line,
-            col         => $col,
+            col         => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -86,7 +86,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands    => [$val],
             parent      => $insert_block,
             line        => $line,
-            col         => $col,
+            col         => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -100,7 +100,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands    => [$val],
             parent      => $insert_block,
             line        => $line,
-            col         => $col,
+            col         => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -114,7 +114,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands    => [$val],
             parent      => $insert_block,
             line        => $line,
-            col         => $col,
+            col         => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -128,7 +128,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode => 'frame_addr',
             parent => $insert_block,
             line   => $line,
-            col    => $col,
+            col    => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -140,7 +140,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode => 'phi',
             parent => $insert_block,
             line   => $line,
-            col    => $col,
+            col    => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -153,7 +153,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [ $cond, $true_val, $false_val ],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -167,7 +167,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands  => [ $ptr, $indices->@* ],
             parent    => $insert_block,
             line      => $line,
-            col       => $col,
+            col       => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -182,11 +182,11 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands         => [
                 $ptr,
                 Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 ),
-                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => $field_idx ),
+                Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => $field_idx )
             ],
             parent => $insert_block,
             line   => $line,
-            col    => $col,
+            col    => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -200,7 +200,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands  => [ $lhs, $rhs ],
             parent    => $insert_block,
             line      => $line,
-            col       => $col,
+            col       => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -213,7 +213,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             dest_block => $dest_block,
             parent     => $insert_block,
             line       => $line,
-            col        => $col,
+            col        => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -228,7 +228,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             false_block => $false_block,
             parent      => $insert_block,
             line        => $line,
-            col         => $col,
+            col         => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -242,7 +242,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => defined $val ? [$val] : [],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -257,7 +257,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => $args,
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -274,7 +274,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             debug_type_name => $debug_type_name,
             parent          => $insert_block,
             line            => $line,
-            col             => $col,
+            col             => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -287,20 +287,20 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$ptr],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
 
-    method build_store( $val, $ptr, $line = 0, $col = 0 ) {
+    method build_store( $val, $ptr, $line = 0, $col = 0, $type = undef ) {
         my $inst = Brocken::Lindsay::IR::Instruction::Store->new(
             name     => undef,
-            type     => Brocken::Lindsay::IR::Type::void(),
+            type     => $type // Brocken::Lindsay::IR::Type::void(),
             opcode   => 'store',
             operands => [ $val, $ptr ],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -313,7 +313,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => $args,
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -328,7 +328,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => \@operands,
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -341,7 +341,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$dynamic_val],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -354,7 +354,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$val],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -368,7 +368,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => \@operands,
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -382,7 +382,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => $args,
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -395,7 +395,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [ $fiber, $val ],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -408,7 +408,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$val],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -421,7 +421,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -434,7 +434,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [ $fiber, $tid ],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -448,7 +448,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => $args,
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -461,7 +461,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$isolate],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -474,7 +474,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$capacity],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -487,7 +487,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [ $chan, $val ],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -500,7 +500,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$chan],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -513,7 +513,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$chan],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -526,7 +526,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [ $chan, $val ],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }
@@ -539,7 +539,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             operands => [$chan],
             parent   => $insert_block,
             line     => $line,
-            col      => $col,
+            col      => $col
         );
         return $insert_block->append_inst($inst);
     }

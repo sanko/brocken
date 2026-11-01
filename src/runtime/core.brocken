@@ -314,7 +314,7 @@ sub bump_alloc( ptr $heap_base, i64 $size ) : returns(ptr) {
     # Hot path 2: Does the allocation fit within the current line?
     if ( Brocken::ptr_cmp_gt( $new_cursor, $limit ) == 0 ) {
         Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ), $new_cursor );
-        my ptr $block_base2 = Brocken::load_i64( Brocken::ptr_add( $heap_base, 80 ) );
+        my ptr $block_base2 = Brocken::load_i64( Brocken::ptr_add( $heap_base,   80 ) );
         my i64 $lc2         = Brocken::load_i64( Brocken::ptr_add( $block_base2, block_live_count_offset() ) );
         Brocken::store_i64( Brocken::ptr_add( $block_base2, block_live_count_offset() ), Brocken::i64_add( $lc2, 1 ) );
         my i64 $mu4 = Brocken::load_i64( Brocken::ptr_add( $heap_base, 96 ) );
@@ -362,10 +362,10 @@ sub bump_alloc( ptr $heap_base, i64 $size ) : returns(ptr) {
         Brocken::store_i64( Brocken::ptr_add( $heap_base, 40 ), $fb_next );
         clear_block_bitmap($fb);
         my ptr $fb_line0 = Brocken::ptr_add( $fb, 16 );
-        Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ), $fb_line0 );
-        Brocken::store_i64( Brocken::ptr_add( $heap_base, 32 ), Brocken::ptr_add( $fb, 256 ) );
-        Brocken::store_i64( Brocken::ptr_add( $fb, block_live_count_offset() ), 1 );
-        Brocken::store_i64( Brocken::ptr_add( $fb, block_next_free_offset() ),  1 );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ),                        $fb_line0 );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 32 ),                        Brocken::ptr_add( $fb, 256 ) );
+        Brocken::store_i64( Brocken::ptr_add( $fb,        block_live_count_offset() ), 1 );
+        Brocken::store_i64( Brocken::ptr_add( $fb,        block_next_free_offset() ),  1 );
         mark_span( $fb, 16, $size );
         Brocken::store_i64( Brocken::ptr_add( $heap_base, 80 ), $fb );
         Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ), Brocken::ptr_add( $fb_line0, $size ) );
@@ -380,19 +380,18 @@ sub bump_alloc( ptr $heap_base, i64 $size ) : returns(ptr) {
     my ptr $arena_base    = Brocken::ptr_add( $heap_base, icb_size() );
     my ptr $legacy_cursor = Brocken::load_i64($heap_base);
     my i64 $cursor_off    = Brocken::ptr_sub( $legacy_cursor, $arena_base );
-    my i64 $aligned_off
-        = Brocken::band( Brocken::i64_add( $cursor_off, Brocken::i64_sub( block_size(), 1 ) ), Brocken::i64_sub( 0, block_size() ) );
-    my ptr $new_block = Brocken::ptr_add( $arena_base, $aligned_off );
+    my i64 $aligned_off = Brocken::band( Brocken::i64_add( $cursor_off, Brocken::i64_sub( block_size(), 1 ) ), Brocken::i64_sub( 0, block_size() ) );
+    my ptr $new_block   = Brocken::ptr_add( $arena_base, $aligned_off );
     Brocken::store_i64( $new_block, 0 );
     Brocken::store_i64( Brocken::ptr_add( $new_block, 8 ),                         0 );
     Brocken::store_i64( Brocken::ptr_add( $new_block, block_live_count_offset() ), 0 );
     Brocken::store_i64( Brocken::ptr_add( $new_block, block_next_free_offset() ),  1 );
     mark_span( $new_block, 16, $size );
-    Brocken::store_i64( $heap_base, Brocken::ptr_add( $new_block, block_size() ) );
+    Brocken::store_i64( $heap_base,                         Brocken::ptr_add( $new_block, block_size() ) );
     Brocken::store_i64( Brocken::ptr_add( $heap_base, 80 ), $new_block );
     my ptr $nb_line0 = Brocken::ptr_add( $new_block, 16 );
-    Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ), $nb_line0 );
-    Brocken::store_i64( Brocken::ptr_add( $heap_base, 32 ), Brocken::ptr_add( $new_block, 256 ) );
+    Brocken::store_i64( Brocken::ptr_add( $heap_base, 24 ),                        $nb_line0 );
+    Brocken::store_i64( Brocken::ptr_add( $heap_base, 32 ),                        Brocken::ptr_add( $new_block, 256 ) );
     Brocken::store_i64( Brocken::ptr_add( $new_block, block_live_count_offset() ), 1 );
     my i64 $mu3 = Brocken::load_i64( Brocken::ptr_add( $heap_base, 96 ) );
     Brocken::store_i64( Brocken::ptr_add( $heap_base, 96 ), Brocken::i64_add( $mu3, $size ) );
@@ -404,13 +403,11 @@ sub incref( ptr $obj ) {
     if ( Brocken::ptr_cmp_eq( $obj, 0 ) ) {
         return;
     }
-    my i64 $header = Brocken::load_i64($obj);
-    my i64 $old_rc = Brocken::band( $header, 65535 );
-    my i64 $new_rc = Brocken::i64_add( $old_rc, 1 );
-    if ( Brocken::ptr_cmp_gt( $new_rc, 65535 ) ) {
-        $new_rc = 65535;
+    my u16 $rc = Brocken::load_u16($obj);
+    if ( $rc == 65535 ) {
+        return;
     }
-    Brocken::store_i64( $obj, Brocken::i64_add( Brocken::i64_sub( $header, $old_rc ), $new_rc ) );
+    Brocken::store_u16( $obj, Brocken::i64_add( $rc, 1 ) );
     return;
 }
 
@@ -421,10 +418,12 @@ sub decref( ptr $obj, ptr $heap_base ) {
     if ( Brocken::ptr_cmp_eq( $obj, 0 ) ) {
         return;
     }
-    my i64 $header = Brocken::load_i64($obj);
-    my i64 $old_rc = Brocken::band( $header, 65535 );
+    my u16 $old_rc = Brocken::load_u16($obj);
+    if ( $old_rc == 65535 ) {
+        return;
+    }
     my i64 $new_rc = Brocken::i64_sub( $old_rc, 1 );
-    Brocken::store_i64( $obj, Brocken::i64_add( Brocken::i64_sub( $header, $old_rc ), $new_rc ) );
+    Brocken::store_u16( $obj, $new_rc );
     if ( Brocken::ptr_cmp_eq( $new_rc, 0 ) && Brocken::ptr_cmp_eq( $heap_base, 0 ) == 0 ) {
 
         # Tag 9 arrays and tag 8 hashes are recycled through the segregated free_big list: the bytes field at [obj+16]
@@ -432,17 +431,17 @@ sub decref( ptr $obj, ptr $heap_base ) {
         # request to it. Block live_count recycling is skipped: big-object reuse is slab-granular, not block-granular.
         # A hash's stored values are released by hash_release before it is decref'd, never from here, so that a grow
         # (which moves the values into the new table) can drop the old table without touching them.
-        my i64 $tag = Brocken::shr( $header, 24 );
+        my i64 $tag = Brocken::load_i8( Brocken::ptr_add( $obj, 3 ) );
         if ( Brocken::ptr_cmp_eq( $tag, 9 ) || Brocken::ptr_cmp_eq( $tag, 8 ) ) {
-            my ptr $big_head = get_free_big_head($heap_base);
-            Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $big_head );
-            set_free_big_head( $heap_base, $obj );
+            my ptr $big_head = Brocken::load_i64( Brocken::ptr_add( $heap_base, 144 ) );
+            Brocken::store_i64( Brocken::ptr_add( $obj,       8 ),   $big_head );
+            Brocken::store_i64( Brocken::ptr_add( $heap_base, 144 ), $obj );
         }
         else {
             # Push to free16 list for immediate reuse
-            my ptr $head = get_free16_head($heap_base);
-            Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $head );
-            set_free16_head( $heap_base, $obj );
+            my ptr $head = Brocken::load_i64( Brocken::ptr_add( $heap_base, 48 ) );
+            Brocken::store_i64( Brocken::ptr_add( $obj,       8 ),  $head );
+            Brocken::store_i64( Brocken::ptr_add( $heap_base, 48 ), $obj );
 
             # Decrement live_count for the block that actually owns this object. It may have been allocated in an earlier
             # block than the current allocation block, so derive the owner from the address.
@@ -454,16 +453,16 @@ sub decref( ptr $obj, ptr $heap_base ) {
             if ( Brocken::ptr_cmp_eq( $lc, 0 ) ) {
 
                 # Block fully empty - recycle to free_blocks
-                my ptr $fb_head = get_free_blocks($heap_base);
-                Brocken::store_i64( $block_base, $fb_head );
-                set_free_blocks( $heap_base, $block_base );
+                my ptr $fb_head = Brocken::load_i64( Brocken::ptr_add( $heap_base, 40 ) );
+                Brocken::store_i64( $block_base,                        $fb_head );
+                Brocken::store_i64( Brocken::ptr_add( $heap_base, 40 ), $block_base );
             }
         }
     }
     elsif ( Brocken::ptr_cmp_gt( $new_rc, 0 ) && Brocken::ptr_cmp_eq( $heap_base, 0 ) == 0 ) {
 
         # R3: RC > 0 after decrement - suspect for cycle detection.
-        my i64 $flags = get_gc_flags($obj);
+        my i64 $flags = Brocken::load_i8( Brocken::ptr_add( $obj, 2 ) );
         if ( Brocken::ptr_cmp_eq( Brocken::band( $flags, 4 ), 0 ) && Brocken::ptr_cmp_eq( Brocken::band( $flags, 2 ), 0 ) ) {
             push_suspect_buffer( $obj, $heap_base );
             maybe_gc_drain($heap_base);
@@ -481,12 +480,14 @@ sub decref_obj( ptr $obj, ptr $heap_base ) : returns(i64) {
     if ( Brocken::ptr_cmp_eq( $obj, 0 ) ) {
         return 0;
     }
-    my i64 $header = Brocken::load_i64($obj);
-    my i64 $old_rc = Brocken::band( $header, 65535 );
+    my u16 $old_rc = Brocken::load_u16($obj);
+    if ( $old_rc == 65535 ) {
+        return 65535;
+    }
     my i64 $new_rc = Brocken::i64_sub( $old_rc, 1 );
-    Brocken::store_i64( $obj, Brocken::i64_add( Brocken::i64_sub( $header, $old_rc ), $new_rc ) );
+    Brocken::store_u16( $obj, $new_rc );
     if ( Brocken::ptr_cmp_gt( $new_rc, 0 ) && Brocken::ptr_cmp_eq( $heap_base, 0 ) == 0 ) {
-        my i64 $flags = get_gc_flags($obj);
+        my i64 $flags = Brocken::load_i8( Brocken::ptr_add( $obj, 2 ) );
         if ( Brocken::ptr_cmp_eq( Brocken::band( $flags, 4 ), 0 ) && Brocken::ptr_cmp_eq( Brocken::band( $flags, 2 ), 0 ) ) {
             push_suspect_buffer( $obj, $heap_base );
             maybe_gc_drain($heap_base);
@@ -506,9 +507,9 @@ sub free_obj( ptr $obj, ptr $heap_base ) {
     if ( Brocken::ptr_cmp_eq( $heap_base, 0 ) ) {
         return;
     }
-    my ptr $head = get_free16_head($heap_base);
-    Brocken::store_i64( Brocken::ptr_add( $obj, 8 ), $head );
-    set_free16_head( $heap_base, $obj );
+    my ptr $head = Brocken::load_i64( Brocken::ptr_add( $heap_base, 48 ) );
+    Brocken::store_i64( Brocken::ptr_add( $obj,       8 ),  $head );
+    Brocken::store_i64( Brocken::ptr_add( $heap_base, 48 ), $obj );
     my ptr $block_base = block_of( $heap_base, $obj );
     my ptr $lc_ptr     = Brocken::ptr_add( $block_base, block_live_count_offset() );
     my i64 $lc         = Brocken::load_i64($lc_ptr);
@@ -516,9 +517,9 @@ sub free_obj( ptr $obj, ptr $heap_base ) {
     Brocken::store_i64( $lc_ptr, $lc );
 
     if ( Brocken::ptr_cmp_eq( $lc, 0 ) ) {
-        my ptr $fb_head = get_free_blocks($heap_base);
-        Brocken::store_i64( $block_base, $fb_head );
-        set_free_blocks( $heap_base, $block_base );
+        my ptr $fb_head = Brocken::load_i64( Brocken::ptr_add( $heap_base, 40 ) );
+        Brocken::store_i64( $block_base,                        $fb_head );
+        Brocken::store_i64( Brocken::ptr_add( $heap_base, 40 ), $block_base );
     }
     return;
 }
@@ -720,15 +721,11 @@ sub set_next_free( ptr $block, i64 $idx ) {
 
 # R3: Bacon/Rajan Trial Deletion (Cycle Detection)
 sub get_gc_flags( ptr $obj ) : returns(i64) {
-    my i64 $header = Brocken::load_i64($obj);
-    return Brocken::band( Brocken::shr( $header, 16 ), 255 );
+    return Brocken::load_i8( Brocken::ptr_add( $obj, 2 ) );
 }
 
 sub set_gc_flags( ptr $obj, i64 $flags ) {
-    my i64 $header    = Brocken::load_i64($obj);
-    my i64 $rc_part   = Brocken::band( $header, 65535 );
-    my i64 $high_part = Brocken::shl( Brocken::shr( $header, 24 ), 24 );
-    Brocken::store_i64( $obj, Brocken::bor( Brocken::bor( $rc_part, Brocken::shl( $flags, 16 ) ), $high_part ) );
+    Brocken::store_i8( Brocken::ptr_add( $obj, 2 ), $flags );
     return;
 }
 
@@ -1143,8 +1140,7 @@ sub box_tag( ptr $dyn ) : returns(i64) {
     if ( Brocken::ptr_cmp_eq( $dyn, 0 ) ) {
         return 0;
     }
-    my i64 $header = Brocken::load_i64($dyn);
-    return Brocken::shr( Brocken::band( $header, 4278190080 ), 24 );
+    return Brocken::load_i8( Brocken::ptr_add( $dyn, 3 ) );
 }
 
 # Read a boxed payload as an integer, truncating a float toward zero. A payload narrower than i64 needs no extra care,
@@ -1269,8 +1265,17 @@ sub str_concat( ptr $hb, ptr $lhs, ptr $rhs ) : returns(ptr) {
     my ptr $buf   = bump_alloc( $hb, $total );
     my ptr $dst   = $buf;
     $p = $lhs;
-    my i64 $i = 0;
-    while ( $i < $llen ) {
+    my i64 $l_chunks = Brocken::shr( $llen, 3 );
+    my i64 $ci       = 0;
+    while ( $ci < $l_chunks ) {
+        Brocken::store_i64( $dst, Brocken::load_i64($p) );
+        $p   = Brocken::ptr_add( $p,   8 );
+        $dst = Brocken::ptr_add( $dst, 8 );
+        $ci  = Brocken::i64_add( $ci, 1 );
+    }
+    my i64 $l_rem = Brocken::band( $llen, 7 );
+    my i64 $i     = 0;
+    while ( $i < $l_rem ) {
         my i8 $byte = Brocken::load_i8($p);
         Brocken::store_i8( $dst, $byte );
         $p   = Brocken::ptr_add( $p,   1 );
@@ -1278,8 +1283,17 @@ sub str_concat( ptr $hb, ptr $lhs, ptr $rhs ) : returns(ptr) {
         $i   = Brocken::i64_add( $i, 1 );
     }
     $p = $rhs;
+    my i64 $r_chunks = Brocken::shr( $rlen, 3 );
+    $ci = 0;
+    while ( $ci < $r_chunks ) {
+        Brocken::store_i64( $dst, Brocken::load_i64($p) );
+        $p   = Brocken::ptr_add( $p,   8 );
+        $dst = Brocken::ptr_add( $dst, 8 );
+        $ci  = Brocken::i64_add( $ci, 1 );
+    }
+    my i64 $r_rem = Brocken::band( $rlen, 7 );
     $i = 0;
-    while ( $i < $rlen ) {
+    while ( $i < $r_rem ) {
         my i8 $byte = Brocken::load_i8($p);
         Brocken::store_i8( $dst, $byte );
         $p   = Brocken::ptr_add( $p,   1 );
@@ -1354,8 +1368,24 @@ sub make_box_f64( ptr $hb, f64 $val ) : returns(ptr) {
 
 sub make_box_str( ptr $hb, ptr $bytes ) : returns(ptr) {
     my ptr $box = bump_alloc( $hb, 16 );
+
+    # Header word: tag=4 at byte 3 (big-endian shift 24, but we are little-endian so byte 3 = tag).
+    # Bytes 0..1 = RC=0, byte 2 = gc_flags=0, byte 3 = tag=4. Bytes 4..7 = aux/length (u32).
+    # Write the full 8-byte header word in two 4-byte halves so the aux field is zeroed before we fill it.
     Brocken::store_i64( $box,                        Brocken::shl( 4, 24 ) );
     Brocken::store_i64( Brocken::ptr_add( $box, 8 ), $bytes );
+
+    # Compute byte-length of the NUL-terminated string and cache it in the aux field (offset 4, u32).
+    # This O(N) walk at box-creation time enables O(1) length reads in str_concat_boxed.
+    my i64 $len = 0;
+    my ptr $p   = $bytes;
+    while (1) {
+        my i8 $c = Brocken::load_i8($p);
+        if ( $c == 0 ) { last; }
+        $len = Brocken::i64_add( $len, 1 );
+        $p   = Brocken::ptr_add( $p, 1 );
+    }
+    Brocken::store_u32( Brocken::ptr_add( $box, 4 ), $len );
     return $box;
 }
 

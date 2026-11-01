@@ -315,7 +315,7 @@ no explicit release, leaving the referenced objects alive for codegen because th
 
 Keyed on `($runtime, platform, policy)`.
 
-- [ ] **Parsed core AST.** Stop re-reading and re-lexing `src/runtime/core.brocken` per compile. Confirm lowering
+- [x] **Parsed core AST.** Stop re-reading and re-lexing `src/runtime/core.brocken` per compile. Confirm lowering
   does not mutate AST nodes. Saves ~0.1 s/call plus transient token/AST memory. `lib/Brocken.pm`
   `parse`/`_read_core_brocken`.
 - [ ] **Lowered core module.** Snapshot the lowerer's cross-function state after lowering the core -- `$functions`,
@@ -338,7 +338,7 @@ Keyed on `($runtime, platform, policy)`.
   codegen, and a linker) per target per `answers` call. `lib/Test2/Tools/Brocken.pm`.
 - [ ] **`state`-cache `executable_targets()`.** It re-parses the cross triples and re-runs `cross_available` (PATH
   scans) on every call. `lib/Test2/Tools/Brocken.pm:132-139`.
-- [ ] **`state`-cache `DEFAULT_RUNTIME`.** It walks the filesystem per instance. `lib/Brocken.pm:41-51`.
+- [x] **`state`-cache `DEFAULT_RUNTIME`.** It walks the filesystem per instance. `lib/Brocken.pm:41-51`.
 - [ ] **Gate the debug-info maps.** `emit_functions` always builds `alloca_map`/`source_map` per function though
   they are only consumed by `build_debug_data`; build them only when debug info is requested.
   `lib/Brocken/Jenny/Codegen/X86_64.pm:149-153`.

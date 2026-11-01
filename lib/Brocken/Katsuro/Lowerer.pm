@@ -717,7 +717,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if (@top_stmts) {
             my $main_body = Brocken::Katsuro::AST::Stmt::Block->new( statements => \@top_stmts );
             my $main_sub
-                = Brocken::Katsuro::AST::Stmt::SubDecl->new( name => '_BROCKEN_ENTRY', return_type => 'i64', params => [], body => $main_body, );
+                = Brocken::Katsuro::AST::Stmt::SubDecl->new( name => '_BROCKEN_ENTRY', return_type => 'i64', params => [], body => $main_body );
             unshift @decls, $main_sub;
         }
 
@@ -977,7 +977,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             Carp::croak("Cannot concatenate value of type '$kind' at line $line, col $col");
         }
         my ( $fmt_label, $fmt_bytes ) = $self->_intern_rodata($fmt_str);
-        my $fmt_ref    = Brocken::Lindsay::IR::RodataRef->new( label => $fmt_label, bytes => $fmt_bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
+        my $fmt_ref    = Brocken::Lindsay::IR::RodataRef->new( label => $fmt_label, bytes => $fmt_bytes, type => Brocken::Lindsay::IR::Type::ptr() );
         my $sprintf_fn = Brocken::Lindsay::IR::Function->new(
             name        => $self->_crt_name('sprintf'),
             return_type => Brocken::Lindsay::IR::Type::i32(),
@@ -989,8 +989,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 # third slot as `f64` is what places the value in the float argument register; without it the operand
                 # has no parameter to land in and the buffer keeps its uninitialised contents.
                 Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::f64() ),
-            ],
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::f64() )
+            ]
         );
         $builder->build_call( $sprintf_fn, [ $buf, $fmt_ref, $sprintf_arg ], undef, $line, $col );
         return $buf;
@@ -1029,7 +1029,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $fn = Brocken::Lindsay::IR::Function->new(
                 name        => $puts_name,
                 return_type => Brocken::Lindsay::IR::Type::void(),
-                params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
+                params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ]
             );
             $module->add_function($fn);
             $functions->{$name} = $fn;
@@ -1126,7 +1126,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 param        => $self->has_attr( $f->attrs, 'param' ) ? 1 : 0,
                 param_name   => $self->has_attr( $f->attrs, 'param' ) ?
                     ( $self->attr_arg( $f->attrs, 'param' ) // $self->strip_underscore( $f->name ) ) : undef,
-                weak => $self->has_attr( $f->attrs, 'weak' ) ? 1 : 0,
+                weak => $self->has_attr( $f->attrs, 'weak' ) ? 1 : 0
                 };
         }
         $classes->{$full_name} = {
@@ -1238,7 +1238,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             field_names    => \@field_names,
             _field_offsets => \@field_offsets,
             bits           => $offset * 8,
-            signed         => 0,
+            signed         => 0
         );
         $cd->{total_size} = $offset;
         $cd->{max_align}  = $max_align;
@@ -1274,13 +1274,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $ret_type = $self->type_from_name($ret_type_name);
         my @params;
         unless ( $name =~ /^Brocken::Runtime::/ ) {
-            push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%__heap_base', );
+            push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%__heap_base' );
             unless ( $name eq '_BROCKEN_ENTRY' ) {
-                push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64(), name => '%__want', );
+                push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64(), name => '%__want' );
             }
         }
         for my $p ( $ast->params->@* ) {
-            push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
+            push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name} );
         }
 
         # Only a callable with at least one default needs its parameter names bound while its arguments are lowered, so
@@ -1288,7 +1288,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # binding loop shadow a caller variable that happened to share a parameter's name (`f($x, $x)` crashed).
         $param_defaults->{$name} = [ map { { name => $_->{name}, default => $_->{default} } } $ast->params->@* ]
             if grep { defined $_->{default} } $ast->params->@*;
-        my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params, );
+        my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params );
         $module->add_function($fn);
         $functions->{$name} = $fn;
     }
@@ -1303,16 +1303,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $function_return_class->{$name} = $classes->{$return_type_name} ? $return_type_name : undef;
         my $ret_type = $self->type_from_name($ir_ret_type_name);
         my @params   = (
-            Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%__heap_base', ),
-            Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64(), name => '%__want', ),
-            Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%self', ),
+            Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%__heap_base' ),
+            Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64(), name => '%__want' ),
+            Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%self' )
         );
         for my $p ( $params_ast->@* ) {
-            push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name}, );
+            push @params, Brocken::Lindsay::IR::Value->new( type => $self->type_from_name( $p->{type} ), name => '%' . $p->{name} );
         }
         $param_defaults->{$name} = [ map { { name => $_->{name}, default => $_->{default} } } $params_ast->@* ]
             if grep { defined $_->{default} } $params_ast->@*;
-        my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params, );
+        my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params );
         $module->add_function($fn);
         $functions->{$name} = $fn;
     }
@@ -2547,7 +2547,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             file     => ( defined $expr ? $expr->file : '' ),
             line     => ( defined $expr ? $expr->line : $line ),
             col      => ( defined $expr ? $expr->col  : $col ),
-            elements => [],
+            elements => []
         );
         return $self->lower_list_expr($list_ast) unless defined $expr;
         if ( $self->_is_local_array($expr) ) {
@@ -2606,7 +2606,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $setjmp_fn = Brocken::Lindsay::IR::Function->new(
             name        => 'setjmp',
             return_type => Brocken::Lindsay::IR::Type::i64(),
-            params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
+            params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ]
         );
         $module->add_function($setjmp_fn);
         $functions->{'setjmp'} = $setjmp_fn;
@@ -2615,8 +2615,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return_type => Brocken::Lindsay::IR::Type::void(),
             params      => [
                 Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64() ),
-            ],
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::i64() )
+            ]
         );
         $module->add_function($longjmp_fn);
         $functions->{'longjmp'} = $longjmp_fn;
@@ -2663,7 +2663,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $eh_stack_addr
             = $builder->build_add( $hb,
             Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::EXCEPTION_HANDLER_STACK ),
-            undef, $line, $col, );
+            undef, $line, $col );
         my $old_head = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $eh_stack_addr, undef, $line, $col );
 
         # Store old_head at handler+0 (next pointer)
@@ -2672,7 +2672,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # Store jmp_buf at handler+8
         my $jmp_buf_slot
             = $builder->build_add( $handler, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 8 ),
-            undef, $line, $col, );
+            undef, $line, $col );
         $builder->build_store( $jmp_buf, $jmp_buf_slot, $line, $col );
 
         # Push handler onto ICB exception_handler_stack
@@ -2717,13 +2717,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $eh_stack_addr
             = $builder->build_add( $hb,
             Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::EXCEPTION_HANDLER_STACK ),
-            undef, $line, $col, );
+            undef, $line, $col );
 
         # Load thrown value
         my $thrown_addr
             = $builder->build_add( $hb,
             Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::THROWN_VALUE ),
-            undef, $line, $col, );
+            undef, $line, $col );
         my $thrown_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $thrown_addr, undef, $line, $col );
 
         # Store thrown value to catch_var if present. The parser records the binding with its sigil (`$e`), but the
@@ -2737,7 +2737,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $alloca = $builder->build_alloca(
                 Brocken::Lindsay::IR::Type::i64(),
                 $self->unique_value_name( '%' . $catch_name . '.addr' ),
-                undef, $line, $col, $catch_name, 'i64',
+                undef, $line, $col, $catch_name, 'i64'
             );
             $saved_catch_sym = $symbols->{$catch_name};
             $symbols->{$catch_name} = $alloca;
@@ -2807,14 +2807,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $thrown_addr
             = $builder->build_add( $hb,
             Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::THROWN_VALUE ),
-            undef, $line, $col, );
+            undef, $line, $col );
         $builder->build_store( $val, $thrown_addr, $line, $col );
 
         # Load handler from ICB.exception_handler_stack
         my $eh_stack_addr
             = $builder->build_add( $hb,
             Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::EXCEPTION_HANDLER_STACK ),
-            undef, $line, $col, );
+            undef, $line, $col );
         my $handler = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $eh_stack_addr, undef, $line, $col );
 
         # Check if handler exists
@@ -2830,7 +2830,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $current_block = $do_throw_block;
         my $jmp_buf_slot
             = $builder->build_add( $handler, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 8 ),
-            undef, $line, $col, );
+            undef, $line, $col );
         my $jmp_buf_ptr = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $jmp_buf_slot, undef, $line, $col );
         my $longjmp_fn  = $functions->{'longjmp'};
         my $one         = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 1 );
@@ -2855,7 +2855,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $err_addr
                 = $builder->build_add( $hb,
                 Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_CODE ),
-                undef, $line, $col, );
+                undef, $line, $col );
             my $err_throw = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::ERR_THROW );
             $builder->build_store( $err_throw, $err_addr, $line, $col );
         }
@@ -2931,7 +2931,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $fn = Brocken::Lindsay::IR::Function->new(
             name        => $name,
             return_type => $ret,
-            params      => [ map { Brocken::Lindsay::IR::Value->new( type => $_ ) } $param_types->@* ],
+            params      => [ map { Brocken::Lindsay::IR::Value->new( type => $_ ) } $param_types->@* ]
         );
         $module->add_function($fn);
         $functions->{$name} = $fn;
@@ -3105,9 +3105,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_const($ast) {
         if ( $ast->type eq 'String' ) {
             my ( $label, $bytes ) = $self->_intern_rodata( $ast->value . "\0" );
-            return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
+            return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr() );
         }
-        return Brocken::Lindsay::IR::Constant->new( type => $self->native_type_from_name( $ast->type ), value => $ast->value, );
+        return Brocken::Lindsay::IR::Constant->new( type => $self->native_type_from_name( $ast->type ), value => $ast->value );
     }
 
     method lower_var_ref($ast) {
@@ -3269,7 +3269,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $hb  = $self->_hash_heap_base( $line, $col );
         my $rt  = $self->_reflect_runtime( 'hash_delete', $ast, $line, $col );
         my $fn
-            = Brocken::Lindsay::IR::Function->new( name => $rt->name, return_type => Brocken::Lindsay::IR::Type::dynamic(), params => $rt->params, );
+            = Brocken::Lindsay::IR::Function->new( name => $rt->name, return_type => Brocken::Lindsay::IR::Type::dynamic(), params => $rt->params );
         $returns_owned->{ $fn->name } = 1;
         return $builder->build_call( $fn, [ $hb, $h, $key ], undef, $line, $col );
     }
@@ -3856,8 +3856,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return_type => Brocken::Lindsay::IR::Type::i32(),
             params      => [
                 Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-            ],
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() )
+            ]
         );
         my $cmp_result = $builder->build_call( $strcmp_fn, [ $lhs, $rhs ], undef, $line, $col );
         my $cmp_i64    = $builder->build_sext( $cmp_result, Brocken::Lindsay::IR::Type::i64(), undef, $line, $col );
@@ -3896,13 +3896,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # constants fold to one; anything else goes through the managed `str_concat`, which copies both byte strings and
     # NUL-terminates the result (the old strlen+malloc+strcpy+strcat depended on libc, which a Wasm module cannot
     # import). Called before the numeric unification in `lower_binop`, so a dynamic operand is not unboxed to f64.
+    #
     method _lower_concat( $lhs, $rhs, $line, $col, $node ) {
         $lhs = $self->_stringify_value( $lhs, $node, $line, $col );
         $rhs = $self->_stringify_value( $rhs, $node, $line, $col );
         if ( $lhs->isa('Brocken::Lindsay::IR::RodataRef') && $rhs->isa('Brocken::Lindsay::IR::RodataRef') ) {
             my $combined = substr( $lhs->bytes, 0, -1 ) . $rhs->bytes;
             my ( $label, $bytes ) = $self->_intern_rodata($combined);
-            return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
+            return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr() );
         }
         my $hb
             = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col ) :
@@ -4083,7 +4084,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method _owned_dynamic_runtime_call( $name, $args, $line, $col ) {
         my $rt = $self->_reflect_runtime( $name, undef, $line, $col );
         my $fn
-            = Brocken::Lindsay::IR::Function->new( name => $rt->name, return_type => Brocken::Lindsay::IR::Type::dynamic(), params => $rt->params, );
+            = Brocken::Lindsay::IR::Function->new( name => $rt->name, return_type => Brocken::Lindsay::IR::Type::dynamic(), params => $rt->params );
         $returns_owned->{ $fn->name } = 1;
         return $builder->build_call( $fn, $args, undef, $line, $col );
     }
@@ -4174,7 +4175,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $callee = Brocken::Lindsay::IR::Function->new(
                     name        => $puts_name,
                     return_type => Brocken::Lindsay::IR::Type::void(),
-                    params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ],
+                    params      => [ Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ) ]
                 );
                 $module->add_function($callee);
                 $functions->{$name} = $callee;
@@ -4305,17 +4306,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $args[0], undef, $line, $col )          if $name eq 'load_i64';
 
         if ( $name eq 'store_i64' ) {
-            $builder->build_store( $args[1], $args[0], $line, $col );
+            $builder->build_store( $args[1], $args[0], $line, $col, Brocken::Lindsay::IR::Type::i64() );
             return undef;
         }
+        return $builder->build_load( Brocken::Lindsay::IR::Type::u8(), $args[0], undef, $line, $col ) if $name eq 'load_u8';
         return $builder->build_load( Brocken::Lindsay::IR::Type::i8(), $args[0], undef, $line, $col ) if $name eq 'load_i8';
-        if ( $name eq 'store_i8' ) {
-            $builder->build_store( $args[1], $args[0], $line, $col );
+        if ( $name eq 'store_i8' || $name eq 'store_u8' ) {
+            $builder->build_store( $args[1], $args[0], $line, $col, Brocken::Lindsay::IR::Type::u8() );
             return undef;
         }
         return $builder->build_load( Brocken::Lindsay::IR::Type::i32(), $args[0], undef, $line, $col ) if $name eq 'load_i32';
-        if ( $name eq 'store_i32' ) {
-            $builder->build_store( $args[1], $args[0], $line, $col );
+        return $builder->build_load( Brocken::Lindsay::IR::Type::u32(), $args[0], undef, $line, $col ) if $name eq 'load_u32';
+        if ( $name eq 'store_i32' || $name eq 'store_u32' ) {
+            $builder->build_store( $args[1], $args[0], $line, $col, Brocken::Lindsay::IR::Type::u32() );
             return undef;
         }
 
@@ -4323,12 +4326,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # value, which is what an unbox in an integer context used to see.
         return $builder->build_load( Brocken::Lindsay::IR::Type::f64(), $args[0], undef, $line, $col ) if $name eq 'load_f64';
         if ( $name eq 'store_f64' ) {
-            $builder->build_store( $args[1], $args[0], $line, $col );
+            $builder->build_store( $args[1], $args[0], $line, $col, Brocken::Lindsay::IR::Type::f64() );
             return undef;
         }
-        return $builder->build_load( Brocken::Lindsay::IR::Type::i16(), $args[0], undef, $line, $col ) if $name eq 'load_u16';
+        return $builder->build_load( Brocken::Lindsay::IR::Type::u16(), $args[0], undef, $line, $col ) if $name eq 'load_u16';
         if ( $name eq 'store_u16' ) {
-            $builder->build_store( $args[1], $args[0], $line, $col );
+            $builder->build_store( $args[1], $args[0], $line, $col, Brocken::Lindsay::IR::Type::u16() );
             return undef;
         }
         return $builder->build_add( $args[0], $args[1], undef, $line, $col )  if $name eq 'i64_add';
@@ -4351,7 +4354,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $syscall_name = $name_ast->value;
             my $syscall_num  = $platform->syscall($syscall_name);
             Carp::croak( "Unknown syscall name '$syscall_name' at " . $self->_loc($ast) ) unless defined $syscall_num;
-            my @syscall_args = ( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $syscall_num, ) );
+            my @syscall_args = ( Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $syscall_num ) );
             for my $i ( 1 .. $#args ) {
                 push @syscall_args, $args[$i];
             }
@@ -4363,8 +4366,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             Carp::croak( "First argument to libc must be a string literal at " . $self->_loc($ast) )
                 unless $name_ast->isa('Brocken::Katsuro::AST::Expr::Const') && $name_ast->type eq 'String';
             my $func_name = $name_ast->value;
-            my $extern_fn
-                = Brocken::Lindsay::IR::Function->new( name => $func_name, return_type => Brocken::Lindsay::IR::Type::i64(), params => [], );
+            my $extern_fn = Brocken::Lindsay::IR::Function->new( name => $func_name, return_type => Brocken::Lindsay::IR::Type::i64(), params => [] );
             my @call_args;
             for my $i ( 1 .. $#args ) {
                 push @call_args, $args[$i];
@@ -4535,7 +4537,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                     params      => [
                         Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
                         Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() )
-                    ],
+                    ]
                 );
                 my $null = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
                 return $builder->build_call( $fn, [ $ptr_val, $null ], undef, $line, $col );
@@ -4754,7 +4756,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $zero = Brocken::Lindsay::IR::Constant->new( type => $t->type, value => 0 );
             return $builder->build_icmp( 'ne', $t, $zero, undef, $line, $col );
         }
-        my $zero = Brocken::Lindsay::IR::Constant->new( type => $side->type, value => $side->type->kind eq 'float' ? 0.0 : 0, );
+        my $zero = Brocken::Lindsay::IR::Constant->new( type => $side->type, value => $side->type->kind eq 'float' ? 0.0 : 0 );
         return $builder->build_icmp( 'ne', $side, $zero, undef, $line, $col );
     }
 
@@ -5410,7 +5412,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_class_const($ast) {
         Carp::croak( '__CLASS__ used outside of a class at ' . $self->_loc($ast) ) unless $current_class;
         my ( $label, $bytes ) = $self->_intern_rodata( $current_class . "\0" );
-        return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr(), );
+        return Brocken::Lindsay::IR::RodataRef->new( label => $label, bytes => $bytes, type => Brocken::Lindsay::IR::Type::ptr() );
     }
 
     # Method body lowering with field GEP pre-population
@@ -5690,7 +5692,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     # the generated id dispatch can call it positionally like any other Brocken::Runtime function.
     method _register_plain_function( $name, $return_type_name, $param_names ) {
         my @params = map { Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%' . $_ ) } @$param_names;
-        my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $self->type_from_name($return_type_name), params => \@params, );
+        my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $self->type_from_name($return_type_name), params => \@params );
         $module->add_function($fn);
         $functions->{$name} = $fn;
         return $fn;

@@ -921,7 +921,7 @@ subtest 'Mixed-width signed/unsigned comparisons agree with the widened values' 
         [ 'i16', -2,  'u32', 4294967294,           '<',  0 ],
         [ 'i8',  -61, 'u32', 4294967235,           '==', 1 ],
         [ 'i32', -1,  'u64', 18446744073709551615, '>=', 1 ],
-        [ 'i8',  -1,  'u8',  255,                  '>=', 1 ],
+        [ 'i8',  -1,  'u8',  255,                  '>=', 1 ]
     );
     for my $case (@cases) {
         my ( $lt, $lv, $rt, $rv, $op, $want ) = @$case;

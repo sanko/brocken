@@ -2516,7 +2516,8 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::Store') ) {
                     my ( $val, $ptr ) = $inst->operands->@*;
-                    my $store_type = $self->_find_alloca_stored_type( $ir_func, $ptr->name );
+                    my $store_type
+                        = ( $inst->type && $inst->type->kind ne 'void' ) ? $inst->type : $self->_find_alloca_stored_type( $ir_func, $ptr->name );
                     my $is_i128 = $val->type && $val->type->kind eq 'int' && $val->type->bits == 128 && ( !$store_type || $store_type->bits >= 128 );
                     if ($is_i128) {
                         my ( $lo_val, $hi_val ) = $self->_split_i128($val);
@@ -4524,12 +4525,12 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
             $lo = -( ~$lo & 0xFFFFFFFFFFFFFFFF ) - 1 if $lo >= 0x8000000000000000;
             return (
                 Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $lo, type => Brocken::Lindsay::IR::Type::i64() ),
-                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() )
             );
         }
         return (
             Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
-            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() )
         );
     }
 

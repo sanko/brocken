@@ -1943,7 +1943,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                                 lshr => "${p}_shr_u",
                                 ashr => "${p}_shr_s",
                                 min  => "${p}_min",
-                                max  => "${p}_max",
+                                max  => "${p}_max"
                             );
                             $mbb->add_instruction(
                                 Brocken::Jenny::MIR::MachineInstruction->new( opcode => $map{$opcode}, operands => [], comment => $opcode ) );
@@ -2123,7 +2123,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                             [ "${p}_const", $move ],
                             [ "${p}_shl",   undef ],
                             [ "${p}_const", $move ],
-                            [ "${p}_shr_s", undef ],
+                            [ "${p}_shr_s", undef ]
                         );
                         for my $step (@steps) {
                             my ( $op, $imm ) = @$step;
@@ -2217,7 +2217,7 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                             opcode   => 'bne',
                             operands => [
                                 Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->true_block->name ),
-                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->false_block->name ),
+                                Brocken::Jenny::MIR::MachineOperand->new( kind => 'label', value => $inst->false_block->name )
                             ],
                             comment => 'cond_br'
                         )
@@ -2369,7 +2369,8 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
                             $op = $val->type->bits >= 64 ? 'f64_store' : 'f32_store';
                         }
                         else {
-                            my $mem_ty   = $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $val->type;
+                            my $mem_ty = ( $inst->type && $inst->type->kind ne 'void' ) ? $inst->type :
+                                ( $self->_find_alloca_stored_type( $ir_func, $ptr->name ) // $val->type );
                             my $mem_bits = $self->_scalar_bits($mem_ty)      || 32;
                             my $val_bits = $self->_scalar_bits( $val->type ) || 32;
                             if ( $val_bits >= 64 ) {
@@ -3246,12 +3247,12 @@ class Brocken::Jenny::Lowerer::Wasm v0.0.1 {
             $lo = -( ~$lo & 0xFFFFFFFFFFFFFFFF ) - 1 if $lo >= 0x8000000000000000;
             return (
                 Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $lo, type => Brocken::Lindsay::IR::Type::i64() ),
-                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() ),
+                Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => $hi, type => Brocken::Lindsay::IR::Type::i64() )
             );
         }
         return (
             Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_lo', type => Brocken::Lindsay::IR::Type::i64() ),
-            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() ),
+            Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $ir_val->name . '_hi', type => Brocken::Lindsay::IR::Type::i64() )
         );
     }
 
