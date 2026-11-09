@@ -127,6 +127,7 @@ class Brocken v0.0.1 {
         $module->set_class_info( $lowerer->classes );
         $module->set_rodata( $lowerer->rodata );
         $module->set_package_versions( $lowerer->package_versions );
+        $linker->set_rodata( $lowerer->rodata ) if $linker;
         return $module;
     }
     #
