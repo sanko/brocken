@@ -2173,7 +2173,17 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 }
             }
             $self->_emit_handler_pops( $_try_handler_depth, $line, $col );
-            $builder->build_ret( undef, $line, $col );
+            if ( $current_func->return_type && $current_func->return_type->kind ne 'void' ) {
+                my $ret_type = $current_func->return_type;
+                my $zero = Brocken::Lindsay::IR::Constant->new(
+                    type  => $ret_type,
+                    value => $ret_type->kind eq 'float' ? 0.0 : 0,
+                );
+                $builder->build_ret( $zero, $line, $col );
+            }
+            else {
+                $builder->build_ret( undef, $line, $col );
+            }
         }
     }
 

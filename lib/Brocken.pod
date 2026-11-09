@@ -14,14 +14,14 @@ Compiling a program is four calls. This is the whole path, start to finish:
 
     my $brocken = Brocken->new;
 
-    my $module = $brocken->compile(<<'BROCKEN');
-    sub fib( i64 $n ) :returns(i64) {
-        if ( $n < 2 ) { return $n; }
-        return fib( $n - 1 ) + fib( $n - 2 );
-    }
+    my $module = $brocken->compile(<<~'BROCKEN');
+        sub fib( i64 $n ) :returns(i64) {
+            return $n if $n < 2;
+            return fib( $n - 1 ) + fib( $n - 2 );
+        }
 
-    return fib( 10 );
-    BROCKEN
+        say( fib( 10 ) );
+        BROCKEN
 
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
     my $file  = $brocken->tmpdir . '/fib' . $brocken->ext;
