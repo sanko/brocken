@@ -1,358 +1,211 @@
-# Brocken Compiler Roadmap & Task List
+# Brocken Compiler Implementation Roadmap & Task List
 
-This document tracks the open work, known bugs, and architectural roadmap for the Brocken compiler. The immediate focus is achieving the **v0.0.1 Release Milestone**.
-
-## The v0.0.1 Milestone Definition ("Hello, World")
-A working end-to-end program that can parse text into an O(1) `%hash`, allocate objects (`class`), handle `undef`, catch an error using `try/catch/finally` or `die`, pass data across a Channel between Isolates, and exit cleanly with 0 memory leaks across all targets (x86_64, ARM64, RISC-V, Wasm).
+This document is the authoritative engineering tracker for bringing the Brocken compiler from its baseline (`v0.0.1`) to complete conformance with `spec.md` (`v0.1.0+`).
 
 ---
 
-## 1. Critical Backend Correctness (Blockers)
+## 1. Critical Backend Correctness & Linking (Release Blockers)
 
-These bugs cause silent miscompilations in the code generators and register allocator.
-
-- [x] **Shift Reload Omission:** `RegAlloc.pm`'s `%reads_dst` table uses `shr`/`sar` instead of the actual MIR opcodes `lshr`/`ashr`. Spilled shift destinations are currently overwritten without being reloaded.
-- [x] **`umulh` Liveness Gap:** `umulh` is missing from both `%reads_dst` and `%rmw` in `RegAlloc.pm`, causing omitted reloads and latent liveness issues.
-- [x] **x86-64 Mixed Arg Sum:** A sum of many mixed integer and floating-point arguments returns the wrong value on x86-64 Linux ELF targets due to register pressure spilling bugs.
-- [x] **F17 - Unbounded Stack Growth:** `alloca_dyn` inside a loop grows `rsp` every iteration until the function epilogue. Fixed by heap-promoting dynamic-sized arrays (and static arrays exceeding 4 KiB) through `alloc_array`, freeing and reusing the slab at each loop back edge so growth is bounded. The dynamic-stack machinery (`alloca_dyn`/`stack_save`/`stack_restore`) and its MIR consumers were removed entirely. Tests: `32913_dynamic_array_alloca.t`, `32914_dynamic_alloca_loop.t`.
-- [x] **i128 Unsigned Div/Rem:** `udiv`/`urem` on 128-bit integers produced wrong results on ARM64 (the partial remainder was accumulated in the wrong 64-bit half, inflating it by 2^64) and on RISC-V (12-bit spill displacements for the i128 operand pairs overflowed the machine addressing mode). Test: `32680_i128_unsigned_divrem_native.t`.
-- [x] **Fresh-Fiber Stack Guard:** On ARM64 and RISC-V `arg0` is also the return register, so the stack-guard handoff that gives a fresh fiber its ICB was skipped to preserve the fiber transfer value; the fresh entry then read `%__heap_base` from a zeroed register and faulted. Transfer/yield values now travel through an FCB slot, leaving `arg0` free for the ICB. Test: `34060_fiber_stack_guard.t`.
-- [x] **RISC-V Large-Frame Callee Saves:** When a function's spill area pushed the callee-save slots or the saved `s0` frame pointer past the 12-bit `SD`/`LD`/`ADDI` displacement range, the prologue and epilogue emitted the raw masked offset, wrapping the access into the bottom of the frame and corrupting live values. Both sites now materialize the displacement through `t0` with `LUI`/`ADDI`/`ADD` when it does not fit, consistent with the existing large-frame `sp` adjustment. This is a prerequisite for the fully-unrolled i128 division sequence's ~12 KiB frame, but does not by itself repair i128 `div`/`rem` (below).
-- [x] **RISC-V Caller-Save Scratch Clobber:** The caller-save stores are emitted *after* the lowerer has placed the outgoing arguments in `a0-a7`, and the caller-restore loads are emitted *before* the caller copies the result out of `a0/a1`. Neither value is a virtual register, so the address-scratch picker (`$pick`) treated `a0-a7` as free and grabbed `a0` whenever a spill slot pushed the caller-save area past the 12-bit `SD`/`LD` displacement range -- silently destroying the argument or return value. The scratch now reserves the parameter registers while a `caller-save`/`caller-restore` instruction is being encoded, which forces it into `t0-t6` (spilled first, reloaded last, and never an argument). The float `fload`/`fstore` handlers previously masked the displacement outright; they now route through the same scratch-aware emitter. Test: `32995_riscv_return_scratch.t`.
-- [ ] **RISC-V i128 Signed Div/Rem:** `div`/`rem` on 128-bit integers return a value unrelated to the operands on RISC-V (`42 / 2` and `0 / 1` return the same wrong constant), reproducing under `qemu-riscv64` cross-compilation and failing on the native CI runner in `t/30000_jenny/32000_codegen/32650_i128_arithmetic_native.t`. The unsigned path passes natively. The sequence is fully unrolled (no calls), so the caller-save scratch defect above is not implicated; the root cause remains unisolated and is most likely a spill-reload or register-allocation defect exposed only under the register pressure the fully unrolled 128-iteration sequence produces.
-- [ ] **Wasm `RodataRef` / Data-Segment Support:** The Wasm code generator has no rodata (data-segment) handling at all: the lowerer never emits a `lea_rodata`, and `_wasm_push` of a `Brocken::Lindsay::IR::RodataRef` falls through to an unnamed `local_get`, so boxing (or otherwise reading) a string literal on Wasm would carry a garbage pointer. String data appears reachable on Wasm only through the `str_concat` runtime path the Wasm string tests exercise. Port the `Box`/`lea_rodata` handling the other backends gained, and install a Wasm runner (`wasmtime`/`node`, see §10 F8) so the fix can be validated. *Fixed alongside this note:* the x86-64 pair of MIR-lowering fixes — `_materialize_ext_src` so a `movzx`/`movsx` never takes a raw immediate (a boxed bool reaches it as `sext i1 1 to i32`), and `_materialize` on the `Box` payload so a string literal is loaded with `lea_rodata` — were ported to ARM64 (both bugs reproduced: the bool box died in the encoder, the string box segfaulted). RISC-V needed neither: its `movsx` codegen materializes an `imm` source itself, and its `Box` already materializes a `RodataRef`. `t/10000_katsuro/10999_introspection.t` now runs its boxed-bool and boxed-string checks on every runnable native target (host, aarch64, riscv64).
-- [x] **Nondeterministic Codegen:** Compiling the identical module twice produced byte-different objects from two independent causes. Perl's per-process hash seed perturbed register allocation; the allocator's liveness and spill walks, the codegen scratch/reload sets, the Wasm source/offset maps, and the ELF64 `.hash` chain now iterate in a sorted order. Separately, the PE linker stamped `time()` into the COFF `TimeDateStamp` and the export directory where ELF, Mach-O, and Wasm write no timestamp. That wall-clock stamp is intentional: the stamp now comes from `Linker::effective_timestamp` (an explicit `set_timestamp`, else `SOURCE_DATE_EPOCH`, else the current time), so a PE image is time-varying by default and a reproducible build requires `SOURCE_DATE_EPOCH` (or `set_timestamp`) on every target. Guards: `32610_deterministic_codegen.t` emits the spill-heavy RISC-V i128 divide under two hash seeds in child processes and compares digests; `31220_pe_reproducible.t` checks that the default PE stamp is the wall clock and that a pinned `SOURCE_DATE_EPOCH` makes repeated links byte-identical. The "i128 `udiv` correct under some seeds" symptom was the allocator-order defect and is gone; the deterministic RISC-V `div`/`rem` miscompile remains tracked above.
-
----
-
-## 2. Memory Safety & Reference Counting (v0.0.1)
-
-Implement the **Caller-Borrows** contract: passing arguments does not touch refcounts. Callees only `incref` if storing or escaping a reference.
-
-- [x] **Fix Immix Block Pointer Bug:** `decref()` charged `live_count` to `get_current_block()` rather than the object's owning block, and the legacy allocator carved new blocks on a `heap_base`-anchored grid that overlapped block 0 by `ICB::SIZE` bytes. Added an arena-anchored `block_of()` and routed `decref`, `gc_decref` and `gc_drain` through it; the naive `obj & ~0x7FFF` mask is wrong because `heap_base` is only 16-byte aligned and block 0 sits off any `heap_base`-anchored grid. Covered by `t/40000_runtime/40330_block_owner.t`.
-- [x] **Wire up Bacon/Rajan Cycle Detection:** `gc_drain()` runs automatically: `maybe_gc_drain` triggers a sweep once the suspect buffer reaches `gc_suspect_threshold()` (256) after an R3 push in `decref`/`decref_obj`. Cycle scanning walks Lists, Hashes, and Class instances (the last through generated per-class `__scan`/`__restore` selected by the class id in the object header: tag `4` with a nonzero auxiliary word; a boxed `ptr` leaves the aux word zero). Phase 3a runs a reclaimed instance's `DESTROY` through the generated `gc_destroy_class` dispatch, and Phase 3b frees it. Cycles built through class-typed fields (below) are now collected and finalized. Still open: an edge that goes through an `Any` box is not followed -- the collector only traverses direct instance pointers (class-typed fields and container slots), so a cycle whose links are boxed values leaks.
-- [x] **F2 - `//=`/`||=` RC Leak:** A conditional assignment on a dynamic (`Any`) slot stored the select result without emitting an `incref` on the replacement (the same gap as the constructor field-default `||=`, F9). A select cannot express a conditional incref, so a dynamic slot now branches: when the slot is absent the replacement goes through the owned store (taking a reference and releasing the null it displaces), and when it is present the slot keeps the box it already owns. Pointer and native slots are not RC-tracked and keep the branchless select. Covers `//=`/`||=` in `lower_assign` (variable and field targets) and the constructor field-default `||=`. Covered by `t/40000_runtime/40130_runtime_orassign_rc.t` (three of five cases fail without the fix).
-- [x] **F3 - Borrowed `Any` UAF:** Callers pass `Any` arguments without `incref`, but callees erroneously `decref` them on exit. Causes Use-After-Free. The lowerer now tracks `Any` parameters as *borrowed* (`$borrowed_params`) instead of owned, so neither the function nor the method exit cleanup touches them; a store into a parameter slot takes its own `incref` and promotes the slot to owned without releasing the caller's value, and a bare `return $param` no longer bumps a reference it does not own. Covered by `t/40000_runtime/40110_runtime_borrow.t` (all four cases fail without the fix).
-- [x] **F5 - Overzealous Loop Cleanup:** `_emit_loop_cleanup` decrefs only the variables a loop body introduced, not the whole function's `needs_rc` set: the loop scope records `rc_pre` (the RC names live before the loop) and both the `last`/`next` cleanup and the back-edge cleanup filter against it, so an enclosing `Any` stays alive for the code after the loop. Covered by a new subtest in `t/40000_runtime/40200_heap_introspect.t` (an outer `Any` survives `last` while the loop-body `Any` is released exactly once).
-- [x] **F9 - Class Field RC Leaks:** Constructors and field assignments stored without an `incref` and displaced the value they replaced without a `decref`, so a dynamic (`Any`) field aliased whatever box the caller passed in and dangled once the caller's local was released. A dynamic field store now takes its own reference and releases the value it displaces, covering constructor positional/named/default field stores, `$obj->field = v` and bare-field assignment, and the generated writer; fresh dynamic fields are nulled up front so the displaced load always reads a valid pointer. The select-based `||=`/`//=` stores (constructor field defaults and `lower_assign`) were a separate gap, completed under F2. Covered by `t/40000_runtime/40120_runtime_field_rc.t` (four of five cases fail without the fix).
-- [x] **F12 - Branch-Body RC Leak:** `if`/`elsif`/`else` bodies lowered their statements directly instead of as a block, so an `Any` declared in a branch was released only at function exit; inside a loop that leaked one box per iteration. Branch bodies now run the same block-scoped cleanup a bare block gets (a `return` inside the branch still short-circuits before the cleanup). `while` bodies were already covered by the loop back-edge cleanup. Covered by two new subtests in `t/40000_runtime/40200_heap_introspect.t` (both fail without the fix).
-- [x] **F13 - Double-Incref on Return:** A callee increfs a dynamic return before its exit cleanup drops the callee's own locals, and the caller then incref'd it again when it stored the result, leaving a permanent +1. The caller now knows each callee's return ownership: a pre-pass over the AST classifies a dynamic-returning function as *owned* (+1) unless every dynamic return is a bare `Any` parameter that is never reassigned, in which case it hands back the caller's own box (+0, the F3 Caller-Borrows case). `lower_return` normalizes an owned function's returns to +1 (incref'ing a borrowed parameter or fresh box, but not an owned call result); the caller consumes that reference in the owned store, the `Any` initializer, the borrowed-parameter store, and the conditional borrowed store, and forwards it with no extra incref when a return is itself a call result. Removing the second reference lets the box fall to RC 0 and be reclaimed at scope exit. Covered by `t/40000_runtime/40140_runtime_return_rc.t` (three of five cases fail without the fix; the two borrowed-return guards pin the F3 behavior). A dynamic call result used in a non-owning position is now released too when it is *discarded* (an expression statement) or *unboxed* on the way into a non-`dynamic` slot (a var initializer or assignment): `lower_statement`, `lower_var_decl`, and `lower_assign` drop the reference through a shared helper, since a `decref` only recycles the 16-byte header and never touches the payload. Passing a temporary as a *borrowed argument* still strands its reference; that is the remaining temporary-cleanup work of the planned Perceus pass in `docs/spec.md`.
-- [x] **Instance Ownership / Object Destructors (`DESTROY`):** `DESTROY { ... }` lowers to a `Class::DESTROY` that chains derived→root and is callable as an ordinary method (C21). The instance-ownership contract now reclaims a class instance at scope exit and runs its destructor exactly once: a `ptr` local bound to a fresh `Class->new` that never escapes is released through a generated `Class::__destroy` thunk, which runs the (chained) `DESTROY`, releases every owned dynamic field, and then `free_obj`s the instance. The runtime decrement is split (`decref_obj` returns the new count without freeing) so the compiled release site can branch to the statically-known destructor — no runtime dispatch — and only reclaim when the header refcount reaches zero. The escape scan (`_scan_escapes`) is a conservative over-approximation: a local handed anywhere as a value (argument, RHS, element, return) keeps its reference, which leaks rather than dangling. `Class->new` is inlined and never a `Call`, so instances are never owned RC call results. Covered by `t/10000_katsuro/10990_instance_ownership.t`. Class-returning calls transfer ownership too: a pre-pass classifies a class-returning function as *owned* only when every class-typed return is a fresh construction, a never-reassigned local a fresh construction initialized, or a call to a function already known owned (a `$self`/parameter/field return stays borrowed, so unprovable cases leak rather than dangle), and the caller then takes the instance — `my ptr $n = make();` releases it through `Class::__destroy` at scope exit, and a plain pointer slot that receives an owned call likewise takes ownership on assignment (releasing any instance it already owned). Covered by `t/10000_katsuro/10996_class_return_ownership.t` (host, aarch64, riscv64). Class-typed fields shipped: `field Node $succ;` (and class-typed params/locals/returns) resolve to a direct instance pointer, so the field is owned and walked by the collector, enabling cycle reclamation. `:weak` shipped: a weak dynamic field stores without taking a reference, and the generated destructor and the `__scan`/`__restore` hooks skip it, so a weak edge cannot hold a cycle open (`t/10000_katsuro/10997_weak_fields.t`). Cycle scanning of class instances shipped: each class gets `__scan`/`__restore`, dispatched by the class id in the header (see the cycle-detection item above). Part of the class object-model work (see §12 and `docs/class_roadmap.md` §1.6).
-- [x] **Managed (`Any`) Array Element Ownership:** A local array whose element type is managed (`Any`) now owns its elements. A managed-element array was a plain stack array with plain element stores, so overwriting an element leaked one 16-byte box per write -- the displaced box was never released, shown by an unbounded Immix bump cursor. Such an array is now heap-forced through `alloc_array` (so it is RC-tracked and reclaimed like an owned `Any`), its body is zeroed at allocation by a new `array_zero` helper (so the owned store's load-old-then-decref reads a null box first), an element store goes through the owned store (taking a reference to the new box and releasing the one it displaces), and scope exit releases every element then the block through a new `array_release` helper. A `dynamic` value is one 8-byte box pointer in memory but is modelled with a 128-bit width, so the element `getelementptr` scaled by `bits / 8` (16) while the allocator and the zeroing loop used `byte_size` (8): slot 1 aliased the first box and later slots ran off the body. The GEP scale in all four native backends now uses `byte_size`. Covered by `t/10000_katsuro/11150_any_array_elements.t`. The i64-only mutators `push`/`pop`/`shift`/`unshift` still reject managed elements; class-typed and `ptr` element ownership, and array-to-array assignment aliasing, remain open.
-- [x] **Weak Locals & Delegated Weakening:** The `:weak` contract now extends to ordinary variables: `my Any $x :weak = EXPR;` stores without taking a reference and is skipped by the scope-exit release, exactly like a `:weak` field, so it cannot keep its referent alive. Ownership can also be toggled at runtime through the new `builtin::` namespace (below): `builtin::weaken($v)` drops the reference `$v` holds — an object it alone owned is freed, leaving the slot dangling by design; Brocken has no weak-reference hook that could null it — and marks it weak, `builtin::unweaken($v)` re-takes a reference, and `builtin::is_weak($v)` folds to a compile-time boolean. The escape scan now treats a weak builtin's argument as an in-place ownership operation rather than a value use, so `weaken` can release the own reference of a class-typed local. Covered by `t/10000_katsuro/10998_weak_vars.t`.
+- [x] **Shift Reload Omission:** Corrected `%reads_dst` in `RegAlloc.pm` to track `lshr`/`ashr`.
+- [x] **`umulh` Liveness Gap:** Added `umulh` to `%reads_dst` and `%rmw` in `RegAlloc.pm`.
+- [x] **x86-64 Mixed Arg Sum:** Fixed register allocator spill pressure on mixed integer/float calling sequences.
+- [x] **F17 - Unbounded Stack Growth:** Heap-promoted dynamic arrays and static arrays $> 4\text{ KiB}$ via `alloc_array`, recycling slabs at loop back-edges.
+- [x] **i128 Unsigned Div/Rem:** Corrected ARM64 high-half remainder accumulation and RISC-V 12-bit displacement spills.
+- [x] **Fresh-Fiber Stack Guard:** Routed fiber handoff values through FCB slots on ARM64 and RISC-V, preserving `arg0` for `%__heap_base`.
+- [x] **RISC-V Large-Frame Callee Saves:** Materialized displacements $> 2047$ bytes through `t0` via `LUI`/`ADDI`/`ADD`.
+- [x] **RISC-V Caller-Save Scratch Clobber:** Reserved argument registers `a0-a7` during caller-save/restore emission to force scratch into `t0-t6`.
+- [x] **Nondeterministic Codegen:** Deterministic sorting applied across `RegAlloc.pm`, codegen maps, and ELF64 `.hash` chains. Pinned PE timestamps via `SOURCE_DATE_EPOCH`.
+- [x] **Linker Rodata Seeding:** `Brocken::compile()` seeds `$linker->set_rodata()` to resolve string constants across all compilation flows.
+- [x] **Store Width Preservation:** Enforced narrow store widths in `Builder.pm` and across all four backend lowerers (`X86_64`, `ARM64`, `RISCV64`, `Wasm`).
+- [ ] **RISC-V i128 Signed Div/Rem (Open):**
+  - [ ] Signed 128-bit `div`/`rem` returns incorrect constants under `qemu-riscv64` and native hardware (`t/30000_jenny/32000_codegen/32650_i128_arithmetic_native.t`).
+  - [ ] Implement 64-bit fast-path in `RISCV64.pm` when high words are zero (`hi_lhs == 0 && hi_rhs == 0`).
+  - [ ] Replace the 128-iteration fully-unrolled shift-subtract sequence (~5,190 instructions) with a compact looped algorithm or library helper to relieve extreme register pressure.
+- [ ] **Wasm Rodata & Data-Segment Support (Open):**
+  - [ ] Lowerer currently falls through on `RodataRef`, causing boxed string literals in Wasm to receive garbage pointers.
+  - [ ] Port `lea_rodata` / `_materialize` string literal handling from native backends to `Lowerer::Wasm`.
+  - [ ] Add Wasm test runner (`wasmtime` or `node`) to CI harness to validate Wasm execution.
 
 ---
 
-## 3. Syntax, Signatures & Grammar Updates
+## 2. Memory Model & Garbage Collection (`core.brocken` & Immix)
 
-- [x] **`:returns(Type)` Syntax:** The return annotation is now the attribute `:returns(Type)` on both `sub` and `method` declarations; the old `-> RetType` spelling has been removed from `Parser.pm`, the core runtime (`src/runtime/core.brocken`), tests, and examples. The spec documents this form (§7.4, §8).
-- [x] **`builtin::` Namespace (partial):** `builtin::NAME(...)` calls parse as intrinsic calls and dispatch through `lower_builtin`, mirroring Perl's `builtin` pragma. Shipped: `builtin::true`/`false` (i1 constants), `builtin::is_tainted` (always false — Brocken has no taint model; the argument is still evaluated), the ownership toggles `builtin::weaken`/`unweaken`/`is_weak`, and the introspection set `builtin::is_bool`, `created_as_string`, `created_as_number`, `stringify`, `numify`, `refaddr`, `reftype`, `blessed`. Reflection answers a static value's IR type at compile time and an `Any` box's header tag at runtime; `blessed` is compile-time only and `refaddr` stores/loads the pointer because the IR has no `ptrtoint`. An unknown `builtin::` name is a compile error. Covered by `t/10000_katsuro/10999_introspection.t`. The math/string set (`ceil`, `floor`, `inf`, `nan`, `trim`) landed after and is covered by `t/10000_katsuro/11040_builtin_math_trim.t`. `indexed` also shipped, paired with `for`/`foreach` (see §5). Still open from Perl's set: `export_lexically`, `load_module`.
-- [x] **Defined-or & Conditional Assignment (`//`, `//=`, `||=`):** The parser treats `//` as an eager binary operator — left-associative and at the same precedence as `||` — and `//=`/`||=` as assignment operators, including on a `my` declaration (where they take the initializer unconditionally, since a fresh variable has no prior value). The lowerer tests a `ptr`/`Any` slot against null for `//=`/`//` and against zero for `||=`, then `select`s. `//=` on a native `int`/`float`/`bool`, which can never be undefined, is a plain `=`. `||=` on an `Any` box currently sees only a null box as false (see §4). Tests: `t/10000_katsuro/10980_defined_or_assign.t` plus parser/lowerer cases.
-- [ ] **`state` (Persistent Lexical):** `state $x //= EXPR` is the spelling whose condition is actually observable across calls, but the IR and linkers have no writable program-global/static storage yet (`__heap_base` arrives as a function parameter), so `state` still parses nowhere. Blocked on static storage.
-- [x] **`package NAME` Declaration Scoping:** `package NAME;` prefixes the declarations that follow in the same scope, and `package NAME { ... }` scopes the prefix to the block. A name that already contains `::` is absolute and is left alone. Both forms also accept a version literal (`package Math::Geometry 1.0.0;`, `package V v1.2.3;`), recorded on the module as `package_versions` for the future module system. The parser stamps the in-effect package onto every node, and the lowerer qualifies `sub`, `class`, method, field, and class-constructor names through `_qualify`/`_resolve_class_ident`, so a bare sibling call, `Point->new`, `$p->method`, and `__CLASS__` all resolve inside the package while the runtime symbols keep their fully-qualified names. Cross-unit `require`/import stays gated on the module system (spec §17.4). Test: `t/10000_katsuro/11030_package.t`. The core runtime (`src/runtime/core.brocken`) simplification this unblocks is tracked separately below.
-- [ ] **Tuple Returns:** Extend `:returns(...)` to multi-type register tuples `:returns(i64, bool)`. The parser currently parses up to the comma and rejects tuples with a clear "not yet implemented" error; the `AST`/`Lowerer` still model a single scalar `return_type`.
-- [ ] **Post-Dereference Syntax (`postderef`):** Implement post-deref parsing and lowering: `$ref->@*`, `$ref->%*`, `$ref->$*`, `$ref->[0]`, `$ref->{key}`.
-- [ ] **Strict String Interpolation:** Update `Lexer.pm` and `Parser.pm` double-quote interpolation: support `$scalars`, `@arr[0]`, `%map{key}`, `${var}`. Method calls like `"$pt->x"` must remain raw text (no method call interpolation).
-- [ ] **Anonymous Subs & Closures:** Add parser and lowerer support for anonymous `sub (...) :returns(...) { ... }`.
-  - Non-capturing: Lower as raw function pointer.
-  - Capturing: Promote captured variables to a heap-allocated Environment Record on Immix; pass as hidden environment pointer.
-- [x] **Postfix Conditionals:** Statement modifiers `STATEMENT if COND;` and `STATEMENT unless COND;` parse as a one-statement `if` (`unless` is an `if` with an empty then-branch and the statement as its else). Only simple statements take a modifier, since a compound statement needs no `;` and so an `if` after one is a new statement. The condition uses the same truthiness test as a prefix `if`. Covered by `t/10000_katsuro/11090_postfix_conditionals.t`. The `die` spelling in the original note waits on the `die`/`warn` builtins (§5).
-- [x] **Compound Assignments:** `TARGET OP= EXPR` for `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`, `.=`. The lexer emits each as one token and the parser rewrites it to `TARGET = TARGET OP EXPR`, so the ordinary assignment lowering -- and its reference counting, boxing, and dynamic-slot handling -- applies unchanged. Works over locals, `Any` boxes, array elements, hash elements, and bare fields. The `=`/`//=`/`||=` forms are untouched. Covered by `t/10000_katsuro/11100_compound_assign.t`. *Note:* the target sub-expressions are re-evaluated once (a `%map{key}` key is computed twice), the one place this differs from a dedicated single-evaluation lowering.
-- [x] **Range Operator Induction Loops:** `for my $i (LO .. HI)` parses the `..` only in the loop list (it carries no binding power elsewhere, so `my $x = 0 .. 3` stays a parse error, matching the spec's narrow scope) and lowers to a native induction loop -- `$i = LO; while ($i <= HI) { ...; $i++ }` -- with no list built. Both bounds are evaluated once, the range is inclusive (unsigned loop variables compare with `ule`), a descending/empty range runs zero times, and the loop is fuel-guarded like every other loop. The loop variable defaults to `i64` when untyped (`Any`); any other declared type must be an integer. Covered by `t/10000_katsuro/11250_range.t`. Spec §4.5.
-- [ ] **Perl Special Variables (`$_`, `@_`, `@ARGV`, ...) & Automatic `shift @_`:** Add the punctuation variables from `perldoc perlvar` that a compiled, isolate-based runtime can honour, plus the implicit subroutine-argument protocol. Planned: `$_` (the default argument — the loop variable of a bare `for`/`foreach` and the element name inside `map`/`grep`), `@_` (the running `sub`/`method`'s arguments, in call order), `@ARGV`/`$ARGV`, `%ENV`, `@INC`/`%INC`, `$$`/`$PID`, `$0`/`$PROGRAM_NAME`, `$?`/`$CHILD_ERROR`, `$!`/`$ERRNO`, `$@`/`$EVAL_ERROR`, `$a`/`$b`, and — once the regex engine exists — the capture/match set (`$1`..`$n`, `$&`, `` $` ``, `$'`, `@-`, `@+`, `%+`). `use English` spellings name the same storage. Punctuation variables outside the set (format and IO internals, `$^X`, `$;`, ...) stay compile errors rather than a silent `undef`. Automatic shifting needs the container mutators `shift`/`unshift`/`push`/`pop` — now shipped with an explicit array operand (§5), but the no-argument `@_` form is still pending — operating on the current sub's argument list, so the untyped `sub f { my $x = shift; ... }` spelling works beside a typed parameter list. Spec §2.3.
-- [x] **Call Argument Shadowing (parameter defaults):** A callable's arguments lower with each value bound to its parameter's name, so a later *default* can read an earlier argument. That list was seeded for every callable -- even one with no defaults -- so a caller variable named like a parameter was shadowed mid-call: `sub f(i64 $x, i64 $y); my i64 $x = 3; f($x, $x)` resolved the second `$x` to the first argument's loaded SSA value and died in the lowerer (`.allocated_type` on a `Load`). The list is now seeded only when some parameter actually has a default, leaving the documented default-reference behaviour intact. Covered by the "a default-less callable does not shadow caller variables" subtest in `t/10000_katsuro/10950_param_defaults.t`.
+Goal: Complete fidelity with the Blackburn & McKinley (PLDI 2008) Immix paper and Bacon & Rajan (ECOOP 2001) trial deletion paper.
 
----
-
-## 4. Nullability & `undef` Semantics
-
-- [ ] **Type Separation:** Lowercase native types (`i64`, `f64`, `bool`, `ptr`) default to `0`/`false` in registers and cannot be `undef`. Capitalized managed types (`Int`, `Float`, `Bool`, `String`, `Class`, `Any`) default to `undef` (Fat Scalar tag = 0).
-- [x] **Zero-initialised pointer slots:** An uninitialised `ptr` or `Any` variable now starts null — the fresh stack slot is explicitly zeroed — so a null test sees it as undefined instead of whatever the slot held. This is what `//`, `//=`, and `||=` rely on. Native `int`/`float`/`bool` declarations are still not zeroed.
-- [x] **`||=` on a boxed false:** `||=` on an `Any` slot now tests Perl truthiness through the runtime `is_truthy`, so a box holding `0`, `0.0`, `""`, or `"0"` is replaced rather than kept; `//=` still keeps the null test (a boxed `0` is defined). The null-box guard for `if (null_any)` and binary `||` is also in place -- `is_truthy` short-circuits on a null box and `unbox_i64`/`unbox_f64` read one as `0` -- so neither faults. Pinned by `t/10000_katsuro/10980_defined_or_assign.t` and `t/10000_katsuro/11055_truthiness.t`.
-- [x] **`undef` Keyword & Literal:** `undef` is shipped in both roles (spec 3.3). As a value it lowers to the null box (Type Tag 0); `maybe_convert_type` turns that constant into a native `0`/`0.0` or a null pointer, so `$x = undef` works in an `Any`, `String`/class, or native slot alike -- without the null-box payload read that would fault. As a mutator it parses as `Expr::UndefOp`: `undef($x)` and the bare `undef $x` reset a scalar (a variable, field, or array element) by reusing the ordinary assignment lowering and its reference counting; `undef %h` releases the table's values (through `hash_release`) and installs a fresh empty table; and `undef @a` empties the array in place -- a managed (`Any`) heap array drops one reference per element through the new `array_clear` runtime helper, a plain element heap array only zeroes its count, and a small fixed stack array zeroes its elements directly. `undef` is a KEYWORD, so it can no longer be an identifier. Pinned by `t/10000_katsuro/11180_undef.t` on host, aarch64, and riscv64.
-- [x] **`defined` Builtin:** `defined EXPR` is shipped as the null test: a pointer-shaped value (`String`, class reference, or `Any` box) is defined when it is not null, and a native int/float/bool has no undefined value so it folds to a constant true. A missing `%h{key}` reads as a null box, so `defined %h{key}` reports presence, and this is distinct from truthiness (`defined "0"` is true). It also fixed a latent codegen abort: a constant condition (`if (true)`, which a native `defined` produces) reached the encoder as an immediate operand, which the encoders cannot resolve, so `as_condition` now materializes a literal condition as a comparison. Pinned by `t/10000_katsuro/11060_defined.t`.
+- [x] **Immix Block Owner Derivation:** Corrected block base masking using arena-relative offsets (`block_of`) instead of naive `ptr & ~0x7FFF`.
+- [x] **Bacon & Rajan Synchronous Trial Deletion:**
+  - [x] Wired automatic threshold sweep (`maybe_gc_drain`) triggered when `suspect_count >= 256`.
+  - [x] Implemented re-entrancy sentinel (`suspect_count = -1`) to protect Phase 3 `DESTROY` sweeps from mutating the suspect ring.
+  - [x] Implemented MarkGray, ScanBlack, and multi-stage collection across Lists, Hashes, and Class instances via compiler-generated `__scan`/`__restore` hooks.
+  - [x] Integrated `gc_destroy_class` to run user `DESTROY` blocks on confirmed cyclic garbage before memory reclamation.
+- [x] **Object Resurrection Protection:** `Class::__destroy` inspects `$self` refcount following user `DESTROY`; if `RC > 0`, reclamation and field cascades abort, keeping the instance alive.
+- [x] **LIFO Field Teardown:** Cascading field teardown in `Class::__destroy` decrefs managed fields in reverse declaration order.
+- [x] **Segregated Free Lists (`free16_head` & `free_big_head`):**
+  - [x] `free16_head` handles hot-path 16-byte Fat Scalar reclamation.
+  - [x] `free_big_head` recycles variable-length Tag 8 (Hash) and Tag 9 (Array) memory slabs via size-matched reuse.
+- [x] **Native-Width Header Optimization:** Replaced 64-bit load-mask-shift operations with direct `u16`/`u8` accessors for refcounts, GC flags, and type tags.
+- [x] **ICB Accessor Inlining:** Inlined compile-time constant offsets in `bump_alloc`, `decref`, and `free_obj`.
+- [x] **Memory Limit Check Hoisting:** Hoisted memory budget checks out of the hot `free16_head` path into fresh line/block allocations.
+- [ ] **Immix Line Compaction & Evacuation (Whitepaper Parity):**
+  - [ ] Add opportunistic line evacuation: detect fragmented blocks during sweep and evacuate live objects into contiguous lines.
+  - [ ] Track two-bit line states (*Free*, *Live*, *Pinned*) to handle multi-line spans across collection cycles.
+- [ ] **Out-of-Line Large Object Space (LOS):**
+  - [ ] Isolate allocations $\ge 4\text{ KiB}$ from the 32 KiB tiled Immix grid into distinct OS virtual memory allocations (`mmap`/`VirtualAlloc`).
+  - [ ] Update `block_of($hb, $addr)` to distinguish contiguous Immix blocks from LOS descriptors.
 
 ---
 
-## 5. Built-in Functions & Container Operations
+## 3. Caller-Borrows Contract & Lifetime Tracking
 
-- [x] **Process & Error Builtins:**
-  - `exit($code)` is shipped: `exit;` / `exit(EXPR);` parses as `Stmt::Exit` and lowers to a call to libc `exit`, so stdio is flushed before the process ends (a raw kernel syscall would drop output still buffered in `puts`, which is why this is a call). The call is noreturn, so the block is closed with a branch to a dead continuation block and nothing after the `exit` runs -- including a `return` in the same function or the rest of an enclosing loop. The status is an `i64` (0 when omitted), unboxing an `Any` operand, and a postfix modifier applies (`exit(1) if $bad;`). Native-only: a Wasm module has no `exit` import (its runner would need `proc_exit`). Pinned by `t/10000_katsuro/11120_exit.t` on host, aarch64, and riscv64.
-  - `warn(@msgs)` is shipped: it parses as `Stmt::Warn` and lowers to a formatted message on stderr followed by a newline. Each argument is stringified exactly as `say` would (a dynamic box through its header tag) and the pieces are concatenated with the managed `str_concat`; an empty list falls back to Perl's "Warning: something's wrong". stdout is flushed first (`fflush(NULL)`) so a buffered `say` cannot appear after the diagnostic, then the bytes go out through libc `write(2, ...)` -- not `fputs(stderr, ...)`, because `stderr` is a macro, not an importable symbol. A postfix modifier applies (`warn "x" if $bad;`). There is no runtime source location, so Perl's " at FILE line N." suffix is absent. Covered by `t/10000_katsuro/11130_warn_die.t`.
-  - `die(@msgs)` is shipped: it parses as `Stmt::Die` and lowers to the same `ICB.thrown_value` + `longjmp` dispatch as `throw`, so a `try`/`catch` in scope catches it identically. With no handler it reports the message on stderr (the same formatting and flush rules as `warn`) and ends the process through libc `exit(255)`, Perl's status for an uncaught `die`; bare `die` uses "Died". `throw` keeps its shipped no-handler behaviour (set `ERR_THROW` and fall through, since it only ever unwinds a `try`). Native-only, like `throw`/`exit`. Pinned by `t/10000_katsuro/11130_warn_die.t` on host, aarch64, and riscv64. *Limitation:* the caught value is still parked in an `i64` slot, so `catch ($e)` cannot yet read the die message as a string (see §6's catch-var work); the message text is only observable on the uncaught path.
-- [x] **Container Builtins:**
-  - `exists %hash{"k"}` is shipped: it parses as `Expr::Exists` and lowers to the runtime `hash_has`, giving a 1-bit membership test, so a key holding a false value (`0`, `""`) still exists. Pinned by `t/10000_katsuro/10900_hash.t` and `t/40000_runtime/40230_hash_runtime.t`.
-  - `delete %hash{"k"}` is shipped: it parses as `Expr::Delete` and lowers to the runtime `hash_delete`, which transfers the table's reference to the caller, so the deleted value comes back as an owned `Any` box (undef when the key was absent). A discarded `delete` statement releases its box; a slot that stores the result consumes the reference. The value is only ever an `Any` box (native-typed `%h` still croaks), which is what makes the single transferred reference well-defined. Pinned by `t/10000_katsuro/11080_delete.t`. *Fixed alongside it:* `hash_find`'s tombstone test was `k != 1 && str_eq(k, key)`, but Brocken's `&&` is bitwise (both operands always evaluated), so a probe that met a tombstone dereferenced the sentinel `1` and faulted; the sentinel is now tested with a nested `if` before `str_eq` sees the pointer. That path was unreachable until `delete` could create a tombstone.
-  - `keys %hash` and `values %hash` are shipped (spec 6.2): each parses as `Expr::HashKeys` and lowers to the runtime `hash_keys`/`hash_values`, returning a tag-7 list (`[0]`=tag 7, `[8]`=count, one eight-byte box pointer per slot from `+16`) -- the exact shape an `Expr::List` builds, so `for my $k (keys %h)` and `my ($x, $y) = values %h` walk it with no boxing or unboxing at the boundary. The list is bump-allocated and never freed, like every other list the compiler emits. Insertion order (spec 6.2) is now tracked by threading a doubly-linked list through the hash buckets: the 48-byte header carries `[32]`=order head and `[40]`=order tail (bucket indices, -1 when empty), each 32-byte bucket `{key, value, prev, next}` links its neighbours, `hash_set` appends a genuinely new key to the tail (an overwrite leaves the position alone), and `hash_delete` unlinks in O(1) before tombstoning. `hash_grow` rebuilds the order by walking the old list rather than the bucket area, so the order survives rehashing. `keys` boxes each borrowed key pointer as a `String` (`make_box_str`); `values` `incref`s each stored box so the list owns a reference and a value outlives an overwrite or a released table. The operand must be a local hash variable `%h` -- a scalar, array, literal, or hash element is a clear compile error -- and both are usable as bare statements. Not implemented: the scalar-context count form (`my $n = keys %h`). Pinned by `t/10000_katsuro/11170_hash_keys_values.t` on host, aarch64, and riscv64.
-  - [x] Array keywords `push @arr, $val`, `pop @arr`, `shift @arr`, `unshift @arr, $val` are shipped (spec 6.1): each parses as `Expr::ArrayOp` and lowers to the runtime `array_push_i64`/`array_pop_i64`/`array_unshift_i64`/`array_shift_i64` helpers plus `array_len`. The operand must be a *growable* array -- one declared without a compile-time element count (`my [i64] @a;` or `my [i64; $n] @a;`), which is heap-promoted to the tag-9 header the helpers need; growth re-allocates the block, so the lowerer stores the fresh base back into the array's slot and answers the new element count, while shrink mutates the count in place and answers the removed element (0 when the array is empty -- an i64 element has no undef). `unshift @a, 1, 2` inserts from the last value back so the result is `(1, 2, @a)`, matching Perl's argument order; both the bare and the parenthesised spelling (`push(@a, 1)`) parse. A compile-time-sized array (`my [i64; 3] @a;`), a non-i64 element array, or an unknown array is a clear compile error rather than a silent no-op. This also fixed the no-count declaration (`my [i64] @a;`), which previously crashed lowering an undef size expression. Pinned by `t/10000_katsuro/11140_container_mutators.t` on host, aarch64, and riscv64. *Deferred:* the no-argument form defaulting to `@_` (see §3), non-i64 element types (an owning array would need to incref its elements and release them when the block dies), and a capacity field so growth is amortized rather than O(n) per call (every push re-allocates today).
-- [x] **Auto-Increment (`++`) and Decrement (`--`):** Numeric pre- and post-increment/decrement ship for every lvalue the lowerer can address. A native `i64`/`f64` local or field is a plain load/add/store; a `String` (ptr) slot takes the magical ASCII increment for `++` or a numeric decrement for `--`; an owned dynamic (`Any`) slot -- a local, an `Any` field, or an owned `Any` array element -- is stepped by the runtime `inc_slot`/`dec_slot`, which carries the owning-store contract and answers the pre- or post-value as an owned box (the caller consumes or releases it). A borrowed `Any` parameter is promoted to an owned slot first, so the caller's box is never released. A weak or non-owned dynamic slot, a hash element, and a literal or doubled-postfix target are clear compile errors. A bare `$x++;` statement steps the slot in place (`inc_slot_discard`/`dec_slot_discard`) instead of materialising a pre-value nobody keeps: the displaced box stays the slot's to reclaim and is freed outright rather than briefly given a second owner and buffered as a cycle suspect. `++` follows Perl's Option A ASCII carry on a non-empty `/^[a-zA-Z]*[0-9]*\z/` string (`"az"++`$\rightarrow$`"ba"`, `"99"++`$\rightarrow$`"100"`, `"zz"++`$\rightarrow$`"aaa"`, `"Z"++`$\rightarrow$`"AA"`); any other string -- symbols, a decimal point, the empty string -- and undef coerce to numeric 0 and yield 1. `--` is never magical: the string coerces to its leading integer and loses one (floats truncated, so `"1.5"--` is 0). New runtime helpers (`make_box_i64`/`_f64`/`_str`, `str_is_incrementable`, `str_to_i64`, `str_increment`, `str_inc_bytes`, `str_dec_bytes`, `inc_dyn`, `dec_dyn`, `inc_slot`, `dec_slot`, `inc_slot_discard`, `dec_slot_discard`) live in `core.brocken`. The lexer emits `++`/`--` as one token, `Expr::IncDec` carries the prefix/postfix distinction, and the parser gives postfix `PREC_POSTFIX`, above unary and below deref, so `-$x++` parses as `-($x++)`. Covered by `t/10000_katsuro/11160_increment.t` on host, aarch64, and riscv64. *Deferred:* hash elements `%h{k}++` (the open-addressing `hash_set` can move the table, complicating the returned owned box) and Option B Unicode carry (below).
-- [x] **Math & String Builtins:** `builtin::ceil`/`floor` round a number to an `i64` toward `±∞` — an integer passes through, a float is truncated with `fptosi` and corrected by one when the truncation landed on the wrong side, all emitted in the IR (`fptosi`/`sitofp`/`fcmp`) so the linker needs no libm `-lm` and every backend is covered by the same ops; a magnitude beyond the `i64` range is undefined, like any integer conversion. `builtin::inf`/`nan` are `f64` constants (`inf` honours a runtime sign argument, `nan` evaluates and ignores it). `builtin::trim` returns a fresh `String` with ASCII whitespace stripped, through the new `Brocken::Runtime::str_trim`/`str_is_space` helpers (byte strings, so Unicode whitespace is out of reach). Covered by `t/10000_katsuro/11040_builtin_math_trim.t`. Still open: `export_lexically` and `load_module` remain v0.0.2 (the module system is unimplemented).
-- [x] **`for` / `foreach` and `builtin::indexed`:** The parser implements `for`/`foreach` with a required `my` loop variable (`for my $x (LIST) { ... }`, `for my ($k, $v) (LIST) { ... }`); there is no `$_`. The list is evaluated once and the lowerer walks it a stride of one boxed slot per target: `k` is an element-base counter that advances by the stride, the row starts at byte `k * 8`, and slot `j` sits at `+16 + j * 8`, so a signed `k <= count - stride` test both bounds the walk and skips a trailing partial group. A separate `incr` block carries the advance and is the header a `next` jumps back to. The loop variables borrow the boxes rather than owning them (leak rather than a dangling free). `builtin::indexed LIST` builds the flat `(index, value, ...)` pair list Perl's `indexed` returns by unrolling a compile-time-sized source: a single local array (needs a folded length), a single `Expr::List`, or several arguments; a runtime-sized array argument is a compile error. `for` asks a callee that produces the iterable for list-`want` (bit 2) — the override applies only to the iterable expression, so a later scalar-context call still sees the caller's own want — so a call returning a list is consumed as one; a runtime-sized or field array is still not an unrollable iterable. Covered by `t/10000_katsuro/11050_for_indexed.t` on host, aarch64, and riscv64.
-
----
-
-## 6. Exception Handling: SJLJ & Landing Dispatcher
-
-- [x] **Implement Landing Dispatcher:** Lower `try/catch/finally` so that normal exits, `return`, `last`/`next`, and `throw`/`die` all drop the ICB handler through one sequence rather than a literal single dispatch block. Normal exits and the landing pad pop inline as they always did; `return` and `last`/`next` now call `_emit_handler_pops` (`t/10000_katsuro/11020_handler_pop.t`).
-- [x] **Fix F4 (`try/catch` Memory Leak):** Ensure the ICB exception handler stack is cleanly popped in the Landing Dispatcher on every single exit path. `return` used to jump straight to `ret` and leave the handler pushed, so a later `throw` longjmped into a frame that had already returned; `last`/`next` did the same for a `try` inside the loop. The lowerer tracks `$_try_handler_depth` (enclosing try bodies) and `$_loop_handler_depths` (the depth each loop was entered at) and pops the difference before the branch, so `return` drops every enclosing handler and `last`/`next` drop only the ones opened inside their loop. Covered by `t/10000_katsuro/11020_handler_pop.t`.
-- [x] **Fix F18 (Catch-var Aliasing):** The catch variable was stored in the symbol table under its sigil -- `catch ($e)` bound `$e`, but a read looked up the bare `e` -- so *any* use of the catch variable was an "Undefined variable" error, a latent bug the old tests missed by never reading it. The binding is now keyed by the bare name, and its alloca is given a unique name (`%<var>.addr_<n>`, where it was previously a fixed `%<var>.addr` that made two nested catches share one static frame slot). The previous binding is saved and restored rather than deleted, so a nested try/catch that reuses a name neither aliases the outer slot nor leaves the outer name unbound after the inner block. Covered by `t/10000_katsuro/11010_catch_var.t`.
+- [x] **F3 - Borrowed `Any` UAF:** Callee treats dynamic `Any` parameters as borrowed (`$borrowed_params`), omitting scope-exit decrefs.
+- [x] **F5 - Scoped Loop Cleanup:** `_emit_loop_cleanup` decrefs only variables introduced within the current loop iteration scope.
+- [x] **F9 - Class Field Ownership:** Dynamic field stores take ownership (`incref`) and decref displaced values across constructors, accessors, and field assignments.
+- [x] **F12 - Branch-Body Scope Cleanup:** `if`/`elsif`/`else` bodies execute block-scoped cleanup, eliminating per-iteration leaks.
+- [x] **F13 - Return Ownership Normalization:** Pre-pass classifies function return ownership; callers consume owned references (`+1`) without duplicate increfs.
+- [x] **Instance Ownership:** Non-escaping fresh instances (`Class->new`) are reclaimed at scope exit via `Class::__destroy`.
+- [x] **Field-Return Promotion:** Returning an instance field promotes the field to an owned reference (`incref`), ensuring values outlive temporary receiver parents.
+- [x] **Managed Array Element Ownership:** Local `Any` arrays (`Tag 9`) track element ownership via `array_zero` and `array_release`.
+- [x] **Weak Reference Semantics (`:weak`):**
+  - [x] `:weak` fields and variables store pointers without taking refcount ownership.
+  - [x] `builtin::weaken`, `builtin::unweaken`, and `builtin::is_weak` toggle ownership tracking on locals.
+- [ ] **Automated Perceus Borrow Inference (PLDI 2021):**
+  - [ ] Implement middle-end analysis to infer borrow annotations automatically.
+  - [ ] Implement RC elision to cancel redundant adjacent `incref`/`decref` instructions.
+  - [ ] Lower terminal lexical uses into affine `Move` transfers.
 
 ---
 
-## 7. Hash Tables & Perl Semantics
+## 4. Language Syntax & Frontend (`Katsuro`)
 
-- [x] **O(1) Hash Table:** `core.brocken` now uses an Open Addressing / Linear Probing power-of-two table (`hash_init`, `hash_alloc`, `hash_new`, `hash_len`, `hash_find`, `hash_grow`, `hash_set`, `hash_get`, `hash_has`, `hash_delete`, `hash_release`). `%h{...}` parses as `Expr::HashIndex` and lowers to `hash_set`/`hash_get`, so a read or write is O(1) rather than a linear scan of an array of pairs. Layout: `+0` header (refcount | tag 8), `+8` live count, `+16` bucket-area bytes (= capacity * 16), `+24` tombstone count, `+32` buckets (capacity x {key, value}). An empty slot is key 0 and a tombstone is key 1; capacity is derived as `bytes >> 4` and the probe mask is `capacity - 1`. A table starts at capacity 8 and doubles past a 3/4 load factor; `hash_grow` rehashes live entries and drops tombstones.
-- [x] **Hash Ownership:** `hash_set` takes ownership of a freshly stored value and `decref`s any value it displaces. `hash_release` cascades a `decref` over every live value (only while the table's own refcount is 1) before releasing the table, and `decref` routes tag 8 to `free_big` like a heap array. Keys are borrowed NUL-terminated pointers and are deliberately not reference-counted. A local `%hash` is released at scope exit; values are restricted to `Any` for now (a native-typed `%h` croaks) so the cascade is always safe.
-- [x] **Perl Truthiness Rules:** Bug F7 fixed. An `if`/`while`/`for` condition on a dynamic value -- and unary `!` on one -- now call the runtime `is_truthy(ptr)` helper instead of truncating through `unbox_i64`. `0`, `0.0`, `""`, `"0"`, and undef (a null box) are false; `"00"`, `"0.0"`, `0.5`, and any reference are true. The helper short-circuits on a null box, so `if (undef)` is false rather than a fault, and `unbox_i64`/`unbox_f64` read a null box as `0`/`0.0`. Pinned by `t/10000_katsuro/11055_truthiness.t`. (`&&`/`||` stay bitwise on integers -- the shipped semantics pinned by `t/50000_fuzz/50100_fuzz_regressions.t` -- so only their null-box fault, not their arithmetic, changed.)
-- [x] **F1 - `say`/`print` Segfaults:** `say`/`print` hand their argument to `puts(ptr)`, so a non-string value is stringified first. The argument goes through `_stringify_value`: a statically-typed value uses `_stringify` (identity for a String, `i64_to_str`/`u64_to_str` for an int, and a `select` of the `"1"`/`""` literals for a Bool per spec 4.2), and a boxed `Any` is dispatched on its header tag (tag 3 -> `unbox_f64`, tag 4 -> the payload string pointer, tag 0/undef -> `""`, otherwise the integer payload). `builtin::stringify` and `numify` share the helper, so they can no longer drift. `say()`/`print()` with no argument passes the empty string. `box_tag` and the new `unbox_ptr` runtime helpers tolerate a null box, so `say($undef)` and `say(%h{"missing"})` print an empty line instead of faulting. The RISC-V lowerer alone lacked the `_materialize_ext_src` step X86_64/ARM64 give a `movzx`/`movsx`, so a `zext` of `true`/`false` reached its encoder as a bare immediate; it now materialises one too. Pinned by `t/10000_katsuro/11070_say_stringify.t` (host + every runnable cross target). *Accepted quirk:* a boxed `false` renders `"0"` rather than the `""` of spec 4.2 -- the narrow-integer box tag cannot distinguish a bool from an int.
-- [ ] **Native-Float Stringification Needs the Variadic ABI:** Spec 4.2 sends a float through `sprintf("%f")`, a *variadic* call, and Brocken implements no variadic calling convention: X86_64 does not set `%al` to the number of vector arguments and RISC-V does not duplicate a float argument into the integer registers, so the callee reads the value from the register-save area's integer half and prints `0.000000`. ARM64 has no such rule and prints the value. A *boxed* float only appears to work on X86_64 because the preceding `unbox_f64` call happens to leave a nonzero `%al`; that is not something to rely on. The `%f` format itself (a fixed six decimals) also differs from Perl's shortest round-trip rendering. Implement the variadic convention from `docs/spec.md`'s calling convention before native-float `say`/concatenation is correct everywhere.
-- [ ] **F6 - Order-dependent Mixed Signs:** Mixed-sign comparisons at equal widths (< 64-bit) derive their `sext`/`zext` rule entirely from the LHS. `u8 < i8` and `i8 > u8` yield contradictory results.
-- [x] **F8 - Unary Float Truncation:** Unary `-` on a dynamic value forced `unbox_i64`, which truncates a float payload toward zero, so `-$x` for a box holding `3.5` came out `-3`. `lower_unop` now reads a dynamic `-` operand at f64, the same Perl scalar rule `lower_binop` already applies to untyped arithmetic; `unbox_f64` widens an integer payload, so one `fneg` serves either kind of box and keeps the fraction a float box carries (a boxed `3.5` negates to `-3.5`, a boxed `5` to `-5`). The bool/float-constant special cases below are unaffected (a dynamic operand is never a constant). Unary `!` was already fixed: it uses `is_truthy`, so `!"0"` and `!0.0` are true and `!"00"` is false. Covered by `t/10000_katsuro/11210_unary_float.t`.
-
----
-
-## 8. Concurrency & Channels (v0.0.1)
-
-- [ ] **Channel Data Structure:** Implement the global bounded ring-buffer table in the `.data` section.
-- [ ] **Inline Synchronization:** Inline `pthread_mutex` / `pthread_cond` (or SRWLock) sequences on X86_64, ARM64, and RISCV64 for channel operations.
-- [ ] **Deep-Copy / Primitive Transfers:** For v0.0.1, channels pass primitives (`i64`, `f64`, `bool`). Aggregates passed through channels are deep-copied into the receiver's Immix heap.
-- [ ] **Channel Tests:** Two-isolate send/recv (native and compiled execution).
-
----
-
-## 9. Compiler Diagnostics & Minor Missing Features
-
-- [ ] **Dynamic Boxing:** `my Int $x = 10` currently lowers like `i64`. Implement actual heap allocation (`bump_alloc(16)`) for top-level boxes.
-- [ ] **F11 - Silent Casts:** `maybe_convert_type` silently allows `int` <-> `ptr` casts as a no-op fallback instead of throwing a hard error.
-- [x] **Boxed Pointer Payload on Assignment:** `maybe_convert_type` leaves a `dynamic -> ptr` conversion a no-op *by default*, because a dynamic value is the box pointer that the `ptr`-taking runtime helpers (`box_tag`, `unbox_i64`, `unbox_f64`) read the header through. Assignment and return sites now opt in with a `$unbox_ptr` flag, which falls through to `build_unbox` and reads the payload at offset 8: `my String $s = $any`, `$s = $any`, `my (String $s) = ($any)`, and `return $any` from a `String`/`ptr` function all read the wrapped string now. Call sites opt in too (see the next item); the default stays a no-op so the helpers keep receiving the box.
-- [x] **String Operators on a Boxed `Any`:** `.` and the `eq`/`ne`/`lt`/`gt`/`le`/`ge`/`cmp` comparisons stringify both operands, so a dynamic operand is now rendered from its box tag (`_stringify_value`) before the operands reach the string operator -- they are dispatched ahead of the numeric unification, which used to unbox the box to f64 first, so `$any . "!"` concatenated `"0.000000!"` and `$any eq "x"` compared `"0.000000"` to `"x"`. Covered by `t/10000_katsuro/11110_string_ops_dynamic.t`.
-- [x] **Boxed Pointer Payload at Call Sites (pre-existing):** Passing an `Any` to a `String`/class/`ptr` parameter left the box in place, so `sub f(String $s)` called with `$any` read length 1 rather than the payload length. The IR sees only `ptr` for both a `String` parameter and a runtime helper's box pointer, so the unbox cannot be a blanket one. The split turns out to be the callee: a user function carries the hidden `%__heap_base` the runtime helpers do not, and every Brocken type that maps to `ptr` (`String`, a class, a raw `ptr`) wants the payload, while an `Any` parameter stays `dynamic`. `lower_call_expr` and `lower_method_call` now pass `$unbox_ptr` when the callee is a user function (a method always is), for both the supplied arguments and a trailing parameter's default; `length`'s `strlen` and the reflection helpers keep receiving the box. `sub slen(ptr $p)` gets the payload the same way. Covered by `t/10000_katsuro/10992_boxed_call_args.t`.
-- [x] **Single-Element Parenthesized List RHS (pre-existing):** `my (TYPE $x) = (EXPR)` with one element parses `EXPR` as an `Expr::Paren`, not a one-element `Expr::List`, so `lower_list_var_decl` used to read `EXPR + 16` as if `EXPR` were a list pointer (an emit-time `RodataRef->value` croak). `_list_rhs_expr` now normalizes a `Paren` RHS to a one-element list, unrolling a bare local array inside it (`my (String $s) = (@a)` takes the first element). The `for my $x (@a)` iterable path still handles the bare-array case separately.
-- [x] **Pointer-Arithmetic Intrinsic Result Type:** `Brocken::ptr_add`/`ptr_sub` now carry an explicit `ptr` result type instead of inheriting the left operand's. Inheriting meant `my ptr $p = Brocken::ptr_add($any, 0)` typed the sum `dynamic`, so the boxed-payload assignment fix above unboxed it and turned a box pointer into its payload. `Builder::build_add`/`build_sub` gained the same optional `$result_type` passthrough `build_and` already had. Fixed the `40400_gc_r3` "gc_drain marks reachable suspects as Black" regression.
-- [x] **F14 - Arity Checking:** Function and method calls now validate their argument count at compile time. An excess argument is a `Too many arguments to 'f': N expected, got M` error instead of a lowered-and-dropped value, and a call that would leave a required parameter (one with no default) unfilled is a `Missing required argument N of 'f'` error instead of an uninitialized slot. The hidden `%__heap_base`, `%__want`, and `$self` parameters are excluded (they are plumbing, not user arguments) and `say`/`print` are exempt as the variadic builtins; trailing parameters with defaults still fill in order, so a default on a later parameter does not excuse an earlier required one. Fixing the missing-argument half also required `lower_var_ref` to stop assuming every non-alloca symbol is a slot address: a call binds an earlier parameter's name to the lowered argument *value* so a later default can reference it, and reading that name used to die on `allocated_type` (only `Alloca` has it) whenever the argument was a Box. Tests: `t/10000_katsuro/11190_arity.t`.
-- [x] **F15 - `__CLASS__` Lowering:** `lower_class_const` lowered to a `ptr` *constant* whose value was the class name, but a constant's value is numified by the encoder, so the string `Point` became the address `0` -- a null pointer that could be mentioned without croaking but was not a usable class handle. `__CLASS__` now lowers exactly like a string literal: a NUL-terminated rodata blob holding the qualified class name (`_intern_rodata`), which is the value `perlclass` gives. So `say(__CLASS__)` prints the name and `__CLASS__ eq "P::C"` compares it, in methods and in field initializers alike. Covered by `t/10000_katsuro/11220_class_const.t`.
-- [ ] **Predefined Constants & File Directives:** *Partial.* The pseudo-constants now fold at parse time to ordinary constants, because the lexer already stamps `line`/`col` on every token and the parser knows the in-effect package and the unit's filename. `__PACKAGE__` folds to the in-effect package name as a string (the top level, with no `package` in effect, is `main`, the module's name), so `package P; __PACKAGE__ eq "P"` holds, a package block scopes it, and `say(__PACKAGE__)` prints the name; covered by `t/10000_katsuro/11230_package_const.t`. `__LINE__` folds to the token's source line as an `Int` and `__FILE__` to the compilation unit's name as a `String` (the caller-supplied name, `(eval)` by default); covered by `t/10000_katsuro/11240_line_file_const.t`. Still unimplemented: `__SUB__` should fold to the enclosing `sub`/`method`'s fully-qualified name; the file-section directives `__END__` (stop parsing; trailing text is not code) and `__DATA__` (expose the trailing text as a readable data handle / `DATA` filehandle) also belong here. `__FILE__` reports whatever name the unit was compiled under -- a meaningful module path waits on the module system (§17.4). Unknown `__NAME__` spellings should stay compile errors rather than a silent `undef`.
-- [x] **F16 - Empty Function Bodies:** An empty `sub f() {}` produces a declaration with no definition, resulting in a silent linker error. This was because `lower_function` skipped any body with no statements, which conflated a prototype `sub f();` (signature-only; a later definition supplies the body, and a lone one becomes a `declare`) with an empty body (a real function). Prototypes are now flagged by the parser and still lower nothing; an empty body falls through to the epilogue and emits the default return (`ret 0` for scalar, `ret void` for void, a null box for `Any`). Covered by `t/10000_katsuro/11200_empty_sub.t`.
-- [ ] **Debug Info Context:** Track source line/col through to compilation diagnostics and runtime error messages.
-- [x] **Half-Finished Feature Documentation Pass:** `docs/spec.md` §1 now carries a **1.3 Known Incomplete** subsection naming the headline shipped-versus-planned gaps (cycle collection, Perceus, concurrency/channels, exceptions, the hash table, the unimplemented language surface, and the backend gaps), and the top-of-file Implementation Note already frames the document as the design of record. The stale `*.old` lowerer copies beside the live ones are local backups under the `.gitignore` `*.old` rule, not tracked files, so they are out of scope here.
-- [x] **Test Renumbering:** Tests and their directories now use 5-digit prefixes (the leading digit run right-padded with zeros), e.g. `3000_jenny` -> `30000_jenny` and `3401_fiber_lowering.t` -> `34010_fiber_lowering.t`, so new tests can be inserted without colliding.
-- [x] **Directory-Band Test Renumbering:** Fold tests that overflowed their parent directory's numeric band back into it. `t/30000_jenny/32000_codegen/` owns the 32000-32999 band; ten tests moved from 33000-33099 to 32905-32914: `32905_wasm_integer_minmax.t`, `32906_call_shuffle_rodata.t`, `32907_riscv_mem_source.t`, `32908_arm64_drop_create_thread_thunk.t`, `32909_gate_dispatch_stack_args.t`, `32910_spill_temp_exhaustion.t`, `32911_arm64_call_shuffle_fp_temp.t`, `32912_caller_restore_self_move.t`, `32913_dynamic_array_alloca.t`, `32914_dynamic_alloca_loop.t` (and `33100_arm64_macos_varargs.t` remains in 33100 outside this band). Updated references in `TODO.md`.
+- [x] **Subroutine Return Syntax:** Replaced `-> Type` with `:returns(Type)` across all grammar productions, runtime files, and tests.
+- [x] **Defined-Or & Conditional Assignment:** Implemented `//`, `//=`, and `||=` across variables and class fields.
+- [x] **Package Scoping:** Implemented `package NAME;` and `package NAME { ... }` with version parsing and automatic symbol qualification.
+- [x] **Compile-Time Pseudo-Constants:** Implemented `__PACKAGE__`, `__CLASS__`, `__FILE__`, and `__LINE__`.
+- [x] **Subroutine Forward Prototypes:** Implemented `sub f();` prototype declarations without code bodies.
+- [x] **Postfix Conditionals:** Implemented statement modifiers `stmt if cond;` and `stmt unless cond;`.
+- [x] **Range Induction Loops:** `for my $i (0 .. 1000)` lowers to register induction loops without array allocation.
+- [x] **Compound Assignments:** Implemented `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`, `.=`.
+- [x] **`for` / `foreach` Iteration:** Implemented typed iteration over array elements and flat lists with `my` loop variables.
+- [x] **`want` Intrinsic:** Implemented `want('scalar')`, `want('list')`, `want('void')`, and type queries via hidden `%__want` injection.
+- [x] **Arity Validation (F14):** Enforced compile-time parameter count checks for function and method calls.
+- [x] **Untyped Receiver Method Calls:** Method calls on `Any` boxes unbox the object payload pointer automatically.
+- [x] **Empty Function Bodies (F16):** Subroutines with empty bodies `sub f() {}` emit valid epilogues and default returns.
+- [ ] **Short-Circuiting Logic (`&&`, `||`, `//`):**
+  - [ ] Replace eager SSA evaluation in `lower_binop` with CFG-level branching blocks to short-circuit RHS side effects.
+- [ ] **Single Evaluation in Compound Assignments:**
+  - [ ] Lower compound assignments so complex target indices (e.g. `%map{compute()} += 1`) evaluate keys exactly once.
+- [ ] **Full Postfix Dereferencing (`postderef`):**
+  - [ ] Add lexer and parser support for `->$*`, `->@*`, `->%*`, and array/hash slice syntax `->@[...]`, `->@{...}`.
+- [ ] **Perl Special Variables:**
+  - [ ] Add lexer and parser support for `$_`, `@_`, `@ARGV`, `%ENV`, `$$`, `$!`, `$@`, `$a`, `$b`.
+  - [ ] Implement implicit shifting: `my $x = shift;` operating automatically on `@_`.
+- [ ] **Named Parameters in Subroutines:**
+  - [ ] Support colon-prefixed named parameters in signatures: `sub configure(String $host, :i64 $port = 8080)`.
+  - [ ] Lower call-site fat-comma pairs (`port => 9000`) into matching parameter slots.
+- [ ] **Multi-Value Tuple Returns:**
+  - [ ] Extend `:returns(Type, ...)` to return $> 2$ values by allocating hidden return slots on the caller stack frame.
+- [ ] **Anonymous Subs & Closures:**
+  - [ ] Support anonymous subroutine expressions (`sub (...) { ... }`).
+  - [ ] Emit bare function pointers for non-capturing subs and Immix Environment Records for capturing closures.
+- [ ] **Persistent Lexicals (`state`):**
+  - [ ] Implement `state` variable declarations once writable program-global storage is available.
 
 ---
 
-## 10. Fuzzer Expansion Plan (F0-F9)
+## 5. Built-in Functions & Containers
 
-- [ ] **F0: Types** - Add `bool`, `i8`-`u64`, `i128`, `f64`, `Int` (fat scalars), and `String`.
-- [ ] **F1: Control Flow** - `while` loops, nested `if/else`, chained logic (`&&`/`||`), `break`/`continue`, ternary.
-- [ ] **F2: Functions** - Generate random subroutines, inter-procedural calls, and recursion.
-- [ ] **F3: Memory** - Arrays, structs/classes, GEP lowering, `say`/`print` stdout capture.
-- [ ] **F4/F5: Mutation & Minimization** - Delta-debugging minimizer (`_minimize`) to automatically extract minimal regression tests from a seeded corpus.
-- [ ] **F8: Wasm CI** - Execute `.wasm` output via `wasmtime` or `node`. Treat Wasm traps (e.g., out of bounds) as test failures.
-
----
-
-## 11. Backlog (v0.0.2)
-
-These items are deferred to the subsequent release:
-
-- [ ] **Zero-Cost Exceptions:** DWARF `.eh_frame` bytecode interpreter (written in `core.brocken`), Windows SEH (`.pdata`/`.xdata`), and Wasm `try_table`/`throw`.
-- [ ] **Zero-Copy Channels:** Implement the **Scoped Affine Move Checker** (`move $var`) and the **Global Message Arena** for zero-copy ownership transfer between Isolates.
-- [ ] **Option B Magical String Increment:** Unicode alphabetic block carry-increment (Cyrillic, Greek).
-- [ ] **Float Width Casting:** Implement `fptrunc` and `fpext` to allow mixing `f32` and `f64`.
-- [ ] **Float-to-Int Overflows:** Define overflow and NaN semantics for float-to-int conversions (`fptoui`).
-- [ ] **Perceus RC Elision:** Compile-time optimizations (Borrow Inference, RC Elision, Reuse Analysis).
-- [ ] **Fiber Stack Scanning:** Walk stacks of suspended fibers to find live GC roots for the tracing cycle detector.
-- [ ] **Stack Map Section:** Emit `.brocken_stackmaps` for precise GC root enumeration.
-- [ ] **Big-Endian Targets:** `i128` math has no handling for big-endian byte layouts.
-- [ ] **illumos Isolate Segfaults:** `Platform::Solaris` crashes on isolate tests. Requires an OmniOS VM to debug.
-- [ ] **Apple AAPCS Varargs:** Test and verify the 64-byte vararg register save area on Apple Silicon.
+- [x] **O(1) Open-Addressing Hash Table:** Implemented power-of-two hash tables with linear probing, tombstones, and automatic doubling.
+- [x] **Insertion-Ordered Hash Iteration:** Implemented doubly-linked bucket threading (`prev`/`next` indices) for $O(N)$ insertion-ordered `keys` and `values`.
+- [x] **Hash Builtins:** Implemented `keys %h`, `values %h`, `exists %h{k}`, and `delete %h{k}`.
+- [x] **Array Mutators:** Implemented `push @a, $v`, `pop @a`, `shift @a`, and `unshift @a, $v` for growable Tag 9 arrays.
+- [x] **Auto-Increment & Decrement (`++` / `--`):**
+  - [x] Implemented pre/post increment/decrement for numbers, string pointers, and dynamic `Any` slots.
+  - [x] Implemented Perl ASCII carry rules for strings matching `/^[a-zA-Z]*[0-9]*\z/`.
+- [x] **`undef` and `defined` Semantics:**
+  - [x] `undef` literal lowers to null box (Tag 0, Payload 0).
+  - [x] Mutator `undef($var)`, `undef(@arr)`, and `undef(%hash)` empties containers in place.
+  - [x] `defined $var` tests for non-null tags on managed types and folds to true for native types.
+- [x] **Process & Diagnostic Builtins:**
+  - [x] Implemented `exit($code)` calling libc exit to flush stdio.
+  - [x] Implemented `warn(@msgs)` formatting messages to `stderr`.
+  - [x] Implemented `die(@msgs)` raising SJLJ exceptions or terminating process with status 255.
+- [x] **Core Utility Builtins (`builtin::`):**
+  - [x] Implemented `true`, `false`, `is_tainted`, `is_bool`, `created_as_string`, `created_as_number`, `stringify`, `numify`, `refaddr`, `reftype`, `blessed`.
+  - [x] Implemented `ceil`, `floor`, `inf`, `nan`, `trim`, `indexed`.
+- [ ] **Variadic Float Formatting:**
+  - [ ] Lower `sprintf("%f")` float stringification according to architecture variadic ABIs (setting `%al` on x86_64, integer register duplication on RISC-V).
 
 ---
 
-## 12. Class System
+## 6. Object-Oriented Features (`perlclass`)
 
-v0.0.1 brings classes to `perlclass` (`use feature 'class'`) parity; v0.0.2 adds selected `Object::Pad`
-features. The feature-by-feature plan, decisions, and open questions live in
-[`docs/class_roadmap.md`](docs/class_roadmap.md). Summary of the work:
-
-- [ ] **v0.0.1 — syntax sugar:** `:returns(Type)` (replacing `-> RET`) [done], parameter defaults [done], `||=`
-  defaults [done], `:param(NAME)`/`:reader(NAME)`/`:writer(NAME)` with `_`-stripping [done], `:writer` returns
-  `$self` for chaining [done], multiple `ADJUST` blocks [done], earlier-field visibility in field
-  initializers [done], `:accessor` [done], array/hash fields, and `:weak` [done].
-- [ ] **v0.0.1 — object model:** class versions and attributes [done], `class NAME;` statement form [done],
-  field alignment/padding [done], `:isa` single inheritance [done], static ancestor resolution and `SUPER::`
-  [done], constructor chaining over a copied `:param` name map [done], and `DESTROY` chaining derived→root
-  [done, callable as a method]. The instance-ownership contract now reclaims a non-escaping `Class->new` local at
-  scope exit and runs `DESTROY` exactly once through the generated `Class::__destroy` thunk (chained DESTROY +
-  dynamic-field teardown + `free_obj`), with the runtime decrement split (`decref_obj`/`free_obj`) so the release
-  site selects the destructor statically [done]. Cycle scanning of class instances is in too: each class gets
-  `__scan`/`__restore`, selected by the class id in the header. `:weak` stores a dynamic field without taking a
-  reference and is skipped by the destructor and the scan hooks [done]. Class-typed fields shipped: the field holds a direct instance pointer, so the collector walks it and cycles reclaim.
-- [x] **Untyped Receiver Method Call (pre-existing):** A method call on an `Any`-typed receiver (the spelling
-  `my $p = P->new(); $p->m();`) read the field area at the wrong offsets and returned garbage; it worked only when
-  the receiver carried a pointer-shaped static type (`my ptr $p`, `my P $p`). The call did not unbox the receiver's
-  box pointer to the object address before the callee dereferenced it. `_lower_object_ptr` now unboxes a `dynamic`
-  receiver (reading the payload at offset 8) and both `lower_method_call` and `lower_field_addr` go through it, so a
-  bare field access (`$p->x`) on an `Any` receiver is fixed too; a pointer-shaped receiver is passed as it stands.
-  Covered by `t/10000_katsuro/10991_untyped_receiver.t` (host, aarch64, riscv64).
-- [ ] **v0.0.2:** `role`/`apply`/`:does`/`requires` compile-time flattening, `:abstract`, ADJUST
-  `:params`, `:strict(params)`, `:lexical_new`, `my class`, `inherit`, `:override`/`:common`, and
-  lexical/anonymous methods.
-- [ ] **Deferred:** `BUILD`/`BUILDARGS`, the metaprogramming API, extension attributes,
-  `:inheritable` field inheritance, `:lvalue` methods, and `:repr(...)`.
+- [x] **Encapsulated Class Declarations:** Block form `class Name { ... }` and statement form `class Name;`.
+- [x] **Field Declarations & Attributes:** Implemented `field` with `:param`, `:reader`, `:writer`, `:accessor`, and `:weak`.
+- [x] **Automated Accessor Synthesis:** Strips exactly one leading underscore for accessors (`$_x` $\to$ `x()`, `set_x()`).
+- [x] **Chained Mutators:** Synthesized `:writer` accessors return `$self`.
+- [x] **Initializers & `ADJUST`:** Field defaults (`=`, `//=`, `||=`) and multiple `ADJUST` blocks execute in declaration order.
+- [x] **Single Inheritance (`:isa`):** Static ancestor resolution and field layout extension.
+- [x] **`SUPER::` Dispatch:** Method calls using `SUPER::method(...)` resolve to ancestor implementations.
+- [x] **Destructor Chaining (`DESTROY`):** Executes derived-to-root upon refcount zero.
+- [ ] **Component Pascal Role Flattening:**
+  - [ ] Parse `role Name { ... }` with method requirements (`requires`).
+  - [ ] Implement `adjoin RoleName;` to inline role fields and methods at compile time with zero vtable overhead.
 
 ---
 
-## 13. Codegen Performance & Code Size
+## 7. Exception Handling & SJLJ
 
-- [ ] **RISC-V i128 Divide Unroll Replacement:** RISC-V 128-bit `div`/`rem` lower to a fully unrolled
-  128-iteration shift/subtract sequence (`reverse 0..127` in `lib/Brocken/Jenny/Lowerer/RISCV64.pm`),
-  about 5191 instructions and 23 KiB of code for a single operator -- an order of magnitude more than
-  the rest of the function and enough register pressure to have masked the allocator defects in §1.
-  Replace the unrolled expansion with a runtime loop (the step sequence emitted once and iterated), or
-  a hardware-assisted fast path analogous to x86's `div128_64` and the ARM64 partial fast path, so
-  both the code size and the allocator pressure drop. The result must stay bit-identical to today's
-  sequence; `t/30000_jenny/32000_codegen/32650_i128_arithmetic_native.t` is the regression guard.
-
----
-
-## 14. Long-Distance Milestone: Freestanding (No-libc) Builds
-
-**Status: not started, deliberately deferred.** `docs/spec.md` §1.1 already claims Brocken "relies on no external C
-runtime (libc)". That is aspirational, not true today: every native binary is a *dynamic* ELF (`DT_NEEDED libc.so.6`
-and `libpthread.so.0`, `PT_INTERP` = `ld-linux-*.so`), and generated code calls libc for I/O, formatting, string
-comparison, exceptions, and process exit. Until this milestone lands, the spec claim should be read as a goal (or
-softened), not a description of the shipped compiler.
-
-### Goal
-
-Support **both** build modes, selected per `Brocken` instance by a flag, exactly like `platform`:
-
-```perl
-Brocken->new( platform => ..., libc => 1 );   # default: linker-resolved libc imports (shipped)
-Brocken->new( platform => ..., libc => 0 );   # freestanding: raw syscalls, static image (planned)
-```
-
-The flag must be threaded to **both** the lowerer (chooses libc calls vs. inline/syscall code) and the linker
-(emits a dynamic vs. a static image), the same way `platform` is.
-
-### Why `exit` is a libc call today (and why a bare syscall is not a one-line swap)
-
-The entry stub ends by calling libc `exit` through the GOT. A raw `exit` *syscall* needs the target's syscall
-number at lowering time, but symbol resolution (`exit`, `puts`, ...) is deferred to the linker and so is
-target-agnostic. Concretely: `Brocken::compile($src)` deliberately does **not** default the lowerer's `platform`
-from `$self->platform` (it keeps portable C symbol spellings), so a raw-syscall `exit` silently used x86_64's
-number 60 on every target and returned instead of exiting on aarch64/riscv64. A freestanding build must therefore
-thread the target platform into lowering (or resolve numbers some other way) before it can emit syscalls.
-
-### Inventory of libc touchpoints (native codegen)
-
-| Layer | libc use | Freestanding replacement |
-| --- | --- | --- |
-| Linker entry stub | `exit` via GOT (ELF64 `_build_entry_stub`) | raw `exit` syscall (linker already computes `$platform->syscall('exit')`) |
-| Linker image | `.interp`, `.dynamic`, `.rela.dyn`, `.dynsym`/`.dynstr`, `.gnu.hash`, GOT, `DT_NEEDED` | static `ET_EXEC`: skip all dynamic sections, no `PT_INTERP`/`PT_DYNAMIC`, no imports |
-| `say`/`print` | `puts`/`_puts` | raw `write(2)` to fd 1 |
-| number -> string, interpolation | `sprintf` (`_stringify`) | inline itoa/ftoa |
-| string -> float | `strtod` | inline parser |
-| string compare | `strcmp` (`_lower_strcmp`) | inline byte loop |
-| string length | `strlen` | inline loop / length field |
-| exceptions | `setjmp`/`longjmp` | custom landing unwinder (hardest) |
-| isolates | `pthread_create`/`pthread_join` | raw `clone` (Linux/BSD only) |
-| FFI | `dlopen`/`dlsym` | none, or a hand-rolled ELF loader |
-| csprng seeds | `getrandom`/`BCryptGenRandom`/`getentropy` | raw `getrandom(2)` |
-
-`src/runtime/core.brocken` (allocator, GC, fibers) is already pure Brocken and needs nothing -- **fibers are
-libc-free by construction**: `ctx_swap` is a userspace register/SP save-restore emitted as machine code, so it
-needs neither libc nor an OS thread.
-
-### Platform constraints
-
-- **Linux / BSD:** a fully static, libc-free image is realistic; `clone`/`rfork` give threads without libc.
-- **macOS:** a *truly* libc-free process is not attainable. There is no BSD syscall for thread creation --
-  threads come from Mach traps (`thread_create`/`thread_set_state`/`thread_resume`) and entail reimplementing
-  per-thread TLS/TSD and much of libpthread, all inside **libSystem**, which macOS does not support statically
-  linking. So on macOS a freestanding build is realistically **single-threaded** (fibers fine, `Isolate` not),
-  and freestanding mode should *gate `Isolate` at compile time per platform* rather than fail at link.
-- **Windows:** threads via `CreateThread` (kernel32), not libc, but still a system DLL.
-
-### Suggested phasing (when picked up)
-
-1. **Plumbing:** `libc => 1|0` on `Brocken`, threaded to lowerer + linker; thread the target platform into the
-   lowerer when `libc => 0`.
-2. **Core static link (Linux/ELF64):** static `ET_EXEC` (no interp/dynamic/imports) + raw-`exit` entry stub.
-3. **Core freestanding I/O:** `exit` syscall, `write` for `say`/`print`, inline `strcmp`/`strlen`, inline
-   itoa/ftoa, inline `strtod`.
-4. **Exceptions without libc:** replace `setjmp`/`longjmp` with a custom unwinder.
-5. **Threads / FFI:** `clone`-based isolates (Linux/BSD); FFI stays libc/dyld-only, so freestanding + FFI is a
-   compile-time conflict.
-6. **Spec:** once modes coexist, state both (default libc, opt-in freestanding) instead of the blanket claim.
+- [x] **SJLJ Landing Dispatcher:** `try/catch/finally` lowers to `setjmp`/`longjmp` state machines on `ICB::EXCEPTION_HANDLER_STACK`.
+- [x] **F4 - Handler Stack Cleanup:** `return`, `last`, and `next` pop active exception handlers before jumping.
+- [x] **F18 - Catch-Variable Scope Safety:** Catch variables are bound by bare name with unique allocas, preventing nested catch clobbering.
+- [ ] **String Exception Payloads in `catch`:**
+  - [ ] Widen `ICB::THROWN_VALUE` handling so `catch ($err)` binds managed string objects from `die`.
+- [ ] **Zero-Cost DWARF Unwinding (v0.0.2):**
+  - [ ] Transition from `setjmp`/`longjmp` to table-driven DWARF `.eh_frame` unwinding.
+  - [ ] Generate Windows SEH `.pdata`/`.xdata` tables on PE32+ targets.
 
 ---
 
-## 15. Compilation Performance, Memory & Incremental Compilation
+## 8. Concurrency, Isolates & Channels
 
-`Brocken::compile` rebuilds and re-lowers the **entire** runtime on every call, and the resulting cyclic IR graph
-was only reclaimed by an explicit `release`. Commit `b5f81f1` stopped the per-compile leak (peak RSS on
-`t/10000_katsuro/10870_float_integer_only_ops.t` fell 243 MB -> 89 MB), but the design is unchanged: parse the core
-runtime, lower core + user together, collect, then codegen every core function. Across the thousands of compiles a
-suite like `answers` performs that costs both memory and time. The work below turns it into "compile the runtime
-once, reuse", and makes the release automatic rather than a caller responsibility.
+- [x] **Share-Nothing Isolates:** Independent Immix heaps with ICB pinned to hardware registers (`r14`, `x28`, `s11`).
+- [x] **Cooperative Fibers:** M:N coroutines with 64 KiB stacks switched via assembly `ctx_swap` using derived FCB layouts.
+- [ ] **Bounded CSP Channel Implementation:**
+  - [ ] Implement Channel Control Block (CCB) ring buffer in shared `.data` protected by inlined mutex and condition variable sequences.
+  - [ ] Implement channel intrinsics: `chan_create($cap)`, `chan_send($c, $v)`, `chan_recv($c)`, `chan_close($c)`.
+  - [ ] Implement deep-copy serialization for aggregates sent across channels with cycle-detection traversal.
+- [ ] **Isolate Heap Reclamation:**
+  - [ ] Ensure `isolate_join($iso)` unmaps and reclaims the terminating Isolate's entire Immix arena and ICB memory.
 
-### 15.1 Make the IR graph acyclic by construction
+---
 
-Today every repeated-compile caller must remember `$module->release`; only `answers`, `validates`, and `Fuzz` do, so
-a direct `compile` in a loop still leaks. Ownership in the IR is one-way -- the module owns functions, a function
-owns its blocks -- so the forward *referenced-object* edges can be weakened and the graph becomes collectable with
-no explicit release, leaving the referenced objects alive for codegen because the owner still holds them.
+## 9. Compilation Pipeline, Memory & Freestanding Support
 
-- [ ] **Weaken the container -> container edges.** `Call`/`IsolateCreate`/`IsolateJoin` `callee`, the `Br`/`CondBr`
-  branch targets, and the `Phi` incoming-block edges. `lib/Brocken/Lindsay/IR.pm`. Verify construction order (a
-  target/callee must be owned before or while it is referenced) before flipping the last one.
-- [ ] **Regression test.** Build a module, `release` it, `weaken` it, drop the last strong reference, and assert it
-  is freed. Deterministic and cross-platform.
+- [x] **Parser AST Caching:** Cached parsed `core.brocken` AST structure via `state %core_ast_cache`.
+- [x] **Path Lookup Caching:** Cached `DEFAULT_RUNTIME` resolution across compiler instances.
+- [ ] **Acyclic IR by Construction:**
+  - [ ] Weaken container back-references (`Function` $\to$ `Block`, `Block` $\to$ `Instruction`, `Phi` incoming blocks) to allow automatic Perl garbage collection without manual `$module->release()`.
+- [ ] **Lowered Core Module Snapshotting:**
+  - [ ] Snapshot lowerer symbol and class state after compiling `core.brocken` to avoid re-lowering runtime IR on every user compile.
+- [ ] **Staged Freestanding (No-libc) Builds:**
+  - [ ] Add `libc => 0|1` configuration flag to `Brocken->new()`.
+  - [ ] Implement freestanding I/O: raw `write(2)` syscall for `say`/`print`, inline string comparison, and inline `itoa`/`ftoa`.
+  - [ ] Lower `exit` to raw platform syscall instead of libc dynamic import.
+  - [ ] Implement Linux/BSD `clone`-based isolates without `libpthread`.
 
-### 15.2 Cache the runtime (the big win)
+---
 
-Keyed on `($runtime, platform, policy)`.
+## 10. Tooling & Test Infrastructure
 
-- [x] **Parsed core AST.** Stop re-reading and re-lexing `src/runtime/core.brocken` per compile. Confirm lowering
-  does not mutate AST nodes. Saves ~0.1 s/call plus transient token/AST memory. `lib/Brocken.pm`
-  `parse`/`_read_core_brocken`.
-- [ ] **Lowered core module.** Snapshot the lowerer's cross-function state after lowering the core -- `$functions`,
-  `$classes`, `$known_class_names`, `$function_return_class`, `$returns_owned`, `$class_returns_owned`,
-  `$package_versions`, and rodata -- seed a fresh lowerer with it, then lower only the user decls. This shares the
-  ~3.4 MB of core IR across compiles instead of rebuilding it, and is the prerequisite for real incrementality.
-  `lib/Brocken/Katsuro/Lowerer.pm` (`lower_program`, 712-827). *Risk:* class ids are assigned by sorted name over
-  **all** classes (760-765), so adding a user class shifts the core ids -- reserve core ids (fixed) and assign user
-  ids from `max+1`, or recompute over the union. The cross-boundary ownership classification (user calls core, core
-  never calls user) must stay sound.
-- [ ] **Codegen blobs for the runtime.** `emit_functions` lowers, register-allocates, and encodes every core
-  function on every compile, but the output is plain data with name-based fixups the linkers already resolve. Cache
-  the core `$funcs` and codegen only the user delta. `lib/Brocken/Jenny/Codegen/X86_64.pm` and the other backends.
-  *Risk:* the fiber/isolate/init-wrapper detection spans core + user and `_BROCKEN_ENTRY` is user-side, so the
-  wrapper decision must be made after merging.
-
-### 15.3 Allocation and lookup micro-wins
-
-- [ ] **Cache `Brocken` instances per `(platform, policy)`** instead of building one (plus a `File::Temp` dir, a
-  codegen, and a linker) per target per `answers` call. `lib/Test2/Tools/Brocken.pm`.
-- [ ] **`state`-cache `executable_targets()`.** It re-parses the cross triples and re-runs `cross_available` (PATH
-  scans) on every call. `lib/Test2/Tools/Brocken.pm:132-139`.
-- [x] **`state`-cache `DEFAULT_RUNTIME`.** It walks the filesystem per instance. `lib/Brocken.pm:41-51`.
-- [ ] **Gate the debug-info maps.** `emit_functions` always builds `alloca_map`/`source_map` per function though
-  they are only consumed by `build_debug_data`; build them only when debug info is requested.
-  `lib/Brocken/Jenny/Codegen/X86_64.pm:149-153`.
-
-### 15.4 Guardrail
-
-- [ ] **A bounded-growth / liveness test.** The weaken-after-release check of 15.1 is deterministic; add a
-  `Test::LeakTrace`-based sweep over the lowering path so a regression like the one `b5f81f1` fixed fails CI
-  instead of surfacing only as RSS growth.
-
-### Suggested order
-
-1. 15.1 acyclic IR + regression test
-2. 15.2 parsed-core cache
-3. 15.3 harness caching
-4. 15.2 lowered-core cache
-5. 15.2 codegen cache
+- [x] **5-Digit Test Band Renumbering:** Standardized test directory bands (`00000_basic`, `10000_katsuro`, `20000_lindsay`, `30000_jenny`, `40000_runtime`, `50000_fuzz`).
+- [x] **Fuzz Replay Mechanism:** Reversible compact hex `case_id` encoding implemented in `Brocken::Fuzz`.
+- [ ] **Fuzzer Corpus Expansion (F0–F9):**
+  - [ ] F0: Add `bool`, `i128`, `f64`, boxed `Int`, and `String` generators.
+  - [ ] F3: Add array and class property mutation fuzzing.
+  - [ ] F4/F5: Implement automated delta-debugging test case minimizer (`_minimize`).
+- [ ] **Unified `bkn` CLI Tool:**
+  - [ ] Build standalone `bkn` driver binary supporting `build`, `run`, `test`, `clean`, and `new`.
+- [ ] **AST-Based Formatter (`bkn fmt`):**
+  - [ ] Implement canonical AST pretty-printer (4-space indent, K&R braces, normalized spacing).
+- [ ] **Language Server Protocol (`bkn lsp`):**
+  - [ ] Implement stdio JSON-RPC daemon providing hover information, completions, and compiler diagnostics.
