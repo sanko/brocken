@@ -330,7 +330,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             name      => $name,
             elem_type => $elem_type,
             size_expr => $size_expr,
-            init      => $init,
+            init      => $init
         );
     }
 
@@ -424,7 +424,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $expr = Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($for_token), elements => \@elements );
         }
         my $body = $self->parse_block();
-        return Brocken::Katsuro::AST::Stmt::For->new( $self->_pos_token($for_token), targets => \@targets, expr => $expr, body => $body, );
+        return Brocken::Katsuro::AST::Stmt::For->new( $self->_pos_token($for_token), targets => \@targets, expr => $expr, body => $body );
     }
 
     # One `for`/`foreach` loop variable: an optional type then a variable. Shares the target shape `parse_list_var_decl`
@@ -435,7 +435,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $type = $self->advance()->{value};
         }
         my $var_token = $self->consume( 'VAR', undef, 'Expected a loop variable' );
-        return { sigil => substr( $var_token->{value}, 0, 1 ), name => substr( $var_token->{value}, 1 ), type => $type, };
+        return { sigil => substr( $var_token->{value}, 0, 1 ), name => substr( $var_token->{value}, 1 ), type => $type };
     }
 
     method parse_return() {
@@ -538,7 +538,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             try_body     => $try_body,
             catch_var    => $catch_var,
             catch_body   => $catch_body,
-            finally_body => $finally_body,
+            finally_body => $finally_body
         );
     }
 
@@ -657,7 +657,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 return_type => $return_type,
                 body        => Brocken::Katsuro::AST::Stmt::Block->new( statements => [] ),
                 package     => $current_package,
-                prototype   => 1,
+                prototype   => 1
             );
         }
         my $body = $self->parse_block();
@@ -667,7 +667,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             params      => \@params,
             return_type => $return_type,
             body        => $body,
-            package     => $current_package,
+            package     => $current_package
         );
     }
 
@@ -711,7 +711,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 name    => $name_token->{value},
                 version => $version,
                 attrs   => $attrs,
-                package => $current_package,
+                package => $current_package
             );
         }
         $self->consume('{');
@@ -751,7 +751,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             methods  => \@methods,
             adjusts  => \@adjusts,
             destroys => \@destroys,
-            package  => $current_package,
+            package  => $current_package
         );
     }
 
@@ -782,7 +782,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 kind      => 'array',
                 elem_type => $elem,
                 size_expr => $size,
-                inline    => 1,
+                inline    => 1
             );
         }
         my $ft = $self->peek();
@@ -799,7 +799,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             sigil     => $sigil,
             kind      => $kind,
             elem_type => $kind eq 'array' ? $ftype : undef,
-            inline    => 0,
+            inline    => 0
         );
     }
 
@@ -823,7 +823,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             inline     => $args{inline},
             attrs      => $attrs,
             default    => $default,
-            default_op => $default_op,
+            default_op => $default_op
         );
     }
 
@@ -859,7 +859,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             name        => $name_token->{value},
             params      => \@params,
             return_type => $return_type,
-            body        => $body,
+            body        => $body
         );
     }
 
@@ -1077,7 +1077,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                         $self->_pos_token($token),
                         obj    => $left,
                         method => $ident->{value},
-                        args   => $args,
+                        args   => $args
                     );
                 }
                 else {
@@ -1160,7 +1160,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 my $then = $self->parse_expression(0);
                 $self->consume( 'OP', ':', "Expected ':' after ternary then-expression" );
                 my $else = $self->parse_expression(PREC_TERNARY);
-                return Brocken::Katsuro::AST::Expr::Ternary->new( $self->_pos_token($token), cond => $left, then => $then, else => $else, );
+                return Brocken::Katsuro::AST::Expr::Ternary->new( $self->_pos_token($token), cond => $left, then => $then, else => $else );
             }
             Carp::croak( "Unknown operator '$op' at " . $self->_loc($token) );
         }

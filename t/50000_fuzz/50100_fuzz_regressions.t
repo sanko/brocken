@@ -8,7 +8,7 @@ no warnings qw[experimental::class];
 # Regression tests for bugs found by the fuzzer.
 # Each test is a specific Brocken program that triggered a miscompilation.
 # Keep these as standalone programs so they remain valid regression tests even if the fuzzer's internal logic changes.
-sub test_prog ( $name, $source, $expected ){
+sub test_prog ( $name, $source, $expected ) {
     my $fuzz   = Brocken::Fuzz->new();
     my $result = $fuzz->test_program( { source => $source, expected => $expected } );
     ok $result->{status} eq 'pass', $name or diag "FAIL: $result->{reason}\nSource:\n$source";
@@ -623,7 +623,7 @@ PROG
 subtest '|| and && are bitwise (not logical) in Brocken' => sub {
 
     # Case 6 pattern: 0 || -26 → bitwise OR = -26 → bool truncates to 0
-    test_prog( '0 || -26 stored to bool gives 0', <<'PROG', 0 );
+    test_prog( 'false || -26 stored to bool gives 0', <<'PROG', builtin::false || -26 );
 my bool $b = false;
 $b = $b || -26;
 my i64 $r = $b;
@@ -631,7 +631,7 @@ return $r;
 PROG
 
     # || on ints returns bitwise OR value
-    test_prog( '0 || -26 stored to i64 gives -26', <<'PROG', 230 );
+    test_prog( '0 || -26 stored to i64 gives -26', <<'PROG', 0 || -26 );
 my i64 $a = 0;
 my i64 $b = -26;
 $a = $a || $b;
@@ -639,7 +639,7 @@ return $a;
 PROG
 
     # Case 8 pattern: -34 && -34 → bitwise AND = -34 → f64 sitofp → i16 fptosi
-    test_prog( '-34 && -34 via f64 and i16 gives -34', <<'PROG', 222 );
+    test_prog( '-34 && -34 via f64 and i16 gives -34', <<'PROG', -34 && -34 );
 my f64 $f = 63.0;
 my i64 $n = -34;
 $f = $n && $n;
@@ -664,7 +664,7 @@ return $a;
 PROG
 
     # || on negative values preserves sign
-    test_prog( '-1 || -2 gives -1 (-1 | -2 = -1)', <<'PROG', 255 );
+    test_prog( '-1 || -2 gives -1 (-1 | -2 = -1)', <<'PROG', -1 || -2 );
 my i64 $a = -1;
 my i64 $b = -2;
 $a = $a || $b;

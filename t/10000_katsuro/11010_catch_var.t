@@ -3,15 +3,14 @@ use Test2::V0 '!subtest';
 use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as => 'subtest' } );
 use blib;
 use Brocken;
-use Test2::Tools::Brocken qw[answers executable_targets];
+use Test2::Tools::Brocken qw[executable_targets];
 
-# try/catch lowers to setjmp/longjmp, which the Wasm backend does not implement, so the runtime checks run on every
+# try/catch lowers to setjmp/longjmp, which the Wasm backend does not implement, so the runtime answerss run on every
 # executable target except Wasm.
 my @targets = grep { $_->[0] !~ /wasm/ } executable_targets();
 
-sub check {
-    my ( $source, $want, $label ) = @_;
-    answers( $source, $want, $label, targets => [@targets] );
+sub answers( $source, $want, $label ) {
+    Test2::Tools::Brocken::answers( $source, $want, $label, targets => [@targets] );
 }
 
 # The parser records `catch ($e)` with its sigil, but the lowerer's symbol table is keyed by the bare name; the catch
@@ -20,19 +19,19 @@ sub check {
 # saved and restored rather than deleted, so a nested try/catch that reuses the name neither aliases the outer slot nor
 # leaves the outer name unbound.
 subtest 'the catch variable carries the thrown value' => sub {
-    check( <<'BROCKEN', 5, 'a handler that reads the value' );
+    answers( <<'BROCKEN', 5, 'a handler that reads the value' );
 my i64 $r = 0;
 try { throw 5; } catch ($e) { $r = $e; }
 return $r;
 BROCKEN
-    check( <<'BROCKEN', 42, 'a handler that computes with the value' );
+    answers( <<'BROCKEN', 42, 'a handler that computes with the value' );
 my i64 $r = 0;
 try { throw 40; } catch ($e) { $r = $e + 2; }
 return $r;
 BROCKEN
 };
 subtest 'a nested catch reusing the name does not clobber the outer binding' => sub {
-    check( <<'BROCKEN', 51, 'the outer catch variable survives the inner block' );
+    answers( <<'BROCKEN', 51, 'the outer catch variable survives the inner block' );
 my i64 $r = 0;
 try {
     throw 5;
@@ -48,7 +47,7 @@ return $r;
 BROCKEN
 };
 subtest 'distinct catch variables are independent' => sub {
-    check( <<'BROCKEN', 51, 'inner and outer names differ' );
+    answers( <<'BROCKEN', 51, 'inner and outer names differ' );
 my i64 $r = 0;
 try {
     throw 5;

@@ -544,7 +544,7 @@ class Brocken::Fuzz v0.0.1 {
         my $cond = $self->_eval_cmp_typed( $cmp, $lv, $rv, $var_types->{$lhs}, $var_types->{$rhs} );
         my $t    = $var_types->{$dst};
         $vars->{$dst} = $self->_clamp_to_type( $cond ? 1 : 0, $t->{bits}, $t->{signed} );
-        return { code => join( "\n", "if (\$$lhs $cmp \$$rhs) {", "    \$$dst = 1;", "} else {", "    \$$dst = 0;", "}" ), };
+        return { code => join( "\n", "if (\$$lhs $cmp \$$rhs) {", "    \$$dst = 1;", "} else {", "    \$$dst = 0;", "}" ) };
     }
 
     # Generate a boolean binary operation (and/or/xor) on i1-typed variables.
@@ -582,7 +582,7 @@ class Brocken::Fuzz v0.0.1 {
         my $src     = $i1_vars[ $self->_rand_int($#i1_vars) ];
         my $sv      = $vars->{$src} ? 1 : 0;
         $vars->{$dst} = $self->_clamp_to_type( $sv ? 0 : 1, 1, 1 );
-        return { code => join( "\n", "if (\$$src) {", "    \$$dst = 0;", "} else {", "    \$$dst = 1;", "}" ), };
+        return { code => join( "\n", "if (\$$src) {", "    \$$dst = 0;", "} else {", "    \$$dst = 1;", "}" ) };
     }
 
     # Generate a while loop with tracked expected values.
@@ -812,7 +812,7 @@ class Brocken::Fuzz v0.0.1 {
         my $t     = $var_types->{$dst};
         $vars->{$dst} = $self->_clamp_to_type( $cond ? 1 : 0, $t->{bits}, $t->{signed} );
         return {
-            code => join( "\n", "if (\$$lhs1 $cmp1 \$$rhs1 $logic \$$lhs2 $cmp2 \$$rhs2) {", "    \$$dst = 1;", "} else {", "    \$$dst = 0;", "}" ),
+            code => join( "\n", "if (\$$lhs1 $cmp1 \$$rhs1 $logic \$$lhs2 $cmp2 \$$rhs2) {", "    \$$dst = 1;", "} else {", "    \$$dst = 0;", "}" )
         };
     }
 
@@ -836,8 +836,8 @@ class Brocken::Fuzz v0.0.1 {
         return { code => "\$$dst = \$$lhs $cmp \$$rhs ? \$$t_val : \$$f_val;" };
     }
 
-    # Generate a logical expression: $dst = $lhs && $rhs or $dst = $lhs || $rhs Uses the &&/|| operators which lower to
-    # bitwise and/or on i1-equivalent values.
+    # Generate a logical expression: $dst = $lhs && $rhs or $dst = $lhs || $rhs
+    # In brocken, && and || are true boolean short-circuit logic operators evaluating to 0 or 1.
     method _gen_logic_assign( $vars, $var_types, $var_names ) {
         my @int_names = grep { $var_types->{$_}{signed} ne 'f' } $var_names->@*;
         return { code => undef } if @int_names < 2;
@@ -848,9 +848,14 @@ class Brocken::Fuzz v0.0.1 {
         my $lv    = $vars->{$lhs} // 0;
         my $rv    = $vars->{$rhs} // 0;
         my $result;
-        use integer;
-        if   ( $logic eq '&&' ) { $result = $lv & $rv }
-        else                    { $result = $lv | $rv }
+        my $c1 = $lv ? 1 : 0;
+        my $c2 = $rv ? 1 : 0;
+
+        # Perl semantics:
+        # A || B -> if A is true, A. Else B.
+        # A && B -> if A is false, A. Else B.
+        if   ( $logic eq '&&' ) { $result = $c1 ? $rv : $lv; }
+        else                    { $result = $c1 ? $lv : $rv; }
         my $t = $var_types->{$dst};
         $vars->{$dst} = $self->_clamp_to_type( $result, $t->{bits}, $t->{signed} );
         return { code => "\$$dst = \$$lhs $logic \$$rhs;" };
@@ -1555,7 +1560,7 @@ class Brocken::Fuzz v0.0.1 {
             args           => $program->{args} // [],
             capture_stdout => ( $program->{capture_stdout} // 0 ) || $want_stdout,
             capture_stderr => $program->{capture_stderr} // 0,
-            timeout        => 10,
+            timeout        => 10
         );
         if ( $exec_result->{error} ) {
             if ( $exec_result->{error} =~ /Inappropriate/ && $file && -e $file ) {
@@ -1585,7 +1590,7 @@ class Brocken::Fuzz v0.0.1 {
                 %$result,
                 status => 'fail',
                 reason => "Expected " . $program->{expected} . " (masked $masked_expected), got $exit_code",
-                got    => $exit_code,
+                got    => $exit_code
             };
         }
         if ($want_stdout) {
@@ -1597,7 +1602,7 @@ class Brocken::Fuzz v0.0.1 {
                     status     => 'fail',
                     reason     => "Stdout mismatch: expected " . _dquot($exp) . ", got " . _dquot($got),
                     got_stdout => $got,
-                    exp_stdout => $exp,
+                    exp_stdout => $exp
                 };
             }
         }
@@ -1672,7 +1677,7 @@ class Brocken::Fuzz v0.0.1 {
             body_items     => \@body_items,
             body_vars      => $body_vars,
             body_var_types => $body_var_types,
-            code           => $code,
+            code           => $code
         };
     }
 
@@ -1710,7 +1715,7 @@ class Brocken::Fuzz v0.0.1 {
             body_vars      => {},
             body_var_types => {},
             code           => $code,
-            recursive_sim  => $sim,
+            recursive_sim  => $sim
         };
     }
 
@@ -1778,7 +1783,7 @@ class Brocken::Fuzz v0.0.1 {
     # Return a random integer type (no float) suitable for sub body variables.
     # This keeps sub body operations simple (int-only binop/unop from _gen_body_assign).
     method _gen_sub_body_type() {
-        my @types   = ( [ 1, 1 ], [ 8, 1 ], [ 8, 0 ], [ 16, 1 ], [ 16, 0 ], [ 32, 1 ], [ 32, 0 ], [ 64, 1 ], [ 64, 0 ], [ 128, 1 ], );
+        my @types   = ( [ 1, 1 ], [ 8, 1 ], [ 8, 0 ], [ 16, 1 ], [ 16, 0 ], [ 32, 1 ], [ 32, 0 ], [ 64, 1 ], [ 64, 0 ], [ 128, 1 ] );
         my @weights = ( 1, 2, 1, 2, 1, 3, 2, 4, 2, 1 );
         my $total   = 0;
         $total += $_ for @weights;

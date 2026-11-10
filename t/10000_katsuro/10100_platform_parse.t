@@ -40,7 +40,7 @@ subtest 'parse triples' => sub {
         [ 'x86_64-unknown-freebsd13.4',  'x86_64',  'unknown', 'freebsd',      'unknown' ],
         [ 'i86pc-unknown-solaris',       'x86_64',  'unknown', 'solaris',      'unknown' ],
         [ 'riscv64gc-unknown-linux-gnu', 'riscv64', 'unknown', 'linux',        'gnu' ],
-        [ 'arm64_32-apple-watchos',      'aarch64', 'apple',   'watchos',      'unknown' ],
+        [ 'arm64_32-apple-watchos',      'aarch64', 'apple',   'watchos',      'unknown' ]
     );
     for my $t (@tests) {
         my ( $raw, $arch, $vendor, $os, $env ) = $t->@*;
@@ -101,7 +101,7 @@ subtest 'back end selection' => sub {
         'aarch64-apple-darwin'      => [ 'Brocken::Jenny::Codegen::ARM64',   'Brocken::Jenny::Linker::MachO', '' ],
         'x86_64-apple-darwin'       => [ 'Brocken::Jenny::Codegen::X86_64',  'Brocken::Jenny::Linker::MachO', '' ],
         'x86_64-unknown-freebsd'    => [ 'Brocken::Jenny::Codegen::X86_64',  'Brocken::Jenny::Linker::ELF64', '' ],
-        'wasm32-unknown-wasi'       => [ 'Brocken::Jenny::Codegen::Wasm',    'Brocken::Jenny::Linker::Wasm',  '.wasm' ],
+        'wasm32-unknown-wasi'       => [ 'Brocken::Jenny::Codegen::Wasm',    'Brocken::Jenny::Linker::Wasm',  '.wasm' ]
     );
     for my $triple ( sort keys %expect ) {
         my ( $codegen, $linker, $ext ) = @{ $expect{$triple} };

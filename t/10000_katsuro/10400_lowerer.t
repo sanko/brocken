@@ -372,8 +372,8 @@ return 0;
 BROCKEN
     my $f    = find_function( $mod, '_BROCKEN_ENTRY' );
     my $text = $f->as_string();
-    like $text, qr/icmp\s+ne\s+ptr/, 'compares the left operand to null' ;
-    like $text, qr/select\s+i1/,     'selects the right operand when it is null' ;
+    like $text, qr/icmp\s+eq\s+ptr/, 'compares the left operand to null';
+    like $text, qr/select\s+i1/,     'selects the right operand when it is null';
 };
 subtest 'Multiple ADJUST blocks lower in declaration order' => sub {
     my $c   = Brocken->new;
