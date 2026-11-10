@@ -1050,17 +1050,6 @@ class Brocken::Katsuro::Parser v0.0.1 {
             my $op = $token->{value};
             if ( $ASSIGN_OPS{$op} ) {
                 my $right = $self->parse_expression( PREC_ASSIGN - 1 );
-
-                # A compound assignment (`$x += 1`, `%h{k} .= "s"`) is sugar for `$x = $x OP 1`: build the read as a
-                # `BinOp` over a second use of the target node and hand the whole thing to the ordinary `=`
-                # assignment, so it reuses the established lowering and its reference counting. The target
-                # sub-expressions are therefore re-evaluated once (a `%map{key}` key is computed twice), which is the
-                # one place this differs from a dedicated single-evaluation lowering.
-                if ( $COMPOUND_ASSIGN{$op} ) {
-                    my $base = substr( $op, 0, -1 );
-                    my $read = Brocken::Katsuro::AST::Expr::BinOp->new( $self->_pos_token($token), op => $base, lhs => $left, rhs => $right );
-                    return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $read, op => '=' );
-                }
                 return Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($token), target => $left, expr => $right, op => $op );
             }
             if ( $op eq '++' || $op eq '--' ) {
