@@ -2141,13 +2141,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $val      = $self->lower_expression( $ast->expr );
             my $ret_type = $current_func->return_type;
             $val = $self->maybe_convert_type( $val, $ret_type, $line, $col, 1 );
-
-
-             warn
-            sprintf '[%s] $val->type->kind: %s, $ret_type->kind: %s',
-            $current_func->name, $val->type->kind,
-                        $ret_type->kind            ;
-
+            #~ warn sprintf '[%s] $val->type->kind: %s, $ret_type->kind: %s', $current_func->name, $val->type->kind, $ret_type->kind;
             my @rc_names = sort keys %$needs_rc;
 
             # Hand the caller an owned reference for a dynamic return. An owned-returning function (+1) increfs the
@@ -2182,10 +2176,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $self->_emit_handler_pops( $_try_handler_depth, $line, $col );
             if ( $current_func->return_type && $current_func->return_type->kind ne 'void' ) {
                 my $ret_type = $current_func->return_type;
-                my $zero = Brocken::Lindsay::IR::Constant->new(
-                    type  => $ret_type,
-                    value => $ret_type->kind eq 'float' ? 0.0 : 0,
-                );
+                my $zero     = Brocken::Lindsay::IR::Constant->new( type => $ret_type, value => $ret_type->kind eq 'float' ? 0.0 : 0 );
                 $builder->build_ret( $zero, $line, $col );
             }
             else {
@@ -3653,17 +3644,20 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     }
 
     method lower_binop($ast) {
-        my $lhs = $self->lower_expression( $ast->lhs );
-        my $rhs = $self->lower_expression( $ast->rhs );
-        my $op  = $ast->op;
-        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $op = $ast->op;
 
         # `//` (defined-or) is not an integer operator. It is handled before the type unification so that the boxed
         # form can keep its tags (see `lower_defined_or`). Both operands are lowered above so `//` stays parallel with
         # `&&` and `||`, which also evaluate both sides.
-        if ( $op eq '//' ) {
-            return $self->lower_defined_or( $lhs, $rhs, $line, $col );
+        # Intercept short-circuiting operators before evaluating both operands!
+        if ( $op eq '//' || $op eq '||' || $op eq '&&' ) {
+            return $self->lower_short_circuit_binop($ast);
         }
+
+        # Eagerly evaluate other binary ops for arithmetic/camparison...
+        my $lhs = $self->lower_expression( $ast->lhs );
+        my $rhs = $self->lower_expression( $ast->rhs );
+        my ( $line, $col ) = ( $ast->line, $ast->col );
 
         # `.` is not arithmetic either: both operands are stringified, so a dynamic (`Any`) operand must be shown as
         # its string payload. It is handled here, before the numeric unification below, which would otherwise unbox the
@@ -3860,6 +3854,81 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $self->_lower_strcmp( $lhs, $rhs, $op, $line, $col, $ast );
         }
         Carp::croak( "Unknown binary operator '$op' at " . $self->_loc($ast) );
+    }
+
+    # Short-circuiting implementation for //, ||, &&
+    method lower_short_circuit_binop($ast) {
+        my $op = $ast->op;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $func = $current_func;
+
+        # First, just evaluate LHS in the current block
+        my $lhs = $self->lower_expression( $ast->lhs );
+
+        # Fast path for // on native machine types: they are never undefined!
+        if ( $op eq '//' ) {
+            my $kind = $lhs->type->kind;
+            if ( $kind ne 'ptr' && $kind ne 'dynamic' ) {
+
+                # $lhs is a native int/float/bool, so it is always defined.
+                # Skip evaluating RHS completely.
+                return $lhs;
+            }
+        }
+
+        # Determine unification type for result slot.
+        # If either operand can be dynamic, promote result to dynamic.
+        my $res_type;
+        if ( $op eq '//' ) {
+            $res_type = ( $lhs->type->kind eq 'ptr' ) ? Brocken::Lindsay::IR::Type::ptr() : Brocken::Lindsay::IR::Type::dynamic();
+        }
+        else {
+            # For && and ||, match LHS type unless dynamic
+            $res_type = ( $lhs->type->kind eq 'dynamic' ) ? Brocken::Lindsay::IR::Type::dynamic() : $lhs->type;
+        }
+        my $res_slot = $builder->build_alloca( $res_type, $self->unique_value_name('%sc_res'), undef, $line, $col );
+
+        # Store converted LHS into the result slot
+        my $lhs_conv = $self->maybe_convert_type( $lhs, $res_type, $line, $col );
+        $builder->build_store( $lhs_conv, $res_slot, $line, $col );
+
+        # Compute condition for short-circuiting
+        my $cond;
+        if ( $op eq '//' ) {
+
+            # Defined-or: test if LHS is defined (non-null)
+            my $zero = Brocken::Lindsay::IR::Constant->new( type => $lhs->type, value => 0 );
+            $cond = $builder->build_icmp( 'ne', $lhs, $zero, undef, $line, $col );
+        }
+        else {
+            # Logical || and &&: Perl truthiness test
+            $cond = $self->_truthy_i1( $lhs, $line, $col );
+        }
+        my $rhs_block   = $func->append_block( $self->unique_block_name('sc_rhs') );
+        my $merge_block = $func->append_block( $self->unique_block_name('sc_merge') );
+        if ( $op eq '//' || $op eq '||' ) {
+
+            # If true/defined -> skip RHS to merge_block; else evaluate RHS
+            $builder->build_cond_br( $cond, $merge_block, $rhs_block, $line, $col );
+        }
+        elsif ( $op eq '&&' ) {
+
+            # If true -> evaluate RHS; else skip to merge_block
+            $builder->build_cond_br( $cond, $rhs_block, $merge_block, $line, $col );
+        }
+
+        # Lower RHS block
+        $builder->position_at_end($rhs_block);
+        $current_block = $rhs_block;
+        my $rhs      = $self->lower_expression( $ast->rhs );
+        my $rhs_conv = $self->maybe_convert_type( $rhs, $res_type, $line, $col );
+        $builder->build_store( $rhs_conv, $res_slot, $line, $col );
+        $builder->build_br( $merge_block, $line, $col ) unless $current_block->terminator;
+
+        # Resume at merge block
+        $builder->position_at_end($merge_block);
+        $current_block = $merge_block;
+        return $builder->build_load( $res_type, $res_slot, undef, $line, $col );
     }
 
     # The string comparisons. Both operands are stringified through `_stringify_value`, so a dynamic box is rendered
@@ -4405,16 +4474,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::BLOCK_SIZE() );
         }
         if ( $name eq 'block_live_count_offset' ) {
-            return Brocken::Lindsay::IR::Constant->new(
-                type  => Brocken::Lindsay::IR::Type::i64(),
-                value => Brocken::ICB::BLOCK_LIVE_COUNT_OFFSET()
-            );
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::BLOCK_LIVE_COUNT_OFFSET() );
         }
         if ( $name eq 'block_next_free_offset' ) {
-            return Brocken::Lindsay::IR::Constant->new(
-                type  => Brocken::Lindsay::IR::Type::i64(),
-                value => Brocken::ICB::BLOCK_NEXT_FREE_OFFSET()
-            );
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::BLOCK_NEXT_FREE_OFFSET() );
         }
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }

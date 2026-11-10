@@ -107,4 +107,5 @@ subtest 'a float is true when it is not zero, not when it truncates' => sub {
     answers( 'my $a = 0; my f64 $b = 1.0; return $a && $b;',   0, 'untyped 0 && f64 1.0' );
     answers( 'my $a = 5; my f64 $b = 1.0; return $a && $b;',   1, 'untyped 5 && f64 1.0' );
 };
+#
 done_testing;

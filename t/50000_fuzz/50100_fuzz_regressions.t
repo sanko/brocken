@@ -8,8 +8,7 @@ no warnings qw[experimental::class];
 # Regression tests for bugs found by the fuzzer.
 # Each test is a specific Brocken program that triggered a miscompilation.
 # Keep these as standalone programs so they remain valid regression tests even if the fuzzer's internal logic changes.
-sub test_prog {
-    my ( $name, $source, $expected ) = @_;
+sub test_prog ( $name, $source, $expected ){
     my $fuzz   = Brocken::Fuzz->new();
     my $result = $fuzz->test_program( { source => $source, expected => $expected } );
     ok $result->{status} eq 'pass', $name or diag "FAIL: $result->{reason}\nSource:\n$source";
@@ -649,7 +648,7 @@ return $z;
 PROG
 
     # Case 15 pattern: -82 && 8 → bitwise AND = 8
-    test_prog( '-82 && 8 gives 8 (bitwise, not logical)', <<'PROG', 8 );
+    test_prog( '-82 && 8 gives 8 (bitwise, not logical)', <<'PROG', -82 && 8 );
 my i64 $a = -82;
 my i32 $b = 8;
 $b = $a && $b;
@@ -657,7 +656,7 @@ return $b;
 PROG
 
     # && on unsigned values preserves bitwise semantics
-    test_prog( '42 && 7 gives 2 (42 & 7 = 2)', <<'PROG', 2 );
+    test_prog( '42 && 7 gives 7 (42 & 7 = 7)', <<'PROG', 42 && 7 );
 my i64 $a = 42;
 my i64 $b = 7;
 $a = $a && $b;
