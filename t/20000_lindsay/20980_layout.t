@@ -166,6 +166,11 @@ subtest 'ICB layout matches committed offsets' => sub {
     is Brocken::ICB::ERR_NO_FUEL(),  2, 'ERR_NO_FUEL=2';
     is Brocken::ICB::ERR_SECURITY(), 3, 'ERR_SECURITY=3';
     is Brocken::ICB::ERR_THROW(),    5, 'ERR_THROW=5';
+
+    # The runtime's block geometry resolves to these through the Brocken::* intrinsics in the lowerer.
+    is Brocken::ICB::BLOCK_SIZE(),              32768, 'BLOCK_SIZE=32768';
+    is Brocken::ICB::BLOCK_LIVE_COUNT_OFFSET(), 32752, 'BLOCK_LIVE_COUNT_OFFSET=32752';
+    is Brocken::ICB::BLOCK_NEXT_FREE_OFFSET(),  32760, 'BLOCK_NEXT_FREE_OFFSET=32760';
 };
 
 # error on missing name/type

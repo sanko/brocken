@@ -48,6 +48,7 @@ package Brocken::ICB v0.0.1 {
         STACK_LIMIT SUSPECT_COUNT
         SIZE ERR_OK ERR_OOM ERR_NO_FUEL ERR_SECURITY ERR_DIV_ZERO ERR_THROW ERR_STACK
         HEAP_SIZE
+        BLOCK_SIZE BLOCK_LIVE_COUNT_OFFSET BLOCK_NEXT_FREE_OFFSET
     ];
 
     # The heap the runtime is told it owns, in bytes. The entry preamble passes
@@ -56,6 +57,13 @@ package Brocken::ICB v0.0.1 {
     # for 1MB here, so the arena bookkeeping the runtime keeps ran past the end of linear memory and a second boxed
     # variable trapped.
     use constant HEAP_SIZE => 0x100000;
+
+    # Immix block geometry. A block is BLOCK_SIZE bytes and its trailer holds the live allocation count and the next
+    # line index to scan. core.brocken reads these through the Brocken::icb_size/block_* intrinsics below, which the
+    # lowerer resolves against these constants, so the runtime never carries a second copy of the layout.
+    use constant BLOCK_SIZE              => 32768;
+    use constant BLOCK_LIVE_COUNT_OFFSET => BLOCK_SIZE - 16;
+    use constant BLOCK_NEXT_FREE_OFFSET  => BLOCK_SIZE - 8;
 };
 #
 1;

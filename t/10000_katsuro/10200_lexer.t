@@ -4,6 +4,7 @@ use Test2::Util::Importer 'Test2::Tools::Subtest' => ( subtest_streamed => { -as
 use blib;
 use Test2::Tools::Brocken qw[run_exec];
 use Brocken::Katsuro::Lexer;
+#
 subtest 'Katsuro Lexer: Tokenizer and gradual typing' => sub {
     my $source = <<'BROCKEN';
     use feature 'brocken_native_types';
@@ -23,7 +24,7 @@ subtest 'Katsuro Lexer: Tokenizer and gradual typing' => sub {
 BROCKEN
     my $lexer  = Brocken::Katsuro::Lexer->new( source => $source );
     my $tokens = $lexer->lex();
-    is( ref $tokens, 'ARRAY', 'lex returned array ref' );
+    is ref $tokens, 'ARRAY', 'lex returned array ref';
 
     # Let's inspect some crucial tokens for self-hosting standard library constructs
     my @idents   = grep { $_->{type} eq 'IDENT' } @$tokens;
@@ -47,36 +48,37 @@ BROCKEN
 };
 subtest 'Lexer error includes filename' => sub {
     my $lexer = Brocken::Katsuro::Lexer->new( source => "my i64 \$x = \x80;", filename => 'test.br' );
-    my $err   = eval { $lexer->lex(); undef } // $@;
-    ok( $err, 'lex error thrown' );
-    like( $err, qr/test\.br/, 'error mentions filename' );
-    like( $err, qr/line 1/,   'error mentions line' );
-    like( $err, qr/col 13/,   'error mentions col' );
+    my $err   = dies { $lexer->lex() };
+    ok $err, 'lex error thrown';
+    like $err, qr/test\.br/, 'error mentions filename';
+    like $err, qr/line 1/,   'error mentions line';
+    like $err, qr/col 13/,   'error mentions col';
 };
 subtest 'Lexer error default filename' => sub {
     my $lexer = Brocken::Katsuro::Lexer->new( source => "\x80" );
-    my $err   = eval { $lexer->lex(); undef } // $@;
-    like( $err, qr/\(eval\)/, 'default filename is (eval)' );
+    my $err   = dies { $lexer->lex() };
+    like $err, qr/\(eval\)/, 'default filename is (eval)';
 };
 subtest 'FLOAT token for float literals' => sub {
     my $lexer  = Brocken::Katsuro::Lexer->new( source => '42.5 + 3.0' );
     my $tokens = $lexer->lex();
     my @floats = grep { $_->{type} eq 'FLOAT' } @$tokens;
     my @nums   = grep { $_->{type} eq 'NUM' } @$tokens;
-    is( scalar @floats,      2,    'two FLOAT tokens found' );
-    is( $floats[0]->{value}, 42.5, 'first FLOAT value is 42.5' );
-    is( $floats[1]->{value}, 3.0,  'second FLOAT value is 3.0' );
-    is( scalar @nums,        0,    'no NUM tokens from float literals' );
+    is scalar @floats,      2,    'two FLOAT tokens found';
+    is $floats[0]->{value}, 42.5, 'first FLOAT value is 42.5';
+    is $floats[1]->{value}, 3.0,  'second FLOAT value is 3.0';
+    is scalar @nums,        0,    'no NUM tokens from float literals';
 };
 subtest 'FLOAT/NUM disambiguation: integer after float' => sub {
     my $lexer  = Brocken::Katsuro::Lexer->new( source => '3.14 99' );
     my $tokens = $lexer->lex();
-    my @floats = grep { $_->{type} eq 'FLOAT' } @$tokens;
-    my @nums   = grep { $_->{type} eq 'NUM' } @$tokens;
-    is( scalar @floats,      1,    'one FLOAT token' );
-    is( $floats[0]->{value}, 3.14, 'FLOAT value is 3.14' );
-    is( scalar @nums,        1,    'one NUM token' );
-    is( $nums[0]->{value},   99,   'NUM value is 99' );
+    is $tokens,
+        [
+        { col => 1, line => 1, type => 'FLOAT', value => 3.14 },
+        { col => 6, line => 1, type => 'NUM',   value => 99 },
+        { col => 8, line => 1, type => 'EOF',   value => '' }
+        ],
+        'lexed $tokens';
 };
 subtest 'STRING token decodes backslash escapes' => sub {
     my $lexer  = Brocken::Katsuro::Lexer->new( source => q{"line\nnext\tend\\slash\"quote"} );
@@ -122,4 +124,5 @@ subtest 'Lexer recognizes ++ and -- as single operators' => sub {
     ok( ( grep { $_ eq '--' } @ops ), '-- is lexed as one operator' );
     is( scalar( grep { $_ eq '-' } @ops ), 0, 'no bare - token produced for --' );
 };
+#
 done_testing;

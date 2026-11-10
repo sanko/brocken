@@ -1,8 +1,9 @@
 use v5.42;
-use Test2::V0 '!subtest';
 use blib;
 use Brocken;
 use Brocken::Katsuro::Platform;
+use Test2::V0;
+use Test2::Tools::Brocken qw[run_exec temp_path];
 #
 # The wasm target lowers, emits, and links without dying, and the module it
 # produces is valid bytecode: the dispatch loop and the branch lowering behind it are exercised here through wasmtime,

@@ -5,14 +5,14 @@
 # Accessor functions below (get_*/set_*) are the single source of truth for ICB field offsets within Brocken runtime
 # code.
 #
-# Immix block layout (32 KB = 32768 bytes per block):
+# Immix block layout (Brocken::ICB::BLOCK_SIZE bytes per block, 32 KB today):
 #   [block + 0..15]:     bitmap (128-bit line bitmap, bit N = line N in use)
 #   [block + 16..255]:   Line 0  (240 usable bytes)
 #   [block + 256..511]:  Line 1  (256 bytes)
 #   ...
 #   [block + 32512..32751]: Line 127 (240 usable bytes - last 16 bytes are metadata)
-#   [block + 32752..32759]:  live_count (i64) - number of live allocations in block
-#   [block + 32760..32767]:  next_free (i64) - next line index to start scanning for free lines
+#   [block + BLOCK_SIZE-16..BLOCK_SIZE-9]: live_count (i64) - number of live allocations in block
+#   [block + BLOCK_SIZE-8..BLOCK_SIZE-1]:  next_free (i64) - next line index to start scanning for free lines
 #   Total per block: 16 + 240 + 126*256 + 240 + 16 = 32768
 #
 # Objects freed by decref (when RC reaches 0) are pushed onto free16_head.
@@ -212,22 +212,22 @@ sub set_stack_limit( ptr $hb, ptr $val ) {
 
 # Immix block geometry
 # A block is block_size() bytes. Every block begins on a block_size grid anchored at the arena base, i.e. the first block
-# immediately after the ICB. Deriving the metadata offsets and the address->block mapping from these helpers keeps the
-# geometry in one place so the two cannot drift apart.
+# immediately after the ICB. These helpers resolve to Brocken::ICB::BLOCK_* through compiler intrinsics, so the runtime
+# and the layout generator share one definition of the block trailer.
 sub icb_size() : returns(i64) {
-    return 168;
+    return Brocken::icb_size();
 }
 
 sub block_size() : returns(i64) {
-    return 32768;
+    return Brocken::block_size();
 }
 
 sub block_live_count_offset() : returns(i64) {
-    return Brocken::i64_sub( block_size(), 16 );
+    return Brocken::block_live_count_offset();
 }
 
 sub block_next_free_offset() : returns(i64) {
-    return Brocken::i64_sub( block_size(), 8 );
+    return Brocken::block_next_free_offset();
 }
 
 # Base of the block that owns the allocation at $addr. Every block is aligned to a block_size grid anchored at the arena

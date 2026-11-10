@@ -5,6 +5,7 @@ use blib;
 use Brocken::Katsuro;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
+#
 subtest 'normalize triple' => sub {
     is Brocken::Katsuro::Platform::normalize_triple('x86_64'),               'x86_64-unknown-unknown-unknown',  'single part';
     is Brocken::Katsuro::Platform::normalize_triple('x86_64-linux-gnu'),     'x86_64-pc-linux-gnu',             'arch-os-env';
@@ -115,4 +116,5 @@ subtest 'back end selection for an unsupported architecture' => sub {
     is $p->codegen_class, undef,                           'no code generator targets i386';
     is $p->linker_class,  'Brocken::Jenny::Linker::ELF64', 'the linker still follows the format';
 };
+#
 done_testing;

@@ -2141,6 +2141,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $val      = $self->lower_expression( $ast->expr );
             my $ret_type = $current_func->return_type;
             $val = $self->maybe_convert_type( $val, $ret_type, $line, $col, 1 );
+
+
+             warn
+            sprintf '[%s] $val->type->kind: %s, $ret_type->kind: %s',
+            $current_func->name, $val->type->kind,
+                        $ret_type->kind            ;
+
             my @rc_names = sort keys %$needs_rc;
 
             # Hand the caller an owned reference for a dynamic return. An owned-returning function (+1) increfs the
@@ -4387,6 +4394,27 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( $name eq 'heap_base' ) {
             my $hb = $symbols->{'__heap_base'} or Carp::croak( "heap_base intrinsic requires __heap_base symbol at " . $self->_loc($ast) );
             return $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $hb, undef, $line, $col );
+        }
+
+        # Heap geometry is defined once in Brocken::ICB; core.brocken reaches it through these intrinsics instead of
+        # hardcoding the ICB size and the block trailer offsets a second time.
+        if ( $name eq 'icb_size' ) {
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::SIZE() );
+        }
+        if ( $name eq 'block_size' ) {
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::BLOCK_SIZE() );
+        }
+        if ( $name eq 'block_live_count_offset' ) {
+            return Brocken::Lindsay::IR::Constant->new(
+                type  => Brocken::Lindsay::IR::Type::i64(),
+                value => Brocken::ICB::BLOCK_LIVE_COUNT_OFFSET()
+            );
+        }
+        if ( $name eq 'block_next_free_offset' ) {
+            return Brocken::Lindsay::IR::Constant->new(
+                type  => Brocken::Lindsay::IR::Type::i64(),
+                value => Brocken::ICB::BLOCK_NEXT_FREE_OFFSET()
+            );
         }
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }

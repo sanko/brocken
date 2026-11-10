@@ -4,6 +4,7 @@ use Brocken;
 use Brocken::Lindsay;
 use Test2::V0;
 use Test2::Tools::Brocken qw[run_exec temp_path];
+#
 my $p    = Brocken->new();
 my $plat = $p->platform;
 note 'Platform: ' . $plat->friendly;
@@ -18,4 +19,5 @@ my $funcs   = $codegen->emit_functions( [$main] );
 my $out     = temp_path('pulse_output');
 $linker->write_executable( $out, $funcs, $plat );
 run_exec( $out, expected_exit => 42, name => "init smoke test on " . $plat->friendly, platform => $plat );
+#
 done_testing;
