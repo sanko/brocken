@@ -191,7 +191,7 @@ my $make_riscv64_wrapper = sub {
     my $code             = pack( 'V*',
         0xFE010113, 0x00113C23, 0x00813423, 0x00913423, $auipc_a0,  $addi_a0,   0x00200593, $auipc_dl,
         $ld_dl,     0x000280E7, 0x00050413, 0x00040513, $auipc_a1,  $addi_a1,   $auipc_ds,  $ld_ds,
-        0x000280E7, 0x000500E7, 0x00813483, 0x01013403, 0x01813083, 0x02010113, 0x00008067, );
+        0x000280E7, 0x000500E7, 0x00813483, 0x01013403, 0x01813083, 0x02010113, 0x00008067 );
     $code .= "\x00" while length($code) < $lib_path_offset;
     $code .= $lib_path . $func_name;
     return $code;

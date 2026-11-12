@@ -3701,6 +3701,47 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                         );
                     };
 
+                    # Win64 variadic calls require floating-point arguments in positions 0..3 to be passed in both the
+                    # XMM register and the corresponding GP register (rcx, rdx, r8, r9). Spill any non-constant float
+                    # before setting argument registers so the reverse-order loop can load its bit pattern cleanly.
+                    my $is_win64_var = $platform->is_windows && $callee->can('variadic') && $callee->variadic;
+                    my %win64_varg_slots;
+                    if ($is_win64_var) {
+                        state $varg_id = 0;
+                        my $i64 = Brocken::Lindsay::IR::Type::i64();
+                        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+                        for my $i ( 0 .. $#args ) {
+                            next unless $classes[$i] eq 'float';
+                            next if ref $arg_regs[$i] && $arg_regs[$i][0] eq 'stack';
+                            next if $args[$i]->isa('Brocken::Lindsay::IR::Constant');
+                            my $val = $self->_materialize( $mbb, $args[$i] );
+                            my $slot_v
+                                = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%win64_varg_' . $varg_id++, type => $ptr );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'alloca',
+                                    operands => [ $slot_v, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8, type => $i64 ) ],
+                                    comment  => "variadic float spill slot for arg $i"
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'fstore',
+                                    operands => [
+                                        Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'mem',
+                                            value => { base => $slot_v->value, disp => 0 },
+                                            type  => $args[$i]->type
+                                        ),
+                                        $val
+                                    ],
+                                    comment => "spill variadic float arg $i"
+                                )
+                            );
+                            $win64_varg_slots{$i} = $slot_v;
+                        }
+                    }
+
                     # Emit in reverse order so arg0 (reg rcx/rdi) is set last, avoiding clobber of virt_regs that may
                     # have been allocated to the same param register as a later argument.
                     for my $i ( reverse 0 .. $#args ) {
@@ -3788,6 +3829,45 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                             comment  => "arg $i to $reg_name"
                                         )
                                     );
+                                }
+                                if ( $is_win64_var && $is_float ) {
+                                    my $gp_name = $abi->param_registers->[$i];
+                                    my $gp_op   = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $gp_name );
+                                    if ( $args[$i]->isa('Brocken::Lindsay::IR::Constant') ) {
+                                        my $bits        = $arg_type->bits;
+                                        my $bit_pattern = $bits >= 64 ? unpack( 'Q', pack( 'd', $args[$i]->value ) ) :
+                                            unpack( 'V', pack( 'f', $args[$i]->value ) );
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'mov',
+                                                operands => [
+                                                    $gp_op,
+                                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                                        kind  => 'imm',
+                                                        value => $bit_pattern,
+                                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                                    )
+                                                ],
+                                                comment => "variadic arg $i (float bits) to $gp_name"
+                                            )
+                                        );
+                                    }
+                                    else {
+                                        $mbb->add_instruction(
+                                            Brocken::Jenny::MIR::MachineInstruction->new(
+                                                opcode   => 'load',
+                                                operands => [
+                                                    $gp_op,
+                                                    Brocken::Jenny::MIR::MachineOperand->new(
+                                                        kind  => 'mem',
+                                                        value => { base => $win64_varg_slots{$i}->value, disp => 0 },
+                                                        type  => Brocken::Lindsay::IR::Type::i64()
+                                                    )
+                                                ],
+                                                comment => "variadic arg $i (float bits) to $gp_name"
+                                            )
+                                        );
+                                    }
                                 }
                             }
                         }

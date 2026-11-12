@@ -1239,7 +1239,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $sprintf_arg = $val;
         my $fmt_str;
         if ( $kind eq 'float' ) {
-            $fmt_str = "%f\0";
+            $fmt_str = "%.1f\0";
+
+            # This will print 6 decimal places (1.000000) like C. Perl's compact float format (1.0) requires I change
+            # this to "%.15g\0" or "%g\0" or even "%.1f\0".
         }
         else {
             Carp::croak("Cannot concatenate value of type '$kind' at line $line, col $col");
@@ -1252,12 +1255,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             variadic    => 1,
             params      => [
                 Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-
-                # `sprintf` is variadic, but the caller has to know where the conversion argument goes. Declaring the
-                # third slot as `f64` is what places the value in the float argument register; without it the operand
-                # has no parameter to land in and the buffer keeps its uninitialised contents.
-                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() ),
-                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::f64() )
+                Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr() )
             ]
         );
         $builder->build_call( $sprintf_fn, [ $buf, $fmt_ref, $sprintf_arg ], undef, $line, $col );

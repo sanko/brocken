@@ -3309,10 +3309,16 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                     # sized independently, so an integer overflow is not charged to the floating-point one.
                     my @where;
                     my ( $gp_idx, $fp_idx, $stk_idx ) = ( 0, 0, 0 );
+                    my $is_rv_var = $callee->can('variadic') && $callee->variadic;
+                    my $num_fixed = $callee->params ? scalar( $callee->params->@* ) : 0;
                     for my $i ( 0 .. $#args ) {
                         my $arg_type = $args[$i]->type;
                         my $is_float = $arg_type  && $arg_type->kind eq 'float';
                         my $is_i128  = !$is_float && $arg_type && $arg_type->kind eq 'int' && $arg_type->bits == 128;
+                        if ( $is_rv_var && $is_float && $i >= $num_fixed ) {
+                            $where[$i] = $gp_idx < @gp_regs ? [ 'reg_var_float', $gp_regs[ $gp_idx++ ] ] : [ 'stack', $stk_idx++ ];
+                            next;
+                        }
                         if ($is_i128) {
 
                             # A 128-bit value takes a consecutive register pair, so it goes to the stack whole when only
@@ -3334,12 +3340,46 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                             $where[$i] = $gp_idx < @gp_regs ? [ 'reg', $gp_regs[ $gp_idx++ ] ] : [ 'stack', $stk_idx++ ];
                         }
                     }
+                    my %rv_varg_slots;
+                    if ($is_rv_var) {
+                        state $rv_varg_id = 0;
+                        my $i64 = Brocken::Lindsay::IR::Type::i64();
+                        my $ptr = Brocken::Lindsay::IR::Type::ptr();
+                        for my $i ( 0 .. $#args ) {
+                            next unless $where[$i][0] eq 'reg_var_float';
+                            next if $args[$i]->isa('Brocken::Lindsay::IR::Constant');
+                            my $val = $self->_materialize( $mbb, $args[$i] );
+                            my $slot_v
+                                = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => '%rv_varg_' . $rv_varg_id++, type => $ptr );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'alloca',
+                                    operands => [ $slot_v, Brocken::Jenny::MIR::MachineOperand->new( kind => 'imm', value => 8, type => $i64 ) ],
+                                    comment  => "variadic float spill slot for arg $i"
+                                )
+                            );
+                            $mbb->add_instruction(
+                                Brocken::Jenny::MIR::MachineInstruction->new(
+                                    opcode   => 'fstore',
+                                    operands => [
+                                        Brocken::Jenny::MIR::MachineOperand->new(
+                                            kind  => 'mem',
+                                            value => { base => $slot_v->value, disp => 0 },
+                                            type  => $args[$i]->type
+                                        ),
+                                        $val
+                                    ],
+                                    comment => "spill variadic float arg $i"
+                                )
+                            );
+                            $rv_varg_slots{$i} = $slot_v;
+                        }
+                    }
 
-                    # Forward order, unlike x86-64, which emits in reverse so arg0 lands last.  A float literal is
+                    # Forward order, unlike x86-64, which emits in reverse so arg0 lands last. A float literal is
                     # placed straight in the register its argument goes to (see _place_float_constant), so the order no
-                    # longer decides
-                    # which registers are still free when one is materialized: a scratch the allocator picked itself
-                    # could land on the register an earlier argument had just been given.
+                    # longer decides which registers are still free when one is materialized: a scratch the allocator
+                    # picked itself could land on the register an earlier argument had just been given.
                     for my $i ( 0 .. $#args ) {
                         my $arg_type = $args[$i]->type;
                         my $is_float = $arg_type  && $arg_type->kind eq 'float';
@@ -3394,6 +3434,45 @@ class Brocken::Jenny::Lowerer::RISCV64 v0.0.1 {
                                         opcode   => $is_float ? 'fstore' : 'store',
                                         operands => [ $slot->( $off, $arg_type ), $val ],
                                         comment  => "arg $i to stack+$off"
+                                    )
+                                );
+                            }
+                        }
+                        elsif ( $w->[0] eq 'reg_var_float' ) {
+                            my $reg_name = $w->[1];
+                            my $reg      = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $reg_name );
+                            if ( $args[$i]->isa('Brocken::Lindsay::IR::Constant') ) {
+                                my $bits = $arg_type->bits;
+                                my $bit_pattern
+                                    = $bits >= 64 ? unpack( 'Q', pack( 'd', $args[$i]->value ) ) : unpack( 'V', pack( 'f', $args[$i]->value ) );
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'mv',
+                                        operands => [
+                                            $reg,
+                                            Brocken::Jenny::MIR::MachineOperand->new(
+                                                kind  => 'imm',
+                                                value => $bit_pattern,
+                                                type  => Brocken::Lindsay::IR::Type::i64()
+                                            )
+                                        ],
+                                        comment => "variadic arg $i (float bits) to $reg_name"
+                                    )
+                                );
+                            }
+                            else {
+                                $mbb->add_instruction(
+                                    Brocken::Jenny::MIR::MachineInstruction->new(
+                                        opcode   => 'load',
+                                        operands => [
+                                            $reg,
+                                            Brocken::Jenny::MIR::MachineOperand->new(
+                                                kind  => 'mem',
+                                                value => { base => $rv_varg_slots{$i}->value, disp => 0 },
+                                                type  => Brocken::Lindsay::IR::Type::i64()
+                                            )
+                                        ],
+                                        comment => "variadic arg $i (float bits) to $reg_name"
                                     )
                                 );
                             }

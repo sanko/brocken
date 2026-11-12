@@ -3823,10 +3823,22 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                     # sized independently, so an integer overflow is not charged to the floating-point one.
                     my @where;
                     my ( $gp_idx, $fp_idx, $stk_idx ) = ( 0, 0, 0 );
+                    my $is_darwin_var = $platform->is_macos && $callee->can('variadic') && $callee->variadic;
+                    my $num_fixed     = $callee->params ? scalar( $callee->params->@* ) : 0;
                     for my $i ( 0 .. $#args ) {
                         my $arg_type = $args[$i]->type;
                         my $is_float = $arg_type  && $arg_type->kind eq 'float';
                         my $is_i128  = !$is_float && $arg_type && $arg_type->kind eq 'int' && $arg_type->bits == 128;
+                        if ( $is_darwin_var && $i >= $num_fixed ) {
+                            if ($is_i128) {
+                                $where[$i] = [ 'stack', $stk_idx, $stk_idx + 1 ];
+                                $stk_idx += 2;
+                            }
+                            else {
+                                $where[$i] = [ 'stack', $stk_idx++ ];
+                            }
+                            next;
+                        }
                         if ($is_i128) {
 
                             # A 128-bit value takes a consecutive register pair, so it goes to the stack whole when only
@@ -3969,7 +3981,7 @@ class Brocken::Jenny::Lowerer::ARM64 v0.0.1 {
                         }
                     }
                     my @call_ops = ( Brocken::Jenny::MIR::MachineOperand->new( kind => 'func', value => $callee->name ) );
-                    if ( $platform->is_macos && $callee->params && scalar( $callee->params->@* ) > 0 ) {
+                    if ( $platform->is_macos && !$is_darwin_var && $callee->params && scalar( $callee->params->@* ) > 0 ) {
                         my $num_named   = scalar $callee->params->@*;
                         my $num_unnamed = scalar @args - $num_named;
                         $num_unnamed = 0 if $num_unnamed < 0;
