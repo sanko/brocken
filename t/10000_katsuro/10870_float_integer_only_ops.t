@@ -91,19 +91,21 @@ subtest 'float arithmetic is unaffected by the float rules' => sub {
 };
 subtest 'a float is true when it is not zero, not when it truncates' => sub {
 
-    # 0.5 is the case that separates a truth test from a truncation: it is true, and it truncates to 0. A zero float is
-    # asserted alongside it so that the pair pins both sides rather than only the true one.
+    # `&&` and `||` yield an operand, not a boolean, so 0.5 being true is visible in which operand comes back: a
+    # true left makes `&&` return the right operand and `||` return the left one (0.5, which returns as 0), while a
+    # false left makes `&&` return the left one (0.0) and `||` the right one. Truncating 0.5 to 0 first would flip
+    # every one of these.
     answers( 'my f64 $a = 0.5; my f64 $b = 1.0; return $a && $b;', 1, 'f64 0.5 && f64 1.0' );
-    answers( 'my f64 $a = 1.5; my f64 $b = 2.5; return $a && $b;', 1, 'f64 1.5 && f64 2.5' );
+    answers( 'my f64 $a = 1.5; my f64 $b = 2.5; return $a && $b;', 2, 'f64 1.5 && f64 2.5' );
     answers( 'my f64 $a = 0.0; my f64 $b = 1.0; return $a && $b;', 0, 'f64 0.0 && f64 1.0' );
-    answers( 'my f64 $a = 0.5; my f64 $b = 1.0; return $a || $b;', 1, 'f64 0.5 || f64 1.0' );
+    answers( 'my f64 $a = 0.5; my f64 $b = 1.0; return $a || $b;', 0, 'f64 0.5 || f64 1.0' );
     answers( 'my f64 $a = 0.0; my f64 $b = 0.0; return $a || $b;', 0, 'f64 0.0 || f64 0.0' );
     answers( 'my f64 $a = 1.5; my f64 $b = 0.0; return $a || $b;', 1, 'f64 1.5 || f64 0.0' );
 
     # The untyped box goes through the same comparison, and covers the integer
     # payload case as well as the float one.
     answers( 'my $a = 0.5; my f64 $b = 1.0; return $a && $b;', 1, 'untyped 0.5 && f64 1.0' );
-    answers( 'my $a = 0.5; my f64 $b = 1.0; return $a || $b;', 1, 'untyped 0.5 || f64 1.0' );
+    answers( 'my $a = 0.5; my f64 $b = 1.0; return $a || $b;', 0, 'untyped 0.5 || f64 1.0' );
     answers( 'my $a = 0; my f64 $b = 1.0; return $a && $b;',   0, 'untyped 0 && f64 1.0' );
     answers( 'my $a = 5; my f64 $b = 1.0; return $a && $b;',   1, 'untyped 5 && f64 1.0' );
 };

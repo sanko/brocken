@@ -31,7 +31,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
         PREC_CALL    => 60,
         PREC_DEREF   => 65
     };
-    my %TYPE_KEYWORDS = map { $_ => 1 } qw[Int String Any Bool ptr int bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64];
+    my %TYPE_KEYWORDS = map { $_ => 1 } qw[Int String Any Bool ptr int bool i1 i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64];
     my %FEATURE_TYPES = ( i128 => 'brocken_native_types', u128 => 'brocken_native_types' );
 
     # Assignment operators. `=` and the short-circuit forms keep their own lowering; the arithmetic/bitwise/string

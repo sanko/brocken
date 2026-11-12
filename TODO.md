@@ -90,8 +90,12 @@ Goal: Complete fidelity with the Blackburn & McKinley (PLDI 2008) Immix paper an
 - [x] **Arity Validation (F14):** Enforced compile-time parameter count checks for function and method calls.
 - [x] **Untyped Receiver Method Calls:** Method calls on `Any` boxes unbox the object payload pointer automatically.
 - [x] **Empty Function Bodies (F16):** Subroutines with empty bodies `sub f() {}` emit valid epilogues and default returns.
-- [ ] **Short-Circuiting Logic (`&&`, `||`, `//`):**
-  - [ ] Replace eager SSA evaluation in `lower_binop` with CFG-level branching blocks to short-circuit RHS side effects.
+- [x] **Short-Circuiting Logic (`&&`, `||`, `//`):**
+  - [x] Replaced eager SSA evaluation in `lower_binop` with CFG-level branching blocks to short-circuit RHS side effects.
+  - [x] `||`/`&&` now use Perl *value* semantics (the deciding operand is yielded, not a boolean) with unified result typing.
+- [x] **Advisory Native Types:**
+  - [x] A native local assigned a value its kind cannot hold is promoted to `Any` for the whole function with a compile-time warning (all native types, `bool` included).
+  - [x] Dynamic/unknown sources keep the native slot and emit a runtime store guard warning instead.
 - [ ] **Single Evaluation in Compound Assignments:**
   - [ ] Lower compound assignments so complex target indices (e.g. `%map{compute()} += 1`) evaluate keys exactly once.
 - [ ] **Full Postfix Dereferencing (`postderef`):**

@@ -122,8 +122,14 @@ class Brocken v0.0.1 {
         my $user_ast = $self->parse( $source, $filename );
         push @all_stmts, $user_ast->statements->@*;
         my $merged_ast = Brocken::Katsuro::AST::Program->new( statements => \@all_stmts );
-        my $lowerer = Brocken::Katsuro::Lowerer->new( platform => $platform, fuel => $fuel, mem_limit => $mem_limit, capabilities => $capabilities );
-        my $module  = $lowerer->lower_program($merged_ast);
+        my $lowerer    = Brocken::Katsuro::Lowerer->new(
+            platform       => $platform,
+            fuel           => $fuel,
+            mem_limit      => $mem_limit,
+            capabilities   => $capabilities,
+            target_is_wasm => ( $self->platform && $self->platform->can('is_wasm') && $self->platform->is_wasm ) ? 1 : 0
+        );
+        my $module = $lowerer->lower_program($merged_ast);
         $module->set_class_info( $lowerer->classes );
         $module->set_rodata( $lowerer->rodata );
         $module->set_package_versions( $lowerer->package_versions );

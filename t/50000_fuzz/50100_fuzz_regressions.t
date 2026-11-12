@@ -622,8 +622,9 @@ PROG
 # Fuzzer seed 20260702, cases 6/8/15.
 subtest '|| and && are bitwise (not logical) in Brocken' => sub {
 
-    # Case 6 pattern: 0 || -26 → bitwise OR = -26 → bool truncates to 0
-    test_prog( 'false || -26 stored to bool gives 0', <<'PROG', builtin::false || -26 );
+    # Case 6 pattern: false || -26 → -26. Storing that in a `bool` would mask it to bit 0, so the variable is promoted
+    # to `Any` instead and keeps the value.
+    test_prog( 'false || -26 stored to bool keeps -26', <<'PROG', -26 );
 my bool $b = false;
 $b = $b || -26;
 my i64 $r = $b;
@@ -631,7 +632,7 @@ return $r;
 PROG
 
     # || on ints returns bitwise OR value
-    test_prog( '0 || -26 stored to i64 gives -26', <<'PROG', 0 || -26 );
+    test_prog( '0 || -26 stored to i64 gives -26', <<'PROG', -26 );
 my i64 $a = 0;
 my i64 $b = -26;
 $a = $a || $b;
@@ -639,7 +640,7 @@ return $a;
 PROG
 
     # Case 8 pattern: -34 && -34 → bitwise AND = -34 → f64 sitofp → i16 fptosi
-    test_prog( '-34 && -34 via f64 and i16 gives -34', <<'PROG', -34 && -34 );
+    test_prog( '-34 && -34 via f64 and i16 gives -34', <<'PROG', -34 );
 my f64 $f = 63.0;
 my i64 $n = -34;
 $f = $n && $n;
@@ -648,7 +649,7 @@ return $z;
 PROG
 
     # Case 15 pattern: -82 && 8 → bitwise AND = 8
-    test_prog( '-82 && 8 gives 8 (bitwise, not logical)', <<'PROG', -82 && 8 );
+    test_prog( '-82 && 8 gives 8 (bitwise, not logical)', <<'PROG', 8 );
 my i64 $a = -82;
 my i32 $b = 8;
 $b = $a && $b;
@@ -656,7 +657,7 @@ return $b;
 PROG
 
     # && on unsigned values preserves bitwise semantics
-    test_prog( '42 && 7 gives 7 (42 & 7 = 7)', <<'PROG', 42 && 7 );
+    test_prog( '42 && 7 gives 7 (42 & 7 = 7)', <<'PROG', 7 );
 my i64 $a = 42;
 my i64 $b = 7;
 $a = $a && $b;
@@ -664,7 +665,7 @@ return $a;
 PROG
 
     # || on negative values preserves sign
-    test_prog( '-1 || -2 gives -1 (-1 | -2 = -1)', <<'PROG', -1 || -2 );
+    test_prog( '-1 || -2 gives -1 (-1 | -2 = -1)', <<'PROG', -1 );
 my i64 $a = -1;
 my i64 $b = -2;
 $a = $a || $b;

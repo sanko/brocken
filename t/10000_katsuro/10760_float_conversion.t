@@ -34,21 +34,22 @@ subtest 'a conversion is masked to the destination width' => sub {
 
     # A destination narrower than the converter produces needs the same mask the integer path already applies. An fptosi
     # typed at a narrow destination still lowers to a full-width convert, so the bits above the destination survived
-    # into a slot only a byte wide: `my f64 $t = 24.0;` stored into a bool came back as 24 rather than 0.
+    # into a slot only a byte wide: `my f64 $t = 24.0;` stored into a one-bit slot came back as 24 rather than 0.
     #
-    # A bool holds bit 0 of the truncated value, which is this compiler's existing convention for a one-bit destination
-    # and is what the integer path does (`i64 24` gives 0). It is not truthiness: 24.0 is falsy here because 24 & 1 is
-    # 0, not because 24.0 is zero. Asserting the integer cases next to the float ones is what keeps the two sources from
-    # drifting apart again.
+    # `i1` holds bit 0 of the truncated value, which is this compiler's convention for a one-bit destination and is what
+    # the integer path does (`i64 24` gives 0). It is not truthiness: 24.0 is falsy here because 24 & 1 is 0, not
+    # because 24.0 is zero. Asserting the integer cases next to the float ones is what keeps the two sources from
+    # drifting apart again. The one-bit destination is `i1`, the raw width; `bool` is logical and does not narrow -- a
+    # `bool` handed a value a one-bit slot cannot hold is promoted to `Any` so the value survives (10400_lowerer.t).
     for my $ty (qw[f32 f64]) {
-        answers( "my bool \$b = false; my $ty \$t = 24.0; \$b = \$t; return \$b;", 0, "$ty 24.0 -> bool 0" );
-        answers( "my bool \$b = false; my $ty \$t = 7.0; \$b = \$t; return \$b;",  1, "$ty 7.0 -> bool 1" );
-        answers( "my bool \$b = false; my $ty \$t = -1.0; \$b = \$t; return \$b;", 1, "$ty -1.0 -> bool 1" );
-        answers( "my bool \$b = false; my $ty \$t = 0.5; \$b = \$t; return \$b;",  0, "$ty 0.5 -> bool 0" );
+        answers( "my i1 \$b = false; my $ty \$t = 24.0; \$b = \$t; return \$b;", 0, "$ty 24.0 -> i1 0" );
+        answers( "my i1 \$b = false; my $ty \$t = 7.0; \$b = \$t; return \$b;",  1, "$ty 7.0 -> i1 1" );
+        answers( "my i1 \$b = false; my $ty \$t = -1.0; \$b = \$t; return \$b;", 1, "$ty -1.0 -> i1 1" );
+        answers( "my i1 \$b = false; my $ty \$t = 0.5; \$b = \$t; return \$b;",  0, "$ty 0.5 -> i1 0" );
     }
-    answers( 'my bool $b = false; my i64 $x = 24; $b = $x; return $b;',            0, 'i64 24 -> bool 0' );
-    answers( 'my bool $b = false; my i64 $x = 7; $b = $x; return $b;',             1, 'i64 7 -> bool 1' );
-    answers( 'my bool $b = false; my i64 $x = -1; $b = $x; return $b;',            1, 'i64 -1 -> bool 1' );
+    answers( 'my i1 $b = false; my i64 $x = 24; $b = $x; return $b;',              0, 'i64 24 -> i1 0' );
+    answers( 'my i1 $b = false; my i64 $x = 7; $b = $x; return $b;',               1, 'i64 7 -> i1 1' );
+    answers( 'my i1 $b = false; my i64 $x = -1; $b = $x; return $b;',              1, 'i64 -1 -> i1 1' );
     answers( 'my i8 $x = 0; my f64 $t = 300.5; $x = $t; return $x == 44 ? 1 : 0;', 1, 'f64 300.5 -> i8 44' );
 };
 subtest 'integer to float, both widths' => sub {

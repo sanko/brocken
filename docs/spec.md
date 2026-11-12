@@ -89,13 +89,23 @@ Brocken maintains a strict syntactic and physical separation between **managed/n
 
 Enabled via `use feature 'brocken_native_types';`, these bypass Fat Scalar overhead and do not participate in reference counting:
 
-* `i1` (Native 1-bit integer / boolean flag)
+* `i1` (Native 1-bit integer; a wider value stored in it is masked to bit 0)
 * `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `i128`, `u128` (Integers)
 * `f32`, `f64` (IEEE 754 Floating Point)
-* `bool` (Alias for `i1`)
+* `bool` (Logical boolean; promoted to `Any` when handed a value a one-bit slot cannot hold -- see below)
 * `ptr` (Opaque 64-bit machine pointer)
 * `int` (Alias for `i64` on all current targets)
 * `void` (Zero-width unit return type)
+
+**`bool` vs `i1`:** `i1` is the raw one-bit integer, and storing a wider value in it masks to bit 0 (`my i1 $b = 24;` yields `0`, because `24 & 1` is `0`). `bool` is *logical*: a `bool` local that is assigned a value a one-bit slot cannot hold is instead **promoted to `Any`** for the whole function, so the value survives (`my bool $b = false; $b = $b || -26;` leaves `$b` holding `-26`, matching Perl). The compiler warns when it promotes. A `bool` that is only ever assigned genuine booleans -- comparisons, `!`/`not`, `true`/`false`, or the literals `0`/`1` -- stays an `i1`.
+
+**Native types are advisory hints.** A native type name describes how a value is *stored* -- it buys speed by skipping the Fat Scalar -- not a promise about what the variable holds. A native local handed a value its kind cannot represent is **promoted to `Any`** for the whole function so the value survives, and the compiler warns; nothing is silently truncated. Kinds that are mutually representable never promote:
+
+* an `int` or `float` destination accepts any integer, any float, or a `ptr`;
+* a `ptr` destination accepts an `int`, another `ptr`, a `String`, or a class instance (a `ptr` holds a machine address, so `my ptr $p = 0;` is fine);
+* a `bool` destination accepts only a genuine boolean (`bool`, `Bool`, or `i1`), so any wider integer, float, or reference promotes it.
+
+Integers and floats interconvert at any width, so `my i8 $x = $some_i64;` and `my f64 $x = 5;` keep their slot. When the assigned value's kind cannot be pinned down at compile time -- a call result, a field or element read -- the native slot is kept and a runtime guard warns if the stored tag does not fit. Managed types (`Any`, `Int`, `String`, classes) are never promoted.
 
 **Nullability:** Unboxed machine types **cannot be `undef`**. If uninitialized, they default to `0`, `0.0`, or `false`.
 
@@ -199,14 +209,18 @@ for my $i (0 .. 1000) { ... }
 
 Compound assignments (`+=`, `-=`, `*=`, etc.) lower to `$target = $target OP $expr`.
 
-#### Defined-or and Logical-or (`//`, `//=`, `||=`)
+#### Defined-or, Logical-or, and Logical-and (`//`, `||`, `&&`)
 
 - `//` yields its left operand when **defined** (non-null for pointers and `Any` boxes) and its right operand otherwise.
+- `||` yields its left operand when **true** and its right operand otherwise.
+- `&&` yields its left operand when **false** and its right operand otherwise.
 - `//=` assigns only if the destination is **undefined** (null). Degrades to `=` on native types.
 - `||=` assigns if the destination evaluates to **false** via `is_truthy(ptr)`.
 
 **Evaluation Semantics:**
-Binary `//`, `||`, and `&&` evaluate both operands into SSA values and emit conditional selects or bitwise operations; they do not perform short-circuit branching.
+`//`, `||`, and `&&` all **short-circuit**: the right operand is not evaluated when the left already decides the result, so `false && $x` and `$x || $y` never read the side they do not need (a division by zero in the skipped operand is harmless).
+
+`||` and `&&` follow Perl's *value* semantics, not a boolean one: the expression yields whichever operand decides it. So `0 || -26` is `-26`, `3 && 4` is `4`, and `$b = false; $b || -26;` leaves `$b` holding `-26`. Truthiness is Perl's (§4.1) -- an integer is true when non-zero, a float when non-zero (not when it truncates), and a box through `is_truthy(ptr)`. The result type unifies the two operands: `i64` when both are integers, `f64` when either is a float, `ptr` when both are pointers, and a box otherwise. This is what lets a native `bool` (or any advisory native slot) that receives a `||`/`&&` result be promoted to `Any` rather than truncated (see §3.1).
 
 ---
 

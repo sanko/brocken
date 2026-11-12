@@ -6,11 +6,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     use Brocken::Lindsay::IR::Builder;
     use Brocken::ICB;
     use Carp ();
-    field $module       : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
-    field $platform     : reader : param = undef;
-    field $fuel         : param = $Brocken::default_fuel;
-    field $mem_limit    : param = $Brocken::default_mem_limit;
-    field $capabilities : param = $Brocken::default_capabilities;
+    field $module : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
+    field $platform : reader : param = undef;
+
+    # Whether the back end is Wasm. `platform` is deliberately left unset here (see `Brocken::compile`), so this
+    # carries the one target fact the front end needs: the Wasm lowerer cannot yet push a rodata reference, so the
+    # runtime type-mismatch diagnostic -- which `warn`/`die` share -- is native-only.
+    field $target_is_wasm : param = 0;
+    field $fuel           : param = $Brocken::default_fuel;
+    field $mem_limit      : param = $Brocken::default_mem_limit;
+    field $capabilities   : param = $Brocken::default_capabilities;
     field $builder = Brocken::Lindsay::IR::Builder->new();
     field $current_func;
     field $current_block;
@@ -32,6 +37,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $class_escaped             = {};    # var_name -> 1 (used as a value, so its instance must not be reclaimed)
     field $borrowed_params           = {};    # param_name -> 1 (caller-owned Any parameter; the callee must not release it)
     field $weak_var                  = {};    # var_name -> 1 (a weak local: it stores without owning a reference)
+    field $promote_any               = {};    # var_name -> 1 (a `bool` local widened to a boxed `Any`; see _scan_promotions)
     field $returns_owned             = {};    # func_name -> 1 (a dynamic return hands the caller an owned +1 reference)
     field $class_returns_owned       = {};    # func_name -> 1 (a class-returning call hands the caller an owned instance)
     field $array_elem_types          = {};    # '@name' -> element IR type (for heap-array GEP scaling)
@@ -130,6 +136,30 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         void   => Brocken::Lindsay::IR::Type::void()
     );
 
+    # The native type names, grouped by the kind of value each holds. A declared native type is a hint, not a
+    # guarantee: a variable handed a value of an incompatible kind is promoted to a boxed `Any` so the value survives
+    # (see `_scan_promotions`). `bool`/`Bool` are ints here but are handled specially -- they are *logical*, so any
+    # value that is not itself a boolean degrades them.
+    my %NATIVE_KIND = (
+        i1   => 'int',
+        i8   => 'int',
+        i16  => 'int',
+        i32  => 'int',
+        i64  => 'int',
+        i128 => 'int',
+        u8   => 'int',
+        u16  => 'int',
+        u32  => 'int',
+        u64  => 'int',
+        u128 => 'int',
+        int  => 'int',
+        bool => 'int',
+        Bool => 'int',
+        f32  => 'float',
+        f64  => 'float',
+        ptr  => 'ptr'
+    );
+
     method _loc($ast) {
         my $f = $ast->file // '';
         my $l = $ast->line // 0;
@@ -179,6 +209,25 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     method native_type_from_name($name) {
         return $TYPE_NATIVE_MAP{$name} // $self->type_from_name($name);
+    }
+
+    # The storage kind of a native type name, or undef when the name is not a native type.
+    method _native_kind($name) {
+        return undef unless defined $name;
+        return $NATIVE_KIND{$name};
+    }
+
+    # The kind of a value of static type `$name`. The numeric and pointer families are the ones a native slot can
+    # hold directly; `Any` is the dynamic/boxed kind, and a class name, `String`, `Array`, or `Hash` is a managed
+    # reference. An unrecognised name is treated as a reference so a native slot never silently swallows it.
+    method _value_kind($name) {
+        return undef unless defined $name;
+        return 'int'     if $name =~ /^(?:i1|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|int|bool|Bool)$/;
+        return 'float'   if $name eq 'f32' || $name eq 'f64';
+        return 'ptr'     if $name eq 'ptr';
+        return 'string'  if $name eq 'String';
+        return 'dynamic' if $name eq 'Any';
+        return 'reference';
     }
 
     # Type size in bytes for field offset calculation. A sub-byte integer (`i1`/`bool`) still occupies one byte of
@@ -399,7 +448,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         for my $p ( $ast->params->@* ) {
             $var_types{ $p->{name} } = $p->{type} // 'Any';
         }
+
+        # The promotion scan and the return walk must agree on which locals are `Any`: a variable widened by
+        # `_scan_promotions` makes a `return $flag` dynamic, so the inferred return type has to be `Any` too.
+        # `_walk_return_types` applies the promotion when it reaches each declaration; a parameter has no declaration
+        # and is never rewritten, so it keeps its declared type here.
+        my $saved_promote = $promote_any;
+        $promote_any = $self->_scan_promotions( $body, {%var_types} );
         my @types = $self->_walk_return_types( $body, \%var_types );
+        $promote_any = $saved_promote;
         return 'void' unless @types;
         my $acc = shift @types;
         for my $t (@types) { $acc = $self->_lub( $acc, $t ); }
@@ -410,11 +467,12 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my @types;
         for my $stmt ( $block->statements->@* ) {
             if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') ) {
-                $var_types->{ $stmt->name } = $stmt->type // 'Any';
+                my $declared = $stmt->type // 'Any';
+                $var_types->{ $stmt->name } = $promote_any->{ $stmt->name } ? 'Any' : $declared;
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::ListVarDecl') ) {
                 for my $t ( $stmt->targets->@* ) {
-                    $var_types->{ $t->{name} } = $t->{type} // 'Any';
+                    $var_types->{ $t->{name} } = $promote_any->{ $t->{name} } ? 'Any' : ( $t->{type} // 'Any' );
                 }
             }
             elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Return') ) {
@@ -470,6 +528,224 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $b unless defined $a;
         return $a if $a eq $b;
         return 'Any';
+    }
+
+    # A native type is a hint about how a variable is stored, not a promise about what it holds. `maybe_convert_type`
+    # will happily force a value of a different kind into the slot -- a class instance into an `i8` keeps only the low
+    # byte of its pointer, a `String` becomes a small integer -- and silently lose it. Rather than truncate, a native
+    # local that is handed a value its kind cannot hold is promoted to a boxed `Any` for the whole function, so the
+    # value survives, and `lower_var_decl` warns. The promotion has to be decided before any body is lowered so the
+    # declaration, every read, and every write agree on the promoted type.
+    #
+    # The scan is deliberately conservative: an expression whose type cannot be pinned down (a call, a field or
+    # element read) is left alone -- such a store keeps its native slot and warns at runtime instead (`_emit_native_store_guard`).
+    # A same-family value (any integer, any float, or any pointer) is stored normally, so `my i8 $x = $some_i64` and
+    # `my f64 $x = 5` keep their slot rather than boxing.
+    method _scan_promotions ( $block, $seed_types ) {
+        my %types = %$seed_types;
+        my %promoted;
+        $self->_scan_promotions_block( $block, \%types, \%promoted );
+        return \%promoted;
+    }
+
+    method _scan_promotions_block ( $block, $types, $promoted ) {
+        return unless defined $block;
+        for my $stmt ( $block->statements->@* ) {
+            if ( $stmt->isa('Brocken::Katsuro::AST::Stmt::VarDecl') ) {
+                my $declared = $stmt->type // 'Any';
+                $promoted->{ $stmt->name } = 1 if $self->_needs_any( $declared, $self->_static_expr_type( $stmt->init, $types ) );
+                $types->{ $stmt->name }    = $promoted->{ $stmt->name } ? 'Any' : $declared;
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Assign') ) {
+                my $target = $stmt->target;
+                if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') && $target->sigil eq '$' && !$promoted->{ $target->name } ) {
+                    my $declared = $types->{ $target->name };
+                    my $st       = $self->_static_assign_type( $stmt, $declared, $types );
+                    if ( $self->_needs_any( $declared, $st ) ) {
+                        $promoted->{ $target->name } = 1;
+                        $types->{ $target->name }    = 'Any';
+                    }
+                }
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::If') ) {
+                my %t = %$types;
+                $self->_scan_promotions_block( $stmt->then, \%t, $promoted );
+                for my $e ( $stmt->elsif->@* ) {
+                    my %e_types = %$types;
+                    $self->_scan_promotions_block( $e->[1], \%e_types, $promoted );
+                }
+                if ( defined $stmt->else ) {
+                    my %e_types = %$types;
+                    $self->_scan_promotions_block( $stmt->else, \%e_types, $promoted );
+                }
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::While') ) {
+                my %t = %$types;
+                $self->_scan_promotions_block( $stmt->body, \%t, $promoted );
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::For') ) {
+                my %t = %$types;
+                $self->_scan_promotions_block( $stmt->body, \%t, $promoted );
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::Block') ) {
+                my %t = %$types;
+                $self->_scan_promotions_block( $stmt, \%t, $promoted );
+            }
+            elsif ( $stmt->isa('Brocken::Katsuro::AST::Stmt::TryCatch') ) {
+                my %t = %$types;
+                $self->_scan_promotions_block( $stmt->try_body, \%t, $promoted );
+                my %catch_types = %$types;
+                $catch_types{ $stmt->catch_var } = 'Any' if defined $stmt->catch_var;
+                $self->_scan_promotions_block( $stmt->catch_body, \%catch_types, $promoted );
+                my %f = %$types;
+                $self->_scan_promotions_block( $stmt->finally_body, \%f, $promoted );
+            }
+        }
+        return;
+    }
+
+    # The static type stored by an assignment `$stmt`, given the variable's current declared type. For a plain `=` it
+    # is the RHS type; for a compound form it is the type the base operator produces, which is what lands in the slot.
+    method _static_assign_type ( $stmt, $declared, $types ) {
+        my $op = $stmt->op // '=';
+        return $self->_static_expr_type( $stmt->expr, $types ) if $op eq '=';
+
+        # `$b //= X` stores X only when the slot is undef, and a native slot never is, so nothing is ever stored.
+        return $declared if $op eq '//=';
+
+        # `$b ||= X` is `$b || X`, so it stores the same unified value the operator yields.
+        if ( $op eq '||=' ) {
+            my $rt = $self->_static_expr_type( $stmt->expr, $types );
+            return $self->_static_binop_type( '||', $declared, $rt );
+        }
+        my $rt = $self->_static_expr_type( $stmt->expr, $types );
+        return $self->_static_binop_type( substr( $op, 0, -1 ), $declared, $rt );
+    }
+
+    # Whether storing a value of static type `$src_type` into a variable declared `$declared` would lose the value.
+    # A native slot is advisory, not a promise: it holds values of its own kind and is promoted to `Any` for anything
+    # else. A pointer is a machine address, so an integer is an address too and a `ptr` accepts both directions of the
+    # int/ptr pair (a null `0`, address arithmetic, a String, or a class instance all fit a `ptr`). The two numeric
+    # kinds interconvert as they always have -- an int stores a float (truncated) and a float an int (widened) -- so
+    # neither promotes; only a genuinely different kind (a managed reference into a number slot) does.
+    #
+    # `bool` is *logical*, not merely one bit wide: it holds only a genuine boolean, and every other value -- a wider
+    # integer, a float, a reference -- would be masked to bit 0, so it promotes. An unknown/dynamic source (`Any`) is
+    # left alone; the runtime warns instead, so a common `my i64 $x = $any_int` keeps its fast native slot.
+    method _needs_any ( $declared, $src_type ) {
+        return 0 unless defined $declared && defined $src_type;
+        return 0 if $src_type eq 'Any';
+        return 0 unless defined $self->_native_kind($declared);
+        my $sk = $self->_value_kind($src_type);
+        return 0 unless defined $sk;
+        if ( $declared eq 'bool' || $declared eq 'Bool' ) {
+            return $src_type =~ /^(?:bool|Bool|i1)$/ ? 0 : 1;
+        }
+        my $dk = $self->_native_kind($declared);
+
+        # A `ptr` holds a machine address: a raw pointer, a String, a class instance, or an integer used as one.
+        return 0 if $dk eq 'ptr' && $sk =~ /^(?:int|ptr|string|reference)$/;
+
+        # The numeric kinds interconvert; a pointer is not numeric.
+        return 0 if $dk =~ /^(?:int|float)$/ && $sk =~ /^(?:int|float|ptr)$/;
+        return 1;
+    }
+
+    # The static Brocken type name of `$expr`, or undef when it cannot be pinned down. Only the forms whose type is
+    # fixed by construction are recognised; calls, field reads, and element reads stay unknown.
+    method _static_expr_type ( $expr, $types ) {
+        return undef unless defined $expr;
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
+            return $self->_static_expr_type( $expr->expr, $types );
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Const') ) {
+            my $t = $expr->type;
+            return 'bool' if $t eq 'Bool';
+            if ( $t eq 'Int' ) {
+                my $v = $expr->value;
+                return 'i64' if ref $v;
+                return ( $v == 0 || $v == 1 ) ? 'bool' : 'i64';
+            }
+            if ( $t eq 'Float' ) {
+                my $v = $expr->value;
+                return ( $v == 0 || $v == 1 ) ? 'bool' : 'f64';
+            }
+            return 'String' if $t eq 'String';
+            return undef;
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            return undef unless $expr->sigil eq '$';
+            return $types->{ $expr->name };
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::UnOp') ) {
+            my $op = $expr->op;
+            return 'bool' if $op eq '!' || $op eq 'not';
+            my $it = $self->_static_expr_type( $expr->expr, $types );
+            return undef unless defined $it;
+            return 'f64' if $it eq 'f32' || $it eq 'f64';
+            return 'i64';
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::BinOp') ) {
+            my $lt = $self->_static_expr_type( $expr->lhs, $types );
+            my $rt = $self->_static_expr_type( $expr->rhs, $types );
+            return $self->_static_binop_type( $expr->op, $lt, $rt );
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::IncDec') ) {
+            return 'i64';
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Defined') || $expr->isa('Brocken::Katsuro::AST::Expr::Exists') ) {
+            return 'bool';
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Ternary') ) {
+            my $a = $self->_static_expr_type( $expr->then, $types );
+            my $b = $self->_static_expr_type( $expr->else, $types );
+            return undef unless defined $a && defined $b;
+            return 'bool' if $a eq 'bool' && $b eq 'bool';
+            return 'f64' if $a eq 'f64' || $b eq 'f64' || $a eq 'f32' || $b eq 'f32';
+            return 'i64';
+        }
+
+        # A class instance, so a native slot cannot hold it. A fresh construction names its class directly; a call
+        # classified as returning an owned instance names the class it returns.
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') ) {
+            return $self->_resolve_class_ident( $expr->obj->name ) if $self->_is_fresh_construction($expr);
+            my $owned = eval { $self->_owned_class_call($expr) };
+            return $owned if $owned;
+            return undef;
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Call') ) {
+            my $owned = eval { $self->_owned_class_call($expr) };
+            return $owned if $owned;
+            return undef;
+        }
+
+        # A container literal is a managed reference, whatever its element type.
+        return 'Array' if $expr->isa('Brocken::Katsuro::AST::Expr::List');
+        return 'Hash'  if $expr->isa('Brocken::Katsuro::AST::Expr::Hash');
+        return undef;
+    }
+
+    # The static type of `$lt OP $rt` given the operand type names, mirroring `lower_binop`'s choices. Shared by the
+    # expression walk and the compound-assignment scan (`$x += 1`), which needs the same answer without a BinOp node.
+    method _static_binop_type ( $op, $lt, $rt ) {
+        return 'bool'   if $op =~ /^(?:==|!=|<|>|<=|>=|eq|ne|lt|gt|le|ge|cmp)$/;
+        return 'String' if $op eq '.';
+        if ( $op eq '&&' || $op eq '||' ) {
+
+            # `lower_short_circuit_binop` yields one of the two operands, so the result's type is their unification:
+            # a float if either side is a float, an i64 when both are integers, and a box otherwise.
+            return undef unless defined $lt && defined $rt;
+            return 'Any' if $lt eq 'Any' || $rt eq 'Any';
+            my $numeric = qr/^(?:bool|Bool|i1|[iu](?:8|16|32|64|128)|int|f32|f64)$/;
+            return undef unless $lt =~ $numeric && $rt        =~ $numeric;
+            return 'f64' if $lt     =~ /^(?:f32|f64)$/ || $rt =~ /^(?:f32|f64)$/;
+            return 'i64';
+        }
+        return $lt if $op eq '//';
+        return undef unless defined $lt && defined $rt;
+        return 'f64' if $lt eq 'f32' || $lt eq 'f64' || $rt eq 'f32' || $rt eq 'f64';
+        return 'i64' if $lt =~ /^(?:bool|Bool|i1|[iu](?:8|16|32|64|128)|int)$/ && $rt =~ /^(?:bool|Bool|i1|[iu](?:8|16|32|64|128)|int)$/;
+        return undef;
     }
 
     # Mark every variable used in a value position in `$block` as escaped. A class instance local may only be
@@ -1331,6 +1607,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $array_owned_elem = {};
         $hash_var         = {};
         $hash_value_type  = {};
+        $promote_any      = $self->_scan_promotions( $ast->body, { map { $_->{name} => ( $_->{type} // 'Any' ) } $ast->params->@* } );
         $self->_scan_escapes( $ast->body );
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
@@ -1684,7 +1961,17 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     method lower_var_decl($ast) {
         my ( $line, $col ) = ( $ast->line, $ast->col );
         return $self->_lower_hash_decl($ast) if $ast->sigil eq '%';
-        my $ir_type = $self->type_from_name( $ast->type );
+
+        # A native variable the promotion scan found to be handed a value its kind cannot hold is stored as a boxed
+        # `Any` instead, so the value survives the assignment (see `_scan_promotions`). The warning names the
+        # declaration; the offending assignment may be later in the body, but the promotion is what makes the
+        # difference.
+        my $promoted = $promote_any->{ $ast->name } ? 1 : 0;
+        if ($promoted) {
+            warn sprintf( "Brocken: '%s' is declared '%s' but is assigned a value that type cannot hold; promoting it to Any at %s\n",
+                $ast->name, $ast->type, $self->_loc($ast) );
+        }
+        my $ir_type = $promoted ? Brocken::Lindsay::IR::Type::dynamic() : $self->type_from_name( $ast->type );
         my $alloca
             = $builder->build_alloca( $ir_type, $self->unique_value_name( '%' . $ast->name . '.addr' ), undef, $line, $col, $ast->name, $ast->type );
         $symbols->{ $ast->name } = $alloca;
@@ -1693,7 +1980,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         my $is_weak = $self->has_attr( $ast->attrs, 'weak' ) ? 1 : 0;
         $weak_var->{ $ast->name } = 1 if $is_weak;
-        if ( $ast->type eq 'Any' && !$is_weak ) {
+        if ( ( $ast->type eq 'Any' || $promoted ) && !$is_weak ) {
             $self->_note_rc( $ast->name );
         }
         if ( !defined $ast->init && ( $ir_type->kind eq 'dynamic' || $ir_type->kind eq 'ptr' ) ) {
@@ -1735,6 +2022,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
             my $raw_val = $self->lower_expression( $ast->init );
             my $val     = $self->maybe_convert_type( $raw_val, $ir_type, $line, $col, 1 );
+
+            # A native slot handed a value whose static type is unknown (`Any`, a call, an element read) keeps its
+            # fast unboxed storage; if the box turns out to hold something the slot cannot represent, warn at
+            # runtime rather than silently truncating it (see `_emit_native_store_guard`).
+            if ( $ir_type->kind ne 'dynamic' && $raw_val->type->kind eq 'dynamic' ) {
+                $self->_emit_native_store_guard( $raw_val, $ir_type->kind, $ast->name, $ast->type, $line, $col );
+            }
 
             # A fresh instance already carries the reference the slot needs -- the constructor wrote a refcount of 1.
             # Track the local for release at scope exit only when nothing can reach it another way (the escape scan
@@ -1961,7 +2255,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             my $rhs_val = $self->lower_expression( $ast->expr );
             $raw_val = $self->_emit_binop_ir( $lhs_val, $rhs_val, $base_op, $line, $col, $ast );
         }
-        my $val            = $self->maybe_convert_type( $raw_val, $stored_type, $line, $col, 1 );
+        my $val = $self->maybe_convert_type( $raw_val, $stored_type, $line, $col, 1 );
+
+        # A native slot handed a value whose static type is unknown (`Any`, a call, an element read) keeps its fast
+        # unboxed storage; if the box turns out to hold something the slot cannot represent, warn at runtime rather
+        # than silently truncating it (see `_emit_native_store_guard`).
+        if ( $stored_type->kind ne 'dynamic' && $raw_val->type->kind eq 'dynamic' && $target->isa('Brocken::Katsuro::AST::Expr::Var') ) {
+            $self->_emit_native_store_guard( $raw_val, $stored_type->kind, $target->name, $self->_native_type_label($stored_type), $line, $col );
+        }
         my $is_rc          = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $needs_rc->{ $target->name };
         my $is_borrowed    = $target->isa('Brocken::Katsuro::AST::Expr::Var') && $borrowed_params->{ $target->name };
         my $is_dyn_field   = $is_field_target                                 && $stored_type->kind eq 'dynamic' && !$is_weak_field;
@@ -1972,7 +2273,6 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $target->array->sigil eq '@'                              &&
             $array_owned_elem->{ '@' . $target->array->name };
         my $is_dyn_rc = $is_dyn_field || ( $stored_type->kind eq 'dynamic' && ( $is_rc || $is_borrowed || $is_owned_elem ) );
-
         if ( $target->isa('Brocken::Katsuro::AST::Expr::Var') && !$is_field_target && $ast->op eq '=' ) {
             my $rhs_class;
             if ( $stored_type->kind eq 'ptr' &&
@@ -2876,6 +3176,77 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $builder->build_call( $write, [ $two, $nl, $one ], undef, $line, $col );
     }
 
+    # A short display name for a native IR type, for the runtime type-mismatch warning.
+    method _native_type_label($type) {
+        return 'ptr'             if $type->kind eq 'ptr';
+        return 'f' . $type->bits if $type->kind eq 'float';
+        return ( $type->is_signed ? 'i' : 'u' ) . $type->bits;
+    }
+
+    # A native slot is advisory and the compiler cannot see what an `Any` holds. A dynamic value stored into a
+    # native slot is unboxed as usual -- that is what keeps `my i64 $x = $any_int` on its fast native path -- but
+    # when the box turns out to hold something the slot cannot represent (a reference where a number is wanted, or
+    # a number where a pointer is wanted) the unbox keeps only the wrong bits and the value is silently lost. This
+    # emits a runtime check that warns when that happens. A value of the expected kind costs one tag comparison and
+    # a fall-through branch; the check is skipped for a constant (only `undef`, tag 0, is ever a dynamic constant).
+    #
+    # The diagnostic goes through the same `write(2, ...)` path `warn`/`die` use, which needs a rodata reference the
+    # Wasm lowerer cannot yet push. `warn`/`die` are native-only for the same reason, so the Wasm target stores
+    # unguarded rather than emitting a module that fails validation.
+    method _emit_native_store_guard ( $val, $dest_kind, $name, $declared, $line, $col ) {
+        return unless $val->type->kind eq 'dynamic';
+        return if $val->isa('Brocken::Lindsay::IR::Constant');
+        return if $target_is_wasm;
+        my $tag = $self->_reflect_box_tag( $val, $line, $col );
+        my $bad;
+        if ( $dest_kind eq 'ptr' ) {
+
+            # A pointer slot wants a pointer: an integer payload is not one (unboxing it would read the number as
+            # an address).
+            $bad = $builder->build_or(
+                $self->_icmp_eq_i64( $tag, 1, $line, $col ),
+                $builder->build_or(
+                    $self->_icmp_eq_i64( $tag, 2, $line, $col ),
+                    $builder->build_or(
+                        $self->_icmp_eq_i64( $tag, 3, $line, $col ), $self->_icmp_eq_i64( $tag, 6, $line, $col ), undef, $line, $col
+                    ),
+                    undef, $line, $col
+                ),
+                undef, $line, $col
+            );
+        }
+        else {
+            # A numeric slot wants a number. The reference tags -- 4 (pointer/String/instance), 7/9 (array), 8
+            # (hash) -- are not numbers, and unboxing one keeps only its pointer, truncated to the slot's width.
+            $bad = $builder->build_or(
+                $self->_icmp_eq_i64( $tag, 4, $line, $col ),
+                $builder->build_or(
+                    $self->_icmp_eq_i64( $tag, 7, $line, $col ),
+                    $builder->build_or(
+                        $self->_icmp_eq_i64( $tag, 8, $line, $col ), $self->_icmp_eq_i64( $tag, 9, $line, $col ), undef, $line, $col
+                    ),
+                    undef, $line, $col
+                ),
+                undef, $line, $col
+            );
+        }
+        my $func       = $current_func;
+        my $warn_block = $func->append_block( $self->unique_block_name('type_warn') );
+        my $cont_block = $func->append_block( $self->unique_block_name('type_warn_end') );
+        $builder->position_at_end($current_block);
+        $builder->build_cond_br( $bad, $warn_block, $cont_block, $line, $col );
+        $builder->position_at_end($warn_block);
+        $current_block = $warn_block;
+        my $word = $dest_kind eq 'ptr' ? 'pointer'                             : 'number';
+        my $what = $declared           ? sprintf( "declared '%s'", $declared ) : 'declared native';
+        my $msg  = sprintf( "Brocken: the value assigned to '%s' (%s) is not a %s; the assignment cannot preserve it at line %d, col %d\n",
+            $name, $what, $word, $line, $col );
+        $self->_emit_stderr_write( $self->_reflect_rodata($msg), $line, $col );
+        $builder->build_br( $cont_block, $line, $col );
+        $builder->position_at_end($cont_block);
+        $current_block = $cont_block;
+    }
+
     # Declare (once) an external C function the generated code calls directly -- `exit`, `longjmp`, and the
     # `warn`/`die` helpers. The linker resolves the symbol like any other import; an existing declaration with the
     # same name (e.g. `strlen`, shared with `length`) is reused so the module never declares it twice.
@@ -3538,6 +3909,54 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
     }
 
+    # `//` is defined-or: the left operand, unless it is undefined -- the null value of a pointer-shaped or boxed type
+    # (a `String`, a class reference, or an `Any` box) -- in which case the right operand.
+    #
+    # Only pointer-shaped values can be undefined in Brocken: a native int, float, or bool is always defined, so `//`
+    # on one is simply that operand. The right operand is promoted to the type the result will carry:
+    #
+    #   * two pointer operands stay a `ptr` (`$s // "default"`);
+    #   * anything that meets an `Any` box becomes the box, with native values boxed and a `ptr` payload keeping its
+    #     pointer tag (`$earnings // $reserve // 0`);
+    #   * a numeric right operand against a pointer left operand also becomes the box, since the two sides have no
+    #     common native type.
+    method lower_defined_or( $ast, $line, $col ) {
+        my $func     = $current_func;
+        my $lhs_val  = $self->lower_expression( $ast->lhs );
+        my $lhs_kind = $lhs_val->type->kind;
+
+        # Fast path for // on native machine types: they are never undefined!
+        if ( $lhs_kind ne 'ptr' && $lhs_kind ne 'dynamic' ) {
+            return $lhs_val;
+        }
+
+        # LHS is nullable. Result type strictly matches LHS since we assume LHS/RHS represent the same container type
+        my $res_type    = $lhs_val->type;
+        my $res_slot    = $builder->build_alloca( $res_type, $self->unique_value_name('%def_or_res'), undef, $line, $col );
+        my $zero        = Brocken::Lindsay::IR::Constant->new( type => $res_type, value => 0 );
+        my $is_undef    = $builder->build_icmp( 'eq', $lhs_val, $zero, undef, $line, $col );
+        my $rhs_block   = $func->append_block( $self->unique_block_name('def_or_rhs') );
+        my $merge_block = $func->append_block( $self->unique_block_name('def_or_merge') );
+
+        # If undefined, go to RHS block. Else, store LHS and jump to merge.
+        $builder->build_store( $lhs_val, $res_slot, $line, $col );
+        $builder->build_cond_br( $is_undef, $rhs_block, $merge_block, $line, $col );
+        $builder->position_at_end($rhs_block);
+        $current_block = $rhs_block;
+        my $rhs_val  = $self->lower_expression( $ast->rhs );
+        my $rhs_conv = $self->maybe_convert_type( $rhs_val, $res_type, $line, $col );
+
+        # If we converted a dynamic to ptr/native, we must release the dynamic!
+        if ( $rhs_val->type->kind eq 'dynamic' && $res_type->kind ne 'dynamic' ) {
+            $self->_release_owned_call_temp( $rhs_val, $line, $col );
+        }
+        $builder->build_store( $rhs_conv, $res_slot, $line, $col );
+        $builder->build_br( $merge_block, $line, $col ) unless $current_block->terminator;
+        $builder->position_at_end($merge_block);
+        $current_block = $merge_block;
+        return $builder->build_load( $res_type, $res_slot, undef, $line, $col );
+    }
+
     method lower_array_addr($ast) {
         my $array_expr = $ast->array;
         my $array_base;
@@ -3602,96 +4021,6 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $builder->build_load( $addr->base_type, $addr, undef, $ast->line, $ast->col );
     }
 
-    # `//` is defined-or: the left operand, unless it is undefined -- the null value of a pointer-shaped or boxed type
-    # (a `String`, a class reference, or an `Any` box) -- in which case the right operand.
-    #
-    # Only pointer-shaped values can be undefined in Brocken: a native int, float, or bool is always defined, so `//`
-    # on one is simply that operand. The right operand is promoted to the type the result will carry:
-    #
-    #   * two pointer operands stay a `ptr` (`$s // "default"`);
-    #   * anything that meets an `Any` box becomes the box, with native values boxed and a `ptr` payload keeping its
-    #     pointer tag (`$earnings // $reserve // 0`);
-    #   * a numeric right operand against a pointer left operand also becomes the box, since the two sides have no
-    #     common native type.
-    method lower_defined_or( $ast, $line, $col ) {
-        my $func     = $current_func;
-        my $lhs_val  = $self->lower_expression( $ast->lhs );
-        my $lhs_kind = $lhs_val->type->kind;
-
-        # Fast path for // on native machine types: they are never undefined!
-        if ( $lhs_kind ne 'ptr' && $lhs_kind ne 'dynamic' ) {
-            return $lhs_val;
-        }
-
-        # LHS is nullable. Result type strictly matches LHS since we assume LHS/RHS represent the same container type
-        my $res_type    = $lhs_val->type;
-        my $res_slot    = $builder->build_alloca( $res_type, $self->unique_value_name('%def_or_res'), undef, $line, $col );
-        my $zero        = Brocken::Lindsay::IR::Constant->new( type => $res_type, value => 0 );
-        my $is_undef    = $builder->build_icmp( 'eq', $lhs_val, $zero, undef, $line, $col );
-        my $rhs_block   = $func->append_block( $self->unique_block_name('def_or_rhs') );
-        my $merge_block = $func->append_block( $self->unique_block_name('def_or_merge') );
-
-        # If undefined, go to RHS block. Else, store LHS and jump to merge.
-        $builder->build_store( $lhs_val, $res_slot, $line, $col );
-        $builder->build_cond_br( $is_undef, $rhs_block, $merge_block, $line, $col );
-        $builder->position_at_end($rhs_block);
-        $current_block = $rhs_block;
-        my $rhs_val  = $self->lower_expression( $ast->rhs );
-        my $rhs_conv = $self->maybe_convert_type( $rhs_val, $res_type, $line, $col );
-
-        # If we converted a dynamic to ptr/native, we must release the dynamic!
-        if ( $rhs_val->type->kind eq 'dynamic' && $res_type->kind ne 'dynamic' ) {
-            $self->_release_owned_call_temp( $rhs_val, $line, $col );
-        }
-        $builder->build_store( $rhs_conv, $res_slot, $line, $col );
-        $builder->build_br( $merge_block, $line, $col ) unless $current_block->terminator;
-        $builder->position_at_end($merge_block);
-        $current_block = $merge_block;
-        return $builder->build_load( $res_type, $res_slot, undef, $line, $col );
-    }
-
-    method lower_short_circuit_logic( $ast, $line, $col ) {
-        my $op   = $ast->op;
-        my $func = $current_func;
-
-        # To support short-circuiting properly without backend Phi nodes, we allocate a strict boolean i1 slot.
-        my $i1_type  = Brocken::Lindsay::IR::Type::i1();
-        my $res_slot = $builder->build_alloca( $i1_type, $self->unique_value_name('%sc_res'), undef, $line, $col );
-        my $lhs_val  = $self->lower_expression( $ast->lhs );
-        my $lhs_cond = $self->as_condition( $lhs_val, $line, $col );
-        $self->_release_owned_call_temp( $lhs_val, $line, $col ) if $lhs_val->type->kind eq 'dynamic';
-        my $eval_rhs_bb = $func->append_block( $self->unique_block_name("sc_rhs") );
-        my $merge_bb    = $func->append_block( $self->unique_block_name("sc_merge") );
-
-        if ( $op eq '&&' ) {
-
-            # LHS False -> Result False, skip RHS
-            my $false_val = Brocken::Lindsay::IR::Constant->new( type => $i1_type, value => 0 );
-            $builder->build_store( $false_val, $res_slot, $line, $col );
-            $builder->build_cond_br( $lhs_cond, $eval_rhs_bb, $merge_bb, $line, $col );
-        }
-        else {
-            # LHS True -> Result True, skip RHS
-            my $true_val = Brocken::Lindsay::IR::Constant->new( type => $i1_type, value => 1 );
-            $builder->build_store( $true_val, $res_slot, $line, $col );
-            $builder->build_cond_br( $lhs_cond, $merge_bb, $eval_rhs_bb, $line, $col );
-        }
-
-        # Evaluate RHS block
-        $builder->position_at_end($eval_rhs_bb);
-        $current_block = $eval_rhs_bb;
-        my $rhs_val  = $self->lower_expression( $ast->rhs );
-        my $rhs_cond = $self->as_condition( $rhs_val, $line, $col );
-        $self->_release_owned_call_temp( $rhs_val, $line, $col ) if $rhs_val->type->kind eq 'dynamic';
-        $builder->build_store( $rhs_cond, $res_slot, $line, $col );
-        $builder->build_br( $merge_bb, $line, $col ) unless $current_block->terminator;
-
-        # Merge block
-        $builder->position_at_end($merge_bb);
-        $current_block = $merge_bb;
-        return $builder->build_load( $i1_type, $res_slot, undef, $line, $col );
-    }
-
     method lower_binop($ast) {
         my $op = $ast->op;
         my ( $line, $col ) = ( $ast->line, $ast->col );
@@ -3701,13 +4030,98 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $self->lower_defined_or( $ast, $line, $col );
         }
         if ( $op eq '&&' || $op eq '||' ) {
-            return $self->lower_short_circuit_logic( $ast, $line, $col );
+            return $self->lower_short_circuit_binop($ast);
         }
 
         # Eagerly evaluate standard binary operations for arithmetic and comparison
         my $lhs = $self->lower_expression( $ast->lhs );
         my $rhs = $self->lower_expression( $ast->rhs );
         return $self->_emit_binop_ir( $lhs, $rhs, $op, $line, $col, $ast );
+    }
+
+    # Short-circuiting `||` and `&&` with Perl's value semantics: the expression yields whichever operand decides the
+    # result -- the left one when `||` short-circuits (left truthy) or `&&` short-circuits (left false), and the right
+    # one otherwise -- rather than a boolean. `$b = false; $b || -26` therefore leaves `$b` holding -26, and a pair of
+    # floats yields a float. Truthiness is Perl's too: a float is true when it is non-zero (not when it truncates to a
+    # non-zero integer), an integer when it is non-zero, and a box through the runtime's `is_truthy`.
+    #
+    # The result slot has to hold either operand, so its type unifies the two operand kinds. The right operand's kind
+    # is read off the AST (`_short_circuit_result_type`) rather than its lowered value, because the slot is allocated
+    # before the branch and the right side must not be evaluated when the left already decides.
+    method lower_short_circuit_binop($ast) {
+        my $op = $ast->op;
+        my ( $line, $col ) = ( $ast->line, $ast->col );
+        my $func     = $current_func;
+        my $lhs      = $self->lower_expression( $ast->lhs );
+        my $res_type = $self->_short_circuit_result_type( $lhs->type, $ast->rhs );
+        my $res_slot = $builder->build_alloca( $res_type, $self->unique_value_name('%sc_res'), undef, $line, $col );
+
+        # The left operand is what the merge block reads when the branch is not taken.
+        my $lhs_conv = $self->maybe_convert_type( $lhs, $res_type, $line, $col );
+        if ( $lhs->type->kind eq 'dynamic' && $res_type->kind ne 'dynamic' ) {
+            $self->_release_owned_call_temp( $lhs, $line, $col );
+        }
+        $builder->build_store( $lhs_conv, $res_slot, $line, $col );
+        my $cond        = $self->_truthy_i1( $lhs, $line, $col );
+        my $rhs_block   = $func->append_block( $self->unique_block_name('sc_rhs') );
+        my $merge_block = $func->append_block( $self->unique_block_name('sc_merge') );
+        $builder->position_at_end($current_block);
+
+        # `||` short-circuits on a true left, `&&` on a false one, so the taken edge is the opposite for each.
+        if ( $op eq '||' ) {
+            $builder->build_cond_br( $cond, $merge_block, $rhs_block, $line, $col );
+        }
+        else {
+            $builder->build_cond_br( $cond, $rhs_block, $merge_block, $line, $col );
+        }
+        $builder->position_at_end($rhs_block);
+        $current_block = $rhs_block;
+        my $rhs      = $self->lower_expression( $ast->rhs );
+        my $rhs_conv = $self->maybe_convert_type( $rhs, $res_type, $line, $col );
+        if ( $rhs->type->kind eq 'dynamic' && $res_type->kind ne 'dynamic' ) {
+            $self->_release_owned_call_temp( $rhs, $line, $col );
+        }
+        $builder->build_store( $rhs_conv, $res_slot, $line, $col );
+        $builder->build_br( $merge_block, $line, $col ) unless $current_block->terminator;
+        $builder->position_at_end($merge_block);
+        $current_block = $merge_block;
+        return $builder->build_load( $res_type, $res_slot, undef, $line, $col );
+    }
+
+    # The IR type of a short-circuit result: the unification of the left operand's kind (already lowered) and the
+    # right operand's kind, which is read off the AST. Both integers give i64, either a float gives f64, both
+    # references give ptr, and anything else -- a box on either side, a mismatched pair, or a right operand whose kind
+    # cannot be pinned down -- gives a box, which can always hold either operand.
+    method _short_circuit_result_type ( $lhs_type, $rhs_ast ) {
+        my $lhs_kind = $lhs_type->kind;
+
+        # The variable map `_static_expr_type` reads: the IR type of every slot bound so far, with a boxed slot named
+        # `Any` so an untyped local is recognised as such.
+        my %types;
+        for my $name ( keys %$symbols ) {
+            my $sym = $symbols->{$name};
+            next unless ref $sym && $sym->can('allocated_type');
+            my $alloc = $sym->allocated_type or next;
+            $types{$name} = $alloc->kind eq 'dynamic' ? 'Any' : $alloc->as_string;
+        }
+        my $rhs_name = $self->_static_expr_type( $rhs_ast, \%types );
+        my $rhs_kind;
+        if ( defined $rhs_name ) {
+            $rhs_kind = 'float'   if $rhs_name =~ /^(?:f32|f64)$/;
+            $rhs_kind = 'int'     if $rhs_name =~ /^(?:bool|Bool|i1|[iu](?:8|16|32|64|128)|int)$/;
+            $rhs_kind = 'ptr'     if $rhs_name =~ /^(?:String|Array|Hash)$/;
+            $rhs_kind = 'dynamic' if $rhs_name eq 'Any';
+        }
+        my $res_kind;
+        if    ( $lhs_kind eq 'dynamic' || !defined $rhs_kind || $rhs_kind eq 'dynamic' ) { $res_kind = 'dynamic' }
+        elsif ( $lhs_kind eq 'int' && $rhs_kind eq 'int' )                               { $res_kind = 'int' }
+        elsif ( $lhs_kind =~ /^(?:int|float)$/ && $rhs_kind =~ /^(?:int|float)$/ )       { $res_kind = 'float' }
+        elsif ( $lhs_kind eq 'ptr' && $rhs_kind eq 'ptr' )                               { $res_kind = 'ptr' }
+        else                                                                             { $res_kind = 'dynamic' }
+        return Brocken::Lindsay::IR::Type::dynamic() if $res_kind eq 'dynamic';
+        return Brocken::Lindsay::IR::Type::f64()     if $res_kind eq 'float';
+        return Brocken::Lindsay::IR::Type::ptr()     if $res_kind eq 'ptr';
+        return Brocken::Lindsay::IR::Type::i64();
     }
 
     method _emit_binop_ir( $lhs, $rhs, $op, $line, $col, $ast ) {
@@ -3817,81 +4231,6 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $builder->build_icmp( $lhs->type->is_signed ? 'sge' : 'uge', $lhs, $rhs, undef, $line, $col );
         }
         Carp::croak( "Unknown binary operator '$op' at " . $self->_loc($ast) );
-    }
-
-    # Short-circuiting implementation for //, ||, &&
-    method lower_short_circuit_binop($ast) {
-        my $op = $ast->op;
-        my ( $line, $col ) = ( $ast->line, $ast->col );
-        my $func = $current_func;
-
-        # First, just evaluate LHS in the current block
-        my $lhs = $self->lower_expression( $ast->lhs );
-
-        # Fast path for // on native machine types: they are never undefined!
-        if ( $op eq '//' ) {
-            my $kind = $lhs->type->kind;
-            if ( $kind ne 'ptr' && $kind ne 'dynamic' ) {
-
-                # $lhs is a native int/float/bool, so it is always defined.
-                # Skip evaluating RHS completely.
-                return $lhs;
-            }
-        }
-
-        # Determine unification type for result slot.
-        # If either operand can be dynamic, promote result to dynamic.
-        my $res_type;
-        if ( $op eq '//' ) {
-            $res_type = ( $lhs->type->kind eq 'ptr' ) ? Brocken::Lindsay::IR::Type::ptr() : Brocken::Lindsay::IR::Type::dynamic();
-        }
-        else {
-            # For && and ||, match LHS type unless dynamic
-            $res_type = ( $lhs->type->kind eq 'dynamic' ) ? Brocken::Lindsay::IR::Type::dynamic() : $lhs->type;
-        }
-        my $res_slot = $builder->build_alloca( $res_type, $self->unique_value_name('%sc_res'), undef, $line, $col );
-
-        # Store converted LHS into the result slot
-        my $lhs_conv = $self->maybe_convert_type( $lhs, $res_type, $line, $col );
-        $builder->build_store( $lhs_conv, $res_slot, $line, $col );
-
-        # Compute condition for short-circuiting
-        my $cond;
-        if ( $op eq '//' ) {
-
-            # Defined-or: test if LHS is defined (non-null)
-            my $zero = Brocken::Lindsay::IR::Constant->new( type => $lhs->type, value => 0 );
-            $cond = $builder->build_icmp( 'ne', $lhs, $zero, undef, $line, $col );
-        }
-        else {
-            # Logical || and &&: Perl truthiness test
-            $cond = $self->_truthy_i1( $lhs, $line, $col );
-        }
-        my $rhs_block   = $func->append_block( $self->unique_block_name('sc_rhs') );
-        my $merge_block = $func->append_block( $self->unique_block_name('sc_merge') );
-        if ( $op eq '//' || $op eq '||' ) {
-
-            # If true/defined -> skip RHS to merge_block; else evaluate RHS
-            $builder->build_cond_br( $cond, $merge_block, $rhs_block, $line, $col );
-        }
-        elsif ( $op eq '&&' ) {
-
-            # If true -> evaluate RHS; else skip to merge_block
-            $builder->build_cond_br( $cond, $rhs_block, $merge_block, $line, $col );
-        }
-
-        # Lower RHS block
-        $builder->position_at_end($rhs_block);
-        $current_block = $rhs_block;
-        my $rhs      = $self->lower_expression( $ast->rhs );
-        my $rhs_conv = $self->maybe_convert_type( $rhs, $res_type, $line, $col );
-        $builder->build_store( $rhs_conv, $res_slot, $line, $col );
-        $builder->build_br( $merge_block, $line, $col ) unless $current_block->terminator;
-
-        # Resume at merge block
-        $builder->position_at_end($merge_block);
-        $current_block = $merge_block;
-        return $builder->build_load( $res_type, $res_slot, undef, $line, $col );
     }
 
     # The string comparisons. Both operands are stringified through `_stringify_value`, so a dynamic box is rendered
@@ -5537,6 +5876,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $borrowed_params->{$pname} = 1;
             }
         }
+        $promote_any = $self->_scan_promotions( $method_ast->body, { map { $_->{name} => ( $_->{type} // 'Any' ) } $method_ast->params->@* } );
         $self->_scan_escapes( $method_ast->body );
         $self->lower_block_body( $method_ast->body );
         unless ( $current_block && $current_block->terminator ) {
@@ -5593,7 +5933,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $self_val = $current_func->params->[2];
         $symbols->{self} = $self_val;
         $self->populate_field_geps( $class_name, $self_val );
+        $promote_any = {};
         for my $adjust_ast ( $adjust_asts->@* ) {
+            $promote_any->{$_} = 1 for keys %{ $self->_scan_promotions( $adjust_ast->body, {} ) };
             $self->_scan_escapes( $adjust_ast->body );
             $self->lower_block_body( $adjust_ast->body );
         }
@@ -5650,7 +5992,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $self_val = $current_func->params->[2];
         $symbols->{self} = $self_val;
         $self->populate_field_geps( $class_name, $self_val );
+        $promote_any = {};
         for my $destroy_ast ( $destroy_asts->@* ) {
+            $promote_any->{$_} = 1 for keys %{ $self->_scan_promotions( $destroy_ast->body, {} ) };
             $self->_scan_escapes( $destroy_ast->body );
             $self->lower_block_body( $destroy_ast->body );
         }

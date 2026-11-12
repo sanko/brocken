@@ -947,10 +947,10 @@ BROCKEN
     like( $text, qr/zext\s+i1\s+.*\s+to\s+i8/, 'bool promoted from i1 to i8 before neg' );
     like( $text, qr/neg\s+i8/,                 'neg operates on i8, not i1' );
 };
-subtest 'Bool negation double-negate preserves value' => sub {
+subtest 'i1 negation double-negate preserves value' => sub {
     my $c   = Brocken->new;
     my $mod = $c->compile(<<'BROCKEN');
-my bool $b = true;
+my i1 $b = true;
 $b = -$b;
 $b = -$b;
 return $b;
@@ -959,7 +959,25 @@ BROCKEN
     ok( $f, 'found entry function' );
     my $text = $f->as_string();
     like( $text, qr/neg\s+i8/,           'first neg on i8' );
-    like( $text, qr/and\s+i8\s+.*,\s+1/, 'result masked to 1-bit for bool storage' );
+    like( $text, qr/and\s+i8\s+.*,\s+1/, 'result masked to 1-bit for i1 storage' );
+};
+subtest 'bool handed a non-boolean value is promoted to Any and warns' => sub {
+    my $c = Brocken->new;
+    my @warnings;
+    my $mod;
+    {
+        local $SIG{__WARN__} = sub { push @warnings, $_[0] };
+        $mod = $c->compile(<<'BROCKEN');
+my bool $b = false;
+$b = $b || -26;
+return $b;
+BROCKEN
+    }
+    my $f = find_function( $mod, '_BROCKEN_ENTRY' );
+    ok( $f, 'found entry function' );
+    my $text = $f->as_string();
+    like( $text, qr/alloca dynamic/, 'a promoted bool is stored in a dynamic slot' );
+    ok( scalar( grep {/promoting it to Any/} @warnings ), 'the promotion is reported to the user' ) or diag "warnings: @warnings";
 };
 subtest 'A forward class declaration does not clobber a definition' => sub {
     my $c   = Brocken->new;
