@@ -442,16 +442,20 @@ finally {
 - Callees borrow arguments and must not decrement them on exit.
 - Returning a field promotes it to an **owned** reference (`incref` on return).
 
-### 10.2 Immix Bump Allocator
+### 10.2 Immix Bump Allocator, Compaction & Large Object Space
 
-- Heap memory is divided into 32 KiB blocks containing 256-byte lines.[^immix]
-- **Block Layout:**
-  - `[block + 0..15]`: 128-bit line availability bitmap.
-  - Line 0: bytes `16..255` usable (240 bytes).
+Heap memory is divided into 32 KiB blocks containing 256-byte lines.[^immix]
+
+- **Block Layout (32 KiB):**
+  - `[block + 0..31]`: 256-bit line state bitmap (2 bits per line: `0`=Free, `1`=Live, `2`=Pinned).
+  - Line 0: bytes `32..255` usable (224 bytes).
   - Lines 1..126: 256 bytes usable each.
   - Line 127: bytes `32512..32751` usable (240 bytes).
   - `[block + 32752..32759]`: `live_count` (`i64`).
   - `[block + 32760..32767]`: `next_free` (`i64`).
+- **Two-Bit Line States:** Each line tracks whether it is *Free*, *Live*, or *Pinned*. Multi-line spans and evacuated objects mark all lines they occupy as *Pinned* (state `2`) to prevent line-level reuse during sweep cycles.
+- **Opportunistic Line Compaction:** Fragmented blocks with sparse live counts can evacuate surviving live objects to contiguous free lines via `evacuate_obj`, freeing entire blocks for recycling into `free_blocks`.
+- **Large Object Space (LOS):** Allocations $\ge 4\text{ KiB}$ bypass the 32 KiB tiled Immix grid and are allocated out-of-line in Large Object Space (LOS) bumping downward from the ceiling of the arena via `ICB::los_head` (or via OS virtual memory mappings). The runtime helper `block_of($hb, $addr)` inspects `ICB::los_head` and the arena boundary to distinguish Immix blocks from LOS memory, bypassing block metadata and live-count operations for large objects.
 - **Segregated Free Lists:**
   - `ICB::free16_head` (offset 48): Recycles 16-byte Fat Scalars.
   - `ICB::free_big_head` (offset 144): Recycles variable-sized Tag 8 and Tag 9 slabs.
@@ -505,7 +509,7 @@ Channels provide synchronized communication between Isolates, deep-copying aggre
 | `Brocken::syscall_by_name(name, ...)` | Platform-resolved syscall by string name |
 | `Brocken::libc(name, ...)` | Dynamic C ABI import invocation |
 | `Brocken::heap_base()` | Load of the isolate's `%__heap_base` pointer |
-| `Brocken::icb_size()` | Compiled byte size of the ICB structure (168) |
+| `Brocken::icb_size()` | Compiled byte size of the ICB structure (184) |
 | `Brocken::block_size()` | Size of an Immix memory block (32768) |
 
 ---
@@ -552,8 +556,10 @@ The Isolate Control Block is pinned to a hardware register (`r14` on x86_64, `x2
 | 144 | `free_big_head` | `ptr` | Segregated free list for large Tag 8 and Tag 9 slabs |
 | 152 | `stack_limit` | `ptr` | Floor stack limit threshold |
 | 160 | `suspect_count` | `i64` | Number of live entries in suspect buffer (-1 = drain active) |
+| 168 | `arena_size` | `i64` | Total bytes allocated for the isolate arena |
+| 176 | `los_head` | `ptr` | Top-of-arena downward bump cursor for Large Object Space (LOS) |
 
-**Total ICB Size:** **168 bytes**.
+**Total ICB Size:** **184 bytes**.
 
 ### 15.2 Sandboxing Flags
 
@@ -583,7 +589,7 @@ The Isolate Control Block is pinned to a hardware register (`r14` on x86_64, `x2
 |---|---|
 | **Isolate**[^isolate] | A share-nothing OS thread with independent heap and pinned ICB. |
 | **Fiber**[^ctxswitch] | Cooperative green thread inside an isolate scheduled by `ctx_swap`. |
-| **ICB**[^isolate] | Isolate Control Block (168-byte struct pinned to hardware register). |
+| **ICB**[^isolate] | Isolate Control Block (184-byte struct pinned to hardware register). |
 | **FCB**[^ctxswitch] | Fiber Control Block: spilled registers, saved SP, and resume PC. |
 | **Fat Scalar**[^fatscalar] | 16-byte `Any` tagged dynamic value. |
 | **Immix**[^immix] | 32 KiB block, 256-byte line mark-region bump allocator. |

@@ -8,7 +8,7 @@ use feature qw[class];
 
 # R2.2 Block Metadata Tests — find_free_line, clear_block_bitmap,
 # next_free hint, bump_alloc line marking, sweep-driven reclamation
-subtest 'clear_block_bitmap zeros both words' => sub {
+subtest 'clear_block_bitmap zeros four words' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
 SKIP: {
@@ -20,15 +20,19 @@ my ptr $block = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 Brocken::Runtime::clear_block_bitmap($block);
 my i64 $w0 = Brocken::load_i64($block);
 my i64 $w1 = Brocken::load_i64(Brocken::ptr_add($block, 8));
+my i64 $w2 = Brocken::load_i64(Brocken::ptr_add($block, 16));
+my i64 $w3 = Brocken::load_i64(Brocken::ptr_add($block, 24));
 if ($w0 != 0) { return 1; }
 if ($w1 != 0) { return 2; }
+if ($w2 != 0) { return 3; }
+if ($w3 != 0) { return 4; }
 return 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r22_clear_bitmap' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 0, 'clear_block_bitmap zeros both words' );
+        is( $? >> 8, 0, 'clear_block_bitmap zeros four words' );
         unlink $file;
     }
 };
@@ -181,8 +185,8 @@ my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 # Check that Line 0 is marked in the bitmap after _init
 my i64 $w0 = Brocken::load_i64($block);
-my i64 $bit0 = Brocken::band($w0, 1);
-if ($bit0 != 1) { return 1; }
+my i64 $state0 = Brocken::band($w0, 3);
+if ($state0 != 1) { return 1; }
 # Check that sweep_block returns 1 (only Line 0 marked)
 my i64 $s = Brocken::Runtime::sweep_block($block);
 if ($s != 1) { return 2; }
@@ -221,10 +225,10 @@ if (Brocken::ptr_cmp_gt(256, $offset)) { return 2; }
 # Check that multiple lines are marked in bitmap
 my i64 $w0 = Brocken::load_i64($block0);
 # At least Line 0 and Line 1 should be marked
-my i64 $bit0 = Brocken::band($w0, 1);
-if ($bit0 != 1) { return 3; }
-my i64 $bit1 = Brocken::band($w0, 2);
-if ($bit1 == 0) { return 4; }
+my i64 $state0 = Brocken::band($w0, 3);
+if ($state0 != 1) { return 3; }
+my i64 $state1 = Brocken::band(Brocken::shr($w0, 2), 3);
+if ($state1 == 0) { return 4; }
 return 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
@@ -328,11 +332,15 @@ Brocken::Runtime::recycle_block($hb, $block);
 # Verify bitmap is cleared
 my i64 $w0 = Brocken::load_i64($block);
 my i64 $w1 = Brocken::load_i64(Brocken::ptr_add($block, 8));
+my i64 $w2 = Brocken::load_i64(Brocken::ptr_add($block, 16));
+my i64 $w3 = Brocken::load_i64(Brocken::ptr_add($block, 24));
 if ($w0 != 0) { return 1; }
 if ($w1 != 0) { return 2; }
+if ($w2 != 0) { return 3; }
+if ($w3 != 0) { return 4; }
 # Verify next_free is reset to 0
 my i64 $nf = Brocken::Runtime::get_next_free($block);
-if ($nf != 0) { return 3; }
+if ($nf != 0) { return 5; }
 return 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
@@ -367,8 +375,12 @@ if (Brocken::ptr_cmp_eq($recycled, 0)) { return 2; }
 # Check the bitmap of the recycled block
 my i64 $w0 = Brocken::load_i64($recycled);
 my i64 $w1 = Brocken::load_i64(Brocken::ptr_add($recycled, 8));
+my i64 $w2 = Brocken::load_i64(Brocken::ptr_add($recycled, 16));
+my i64 $w3 = Brocken::load_i64(Brocken::ptr_add($recycled, 24));
 if ($w0 != 0) { return 3; }
 if ($w1 != 0) { return 4; }
+if ($w2 != 0) { return 5; }
+if ($w3 != 0) { return 6; }
 return 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
@@ -398,15 +410,15 @@ if ($lc != 16) { return 1; }
 # Bitmap should have multiple lines marked
 my i64 $w0 = Brocken::load_i64($block0);
 # At least lines 0 and 1 should be marked
-if (Brocken::band($w0, 1) == 0) { return 2; }
-if (Brocken::band($w0, 2) == 0) { return 3; }
+if (Brocken::band($w0, 3) == 0) { return 2; }
+if (Brocken::band(Brocken::shr($w0, 2), 3) == 0) { return 3; }
 return 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_r22_lc_multiline' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 0, 'live_count tracks allocations across line advances' );
+        is $? >> 8, 0, 'live_count tracks allocations across line advances';
         unlink $file;
     }
 };

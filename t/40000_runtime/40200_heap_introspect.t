@@ -5,6 +5,7 @@ use blib;
 use Brocken;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
+#
 subtest 'Initial ICB cursor state after _init' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
@@ -19,20 +20,20 @@ my i64 $lr = Brocken::Runtime::line_remaining($hb);
 my i64 $br = Brocken::Runtime::block_remaining($hb);
 my i64 $f16 = Brocken::Runtime::free16_count($hb);
 my i64 $fb = Brocken::Runtime::free_blocks_count($hb);
-# Expected: heap_cursor == immix_cursor == hb + 160 (block at hb+160, Line 0 data at block+16)
+# Expected: heap_cursor == immix_cursor == hb + 184 (block at hb+184, Line 0 data at block+32)
 
     my ptr $base = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
-    my ptr $line0 = Brocken::ptr_add($base, 16);
+    my ptr $line0 = Brocken::ptr_add($base, 32);
     # hc should be line0
     if (Brocken::ptr_cmp_eq($hc, $line0) == 0) { return 1; }
     # ic should also be line0
     if (Brocken::ptr_cmp_eq($ic, $line0) == 0) { return 2; }
     # il should be base + 256
     if (Brocken::ptr_cmp_eq($il, Brocken::ptr_add($base, 256)) == 0) { return 3; }
-    # line_remaining = 256 - 16 = 240
-    if ($lr != 240) { return 4; }
-    # block_remaining = 32752 - 16 = 32736 (last 16 bytes are metadata)
-    if ($br != 32736) { return 5; }
+    # line_remaining = 256 - 32 = 224
+    if ($lr != 224) { return 4; }
+    # block_remaining = 32752 - 32 = 32720 (last 16 bytes are metadata)
+    if ($br != 32720) { return 5; }
 # free16_count == 0
 if ($f16 != 0) { return 6; }
 # free_blocks_count == 0
@@ -205,10 +206,10 @@ SKIP: {
         skip 'Not native', 2 unless $host->is_native;
         my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
-# Fill line 0: 240 bytes / 16 = 15 Any allocations
+# Fill line 0: 224 bytes / 16 = 14 Any allocations
 my $a1=1;my $a2=2;my $a3=3;my $a4=4;my $a5=5;
 my $a6=6;my $a7=7;my $a8=8;my $a9=9;my $a10=10;
-my $a11=11;my $a12=12;my $a13=13;my $a14=14;my $a15=15;
+my $a11=11;my $a12=12;my $a13=13;my $a14=14;
 my i64 $s = Brocken::Runtime::mem_status($hb);
 # bit 0 (value 1) should be set
 my i64 $expected = 1;
@@ -281,18 +282,18 @@ SKIP: {
         my $module = Brocken->new->compile(<<'BROCKEN');
 my ptr $hb = Brocken::heap_base();
 my i64 $w0 = Brocken::Runtime::line_waste($hb);
-# Initially: line 0 starts at block+16, limit at block+256 → waste = 240
-if ($w0 != 240) { return 1; }
+# Initially: line 0 starts at block+32, limit at block+256 → waste = 224
+if ($w0 != 224) { return 1; }
 my $x = 42;
 my i64 $w1 = Brocken::Runtime::line_waste($hb);
-# After 1 alloc (16 bytes): waste = 240 - 16 = 224
-if ($w1 != 224) { return 2; }
-# Fill the rest of line 0 (14 more allocs: 15 total = 240 bytes)
+# After 1 alloc (16 bytes): waste = 224 - 16 = 208
+if ($w1 != 208) { return 2; }
+# Fill the rest of line 0 (13 more allocs: 14 total = 224 bytes)
 my $a1=1;my $a2=2;my $a3=3;my $a4=4;my $a5=5;
 my $a6=6;my $a7=7;my $a8=8;my $a9=9;my $a10=10;
-my $a11=11;my $a12=12;my $a13=13;my $a14=14;
+my $a11=11;my $a12=12;my $a13=13;
 my i64 $w15 = Brocken::Runtime::line_waste($hb);
-# After 15 allocs: waste = 0 (line exhausted)
+# After 14 allocs: waste = 0 (line exhausted)
 if ($w15 != 0) { return 3; }
 # The next alloc advances to line 1
 my $a16 = 16;
@@ -305,7 +306,7 @@ BROCKEN
         my $file  = $brocken->tmpdir . '/r_gc_line_waste' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 0, 'line_waste: initial 240, 224 after 1 alloc, 0 at line fill, 240 on new line' );
+        is( $? >> 8, 0, 'line_waste: initial 224, 208 after 1 alloc, 0 at line fill, 240 on new line' );
         unlink $file;
     }
 };
@@ -480,36 +481,48 @@ my ptr $hb = Brocken::heap_base();
 my ptr $block = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 # _init marks Line 0 — clear bitmap first
 Brocken::Runtime::clear_block_bitmap($block);
+
 # Initially no lines marked
 my i64 $s0 = Brocken::Runtime::sweep_block($block);
 if ($s0 != 0) { return 1; }
-# Mark line 0
+
+# Mark line 0 (word 0, bits 0-1)
 Brocken::Runtime::mark_line($block, 0);
 my i64 $s1 = Brocken::Runtime::sweep_block($block);
 if ($s1 != 1) { return 2; }
-# Mark line 1
+
+# Mark line 1 (word 0, bits 2-3)
 Brocken::Runtime::mark_line($block, 1);
 my i64 $s2 = Brocken::Runtime::sweep_block($block);
 if ($s2 != 2) { return 3; }
-# Mark line 63 (last bit of first i64 word)
-Brocken::Runtime::mark_line($block, 63);
+
+# Mark line 31 (last line of first i64 word, bits 62-63)
+Brocken::Runtime::mark_line($block, 31);
 my i64 $s3 = Brocken::Runtime::sweep_block($block);
 if ($s3 != 3) { return 4; }
-# Mark line 64 (first bit of second i64 word)
-Brocken::Runtime::mark_line($block, 64);
+
+# Mark line 32 (first line of second i64 word)
+Brocken::Runtime::mark_line($block, 32);
 my i64 $s4 = Brocken::Runtime::sweep_block($block);
 if ($s4 != 4) { return 5; }
-# Mark line 127 (last bit)
-Brocken::Runtime::mark_line($block, 127);
+
+# Mark line 64 (first line of third i64 word)
+Brocken::Runtime::mark_line($block, 64);
 my i64 $s5 = Brocken::Runtime::sweep_block($block);
 if ($s5 != 5) { return 6; }
+
+# Mark line 127 (last line of fourth i64 word)
+Brocken::Runtime::mark_line($block, 127);
+my i64 $s6 = Brocken::Runtime::sweep_block($block);
+if ($s6 != 6) { return 7; }
+
 return 0;
 BROCKEN
         my $funcs = $brocken->codegen->emit_functions( $module->functions );
         my $file  = $brocken->tmpdir . '/r_gc_mark_sweep' . $brocken->ext;
         $brocken->linker->write_executable( $file, $funcs, $host );
         system $file;
-        is( $? >> 8, 0, 'mark_line and sweep_block: 0→1→2→3→4→5 marked lines' );
+        is( $? >> 8, 0, 'mark_line and sweep_block: 0→1→2→3→4→5→6 marked lines' );
         unlink $file;
     }
 };
@@ -570,7 +583,7 @@ SKIP: {
 my ptr $hb = Brocken::heap_base();
 my ptr $block0 = Brocken::ptr_add($hb, Brocken::Runtime::icb_size());
 my ptr $cb = Brocken::load_i64(Brocken::ptr_add($hb, 80));
-# Sanity: current_block starts as hb+160
+# Sanity: current_block starts as hb + icb_size()
 if (Brocken::ptr_cmp_eq($cb, $block0) == 0) { return 1; }
 # Mark all 128 lines in the bitmap so find_free_line returns -1
 my i64 $i = 0;
@@ -595,11 +608,15 @@ if (Brocken::ptr_cmp_eq($after_cb, $block0)) { return 2; }
 # New block should have live_count = 1
 my i64 $lc = Brocken::load_i64(Brocken::ptr_add($after_cb, 32752));
 if ($lc != 1) { return 3; }
-# New block bitmap: word0 has bit 0 set (mark_line in bump_alloc), rest zero
+# New block bitmap: word0 has state for line 0 set to 1, rest zero
 my i64 $bm0 = Brocken::load_i64($after_cb);
 my i64 $bm1 = Brocken::load_i64(Brocken::ptr_add($after_cb, 8));
+my i64 $bm2 = Brocken::load_i64(Brocken::ptr_add($after_cb, 16));
+my i64 $bm3 = Brocken::load_i64(Brocken::ptr_add($after_cb, 24));
 if ($bm0 != 1) { return 4; }
 if ($bm1 != 0) { return 5; }
+if ($bm2 != 0) { return 6; }
+if ($bm3 != 0) { return 7; }
 return 0;
 BROCKEN
         my $module = Brocken->new->compile($source);
@@ -658,4 +675,5 @@ BROCKEN
         unlink $file;
     }
 };
+#
 done_testing;

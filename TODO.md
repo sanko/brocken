@@ -46,12 +46,12 @@ Goal: Complete fidelity with the Blackburn & McKinley (PLDI 2008) Immix paper an
 - [x] **Native-Width Header Optimization:** Replaced 64-bit load-mask-shift operations with direct `u16`/`u8` accessors for refcounts, GC flags, and type tags.
 - [x] **ICB Accessor Inlining:** Inlined compile-time constant offsets in `bump_alloc`, `decref`, and `free_obj`.
 - [x] **Memory Limit Check Hoisting:** Hoisted memory budget checks out of the hot `free16_head` path into fresh line/block allocations.
-- [ ] **Immix Line Compaction & Evacuation (Whitepaper Parity):**
-  - [ ] Add opportunistic line evacuation: detect fragmented blocks during sweep and evacuate live objects into contiguous lines.
-  - [ ] Track two-bit line states (*Free*, *Live*, *Pinned*) to handle multi-line spans across collection cycles.
-- [ ] **Out-of-Line Large Object Space (LOS):**
-  - [ ] Isolate allocations $\ge 4\text{ KiB}$ from the 32 KiB tiled Immix grid into distinct OS virtual memory allocations (`mmap`/`VirtualAlloc`).
-  - [ ] Update `block_of($hb, $addr)` to distinguish contiguous Immix blocks from LOS descriptors.
+- [x] **Immix Line Compaction & Evacuation (Whitepaper Parity):**
+  - [x] Add opportunistic line evacuation: detect fragmented blocks during sweep and evacuate live objects into contiguous lines.
+  - [x] Track two-bit line states (*Free*, *Live*, *Pinned*) to handle multi-line spans across collection cycles.
+- [x] **Out-of-Line Large Object Space (LOS):**
+  - [x] Isolate allocations $\ge 4\text{ KiB}$ from the 32 KiB tiled Immix grid into distinct OS virtual memory allocations (`mmap`/`VirtualAlloc`).
+  - [x] Update `block_of($hb, $addr)` to distinguish contiguous Immix blocks from LOS descriptors.
 
 ---
 

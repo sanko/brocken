@@ -24,7 +24,9 @@ package Brocken::ICB v0.0.1 {
             { name => 'thrown_value',            type => 'i64' },
             { name => 'free_big_head',           type => 'ptr' },
             { name => 'stack_limit',             type => 'ptr' },
-            { name => 'suspect_count',           type => 'i64' }
+            { name => 'suspect_count',           type => 'i64' },
+            { name => 'arena_size',              type => 'i64' },
+            { name => 'los_head',                type => 'ptr' }
         );
         my $layout    = Brocken::Layout::layout_fields(@FIELD_DEFS);
         my %ERR_CODES = ( OK => 0, OOM => 1, NO_FUEL => 2, SECURITY => 3, DIV_ZERO => 4, THROW => 5, STACK => 6 );
@@ -45,7 +47,7 @@ package Brocken::ICB v0.0.1 {
         FREE_BLOCKS FREE16_HEAD SUSPECT_BUFFER_HEAD FUEL ERR_CODE
         CURRENT_BLOCK MEMORY_LIMIT MEMORY_USED CAPABILITIES
         GATE_TABLE HOST_ICB EXCEPTION_HANDLER_STACK THROWN_VALUE FREE_BIG_HEAD
-        STACK_LIMIT SUSPECT_COUNT
+        STACK_LIMIT SUSPECT_COUNT ARENA_SIZE LOS_HEAD
         SIZE ERR_OK ERR_OOM ERR_NO_FUEL ERR_SECURITY ERR_DIV_ZERO ERR_THROW ERR_STACK
         HEAP_SIZE
         BLOCK_SIZE BLOCK_LIVE_COUNT_OFFSET BLOCK_NEXT_FREE_OFFSET
