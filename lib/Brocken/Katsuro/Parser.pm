@@ -68,7 +68,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $msg = "Expected $type" . ( defined $value ? " '$value'" : '' ) . ", got $got at " . $self->_loc($t);
         }
         if ( !$t || $t->{type} ne $type || ( defined $value && $t->{value} ne $value ) ) {
-            Carp::croak($msg);
+            Carp::croak( $msg . ' at ' . $self->_loc($t) );
         }
         return $self->advance();
     }
@@ -211,7 +211,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
                 = Brocken::Katsuro::AST::Stmt::Assign->new( $self->_pos_token($op_tok), target => $expr, expr => $rhs, op => $op_tok->{value} );
             return $self->_end_statement( $assign, "Expected ';' after assignment" );
         }
-        return $self->_end_statement( $expr, "Expected ';' after expression" );
+        return $self->_end_statement( $expr, q[Expected ';' after expression] );
     }
 
     # Finish a simple statement. Normally that is just consuming the `;`; but when a postfix `if`/`unless` modifier

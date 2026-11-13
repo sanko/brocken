@@ -23,34 +23,34 @@
 # Offsets match lib/Brocken/ICB.pm constants. If the ICB layout changes, update these functions and regenerate ICB.pm
 # via Brocken::Layout.
 package Brocken::Runtime {
-    sub get_heap_cursor( ptr $hb ) : returns(ptr)         { Brocken::load_i64($hb); }
+    sub get_heap_cursor( ptr $hb ) : returns(ptr)         { return Brocken::load_i64($hb); }
     sub set_heap_cursor( ptr $hb, ptr $val )              { Brocken::store_i64( $hb, $val ); }
-    sub get_current_fcb( ptr $hb ) : returns(ptr)         { Brocken::load_i64( Brocken::ptr_add( $hb, 8 ) ); }
+    sub get_current_fcb( ptr $hb ) : returns(ptr)         { return Brocken::load_i64( Brocken::ptr_add( $hb, 8 ) ); }
     sub set_current_fcb( ptr $hb, ptr $val )              { Brocken::store_i64( Brocken::ptr_add( $hb, 8 ), $val ); }
-    sub get_fiber_head( ptr $hb ) : returns(ptr)          { Brocken::load_i64( Brocken::ptr_add( $hb, 16 ) ); }
+    sub get_fiber_head( ptr $hb ) : returns(ptr)          { return Brocken::load_i64( Brocken::ptr_add( $hb, 16 ) ); }
     sub set_fiber_head( ptr $hb, ptr $val )               { Brocken::store_i64( Brocken::ptr_add( $hb, 16 ), $val ); }
-    sub get_immix_cursor( ptr $hb ) : returns(ptr)        { Brocken::load_i64( Brocken::ptr_add( $hb, 24 ) ); }
+    sub get_immix_cursor( ptr $hb ) : returns(ptr)        { return Brocken::load_i64( Brocken::ptr_add( $hb, 24 ) ); }
     sub set_immix_cursor( ptr $hb, ptr $val )             { Brocken::store_i64( Brocken::ptr_add( $hb, 24 ), $val ); }
-    sub get_immix_limit( ptr $hb ) : returns(ptr)         { Brocken::load_i64( Brocken::ptr_add( $hb, 32 ) ); }
+    sub get_immix_limit( ptr $hb ) : returns(ptr)         { return Brocken::load_i64( Brocken::ptr_add( $hb, 32 ) ); }
     sub set_immix_limit( ptr $hb, ptr $val )              { Brocken::store_i64( Brocken::ptr_add( $hb, 32 ), $val ); }
-    sub get_free_blocks( ptr $hb ) : returns(ptr)         { Brocken::load_i64( Brocken::ptr_add( $hb, 40 ) ); }
+    sub get_free_blocks( ptr $hb ) : returns(ptr)         { return Brocken::load_i64( Brocken::ptr_add( $hb, 40 ) ); }
     sub set_free_blocks( ptr $hb, ptr $val )              { Brocken::store_i64( Brocken::ptr_add( $hb, 40 ), $val ); }
-    sub get_free16_head( ptr $hb ) : returns(ptr)         { Brocken::load_i64( Brocken::ptr_add( $hb, 48 ) ); }
+    sub get_free16_head( ptr $hb ) : returns(ptr)         { return Brocken::load_i64( Brocken::ptr_add( $hb, 48 ) ); }
     sub set_free16_head( ptr $hb, ptr $val )              { Brocken::store_i64( Brocken::ptr_add( $hb, 48 ), $val ); }
-    sub get_free_big_head( ptr $hb ) : returns(ptr)       { Brocken::load_i64( Brocken::ptr_add( $hb, 144 ) ); }
+    sub get_free_big_head( ptr $hb ) : returns(ptr)       { return Brocken::load_i64( Brocken::ptr_add( $hb, 144 ) ); }
     sub set_free_big_head( ptr $hb, ptr $val )            { Brocken::store_i64( Brocken::ptr_add( $hb, 144 ), $val ); }
-    sub get_suspect_buffer_head( ptr $hb ) : returns(ptr) { Brocken::load_i64( Brocken::ptr_add( $hb, 56 ) ); }
+    sub get_suspect_buffer_head( ptr $hb ) : returns(ptr) { return Brocken::load_i64( Brocken::ptr_add( $hb, 56 ) ); }
     sub set_suspect_buffer_head( ptr $hb, ptr $val )      { Brocken::store_i64( Brocken::ptr_add( $hb, 56 ), $val ); }
 
     # Number of objects currently queued on the suspect buffer. The runtime keeps this incrementally so the R3 push site
     # can decide whether the buffer is "full" without walking the list. A value of -1 is the sentinel that a drain is in
     # progress: it suppresses both the re-entry trigger and any new buffering, so a DESTROY run in Phase 3 cannot mutate
     # the list the sweep is iterating.
-    sub get_suspect_count( ptr $hb ) : returns(i64) { Brocken::load_i64( Brocken::ptr_add( $hb, 160 ) ); }
+    sub get_suspect_count( ptr $hb ) : returns(i64) { return Brocken::load_i64( Brocken::ptr_add( $hb, 160 ) ); }
     sub set_suspect_count( ptr $hb, i64 $val )      { Brocken::store_i64( Brocken::ptr_add( $hb, 160 ), $val ); }
-    sub get_arena_size( ptr $hb ) : returns(i64)    { Brocken::load_i64( Brocken::ptr_add( $hb, 168 ) ); }
+    sub get_arena_size( ptr $hb ) : returns(i64)    { return Brocken::load_i64( Brocken::ptr_add( $hb, 168 ) ); }
     sub set_arena_size( ptr $hb, i64 $val )         { Brocken::store_i64( Brocken::ptr_add( $hb, 168 ), $val ); }
-    sub get_los_head( ptr $hb ) : returns(ptr)      { Brocken::load_i64( Brocken::ptr_add( $hb, 176 ) ); }
+    sub get_los_head( ptr $hb ) : returns(ptr)      { return Brocken::load_i64( Brocken::ptr_add( $hb, 176 ) ); }
     sub set_los_head( ptr $hb, ptr $val )           { Brocken::store_i64( Brocken::ptr_add( $hb, 176 ), $val ); }
 
     # Push a suspect once the queue reaches this many entries.
@@ -62,42 +62,42 @@ package Brocken::Runtime {
         gc_drain($hb) if Brocken::ptr_cmp_ge( get_suspect_count($hb), gc_suspect_threshold() );
         return;
     }
-    sub get_fuel( ptr $hb ) : returns(i64) { Brocken::load_i64( Brocken::ptr_add( $hb, 64 ) ); }
+    sub get_fuel( ptr $hb ) : returns(i64) { return Brocken::load_i64( Brocken::ptr_add( $hb, 64 ) ); }
     sub set_fuel( ptr $hb, i64 $val )      { Brocken::store_i64( Brocken::ptr_add( $hb, 64 ), $val ); }
     #
-    sub get_err_code( ptr $hb ) : returns(i64) { Brocken::load_i64( Brocken::ptr_add( $hb, 72 ) ); }
+    sub get_err_code( ptr $hb ) : returns(i64) { return Brocken::load_i64( Brocken::ptr_add( $hb, 72 ) ); }
     sub set_err_code( ptr $hb, i64 $val )      { Brocken::store_i64( Brocken::ptr_add( $hb, 72 ), $val ); }
     #
-    sub get_current_block( ptr $hb ) : returns(ptr) { Brocken::load_i64( Brocken::ptr_add( $hb, 80 ) ); }
+    sub get_current_block( ptr $hb ) : returns(ptr) { return Brocken::load_i64( Brocken::ptr_add( $hb, 80 ) ); }
 
     sub set_current_block( ptr $hb, ptr $val ) {
         Brocken::store_i64( Brocken::ptr_add( $hb, 80 ), $val );
     }
-    sub get_memory_limit( ptr $hb ) : returns(i64)            { Brocken::load_i64( Brocken::ptr_add( $hb, 88 ) ); }
+    sub get_memory_limit( ptr $hb ) : returns(i64)            { return Brocken::load_i64( Brocken::ptr_add( $hb, 88 ) ); }
     sub set_memory_limit( ptr $hb, i64 $val )                 { Brocken::store_i64( Brocken::ptr_add( $hb, 88 ), $val ); }
-    sub get_memory_used( ptr $hb ) : returns(i64)             { Brocken::load_i64( Brocken::ptr_add( $hb, 96 ) ); }
+    sub get_memory_used( ptr $hb ) : returns(i64)             { return Brocken::load_i64( Brocken::ptr_add( $hb, 96 ) ); }
     sub set_memory_used( ptr $hb, i64 $val )                  { Brocken::store_i64( Brocken::ptr_add( $hb, 96 ), $val ); }
-    sub get_capabilities( ptr $hb ) : returns(i64)            { Brocken::load_i64( Brocken::ptr_add( $hb, 104 ) ); }
+    sub get_capabilities( ptr $hb ) : returns(i64)            { return Brocken::load_i64( Brocken::ptr_add( $hb, 104 ) ); }
     sub set_capabilities( ptr $hb, i64 $val )                 { Brocken::store_i64( Brocken::ptr_add( $hb, 104 ), $val ); }
-    sub get_gate_table( ptr $hb ) : returns(ptr)              { Brocken::load_i64( Brocken::ptr_add( $hb, 112 ) ); }
+    sub get_gate_table( ptr $hb ) : returns(ptr)              { return Brocken::load_i64( Brocken::ptr_add( $hb, 112 ) ); }
     sub set_gate_table( ptr $hb, ptr $val )                   { Brocken::store_i64( Brocken::ptr_add( $hb, 112 ), $val ); }
-    sub get_host_icb( ptr $hb ) : returns(ptr)                { Brocken::load_i64( Brocken::ptr_add( $hb, 120 ) ); }
+    sub get_host_icb( ptr $hb ) : returns(ptr)                { return Brocken::load_i64( Brocken::ptr_add( $hb, 120 ) ); }
     sub set_host_icb( ptr $hb, ptr $val )                     { Brocken::store_i64( Brocken::ptr_add( $hb, 120 ), $val ); }
-    sub get_exception_handler_stack( ptr $hb ) : returns(ptr) { Brocken::load_i64( Brocken::ptr_add( $hb, 128 ) ); }
+    sub get_exception_handler_stack( ptr $hb ) : returns(ptr) { return Brocken::load_i64( Brocken::ptr_add( $hb, 128 ) ); }
     sub set_exception_handler_stack( ptr $hb, ptr $val )      { Brocken::store_i64( Brocken::ptr_add( $hb, 128 ), $val ); }
-    sub get_thrown_value( ptr $hb ) : returns(i64)            { Brocken::load_i64( Brocken::ptr_add( $hb, 136 ) ); }
+    sub get_thrown_value( ptr $hb ) : returns(i64)            { return Brocken::load_i64( Brocken::ptr_add( $hb, 136 ) ); }
     sub set_thrown_value( ptr $hb, i64 $val )                 { Brocken::store_i64( Brocken::ptr_add( $hb, 136 ), $val ); }
-    sub get_stack_limit( ptr $hb ) : returns(ptr)             { Brocken::load_i64( Brocken::ptr_add( $hb, 152 ) ); }
+    sub get_stack_limit( ptr $hb ) : returns(ptr)             { return Brocken::load_i64( Brocken::ptr_add( $hb, 152 ) ); }
     sub set_stack_limit( ptr $hb, ptr $val )                  { Brocken::store_i64( Brocken::ptr_add( $hb, 152 ), $val ); }
 
     # Immix block geometry
     # A block is block_size() bytes. Every block begins on a block_size grid anchored at the arena base, i.e. the first block
     # immediately after the ICB. These helpers resolve to Brocken::ICB::BLOCK_* through compiler intrinsics, so the runtime
     # and the layout generator share one definition of the block trailer.
-    sub icb_size()                : returns(i64) { Brocken::icb_size(); }
-    sub block_size()              : returns(i64) { Brocken::block_size(); }
-    sub block_live_count_offset() : returns(i64) { Brocken::block_live_count_offset(); }
-    sub block_next_free_offset()  : returns(i64) { Brocken::block_next_free_offset(); }
+    sub icb_size()                : returns(i64) { return Brocken::icb_size(); }
+    sub block_size()              : returns(i64) { return Brocken::block_size(); }
+    sub block_live_count_offset() : returns(i64) { return Brocken::block_live_count_offset(); }
+    sub block_next_free_offset()  : returns(i64) { return Brocken::block_next_free_offset(); }
 
     # Base of the block that owns the allocation at $addr. Every block is aligned to a block_size grid anchored at the arena
     # base, so the owning block is the arena-aligned region that contains $addr. Returns 0 for Large Object Space (LOS).
@@ -1188,7 +1188,7 @@ package Brocken::Runtime {
     # rather than faulting -- `%h{...}` returns a null box for a missing key, and `return %h{$k}` from an int function then
     # unboxes that null.
     sub unbox_i64( ptr $dyn, ptr $file = 0, i64 $line = 0, i64 $col = 0 ) : returns(i64) {
-        rt_warn("unbox_i64");
+        #rt_warn("unbox_i64");
         if ( Brocken::ptr_cmp_eq( $dyn, 0 ) ) {
             return 0;
         }
@@ -1350,6 +1350,206 @@ package Brocken::Runtime {
             $i   = Brocken::i64_add( $i, 1 );
         }
         Brocken::store_i8( $dst, 0 );
+        return $buf;
+    }
+
+    sub _empty_str( ptr $hb ) : returns(ptr) {
+        my ptr $buf = bump_alloc( $hb, 1 );
+        Brocken::store_u8( $buf, 0 );
+        return $buf;
+    }
+
+    # `substr($s, $offset)` -- substring from $offset (negative counts from end) to the end of $s.
+    sub str_substr_rest( ptr $hb, ptr $s, i64 $offset ) : returns(ptr) {
+        if ( Brocken::ptr_cmp_eq( $s, 0 ) ) { return _empty_str($hb); }
+        my i64 $slen  = str_len($s);
+        my i64 $start = $offset;
+        if ( $start < 0 )     { $start = $slen + $start; }
+        if ( $start < 0 )     { $start = 0; }
+        if ( $start > $slen ) { $start = $slen; }
+        my i64 $copy_len = $slen - $start;
+        my ptr $buf      = bump_alloc( $hb, $copy_len + 1 );
+        my i64 $i        = 0;
+
+        while ( $i < $copy_len ) {
+            my u8 $ch = Brocken::load_u8( Brocken::ptr_add( $s, $start + $i ) );
+            Brocken::store_u8( Brocken::ptr_add( $buf, $i ), $ch );
+            $i = $i + 1;
+        }
+        Brocken::store_u8( Brocken::ptr_add( $buf, $copy_len ), 0 );
+        return $buf;
+    }
+
+    # `substr($s, $offset, $len)` -- negative $len leaves -$len characters at the end of $s.
+    sub str_substr( ptr $hb, ptr $s, i64 $offset, i64 $len ) : returns(ptr) {
+        if ( Brocken::ptr_cmp_eq( $s, 0 ) ) { return _empty_str($hb); }
+        my i64 $slen  = str_len($s);
+        my i64 $start = $offset;
+        if ( $start < 0 )     { $start = $slen + $start; }
+        if ( $start < 0 )     { $start = 0; }
+        if ( $start > $slen ) { $start = $slen; }
+        my i64 $avail    = $slen - $start;
+        my i64 $copy_len = 0;
+
+        if ( $len >= 0 ) {
+            $copy_len = $len;
+            if ( $copy_len > $avail ) { $copy_len = $avail; }
+        }
+        else {
+            my i64 $end = $slen + $len;
+            if ( $end > $start ) { $copy_len = $end - $start; }
+        }
+        my ptr $buf = bump_alloc( $hb, $copy_len + 1 );
+        my i64 $i   = 0;
+        while ( $i < $copy_len ) {
+            my u8 $ch = Brocken::load_u8( Brocken::ptr_add( $s, $start + $i ) );
+            Brocken::store_u8( Brocken::ptr_add( $buf, $i ), $ch );
+            $i = $i + 1;
+        }
+        Brocken::store_u8( Brocken::ptr_add( $buf, $copy_len ), 0 );
+        return $buf;
+    }
+
+    # `index($haystack, $needle, $pos)` -- 0-based position at or after $pos, or -1 if absent.
+    sub str_index( ptr $haystack, ptr $needle, i64 $pos ) : returns(i64) {
+        if ( Brocken::ptr_cmp_eq( $haystack, 0 ) ) { return -1; }
+        if ( Brocken::ptr_cmp_eq( $needle,   0 ) ) { return -1; }
+        my i64 $hlen  = str_len($haystack);
+        my i64 $nlen  = str_len($needle);
+        my i64 $start = $pos;
+        if ( $start < 0 ) { $start = 0; }
+        if ( $nlen == 0 ) {
+            if ( $start > $hlen ) { return $hlen; }
+            return $start;
+        }
+        my i64 $limit = $hlen - $nlen;
+        if ( $start > $limit ) { return -1; }
+        my i64 $i = $start;
+        while ( $i <= $limit ) {
+            my i64 $j       = 0;
+            my i64 $matched = 1;
+            while ( $j < $nlen ) {
+                my u8 $hc = Brocken::load_u8( Brocken::ptr_add( $haystack, $i + $j ) );
+                my u8 $nc = Brocken::load_u8( Brocken::ptr_add( $needle,   $j ) );
+                if ( $hc != $nc ) {
+                    $matched = 0;
+                    last;
+                }
+                $j = $j + 1;
+            }
+            if ( $matched != 0 ) { return $i; }
+            $i = $i + 1;
+        }
+        return -1;
+    }
+
+    # `rindex($haystack, $needle, $pos)` -- rightmost 0-based position <= $pos, or -1 if absent.
+    sub str_rindex( ptr $haystack, ptr $needle, i64 $pos ) : returns(i64) {
+        if ( Brocken::ptr_cmp_eq( $haystack, 0 ) ) { return -1; }
+        if ( Brocken::ptr_cmp_eq( $needle, 0 ) )   { return -1; }
+        if ( $pos < 0 )                            { return -1; }
+        my i64 $hlen = str_len($haystack);
+        my i64 $nlen = str_len($needle);
+        if ( $nlen == 0 ) {
+            if ( $pos > $hlen ) { return $hlen; }
+            return $pos;
+        }
+        my i64 $max_start = $hlen - $nlen;
+        if ( $max_start < 0 ) { return -1; }
+        my i64 $i = $pos;
+        if ( $i > $max_start ) { $i = $max_start; }
+        while ( $i >= 0 ) {
+            my i64 $j       = 0;
+            my i64 $matched = 1;
+            while ( $j < $nlen ) {
+                my u8 $hc = Brocken::load_u8( Brocken::ptr_add( $haystack, $i + $j ) );
+                my u8 $nc = Brocken::load_u8( Brocken::ptr_add( $needle,   $j ) );
+                if ( $hc != $nc ) {
+                    $matched = 0;
+                    last;
+                }
+                $j = $j + 1;
+            }
+            if ( $matched != 0 ) { return $i; }
+            $i = $i - 1;
+        }
+        return -1;
+    }
+
+    sub str_rindex_end( ptr $haystack, ptr $needle ) : returns(i64) {
+        if ( Brocken::ptr_cmp_eq( $haystack, 0 ) ) { return -1; }
+        return str_rindex( $haystack, $needle, str_len($haystack) );
+    }
+
+    sub str_lc( ptr $hb, ptr $s ) : returns(ptr) {
+        if ( Brocken::ptr_cmp_eq( $s, 0 ) ) { return _empty_str($hb); }
+        my i64 $len = str_len($s);
+        my ptr $buf = bump_alloc( $hb, $len + 1 );
+        my i64 $i   = 0;
+        while ( $i < $len ) {
+            my u8 $c = Brocken::load_u8( Brocken::ptr_add( $s, $i ) );
+            if ( $c >= 65 ) {
+                if ( $c <= 90 ) { $c = $c + 32; }
+            }
+            Brocken::store_u8( Brocken::ptr_add( $buf, $i ), $c );
+            $i = $i + 1;
+        }
+        Brocken::store_u8( Brocken::ptr_add( $buf, $len ), 0 );
+        return $buf;
+    }
+
+    sub str_uc( ptr $hb, ptr $s ) : returns(ptr) {
+        if ( Brocken::ptr_cmp_eq( $s, 0 ) ) { return _empty_str($hb); }
+        my i64 $len = str_len($s);
+        my ptr $buf = bump_alloc( $hb, $len + 1 );
+        my i64 $i   = 0;
+        while ( $i < $len ) {
+            my u8 $c = Brocken::load_u8( Brocken::ptr_add( $s, $i ) );
+            if ( $c >= 97 ) {
+                if ( $c <= 122 ) { $c = $c - 32; }
+            }
+            Brocken::store_u8( Brocken::ptr_add( $buf, $i ), $c );
+            $i = $i + 1;
+        }
+        Brocken::store_u8( Brocken::ptr_add( $buf, $len ), 0 );
+        return $buf;
+    }
+
+    sub str_lcfirst( ptr $hb, ptr $s ) : returns(ptr) {
+        if ( Brocken::ptr_cmp_eq( $s, 0 ) ) { return _empty_str($hb); }
+        my i64 $len = str_len($s);
+        my ptr $buf = bump_alloc( $hb, $len + 1 );
+        my i64 $i   = 0;
+        while ( $i < $len ) {
+            my u8 $c = Brocken::load_u8( Brocken::ptr_add( $s, $i ) );
+            if ( $i == 0 ) {
+                if ( $c >= 65 ) {
+                    if ( $c <= 90 ) { $c = $c + 32; }
+                }
+            }
+            Brocken::store_u8( Brocken::ptr_add( $buf, $i ), $c );
+            $i = $i + 1;
+        }
+        Brocken::store_u8( Brocken::ptr_add( $buf, $len ), 0 );
+        return $buf;
+    }
+
+    sub str_ucfirst( ptr $hb, ptr $s ) : returns(ptr) {
+        if ( Brocken::ptr_cmp_eq( $s, 0 ) ) { return _empty_str($hb); }
+        my i64 $len = str_len($s);
+        my ptr $buf = bump_alloc( $hb, $len + 1 );
+        my i64 $i   = 0;
+        while ( $i < $len ) {
+            my u8 $c = Brocken::load_u8( Brocken::ptr_add( $s, $i ) );
+            if ( $i == 0 ) {
+                if ( $c >= 97 ) {
+                    if ( $c <= 122 ) { $c = $c - 32; }
+                }
+            }
+            Brocken::store_u8( Brocken::ptr_add( $buf, $i ), $c );
+            $i = $i + 1;
+        }
+        Brocken::store_u8( Brocken::ptr_add( $buf, $len ), 0 );
         return $buf;
     }
 

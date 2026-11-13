@@ -4566,10 +4566,15 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 $module->add_function($callee);
                 $functions->{$name} = $callee;
             }
-            elsif ( $name eq 'length' ) {
-                $callee
-                    = $self->_ensure_extern( $self->_crt_name('strlen'), Brocken::Lindsay::IR::Type::i64(), [ Brocken::Lindsay::IR::Type::ptr() ] );
-                $functions->{$name} = $callee;
+            elsif ( $name eq 'length' ) { return $self->_lower_str_length( $ast, $line, $col ) }
+            elsif ( $name eq 'substr' ||
+                $name eq 'index'   ||
+                $name eq 'rindex'  ||
+                $name eq 'lc'      ||
+                $name eq 'uc'      ||
+                $name eq 'lcfirst' ||
+                $name eq 'ucfirst' ) {
+                return $self->_lower_str_builtin( $name, $ast, $line, $col );
             }
             else {
                 Carp::croak( "Undefined function '$name' at " . $self->_loc($ast) );
@@ -4667,6 +4672,87 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $symbols->{ $_->[0] } = $_->[1] for @saved;
         $self->_emit_fuel_check( $line, $col );
         return $builder->build_call( $callee, \@args, undef, $line, $col );
+    }
+
+    method _lower_str_length( $ast, $line, $col ) {
+        Carp::croak( "length expects 1 argument at " . $self->_loc($ast) ) unless $ast->args->@* == 1;
+        my $raw = $self->lower_expression( $ast->args->[0] );
+        my $s   = $self->_stringify_value( $raw, $ast, $line, $col );
+        my $fn  = $self->_reflect_runtime( 'str_len', $ast, $line, $col );
+        $self->_emit_fuel_check( $line, $col );
+        my $res = $builder->build_call( $fn, [$s], undef, $line, $col );
+        $self->_release_owned_call_temp( $raw, $line, $col );
+        return $res;
+    }
+
+    method _lower_str_builtin( $name, $ast, $line, $col ) {
+        my @args = $ast->args->@*;
+        my $hb
+            = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col ) :
+            undef;
+        if ( $name eq 'lc' || $name eq 'uc' || $name eq 'lcfirst' || $name eq 'ucfirst' ) {
+            Carp::croak( "$name expects 1 argument at " . $self->_loc($ast) )   unless @args == 1;
+            Carp::croak( "$name requires __heap_base at " . $self->_loc($ast) ) unless $hb;
+            my $raw = $self->lower_expression( $args[0] );
+            my $s   = $self->_stringify_value( $raw, $ast, $line, $col );
+            my $fn  = $self->_reflect_runtime( 'str_' . $name, $ast, $line, $col );
+            $self->_emit_fuel_check( $line, $col );
+            my $res = $builder->build_call( $fn, [ $hb, $s ], undef, $line, $col );
+            $self->_release_owned_call_temp( $raw, $line, $col );
+            return $res;
+        }
+        if ( $name eq 'substr' ) {
+            Carp::croak( "substr expects 2 or 3 arguments at " . $self->_loc($ast) ) unless @args == 2 || @args == 3;
+            Carp::croak( "substr requires __heap_base at " . $self->_loc($ast) )     unless $hb;
+            my $raw_s   = $self->lower_expression( $args[0] );
+            my $s       = $self->_stringify_value( $raw_s, $ast, $line, $col );
+            my $raw_off = $self->lower_expression( $args[1] );
+            my $off     = $self->maybe_convert_type( $raw_off, Brocken::Lindsay::IR::Type::i64(), $line, $col );
+            my $res;
+            $self->_emit_fuel_check( $line, $col );
+
+            if ( @args == 2 ) {
+                my $fn = $self->_reflect_runtime( 'str_substr_rest', $ast, $line, $col );
+                $res = $builder->build_call( $fn, [ $hb, $s, $off ], undef, $line, $col );
+            }
+            else {
+                my $raw_len = $self->lower_expression( $args[2] );
+                my $len     = $self->maybe_convert_type( $raw_len, Brocken::Lindsay::IR::Type::i64(), $line, $col );
+                my $fn      = $self->_reflect_runtime( 'str_substr', $ast, $line, $col );
+                $res = $builder->build_call( $fn, [ $hb, $s, $off, $len ], undef, $line, $col );
+                $self->_release_owned_call_temp( $raw_len, $line, $col );
+            }
+            $self->_release_owned_call_temp( $raw_off, $line, $col );
+            $self->_release_owned_call_temp( $raw_s,   $line, $col );
+            return $res;
+        }
+        if ( $name eq 'index' || $name eq 'rindex' ) {
+            Carp::croak( "$name expects 2 or 3 arguments at " . $self->_loc($ast) ) unless @args == 2 || @args == 3;
+            my $raw_h = $self->lower_expression( $args[0] );
+            my $h     = $self->_stringify_value( $raw_h, $ast, $line, $col );
+            my $raw_n = $self->lower_expression( $args[1] );
+            my $n     = $self->_stringify_value( $raw_n, $ast, $line, $col );
+            my $res;
+            $self->_emit_fuel_check( $line, $col );
+            if ( @args == 2 ) {
+                my $fn = $self->_reflect_runtime( $name eq 'index' ? 'str_index' : 'str_rindex_end', $ast, $line, $col );
+                my @call_args
+                    = $name eq 'index' ? ( $h, $n, Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => 0 ) ) :
+                    ( $h, $n );
+                $res = $builder->build_call( $fn, \@call_args, undef, $line, $col );
+            }
+            else {
+                my $raw_pos = $self->lower_expression( $args[2] );
+                my $pos     = $self->maybe_convert_type( $raw_pos, Brocken::Lindsay::IR::Type::i64(), $line, $col );
+                my $fn      = $self->_reflect_runtime( 'str_' . $name, $ast, $line, $col );
+                $res = $builder->build_call( $fn, [ $h, $n, $pos ], undef, $line, $col );
+                $self->_release_owned_call_temp( $raw_pos, $line, $col );
+            }
+            $self->_release_owned_call_temp( $raw_n, $line, $col );
+            $self->_release_owned_call_temp( $raw_h, $line, $col );
+            return $res;
+        }
+        Carp::croak( "Unknown string builtin '$name' at " . $self->_loc($ast) );
     }
 
     method lower_intrinsic($ast) {
