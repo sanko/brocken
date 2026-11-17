@@ -17,6 +17,11 @@ cover_db/
 *.bak
 *.old
 *~
+eg/fib
+eg/fib.exe
+eg/pulse_output
+_pro*.pl
+
 
 !LICENSE
 
