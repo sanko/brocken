@@ -1417,6 +1417,7 @@ class Brocken::Fuzz v0.0.1 {
             $fd->{fixups}     = undef if exists $fd->{fixups};
             $fd->{alloca_map} = undef if exists $fd->{alloca_map};
             $fd->{source_map} = undef if exists $fd->{source_map};
+            $fd->{line_locs}  = undef if exists $fd->{line_locs};
         }
     }
 

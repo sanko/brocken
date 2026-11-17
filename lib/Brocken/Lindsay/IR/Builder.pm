@@ -4,7 +4,9 @@ no warnings qw[experimental::class];
 use Brocken::Lindsay::IR;
 class Brocken::Lindsay::IR::Builder v0.0.1 {
     field $insert_block : reader = undef;
+    field $current_file : reader : writer = '';
     field $id_counter = 0;
+    #
     method position_at_end($block) { $insert_block = $block }
     method _next_id()              { '%' . $id_counter++ }
 
@@ -19,6 +21,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => $opcode,
             operands => [ $lhs, $rhs ],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -54,6 +57,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => $opcode,
             operands => [$operand],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -71,6 +75,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             target_type => $target_type,
             operands    => [$val],
             parent      => $insert_block,
+            file        => $current_file,
             line        => $line,
             col         => $col
         );
@@ -85,6 +90,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             target_type => $target_type,
             operands    => [$val],
             parent      => $insert_block,
+            file        => $current_file,
             line        => $line,
             col         => $col
         );
@@ -99,6 +105,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             target_type => $target_type,
             operands    => [$val],
             parent      => $insert_block,
+            file        => $current_file,
             line        => $line,
             col         => $col
         );
@@ -113,6 +120,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             target_type => $target_type,
             operands    => [$val],
             parent      => $insert_block,
+            file        => $current_file,
             line        => $line,
             col         => $col
         );
@@ -127,6 +135,21 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             type   => Brocken::Lindsay::IR::Type::ptr(),
             opcode => 'frame_addr',
             parent => $insert_block,
+            file   => $current_file,
+            line   => $line,
+            col    => $col
+        );
+        return $insert_block->append_inst($inst);
+    }
+
+    method build_func_addr( $target, $name = undef, $line = 0, $col = 0 ) {
+        my $inst = Brocken::Lindsay::IR::Instruction::FuncAddr->new(
+            name   => $name // $self->_next_id(),
+            type   => Brocken::Lindsay::IR::Type::ptr(),
+            opcode => 'func_addr',
+            target => $target,
+            parent => $insert_block,
+            file   => $current_file,
             line   => $line,
             col    => $col
         );
@@ -139,6 +162,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             type   => $type,
             opcode => 'phi',
             parent => $insert_block,
+            file   => $current_file,
             line   => $line,
             col    => $col
         );
@@ -152,6 +176,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'select',
             operands => [ $cond, $true_val, $false_val ],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -166,6 +191,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             base_type => $base_type,
             operands  => [ $ptr, $indices->@* ],
             parent    => $insert_block,
+            file      => $current_file,
             line      => $line,
             col       => $col
         );
@@ -185,6 +211,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
                 Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i32(), value => $field_idx )
             ],
             parent => $insert_block,
+            file   => $current_file,
             line   => $line,
             col    => $col
         );
@@ -199,6 +226,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             predicate => $predicate,
             operands  => [ $lhs, $rhs ],
             parent    => $insert_block,
+            file      => $current_file,
             line      => $line,
             col       => $col
         );
@@ -212,6 +240,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode     => 'br',
             dest_block => $dest_block,
             parent     => $insert_block,
+            file       => $current_file,
             line       => $line,
             col        => $col
         );
@@ -227,6 +256,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             true_block  => $true_block,
             false_block => $false_block,
             parent      => $insert_block,
+            file        => $current_file,
             line        => $line,
             col         => $col
         );
@@ -241,6 +271,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'ret',
             operands => defined $val ? [$val] : [],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -256,6 +287,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             callee   => $callee,
             operands => $args,
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -273,6 +305,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             debug_name      => $debug_name,
             debug_type_name => $debug_type_name,
             parent          => $insert_block,
+            file            => $current_file,
             line            => $line,
             col             => $col
         );
@@ -286,6 +319,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'load',
             operands => [$ptr],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -299,6 +333,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'store',
             operands => [ $val, $ptr ],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -312,6 +347,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'syscall',
             operands => $args,
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -327,6 +363,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'box',
             operands => \@operands,
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -340,6 +377,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'unbox',
             operands => [$dynamic_val],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -353,6 +391,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'incref',
             operands => [$val],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -367,6 +406,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'decref',
             operands => \@operands,
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -381,6 +421,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             callee   => $callee,
             operands => $args,
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -394,6 +435,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'fiber_transfer',
             operands => [ $fiber, $val ],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -407,6 +449,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'fiber_yield',
             operands => [$val],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -420,6 +463,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'fiber_id',
             operands => [],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -433,6 +477,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'fiber_pin',
             operands => [ $fiber, $tid ],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -447,6 +492,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             callee   => $callee,
             operands => $args,
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -460,6 +506,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'isolate_join',
             operands => [$isolate],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -473,6 +520,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'chan_create',
             operands => [$capacity],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -486,6 +534,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'chan_send',
             operands => [ $chan, $val ],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -499,6 +548,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'chan_recv',
             operands => [$chan],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -512,6 +562,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'chan_close',
             operands => [$chan],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -525,6 +576,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'chan_try_send',
             operands => [ $chan, $val ],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );
@@ -538,6 +590,7 @@ class Brocken::Lindsay::IR::Builder v0.0.1 {
             opcode   => 'chan_try_recv',
             operands => [$chan],
             parent   => $insert_block,
+            file     => $current_file,
             line     => $line,
             col      => $col
         );

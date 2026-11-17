@@ -90,8 +90,24 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
 
         # Snapshot text before stubs for exports (edata RVA), then compute exports
-        my $text_bytes     = $text;
-        my $text_size      = length($text);
+        my $text_bytes = $text;
+        my $text_size  = length($text);
+        my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
+        if ( ref $code_data eq 'ARRAY' ) {
+            my ( @ranges, @lines );
+            for my $fd ( $code_data->@* ) {
+                my $fstart = $entry_size + $func_offsets{ $fd->{name} };
+                my $flen   = length( $fd->{bytes} );
+                push @ranges, { name => $fd->{name}, start => $fstart, end => $fstart + $flen };
+                for my $loc ( ( $fd->{line_locs} // [] )->@* ) {
+                    push @lines, { offset => $fstart + $loc->{offset}, file => $loc->{file}, line => $loc->{line}, col => $loc->{col} };
+                }
+            }
+            $self->set_func_ranges( \@ranges );
+            $self->set_line_entries( \@lines );
+            $self->set_anchor_offset(
+                exists $func_offsets{'Brocken::Runtime::_bt_anchor'} ? $entry_size + $func_offsets{'Brocken::Runtime::_bt_anchor'} : 0 );
+        }
         my $has_data       = length($data_bytes) > 0;
         my $has_rodata     = scalar( keys $self->rodata->%* ) > 0;
         my $rodata_bytes   = $has_rodata ? join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) : '';
@@ -102,11 +118,15 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $edata_bytes = '';
         my $edata_rva   = 0;
         my @sorted_exports = ();
+        my $brk_sym_size   = $self->brk_sym_size()  || 4;
+        my $brk_line_size  = $self->brk_line_size() || 16;
 
         if ($has_exports) {
             my $text_rva = 0x1000;
             my $data_rva = 0x1000 + ( ( length($text_bytes) + 4095 ) & ~4095 );
-            $data_rva += ( $self->brk_sym_size() + 4095 ) & ~4095 if $self->brk_sym_size() > 0;
+            $data_rva += ( length($rodata_bytes) + 4095 ) & ~4095 if $has_rodata;
+            $data_rva += ( $brk_sym_size + 4095 ) & ~4095;
+            $data_rva += ( $brk_line_size + 4095 ) & ~4095;
             $edata_rva = $data_rva;
             $edata_rva += ( ( length($data_bytes) + 4095 ) & ~4095 ) if $has_data;
             $edata_bytes = "\x00" x 40;
@@ -157,7 +177,6 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
 
         # Generate inline setjmp/longjmp stubs (skip libc import)
-        my $entry_size = $self->type eq 'exe' ? length($entry_stub) : 0;
         my %sjlj_stubs;
         if ( $platform->is_x64 && grep { $_ eq 'setjmp' || $_ eq 'longjmp' } @extern_funcs ) {
             my $stub_base = length($text);
@@ -315,13 +334,13 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         elsif ( $platform->is_x64 ) {
             $import_stub_overhead = scalar(@import_list) * 6;     # JMP [rip+disp32]
         }
-        my $final_text_size = length($text) + $import_stub_overhead;
-        my $rdata_rva_fixed = 0x1000 + ( ( $final_text_size + 4095 ) & ~4095 );
-        $idata_rva = $rdata_rva_fixed;
-        $idata_rva += ( length($rodata_bytes) + 4095 ) & ~4095 if $has_rodata;
-        $idata_rva += ( $self->brk_sym_size() + 4095 ) & ~4095 if $self->brk_sym_size() > 0;
-        $idata_rva += ( length($data_bytes) + 4095 ) & ~4095   if length($data_bytes) > 0;
-        $idata_rva += ( length($edata_bytes) + 4095 ) & ~4095  if $has_exports;
+        my $final_text_size    = length($text) + $import_stub_overhead;
+        my $rdata_rva_fixed    = 0x1000 + ( ( $final_text_size + 4095 ) & ~4095 );
+        my $brk_sym_rva_fixed  = $rdata_rva_fixed + ( $has_rodata ? ( ( length($rodata_bytes) + 4095 ) & ~4095 ) : 0 );
+        my $brk_line_rva_fixed = $brk_sym_rva_fixed + ( ( $brk_sym_size + 4095 ) & ~4095 );
+        $idata_rva = $brk_line_rva_fixed + ( ( $brk_line_size + 4095 ) & ~4095 );
+        $idata_rva += ( length($data_bytes) + 4095 ) & ~4095  if length($data_bytes) > 0;
+        $idata_rva += ( length($edata_bytes) + 4095 ) & ~4095 if $has_exports;
         my %iat_base;    # name => IAT RVA entry (populated below if has_idata)
 
         if ($has_idata) {
@@ -384,33 +403,36 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
             die "fixup offset $src_pos out of bounds" if $src_pos + 4 > length($text);
 
             # rodata-relocated fixups are resolved first (no function target needed)
-            if ( $ff->{type} eq 'lea_rodata_rel32' ) {
-                my $label_off = 0;
-                for my $key ( sort keys $self->rodata->%* ) {
-                    last if $key eq $ff->{target};
-                    $label_off += length( $self->rodata->{$key} );
+            if ( $ff->{type} eq 'lea_rodata_rel32' || $ff->{type} eq 'lea_rodata_adr' ) {
+                my $target_rva;
+                if ( $ff->{target} eq '__brk_sym_table' ) {
+                    $target_rva = $brk_sym_rva_fixed;
                 }
-                my $target_rva = $rdata_rva_fixed + $label_off;
-                my $src_rva    = 0x1000 + $src_pos;
-                my $rel        = $target_rva - ( $src_rva + 4 );
-                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
-                next;
-            }
-            if ( $ff->{type} eq 'lea_rodata_adr' ) {
-                my $label_off = 0;
-                for my $key ( sort keys $self->rodata->%* ) {
-                    last if $key eq $ff->{target};
-                    $label_off += length( $self->rodata->{$key} );
+                elsif ( $ff->{target} eq '__brk_line_table' ) {
+                    $target_rva = $brk_line_rva_fixed;
                 }
-                my $target_rva = $rdata_rva_fixed + $label_off;
-                my $src_rva    = 0x1000 + $src_pos;
-                my $rel        = $target_rva - $src_rva;
-                my $word       = unpack( 'V', substr( $text, $src_pos, 4 ) );
-                my $rd         = $word & 0x1F;
-                my $lo         = $rel & 3;
-                my $hi         = ( $rel >> 2 ) & 0x7FFFF;
-                $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
-                substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                else {
+                    my $label_off = 0;
+                    for my $key ( sort keys $self->rodata->%* ) {
+                        last if $key eq $ff->{target};
+                        $label_off += length( $self->rodata->{$key} );
+                    }
+                    $target_rva = $rdata_rva_fixed + $label_off;
+                }
+                my $src_rva = 0x1000 + $src_pos;
+                if ( $ff->{type} eq 'lea_rodata_rel32' ) {
+                    my $rel = $target_rva - ( $src_rva + 4 );
+                    substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+                }
+                else {
+                    my $rel  = $target_rva - $src_rva;
+                    my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                    my $rd   = $word & 0x1F;
+                    my $lo   = $rel & 3;
+                    my $hi   = ( $rel >> 2 ) & 0x7FFFF;
+                    $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
+                    substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                }
                 next;
             }
             my $target_off = $func_offsets{ $ff->{target} };
@@ -555,8 +577,8 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
 
         # Layout sections
-        my $brk_sym_size       = $self->brk_sym_size();
-        my $has_brk_sym        = $brk_sym_size > 0;
+        my $has_brk_sym        = 1;
+        my $has_brk_line       = 1;
         my $num_debug_sections = 0;
         my @debug_sec_names;
         my %debug_sec_data;
@@ -576,10 +598,11 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
         }
         my $num_sections
             = 1 + ( $has_brk_sym ? 1 : 0 )
-            + ( $has_rodata  ? 1 : 0 )
-            + ( $has_data    ? 1 : 0 )
-            + ( $has_exports ? 1 : 0 )
-            + ( $has_idata   ? 1 : 0 )
+            + ( $has_brk_line ? 1 : 0 )
+            + ( $has_rodata   ? 1 : 0 )
+            + ( $has_data     ? 1 : 0 )
+            + ( $has_exports  ? 1 : 0 )
+            + ( $has_idata    ? 1 : 0 )
             + $has_reloc
             + $has_pdata
             + $num_debug_sections;
@@ -633,6 +656,16 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
                 .= pack( 'a8 V2 V2 V2 v2 V', ".brk_sym", $brk_sym_size, $sec_rva, $sec_raw_brk_sym_size, $sec_raw_ptr, 0, 0, 0, 0, 0x40000040 );
             $sec_rva     += ( $brk_sym_size + 4095 ) & ~4095;
             $sec_raw_ptr += $sec_raw_brk_sym_size;
+        }
+
+        # .brkline section (Native Backtrace Line Table)
+        my $sec_raw_brk_line_size = 0;
+        if ($has_brk_line) {
+            $sec_raw_brk_line_size = ( $brk_line_size + 511 ) & ~511;
+            $section_table
+                .= pack( 'a8 V2 V2 V2 v2 V', ".brkline", $brk_line_size, $sec_rva, $sec_raw_brk_line_size, $sec_raw_ptr, 0, 0, 0, 0, 0x40000040 );
+            $sec_rva     += ( $brk_line_size + 4095 ) & ~4095;
+            $sec_raw_ptr += $sec_raw_brk_line_size;
         }
 
         # .data section (Initialized Data)
@@ -769,6 +802,7 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
             + $sec_raw_reloc_size
             + $init_debug_size
             + $sec_raw_brk_sym_size
+            + $sec_raw_brk_line_size
             + $sec_raw_rodata_size
             + $sec_raw_idata_size
             + $sec_raw_pdata_size;
@@ -817,9 +851,14 @@ class Brocken::Jenny::Linker::PE v0.0.1 : isa(Brocken::Jenny::Linker) {
             print $fh ( "\x00" x ( $sec_raw_rodata_size - length($rodata_bytes) ) );
         }
         if ($has_brk_sym) {
-            my $brk_sym_bytes = $self->build_brk_sym();
+            my $brk_sym_bytes = $self->build_brk_sym() || ( "\0" x 4 );
             print $fh $brk_sym_bytes;
             print $fh ( "\x00" x ( $sec_raw_brk_sym_size - length($brk_sym_bytes) ) );
+        }
+        if ($has_brk_line) {
+            my $brk_line_bytes = $self->build_brk_line() || ( "\0" x 16 );
+            print $fh $brk_line_bytes;
+            print $fh ( "\x00" x ( $sec_raw_brk_line_size - length($brk_line_bytes) ) );
         }
         if ($has_data) {
             print $fh $data_bytes;

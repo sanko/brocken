@@ -149,6 +149,12 @@ For Tag 4, Offset 4 stores:
 
 **Nullability:** Managed containers **default to `undef`** (Type Tag 0, Payload 0).
 
+**String to Numeric Coercion:**
+When a `String` (managed Fat Scalar or string literal) is assigned to or returned as an unboxed numeric type (`i64`, `f64`, etc.):
+- The value does not evaluate to its memory pointer.
+- The string is coerced numerically following Perl semantics: leading digits are parsed, and if the string contains non-numeric characters or has no digits, a runtime warning is emitted to `stderr` (`Argument "%s" isn't numeric in numeric conversion`) and non-numeric values yield `0` (or `0.0`).
+- Raw machine pointers (`ptr`) created via `ptr_add`, syscalls, or `0` remain raw pointers and may be bitcast to `i64` without string inspection.
+
 ### 3.3 `undef` and `defined`
 
 - **As a Value Literal:** `$var = undef;` resets a managed variable to the undefined state (Tag 0, Payload 0) and decrefs its previous value.
@@ -180,6 +186,8 @@ The `say()`, `print()`, and concatenation (`.`) operators automatically stringif
 - `Float` and `f64` invoke runtime `sprintf("%f")`.
 - `Bool` stringifies to `"1"` or `""`.
 - Classes and Arrays stringify to `"ClassName=ptr:0x..."`.
+
+`say` and `print` are variadic: every argument is stringified and the pieces are concatenated, so `say('a', 'b')` prints `ab`. A `String` argument is passed through unchanged.
 
 ### 4.3 String Interpolation (Strict)
 
@@ -309,7 +317,7 @@ if (want('list'))   { return (1, 2, 3); }
 if (want('scalar')) { return 42; }
 if (want('void'))   { return; }
 ```
-Functions receive a hidden `%__want` argument (0 = void, 1 = scalar, 2 = list).
+Functions receive a hidden `%__want` argument (0 = void, 1 = scalar, 2 = list). A position that consumes a list tells the call sitting directly in it `want('list')`: the iterable of a `for`/`foreach` loop, and every element of an argument list, since Perl evaluates arguments in list context. The override is scoped to that call; an operator between the list and a nested call imposes its own scalar context.
 
 ### 6.4 The `builtin::` Namespace
 
@@ -348,6 +356,18 @@ Subroutines can return multi-value tuples mapping directly to hardware registers
 ```perl
 sub calculate(i64 $x) :returns(i64);
 ```
+
+**Optional Parentheses:**
+A call to a known sub may omit its parentheses. The name is a list operator followed by a comma-separated argument
+list that runs to the end of the statement (or the enclosing delimiter):
+```perl
+sub render2(String $name) :returns(String) { return 'Hi, ' . $name; }
+say render2 'Alex';          # same as say( render2('Alex') )
+```
+A comma immediately after the name ends its (empty) argument list, so `say render, render2 'Alex'` is
+`say( render(), render2('Alex') )`. The argument list is syntactic, not inferred from the signature: `render 'Test'` on a
+zero-parameter sub is an ordinary arity error. A known sub name stays a bareword before `(`, `->`, `{`/`}`, `[`/`]`, and
+`=>`. `say`/`print` may likewise drop their parentheses and take a bare list.
 
 **Parameter Defaults:**
 ```perl
@@ -409,6 +429,12 @@ class DatabaseConnection {
 - `while`, `for`, `foreach`
 - `last`, `next`
 - Postfix modifiers: `return $x if $cond;`
+
+Simple statements end with `;`. As in Perl, the `;` is optional on the **last** statement of a block: a statement whose next token is a closing `}` (or the end of the file) may drop its terminator. A statement in the middle of a block still needs it, because without the `;` the parser cannot tell where one statement ends and the next begins (`my $x = 1 return $x` is an error). This applies to every simple-statement form — a `return`, `my`, assignment, `say`/`print`, `last`/`next`, postfix modifier, or class field — while compound statements never required a `;`.
+
+```perl
+sub render() { return 'blah' }   # no `;` before the closing brace
+```
 
 ### 9.2 Exceptions (`try / catch / finally`)
 

@@ -1092,20 +1092,113 @@ package Brocken::Runtime {
     }
 
     # Generic warning output routines:
-    sub rt_warn( ptr $msg ) {
-        return () if Brocken::ptr_cmp_eq( $msg, 0 );
-        rt_write_stderr( $msg, str_len($msg) );
-    }
+    sub rt_warn( ptr $msg, ptr $file = 0, i64 $line = 0, i64 $col = 0 ) {
+         return () if Brocken::ptr_cmp_eq( $msg, 0 );
+        my i64 $len = str_len($msg);
+        rt_write_stderr( $msg, $len );
 
-    sub rt_warn_non_numeric( ptr $val_str ) {
-        rt_warn("Argument \"");
-        rt_warn($val_str);
-        rt_warn("\" isn't numeric in numeric conversion\n");
-    }
+        my i64 $has_nl = 0;
+        if ( $len > 0 ) {
+            my u8 $last = Brocken::load_u8( Brocken::ptr_add( $msg, Brocken::i64_sub( $len, 1 ) ) );
+            if ( $last == 10 ) { $has_nl = 1; }
+        }
+         if ( $has_nl == 0 ) {
+             if ( $line <= 0 ) {
+                 my [i64; 1] @f_slot;
+                 my [i64; 1] @l_slot;
+                 my [i64; 1] @c_slot;
+                 @f_slot[0] = 0;
+                 @l_slot[0] = 0;
+                 @c_slot[0] = 0;
+                 if ( rt_caller_loc( @f_slot, @l_slot, @c_slot ) != 0 ) {
+                     $file = @f_slot[0];
+                     $line = @l_slot[0];
+                    $col  = @c_slot[0];
+                }
+            }
+            if ( $line > 0 ) {
+                my i64 $has_file = 0;
+                if ( Brocken::ptr_cmp_eq( $file, 0 ) == 0 ) {
+                   if ( str_len($file) > 0 ) { $has_file = 1; }
+                }
+                my [i64; 2] @b0;
+                my [i64; 2] @b1;
+                my [i64; 2] @b2;
+                my [i64; 5] @list;
+                my ptr $fmt = " at line %d.\n";
+
+                if ( $has_file != 0 && $col > 0 ) {
+                    @b0[0] = Brocken::shl( 4, 24 ); @b0[1] = $file;
+                    @b1[0] = Brocken::shl( 2, 24 ); @b1[1] = $line;
+                    @b2[0] = Brocken::shl( 2, 24 ); @b2[1] = $col;
+                    @list[0] = Brocken::shl( 7, 24 );
+                    @list[1] = 3;
+                    @list[2] = @b0;
+                    @list[3] = @b1;
+                    @list[4] = @b2;
+                    $fmt = " at %s line %d, col %d.\n";
+                }
+                elsif ( $has_file != 0 ) {
+                    @b0[0] = Brocken::shl( 4, 24 ); @b0[1] = $file;
+                    @b1[0] = Brocken::shl( 2, 24 ); @b1[1] = $line;
+                    @list[0] = Brocken::shl( 7, 24 );
+                    @list[1] = 2;
+                    @list[2] = @b0;
+                    @list[3] = @b1;
+                    $fmt = " at %s line %d.\n";
+                }
+                elsif ( $col > 0 ) {
+                    @b0[0] = Brocken::shl( 2, 24 ); @b0[1] = $line;
+                    @b1[0] = Brocken::shl( 2, 24 ); @b1[1] = $col;
+                    @list[0] = Brocken::shl( 7, 24 );
+                    @list[1] = 2;
+                    @list[2] = @b0;
+                    @list[3] = @b1;
+                    $fmt = " at line %d, col %d.\n";
+                }
+                else {
+                    @b0[0] = Brocken::shl( 2, 24 ); @b0[1] = $line;
+                    @list[0] = Brocken::shl( 7, 24 );
+                    @list[1] = 1;
+                    @list[2] = @b0;
+                }
+
+                my ptr $loc = str_sprintf( $fmt, @list );
+                if ( Brocken::ptr_cmp_eq( $loc, 0 ) == 0 ) {
+                    rt_write_stderr( $loc, str_len($loc) );
+                    Brocken::libc( "free", $loc );
+                }
+            }
+            else {
+               rt_write_stderr( "\n", 1 );
+           }
+         }
+        return ();
+     }
+
+  sub rt_warn_non_numeric( ptr $val_str, ptr $file = 0, i64 $line = 0, i64 $col = 0 ) :returns(bool) {
+         my [i64; 2] @b0;
+         @b0[0] = Brocken::shl( 4, 24 );
+         @b0[1] = $val_str;
+         #
+         my [i64; 2] @b1;
+         @b1[0] = Brocken::shl( 4, 24 );
+         @b1[1] = "numeric";
+ #
+         my [i64; 4] @list;
+         @list[0] = Brocken::shl( 7, 24 );
+         @list[1] = 2;
+         @list[2] = @b0;
+         @list[3] = @b1;
+ #
+        my ptr $msg = str_sprintf( "Argument \"%s\" isn't %s in conversion", @list );
+        rt_warn( $msg, $file, $line, $col );
+         Brocken::libc( 'free', $msg ) if Brocken::ptr_cmp_eq( $msg, 0 ) == 0;
+         return true;
+     }
 
     # Returns: 1 = numeric ("42", "-15", "3.14"), 2 = partial ("42abc"), 0 = non-numeric ("String")
     sub str_is_numeric( ptr $s ) : returns(i64) {
-        rt_warn("str_is_numeric");
         return 0 if Brocken::ptr_cmp_eq( $s, 0 );
         my ptr $p = $s;
         while (1) {
@@ -1159,12 +1252,11 @@ package Brocken::Runtime {
         return 2;
     }
 
-    sub str_to_i64_checked( ptr $s ) : returns(i64) {
-        rt_warn("str_to_i64_checked");
+    sub str_to_i64_checked( ptr $s, ptr $file = 0, i64 $line = 0, i64 $col = 0 ) : returns(i64) {
         return 0 if Brocken::ptr_cmp_eq( $s, 0 );
         my i64 $st = str_is_numeric($s);
 
-        #~ rt_warn_non_numeric($s) unless $st == 1;
+        #~ rt_warn_non_numeric( $s, $file, $line, $col ) unless $st == 1;
         return str_to_i64($s);
     }
 
@@ -1209,7 +1301,7 @@ package Brocken::Runtime {
             my i64 $class_id = Brocken::shr( $header, 32 );
             if ( $class_id == 0 ) {
                 my ptr $s = Brocken::load_i64($payload);
-                return str_to_i64_checked($s);
+                return str_to_i64_checked( $s, $file, $line, $col );
             }
         }
         return Brocken::load_i64($payload);
@@ -1598,6 +1690,744 @@ package Brocken::Runtime {
         return $buf;
     }
 
+  # Retrieve the $idx-th boxed argument from $args (0/undef = none, tag-7 list = element slot, otherwise single boxed scalar).
+    sub _sprintf_get_arg( ptr $args, i64 $idx ) : returns(ptr) {
+        if ( Brocken::ptr_cmp_eq( $args, 0 ) ) { return 0; }
+        if ( $idx < 0 ) { return 0; }
+        my i64 $tag = box_tag($args);
+        if ( $tag == 7 ) {
+            my i64 $count = Brocken::load_i64( Brocken::ptr_add( $args, 8 ) );
+            if ( $idx >= $count ) { return 0; }
+            return Brocken::load_i64( Brocken::ptr_add( $args, Brocken::i64_add( 16, $idx * 8 ) ) );
+        }
+        if ( $idx == 0 ) { return $args; }
+        return 0;
+    }
+
+    sub _sprintf_emit_byte( ptr $buf, i64 $pos, u8 $ch ) : returns(i64) {
+        if ( Brocken::ptr_cmp_eq( $buf, 0 ) == 0 ) {
+            Brocken::store_u8( Brocken::ptr_add( $buf, $pos ), $ch );
+        }
+        return Brocken::i64_add( $pos, 1 );
+    }
+
+    sub _sprintf_emit_repeat( ptr $buf, i64 $pos, u8 $ch, i64 $count ) : returns(i64) {
+        if ( $count <= 0 ) { return $pos; }
+        if ( Brocken::ptr_cmp_eq( $buf, 0 ) == 0 ) {
+            my i64 $i = 0;
+            while ( $i < $count ) {
+                Brocken::store_u8( Brocken::ptr_add( $buf, Brocken::i64_add( $pos, $i ) ), $ch );
+                $i = Brocken::i64_add( $i, 1 );
+            }
+        }
+        return Brocken::i64_add( $pos, $count );
+    }
+
+    sub _sprintf_emit_bytes( ptr $buf, i64 $pos, ptr $s, i64 $len ) : returns(i64) {
+        if ( Brocken::ptr_cmp_eq( $s, 0 ) || $len <= 0 ) {
+            return $pos;
+        }
+        if ( Brocken::ptr_cmp_eq( $buf, 0 ) == 0 ) {
+            my i64 $i = 0;
+            while ( $i < $len ) {
+                Brocken::store_u8(
+                    Brocken::ptr_add( $buf, Brocken::i64_add( $pos, $i ) ),
+                    Brocken::load_u8( Brocken::ptr_add( $s, $i ) )
+                );
+                $i = Brocken::i64_add( $i, 1 );
+            }
+        }
+        return Brocken::i64_add( $pos, $len );
+    }
+
+    # Format a NUL-terminated string. $flags bit 0 = left-justify ('-'); $prec >= 0 truncates to at most $prec bytes.
+    sub _sprintf_fmt_str( ptr $buf, i64 $pos, ptr $s, i64 $flags, i64 $width, i64 $prec ) : returns(i64) {
+        my i64 $slen = str_len($s);
+        if ( $prec >= 0 && $prec < $slen ) {
+            $slen = $prec;
+        }
+        my i64 $pad = Brocken::i64_sub( $width, $slen );
+        if ( $pad < 0 ) { $pad = 0; }
+        my i64 $flag_minus = Brocken::band( $flags, 1 );
+        if ( $flag_minus == 0 ) {
+            $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad );
+        }
+        $pos = _sprintf_emit_bytes( $buf, $pos, $s, $slen );
+        if ( $flag_minus != 0 ) {
+            $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad );
+        }
+        return $pos;
+    }
+
+    # Format an integer for %s, supporting optional string precision truncation (e.g. "%.2s" on 12345 -> "12").
+    sub _sprintf_fmt_str_int( ptr $buf, i64 $pos, i64 $val, i64 $flags, i64 $width, i64 $prec ) : returns(i64) {
+        my i64 $is_neg = 0;
+        my u64 $uval   = $val;
+        if ( $val < 0 ) {
+            $is_neg = 1;
+            $uval   = 0 - $val;
+        }
+        my i64 $ndigits = 0;
+        my u64 $utmp    = $uval;
+        if ( $utmp == 0 ) {
+            $ndigits = 1;
+        }
+        else {
+            while ( $utmp != 0 ) {
+                $ndigits = Brocken::i64_add( $ndigits, 1 );
+                $utmp    = $utmp / 10;
+            }
+        }
+        my i64 $full_len = Brocken::i64_add( $is_neg, $ndigits );
+        my i64 $slen     = $full_len;
+        if ( $prec >= 0 && $prec < $slen ) {
+            $slen = $prec;
+        }
+        my i64 $pad = Brocken::i64_sub( $width, $slen );
+        if ( $pad < 0 ) { $pad = 0; }
+        my i64 $flag_minus = Brocken::band( $flags, 1 );
+        if ( $flag_minus == 0 ) {
+            $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad );
+        }
+        if ( Brocken::ptr_cmp_eq( $buf, 0 ) ) {
+            $pos = Brocken::i64_add( $pos, $slen );
+        }
+        else {
+            my i64 $rem_emit = $slen;
+            if ( $is_neg != 0 && $rem_emit > 0 ) {
+                $pos      = _sprintf_emit_byte( $buf, $pos, 45 );
+                $rem_emit = Brocken::i64_sub( $rem_emit, 1 );
+            }
+            my u64 $udiv = 1;
+            my i64 $i    = 1;
+            while ( $i < $ndigits ) {
+                $udiv = $udiv * 10;
+                $i    = Brocken::i64_add( $i, 1 );
+            }
+            my u64 $rem = $uval;
+            $i = 0;
+            while ( $i < $rem_emit ) {
+                my i64 $d = $rem / $udiv;
+                $rem  = $rem % $udiv;
+                $udiv = $udiv / 10;
+                $pos  = _sprintf_emit_byte( $buf, $pos, Brocken::i64_add( $d, 48 ) );
+                $i    = Brocken::i64_add( $i, 1 );
+            }
+        }
+        if ( $flag_minus != 0 ) {
+            $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad );
+        }
+        return $pos;
+    }
+
+    # Format an integer in base 2..16.
+    # $flags bits: 1='-', 2='+', 4=' ', 8='0', 16='#', 32=signed, 64=uppercase, 128=force prefix ('0x' for %p).
+    sub _sprintf_fmt_int( ptr $buf, i64 $pos, i64 $val, i64 $base, i64 $flags, i64 $width, i64 $prec ) : returns(i64) {
+        my i64 $flag_minus   = Brocken::band( $flags, 1 );
+        my i64 $flag_plus    = Brocken::band( $flags, 2 );
+        my i64 $flag_space   = Brocken::band( $flags, 4 );
+        my i64 $flag_zero    = Brocken::band( $flags, 8 );
+        my i64 $flag_alt     = Brocken::band( $flags, 16 );
+        my i64 $is_signed    = Brocken::band( $flags, 32 );
+        my i64 $is_upper     = Brocken::band( $flags, 64 );
+        my i64 $force_prefix = Brocken::band( $flags, 128 );
+
+        my i64 $is_neg = 0;
+        my u64 $uval   = $val;
+        if ( $is_signed != 0 && $val < 0 ) {
+            $is_neg = 1;
+            $uval   = 0 - $val;
+        }
+        my u64 $ubase   = $base;
+        my i64 $ndigits = 0;
+        if ( $uval == 0 ) {
+            if ( $prec != 0 ) { $ndigits = 1; }
+        }
+        else {
+            my u64 $utmp = $uval;
+            while ( $utmp != 0 ) {
+                $ndigits = Brocken::i64_add( $ndigits, 1 );
+                $utmp    = $utmp / $ubase;
+            }
+        }
+        my i64 $prec_zeros = 0;
+        if ( $prec > $ndigits ) {
+            $prec_zeros = Brocken::i64_sub( $prec, $ndigits );
+        }
+
+        my u8 $sign_ch   = 0;
+        my i64 $sign_len = 0;
+        if ( $is_signed != 0 ) {
+            if    ( $is_neg != 0 )     { $sign_ch = 45; $sign_len = 1; }
+            elsif ( $flag_plus != 0 )  { $sign_ch = 43; $sign_len = 1; }
+            elsif ( $flag_space != 0 ) { $sign_ch = 32; $sign_len = 1; }
+        }
+
+        my i64 $alt_len = 0;
+        if ( $flag_alt != 0 ) {
+            if ( $base == 16 || $base == 2 ) {
+                if ( $uval != 0 || $force_prefix != 0 ) { $alt_len = 2; }
+            }
+            elsif ( $base == 8 ) {
+                if ( $uval != 0 ) {
+                    if ( $prec_zeros == 0 ) { $alt_len = 1; }
+                }
+                elsif ( $prec == 0 ) {
+                    $alt_len = 1;
+                }
+            }
+        }
+
+        my i64 $content_len = Brocken::i64_add(
+            Brocken::i64_add( $sign_len, $alt_len ),
+            Brocken::i64_add( $prec_zeros, $ndigits )
+        );
+        my i64 $pad = Brocken::i64_sub( $width, $content_len );
+        if ( $pad < 0 ) { $pad = 0; }
+        my i64 $zero_pad = 0;
+        if ( $flag_zero != 0 && $flag_minus == 0 && $prec < 0 ) {
+            $zero_pad = 1;
+        }
+
+        if ( $flag_minus == 0 && $zero_pad == 0 ) {
+            $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad );
+        }
+        if ( $sign_len != 0 ) {
+            $pos = _sprintf_emit_byte( $buf, $pos, $sign_ch );
+        }
+        if ( $alt_len == 1 ) {
+            $pos = _sprintf_emit_byte( $buf, $pos, 48 );
+        }
+        elsif ( $alt_len == 2 ) {
+            $pos = _sprintf_emit_byte( $buf, $pos, 48 );
+            if ( $base == 16 ) {
+                $pos = _sprintf_emit_byte( $buf, $pos, $is_upper != 0 ? 88 : 120 );
+            }
+            else {
+                $pos = _sprintf_emit_byte( $buf, $pos, $is_upper != 0 ? 66 : 98 );
+            }
+        }
+        if ( $flag_minus == 0 && $zero_pad != 0 ) {
+            $pos = _sprintf_emit_repeat( $buf, $pos, 48, $pad );
+        }
+        $pos = _sprintf_emit_repeat( $buf, $pos, 48, $prec_zeros );
+
+        if ( $ndigits > 0 ) {
+            if ( Brocken::ptr_cmp_eq( $buf, 0 ) ) {
+                $pos = Brocken::i64_add( $pos, $ndigits );
+            }
+            else {
+                my u64 $udiv = 1;
+                my i64 $i    = 1;
+                while ( $i < $ndigits ) {
+                    $udiv = $udiv * $ubase;
+                    $i    = Brocken::i64_add( $i, 1 );
+                }
+                my u64 $rem = $uval;
+                $i = 0;
+                while ( $i < $ndigits ) {
+                    my i64 $d = $rem / $udiv;
+                    $rem  = $rem % $udiv;
+                    $udiv = $udiv / $ubase;
+                    my i64 $ch = Brocken::i64_add( $d, 48 );
+                    if ( $d >= 10 ) {
+                        if ( $is_upper != 0 ) { $ch = Brocken::i64_add( $d, 55 ); }
+                        else                  { $ch = Brocken::i64_add( $d, 87 ); }
+                    }
+                    $pos = _sprintf_emit_byte( $buf, $pos, $ch );
+                    $i   = Brocken::i64_add( $i, 1 );
+                }
+            }
+        }
+        if ( $flag_minus != 0 ) {
+            $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad );
+        }
+        return $pos;
+    }
+
+    # Format an IEEE-754 f64 in fixed decimal notation (%f / %F).
+    # $flags bits: 1='-', 2='+', 4=' ', 8='0', 16='#', 64=uppercase, 256=trim trailing fractional zeros (for %s).
+    sub _sprintf_fmt_float( ptr $buf, i64 $pos, f64 $val, i64 $flags, i64 $width, i64 $prec ) : returns(i64) {
+        my i64 $flag_minus = Brocken::band( $flags, 1 );
+        my i64 $flag_plus  = Brocken::band( $flags, 2 );
+        my i64 $flag_space = Brocken::band( $flags, 4 );
+        my i64 $flag_zero  = Brocken::band( $flags, 8 );
+        my i64 $flag_alt   = Brocken::band( $flags, 16 );
+        my i64 $is_upper   = Brocken::band( $flags, 64 );
+        my i64 $trim_zeros = Brocken::band( $flags, 256 );
+
+        if ( $prec < 0 ) { $prec = 6; }
+
+        # NaN
+        if ( $val != $val ) {
+            my i64 $pad = Brocken::i64_sub( $width, 3 );
+            if ( $pad < 0 ) { $pad = 0; }
+            if ( $flag_minus == 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+            $pos = _sprintf_emit_bytes( $buf, $pos, $is_upper != 0 ? "NAN" : "NaN", 3 );
+            if ( $flag_minus != 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+            return $pos;
+        }
+
+        my i64 $is_neg  = 0;
+        my f64 $abs_val = $val;
+        if ( $val < 0.0 ) {
+            $is_neg  = 1;
+            $abs_val = 0.0 - $val;
+        }
+        elsif ( $val == 0.0 ) {
+            my f64 $inv = 1.0 / $val;
+            if ( $inv < 0.0 ) {
+                $is_neg  = 1;
+                $abs_val = 0.0;
+            }
+        }
+
+        my u8 $sign_ch   = 0;
+        my i64 $sign_len = 0;
+        if    ( $is_neg != 0 )     { $sign_ch = 45; $sign_len = 1; }
+        elsif ( $flag_plus != 0 )  { $sign_ch = 43; $sign_len = 1; }
+        elsif ( $flag_space != 0 ) { $sign_ch = 32; $sign_len = 1; }
+
+        # +/-Inf
+        if ( $abs_val > 0.0 && ( $abs_val * 0.5 ) == $abs_val ) {
+            my i64 $inf_len = Brocken::i64_add( $sign_len, 3 );
+            my i64 $pad     = Brocken::i64_sub( $width, $inf_len );
+            if ( $pad < 0 ) { $pad = 0; }
+            if ( $flag_minus == 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+            if ( $sign_len != 0 )   { $pos = _sprintf_emit_byte( $buf, $pos, $sign_ch ); }
+            $pos = _sprintf_emit_bytes( $buf, $pos, $is_upper != 0 ? "INF" : "Inf", 3 );
+            if ( $flag_minus != 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+            return $pos;
+        }
+
+        # Huge finite floats (>= 2^53) are exact integers with zero fractional part.
+        if ( $abs_val >= 9007199254740992.0 ) {
+            my f64 $pow     = 1.0;
+            my f64 $limit   = $abs_val / 10.0;
+            my i64 $idigits = 1;
+            while ( $pow <= $limit ) {
+                $pow     = $pow * 10.0;
+                $idigits = Brocken::i64_add( $idigits, 1 );
+            }
+            my i64 $eff_prec = $trim_zeros != 0 ? 0 : $prec;
+            my i64 $dot_len  = ( $eff_prec > 0 || $flag_alt != 0 ) ? 1 : 0;
+            my i64 $total    = Brocken::i64_add( Brocken::i64_add( $sign_len, $idigits ), Brocken::i64_add( $dot_len, $eff_prec ) );
+            my i64 $pad      = Brocken::i64_sub( $width, $total );
+            if ( $pad < 0 ) { $pad = 0; }
+
+            if ( $flag_minus == 0 && $flag_zero == 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+            if ( $sign_len != 0 )                      { $pos = _sprintf_emit_byte( $buf, $pos, $sign_ch ); }
+            if ( $flag_minus == 0 && $flag_zero != 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 48, $pad ); }
+
+            if ( Brocken::ptr_cmp_eq( $buf, 0 ) ) {
+                $pos = Brocken::i64_add( $pos, Brocken::i64_add( $idigits, Brocken::i64_add( $dot_len, $eff_prec ) ) );
+            }
+            else {
+                my f64 $rem = $abs_val;
+                my i64 $k   = 0;
+                while ( $k < $idigits ) {
+                    my i64 $d = $rem / $pow;
+                    if ( $d > 9 ) { $d = 9; }
+                    if ( $d < 0 ) { $d = 0; }
+                    my f64 $fd = $d;
+                    $rem = $rem - $fd * $pow;
+                    $pow = $pow / 10.0;
+                    $pos = _sprintf_emit_byte( $buf, $pos, Brocken::i64_add( $d, 48 ) );
+                    $k   = Brocken::i64_add( $k, 1 );
+                }
+                if ( $dot_len != 0 ) { $pos = _sprintf_emit_byte( $buf, $pos, 46 ); }
+                $pos = _sprintf_emit_repeat( $buf, $pos, 48, $eff_prec );
+            }
+            if ( $flag_minus != 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+            return $pos;
+        }
+
+        # Standard finite range (< 2^53): integer part fits cleanly in i64 even after carry from rounding.
+        my i64 $ipart  = $abs_val;
+        my f64 $fipart = $ipart;
+        my f64 $frac   = $abs_val - $fipart;
+        my i64 $use_prec = $prec;
+        if ( $use_prec > 15 ) { $use_prec = 15; }
+
+        my f64 $p10  = 1.0;
+        my i64 $ip10 = 1;
+        my i64 $pi   = 0;
+        while ( $pi < $use_prec ) {
+            $p10  = $p10 * 10.0;
+            $ip10 = $ip10 * 10;
+            $pi   = Brocken::i64_add( $pi, 1 );
+        }
+
+        my i64 $fdigits  = 0;
+        my f64 $rem_frac = 0.0;
+        if ( $prec <= 15 ) {
+            my f64 $scaled = $frac * $p10 + 0.5;
+            $fdigits = $scaled;
+            if ( $fdigits >= $ip10 ) {
+                $fdigits = Brocken::i64_sub( $fdigits, $ip10 );
+                $ipart   = Brocken::i64_add( $ipart, 1 );
+            }
+        }
+        else {
+            my f64 $scaled15 = $frac * $p10;
+            $fdigits = $scaled15;
+            my f64 $fdigits_f = $fdigits;
+            $rem_frac = $scaled15 - $fdigits_f;
+        }
+
+        my i64 $eff_prec = $prec;
+        if ( $trim_zeros != 0 && $prec <= 15 && $use_prec > 0 ) {
+            if ( $fdigits == 0 ) {
+                $eff_prec = 0;
+                $use_prec = 0;
+            }
+            else {
+                while ( $eff_prec > 0 && ( $fdigits % 10 ) == 0 ) {
+                    $fdigits  = $fdigits / 10;
+                    $eff_prec = Brocken::i64_sub( $eff_prec, 1 );
+                    $use_prec = Brocken::i64_sub( $use_prec, 1 );
+                    $ip10     = $ip10 / 10;
+                }
+            }
+        }
+
+        my i64 $idigits = 0;
+        my i64 $itmp    = $ipart;
+        if ( $itmp == 0 ) {
+            $idigits = 1;
+        }
+        else {
+            while ( $itmp > 0 ) {
+                $idigits = Brocken::i64_add( $idigits, 1 );
+                $itmp    = $itmp / 10;
+            }
+        }
+
+        my i64 $dot_len = ( $eff_prec > 0 || $flag_alt != 0 ) ? 1 : 0;
+        my i64 $total   = Brocken::i64_add( Brocken::i64_add( $sign_len, $idigits ), Brocken::i64_add( $dot_len, $eff_prec ) );
+        my i64 $pad     = Brocken::i64_sub( $width, $total );
+        if ( $pad < 0 ) { $pad = 0; }
+
+        if ( $flag_minus == 0 && $flag_zero == 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+        if ( $sign_len != 0 )                      { $pos = _sprintf_emit_byte( $buf, $pos, $sign_ch ); }
+        if ( $flag_minus == 0 && $flag_zero != 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 48, $pad ); }
+
+        if ( Brocken::ptr_cmp_eq( $buf, 0 ) ) {
+            $pos = Brocken::i64_add( $pos, Brocken::i64_add( $idigits, Brocken::i64_add( $dot_len, $eff_prec ) ) );
+        }
+        else {
+            my i64 $idiv = 1;
+            my i64 $ii   = 1;
+            while ( $ii < $idigits ) {
+                $idiv = $idiv * 10;
+                $ii   = Brocken::i64_add( $ii, 1 );
+            }
+            my i64 $irem = $ipart;
+            $ii = 0;
+            while ( $ii < $idigits ) {
+                my i64 $d = $irem / $idiv;
+                $irem = $irem % $idiv;
+                $idiv = $idiv / 10;
+                $pos  = _sprintf_emit_byte( $buf, $pos, Brocken::i64_add( $d, 48 ) );
+                $ii   = Brocken::i64_add( $ii, 1 );
+            }
+            if ( $dot_len != 0 ) {
+                $pos = _sprintf_emit_byte( $buf, $pos, 46 );
+            }
+            if ( $use_prec > 0 ) {
+                my i64 $fdiv = $ip10 / 10;
+                my i64 $frem = $fdigits;
+                my i64 $fi   = 0;
+                while ( $fi < $use_prec ) {
+                    my i64 $fd = $frem / $fdiv;
+                    $frem = $frem % $fdiv;
+                    $fdiv = $fdiv / 10;
+                    $pos  = _sprintf_emit_byte( $buf, $pos, Brocken::i64_add( $fd, 48 ) );
+                    $fi   = Brocken::i64_add( $fi, 1 );
+                }
+            }
+            if ( $eff_prec > $use_prec ) {
+                my i64 $extra = Brocken::i64_sub( $eff_prec, $use_prec );
+                my i64 $ei    = 0;
+                while ( $ei < $extra ) {
+                    $rem_frac = $rem_frac * 10.0;
+                    my i64 $ed = $rem_frac;
+                    if ( $ed > 9 ) { $ed = 9; }
+                    if ( $ed < 0 ) { $ed = 0; }
+                    my f64 $fed = $ed;
+                    $rem_frac = $rem_frac - $fed;
+                    $pos      = _sprintf_emit_byte( $buf, $pos, Brocken::i64_add( $ed, 48 ) );
+                    $ei       = Brocken::i64_add( $ei, 1 );
+                }
+            }
+        }
+        if ( $flag_minus != 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+        return $pos;
+    }
+
+    # Format a boxed Any value for %s.
+    sub _sprintf_fmt_any_str( ptr $buf, i64 $pos, ptr $arg, i64 $flags, i64 $width, i64 $prec ) : returns(i64) {
+        if ( Brocken::ptr_cmp_eq( $arg, 0 ) ) {
+            return _sprintf_fmt_str( $buf, $pos, "", $flags, $width, $prec );
+        }
+        my i64 $tag = box_tag($arg);
+        if ( $tag == 0 ) {
+            return _sprintf_fmt_str( $buf, $pos, "", $flags, $width, $prec );
+        }
+        if ( $tag == 4 ) {
+            my i64 $header   = Brocken::load_i64($arg);
+            my i64 $class_id = Brocken::shr( $header, 32 );
+            if ( $class_id == 0 ) {
+                return _sprintf_fmt_str( $buf, $pos, unbox_ptr($arg), $flags, $width, $prec );
+            }
+            return _sprintf_fmt_str( $buf, $pos, "OBJECT", $flags, $width, $prec );
+        }
+        if ( $tag == 1 || $tag == 2 ) {
+            return _sprintf_fmt_str_int( $buf, $pos, unbox_i64($arg), $flags, $width, $prec );
+        }
+        if ( $tag == 3 ) {
+            return _sprintf_fmt_float( $buf, $pos, unbox_f64($arg), Brocken::bor( $flags, 256 ), $width, $prec );
+        }
+        if ( $tag == 7 || $tag == 9 ) {
+            return _sprintf_fmt_str( $buf, $pos, "ARRAY", $flags, $width, $prec );
+        }
+        if ( $tag == 8 ) {
+            return _sprintf_fmt_str( $buf, $pos, "HASH", $flags, $width, $prec );
+        }
+        return _sprintf_fmt_str_int( $buf, $pos, unbox_i64($arg), $flags, $width, $prec );
+    }
+
+# Core sprintf pass: when $buf == 0, counts output bytes; when $buf != 0, writes formatted bytes into $buf.
+    sub _sprintf_run( ptr $buf, ptr $format, ptr $args ) : returns(i64) {
+        my i64 $fi      = 0;
+        my i64 $pos     = 0;
+        my i64 $arg_idx = 0;
+
+        while (1) {
+            my u8 $c = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+            if ( $c == 0 ) { last; }
+            if ( $c != 37 ) {    # not '%'
+                $pos = _sprintf_emit_byte( $buf, $pos, $c );
+                $fi  = Brocken::i64_add( $fi, 1 );
+                next;
+            }
+
+            my i64 $spec_start = $fi;
+            $fi = Brocken::i64_add( $fi, 1 );
+            my u8 $nc = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+            if ( $nc == 0 ) {
+                $pos = _sprintf_emit_byte( $buf, $pos, 37 );
+                last;
+            }
+            if ( $nc == 37 ) {    # '%%'
+                $pos = _sprintf_emit_byte( $buf, $pos, 37 );
+                $fi  = Brocken::i64_add( $fi, 1 );
+                next;
+            }
+
+            # Flags: '-'=45(1), '+'=43(2), ' '=32(4), '0'=48(8), '#'=35(16)
+            my i64 $flags = 0;
+            while (1) {
+                my u8 $fc = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+                if    ( $fc == 45 ) { $flags = Brocken::bor( $flags, 1 ); }
+                elsif ( $fc == 43 ) { $flags = Brocken::bor( $flags, 2 ); }
+                elsif ( $fc == 32 ) { $flags = Brocken::bor( $flags, 4 ); }
+                elsif ( $fc == 48 ) { $flags = Brocken::bor( $flags, 8 ); }
+                elsif ( $fc == 35 ) { $flags = Brocken::bor( $flags, 16 ); }
+                else                { last; }
+                $fi = Brocken::i64_add( $fi, 1 );
+            }
+
+            # Width: '*' or decimal digits
+            my i64 $width = 0;
+            my u8 $wc     = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+            if ( $wc == 42 ) {    # '*'
+                $fi = Brocken::i64_add( $fi, 1 );
+                my ptr $warg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $width   = unbox_i64($warg);
+                if ( $width < 0 ) {
+                    $flags = Brocken::bor( $flags, 1 );
+                    $width = 0 - $width;
+                }
+            }
+            else {
+                while (1) {
+                    my u8 $dc = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+                    if ( $dc >= 48 && $dc <= 57 ) {
+                        $width = Brocken::i64_add( $width * 10, Brocken::i64_sub( $dc, 48 ) );
+                        $fi    = Brocken::i64_add( $fi, 1 );
+                    }
+                    else {
+                        last;
+                    }
+                }
+            }
+
+            # Precision: '.' followed by '*' or decimal digits (-1 when omitted)
+            my i64 $prec = -1;
+            my u8 $pc    = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+            if ( $pc == 46 ) {    # '.'
+                $prec = 0;
+                $fi   = Brocken::i64_add( $fi, 1 );
+                my u8 $pnc = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+                if ( $pnc == 42 ) {    # '*'
+                    $fi = Brocken::i64_add( $fi, 1 );
+                    my ptr $parg = _sprintf_get_arg( $args, $arg_idx );
+                    $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                    $prec    = unbox_i64($parg);
+                    if ( $prec < 0 ) {
+                        $prec = -1;
+                    }
+                }
+                else {
+                    while (1) {
+                        my u8 $dc = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+                        if ( $dc >= 48 && $dc <= 57 ) {
+                            $prec = Brocken::i64_add( $prec * 10, Brocken::i64_sub( $dc, 48 ) );
+                            $fi   = Brocken::i64_add( $fi, 1 );
+                        }
+                        else {
+                            last;
+                        }
+                    }
+                }
+            }
+
+            # Optional length modifiers: h(104), l(108), j(106), z(122), t(116), q(113), L(76), V(86)
+            while (1) {
+                my u8 $lc = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+                if ( $lc == 104 || $lc == 108 || $lc == 106 || $lc == 122 || $lc == 116 || $lc == 113 || $lc == 76 || $lc == 86 ) {
+                    $fi = Brocken::i64_add( $fi, 1 );
+                }
+                else {
+                    last;
+                }
+            }
+
+            # Conversion specifier
+            my u8 $conv = Brocken::load_u8( Brocken::ptr_add( $format, $fi ) );
+            if ( $conv == 0 ) {
+                $pos = _sprintf_emit_bytes( $buf, $pos, Brocken::ptr_add( $format, $spec_start ), Brocken::i64_sub( $fi, $spec_start ) );
+                last;
+            }
+            $fi = Brocken::i64_add( $fi, 1 );
+
+            if ( $conv == 115 ) {    # 's'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_any_str( $buf, $pos, $arg, $flags, $width, $prec );
+            }
+            elsif ( $conv == 99 ) {    # 'c'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                my u8 $ch = Brocken::band( unbox_i64($arg), 255 );
+                my i64 $pad = Brocken::i64_sub( $width, 1 );
+                if ( $pad < 0 ) { $pad = 0; }
+                my i64 $flag_minus = Brocken::band( $flags, 1 );
+                if ( $flag_minus == 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+                $pos = _sprintf_emit_byte( $buf, $pos, $ch );
+                if ( $flag_minus != 0 ) { $pos = _sprintf_emit_repeat( $buf, $pos, 32, $pad ); }
+            }
+            elsif ( $conv == 100 || $conv == 105 ) {    # 'd' / 'i'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_int( $buf, $pos, unbox_i64($arg), 10, Brocken::bor( $flags, 32 ), $width, $prec );
+            }
+            elsif ( $conv == 117 ) {    # 'u'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_int( $buf, $pos, unbox_i64($arg), 10, $flags, $width, $prec );
+            }
+            elsif ( $conv == 120 ) {    # 'x'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_int( $buf, $pos, unbox_i64($arg), 16, $flags, $width, $prec );
+            }
+            elsif ( $conv == 88 ) {    # 'X'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_int( $buf, $pos, unbox_i64($arg), 16, Brocken::bor( $flags, 64 ), $width, $prec );
+            }
+            elsif ( $conv == 111 ) {    # 'o'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_int( $buf, $pos, unbox_i64($arg), 8, $flags, $width, $prec );
+            }
+            elsif ( $conv == 98 ) {    # 'b'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_int( $buf, $pos, unbox_i64($arg), 2, $flags, $width, $prec );
+            }
+            elsif ( $conv == 66 ) {    # 'B'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_int( $buf, $pos, unbox_i64($arg), 2, Brocken::bor( $flags, 64 ), $width, $prec );
+            }
+            elsif ( $conv == 112 ) {    # 'p'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                my i64 $pval = 0;
+                if ( Brocken::ptr_cmp_eq( $arg, 0 ) == 0 ) {
+                    my i64 $tag = box_tag($arg);
+                    if ( $tag == 4 ) {
+                        my i64 $header   = Brocken::load_i64($arg);
+                        my i64 $class_id = Brocken::shr( $header, 32 );
+                        if ( $class_id == 0 ) { $pval = unbox_ptr($arg); }
+                        else                  { $pval = $arg; }
+                    }
+                    else {
+                        $pval = unbox_i64($arg);
+                    }
+                }
+                $pos = _sprintf_fmt_int( $buf, $pos, $pval, 16, Brocken::bor( $flags, 144 ), $width, $prec );
+            }
+            elsif ( $conv == 102 ) {    # 'f'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_float( $buf, $pos, unbox_f64($arg), $flags, $width, $prec );
+            }
+            elsif ( $conv == 70 ) {    # 'F'
+                my ptr $arg = _sprintf_get_arg( $args, $arg_idx );
+                $arg_idx = Brocken::i64_add( $arg_idx, 1 );
+                $pos     = _sprintf_fmt_float( $buf, $pos, unbox_f64($arg), Brocken::bor( $flags, 64 ), $width, $prec );
+            }
+            else {
+                # Unknown conversion: emit the literal specifier sequence without consuming an argument.
+                $pos = _sprintf_emit_bytes( $buf, $pos, Brocken::ptr_add( $format, $spec_start ), Brocken::i64_sub( $fi, $spec_start ) );
+            }
+        }
+        return $pos;
+    }
+
+sub str_sprintf( ptr $format, ptr $args = 0, ptr $hb = 0 ) : returns(ptr) {
+        if ( Brocken::ptr_cmp_eq( $format, 0 ) ) {
+            if ( Brocken::ptr_cmp_eq( $hb, 0 ) == 0 ) {
+                return _empty_str($hb);
+            }
+            my ptr $empty = Brocken::libc( "malloc", 1 );
+            if ( Brocken::ptr_cmp_eq( $empty, 0 ) == 0 ) {
+                Brocken::store_u8( $empty, 0 );
+            }
+            return $empty;
+        }
+        my i64 $len   = _sprintf_run( 0, $format, $args );
+        my i64 $alloc = Brocken::i64_add( $len, 1 );
+        my ptr $buf   = 0;
+        if ( Brocken::ptr_cmp_eq( $hb, 0 ) == 0 ) {
+            $buf = bump_alloc( $hb, $alloc );
+        }
+        else {
+            $buf = Brocken::libc( "malloc", $alloc );
+        }
+        if ( Brocken::ptr_cmp_eq( $buf, 0 ) ) {
+            return 0;
+        }
+        _sprintf_run( $buf, $format, $args );
+        Brocken::store_u8( Brocken::ptr_add( $buf, $len ), 0 );
+        return $buf;
+    }
+
     # Allocate a fresh 16-byte box (refcount 0, owned by the caller) holding an integer or pointer payload. The header is
     # `tag << 24` exactly as the IR `box` instruction writes it, so incref/decref/box_tag read it the same way. The three
     # constructors cover the payload shapes `++`/`--` can produce: an i64, an f64, and a String's bytes pointer.
@@ -1707,39 +2537,7 @@ package Brocken::Runtime {
         return $val * $sign;
     }
 
-    # Check if string $s is numeric:
-    # Returns 1 for purely numeric ("123"), 2 for partially numeric ("123abc"), 0 for non-numeric ("String").
-    sub str_is_numeric( ptr $s ) : returns(i64) {
-        if ( Brocken::ptr_cmp_eq( $s, 0 ) ) { return 0; }
-        my ptr $p = $s;
-        while (1) {
-            my i8 $c = Brocken::load_i8($p);
-            if ( $c == 32 || ( $c >= 9 && $c <= 13 ) ) {
-                $p = Brocken::ptr_add( $p, 1 );
-            }
-            else {
-                last;
-            }
-        }
-        my i8 $sign = Brocken::load_i8($p);
-        if ( $sign == 43 || $sign == 45 ) {    # '+' or '-'
-            $p = Brocken::ptr_add( $p, 1 );
-        }
-        my i64 $digits = 0;
-        while (1) {
-            my i8 $d = Brocken::load_i8($p);
-            if ( $d >= 48 && $d <= 57 ) {
-                $digits = Brocken::i64_add( $digits, 1 );
-                $p      = Brocken::ptr_add( $p, 1 );
-            }
-            else {
-                last;
-            }
-        }
-        if ( $digits == 0 )              { return 0; }
-        if ( Brocken::load_i8($p) != 0 ) { return 2; }
-        return 1;
-    }
+
 
     # Coerce a string pointer to an i64 with Perl-style warnings.
     sub str_to_i64_coerced( ptr $s ) : returns(i64) {
@@ -2411,5 +3209,195 @@ package Brocken::Runtime {
             $idx = Brocken::load_i64( Brocken::ptr_add( $slot, 24 ) );
         }
         return $list;
+    }
+
+    # Fixed anchor inside .text; comparing its runtime PC-relative address against the linked
+    # anchor_rva in .brk_line gives the ASLR slide without OS-specific loader APIs.
+    sub _bt_anchor() { return; }
+
+    sub _bt_str_starts_with( ptr $s, ptr $prefix, i64 $plen ) : returns(i64) {
+        if ( Brocken::ptr_cmp_eq( $s, 0 ) ) { return 0; }
+        my i64 $i = 0;
+        while ( $i < $plen ) {
+            my u8 $sc = Brocken::load_u8( Brocken::ptr_add( $s, $i ) );
+            my u8 $pc = Brocken::load_u8( Brocken::ptr_add( $prefix, $i ) );
+            if ( $sc == 0 || $sc != $pc ) { return 0; }
+            $i = Brocken::i64_add( $i, 1 );
+        }
+        return 1;
+    }
+
+    # Binary search .brk_sym for the function containing $rva. Returns NUL-terminated name or 0.
+    sub _bt_find_sym( ptr $sym_tbl, i64 $rva ) : returns(ptr) {
+        if ( Brocken::ptr_cmp_eq( $sym_tbl, 0 ) ) { return 0; }
+        my i64 $count = Brocken::load_u32($sym_tbl);
+        if ( $count <= 0 ) { return 0; }
+        my i64 $lo = 0;
+        my i64 $hi = Brocken::i64_sub( $count, 1 );
+        while ( $lo <= $hi ) {
+            my i64 $mid   = Brocken::shr( Brocken::i64_add( $lo, $hi ), 1 );
+            my ptr $rec   = Brocken::ptr_add( $sym_tbl, Brocken::i64_add( 4, $mid * 12 ) );
+            my i64 $start = Brocken::load_u32($rec);
+            my i64 $end   = Brocken::load_u32( Brocken::ptr_add( $rec, 4 ) );
+            if ( $rva < $start ) {
+                $hi = Brocken::i64_sub( $mid, 1 );
+            }
+            elsif ( $rva >= $end ) {
+                $lo = Brocken::i64_add( $mid, 1 );
+            }
+            else {
+                my i64 $name_off = Brocken::load_u32( Brocken::ptr_add( $rec, 8 ) );
+                return Brocken::ptr_add( $sym_tbl, $name_off );
+            }
+        }
+        return 0;
+    }
+
+    # Binary search .brk_line for the greatest record with rec.rva <= $rva.
+    # Returns 1 if found and writes $out_file (ptr), $out_line (i64), $out_col (i64).
+    sub _bt_find_line( ptr $line_tbl, i64 $rva, ptr $out_file, ptr $out_line, ptr $out_col ) : returns(i64) {
+        if ( Brocken::ptr_cmp_eq( $line_tbl, 0 ) ) { return 0; }
+        my i64 $magic = Brocken::load_u32($line_tbl);
+        if ( $magic != 0x42524B4C ) { return 0; }
+        my i64 $count = Brocken::load_u32( Brocken::ptr_add( $line_tbl, 4 ) );
+        if ( $count <= 0 ) { return 0; }
+
+        my i64 $lo   = 0;
+        my i64 $hi   = Brocken::i64_sub( $count, 1 );
+        my i64 $best = -1;
+        while ( $lo <= $hi ) {
+            my i64 $mid     = Brocken::shr( Brocken::i64_add( $lo, $hi ), 1 );
+            my ptr $rec     = Brocken::ptr_add( $line_tbl, Brocken::i64_add( 16, $mid * 16 ) );
+            my i64 $rec_rva = Brocken::load_u32($rec);
+            if ( $rec_rva <= $rva ) {
+                $best = $mid;
+                $lo   = Brocken::i64_add( $mid, 1 );
+            }
+            else {
+                $hi = Brocken::i64_sub( $mid, 1 );
+            }
+        }
+        if ( $best < 0 ) { return 0; }
+        my ptr $brec     = Brocken::ptr_add( $line_tbl, Brocken::i64_add( 16, $best * 16 ) );
+        my i64 $file_off = Brocken::load_u32( Brocken::ptr_add( $brec, 4 ) );
+        my i64 $ln       = Brocken::load_u32( Brocken::ptr_add( $brec, 8 ) );
+        my i64 $cl       = Brocken::load_u32( Brocken::ptr_add( $brec, 12 ) );
+        Brocken::store_i64( $out_file, Brocken::ptr_add( $line_tbl, $file_off ) );
+        Brocken::store_i64( $out_line, $ln );
+        Brocken::store_i64( $out_col,  $cl );
+        return 1;
+    }
+
+    sub _bt_slide( ptr $line_tbl ) : returns(i64) {
+        if ( Brocken::ptr_cmp_eq( $line_tbl, 0 ) ) { return 0; }
+        my i64 $magic = Brocken::load_u32($line_tbl);
+        if ( $magic != 0x42524B4C ) { return 0; }
+        my i64 $anchor_rva = Brocken::load_u32( Brocken::ptr_add( $line_tbl, 12 ) );
+        my ptr $anchor_rt  = Brocken::func_addr("Brocken::Runtime::_bt_anchor");
+        if ( Brocken::ptr_cmp_eq( $anchor_rt, 0 ) ) { return 0; }
+        return Brocken::ptr_sub( $anchor_rt, $anchor_rva );
+    }
+
+    # Resolve the first non-runtime caller's (file, line, col) by unwinding the FP chain.
+    sub rt_caller_loc( ptr $out_file, ptr $out_line, ptr $out_col ) : returns(i64) {
+        my ptr $sym_tbl  = Brocken::rodata_addr("__brk_sym_table");
+        my ptr $line_tbl = Brocken::rodata_addr("__brk_line_table");
+        if ( Brocken::ptr_cmp_eq( $sym_tbl, 0 ) || Brocken::ptr_cmp_eq( $line_tbl, 0 ) ) { return 0; }
+        my i64 $slide = _bt_slide($line_tbl);
+        my ptr $fp    = Brocken::frame_addr();
+        my i64 $depth = 0;
+
+        while ( Brocken::ptr_cmp_eq( $fp, 0 ) == 0 && $depth < 64 ) {
+            if ( Brocken::band( $fp, 7 ) != 0 ) { last; }
+            my ptr $next_fp  = Brocken::load_i64($fp);
+            my ptr $ret_addr = Brocken::load_i64( Brocken::ptr_add( $fp, 8 ) );
+            if ( Brocken::ptr_cmp_eq( $ret_addr, 0 ) ) { last; }
+
+            # Subtract 1 so the return address lands inside the caller's `call`/`bl`/`jal` instruction.
+            my i64 $call_rva = Brocken::i64_sub( Brocken::i64_sub( $ret_addr, 1 ), $slide );
+            my ptr $fn_name  = _bt_find_sym( $sym_tbl, $call_rva );
+            if ( Brocken::ptr_cmp_eq( $fn_name, 0 ) ) { last; }
+
+            if ( _bt_str_starts_with( $fn_name, "Brocken::Runtime::", 18 ) == 0 ) {
+                return _bt_find_line( $line_tbl, $call_rva, $out_file, $out_line, $out_col );
+            }
+
+            if ( Brocken::ptr_cmp_le( $next_fp, $fp ) ) { last; }
+            if ( Brocken::i64_sub( $next_fp, $fp ) > 0x400000 ) { last; }
+            $fp    = $next_fp;
+            $depth = Brocken::i64_add( $depth, 1 );
+        }
+        return 0;
+    }
+
+    # Print a full stack backtrace to stderr (skipping $skip innermost frames).
+    sub rt_print_backtrace( i64 $skip = 0 ) {
+        my ptr $sym_tbl  = Brocken::rodata_addr("__brk_sym_table");
+        my ptr $line_tbl = Brocken::rodata_addr("__brk_line_table");
+        if ( Brocken::ptr_cmp_eq( $sym_tbl, 0 ) ) { return; }
+        my i64 $slide = _bt_slide($line_tbl);
+
+        rt_write_stderr( "Stack trace:\n", 13 );
+        my ptr $fp    = Brocken::frame_addr();
+        my i64 $depth = 0;
+
+        my [i64; 2] @b0;
+        my [i64; 2] @b1;
+        my [i64; 2] @b2;
+        my [i64; 2] @b3;
+        my [i64; 6] @list;
+
+        while ( Brocken::ptr_cmp_eq( $fp, 0 ) == 0 && $depth < 64 ) {
+            if ( Brocken::band( $fp, 7 ) != 0 ) { last; }
+            my ptr $next_fp  = Brocken::load_i64($fp);
+            my ptr $ret_addr = Brocken::load_i64( Brocken::ptr_add( $fp, 8 ) );
+            if ( Brocken::ptr_cmp_eq( $ret_addr, 0 ) ) { last; }
+
+            my i64 $call_rva = Brocken::i64_sub( Brocken::i64_sub( $ret_addr, 1 ), $slide );
+            my ptr $fn_name  = _bt_find_sym( $sym_tbl, $call_rva );
+            if ( Brocken::ptr_cmp_eq( $fn_name, 0 ) ) { last; }
+
+            if ( $depth >= $skip ) {
+                my [i64; 1] @f_slot;
+                my [i64; 1] @l_slot;
+                my [i64; 1] @c_slot;
+                @f_slot[0] = 0;
+                @l_slot[0] = 0;
+                @c_slot[0] = 0;
+                my i64 $has_loc = _bt_find_line( $line_tbl, $call_rva, @f_slot, @l_slot, @c_slot );
+                my ptr $line_str = 0;
+
+                if ( $has_loc != 0 && @l_slot[0] > 0 ) {
+                    @b0[0] = Brocken::shl( 4, 24 ); @b0[1] = $fn_name;
+                    @b1[0] = Brocken::shl( 4, 24 ); @b1[1] = @f_slot[0];
+                    @b2[0] = Brocken::shl( 2, 24 ); @b2[1] = @l_slot[0];
+                    @b3[0] = Brocken::shl( 2, 24 ); @b3[1] = @c_slot[0];
+                    @list[0] = Brocken::shl( 7, 24 );
+                    @list[1] = 4;
+                    @list[2] = @b0;
+                    @list[3] = @b1;
+                    @list[4] = @b2;
+                    @list[5] = @b3;
+                    $line_str = str_sprintf( "  at %s (%s line %d, col %d)\n", @list );
+                }
+                else {
+                    @b0[0] = Brocken::shl( 4, 24 ); @b0[1] = $fn_name;
+                    @list[0] = Brocken::shl( 7, 24 );
+                    @list[1] = 1;
+                    @list[2] = @b0;
+                    $line_str = str_sprintf( "  at %s\n", @list );
+                }
+                if ( Brocken::ptr_cmp_eq( $line_str, 0 ) == 0 ) {
+                    rt_write_stderr( $line_str, str_len($line_str) );
+                    Brocken::libc( "free", $line_str );
+                }
+            }
+
+            if ( Brocken::ptr_cmp_le( $next_fp, $fp ) ) { last; }
+            if ( Brocken::i64_sub( $next_fp, $fp ) > 0x400000 ) { last; }
+            $fp    = $next_fp;
+            $depth = Brocken::i64_add( $depth, 1 );
+        }
+        return;
     }
 }

@@ -87,6 +87,40 @@ C<Any> becoming C<dynamic> rather than a pointer is what makes an untyped variab
 tracks such variables in a C<needs_rc> set and decrements them on scope exit, because it cannot know from the type
 whether the value owns anything.
 
+=head1 RETURNS
+
+A sub or method body that falls off its end returns the value of its final expression, Perl's implicit last-expression
+return. The lowerer pops that trailing expression and lowers a synthesised C<return> for it, so the value gets the same
+conversion, reference-count, and handler-pop bookkeeping a written C<return> would; it is not also lowered as a
+discarded statement, which would run its side effects twice. A trailing expression that produces no value -- a store
+intrinsic, a C<say>/C<print>, or a call to a C<void> function -- is discarded and the body keeps its default return,
+which is what keeps a C<void> sub C<void>. The entry point C<_BROCKEN_ENTRY> never takes an implicit return, because
+its value is the process exit code and a top-level statement must not set it by accident.
+
+The same trailing expression participates in return-type inference, so an unannotated C<sub seven() { 7; }> is inferred
+to return C<i64> and can be called as a value. Inference runs while declarations are registered, before every callee
+may be known, so a body whose last expression calls a function declared later is provisionally treated as
+value-producing; a fixpoint pass re-infers every unannotated sub once the whole function table exists, which settles a
+chain of C<void> wrappers to C<void>. The inferred type only ever moves toward C<void>, so the pass terminates.
+
+A C<return> at the top level has no subroutine to return from. Its value still becomes the process exit code, but the
+compiler emits a runtime warning, C<Brocken: return outside of a subroutine>, the first time such a return executes.
+The warning goes through the same C<write(2, ...)> path C<warn>/C<die> use and is therefore native-only; the Wasm
+target stays silent.
+
+=head1 CONTEXT
+
+The hidden C<%__want> parameter carries the caller's context into a call. C<want('scalar')>, C<want('list')>, and
+C<want('void')> read it as a bitmask (C<want_is_scalar>/C<want_is_list>/C<want_is_void> in C<core.brocken>), and a
+C<want(TypeName)> query is folded against the current function's return type. At the top level the context is scalar.
+
+A position that consumes a list tells the call sitting directly in it C<want=list>, so the callee can return a list
+rather than boxing a single scalar. Two positions do this: the iterable of a C<for>/C<foreach> loop, and every element
+of an argument list -- Perl evaluates arguments in list context, so a call in argument position sees C<want('list')>.
+The override is scoped to that call: an operator between the list and a nested call imposes its own scalar context (the
+override is dropped as the lowerer descends into any node that is not itself a call), and it never leaks past the call
+into the surrounding expression.
+
 =head1 RUNTIME POLICY
 
 The lowerer is where the three isolation limits are actually applied, and the order matters. At the entry of the main
@@ -138,10 +172,12 @@ without naming its class.
 
 =head1 STRINGS
 
-A string literal does not become instructions. It is appended to a C<rodata> hashref under a generated label C<__str_N>
-with its bytes, and the program refers to the label. The caller passes that hashref to the module with C<set_rodata>,
-and the back end lays it out in the executable's read-only data. Two occurrences of the same string are two labels,
-since there is no interning pass.
+A string literal does not become instructions. It is interned into a C<rodata> hashref under a content-derived label,
+C<__str_E<lt>md5-of-bytesE<gt>>, together with its bytes, and the program refers to the label. Because the label is a
+pure function of the bytes, the same literal always interns to the same label regardless of the order in which
+functions are lowered. That stability is what lets the back ends cache emitted core-runtime blobs -- whose
+C<lea_rodata> fixups name these labels -- across compilations. The caller passes the hashref to the module with
+C<set_rodata>, and the back end lays it out in the executable's read-only data.
 
 =head1 FUEL AND BLOCKS
 

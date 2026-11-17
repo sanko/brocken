@@ -32,6 +32,11 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             ],
             alloca_map => { $blob->{alloca_map}->%* },
             source_map => { $blob->{source_map}->%* },
+            line_locs  => [
+                map {
+                    {%$_}
+                } ( $blob->{line_locs} // [] )->@*
+            ]
         };
     }
 
@@ -111,20 +116,22 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             }
         }
 
-        # 1. Obtain core runtime functions (cached per platform)
+        # Obtain core runtime functions (cached per platform)
         my $cached_core = $CORE_CACHE{$cache_key};
         if ( !$cached_core && @core_ir ) {
             my @built_core;
             for my $func (@core_ir) {
                 my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
                 my $mf      = $lowerer->lower($func);
-                push @built_core, $self->_emit_single_mf( $mf, $func->name );
+                my $blob    = $self->_emit_single_mf( $mf, $func->name );
+                $blob->{line_locs} = Brocken::Jenny::Codegen::_collect_line_locs( $func, $blob );
+                push @built_core, $blob;
             }
             $cached_core = \@built_core;
             $CORE_CACHE{$cache_key} = \@built_core;
         }
 
-        # 2. Lower and emit user functions (and dynamic dispatchers)
+        # Lower and emit user functions (and dynamic dispatchers)
         my @user_blobs;
         my @user_mfs;
         for my $pair (@user_ir) {
@@ -132,15 +139,17 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             my $lowerer = Brocken::Jenny::Lowerer::X86_64->new( platform => $platform );
             my $mf      = $lowerer->lower($func);
             $has_fiber ||= $self->_has_fiber_ops_mf($mf);
-            push @user_mfs, [ $mf, $fn_i, $func->name ];
+            push @user_mfs, [ $mf, $fn_i, $func->name, $func ];
         }
         my $emit_init = $has_fiber && $entry_index >= 0;
         for my $entry (@user_mfs) {
-            my ( $mf, $fn_i, $fname ) = @$entry;
+            my ( $mf, $fn_i, $fname, $ir_fn ) = @$entry;
             if ( $emit_init && $fn_i == $entry_index ) {
                 $fname = '_real_main';
             }
-            push @user_blobs, $self->_emit_single_mf( $mf, $fname );
+            my $blob = $self->_emit_single_mf( $mf, $fname );
+            $blob->{line_locs} = Brocken::Jenny::Codegen::_collect_line_locs( $ir_fn, $blob );
+            push @user_blobs, $blob;
         }
         my @result;
         if ($cached_core) {
@@ -682,11 +691,18 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         my $spill_frame  = $self->_compute_spill_frame( $mf, 'rsp' );
         my $callee_size  = scalar(@$used_callee) * 8;
         my $is_leaf      = 1;
+        my $uses_fp      = 0;
         my $total_alloca = 0;
 
         for my $mbb ( $mf->blocks->@* ) {
             for my $inst ( $mbb->instructions->@* ) {
                 $is_leaf = 0 if $inst->opcode eq 'call_func' || $inst->opcode eq 'call_indirect';
+                if ( $inst->opcode eq 'mov' &&
+                    $inst->operands->[1] &&
+                    $inst->operands->[1]->kind eq 'phys_reg' &&
+                    $inst->operands->[1]->value eq 'rbp' ) {
+                    $uses_fp = 1;
+                }
                 if ( $inst->opcode eq 'alloca' ) {
                     my ( undef, $src ) = $inst->operands->@*;
                     $total_alloca += $src->value;
@@ -711,7 +727,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
         # callee saves.
         $spill_frame += $call_arg_frame;
         my $total_frame = ( $callee_size + $spill_frame + $call_arg_frame + $total_alloca + 15 ) & ~15;
-        my $needs_frame = $total_frame > 0 || $used_callee->@* > 0 || $total_alloca > 0;
+        my $needs_frame = $total_frame > 0 || $used_callee->@* > 0 || $total_alloca > 0 || $uses_fp;
         if ( $is_leaf && !$needs_frame ) {
 
             # Leaf function with no frame: skip all prologue bytes
@@ -1789,7 +1805,7 @@ class Brocken::Jenny::Codegen::X86_64 v0.0.1 {
             }
             my $func_source_file = $fname =~ /^Brocken::Runtime::/ ? '<runtime>' : $source_file;
             push @func_ranges,
-                { name => $fname, start => $fstart, end => $fend, params => \@params, locals => \@locals, source_file => $func_source_file, };
+                { name => $fname, start => $fstart, end => $fend, params => \@params, locals => \@locals, source_file => $func_source_file };
 
             # Collect source_locs from IR instructions using precise byte offsets from source_map
             my $source_map = $blob->{source_map} // {};

@@ -74,6 +74,13 @@ C<parse_statement> dispatches on the first keyword of the statement:
 Anything else is parsed as an expression, and a C<;> is then required. A C<{> in statement position is a bare block. An
 empty C<;> is allowed and produces no node, which is why a trailing C<;> at the end of a block is not a syntax error.
 
+The C<;> is optional on the last statement of a block, exactly as in Perl: a statement whose next token is C<}> or
+C<EOF> may drop its terminator, while a statement in the middle of a block may not, because without the C<;> the parser
+cannot tell where one statement ends and the next begins. Every simple-statement form goes through the shared
+C<_semicolon> helper, so a final C<return>, C<my>, assignment, C<say>, C<last>, postfix modifier, or class field may
+all end a block without one. Compound statements (C<if>, C<while>, C<for>, C<try>, a bare block) never needed a C<;> in
+the first place.
+
 An expression statement that is a bare identifier is rejected with a specific message, because in this language a bare
 name is a class or a constant rather than a value and is nearly always a forgotten method call:
 
@@ -82,8 +89,9 @@ name is a class or a constant rather than a value and is nearly always a forgott
 =head2 C<my> declarations
 
 A declaration is C<my>, then optionally a type keyword, then a sigil-led name, then optionally C<=> and an expression,
-then C<;>. The type defaults to C<Any> when no type keyword is present, and the C<init> is C<undef> when there is no
-initializer, which the lowerer materializes as a zero value.
+then C<;> (which may be omitted on the last statement of a block; see L</STATEMENTS>). The type defaults to C<Any> when
+no type keyword is present, and the C<init> is C<undef> when there is no initializer, which the lowerer materializes as
+a zero value.
 
 Three forms hang off C<my>: a plain C<my i64 $x = 0;>, a fixed-size array on C<my i64 [ $a, $b ];>, and a list
 destructuring declaration on C<my ( $a, $b ) = f();>.
@@ -121,7 +129,8 @@ braces: a C<while> with a single statement and no braces is a syntax error rathe
 
 C<return> takes an optional expression and C<throw> takes a required one. A bare C<return> and a C<return> of a value
 are the same node with C<init> either present or absent, and the distinction matters to the lowerer: a bare C<return>
-does not produce a value, and a C<return> of a zero does.
+does not produce a value, and a C<return> of a zero does. What follows a bare C<return> is C<;>, the end of the block,
+or a postfix C<if>/C<unless> modifier (C<return if $x>); only otherwise is an expression parsed.
 
 =head2 C<try>
 
@@ -137,14 +146,10 @@ and both are verified by the test suite.
 
 =head2 C<say> and C<print>
 
-C<say( ... );> and C<print( ... );>, both requiring parentheses and a trailing C<;>. C<say "hi";> without parentheses
-is a syntax error at the string:
-
-    Expected (, got STRING 'hi' at d.brocken line 1, col 5
-
-This is one of the two places in the language where a keyword-looking thing is a function rather than a statement form,
-and the requirement for parentheses is a consequence of that: the argument list is a call argument list, not a string
-concatenation.
+C<say( ... );> and C<print( ... );> take the parenthesised call form, or a bare list that runs to the end of the
+statement: C<say 'hi', 'there';>. This is one of the two places in the language where a keyword-looking thing is a
+function rather than a statement form, so the bare form is the same list-operator parsing a paren-less sub call uses
+(see L</Paren-less calls>), not a string concatenation.
 
 =head2 C<use feature>
 
@@ -202,6 +207,25 @@ A bare name on the left of a fat comma becomes a C<String> constant, so C<< f( x
 a variable named C<x>. That is deliberate: named arguments in this language are for constructors and other hash-like
 callees, where a bare name is almost always a key and not a variable. It does mean there is no way to pass a variable
 as a named key.
+
+=head2 Paren-less calls
+
+A call to a known sub may omit its parentheses. The name is a list operator: it is followed by a comma-separated
+argument list that runs to the end of the statement or the enclosing delimiter, exactly as a bare C<say>/C<print>
+argument list does. C<< render2 'Alex' >> parses as C<< render2('Alex') >>, and C<render2 1, 2> parses as C<<
+render2(1, 2) >>. A comma immediately after the name ends its (empty) argument list, so C<< say render, render2 'Alex'
+>> is C<< say( render(), render2('Alex') ) >> -- the comma belongs to the enclosing list.
+
+The set of known subs is collected by a flat scan of the whole token stream (the same way class names are), so a call
+may name a sub declared later in the file; no prototype is required for the forward reference.
+
+The argument list is syntactic, not inferred from the signature. C<< render 'Test' >> on a zero-parameter sub parses
+the same way as any other paren-less call and is then an ordinary arity error. Whether a name is called at all is
+decided by what follows it: a following C<(> is the parenthesised call, C<< -> >> a method or field access, C<{>/C<}>
+or C<[>/C<]> a subscript, and C<< => >> a hash key, so in each of those positions the name stays a bareword. Everywhere
+else -- a term, which becomes the arguments, or a list terminator such as C<,>, C<;>, or C<)>, which makes it a
+zero-argument call -- the name is called. Because a known sub name is special in this way, an unknown bareword is not
+silently turned into a call; it remains an identifier and is rejected later if it is not a valid expression.
 
 =head1 FEATURE GATES
 

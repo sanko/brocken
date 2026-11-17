@@ -76,43 +76,48 @@ subtest 'die takes a postfix modifier' => sub {
     native_case( 'die("no") if false; return 4;',     4,   'die(...) if false is skipped' );
     native_case( 'die("no") unless false; return 4;', 255, 'die(...) unless false fires' );
 };
+
+# The snippets below end the process with `exit(N)` rather than a top-level `return N`: a `return` outside a sub is
+# now a runtime warning (see `11270_return_outside_sub.t`), and these cases assert the exact bytes on stderr, so the
+# diagnostic would otherwise be mistaken for the message under test. `exit` sets the same process status with no
+# extra output.
 subtest 'warn writes its message to stderr and continues' => sub {
-    my ( $out, $err, $status ) = host_run('warn "hello"; return 7;');
+    my ( $out, $err, $status ) = host_run('warn "hello"; exit(7);');
     is $out,    '',        'warn writes nothing to stdout';
     is $err,    "hello\n", 'the message and a newline reach stderr';
     is $status, 7,         'execution continues past warn';
 };
 subtest 'warn stringifies its arguments the way say does' => sub {
-    my ( undef, $err ) = host_run('warn 42; return 0;');
+    my ( undef, $err ) = host_run('warn 42; exit(0);');
     is $err, "42\n", 'a number is rendered as its decimal text';
-    ( undef, $err ) = host_run('warn "a", "b", 7; return 0;');
+    ( undef, $err ) = host_run('warn "a", "b", 7; exit(0);');
     is $err, "ab7\n", 'a list of arguments is concatenated in order';
-    ( undef, $err ) = host_run('warn true; return 0;');
+    ( undef, $err ) = host_run('warn true; exit(0);');
     is $err, "1\n", 'true renders as 1';
-    ( undef, $err ) = host_run('warn false; return 0;');
+    ( undef, $err ) = host_run('warn false; exit(0);');
     is $err, "\n", 'false renders as the empty string';
 };
 subtest 'the bare forms use Perl wording' => sub {
-    my ( undef, $err ) = host_run('warn; return 0;');
+    my ( undef, $err ) = host_run('warn; exit(0);');
     is $err, "Warning: something's wrong\n", 'bare warn uses Perl\'s default text';
-    my ( undef, $die_err, $status ) = host_run('die; return 0;');
+    my ( undef, $die_err, $status ) = host_run('die; exit(0);');
     is $die_err, "Died\n", 'bare die reports "Died"';
     is $status,  255,      'bare die exits 255';
 };
 subtest 'an uncaught die reports its message before exiting' => sub {
-    my ( $out, $err, $status ) = host_run('die "BOOM"; return 0;');
+    my ( $out, $err, $status ) = host_run('die "BOOM"; exit(0);');
     is $out,    '',       'die writes nothing to stdout';
     is $err,    "BOOM\n", 'the message reaches stderr';
     is $status, 255,      'and the status is 255';
 };
 subtest 'output written before an uncaught die still reaches the terminal' => sub {
-    my ( $out, undef, $status ) = host_run('say("before"); die "after"; return 0;');
+    my ( $out, undef, $status ) = host_run('say("before"); die "after"; exit(0);');
     is $out,    "before\n", 'the earlier say is flushed before the process ends';
     is $status, 255,        'the die status wins';
 };
 subtest 'a buffered say cannot overtake a later warn' => sub {
     skip_all 'merging the streams needs a POSIX shell', 1 if $^O eq 'MSWin32';
-    my $file   = link_host('say("out"); warn "W"; return 0;');
+    my $file   = link_host('say("out"); warn "W"; exit(0);');
     my $merged = qx{"$file" 2>&1};
     unlink $file if -e $file;
     is $merged, "out\nW\n", 'stdout is flushed before the warn reaches stderr';

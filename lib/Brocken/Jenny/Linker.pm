@@ -26,11 +26,16 @@ class Brocken::Jenny::Linker v0.0.1 {
     field $timestamp      : reader = undef;
     field $debug_level    : reader = 0;
     field $rodata         : reader = {};
+    field $line_entries   : reader = [];               # [ { offset => text_off, file => $str, line => $n, col => $n }, ... ]
+    field $anchor_offset  : reader = 0;                # byte offset of Brocken::Runtime::_bt_anchor inside .text
+
     #
     method set_preserved_regs($r) { $preserved_regs = $r; }
     method set_frame_size($s)     { $frame_size     = $s; }
     method set_rodata($r)         { $rodata         = $r; }
     method set_timestamp($t)      { $timestamp      = $t; }
+    method set_line_entries($e)   { $line_entries   = $e; }
+    method set_anchor_offset($o)  { $anchor_offset  = $o; }
 
     # The build stamp written into a linked image.  PE carries one (the COFF header and the export directory); ELF,
     # Mach-O, and Wasm write none, so only a PE link is time-varying.  An explicit set_timestamp wins, then
@@ -78,6 +83,41 @@ class Brocken::Jenny::Linker v0.0.1 {
             my $end_rva   = $self->rva_for('.text') + ( $fn->{end} // $fn->{start} );
             $payload  .= pack( 'V3', $start_rva, $end_rva, $strtab_base + length($str_pool) );
             $str_pool .= $fn->{name} . "\0";
+        }
+        return $payload . $str_pool;
+    }
+
+    method brk_line_size() {
+        return 0 unless scalar $self->line_entries->@*;
+        my %seen;
+        my $str_size = 0;
+        for my $e ( $self->line_entries->@* ) {
+            my $f = $e->{file} // '';
+            next if exists $seen{$f};
+            $seen{$f} = 1;
+            $str_size += length($f) + 1;
+        }
+        return 16 + 16 * scalar( $self->line_entries->@* ) + $str_size;
+    }
+
+    method build_brk_line() {
+        return '' unless scalar $self->line_entries->@*;
+        my @sorted     = sort { $a->{offset} <=> $b->{offset} } $self->line_entries->@*;
+        my $count      = scalar @sorted;
+        my $text_rva   = $self->rva_for('.text');
+        my $anchor_rva = $text_rva + $self->anchor_offset;
+        my $str_base   = 16 + 16 * $count;
+        my $payload    = pack( 'V4', 0x42524B4C, $count, $text_rva, $anchor_rva );
+        my $str_pool   = '';
+        my %str_off;
+
+        for my $e (@sorted) {
+            my $f = $e->{file} // '';
+            if ( !exists $str_off{$f} ) {
+                $str_off{$f} = $str_base + length($str_pool);
+                $str_pool .= $f . "\0";
+            }
+            $payload .= pack( 'V4', $text_rva + $e->{offset}, $str_off{$f}, $e->{line} // 0, $e->{col} // 0 );
         }
         return $payload . $str_pool;
     }

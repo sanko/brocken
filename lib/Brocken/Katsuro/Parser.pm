@@ -11,6 +11,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
     field $features        = {};
     field $current_package = undef;    # namespace from a `package NAME` declaration; stamped onto following nodes
     field $class_type_names;           # cache: { ClassName => 1 } for every `class NAME` in the token stream
+    field $_sub_names;                 # cache: { subname => 1 } for every `sub NAME` in the token stream
 
     # Precedence constants
     use constant {
@@ -107,6 +108,72 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return $class_type_names;
     }
 
+    # Every `sub NAME` in the token stream, collected the same way as the class names. A flat scan rather than a
+    # declaration-order registry is what lets a paren-less call name a sub declared later in the file: `say render2
+    # 'Alex'` resolves even before `sub render2` is reached, so no prototype is needed for the forward reference.
+    method _sub_names() {
+        $_sub_names //= do {
+            my %names;
+            my $i = 0;
+            while ( $i < $tokens->@* ) {
+                my $t = $tokens->[$i];
+                if ( $t && $t->{type} eq 'KEYWORD' && $t->{value} eq 'sub' ) {
+                    my $n = $tokens->[ $i + 1 ];
+                    $names{ $n->{value} } = 1 if $n && $n->{type} eq 'IDENT';
+                }
+                $i++;
+            }
+            \%names;
+        };
+        return $_sub_names;
+    }
+
+    # Keywords that can begin an argument expression. `if`/`unless` are deliberately absent: after a bareword they are
+    # the statement's postfix modifier (`render if $cond`), not an argument.
+    my %TERM_KEYWORDS = map { $_ => 1 }
+        qw[true false True False __CLASS__ __PACKAGE__ __LINE__ __FILE__ want length exists defined delete undef keys values push pop shift unshift];
+
+    # Whether this token can begin an argument of a paren-less call. A `(` is the parenthesised call form, handled by
+    # `led`, so it is not an argument start.
+    method _starts_argument($t) {
+        return 0 unless $t;
+        return 1 if $t->{type} =~ /^(?:NUM|FLOAT|STRING|VAR|IDENT)$/;
+        return 1 if $t->{type} eq 'KEYWORD' && $TERM_KEYWORDS{ $t->{value} };
+        return 0;
+    }
+
+    # Whether a known sub name at this position is a paren-less call rather than a bareword. A following `(` is the
+    # parenthesised call, `->` a method/field access, `{`/`[` (and their closers) a subscript, and `=>` a hash key, so
+    # those keep the name a bareword. Everywhere else -- a term (which becomes the arguments), or a list terminator
+    # such as `,`/`;`/`)` (a zero-argument call) -- the name is called.
+    method _is_parenless_call($next) {
+        return 0 unless $next;
+        return 0 if $next->{type} eq '(';
+        return 0 if $next->{type} eq '{' || $next->{type} eq '}';
+        return 0 if $next->{type} eq '[' || $next->{type} eq ']';
+        return 0 if $next->{type} eq 'OP' && ( $next->{value} eq '->' || $next->{value} eq '=>' );
+        return 1;
+    }
+
+    # The arguments of a paren-less ("list operator") call: a comma-separated list that runs to the end of the
+    # statement or the enclosing delimiter. A name followed immediately by a comma is a zero-argument call -- the comma
+    # separates the enclosing list -- which is how `say render, render2 'Alex'` gives `render` no arguments.
+    method parse_parenless_args() {
+        my @args;
+        if ( $self->_starts_argument( $self->peek() ) ) {
+            while (1) {
+                push @args, $self->parse_expression(0);
+                last unless $self->check(',');
+                $self->advance();
+            }
+        }
+        return \@args;
+    }
+
+    method parse_parenless_call( $name, $token ) {
+        return Brocken::Katsuro::AST::Expr::Call->new( $self->_pos_token($token), func_name => $name, args => $self->parse_parenless_args );
+    }
+
     # === Top level ===
     method parse_program() {
         my @stmts;
@@ -142,7 +209,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $current_package = $saved;
             return Brocken::Katsuro::AST::Stmt::PackageDecl->new( $self->_pos_token($pkg_token), name => $name, version => $version, body => $body );
         }
-        $self->consume( ';', undef, "Expected ';' or '{' after 'package $name'" );
+        $self->_semicolon("Expected ';' or '{' after 'package $name'");
         $current_package = $name;
         return Brocken::Katsuro::AST::Stmt::PackageDecl->new( $self->_pos_token($pkg_token), name => $name, version => $version );
     }
@@ -175,7 +242,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             my $feat = $self->consume( 'IDENT', undef, "Expected 'feature' after 'use'" );
             Carp::croak("Expected 'feature', got '$feat->{value}'") unless $feat->{value} eq 'feature';
             my $name_tok = $self->consume( 'STRING', undef, "Expected feature name string after 'use feature'" );
-            $self->consume( ';', undef, "Expected ';' after use feature" );
+            $self->_semicolon("Expected ';' after use feature");
             $features->{ $name_tok->{value} } = 1;
             return undef;
         }
@@ -214,6 +281,17 @@ class Brocken::Katsuro::Parser v0.0.1 {
         return $self->_end_statement( $expr, q[Expected ';' after expression] );
     }
 
+    # Consume the `;` that ends a simple statement. Perl makes it optional on the last statement of a block, so its
+    # absence is accepted when the next token closes the block (`}`) or ends the input (EOF). Anywhere else the `;` is
+    # still required: without it the parser cannot tell where one statement ends and the next begins, so
+    # `my $x = 1 return $x` stays an error, exactly as in Perl. A statement in the middle of a block therefore still
+    # needs its semicolon -- only the last one, the one in front of `}` or EOF, may drop it.
+    method _semicolon($what) {
+        return if $self->check('}') || $self->check('EOF');
+        $self->consume( ';', undef, $what );
+        return;
+    }
+
     # Finish a simple statement. Normally that is just consuming the `;`; but when a postfix `if`/`unless` modifier
     # follows (`return 0 if $cond;`, `next unless $skip;`) the statement becomes the body of a one-statement `if`.
     # `unless COND { BODY }` runs the body when COND is false, which is an `if` whose then-branch is empty and whose
@@ -224,7 +302,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             my $modifier = $self->advance();
             $stmt->set_package($current_package);
             my $cond = $self->parse_expression(0);
-            $self->consume( ';', undef, "Expected ';' after postfix $modifier->{value}" );
+            $self->_semicolon("Expected ';' after postfix $modifier->{value}");
             my $body = Brocken::Katsuro::AST::Stmt::Block->new( $self->_pos_token($modifier), statements => [$stmt] );
             if ( $modifier->{value} eq 'unless' ) {
                 my $empty = Brocken::Katsuro::AST::Stmt::Block->new( $self->_pos_token($modifier), statements => [] );
@@ -233,7 +311,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             }
             return Brocken::Katsuro::AST::Stmt::If->new( $self->_pos_token($modifier), cond => $cond, then => $body, elsif => [], else => undef );
         }
-        $self->consume( ';', undef, $what );
+        $self->_semicolon($what);
         return $stmt;
     }
 
@@ -265,7 +343,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $self->advance();
             $init = $self->parse_expression(0);
         }
-        $self->consume( ';', undef, "Expected ';' after variable declaration" );
+        $self->_semicolon("Expected ';' after variable declaration");
         return Brocken::Katsuro::AST::Stmt::VarDecl->new(
             $self->_pos_token($var_token),
             sigil => $sigil,
@@ -300,7 +378,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $self->advance();
             $expr = $self->parse_expression(0);
         }
-        $self->consume( ';', undef, "Expected ';' after list variable declaration" );
+        $self->_semicolon("Expected ';' after list variable declaration");
         return Brocken::Katsuro::AST::Stmt::ListVarDecl->new( $self->_pos_token(), targets => \@targets, expr => $expr );
     }
 
@@ -324,7 +402,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $self->advance();
             $init = $self->parse_expression(0);
         }
-        $self->consume( ';', undef, "Expected ';' after array declaration" );
+        $self->_semicolon("Expected ';' after array declaration");
         return Brocken::Katsuro::AST::Stmt::ArrayDecl->new(
             $self->_pos_token($var_token),
             name      => $name,
@@ -441,7 +519,14 @@ class Brocken::Katsuro::Parser v0.0.1 {
     method parse_return() {
         my $ret_token = $self->advance();
         my $expr      = undef;
-        unless ( $self->check(';') ) {
+
+        # A bare `return` may be followed by `;`, the end of the block, or a postfix `if`/`unless` modifier
+        # (`return if $x`); in all of those there is no expression to parse.
+        unless ( $self->check(';') ||
+            $self->check('}')               ||
+            $self->check('EOF')             ||
+            $self->check( 'KEYWORD', 'if' ) ||
+            $self->check( 'KEYWORD', 'unless' ) ) {
             $expr = $self->parse_expression(0);
             if ( $expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
                 $expr = Brocken::Katsuro::AST::Expr::List->new( $self->_pos_token($ret_token), elements => [ $expr->expr ] );
@@ -491,7 +576,12 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $self->consume(')');
             return @args;
         }
-        return @args if $self->check(';') || $self->check( 'KEYWORD', 'if' ) || $self->check( 'KEYWORD', 'unless' );
+        return @args
+            if $self->check(';')            ||
+            $self->check('}')               ||
+            $self->check('EOF')             ||
+            $self->check( 'KEYWORD', 'if' ) ||
+            $self->check( 'KEYWORD', 'unless' );
         push @args, $self->parse_expression(0);
         while ( $self->check(',') ) {
             $self->advance();
@@ -578,8 +668,17 @@ class Brocken::Katsuro::Parser v0.0.1 {
     method parse_builtin_print() {
         my $tok  = $self->advance();
         my $name = $tok->{value};
-        $self->consume('(');
-        my $args = $self->parse_call_args_after_paren();
+
+        # `say`/`print` take either the parenthesised form or a bare list that runs to the end of the statement:
+        # `say 'hi', 'there'`. The bare form is the same list-operator parsing a paren-less sub call uses.
+        my $args;
+        if ( $self->check('(') ) {
+            $self->advance();
+            $args = $self->parse_call_args_after_paren();
+        }
+        else {
+            $args = $self->parse_parenless_args;
+        }
         return $self->_end_statement( Brocken::Katsuro::AST::Expr::Call->new( $self->_pos_token($tok), func_name => $name, args => $args ),
             "Expected ';' after $name()" );
     }
@@ -811,7 +910,7 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $default_op = $self->advance()->{value};
             $default    = $self->parse_expression(0);
         }
-        $self->consume(';');
+        $self->_semicolon(undef);
         return Brocken::Katsuro::AST::Stmt::FieldDecl->new(
             $self->_pos_token($field_tok),
             type       => $args{type},
@@ -916,7 +1015,12 @@ class Brocken::Katsuro::Parser v0.0.1 {
             return Brocken::Katsuro::AST::Expr::Var->new( $self->_pos_token($token), sigil => $sigil, name => $name );
         }
         if ( $token->{type} eq 'IDENT' ) {
-            return Brocken::Katsuro::AST::Expr::Ident->new( $self->_pos_token($token), name => $token->{value} );
+            my $name = $token->{value};
+
+            # A known sub may be called without parentheses: `render2 'Alex'`. The name is left a bareword when a
+            # parenthesised call, a method/field access, or a subscript follows (see `_is_parenless_call`).
+            return $self->parse_parenless_call( $name, $token ) if $self->_sub_names->{$name} && $self->_is_parenless_call( $self->peek() );
+            return Brocken::Katsuro::AST::Expr::Ident->new( $self->_pos_token($token), name => $name );
         }
         if ( $token->{type} eq '(' ) {
             my @elements;

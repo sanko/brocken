@@ -78,6 +78,9 @@ Goal: Complete fidelity with the Blackburn & McKinley (PLDI 2008) Immix paper an
 ## 4. Language Syntax & Frontend (`Katsuro`)
 
 - [x] **Subroutine Return Syntax:** Replaced `-> Type` with `:returns(Type)` across all grammar productions, runtime files, and tests.
+  - [x] Returning from outside of a sub/method is a runtime warning just like Perl.
+  - [x] **Implicit last-expression returns** — a sub or method whose body falls off its end returns its final expression (and infers the return type from it); a `void` body discards it.
+  - [x] **Returning a string literal** — a `String`-returning sub or method may return a string literal. The literal reaches the lowerer as a rodata reference (a label, not a register), and the return path materialises it into the return register on every native backend (x86_64, ARM64, RISC-V) instead of passing the label through as an uninitialised virtual register.
 - [x] **Defined-Or & Conditional Assignment:** Implemented `//`, `//=`, and `||=` across variables and class fields.
 - [x] **Package Scoping:** Implemented `package NAME;` and `package NAME { ... }` with version parsing and automatic symbol qualification.
 - [x] **Compile-Time Pseudo-Constants:** Implemented `__PACKAGE__`, `__CLASS__`, `__FILE__`, and `__LINE__`.
@@ -87,6 +90,7 @@ Goal: Complete fidelity with the Blackburn & McKinley (PLDI 2008) Immix paper an
 - [x] **Compound Assignments:** Implemented `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`, `.=`.
 - [x] **`for` / `foreach` Iteration:** Implemented typed iteration over array elements and flat lists with `my` loop variables.
 - [x] **`want` Intrinsic:** Implemented `want('scalar')`, `want('list')`, `want('void')`, and type queries via hidden `%__want` injection.
+  - [x] **List context in argument lists** — every argument of a call or method call is evaluated in list context (like Perl), so a call directly in argument position is told `want('list')`. The context is dropped as soon as the argument descends into an operator that imposes its own scalar context.
 - [x] **Arity Validation (F14):** Enforced compile-time parameter count checks for function and method calls.
 - [x] **Untyped Receiver Method Calls:** Method calls on `Any` boxes unbox the object payload pointer automatically.
 - [x] **Empty Function Bodies (F16):** Subroutines with empty bodies `sub f() {}` emit valid epilogues and default returns.
@@ -113,6 +117,8 @@ Goal: Complete fidelity with the Blackburn & McKinley (PLDI 2008) Immix paper an
   - [ ] Emit bare function pointers for non-capturing subs and Immix Environment Records for capturing closures.
 - [ ] **Persistent Lexicals (`state`):**
   - [ ] Implement `state` variable declarations once writable program-global storage is available.
+- [x] **Optional trailing semi-colons** on final/only statements in blocks. The `;` is optional on the last statement of a block (Perl's rule): a statement whose next token is `}` or EOF may drop its terminator, while a statement in the middle of a block may not. Every simple-statement form shares one `_semicolon` helper, so a final `return`, `my`, assignment, `say`, `last`/`next`, postfix modifier, or class field may all end a block without one. A bare `return` may also now be followed directly by a postfix `if`/`unless` (`return if $x`).
+- [x] **Optional parentheses on subs.** A call to a known sub may omit its parentheses: the name is followed by a comma-separated argument list that runs to the end of the statement (or the enclosing delimiter). `render2 'Alex'` is `render2('Alex')`; a comma immediately after the name makes it a zero-argument call, so `say render, render2 'Alex'` is `say(render(), render2('Alex'))`. The set of known subs is collected from the whole token stream, so a call may name a sub declared later in the file. This is syntactic, not signature-driven: `render 'Test'` on a zero-parameter sub parses and is then an ordinary arity error. A known sub name stays a bareword before `(`, `->`, `{`/`}`, `[`/`]`, and `=>`. `say`/`print` may likewise drop their parentheses and take a bare list.
 
 ---
 
@@ -129,8 +135,10 @@ Goal: Complete fidelity with the Blackburn & McKinley (PLDI 2008) Immix paper an
   - [x] `undef` literal lowers to null box (Tag 0, Payload 0).
   - [x] Mutator `undef($var)`, `undef(@arr)`, and `undef(%hash)` empties containers in place.
   - [x] `defined $var` tests for non-null tags on managed types and folds to true for native types.
+- [x] **`say` / `print` Stringification & Variadic Concatenation:** Each argument is stringified (an integer, float, or boxed `Any` through its header tag; a `String` is passed through unchanged) and the pieces concatenated through the managed `str_concat` into the single pointer `puts` takes, so `say('a', 'b')` prints `ab` rather than only the first argument. `say()` with no argument prints one empty line.
 - [x] **Process & Diagnostic Builtins:**
-  - [x] Implemented `exit($code)` calling libc exit to flush stdio.
+  - [x] Implemented `exit($code)` calling libc exit with proper unboxing, string coercion, and default `0` termination (`_BROCKEN_ENTRY` fallback).
+  - [x] Implemented zero-allocation runtime warning infrastructure (`rt_warn`, `rt_print_u64`, `rt_warn_non_numeric`, `str_to_i64_checked`) streaming directly to `stderr` (FD 2).
   - [x] Implemented `warn(@msgs)` formatting messages to `stderr`.
   - [x] Implemented `die(@msgs)` raising SJLJ exceptions or terminating process with status 255.
 - [x] **Core Utility Builtins (`builtin::`):**
@@ -187,10 +195,16 @@ Goal: Complete fidelity with the Blackburn & McKinley (PLDI 2008) Immix paper an
 
 - [x] **Parser AST Caching:** Cached parsed `core.brocken` AST structure via `state %core_ast_cache`.
 - [x] **Path Lookup Caching:** Cached `DEFAULT_RUNTIME` resolution across compiler instances.
+- [x] **Stable Rodata Labels:** String constants intern to content-derived labels (`__str_<md5>`), so the back ends' cached core-runtime blobs keep resolving to the right literals across compilations. See Sprint Step 4.
 - [ ] **Acyclic IR by Construction:**
   - [ ] Weaken container back-references (`Function` $\to$ `Block`, `Block` $\to$ `Instruction`, `Phi` incoming blocks) to allow automatic Perl garbage collection without manual `$module->release()`.
 - [ ] **Lowered Core Module Snapshotting:**
   - [ ] Snapshot lowerer symbol and class state after compiling `core.brocken` to avoid re-lowering runtime IR on every user compile.
+- [ ] **Runtime Relocation to `core.brocken`:**
+  - [x] Low-level zero-allocation stderr writing (`rt_write_stderr`, `rt_warn`, `rt_print_u64`).
+  - [x] Numeric string validation and coercion (`str_is_numeric`, `str_to_i64_checked`).
+  - [ ] **Advanced Container Helpers:** Relocate complex array slicing, mapping/filtering, and hash aggregation logic from frontend lowerers into pure Brocken runtime routines.
+  - [ ] **Exception Handling Frames:** Encapsulate SJLJ handler registration/unwinding helpers into `core.brocken`.
 - [ ] **Staged Freestanding (No-libc) Builds:**
   - [ ] Add `libc => 0|1` configuration flag to `Brocken->new()`.
   - [ ] Implement freestanding I/O: raw `write(2)` syscall for `say`/`print`, inline string comparison, and inline `itoa`/`ftoa`.

@@ -72,4 +72,11 @@ subtest 'undef stringifies as the empty string' => sub {
 subtest 'say() with no argument prints an empty line' => sub {
     check_say( "say();\nreturn 0;\n", "\n", 'say()' );
 };
+subtest 'say/print concatenate every argument' => sub {
+    check_say( "say(\"a\", \"b\");\nreturn 0;\n",                     "ab\n",   'two string literals' );
+    check_say( "say(1, 2, 3);\nreturn 0;\n",                          "123\n",  'three integers' );
+    check_say( "say(\"n=\", 42);\nreturn 0;\n",                       "n=42\n", 'string then integer' );
+    check_say( "my String \$s = \"x\";\nsay(\$s, \$s);\nreturn 0;\n", "xx\n",   'two variable pieces' );
+    check_say( "print(\"a\", \"b\", \"c\");\nreturn 0;\n",            "abc\n",  'print concatenates too' );
+};
 done_testing;

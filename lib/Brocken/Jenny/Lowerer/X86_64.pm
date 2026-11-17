@@ -3148,7 +3148,7 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                                 $mbb->add_instruction(
                                     Brocken::Jenny::MIR::MachineInstruction->new(
                                         opcode   => 'mov',
-                                        operands => [ $ret_reg, $self->_lower_opnd($val) ],
+                                        operands => [ $ret_reg, $self->_materialize( $mbb, $val ) ],
                                         comment  => '=> ' . $abi->return_register
                                     )
                                 );
@@ -4961,6 +4961,12 @@ class Brocken::Jenny::Lowerer::X86_64 v0.0.1 {
                     my $fp_reg = Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $self->_abi->frame_reg );
                     $mbb->add_instruction(
                         Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'mov', operands => [ $dst, $fp_reg ], comment => "frame_addr" ) );
+                }
+                elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::FuncAddr') ) {
+                    my $dst  = Brocken::Jenny::MIR::MachineOperand->new( kind => 'virt_reg', value => $inst->name, type => $inst->type );
+                    my $func = Brocken::Jenny::MIR::MachineOperand->new( kind => 'func',     value => $inst->target );
+                    $mbb->add_instruction(
+                        Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'lea_func', operands => [ $dst, $func ], comment => "func_addr" ) );
                 }
                 elsif ( $inst->isa('Brocken::Lindsay::IR::Instruction::ChanCreate') ) {
                     my $i64 = Brocken::Lindsay::IR::Type::i64();

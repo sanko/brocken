@@ -164,10 +164,15 @@ elsif ($cmd eq 'fmt') {
     my $check = 0;
     my $diff = 0;
     GetOptions('check' => \$check, 'diff' => \$diff, 'h|help' => \$help) or die "Invalid options for fmt\n";
-    if ($help) {
-        print "Usage: bkn fmt [options] [files...]\n\nOptions:\n  --check            Check without modifying\n  --diff             Show diff\n  -h, --help         Show help\n";
-        exit(0);
-    }
+    if ($help) {print <<~'HELP'; exit 0}
+        Usage: bkn fmt [options] [files...]
+
+        Options:
+        --check            Check without modifying
+        --diff             Show diff
+        -h, --help         Show help
+        HELP
+
     my @files = @ARGV;
     @files = find_brocken_files('.') unless @files;
     if (!@files) { print "No .brocken files found\n" unless $quiet; exit(0); }

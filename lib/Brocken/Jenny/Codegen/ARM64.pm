@@ -78,7 +78,9 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             for my $func (@core_ir) {
                 my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
                 my $mf      = $lowerer->lower($func);
-                push @built_core, $self->_emit_single_mf( $mf, $func->name );
+                my $blob    = $self->_emit_single_mf( $mf, $func->name );
+                $blob->{line_locs} = Brocken::Jenny::Codegen::_collect_line_locs( $func, $blob );
+                push @built_core, $blob;
             }
             $cached_core = \@built_core;
             $core_cache{$plat_key} = \@built_core;
@@ -90,15 +92,17 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             my $lowerer = Brocken::Jenny::Lowerer::ARM64->new( platform => $platform );
             my $mf      = $lowerer->lower($func);
             $has_fiber ||= $self->_has_fiber_ops_mf($mf);
-            push @user_mfs, [ $mf, $fn_i, $func->name ];
+            push @user_mfs, [ $mf, $fn_i, $func->name, $func ];
         }
         my $emit_init = $has_fiber && $entry_index >= 0;
         for my $entry (@user_mfs) {
-            my ( $mf, $fn_i, $fname ) = @$entry;
+            my ( $mf, $fn_i, $fname, $ir_fn ) = @$entry;
             if ( $emit_init && $fn_i == $entry_index ) {
                 $fname = '_real_main';
             }
-            push @user_blobs, $self->_emit_single_mf( $mf, $fname );
+            my $blob = $self->_emit_single_mf( $mf, $fname );
+            $blob->{line_locs} = Brocken::Jenny::Codegen::_collect_line_locs( $ir_fn, $blob );
+            push @user_blobs, $blob;
         }
         my @result;
         if ($cached_core) {
@@ -883,7 +887,7 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                         udiv  => ( $bits >= 64 ? UDIV_X : UDIV_W ),
                         sdiv  => ( $bits >= 64 ? SDIV_X : SDIV_W ),
                         adc   => ADCS_X,
-                        sbb   => SBCS_X,
+                        sbb   => SBCS_X
                     );
                     if ( $src->kind eq 'imm' && ( $opcode eq 'add' || $opcode eq 'sub' ) ) {
                         my $v = $src->value;
@@ -1467,7 +1471,7 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                 substr $bytes, $fixup->{offset}, 4, pack( 'V', $inst );
             }
         }
-        my %unwind_info = ( frame_size => $total_frame, num_saved_int => scalar( grep { !/^x(29|30)$/ } @to_save ), saves_lr => !$is_leaf, );
+        my %unwind_info = ( frame_size => $total_frame, num_saved_int => scalar( grep { !/^x(29|30)$/ } @to_save ), saves_lr => !$is_leaf );
         return ( $bytes, \@func_fixups, \%unwind_info );
     }
 
@@ -1544,7 +1548,7 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
                 my $vreg = '%' . $p->name . '.addr';
                 my $slot = $alloca_map->{$vreg};
                 push @params,
-                    { name => ( $p->name =~ s/^%//r ), type => 'Int', slot => defined $slot ? $slot : 0, line => 0, col => 0, artificial => 0, };
+                    { name => ( $p->name =~ s/^%//r ), type => 'Int', slot => defined $slot ? $slot : 0, line => 0, col => 0, artificial => 0 };
             }
             my @locals;
             for my $block ( $ir_fn->blocks->@* ) {
@@ -1612,7 +1616,12 @@ class Brocken::Jenny::Codegen::ARM64 v0.0.1 {
             ],
             alloca_map => $blob->{alloca_map} ? { $blob->{alloca_map}->%* } : {},
             source_map => $blob->{source_map} ? { $blob->{source_map}->%* } : {},
-            unwind     => $blob->{unwind}     ? { $blob->{unwind}->%* }     : undef
+            line_locs  => [
+                map {
+                    {%$_}
+                } ( $blob->{line_locs} // [] )->@*
+            ],
+            unwind => $blob->{unwind} ? { $blob->{unwind}->%* } : undef
         };
     }
 };

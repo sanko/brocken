@@ -95,6 +95,7 @@ class Brocken::Lindsay::IR::Instruction v0.0.1: isa(Brocken::Lindsay::IR::Value)
     field $opcode   : reader : param;
     field $operands : reader : param = [];
     field $parent   : reader : param = undef;    # The Basic Block
+    field $file     : reader : param = '';
     field $line     : reader : param = 0;
     field $col      : reader : param = 0;
 
@@ -362,7 +363,13 @@ class Brocken::Lindsay::IR::Instruction::FrameAddr v0.0.1: isa(Brocken::Lindsay:
         return sprintf '  %s = frame_addr %s', ( $self->name // '%<anon>' ), $self->type->as_string;
     }
 };
+class Brocken::Lindsay::IR::Instruction::FuncAddr v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
+    field $target : reader : param;    # function symbol name
 
+    method render() {
+        return sprintf '  %s = func_addr @%s', ( $self->name // '%<anon>' ), $target;
+    }
+};
 class Brocken::Lindsay::IR::Instruction::Phi v0.0.1: isa(Brocken::Lindsay::IR::Instruction) {
     field $incoming : reader : param = [];    # Array of [Value, Block]
 

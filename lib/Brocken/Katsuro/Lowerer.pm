@@ -5,7 +5,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     use Brocken::Lindsay::IR;
     use Brocken::Lindsay::IR::Builder;
     use Brocken::ICB;
-    use Carp ();
+    use Carp        ();
+    use Digest::MD5 ();
+    #
     field $module : param = Brocken::Lindsay::IR::Module->new( name => 'main' );
     field $platform : reader : param = undef;
 
@@ -47,7 +49,6 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $hash_var                  = {};    # var_name -> 1 (a local %hash; its slot holds a tag-8 table released by hash_release)
     field $hash_value_type           = {};    # var_name -> IR type of the hash's stored values (defaults to dynamic)
     field $rodata : reader           = {};    # label -> bytes for string constants
-    field $_rodata_label_counter     = 0;
     field $writer_map                = {};    # "Class::name" -> class name (auto-generated writers return their receiver)
     field $_loop_header_blocks       = [];    # stack of header block labels
     field $_loop_check_blocks        = [];    # stack of iteration-check block labels (counter guard)
@@ -58,7 +59,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
     field $_try_handler_depth = 0;     # number of try-body exception handlers pushed and not yet popped, so `return` can pop them
     field $_dyn_scope_stack   = [];    # stack of scope records for each in-progress block/loop (RC ownership)
     field $fuel_exit_block;            # set in lower_function, used by call-site fuel checks
-    field $_want_override = undef;     # i64 mask forced on a call while lowering a context that consumes a list (e.g. a `for` iterable)
+    field $_want_override = undef;     # i64 mask forced on a call while lowering a list-consuming position (a `for` iterable or an argument list)
+
+    #
     method unique_block_name($prefix) { $prefix . '_' . $block_id++ }
 
     # Local storage names must be unique across a function: the codegen resolves every operand through its SSA
@@ -159,6 +162,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         f64  => 'float',
         ptr  => 'ptr'
     );
+
+    # The `Brocken::*` intrinsics that yield no value -- the stores write through a pointer and hand back nothing.
+    # They are what a bare expression statement in `core.brocken` most often is (`sub set_x { Brocken::store_i64(...) }`),
+    # so the implicit-return analysis has to know they are void or a setter would be inferred to return a value.
+    my %VOID_INTRINSICS = map { $_ => 1 } qw[store_i64 store_i8 store_u8 store_i32 store_u32 store_f64 store_u16];
 
     method _loc($ast) {
         my $f = $ast->file // '';
@@ -282,6 +290,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my %locals;
         my @returns;
         $self->_scan_function_body( $body, \%assigned, \%locals, \@returns );
+
+        # A body that falls off its end hands the caller its final expression, so that return participates in the
+        # ownership verdict exactly as a `return EXPR` would.
+        my $implicit = $self->_implicit_return_expr($body);
+        push @returns, $implicit if defined $implicit;
         my $owned = 0;
         for my $expr (@returns) {
             if ( defined $expr && $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
@@ -380,6 +393,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my ( %assigned, %locals, %fresh, @returns );
         $self->_scan_function_body( $body, \%assigned, \%locals, \@returns, \%fresh );
 
+        # A body that falls off its end hands the caller its final expression, so that return participates in the
+        # ownership verdict exactly as a `return EXPR` would.
+        my $implicit = $self->_implicit_return_expr($body);
+        push @returns, $implicit if defined $implicit;
+
         # A `return 0` (or `return false`) hands back no instance and a null pointer is safe to release, so such a path
         # neither proves nor disproves ownership and is dropped before the verdict. Only the class-typed returns decide;
         # a function that never hands back an instance stays borrowed.
@@ -441,6 +459,64 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return undef;
     }
 
+    # A bare expression in statement position is the expression node itself; there is no Stmt::Expr wrapper. The last
+    # such node in a function body is the implicit return value when the body falls off its end.
+    method _is_expression_node($stmt) {
+        return 0 unless defined $stmt;
+        return ref($stmt) =~ /^Brocken::Katsuro::AST::Expr::/ ? 1 : 0;
+    }
+
+    # The expression a function body implicitly returns, or undef. Only a non-void trailing expression qualifies: a
+    # void one (`Brocken::store_i64(...)`, `say(...)`) is a side-effecting statement that is evaluated and discarded,
+    # which keeps a `void` sub `void`.
+    method _implicit_return_expr($body) {
+        return undef unless $body && $body->statements->@*;
+        my $last = $body->statements->[-1];
+        return undef unless $self->_is_expression_node($last);
+        return undef if $self->_expr_is_void($last);
+        return $last;
+    }
+
+    # Whether a bare expression statement produces no value. A store intrinsic writes through a pointer and yields
+    # nothing, and a call to a `void` function (or to the `say`/`print` statement builtins) is void too. An
+    # unresolvable call is treated as value-producing, so an untyped forward call still gets the benefit of the doubt
+    # and the re-inference pass (Pass 1.4 in `lower_program`) corrects it once every callee is registered.
+    method _expr_is_void($expr) {
+        return 0 unless defined $expr;
+        return 1 if $expr->isa('Brocken::Katsuro::AST::Expr::IntrinsicCall') && $VOID_INTRINSICS{ $expr->name };
+        return 1 if $expr->isa('Brocken::Katsuro::AST::Expr::UndefOp');
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Call') ) {
+            my $name = $expr->func_name;
+            return 1 if $name eq 'say' || $name eq 'print';
+            my $callee = $self->_resolve_callee_function($name);
+            return 1 if $callee && $callee->return_type && $callee->return_type->kind eq 'void';
+        }
+        return 0;
+    }
+
+    # The registered IR function a call names, resolved the same way `lower_call_expr` does: by the bare spelling
+    # first, then through the current package. Returns undef for a builtin or an as-yet-unregistered callee.
+    method _resolve_callee_function($name) {
+        my $callee = $functions->{$name};
+        if ( !$callee && defined $current_package && length $current_package ) {
+            $callee = $functions->{ $current_package . '::' . $name };
+        }
+        return $callee;
+    }
+
+    # The Brocken type name a call yields, for the return-type walk: the callee's IR return kind mapped back to a
+    # name. `void` is returned as `void` so a void call is not mistaken for a value.
+    method _call_return_type_name($expr) {
+        my $callee = $self->_resolve_callee_function( $expr->func_name );
+        return undef unless $callee && $callee->return_type;
+        my $kind = $callee->return_type->kind;
+        return 'void' if $kind eq 'void';
+        return 'Any'  if $kind eq 'dynamic';
+        return 'ptr'  if $kind eq 'ptr';
+        return 'f64'  if $kind eq 'float';
+        return 'i64';
+    }
+
     # Return type inference
     method _infer_return_type($ast) {
         my $body = $ast->body;
@@ -449,6 +525,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             $var_types{ $p->{name} } = $p->{type} // 'Any';
         }
 
+        # Callee resolution for the implicit return uses the ambient package, but inference runs during registration
+        # (Pass 1/1.4) when no body is being lowered, so pin it to the declaration's own package for the duration.
+        my $saved_package = $current_package;
+        $current_package = $ast->package;
+
         # The promotion scan and the return walk must agree on which locals are `Any`: a variable widened by
         # `_scan_promotions` makes a `return $flag` dynamic, so the inferred return type has to be `Any` too.
         # `_walk_return_types` applies the promotion when it reaches each declaration; a parameter has no declaration
@@ -456,7 +537,17 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $saved_promote = $promote_any;
         $promote_any = $self->_scan_promotions( $body, {%var_types} );
         my @types = $self->_walk_return_types( $body, \%var_types );
-        $promote_any = $saved_promote;
+
+        # The body's final expression is the function's value when it falls off the end (Perl's implicit return), so
+        # it participates in the inferred type. A void trailing expression is a discarded statement and contributes
+        # nothing, which keeps a `void` sub that ends in `say(...)` void.
+        my $implicit = $self->_implicit_return_expr($body);
+        if ( defined $implicit ) {
+            my $t = $self->_infer_expr_type( $implicit, \%var_types );
+            push @types, $t if defined $t && $t ne 'void';
+        }
+        $promote_any     = $saved_promote;
+        $current_package = $saved_package;
         return 'void' unless @types;
         my $acc = shift @types;
         for my $t (@types) { $acc = $self->_lub( $acc, $t ); }
@@ -505,6 +596,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     method _infer_expr_type( $expr, $var_types ) {
         return undef unless defined $expr;
+
+        # A store intrinsic or a void call yields nothing; returning `void` lets the caller drop it from the
+        # return-type walk rather than widening the function to `Any`.
+        return 'void' if $self->_expr_is_void($expr);
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Const') ) {
             return 'i64'    if $expr->type eq 'Int';
             return 'f64'    if $expr->type eq 'Float';
@@ -514,6 +609,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Var') ) {
             return $var_types->{ $expr->name } // 'Any';
+        }
+        if ( $expr->isa('Brocken::Katsuro::AST::Expr::Call') ) {
+            return $self->_call_return_type_name($expr) // 'Any';
         }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::List') ) {
             return 'ptr';    # list returns a pointer to heap-allocated list data
@@ -1016,6 +1114,34 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             }
         }
 
+        # Pass 1.4: Re-infer the return type of every unannotated sub now that all callees are registered. Pass 1
+        # registers in source order, so a body whose final expression calls a function declared later saw an
+        # unresolvable callee and treated the call as value-producing; with the whole function table in hand the call's
+        # real `void` (or value) type decides whether the body has an implicit return at all. The pass iterates to a
+        # fixpoint so a chain of void wrappers settles: a body that only calls another void wrapper is itself void. The
+        # inferred type only ever moves toward `void`, so the declaration count bounds the rounds.
+        {
+            my %settled;
+            my $changed = 1;
+            my $rounds  = 0;
+            my $limit   = 1 + scalar @decls;
+            while ( $changed && $rounds++ < $limit ) {
+                $changed = 0;
+                for my $stmt (@decls) {
+                    next unless $stmt->isa('Brocken::Katsuro::AST::Stmt::SubDecl');
+                    next if $stmt->prototype;
+                    next if defined $stmt->return_type;    # an annotation is authoritative; nothing to infer
+                    my $name = $self->_qualify( $stmt->name, $stmt->package );
+                    my ( $ret_class, $ir_name ) = $self->_resolved_inferred_return($stmt);
+                    next if defined $settled{$name} && $settled{$name} eq $ir_name;
+                    $settled{$name}                 = $ir_name;
+                    $changed                        = 1;
+                    $function_return_class->{$name} = $ret_class;
+                    $functions->{$name}->set_return_type( $self->type_from_name($ir_name) );
+                }
+            }
+        }
+
         # Pass 1.5: Resolve `:isa` and lay out each class's field block over its ancestor chain. Both wait until
         # every class is registered so a parent may be declared after its child.
         $self->resolve_inheritance;
@@ -1291,7 +1417,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     method register_intrinsics() {
         my $puts_name = $self->_puts_name;
-        for my $name (qw(say print)) {
+        for my $name (qw[say print]) {
             my $fn = Brocken::Lindsay::IR::Function->new(
                 name        => $puts_name,
                 return_type => Brocken::Lindsay::IR::Type::void(),
@@ -1529,15 +1655,9 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( !defined $ret_type_name ) {
             $ret_type_name = $self->_infer_return_type($ast);
         }
-        my $resolved_ret = $ret_type_name;
-        if ( defined $ret_type_name ) {
-            my $qualified = $self->_qualify( $ret_type_name, $ast->package );
-            $resolved_ret = $qualified if $classes->{$qualified};
-        }
-        my $ret_class = $classes->{$resolved_ret} ? $resolved_ret : undef;
-        $ret_type_name = $classes->{$resolved_ret} ? 'ptr' : $ret_type_name;
+        my ( $ret_class, $ir_ret_name ) = $self->_resolve_return_type( $ret_type_name, $ast );
         $function_return_class->{$name} = $ret_class;
-        my $ret_type = $self->type_from_name($ret_type_name);
+        my $ret_type = $self->type_from_name($ir_ret_name);
         my @params;
         unless ( $name =~ /^Brocken::Runtime::/ ) {
             push @params, Brocken::Lindsay::IR::Value->new( type => Brocken::Lindsay::IR::Type::ptr(), name => '%__heap_base' );
@@ -1557,6 +1677,26 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $fn = Brocken::Lindsay::IR::Function->new( name => $name, return_type => $ret_type, params => \@params );
         $module->add_function($fn);
         $functions->{$name} = $fn;
+    }
+
+    # Resolve a return type name as `register_function` records it: the class the name denotes (or undef) and the IR
+    # type name it maps to (`ptr` for a class). A class name written inside a package resolves against the global
+    # class map, matching the qualified spelling.
+    method _resolve_return_type( $ret_type_name, $ast ) {
+        my $resolved_ret = $ret_type_name;
+        if ( defined $ret_type_name ) {
+            my $qualified = $self->_qualify( $ret_type_name, $ast->package );
+            $resolved_ret = $qualified if $classes->{$qualified};
+        }
+        my $ret_class = $classes->{$resolved_ret} ? $resolved_ret : undef;
+        $ret_type_name = 'ptr' if $ret_class;
+        return ( $ret_class, $ret_type_name );
+    }
+
+    # Resolve an inferred return type to the pair `register_function` records. The re-inference pass uses this to
+    # refresh a function's return type after every callee is registered.
+    method _resolved_inferred_return($ast) {
+        return $self->_resolve_return_type( $self->_infer_return_type($ast), $ast );
     }
 
     method register_method( $class_name, $method_name, $return_type_name, $params_ast ) {
@@ -1583,6 +1723,44 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $functions->{$name} = $fn;
     }
 
+    # Lower a function or method body, honouring Perl's implicit last-expression return: when the body falls off its
+    # end and its final statement is a value-producing expression, that expression is the function's value. The
+    # trailing expression is not also lowered as a discarded statement -- that would evaluate its side effects twice --
+    # so the statements before it are lowered first and the expression is handed to `lower_return`, which owns the
+    # return-conversion, reference-count, and handler-pop bookkeeping a `return EXPR` would get.
+    #
+    # A `void` function discards the trailing expression instead: it is lowered for its side effects and the default
+    # void return follows. `_BROCKEN_ENTRY` never takes an implicit return, because its value is the process exit code
+    # and a top-level statement must not set it by accident.
+    method _lower_function_body($body) {
+        my $implicit = $self->_implicit_return_expr($body);
+        my $returns_value
+            = defined $implicit                     &&
+            $current_func->name ne '_BROCKEN_ENTRY' &&
+            $current_func->return_type              &&
+            $current_func->return_type->kind ne 'void';
+        if ( !$returns_value ) {
+            $self->lower_block_body($body);
+            return;
+        }
+        my @stmts = $body->statements->@*;
+        my $tail  = pop @stmts;
+        push $_dyn_scope_stack->@*, {};
+        $self->lower_block_statements( Brocken::Katsuro::AST::Stmt::Block->new( statements => \@stmts ) );
+        unless ( $current_block && $current_block->terminator ) {
+            $current_package = $tail->package if defined $tail->package;
+            my $ret = Brocken::Katsuro::AST::Stmt::Return->new(
+                file    => $tail->file,
+                line    => $tail->line,
+                col     => $tail->col,
+                package => $tail->package,
+                expr    => $tail
+            );
+            $self->lower_return($ret);
+        }
+        pop $_dyn_scope_stack->@*;
+    }
+
     # Pass 2: Lower function bodies
     method lower_function($ast) {
         $fuel_exit_block = undef;
@@ -1592,7 +1770,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # with an undefined symbol (F16); it falls through and emits the default return below.
         return if $ast->prototype;
         my $name = $self->_qualify( $ast->name, $ast->package );
-        $current_package  = $ast->package;
+        $current_package = $ast->package;
+        $builder->set_current_file( $ast->file // '' );
         $current_func     = $functions->{$name};
         $symbols          = {};
         $needs_rc         = {};
@@ -1709,7 +1888,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         $builder->position_at_end($body_block);
         $current_block = $body_block;
-        $self->lower_block_body( $ast->body );
+        $self->_lower_function_body( $ast->body );
         unless ( $current_block && $current_block->terminator ) {
             my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
             for my $name ( sort keys %$needs_rc ) {
@@ -1761,7 +1940,8 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             # Restore the namespace each statement was parsed in. A synthesized block (the entry body) carries
             # statements from several packages, and a `package NAME { ... }` block's statements were stamped inside
             # it, so the statement is the authority on the current package while it lowers.
-            $current_package = $stmt->package if defined $stmt->package;
+            $current_package = $stmt->package         if defined $stmt->package;
+            $builder->set_current_file( $stmt->file ) if defined $stmt->file && length $stmt->file;
             $self->lower_statement($stmt);
         }
     }
@@ -2382,6 +2562,14 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     method lower_return($ast) {
         my ( $line, $col ) = ( $ast->line, $ast->col );
+
+        # A `return` at the top level has no subroutine to return from; it sets the process exit code (the entry
+        # function's return value), which is a useful but easily-mistaken idiom, so it warns first. The diagnostic
+        # goes through the `warn`/`die` `write(2, ...)` path, which needs a rodata reference the Wasm lowerer cannot
+        # yet push, so the Wasm target stays silent (as `warn`/`die` already do).
+        if ( $current_func->name eq '_BROCKEN_ENTRY' && !$target_is_wasm ) {
+            $self->_emit_stderr_write( $self->_reflect_rodata('Brocken: return outside of a subroutine'), $line, $col );
+        }
         if ( defined $ast->expr ) {
             my $val      = $self->lower_expression( $ast->expr );
             my $ret_type = $current_func->return_type;
@@ -3155,6 +3343,25 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $msg;
     }
 
+    # Stringify a list of expressions and concatenate the pieces into one string, the way `say`/`print` render their
+    # variadic arguments. An empty list is the empty string. Each piece is evaluated in list context, since a call in
+    # argument position is, and the join goes through the managed `str_concat`, which needs `__heap_base`.
+    method _concat_stringified ( $args, $node, $line, $col ) {
+        return $self->_reflect_rodata('') unless $args->@*;
+        my @pieces = map { $self->_stringify_value( $self->_lower_in_list_context($_), $node, $line, $col ) } $args->@*;
+        my $msg    = shift @pieces;
+        return $msg unless @pieces;
+        my $hb
+            = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col ) :
+            undef;
+        Carp::croak( "say/print require __heap_base at " . $self->_loc($node) ) unless $hb;
+        my $concat = $functions->{'Brocken::Runtime::str_concat'} or Carp::croak( "Runtime function str_concat not found at " . $self->_loc($node) );
+        for my $piece (@pieces) {
+            $msg = $builder->build_call( $concat, [ $hb, $msg, $piece ], undef, $line, $col );
+        }
+        return $msg;
+    }
+
     # Write a NUL-terminated string plus a newline to stderr. libc `write(2, ...)` is used rather than `fputs(stderr,
     # ...)`: stderr is a macro, not an importable symbol, on Windows. stdout is flushed first (`fflush(NULL)`) so a
     # buffered `say` does not appear after the diagnostic; `strlen` supplies the byte count.
@@ -3341,6 +3548,16 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
 
     # Expression lowering
     method lower_expression($expr) {
+
+        # A list-context override set by an enclosing argument list or `for` iterable applies only to a call sitting
+        # directly in that position. Any other node -- an operator, a ternary, a list constructor -- gives its own
+        # operands their own context, so the override is dropped before we descend into it. `Paren` is transparent.
+        if ( defined $_want_override &&
+            !$expr->isa('Brocken::Katsuro::AST::Expr::Call')       &&
+            !$expr->isa('Brocken::Katsuro::AST::Expr::MethodCall') &&
+            !$expr->isa('Brocken::Katsuro::AST::Expr::Paren') ) {
+            $_want_override = undef;
+        }
         if ( $expr->isa('Brocken::Katsuro::AST::Expr::Const') ) {
             return $self->lower_const($expr);
         }
@@ -3416,13 +3633,19 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         Carp::croak( "Unknown expression type: " . ref($expr) . " at " . $self->_loc($expr) );
     }
 
+    # Intern a string constant and return its ( label, bytes ). The label is derived from the bytes themselves rather
+    # than a per-lowerer counter, so a given literal always maps to the same label no matter which functions a program
+    # happens to lower. That stability is what lets the back ends cache emitted core-runtime blobs -- which embed these
+    # labels -- across compilations: with an order-dependent counter, a cached blob could reference a label that a later
+    # compilation handed to a different literal. Content-derived labels also make the emitted image deterministic.
     method _intern_rodata($bytes) {
-        for my $key ( keys $rodata->%* ) {
-            if ( $rodata->{$key} eq $bytes ) {
-                return ( $key, $rodata->{$key} );
-            }
+        my $label = '__str_' . Digest::MD5::md5_hex($bytes);
+
+        # An md5 collision is infeasible in practice, but if one ever occurred the re-hash below yields a distinct,
+        # still content-derived label rather than silently aliasing two literals.
+        while ( exists $rodata->{$label} && $rodata->{$label} ne $bytes ) {
+            $label = '__str_' . Digest::MD5::md5_hex( $label . $bytes );
         }
-        my $label = '__str_' . $_rodata_label_counter++;
         $rodata->{$label} = $bytes;
         return ( $label, $bytes );
     }
@@ -4546,6 +4769,18 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         return $rhs;
     }
 
+    # Lower one element of an argument list. Perl evaluates every argument in list context, so a call sitting directly
+    # in that position is told want=list -- a callee that consults want("list") then returns a list rather than boxing
+    # a single scalar. The override covers only the argument's own outermost call; lower_expression drops it before
+    # descending into any operator, which imposes its own (scalar) context.
+    method _lower_in_list_context($expr) {
+        my $saved = $_want_override;
+        $_want_override = 2;
+        my $val = $self->lower_expression($expr);
+        $_want_override = $saved;
+        return $val;
+    }
+
     method lower_call_expr($ast) {
         my $name     = $ast->func_name;
         my $callee   = $functions->{$name};
@@ -4611,39 +4846,40 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         if ( !$stringify_args && $ast->args->@* > $user_params ) {
             Carp::croak( "Too many arguments to '$name': $user_params expected, got " . $ast->args->@* . " at " . $self->_loc($ast) );
         }
-
-        # A default for one omitted trailing argument may reference an earlier one, so each value that lands in a
-        # parameter is bound to that parameter's name while the rest of the call is lowered. The bindings are
-        # restored afterwards so they never leak into the caller's scope.
         my @saved;
-        for my $arg ( $ast->args->@* ) {
-            my $val = $self->lower_expression($arg);
-            if ( $stringify_args && $param_idx == 0 ) {
-                $val = $self->_stringify_value( $val, $ast, $line, $col );
-            }
-            elsif ( $param_idx < $callee->params->@* ) {
+        if ($stringify_args) {
 
-                # A user parameter whose Brocken type maps to `ptr` (`String`, a class, a raw `ptr`) wants the box's
-                # payload, so a dynamic argument is unboxed here; an `Any` parameter stays `dynamic` and keeps the box.
-                # `$callee_has_heap_base` is what separates a user function from a runtime helper (`length`'s `strlen`),
-                # which still receives the box it reads the header through.
-                $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type, $line, $col, $callee_has_heap_base ? 1 : 0 );
-            }
-            push @args, $val;
-            if ($defaults) {
-                my $di  = $param_idx - ( $callee_has_heap_base ? 1 : 0 ) - ( $callee_has_want ? 1 : 0 );
-                my $rec = $di < $defaults->@* ? $defaults->[$di] : undef;
-                if ($rec) {
-                    push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
-                    $symbols->{ $rec->{name} } = $val;
-                }
-            }
-            $param_idx++;
+            # `say`/`print` are variadic: every argument is stringified and the pieces concatenated into the single
+            # pointer `puts` takes, so `say('a', 'b')` prints "ab" rather than dropping every argument but the first.
+            # `say()`/`print()` with no argument still prints one line, so an empty list becomes the empty string.
+            push @args, $self->_concat_stringified( $ast->args, $ast, $line, $col );
         }
+        else {
+            # A default for one omitted trailing argument may reference an earlier one, so each value that lands in a
+            # parameter is bound to that parameter's name while the rest of the call is lowered. The bindings are
+            # restored afterwards so they never leak into the caller's scope.
+            for my $arg ( $ast->args->@* ) {
+                my $val = $self->_lower_in_list_context($arg);
+                if ( $param_idx < $callee->params->@* ) {
 
-        # `say()`/`print()` with no argument still prints one line: hand `puts` the empty string rather than leaving
-        # its argument register unset.
-        push @args, $self->_reflect_rodata('') if $stringify_args && !$ast->args->@*;
+                    # A user parameter whose Brocken type maps to `ptr` (`String`, a class, a raw `ptr`) wants the box's
+                    # payload, so a dynamic argument is unboxed here; an `Any` parameter stays `dynamic` and keeps the box.
+                    # `$callee_has_heap_base` is what separates a user function from a runtime helper (`length`'s `strlen`),
+                    # which still receives the box it reads the header through.
+                    $val = $self->maybe_convert_type( $val, $callee->params->[$param_idx]->type, $line, $col, $callee_has_heap_base ? 1 : 0 );
+                }
+                push @args, $val;
+                if ($defaults) {
+                    my $di  = $param_idx - ( $callee_has_heap_base ? 1 : 0 ) - ( $callee_has_want ? 1 : 0 );
+                    my $rec = $di < $defaults->@* ? $defaults->[$di] : undef;
+                    if ($rec) {
+                        push @saved, [ $rec->{name}, $symbols->{ $rec->{name} } ];
+                        $symbols->{ $rec->{name} } = $val;
+                    }
+                }
+                $param_idx++;
+            }
+        }
 
         # Omitted trailing parameters take their defaults in order. Filling stops at the first parameter without a
         # default: a required parameter cannot be skipped so that a later one can be provided.
@@ -4834,8 +5070,11 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
             return $builder->build_syscall( \@syscall_args, undef, $line, $col );
         }
         if ( $name eq 'libc' ) {
+            if ($target_is_wasm) {
+                return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+            }
             my $name_ast = $ast->args->[0];
-            Carp::croak( "First argument to libc must be a string literal at " . $self->_loc($ast) )
+            Carp::croak( 'First argument to libc must be a string literal at ' . $self->_loc($ast) )
                 unless $name_ast->isa('Brocken::Katsuro::AST::Expr::Const') && $name_ast->type eq 'String';
             my $func_name = $name_ast->value;
             my $extern_fn = Brocken::Lindsay::IR::Function->new( name => $func_name, return_type => Brocken::Lindsay::IR::Type::i64(), params => [] );
@@ -4864,6 +5103,24 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         if ( $name eq 'block_next_free_offset' ) {
             return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => Brocken::ICB::BLOCK_NEXT_FREE_OFFSET() );
+        }
+        if ( $name eq 'frame_addr' ) {
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) if $target_is_wasm;
+            return $builder->build_frame_addr( undef, $line, $col );
+        }
+        if ( $name eq 'func_addr' ) {
+            my $sym_ast = $ast->args->[0];
+            Carp::croak( "Argument to func_addr must be a string literal at " . $self->_loc($ast) )
+                unless $sym_ast && $sym_ast->isa('Brocken::Katsuro::AST::Expr::Const') && $sym_ast->type eq 'String';
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) if $target_is_wasm;
+            return $builder->build_func_addr( $sym_ast->value, undef, $line, $col );
+        }
+        if ( $name eq 'rodata_addr' ) {
+            my $sym_ast = $ast->args->[0];
+            Carp::croak( "Argument to rodata_addr must be a string literal at " . $self->_loc($ast) )
+                unless $sym_ast && $sym_ast->isa('Brocken::Katsuro::AST::Expr::Const') && $sym_ast->type eq 'String';
+            return Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 ) if $target_is_wasm;
+            return Brocken::Lindsay::IR::RodataRef->new( label => $sym_ast->value, bytes => '', type => Brocken::Lindsay::IR::Type::ptr() );
         }
         Carp::croak( "Unknown intrinsic '$name' at " . $self->_loc($ast) );
     }
@@ -5314,8 +5571,13 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 return $builder->build_call( $fn, [$val], undef, $line, $col );
             }
             if ( $kind eq 'int' && $bits <= 64 ) {
-                my $fn   = $functions->{'Brocken::Runtime::unbox_i64'} or Carp::croak("Runtime function unbox_i64 not found at line $line, col $col");
-                my $wide = $builder->build_call( $fn, [$val], undef, $line, $col );
+                my $fn = $functions->{'Brocken::Runtime::unbox_i64'} or Carp::croak("Runtime function unbox_i64 not found at line $line, col $col");
+                my $cur_file = $builder->current_file;
+                my $file_val = ( !$target_is_wasm && defined $cur_file && length $cur_file ) ? $self->_reflect_rodata($cur_file) :
+                    Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::ptr(), value => 0 );
+                my $line_val = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $line );
+                my $col_val  = Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $col );
+                my $wide     = $builder->build_call( $fn, [ $val, $file_val, $line_val, $col_val ], undef, $line, $col );
                 return $bits == 64 ? $wide : $self->maybe_convert_type( $wide, $target_type, $line, $col );
             }
             return $builder->build_unbox( $val, $target_type, undef, $line, $col );
@@ -5554,8 +5816,10 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
                 Carp::croak( "Undefined method '" . $method . "' in class '" . $class_name . "' at " . $self->_loc($ast) ) unless $full_name;
             }
         }
-        my $hb       = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
-        my $want_val = $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'},      undef, $line, $col );
+        my $hb = $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'}, undef, $line, $col );
+        my $want_val
+            = defined $_want_override ? Brocken::Lindsay::IR::Constant->new( type => Brocken::Lindsay::IR::Type::i64(), value => $_want_override ) :
+            $builder->build_load( Brocken::Lindsay::IR::Type::i64(), $symbols->{'__want'}, undef, $line, $col );
         if ( $obj_is_class && $method eq 'new' ) {
             my $cd            = $classes->{$class_name};
             my $total_size    = $cd->{total_size};
@@ -5753,7 +6017,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         # may reference an earlier one because each landed value is bound to its parameter name until the call is done.
         my @saved;
         for my $arg ( $ast->args->@* ) {
-            my $val = $self->lower_expression($arg);
+            my $val = $self->_lower_in_list_context($arg);
             if ( $param_idx < $callee->params->@* ) {
 
                 # As at a plain call: a `ptr`-shaped user parameter (`String`/class/`ptr`) takes the box's payload.
@@ -5907,6 +6171,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $full_name = $class_name . '::' . $method_ast->name;
         $current_func = $functions->{$full_name};
         return unless $current_func;
+        $builder->set_current_file( $method_ast->file // '' );
         $symbols          = {};
         $needs_rc         = {};
         $rc_owner         = {};
@@ -5962,7 +6227,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         }
         $promote_any = $self->_scan_promotions( $method_ast->body, { map { $_->{name} => ( $_->{type} // 'Any' ) } $method_ast->params->@* } );
         $self->_scan_escapes( $method_ast->body );
-        $self->lower_block_body( $method_ast->body );
+        $self->_lower_function_body( $method_ast->body );
         unless ( $current_block && $current_block->terminator ) {
             my $decref_hb = $symbols->{'__heap_base'} ? $builder->build_load( Brocken::Lindsay::IR::Type::ptr(), $symbols->{'__heap_base'} ) : undef;
             for my $name ( sort keys %$needs_rc ) {
@@ -5982,6 +6247,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $full_name = $class_name . '::ADJUST';
         $current_func = $functions->{$full_name};
         return unless $current_func;
+        $builder->set_current_file( $adjust_asts->[0] ? ( $adjust_asts->[0]->file // '' ) : '' );
         $symbols          = {};
         $needs_rc         = {};
         $rc_owner         = {};
@@ -6019,6 +6285,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $self->populate_field_geps( $class_name, $self_val );
         $promote_any = {};
         for my $adjust_ast ( $adjust_asts->@* ) {
+            $builder->set_current_file( $adjust_ast->file // '' );
             $promote_any->{$_} = 1 for keys %{ $self->_scan_promotions( $adjust_ast->body, {} ) };
             $self->_scan_escapes( $adjust_ast->body );
             $self->lower_block_body( $adjust_ast->body );
@@ -6041,6 +6308,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $full_name = $class_name . '::DESTROY';
         $current_func = $functions->{$full_name};
         return unless $current_func;
+        $builder->set_current_file( $destroy_asts->[0] ? ( $destroy_asts->[0]->file // '' ) : '' );
         $symbols          = {};
         $needs_rc         = {};
         $rc_owner         = {};
@@ -6078,6 +6346,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         $self->populate_field_geps( $class_name, $self_val );
         $promote_any = {};
         for my $destroy_ast ( $destroy_asts->@* ) {
+            $builder->set_current_file( $destroy_ast->file // '' );
             $promote_any->{$_} = 1 for keys %{ $self->_scan_promotions( $destroy_ast->body, {} ) };
             $self->_scan_escapes( $destroy_ast->body );
             $self->lower_block_body( $destroy_ast->body );
@@ -6110,6 +6379,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $full_name = $class_name . '::__destroy';
         $current_func = $functions->{$full_name};
         return unless $current_func;
+        $builder->set_current_file('');
         $symbols          = {};
         $needs_rc         = {};
         $rc_owner         = {};
@@ -6373,6 +6643,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $full_name = $class_name . '::' . $mname;
         $current_func = $functions->{$full_name};
         return unless $current_func;
+        $builder->set_current_file( $field_ast->file // '' );
         $current_func->set_blocks( [] );
         my $entry = $current_func->append_block('entry');
         $builder->position_at_end($entry);
@@ -6402,6 +6673,7 @@ class Brocken::Katsuro::Lowerer v0.0.1 {
         my $full_name = $class_name . '::' . $mname;
         $current_func = $functions->{$full_name};
         return unless $current_func;
+        $builder->set_current_file( $field_ast->file // '' );
 
         # Isolate the symbol table: the reclaim cascade below may consult `__want`, and a stale entry from the
         # previously lowered function would name an alloca belonging to a different function.

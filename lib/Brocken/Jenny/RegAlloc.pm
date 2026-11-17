@@ -27,7 +27,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 }
             }
             unless ($has_float) {
-                return { assignment => {}, used_callee => [], spill_slots => {}, spill_temp => undef, spill_addr_temp => undef, };
+                return { assignment => {}, used_callee => [], spill_slots => {}, spill_temp => undef, spill_addr_temp => undef };
             }
         }
         $mf->compute_cfg unless $mf->entry_block->successors->@*;
@@ -565,7 +565,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
             used_callee     => [ sort keys %used_callee ],
             spill_slots     => \%spill_slots,
             spill_temp      => $spill_temp,
-            spill_addr_temp => $spill_addr_temp,
+            spill_addr_temp => $spill_addr_temp
         };
     }
 
@@ -578,8 +578,8 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
         # the value is never written back.  It is listed here anyway so the first comparand is reloaded; the
         # resulting write-back stores the same value it just loaded and is therefore harmless.
         my %reads_dst = map { $_ => 1 }
-            qw(add sub mul umulh sdiv udiv div rem urem adc sbb and or xor cmp shl lshr ashr neg inc dec not bne beq fcmp fadd fsub fmul fdiv fmin fmax fxor fand);
-        my %can_mem_src = map { $_ => 1 } qw(add sub adc sbb and or xor cmp);
+            qw[add sub mul umulh sdiv udiv div rem urem adc sbb and or xor cmp shl lshr ashr neg inc dec not bne beq fcmp fadd fsub fmul fdiv fmin fmax fxor fand];
+        my %can_mem_src = map { $_ => 1 } qw[add sub adc sbb and or xor cmp];
         my $temp_op     = sub { Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $spill_temp, type => undef ) };
 
         # Falls back to the value scratch when no address scratch was reserved.
@@ -674,7 +674,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                         $ops[$i] = Brocken::Jenny::MIR::MachineOperand->new(
                             kind  => 'mem',
                             value => { base => $stack_reg, disp => $sp{$i} },
-                            type  => $ops[$i]->type,
+                            type  => $ops[$i]->type
                         );
                         next;
                     }
@@ -709,12 +709,18 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                         opcode   => $load_op,
                         operands => [
                             Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $lr->[1], type => undef ),
-                            $mem_op->( $lr->[0] ),
+                            $mem_op->( $lr->[0] )
                         ],
-                        comment => 'spill-reload',
+                        comment => 'spill-reload'
                         );
                 }
-                push @new, Brocken::Jenny::MIR::MachineInstruction->new( opcode => $opcode, operands => [@ops], comment => $inst->comment, );
+                push @new,
+                    Brocken::Jenny::MIR::MachineInstruction->new(
+                    opcode      => $opcode,
+                    operands    => [@ops],
+                    comment     => $inst->comment,
+                    ir_inst_idx => $inst->ir_inst_idx
+                    );
                 push @new, $store_inst->($store_off) if defined $store_off;
             }
             $bb->instructions->@* = @new;
@@ -731,26 +737,25 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                 if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap|syscall)$/ ) {
                     for my $r (@$caller_regs) {
                         my $mem
-                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 }, );
+                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx++ * 8 } );
                         push @new,
                             Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => $store_op,
                             operands => [ $mem, Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r ) ],
-                            comment  => 'caller-save ' . $r,
+                            comment  => 'caller-save ' . $r
                             );
                     }
                 }
                 push @new, $inst;
                 if ( $inst->opcode =~ /^(?:call_func|call_indirect|ctx_swap|syscall)$/ ) {
                     for my $r ( reverse @$caller_regs ) {
-                        my $mem
-                            = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem', value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 },
-                            );
+                        my $mem = Brocken::Jenny::MIR::MachineOperand->new( kind => 'mem',
+                            value => { base => $stack_reg, disp => $spill_idx-- * 8 - 8 } );
                         push @new,
                             Brocken::Jenny::MIR::MachineInstruction->new(
                             opcode   => $load_op,
                             operands => [ Brocken::Jenny::MIR::MachineOperand->new( kind => 'phys_reg', value => $r ), $mem ],
-                            comment  => 'caller-restore ' . $r,
+                            comment  => 'caller-restore ' . $r
                             );
                     }
                 }
@@ -1124,7 +1129,7 @@ class Brocken::Jenny::RegAlloc::LinearScan v0.0.1 {
                         reads  => $r,
                         is_fp  => ( $inst->opcode eq 'fmov' ? 1 : 0 ),
                         opcode => $inst->opcode,
-                        type   => $src ? $src->type : undef,
+                        type   => $src ? $src->type : undef
                         };
                 }
                 next unless $understood;

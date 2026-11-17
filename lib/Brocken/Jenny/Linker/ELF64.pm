@@ -18,7 +18,9 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         my $rodata_size = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
         $layout->add_section( '.rodata', $rodata_size || 1, 2 );
         my $brk_sym_size = $self->brk_sym_size();
-        $layout->add_section( '.brk_sym', $brk_sym_size, 2 ) if $brk_sym_size > 0;
+        $layout->add_section( '.brk_sym', $brk_sym_size || 4, 2 );
+        my $brk_line_size = $self->brk_line_size();
+        $layout->add_section( '.brk_line', $brk_line_size || 16, 2 );
 
         # Read-only metadata sections (strictly mapped to RX segment)
         $layout->add_section( '.interp',   512,  2 ) if $self->type eq 'exe';
@@ -326,6 +328,21 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             $code_bytes = $code_data;
         }
         my $entry_stub_len = $self->entry_stub_len($platform);
+        if ( ref $code_data eq 'ARRAY' ) {
+            my ( @ranges, @lines );
+            for my $fd ( $code_data->@* ) {
+                my $fstart = $entry_stub_len + $func_offsets{ $fd->{name} };
+                my $flen   = length( $fd->{bytes} );
+                push @ranges, { name => $fd->{name}, start => $fstart, end => $fstart + $flen };
+                for my $loc ( ( $fd->{line_locs} // [] )->@* ) {
+                    push @lines, { offset => $fstart + $loc->{offset}, file => $loc->{file}, line => $loc->{line}, col => $loc->{col} };
+                }
+            }
+            $self->set_func_ranges( \@ranges );
+            $self->set_line_entries( \@lines );
+            $self->set_anchor_offset(
+                exists $func_offsets{'Brocken::Runtime::_bt_anchor'} ? $entry_stub_len + $func_offsets{'Brocken::Runtime::_bt_anchor'} : 0 );
+        }
         if ( !defined $self->layout ) {
             my $extra_data = $platform->is_bsd ? 32 : ( $platform->is_haiku ? 8 : 0 );
             $self->pre_layout( length($code_bytes) + $entry_stub_len, $extra_data, $platform, $self->debug_level );
@@ -344,6 +361,8 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 my $_rodata_size = length( join( '', map { $self->rodata->{$_} } sort keys $self->rodata->%* ) );
                 $_rd->{size} = $_rodata_size || 1;
             }
+            if ( my $_bs = $self->layout->get('.brk_sym') )  { $_bs->{size} = $self->brk_sym_size()  || 4; }
+            if ( my $_bl = $self->layout->get('.brk_line') ) { $_bl->{size} = $self->brk_line_size() || 16; }
             $self->layout->calculate( $self->layout->section_align );
         }
         my $l          = $self->layout;
@@ -553,6 +572,14 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             my $rva           = $text_sec->{rva} + ( ( $text_sec->{size} + $section_align - 1 ) & ~( $section_align - 1 ) );
             $rva += 2 * $section_align if $platform->is_dragonflybsd;
             $rodata_sec->{rva} = $rva;
+            $rva += ( $rodata_sec->{size} + $section_align - 1 ) & ~( $section_align - 1 );
+            if ( my $bs_sec = $self->layout->get('.brk_sym') ) {
+                $bs_sec->{rva} = $rva;
+                $rva += ( $bs_sec->{size} + $section_align - 1 ) & ~( $section_align - 1 );
+            }
+            if ( my $bl_sec = $self->layout->get('.brk_line') ) {
+                $bl_sec->{rva} = $rva;
+            }
         }
 
         # Resolve cross-function call fixups at link time
@@ -561,49 +588,49 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
             die "fixup offset $src_pos out of bounds" if $src_pos + 4 > length($text);
 
             # rodata-relocated fixups are resolved first (no function target needed)
-            if ( $ff->{type} eq 'lea_rodata_rel32' ) {
-                my $rodata_sec = $self->layout->get('.rodata') or die "no .rodata section for lea_rodata_rel32";
-                my $rodata_rva = $rodata_sec->{rva};
-                my $label_off  = 0;
-                for my $key ( sort keys $self->rodata->%* ) {
-                    last if $key eq $ff->{target};
-                    $label_off += length( $self->rodata->{$key} );
+            if ( $ff->{type} eq 'lea_rodata_rel32' || $ff->{type} eq 'lea_rodata_adr' ) {
+                my $target_rva;
+                if ( $ff->{target} eq '__brk_sym_table' ) {
+                    $target_rva = $self->layout->get('.brk_sym')->{rva};
                 }
-                my $target_rva = $rodata_rva + $label_off;
-                my $text_rva   = $self->layout->get('.text')->{rva};
-                my $rel        = $target_rva - ( $text_rva + $src_pos + 4 );
-                substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
-                next;
-            }
-            if ( $ff->{type} eq 'lea_rodata_adr' ) {
-                my $rodata_sec = $self->layout->get('.rodata') or die "no .rodata section for lea_rodata_adr";
-                my $rodata_rva = $rodata_sec->{rva};
-                my $label_off  = 0;
-                for my $key ( sort keys $self->rodata->%* ) {
-                    last if $key eq $ff->{target};
-                    $label_off += length( $self->rodata->{$key} );
+                elsif ( $ff->{target} eq '__brk_line_table' ) {
+                    $target_rva = $self->layout->get('.brk_line')->{rva};
                 }
-                my $target_rva = $rodata_rva + $label_off;
-                my $text_rva   = $self->layout->get('.text')->{rva};
-                my $src_rva    = $text_rva + $src_pos;
-                my $rel        = $target_rva - $src_rva;
-                if ( $platform->is_arm64 ) {
-                    my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
-                    my $rd   = $word & 0x1F;
-                    my $lo   = $rel & 3;
-                    my $hi   = ( $rel >> 2 ) & 0x7FFFF;
-                    $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
-                    substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                else {
+                    my $rodata_sec = $self->layout->get('.rodata') or die "no .rodata section for $ff->{type}";
+                    my $label_off  = 0;
+                    for my $key ( sort keys $self->rodata->%* ) {
+                        last if $key eq $ff->{target};
+                        $label_off += length( $self->rodata->{$key} );
+                    }
+                    $target_rva = $rodata_sec->{rva} + $label_off;
                 }
-                elsif ( $platform->is_riscv64 ) {
-                    my $auipc = unpack( 'V', substr( $text, $src_pos, 4 ) );
-                    my $rd    = ( $auipc >> 7 ) & 0x1F;
-                    my $hi    = ( ( $rel + 0x800 ) >> 12 ) & 0xFFFFF;
-                    $auipc = ( $hi << 12 ) | ( $rd << 7 ) | 0x17;
-                    substr( $text, $src_pos, 4, pack( 'V', $auipc ) );
-                    my $lo   = $rel & 0xFFF;
-                    my $addi = ( $lo << 20 ) | ( $rd << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13;
-                    substr( $text, $src_pos + 4, 4, pack( 'V', $addi ) );
+                my $text_rva = $self->layout->get('.text')->{rva};
+                if ( $ff->{type} eq 'lea_rodata_rel32' ) {
+                    my $rel = $target_rva - ( $text_rva + $src_pos + 4 );
+                    substr( $text, $src_pos, 4, pack( 'V', $rel & 0xFFFFFFFF ) );
+                }
+                else {
+                    my $src_rva = $text_rva + $src_pos;
+                    my $rel     = $target_rva - $src_rva;
+                    if ( $platform->is_arm64 ) {
+                        my $word = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                        my $rd   = $word & 0x1F;
+                        my $lo   = $rel & 3;
+                        my $hi   = ( $rel >> 2 ) & 0x7FFFF;
+                        $word = 0x10000000 | ( $lo << 29 ) | ( $hi << 5 ) | $rd;
+                        substr( $text, $src_pos, 4, pack( 'V', $word ) );
+                    }
+                    elsif ( $platform->is_riscv64 ) {
+                        my $auipc = unpack( 'V', substr( $text, $src_pos, 4 ) );
+                        my $rd    = ( $auipc >> 7 ) & 0x1F;
+                        my $hi    = ( ( $rel + 0x800 ) >> 12 ) & 0xFFFFF;
+                        $auipc = ( $hi << 12 ) | ( $rd << 7 ) | 0x17;
+                        substr( $text, $src_pos, 4, pack( 'V', $auipc ) );
+                        my $lo   = $rel & 0xFFF;
+                        my $addi = ( $lo << 20 ) | ( $rd << 15 ) | ( 0 << 12 ) | ( $rd << 7 ) | 0x13;
+                        substr( $text, $src_pos + 4, 4, pack( 'V', $addi ) );
+                    }
                 }
                 next;
             }
@@ -739,7 +766,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
         if ( $platform->is_native ) {
             my @search_paths = (
                 '/usr/lib', '/lib', '/lib64', '/usr/lib64',
-                '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu',
+                '/usr/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu', '/usr/lib/riscv64-linux-gnu'
             );
             my @found;
             for my $dir (@search_paths) {
@@ -1207,7 +1234,10 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 $s->{size} = length($payload);
             }
             elsif ( $s->{name} eq '.brk_sym' ) {
-                $payload = $self->build_brk_sym();
+                $payload = $self->build_brk_sym() || ( "\0" x 4 );
+            }
+            elsif ( $s->{name} eq '.brk_line' ) {
+                $payload = $self->build_brk_line() || ( "\0" x 16 );
             }
             elsif ( $s->{name} eq '.interp' ) {
                 $payload = $interp;
@@ -1283,7 +1313,7 @@ class Brocken::Jenny::Linker::ELF64 v0.0.1 : isa(Brocken::Jenny::Linker) {
                 $type  = 1;
                 $flags = 2;
             }
-            elsif ( $s->{name} eq '.brk_sym' ) {
+            elsif ( $s->{name} eq '.brk_sym' || $s->{name} eq '.brk_line' ) {
                 $type  = 1;
                 $flags = 2;
             }

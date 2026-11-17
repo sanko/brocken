@@ -74,7 +74,9 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             for my $func (@core_ir) {
                 my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new( platform => $platform );
                 my $mf      = $lowerer->lower($func);
-                push @built_core, $self->_emit_single_mf( $mf, $func->name );
+                my $blob    = $self->_emit_single_mf( $mf, $func->name );
+                $blob->{line_locs} = Brocken::Jenny::Codegen::_collect_line_locs( $func, $blob );
+                push @built_core, $blob;
             }
             $cached_core = \@built_core;
             $core_cache{$plat_key} = \@built_core;
@@ -86,15 +88,17 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             my $lowerer = Brocken::Jenny::Lowerer::RISCV64->new( platform => $platform );
             my $mf      = $lowerer->lower($func);
             $has_fiber ||= $self->_has_fiber_ops_mf($mf);
-            push @user_mfs, [ $mf, $fn_i, $func->name ];
+            push @user_mfs, [ $mf, $fn_i, $func->name, $func ];
         }
         my $emit_init = $has_fiber && $entry_index >= 0;
         for my $entry (@user_mfs) {
-            my ( $mf, $fn_i, $fname ) = @$entry;
+            my ( $mf, $fn_i, $fname, $ir_fn ) = @$entry;
             if ( $emit_init && $fn_i == $entry_index ) {
                 $fname = '_real_main';
             }
             my $blob = $self->_emit_single_mf( $mf, $fname );
+
+            #~ $blob->{line_locs} = Brocken::Jenny::Codegen::_collect_line_locs( $ir_fn, $blob );
             push @user_blobs, $blob;
         }
         my @result;
@@ -281,7 +285,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         );
 
         # return result
-        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', ) );
+        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret' ) );
         $mf->add_block($mbb);
         return $mf;
     }
@@ -415,7 +419,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
         );
 
         # Return result
-        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret', ) );
+        $mbb->add_instruction( Brocken::Jenny::MIR::MachineInstruction->new( opcode => 'ret' ) );
         $mf->add_block($mbb);
         return $mf;
     }
@@ -1632,7 +1636,7 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
                 my $vreg = '%' . $p->name . '.addr';
                 my $slot = $alloca_map->{$vreg};
                 push @params,
-                    { name => ( $p->name =~ s/^%//r ), type => 'Int', slot => defined $slot ? $slot : 0, line => 0, col => 0, artificial => 0, };
+                    { name => ( $p->name =~ s/^%//r ), type => 'Int', slot => defined $slot ? $slot : 0, line => 0, col => 0, artificial => 0 };
             }
             my @locals;
             for my $block ( $ir_fn->blocks->@* ) {
@@ -1700,6 +1704,11 @@ class Brocken::Jenny::Codegen::RISCV64 v0.0.1 {
             ],
             alloca_map => { $blob->{alloca_map}->%* },
             source_map => { $blob->{source_map}->%* },
+            line_locs  => [
+                map {
+                    {%$_}
+                } ( $blob->{line_locs} // [] )->@*
+            ]
         };
     }
 };

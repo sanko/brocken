@@ -7,35 +7,35 @@ use Brocken::Lindsay::IR;
 no warnings qw[experimental::class experimental::builtin portable];
 use feature qw[class];
 subtest 'String constant compiles and produces RodataRef in IR' => sub {
-    my $module = Brocken->new->compile(<<'BROCKEN');
-my String $x = "hello";
-return 42;
-BROCKEN
+    my $module = Brocken->new->compile(<<~'BROCKEN');
+        my String $x = "hello";
+        return 42;
+        BROCKEN
     my $rodata = $module->rodata;
-    ok( defined $rodata, 'module has rodata hash' );
-    is( scalar( keys $rodata->%* ), 1, 'one string constant in rodata' );
+    is $rodata,                    D(), 'module has rodata hash';
+    is scalar( keys $rodata->%* ), 1,   'one string constant in rodata';
     my ( $label, $bytes ) = each $rodata->%*;
-    like( $label, qr/^__str_\d+$/, 'label matches __str_N pattern' );
-    is( $bytes, "hello\0", 'bytes include null terminator' );
+    like $label, qr/^__str_[0-9a-f]{32}$/, 'label is a content-derived __str_<md5> name';
+    is $bytes, "hello\0", 'bytes include null terminator';
     my $funcs = $module->functions;
-    ok( scalar $funcs->@* > 0, 'at least one function in module' );
+    ok scalar $funcs->@* > 0, 'at least one function in module';
     my $func = $funcs->[0];
-    ok( defined $func->name, 'entry function has a name' );
+    ok defined $func->name, 'entry function has a name';
     my $blocks = $func->blocks;
-    ok( scalar $blocks->@* > 0, 'entry function has blocks' );
+    ok scalar $blocks->@* > 0, 'entry function has blocks';
 };
 subtest 'String constant through codegen and linker' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $module  = Brocken->new->compile(<<'BROCKEN');
-my String $x = "Hello, world!";
-say($x);
-return 0;
-BROCKEN
+    my $module  = Brocken->new->compile(<<~'BROCKEN');
+        my String $x = "Hello, world!";
+        say($x);
+        return 0;
+        BROCKEN
     my $rodata = $module->rodata;
-    ok( defined $rodata, 'module has rodata before codegen' );
+    is $rodata, D(), 'module has rodata before codegen';
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
-    ok( scalar $funcs->@* > 0, 'at least one function emitted' );
+    ok scalar $funcs->@* > 0, 'at least one function emitted';
     my @rodata_fixups = grep { $_->{type} eq 'lea_rodata_rel32' || $_->{type} eq 'lea_rodata_adr' } map { $_->{fixups}->@* } $funcs->@*;
     ok scalar @rodata_fixups > 0, 'at least one rodata fixup generated';
 SKIP: {
@@ -61,30 +61,30 @@ SKIP: {
     }
 };
 subtest 'String concat folds two RodataRef strings' => sub {
-    my $module = Brocken->new->compile(<<'BROCKEN');
-my String $x = "hello " . "world";
-return 0;
-BROCKEN
+    my $module = Brocken->new->compile(<<~'BROCKEN');
+        my String $x = "hello " . "world";
+        return 0;
+        BROCKEN
     my $rodata = $module->rodata;
-    ok( defined $rodata, 'module has rodata' );
+    is $rodata, D(), 'module has rodata';
     my $found = 0;
     for my $bytes ( values $rodata->%* ) {
         $found = 1 if $bytes eq "hello world\0";
     }
-    ok( $found, 'found folded concatenated string in rodata' );
+    ok $found, 'found folded concatenated string in rodata';
 };
 subtest 'Parser accepts . as binary operator' => sub {
-    my $ast = Brocken->new->parse(<<'BROCKEN');
-my String $x = "a" . "b";
-return 0;
-BROCKEN
+    my $ast = Brocken->new->parse(<<~'BROCKEN');
+        my String $x = "a" . "b";
+        return 0;
+        BROCKEN
     my $decl = $ast->statements->[0];
-    ok( defined $decl,                                      'first statement is decl' );
-    ok( $decl->isa('Brocken::Katsuro::AST::Stmt::VarDecl'), 'var decl' );
+    is $decl, D(), 'first statement is decl';
+    ok $decl->isa('Brocken::Katsuro::AST::Stmt::VarDecl'), 'var decl';
     my $expr = $decl->init;
-    ok( defined $expr,                                    'decl has init expression' );
-    ok( $expr->isa('Brocken::Katsuro::AST::Expr::BinOp'), 'expression is BinOp' );
-    is( $expr->op, '.', 'operator is .' );
+    is $expr, D(), 'decl has init expression';
+    ok $expr->isa('Brocken::Katsuro::AST::Expr::BinOp'), 'expression is BinOp';
+    is $expr->op, '.', 'operator is .';
 };
 subtest 'String concat through codegen and linker (constant fold)' => sub {
     my $brocken = Brocken->new();
@@ -94,14 +94,14 @@ say("Hello " . "world!");
 return 0;
 BROCKEN
     my $rodata = $module->rodata;
-    ok( defined $rodata, 'module has rodata' );
+    is $rodata, D(), 'module has rodata';
     my $found = 0;
     for my $bytes ( values $rodata->%* ) {
         $found = 1 if $bytes eq "Hello world!\0";
     }
-    ok( $found, 'found folded concatenated string in rodata' );
+    ok $found, 'found folded concatenated string in rodata';
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
-    ok( scalar $funcs->@* > 0, 'at least one function emitted' );
+    ok scalar $funcs->@* > 0, 'at least one function emitted';
 SKIP: {
         if ( $host->is_native ) {
             $brocken->linker->set_rodata($rodata);
@@ -119,14 +119,14 @@ SKIP: {
 subtest 'String . integer runtime concat (say "hello " . 42)' => sub {
     my $brocken = Brocken->new();
     my $host    = $brocken->platform;
-    my $module  = Brocken->new->compile(<<'BROCKEN');
-say("hello " . 42);
-return 0;
-BROCKEN
+    my $module  = Brocken->new->compile(<<~'BROCKEN');
+        say("hello " . 42);
+        return 0;
+        BROCKEN
     my $rodata = $module->rodata;
-    ok( defined $rodata, 'module has rodata' );
+    is $rodata, D(), 'module has rodata';
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
-    ok( scalar $funcs->@* > 0, 'at least one function emitted' );
+    ok scalar $funcs->@* > 0, 'at least one function emitted';
 SKIP: {
         if ( $host->is_native ) {
             $brocken->linker->set_rodata($rodata);
@@ -149,9 +149,9 @@ say(42 . " hello");
 return 0;
 BROCKEN
     my $rodata = $module->rodata;
-    ok( defined $rodata, 'module has rodata' );
+    is $rodata, D(), 'module has rodata';
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
-    ok( scalar $funcs->@* > 0, 'at least one function emitted' );
+    ok scalar $funcs->@* > 0, 'at least one function emitted';
 SKIP: {
         if ( $host->is_native ) {
             $brocken->linker->set_rodata($rodata);
@@ -174,9 +174,9 @@ say(5 . 10);
 return 0;
 BROCKEN
     my $rodata = $module->rodata;
-    ok( defined $rodata, 'module has rodata' );
+    is $rodata, D(), 'module has rodata';
     my $funcs = $brocken->codegen->emit_functions( $module->functions );
-    ok( scalar $funcs->@* > 0, 'at least one function emitted' );
+    ok scalar $funcs->@* > 0, 'at least one function emitted';
 SKIP: {
         if ( $host->is_native ) {
             $brocken->linker->set_rodata($rodata);
@@ -191,4 +191,5 @@ SKIP: {
         }
     }
 };
+#
 done_testing;
