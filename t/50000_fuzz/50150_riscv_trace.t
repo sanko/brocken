@@ -142,7 +142,7 @@ $v1 = $v4 | $v2;
 $v2 = $v1 << $v1;
 $v1 = $v1 / $v3;
 $v3 = $v3 << $v1;
-return $v4;
+exit $v4
 PROG
 };
 done_testing;

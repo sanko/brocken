@@ -554,8 +554,10 @@ class Brocken::Katsuro::Parser v0.0.1 {
             "Expected ';' after throw" );
     }
 
-    # `exit;` or `exit(EXPR);` -- terminate the process with the given status (0 when omitted). The status is optional
-    # so both the bare form and the Perl-style parenthesized form parse; a postfix modifier (`exit(1) if $bad;`) is
+    # `exit;`, `exit(EXPR);`, or `exit EXPR;` -- terminate the process with the given status (0 when omitted). The
+    # status is optional so the bare form, the Perl-style parenthesized form, and the paren-less list-operator form all
+    # parse. The paren-less form is guarded like `return`: a `;`, the end of the block, EOF, or a postfix `if`/`unless`
+    # modifier means there is no status, so `exit if $bad;` stays a bare exit. A postfix modifier (`exit 1 if $bad;`) is
     # handled by `_end_statement`.
     method parse_exit() {
         my $exit_token = $self->advance();
@@ -564,6 +566,13 @@ class Brocken::Katsuro::Parser v0.0.1 {
             $self->advance();
             $code = $self->parse_expression(0) unless $self->check(')');
             $self->consume(')');
+        }
+        elsif ( !$self->check(';') &&
+            !$self->check('}')               &&
+            !$self->check('EOF')             &&
+            !$self->check( 'KEYWORD', 'if' ) &&
+            !$self->check( 'KEYWORD', 'unless' ) ) {
+            $code = $self->parse_expression(0);
         }
         return $self->_end_statement( Brocken::Katsuro::AST::Stmt::Exit->new( $self->_pos_token($exit_token), code => $code ),
             "Expected ';' after exit" );
